@@ -6,6 +6,22 @@ Implements the newest ATLAS RAG API shape:
   - GET  /api/v1/discover/datasources?role=read|write&as_user=<user>
   - POST /api/v1/rag/completions?as_user=<user>
 
+plus the v2 tool-oriented interface:
+
+  - GET  /api/v2/discover/datasources?role=read|write&as_user=<user>
+  - POST /api/v2/rag/query?as_user=<user>
+
+v2 request body (RagQueryRequest):
+
+    {"query": "...", "corpora": "<id>" | ["<id>", ...],
+     "mode": "raw" | "synthesized", "top_k": 4}
+
+v2 response body (RagQueryResponse):
+
+    {"query": "...", "mode": "raw",
+     "results": {"hits": [...], "stats": {...}},
+     "metadata": {"response_time_ms": 12, "corpora_searched": [...]}}
+
 Request body (RagRequest):
 
     {"messages": [...], "stream": false, "corpora": "<id>" | ["<id>", ...]}
@@ -47,7 +63,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -198,6 +214,107 @@ class RagResponse(BaseModel):
     metadata: RagMetadata
 
 
+# --- v2: tool-oriented query interface -----------------------------------
+
+class DataSourceV2(DataSource):
+    """v2 discovery entry.
+
+    Same shape as v1 plus ``api_version``, which is how a backend tells
+    ATLAS-UI which contract a given source speaks.
+    """
+    api_version: str = Field("v2", description="RAG API contract this source speaks.")
+
+
+class RagQueryRequest(BaseModel):
+    """v2 request: an explicit query, never the conversation."""
+    query: str = Field(..., description="The specific question to ask.")
+    corpora: Union[str, List[str]] = Field(..., description="Corpus id(s) to search.")
+    mode: Literal["raw", "synthesized"] = Field(
+        "raw", description="raw returns evidence chunks; synthesized returns an answer."
+    )
+    top_k: int = Field(4, ge=1, le=50, description="Max results per corpus.")
+    filters: Optional[Dict[str, Any]] = Field(
+        None, description="Server-defined metadata filters (unused by the mock)."
+    )
+    synthesis_params: Optional[Dict[str, Any]] = Field(
+        None, description="Mode-specific knobs for synthesized (unused by the mock)."
+    )
+
+
+class Hit(BaseModel):
+    """One retrieved document and the sections that matched, for ``raw`` mode."""
+    document_ref: int
+    filename: str
+    title: Optional[str] = None
+    citation: Optional[str] = None
+    sections: List[Section]
+
+
+class Citation(BaseModel):
+    """One document a ``synthesized`` answer was built from."""
+    document_ref: int
+    filename: str
+    title: Optional[str] = None
+    citation: Optional[str] = None
+
+
+class RawResults(BaseModel):
+    hits: List[Hit]
+    stats: Dict[str, int]
+
+
+class SynthesizedResults(BaseModel):
+    answer: str
+    citations: List[Citation]
+
+
+class RagQueryMetadata(BaseModel):
+    response_time_ms: int
+    corpora_searched: List[str]
+    fallback_used: bool = False
+
+
+class RagQueryResponse(BaseModel):
+    query: str
+    mode: Literal["raw", "synthesized"]
+    results: Union[RawResults, SynthesizedResults]
+    metadata: RagQueryMetadata
+
+
+class RegisterUserRequest(BaseModel):
+    """Test-only helper: register (or update) a user in the mock's group table.
+
+    Lets integration tests register the configured ATLAS test identity so the
+    live mock recognizes it regardless of ``TEST_USER`` overrides -- the mock
+    otherwise ships a fixed user database (see ``mock_data.json``). Either
+    ``groups`` or ``clone_from`` may be supplied; ``clone_from`` copies an
+    existing user's groups so the test does not hand-copy group data owned by
+    ``mock_data.json``.
+    """
+
+    user: str = Field(..., description="User ID to register or update")
+    groups: List[str] = Field(default_factory=list, description="Group memberships for the user")
+    clone_from: Optional[str] = Field(
+        default=None,
+        description="If set, copy group memberships from this existing user instead of using ``groups``.",
+    )
+
+    @model_validator(mode="after")
+    def _require_exactly_one_source(self):
+        """Enforce the either/or contract documented in the README.
+
+        Rejects the ambiguous cases the silent defaults would otherwise hide:
+        both ``groups`` and ``clone_from`` (clone would silently win) and
+        neither (which would register an empty group list and revoke a known
+        user's access).
+        """
+        if self.clone_from and self.groups:
+            raise ValueError("Provide either 'groups' or 'clone_from', not both")
+        if not self.clone_from and not self.groups:
+            raise ValueError("Provide either 'groups' or 'clone_from'")
+        return self
+
+
 # ------------------------------------------------------------------------------
 # Search Helpers
 # ------------------------------------------------------------------------------
@@ -256,6 +373,18 @@ def grep_search(query: str, text: str, context_chars: int = 240) -> List[Tuple[s
             seen.add(key)
             unique.append((snippet, score))
     return unique[:5]
+
+
+def safe_log(value: Any, max_chars: int = 120) -> str:
+    """Flatten a value for logging.
+
+    ``as_user`` and ``corpora`` arrive from the request, so newlines in them
+    would let a caller forge extra log lines. Strip control characters and cap
+    the length before anything reaches the log stream.
+    """
+    text = str(value)
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    return text[:max_chars]
 
 
 def _make_data_source(corpus_id: str) -> DataSource:
@@ -489,9 +618,138 @@ async def rag_completions(
     )
 
 
+@app.get("/api/v2/discover/datasources", response_model=List[DataSourceV2])
+async def discover_data_sources_v2(
+    role: Literal["read", "write"] = Query("read"),
+    as_user: Optional[str] = Query(None, description="User ID to impersonate"),
+):
+    """v2 discovery: the v1 list, with each source declaring ``api_version``."""
+    user = as_user or ""
+    logger.info("Discovery request (v2): user=%s role=%s", safe_log(user), role)
+    accessible = get_accessible_corpora(user)
+    return [DataSourceV2(**src.model_dump(), api_version="v2") for src in accessible]
+
+
+def _resolve_corpora(corpora: Union[str, List[str]], user: str) -> List[str]:
+    """Validate requested corpora and return them as a list.
+
+    Authorization is identical to v1 -- the contract version does not decide
+    who may read what.
+    """
+    corpora_to_search = [corpora] if isinstance(corpora, str) else list(corpora)
+    if not corpora_to_search:
+        raise HTTPException(status_code=400, detail="corpora must name at least one corpus")
+
+    for corpus in corpora_to_search:
+        if corpus not in DATA_SOURCES:
+            raise HTTPException(status_code=404, detail=f"Corpus '{corpus}' not found")
+        if not can_access_corpus(user, corpus):
+            raise HTTPException(status_code=403, detail=f"Access denied to '{corpus}'")
+    return corpora_to_search
+
+
+@app.post("/api/v2/rag/query", response_model=RagQueryResponse)
+async def rag_query_v2(
+    request: RagQueryRequest,
+    as_user: Optional[str] = Query(None, description="User ID to impersonate"),
+):
+    """v2 query: explicit query in, evidence (``raw``) or an answer (``synthesized``) out."""
+    start_time = time.time()
+
+    user = as_user or ""
+    logger.info("---------- RAG query (v2) ----------")
+    logger.info(
+        "RAG v2 query user=%s corpora=%s mode=%s top_k=%d query_chars=%d",
+        safe_log(user),
+        safe_log(request.corpora),
+        request.mode,
+        request.top_k,
+        len(request.query),
+    )
+
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="query must be a non-empty string")
+
+    corpora_to_search = _resolve_corpora(request.corpora, user)
+
+    references: List[Reference] = []
+    next_doc_ref = 1
+    for corpus in corpora_to_search:
+        corpus_refs = search_corpus_for_references(
+            request.query, corpus, top_k=request.top_k, start_doc_ref=next_doc_ref,
+        )
+        references.extend(corpus_refs)
+        next_doc_ref += len(corpus_refs)
+
+    response_time_ms = max(1, int((time.time() - start_time) * 1000))
+    metadata = RagQueryMetadata(
+        response_time_ms=response_time_ms,
+        corpora_searched=corpora_to_search,
+        fallback_used=False,
+    )
+
+    if request.mode == "synthesized":
+        results: Union[RawResults, SynthesizedResults] = SynthesizedResults(
+            answer=_compose_assistant_content(corpora_to_search, references, request.query),
+            citations=[
+                Citation(
+                    document_ref=ref.document_ref,
+                    filename=ref.filename,
+                    title=ref.filename,
+                    citation=ref.citation,
+                )
+                for ref in references
+            ],
+        )
+    else:
+        results = RawResults(
+            hits=[
+                Hit(
+                    document_ref=ref.document_ref,
+                    filename=ref.filename,
+                    title=ref.filename,
+                    citation=ref.citation,
+                    sections=ref.sections,
+                )
+                for ref in references
+            ],
+            stats={"total_found": len(references), "top_k": request.top_k},
+        )
+
+    return RagQueryResponse(
+        query=request.query,
+        mode=request.mode,
+        results=results,
+        metadata=metadata,
+    )
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/admin/users")
+async def register_test_user(req: RegisterUserRequest):
+    """Register or update a test user's group memberships (test-only helper).
+
+    Authenticated by the same bearer token as the RAG endpoints. Existing
+    users are overwritten. Used by the integration test fixture to ensure the
+    configured ATLAS test identity is recognized regardless of overrides.
+    """
+    if req.clone_from:
+        source_groups = USERS_GROUPS_DB.get(req.clone_from)
+        if source_groups is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Cannot clone groups: user {req.clone_from!r} not found",
+            )
+        groups = list(source_groups)
+    else:
+        groups = list(req.groups)
+    USERS_GROUPS_DB[req.user] = groups
+    logger.info("Registered test user with %d group(s)", len(groups))
+    return {"user": req.user, "groups": groups}
 
 
 @app.get("/")
@@ -507,6 +765,11 @@ async def root():
                 "List accessible data sources",
             "POST /api/v1/rag/completions?as_user=<user>":
                 "Search and query (returns RagResponse with references/sections)",
+            "GET /api/v2/discover/datasources?role=read|write&as_user=<user>":
+                "List accessible data sources, each declaring api_version",
+            "POST /api/v2/rag/query?as_user=<user>":
+                "Query with an explicit query string (mode=raw|synthesized)",
+            "POST /admin/users": "Register/update a test user's groups (test-only)",
             "GET /health": "Health check",
         },
     }

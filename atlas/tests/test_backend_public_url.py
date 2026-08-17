@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from atlas.core.capabilities import create_download_url, generate_file_token
+from atlas.modules.config.config_manager import config_manager
 
 
 def create_mock_settings(backend_public_url=None):
@@ -49,7 +50,7 @@ class TestBackendPublicUrlConfiguration:
         with patch('atlas.core.capabilities.config_manager') as mock_cm:
             mock_cm.app_settings = mock_settings
 
-            url = create_download_url("test-key-456", "admin@example.com")
+            url = create_download_url("test-key-456", config_manager.app_settings.admin_test_user)
 
             # Should be absolute URL with /mcp/ prefix
             assert url.startswith("https://atlas.example.com/mcp/files/download/")

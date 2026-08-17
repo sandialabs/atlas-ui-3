@@ -1,6 +1,6 @@
 # RAG Configuration
 
-Last updated: 2026-03-18
+Last updated: 2026-08-13
 
 This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atlas UI.
 
@@ -105,6 +105,10 @@ For external HTTP REST API RAG backends:
 | `top_k` | No | `4` | Number of documents to retrieve |
 | `timeout` | No | `60.0` | Request timeout in seconds |
 | `strip_domain` | No | `false` | Strip `@domain` from usernames before sending to RAG API (e.g. `user@corp.com` → `user`) |
+| `api_version` | No | `"v1"` | Which contract the backend speaks: `"v1"` (conversation → completion) or `"v2"` (explicit query → evidence or answer). See [API v2](#api-v2-tool-oriented-query-interface) |
+| `default_mode` | No | `"synthesized"` | v2 only. Response shape when the caller does not ask for one: `"synthesized"` (backend answers) or `"raw"` (evidence for Atlas' own LLM) |
+| `discovery_endpoint` | No | per `api_version` | Override the discovery path |
+| `query_endpoint` | No | per `api_version` | Override the query path |
 | `groups` | No | `[]` | Required groups for access |
 | `compliance_level` | No | `null` | Compliance level restriction |
 | `enabled` | No | `true` | Whether this source is active |
@@ -182,7 +186,9 @@ GET /discover/datasources?as_user=alice@corp.com
 
 ## API Contract (HTTP Sources)
 
-HTTP RAG sources must implement these endpoints:
+This is the **v1** contract, used unless a source sets `"api_version": "v2"`
+(see [API v2](#api-v2-tool-oriented-query-interface)). HTTP RAG sources must
+implement these endpoints:
 
 ### Discovery Endpoint
 
@@ -246,6 +252,139 @@ Content-Type: application/json
 }
 ```
 
+## API v2: Tool-Oriented Query Interface
+
+Last updated: 2026-08-13
+
+v2 exists because v1 ships the **entire conversation** to the RAG backend on
+every query, even though the backend only uses the last user message. v2 sends
+an explicit `query` string and nothing else, and lets the caller choose whether
+it wants evidence or an answer.
+
+Set `"api_version": "v2"` on an HTTP source to use it. v1 remains the default,
+and both contracts share the same authentication, `as_user` impersonation,
+group/compliance authorization and `strip_domain` behaviour — the version
+decides the request shape, not who may read what.
+
+```json
+{
+  "atlas_rag": {
+    "type": "http",
+    "url": "${ATLAS_RAG_URL}",
+    "bearer_token": "${ATLAS_RAG_BEARER_TOKEN}",
+    "api_version": "v2",
+    "default_mode": "synthesized",
+    "groups": ["users"]
+  }
+}
+```
+
+### Discovery (v2)
+
+```
+GET /api/v2/discover/datasources?role=read&as_user={user_email}
+Authorization: Bearer {token}
+```
+
+Same response shape as v1, plus an optional `api_version` per source so a
+backend can declare what it speaks:
+
+```json
+[
+  {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "...", "api_version": "v2"}
+]
+```
+
+### Query (v2)
+
+```
+POST /api/v2/rag/query?as_user={user_email}
+Authorization: Bearer {token}
+Content-Type: application/json
+```
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `query` | string | Yes | - | The specific question to ask. Non-empty. |
+| `corpora` | string \| string[] | Yes | - | Corpus id(s) to search |
+| `mode` | `"raw"` \| `"synthesized"` | No | `"raw"` | Shape of the response |
+| `top_k` | int | No | source `top_k` | Max results per corpus |
+| `filters` | object | No | - | Server-defined metadata filters, forwarded as-is |
+| `synthesis_params` | object | No | - | Knobs for `synthesized`; not sent in `raw` mode |
+
+```json
+{
+  "query": "What is the maximum PTO carryover per year?",
+  "corpora": ["company-policies"],
+  "mode": "raw",
+  "top_k": 5
+}
+```
+
+**Response — `mode: "raw"`** (retrieved evidence; Atlas' LLM writes the answer):
+
+```json
+{
+  "query": "What is the maximum PTO carryover per year?",
+  "mode": "raw",
+  "results": {
+    "hits": [
+      {
+        "document_ref": 1,
+        "filename": "pto-policy.pdf",
+        "title": "PTO Policy",
+        "citation": "[1] PTO Policy, pto-policy.pdf",
+        "sections": [
+          {"section_ref": 1, "text": "Employees may carry over up to 240 hours...", "relevance": 0.91}
+        ]
+      }
+    ],
+    "stats": {"total_found": 1, "top_k": 5}
+  },
+  "metadata": {"response_time_ms": 128, "corpora_searched": ["company-policies"]}
+}
+```
+
+**Response — `mode: "synthesized"`** (the backend's own answer, used verbatim):
+
+```json
+{
+  "query": "What is the maximum PTO carryover per year?",
+  "mode": "synthesized",
+  "results": {
+    "answer": "Employees may carry over up to 240 hours. [1]",
+    "citations": [
+      {"document_ref": 1, "filename": "pto-policy.pdf", "citation": "[1] PTO Policy, pto-policy.pdf"}
+    ]
+  },
+  "metadata": {"response_time_ms": 305, "corpora_searched": ["company-policies"], "fallback_used": false}
+}
+```
+
+An empty `query` must be rejected with `400`; `403` and `404` mean the same
+things they do on v1.
+
+### What changes in Atlas UI
+
+- **`raw` hits are rendered as an evidence block** with `[N]` document markers,
+  which is the same citation form the UI already parses — a v2 raw answer cites
+  like a v1 one.
+- **`raw` sets `is_completion=false`**, so the retrieved text is context for the
+  configured LLM. `synthesized` sets `is_completion=true` and short-circuits it,
+  matching v1 behaviour.
+- **The `atlas_rag_query` agent tool asks for `raw` by default** and accepts an
+  optional `mode` argument. The model reasons over the evidence alongside other
+  tool results instead of relaying a backend-written answer. On v1 sources the
+  argument has no effect — v1 always synthesizes.
+- **Nothing but the query leaves the process.** `messages` is not part of a v2
+  request, so conversation history never reaches the RAG backend.
+
+Design notes and the remaining phases (discovery-driven negotiation, removing
+the completion short-circuit, retiring v1) are in
+[RAG API v2: Tool-Oriented Query Interface](../planning/rag-api-v2-tool-interface.md).
+
 ## Testing with the Mock Service
 
 A mock ATLAS RAG API is provided in `mocks/atlas-rag-api-mock/` for testing.
@@ -257,7 +396,10 @@ cd mocks/atlas-rag-api-mock
 bash run.sh
 ```
 
-The mock runs on `http://localhost:8002` with token `test-atlas-rag-token`.
+The mock runs on `http://localhost:8002` with token `test-atlas-rag-token`,
+and serves both contracts: `/api/v1/discover/datasources` +
+`/api/v1/rag/completions`, and `/api/v2/discover/datasources` +
+`/api/v2/rag/query`. Point a source at v2 by adding `"api_version": "v2"`.
 
 ### Test Users
 

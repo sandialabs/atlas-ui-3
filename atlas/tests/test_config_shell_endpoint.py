@@ -6,12 +6,13 @@ from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.config.config_manager import config_manager
 
 
 def test_config_shell_endpoint_returns_200():
     """Shell endpoint should return 200 with required fields."""
     client = TestClient(app)
-    resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config/shell", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
 
@@ -29,7 +30,7 @@ def test_config_shell_endpoint_returns_200():
 def test_config_shell_does_not_include_slow_fields():
     """Shell endpoint must NOT include tools, prompts, or RAG data."""
     client = TestClient(app)
-    resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config/shell", headers={"X-User-Email": config_manager.app_settings.test_user})
     assert resp.status_code == 200
     data = resp.json()
 
@@ -49,7 +50,7 @@ def test_config_shell_does_not_call_mcp_discovery():
 
     with patch.object(app_factory, 'get_mcp_manager', return_value=mock_mcp_manager):
         client = TestClient(app)
-        resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/config/shell", headers={"X-User-Email": config_manager.app_settings.test_user})
         assert resp.status_code == 200
 
         # MCP discovery should NOT be called
@@ -67,7 +68,7 @@ def test_config_shell_does_not_call_rag_discovery():
     with patch.object(app_factory, 'get_unified_rag_service', return_value=mock_unified_rag):
         with patch.object(app_factory, 'get_rag_mcp_service', return_value=mock_rag_mcp):
             client = TestClient(app)
-            resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+            resp = client.get("/api/config/shell", headers={"X-User-Email": config_manager.app_settings.test_user})
             assert resp.status_code == 200
 
             mock_unified_rag.discover_data_sources.assert_not_called()
@@ -77,7 +78,7 @@ def test_config_shell_does_not_call_rag_discovery():
 def test_config_shell_includes_feature_flags():
     """Shell endpoint should include all feature flags."""
     client = TestClient(app)
-    resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config/shell", headers={"X-User-Email": config_manager.app_settings.test_user})
     data = resp.json()
     features = data["features"]
 
@@ -93,7 +94,7 @@ def test_config_shell_includes_feature_flags():
 def test_config_shell_models_have_names():
     """Shell endpoint should return models with name fields."""
     client = TestClient(app)
-    resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+    resp = client.get("/api/config/shell", headers={"X-User-Email": config_manager.app_settings.test_user})
     data = resp.json()
 
     for model in data["models"]:
@@ -112,7 +113,7 @@ def test_config_shell_user_matches_header():
 def test_config_shell_feature_flags_match_full_config():
     """Feature flags from /api/config/shell should match /api/config."""
     client = TestClient(app)
-    headers = {"X-User-Email": "test@test.com"}
+    headers = {"X-User-Email": config_manager.app_settings.test_user}
 
     shell_resp = client.get("/api/config/shell", headers=headers)
     full_resp = client.get("/api/config", headers=headers)
@@ -131,7 +132,7 @@ def test_config_shell_feature_flags_match_full_config():
 def test_config_shell_file_upload_matches_full_config():
     """File upload limits from /api/config/shell should match /api/config."""
     client = TestClient(app)
-    headers = {"X-User-Email": "test@test.com"}
+    headers = {"X-User-Email": config_manager.app_settings.test_user}
 
     shell_resp = client.get("/api/config/shell", headers=headers)
     full_resp = client.get("/api/config", headers=headers)
@@ -149,7 +150,7 @@ def test_config_shell_file_upload_uses_env_setting():
     try:
         config_manager.app_settings.max_file_upload_size_mb = 7
         client = TestClient(app)
-        resp = client.get("/api/config/shell", headers={"X-User-Email": "test@test.com"})
+        resp = client.get("/api/config/shell", headers={"X-User-Email": config_manager.app_settings.test_user})
 
         assert resp.status_code == 200
         file_upload = resp.json()["file_upload"]

@@ -48,8 +48,8 @@ session as savable.
 Persisted `tool_call` and `agent_intermediate` rows are display-only
 (`DISPLAY_ONLY_MESSAGE_TYPES`) and the agent loop's working `assistant`/`tool`
 transcript is local to the turn, so neither reaches a later request. Instead,
-each agent turn's closing assistant message carries a compact digest of the
-calls it made in `metadata["agent_tool_digest"]`, and
+the turn's closing assistant message carries a compact digest of the calls it
+made in `metadata["agent_tool_digest"]`, and
 `ConversationHistory.get_messages_for_llm()` folds that digest into **that
 message's content**.
 
@@ -57,10 +57,25 @@ Folding into an existing message (rather than appending a new one) keeps the
 role sequence identical, so no provider sees back-to-back assistant turns and no
 orphaned `tool` message is ever replayed.
 
+The digest is attached by every mode that runs tools:
+
+| Mode | Closing site | Interrupted site |
+| --- | --- | --- |
+| Agent | `AgentModeRunner._close_turn` | `AgentModeRunner._close_turn` (cancel path) |
+| Tools | `ToolsModeRunner._close_turn` (three sites: `run`, `run_streaming` synthesis, `_finalize_text_response`) | `close_open_turn` in `interrupted_turn.py` |
+
+Tools mode is the default, so this is the path the digest has to reach for the
+fix to matter -- agent mode alone (the original #755 scope) misses most
+conversations. Both modes share the same `build_tool_digest` helper, the same
+`agent_tool_digest` metadata key, and the same fold in `get_messages_for_llm`.
+
 Bounds, all in `agent_digest.py` and `domain/messages/models.py`:
 
 - 300 characters of arguments and 400 of result per call; 30 calls per digest
-  (head and tail kept, the elided middle announced).
+  (head and tail kept, the elided middle announced). Those budgets are spent on
+  *source* characters, so a fetched HTML page does not pay its budget to its own
+  markup; the escaped form has a separate ceiling (twice the budget) so a value
+  made only of delimiters still cannot crowd later calls out.
 - A digest never exceeds `MAX_FOLDED_DIGEST_CHARS`.
 - A request folds at most `MAX_FOLDED_DIGESTS` digests, newest first, within
   that character budget; an oversized newest digest is trimmed on a line
@@ -71,9 +86,18 @@ Bounds, all in `agent_digest.py` and `domain/messages/models.py`:
 Results and arguments come from fetched pages, external MCP servers, and command
 output, and they end up inside **assistant-role** content that is replayed for
 several turns. The digest header states that the quoted text is verbatim tool
-output and not instruction, each field is wrapped in a `<<<…>>>` fence, and `&`,
-`<`, `>` are escaped so no value can close or forge a delimiter. `tool_name` is
-whitespace-collapsed and length-capped so it cannot inject extra digest lines.
+output and not instruction, arguments and results are wrapped in a `<<<…>>>`
+fence, and `&`, `<`, `>` are escaped in every field — fenced or not — so no
+value can close or forge a delimiter. `tool_name` is whitespace-collapsed and
+length-capped so it cannot inject extra digest lines. `status` carries only
+literals written by the recorder, but it goes through the same quoting (plus its
+own `[`/`]`, since it is rendered in brackets rather than a fence), so "every
+value on the line is escaped" holds by construction rather than by an audit of
+the call sites.
+
+One mapping (`_ESCAPES`, extended per field) drives both the substitution and
+the cost walk that spends the budget, so a field that escapes more characters
+than the default cannot slip past the ceiling its cost was computed against.
 
 ## Frontend contract
 

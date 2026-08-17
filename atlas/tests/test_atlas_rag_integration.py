@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from atlas.modules.config.config_manager import config_manager
+
 # Add paths for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,6 +24,13 @@ from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 MOCK_URL = "http://localhost:8002"
 MOCK_TOKEN = "test-atlas-rag-token"
 MOCK_STARTUP_TIMEOUT = 10
+
+# The mock ships a fixed user database (see mocks/atlas-rag-api-mock/mock_data.json);
+# ``test@test.com`` is its all-corpora identity. The integration test fixture
+# clones this identity into the configured ATLAS test user so live integration
+# tests are robust to TEST_USER overrides -- the mock otherwise wouldn't
+# recognize an overridden TEST_USER and would only return the public corpus.
+MOCK_ALL_CORPORA_USER = "test@test.com"
 
 
 def is_mock_running() -> bool:
@@ -33,43 +42,97 @@ def is_mock_running() -> bool:
         return False
 
 
+def _abort_registration(process, reason):
+    """Handle a test-user registration failure/incompatibility.
+
+    A failure against a freshly spawned mock (``process is not None``) is a
+    regression in this repo's own mock and fails the suite so it is not
+    silently hidden; against a pre-existing external mock it is treated as
+    an incompatibility and the live integration tests skip.
+    """
+    if process is not None:
+        process.terminate()
+        process.wait(timeout=5)
+        pytest.fail(
+            f"Freshly spawned RAG mock rejected test-user registration: {reason}",
+            pytrace=True,
+        )
+    pytest.skip(reason)
+
+
 @pytest.fixture(scope="module")
 def mock_service():
-    """Start the mock service if not already running."""
-    if is_mock_running():
-        yield MOCK_URL
-        return
+    """Start the mock service if not already running.
 
-    # Try to start the mock service
-    mock_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "mocks", "atlas-rag-api-mock", "main.py"
-    )
-    mock_path = os.path.abspath(mock_path)
+    Also registers the configured ATLAS test identity in the mock's user
+    table so live integration tests are robust to ``TEST_USER`` overrides:
+    the mock ships a fixed user database, so without this step an overridden
+    ``TEST_USER`` would be unknown to the mock and only see public corpora.
+    """
+    process = None
+    if not is_mock_running():
+        # Try to start the mock service
+        mock_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "mocks", "atlas-rag-api-mock", "main.py"
+        )
+        mock_path = os.path.abspath(mock_path)
 
-    if not os.path.exists(mock_path):
-        pytest.skip(f"Mock service not found at {mock_path}")
+        if not os.path.exists(mock_path):
+            pytest.skip(f"Mock service not found at {mock_path}")
 
-    process = subprocess.Popen(
-        [sys.executable, mock_path],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+        process = subprocess.Popen(
+            [sys.executable, mock_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
-    # Wait for service to start
-    start_time = time.time()
-    while time.time() - start_time < MOCK_STARTUP_TIMEOUT:
-        if is_mock_running():
-            break
-        time.sleep(0.5)
+        # Wait for service to start
+        start_time = time.time()
+        while time.time() - start_time < MOCK_STARTUP_TIMEOUT:
+            if is_mock_running():
+                break
+            time.sleep(0.5)
+        else:
+            process.terminate()
+            pytest.skip("Could not start mock service")
+
+    # Register the configured test identity (works whether the mock was just
+    # spawned or was already running) by cloning the mock's all-corpora user
+    # groups. A failure against a freshly spawned mock is a regression in this
+    # repo's own code and fails the suite; against a pre-existing external
+    # mock it is an incompatibility and the live tests skip. The non-empty-
+    # groups guard covers an older mock that has /admin/users but not
+    # clone_from: pydantic drops the unknown field, ``groups`` defaults to [],
+    # and registration returns 200 with no memberships, which would leave the
+    # configured user able to see only the public corpus.
+    try:
+        resp = httpx.post(
+            f"{MOCK_URL}/admin/users",
+            headers={"Authorization": f"Bearer {MOCK_TOKEN}"},
+            json={
+                "user": config_manager.app_settings.test_user,
+                "clone_from": MOCK_ALL_CORPORA_USER,
+            },
+            timeout=5.0,
+        )
+        resp.raise_for_status()
+        registered_groups = resp.json().get("groups")
+    except (httpx.HTTPError, ValueError) as exc:
+        _abort_registration(process, str(exc))
     else:
-        process.terminate()
-        pytest.skip("Could not start mock service")
+        if not registered_groups:
+            _abort_registration(
+                process,
+                f"registered {config_manager.app_settings.test_user!r} with no groups "
+                f"(clone_from unsupported by this mock version?)",
+            )
 
     yield MOCK_URL
 
     # Cleanup
-    process.terminate()
-    process.wait(timeout=5)
+    if process is not None:
+        process.terminate()
+        process.wait(timeout=5)
 
 
 @pytest.fixture
@@ -97,7 +160,7 @@ class TestDiscoverDataSourcesUnit:
     """Unit tests for discover_data_sources (no external service needed)."""
 
     @pytest.mark.asyncio
-    async def test_discover_data_sources_success(self):
+    async def test_discover_data_sources_success(self, test_user):
         """Test discovering data sources for a known user."""
         client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
         mock_sources = [
@@ -108,7 +171,7 @@ class TestDiscoverDataSourcesUnit:
         mock_resp = _mock_discover_response(mock_sources)
 
         with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
-            sources = await client.discover_data_sources("test@test.com")
+            sources = await client.discover_data_sources(test_user)
 
         assert len(sources) > 0
         source_ids = [s.id for s in sources]
@@ -157,14 +220,14 @@ class TestDiscoverDataSourcesUnit:
         assert "technical-docs" not in source_ids
 
     @pytest.mark.asyncio
-    async def test_discover_connection_error_returns_empty(self):
+    async def test_discover_connection_error_returns_empty(self, test_user):
         """Test that connection errors return empty list gracefully."""
         client = AtlasRAGClient(base_url="http://localhost:99999", bearer_token=MOCK_TOKEN)
-        sources = await client.discover_data_sources("test@test.com")
+        sources = await client.discover_data_sources(test_user)
         assert sources == []
 
     @pytest.mark.asyncio
-    async def test_discover_http_error_returns_empty(self):
+    async def test_discover_http_error_returns_empty(self, test_user):
         """Test that HTTP errors return empty list gracefully."""
         client = AtlasRAGClient(base_url=MOCK_URL, bearer_token=MOCK_TOKEN)
         mock_resp = httpx.Response(
@@ -174,7 +237,7 @@ class TestDiscoverDataSourcesUnit:
         )
 
         with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
-            sources = await client.discover_data_sources("test@test.com")
+            sources = await client.discover_data_sources(test_user)
 
         assert sources == []
 
@@ -192,7 +255,7 @@ class TestAtlasRAGIntegration:
     @pytest.mark.asyncio
     async def test_discover_data_sources_success(self, mock_service, client):
         """Test discovering data sources for a known user against live mock."""
-        sources = await client.discover_data_sources("test@test.com")
+        sources = await client.discover_data_sources(config_manager.app_settings.test_user)
 
         assert len(sources) > 0
         source_ids = [s.id for s in sources]
@@ -231,7 +294,7 @@ class TestAtlasRAGIntegration:
         messages = [{"role": "user", "content": "What is the API authentication?"}]
 
         response = await client.query_rag(
-            user_name="test@test.com",
+            user_name=config_manager.app_settings.test_user,
             data_source="technical-docs",
             messages=messages,
         )
@@ -290,7 +353,7 @@ class TestAtlasRAGIntegration:
 
         with pytest.raises(Exception) as exc_info:
             await client.query_rag(
-                user_name="test@test.com",
+                user_name=config_manager.app_settings.test_user,
                 data_source="non-existent-corpus",
                 messages=messages,
             )
@@ -315,7 +378,7 @@ class TestAtlasRAGAuthFailures:
         )
 
         # Discovery should return empty list on auth failure (graceful degradation)
-        sources = await client.discover_data_sources("test@test.com")
+        sources = await client.discover_data_sources(config_manager.app_settings.test_user)
         assert sources == []
 
     @pytest.mark.asyncio
@@ -327,5 +390,5 @@ class TestAtlasRAGAuthFailures:
         )
 
         # Discovery should return empty list on auth failure (graceful degradation)
-        sources = await client.discover_data_sources("test@test.com")
+        sources = await client.discover_data_sources(config_manager.app_settings.test_user)
         assert sources == []
