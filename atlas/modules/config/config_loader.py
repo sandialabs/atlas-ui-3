@@ -42,6 +42,7 @@ class ConfigManager:
         self._rag_sources_config: Optional[RAGSourcesConfig] = None
         self._tool_approvals_config: Optional[ToolApprovalsConfig] = None
         self._file_extractors_config: Optional[FileExtractorsConfig] = None
+        self._hooks_config: Optional[Any] = None
 
     def _search_paths(self, file_name: str) -> List[Path]:
         """Generate search paths for a configuration file.
@@ -386,6 +387,64 @@ class ConfigManager:
 
         return self._file_extractors_config
 
+    @property
+    def hooks_config(self):
+        """Get hook configuration (cached) from hooks.json.
+
+        Follows the same two-layer lookup (user ``config/`` overrides packaged
+        ``atlas/config/``) and error tolerance as the other file-backed configs.
+        Hooks are opt-in: a missing file yields an empty config, which means the
+        hook manager short-circuits with zero overhead on the hot path (GH #713).
+        """
+        if self._hooks_config is None:
+            try:
+                # Lazy import avoids a config -> hooks package init cycle at
+                # module load time; the model itself has no I/O or config deps.
+                from atlas.hooks.models import HooksConfig
+
+                hooks_filename = self.app_settings.hooks_config_file
+                file_paths = self._search_paths(hooks_filename)
+                data = self._load_file_with_error_handling(file_paths, "JSON")
+
+                self._hooks_config_load_failed = False
+                if data:
+                    self._hooks_config = HooksConfig(**data)
+                    total = sum(len(v) for v in self._hooks_config.hooks.values())
+                    logger.info(
+                        "Loaded hooks config with %d hook(s) across %d event(s): %s",
+                        total,
+                        len(self._hooks_config.hooks),
+                        list(self._hooks_config.hooks.keys()),
+                    )
+                else:
+                    self._hooks_config = HooksConfig()
+                    # _load_file_with_error_handling() returns None both when the
+                    # file is absent and when it exists but failed to parse -- it
+                    # logs and continues. Those cases are not equivalent here: a
+                    # typo in hooks.json silently disables every fail-closed
+                    # control, so distinguish them by checking whether any
+                    # candidate path actually exists on disk.
+                    if any(p.exists() for p in file_paths):
+                        self._hooks_config_load_failed = True
+                        logger.error(
+                            "hooks.json exists but could not be parsed; ALL hooks are "
+                            "disabled, including fail-closed policy hooks. "
+                            "Searched: %s",
+                            [str(p) for p in file_paths],
+                        )
+                    else:
+                        logger.info("No hooks.json found; hook system disabled (zero overhead)")
+            except Exception as e:
+                # Degrading to an empty config disables every hook, including the
+                # fail-closed ones. Record it so validate_config can report the
+                # controls are off rather than leaving it to a single log line.
+                self._hooks_config_load_failed = True
+                logger.error(f"Failed to parse hooks configuration: {e}", exc_info=True)
+                from atlas.hooks.models import HooksConfig
+                self._hooks_config = HooksConfig()
+
+        return self._hooks_config
+
     def _resolve_file_extractor_env_vars(self) -> None:
         """Resolve environment variables in file extractor configurations.
 
@@ -462,6 +521,7 @@ class ConfigManager:
         self._rag_sources_config = None
         self._tool_approvals_config = None
         self._file_extractors_config = None
+        self._hooks_config = None
         logger.info("Configuration cache cleared, will reload on next access")
 
     def reload_mcp_config(self) -> MCPConfig:
@@ -506,5 +566,22 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"MCP config validation failed: {e}", exc_info=True)
             status["mcp_config"] = False
+
+        # Hooks are security controls, so a malformed hooks.json must be visible
+        # here and not only as a line in the startup log: the load path degrades
+        # to an empty config, which disables every fail-closed hook.
+        try:
+            hooks_config = self.hooks_config
+            status["hooks_config"] = not getattr(self, "_hooks_config_load_failed", False)
+            if not status["hooks_config"]:
+                logger.error(
+                    "hooks.json failed to load; ALL hooks are disabled, including "
+                    "fail-closed policy hooks. Fix the file or remove it deliberately."
+                )
+            elif not hooks_config.hooks:
+                logger.info("No hooks configured (hook system disabled)")
+        except Exception as e:
+            logger.error(f"Hooks config validation failed: {e}", exc_info=True)
+            status["hooks_config"] = False
 
         return status

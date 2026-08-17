@@ -137,7 +137,11 @@ class ToolsModeRunner:
         # they do in agent mode, instead of falling back to all authorized
         # sources. build_session_context() only reflects session state, not this
         # per-request selection.
-        if selected_data_sources:
+        # ``is not None``, not truthiness: an explicitly empty list means "no
+        # sources" (e.g. a UserPromptSubmit hook narrowed the turn to nothing).
+        # Dropping it would leave mcp_execution reading None and widening the
+        # query back to every source the user is authorized for.
+        if selected_data_sources is not None:
             session_context["selected_data_sources"] = selected_data_sources
 
         # Ensure update_callback is never None (critical for elicitation)
@@ -307,8 +311,9 @@ class ToolsModeRunner:
 
         session_context = build_session_context(session)
         # See note above: propagate the per-request RAG selection so atlas_rag
-        # tools behave consistently with agent mode in the streaming path too.
-        if selected_data_sources:
+        # tools behave consistently with agent mode in the streaming path too,
+        # preserving an explicit empty selection.
+        if selected_data_sources is not None:
             session_context["selected_data_sources"] = selected_data_sources
         effective_callback = update_callback
         if effective_callback is None:

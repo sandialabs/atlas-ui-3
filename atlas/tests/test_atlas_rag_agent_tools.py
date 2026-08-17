@@ -42,13 +42,13 @@ class FakeUnifiedRAG:
             }
         ]
 
-    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
         self.query_calls.append(qualified_data_source)
         return SimpleNamespace(
             content=f"Result from {qualified_data_source}", is_completion=False
         )
 
-    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None):
+    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, _skip_hooks=False):
         self.batch_calls.append(list(qualified_data_sources))
         return SimpleNamespace(
             content=f"Batched {','.join(qualified_data_sources)}", is_completion=True
@@ -270,11 +270,11 @@ class ComplianceAwareRAG:
         ids = self.by_level.get(user_compliance_level, [])
         return [{"server": "atlas_rag", "sources": [{"id": i} for i in ids]}]
 
-    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
         self.query_calls.append(qualified_data_source)
         return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
 
-    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None):
+    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, _skip_hooks=False):
         raise AssertionError("batch not expected in this test")
 
 
@@ -398,12 +398,12 @@ async def test_execute_atlas_rag_query_isolates_partial_failures(monkeypatch):
                 {"server": "srvB", "sources": [{"id": "broken"}]},
             ]
 
-        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
+        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
             if qualified_data_source == "srvB:broken":
                 raise RuntimeError("backend down")
             return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
 
-        async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None):
+        async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, _skip_hooks=False):
             raise AssertionError("each server has a single source; batch not expected")
 
     _patch_app_factory(monkeypatch, unified_rag=TwoServerRAG())
@@ -435,7 +435,7 @@ async def test_execute_atlas_rag_query_all_failures_reports_failure(monkeypatch)
     manager = _manager()
 
     class BrokenUnifiedRAG(FakeUnifiedRAG):
-        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None):
+        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
             raise RuntimeError("total outage")
 
     unified = BrokenUnifiedRAG(discovered=["technical-docs"])
@@ -460,6 +460,49 @@ async def test_execute_atlas_rag_query_no_sources_available(monkeypatch):
     result = await manager.execute_tool(
         ToolCall(id="call-empty", name="atlas_rag_query", arguments={"query": "hi"}),
         context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is False
+    assert unified.query_calls == []
+    assert unified.batch_calls == []
+
+
+@pytest.mark.asyncio
+async def test_execute_atlas_rag_query_falls_back_when_no_selection(monkeypatch):
+    """No ``selected_data_sources`` key at all means "the user chose nothing
+    specific" -- query everything they are authorized for.
+
+    This is the common agent-mode case; collapsing it to ``[]`` upstream would
+    take the "explicitly no sources" branch and break RAG for every such turn.
+    """
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs", "policies"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-fb", name="atlas_rag_query", arguments={"query": "q"}),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is True
+    queried = sorted(unified.query_calls + [s for c in unified.batch_calls for s in c])
+    assert queried == ["atlas_rag:policies", "atlas_rag:technical-docs"]
+
+
+@pytest.mark.asyncio
+async def test_execute_atlas_rag_query_honors_explicit_empty_selection(monkeypatch):
+    """An explicit empty list is a ceiling of zero, not "unset".
+
+    A UserPromptSubmit hook narrowing the turn to no sources must not be
+    widened back to the user's full authorized set.
+    """
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs", "policies"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-empty", name="atlas_rag_query", arguments={"query": "q"}),
+        context={"user_email": "test@example.com", "selected_data_sources": []},
     )
 
     assert result.success is False

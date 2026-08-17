@@ -53,6 +53,16 @@ class LiteLLMStreamingMixin:
         if max_tokens is not None:
             model_kwargs["max_tokens"] = max_tokens
 
+        # PreLlmCall hook (GH #713): zero-overhead when no hooks registered.
+        # Deny raises HookBlockedError which propagates through the generator.
+        mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email)
+        if mod is not None:
+            model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages, user_email=user_email)
+            litellm_model = self._get_litellm_model_name(model_name)
+            model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+            if max_tokens is not None:
+                model_kwargs["max_tokens"] = max_tokens
+
         provider, model_suffix = split_provider(litellm_model)
         span_attrs = {
             "model": litellm_model,
@@ -147,6 +157,15 @@ class LiteLLMStreamingMixin:
 
         litellm_model = self._get_litellm_model_name(model_name)
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+
+        # PreLlmCall hook (GH #713)
+        mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email, tools_schema=tools_schema)
+        if mod is not None:
+            model_name, messages, tools_schema = await self._apply_pre_llm_modify(
+                mod, model_name, messages, tools_schema, user_email=user_email
+            )
+            litellm_model = self._get_litellm_model_name(model_name)
+            model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
 
         provider, model_suffix = split_provider(litellm_model)
         span_attrs = {

@@ -523,6 +523,7 @@ class AppSettings(BaseSettings):
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     splash_screen_file: str = Field(default="splash-screen.md", validation_alias="SPLASH_SCREEN_FILE")
     file_extractors_config_file: str = Field(default="file-extractors.json", validation_alias="FILE_EXTRACTORS_CONFIG_FILE")
+    hooks_config_file: str = Field(default="hooks.json", validation_alias="HOOKS_CONFIG_FILE")
 
     # Config directory path (user customizations; falls back to atlas/config/ for defaults)
     app_config_dir: str = Field(default="config", validation_alias="APP_CONFIG_DIR")

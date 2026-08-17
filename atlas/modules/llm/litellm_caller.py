@@ -20,6 +20,8 @@ import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
+from atlas.hooks import HookBlockedError, HookEvent, get_hook_manager
+
 # Suppress Pydantic deprecation warnings from litellm's response processing.
 # litellm accesses Pydantic v2.11+ deprecated instance attributes
 # (model_fields, model_computed_fields) on every streaming chunk, generating
@@ -34,7 +36,9 @@ except ImportError:
 import litellm
 from litellm import acompletion
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
@@ -150,6 +154,114 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             litellm.set_verbose = False
         else:
             litellm.set_verbose = debug_mode
+
+    async def _fire_pre_llm_hook(
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
+        user_email: Optional[str] = None,
+        tools_schema: Optional[List[Dict]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """PreLlmCall hook (GH #713).
+
+        Returns a dict of modified fields (``model``, ``messages``, ``tools``)
+        when a hook made a ``modify`` decision; returns ``None`` when no hooks
+        fired or the verdict was continue/require_approval (no change). Raises
+        ``HookBlockedError`` on ``deny`` so the call surfaces the reason rather
+        than silently proceeding. Opt-in; zero overhead without hooks.json.
+
+        ``require_approval`` has no approval gate at the LLM layer, so it is
+        treated as continue (audited only) -- a hook that needs to block an LLM
+        call should use ``deny``.
+        """
+        mgr = get_hook_manager()
+        if mgr is None or not mgr.has_hooks(HookEvent.PRE_LLM_CALL):
+            return None
+        compliance_level = None
+        try:
+            from atlas.core.compliance import get_active_compliance_context
+            compliance_level, _ = get_active_compliance_context()
+        except Exception:
+            # Compliance context is informational in the hook envelope; when it is
+            # unavailable (no active request context) the hook still runs with
+            # compliance_level=None rather than failing the LLM call.
+            logger.debug("hooks: no active compliance context for PreLlmCall", exc_info=True)
+        payload: Dict[str, Any] = {
+            "model": model_name,
+            "messages": messages,
+            "user_email": user_email,
+        }
+        if tools_schema is not None:
+            payload["tools"] = tools_schema
+        outcome = await mgr.run_event(
+            HookEvent.PRE_LLM_CALL,
+            payload,
+            session_context={"user_email": user_email, "compliance_level": compliance_level},
+        )
+        if outcome.verdict == "deny":
+            raise HookBlockedError(HookEvent.PRE_LLM_CALL, outcome.reason or "LLM call blocked by policy hook")
+        if outcome.modified:
+            return outcome.payload
+        return None
+
+    async def _apply_pre_llm_modify(
+        self,
+        mod: Optional[Dict[str, Any]],
+        model_name: str,
+        messages: List[Dict[str, str]],
+        tools_schema: Optional[List[Dict]] = None,
+        *,
+        user_email: Optional[str] = None,
+    ):
+        """Apply a PreLlmCall modify payload.
+
+        Returns ``(model_name, messages, tools_schema)`` after a hook may have
+        swapped the model or rewritten messages/tools.
+
+        A model swap is re-authorized against the same per-model group check
+        ``ChatOrchestrator`` ran for the originally selected model. Without that,
+        a hook could route a turn to a model the user is not cleared for, since
+        the orchestrator's check only ever saw the original name. An unauthorized
+        swap is refused and the original model is kept.
+        """
+        if mod is None:
+            return model_name, messages, tools_schema
+        new_model = mod.get("model")
+        if isinstance(new_model, str) and new_model and new_model != model_name:
+            if await self._hook_model_swap_allowed(new_model, user_email):
+                model_name = new_model
+            else:
+                logger.warning(
+                    "hooks: PreLlmCall model swap to %s refused (user not authorized); "
+                    "keeping %s",
+                    sanitize_for_logging(new_model),
+                    sanitize_for_logging(model_name),
+                )
+        new_messages = mod.get("messages")
+        if isinstance(new_messages, list):
+            messages = new_messages
+        if tools_schema is not None:
+            new_tools = mod.get("tools")
+            if isinstance(new_tools, list):
+                tools_schema = new_tools
+        return model_name, messages, tools_schema
+
+    async def _hook_model_swap_allowed(self, model_name: str, user_email: Optional[str]) -> bool:
+        """Re-run the per-model group check for a hook-supplied model name.
+
+        Mirrors ``ChatOrchestrator``'s gate. An unknown model is left to the
+        downstream caller (same policy as chat), but a model the user's groups do
+        not cover is refused here.
+        """
+        try:
+            models = self.llm_config.models
+        except Exception:
+            # Without a model registry there is nothing to check against; refuse
+            # the swap rather than assume the replacement is authorized.
+            logger.warning("hooks: cannot verify PreLlmCall model swap (no llm_config); refusing")
+            return False
+        decision = await check_model_access(models, model_name, user_email, context="PreLlmCall hook")
+        return decision is not ModelAccessDecision.DENIED
 
     @staticmethod
     def _tools_implicated_by(error_str: str, tools_schema: Optional[List[Dict]]) -> List[str]:
@@ -871,6 +983,16 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"Plain LLM call: {len(messages)} messages, {total_chars} chars")
 
+            # PreLlmCall hook (GH #713): inspect/redact messages, swap/veto model,
+            # or block the call. Zero-overhead when no hooks registered.
+            mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email)
+            if mod is not None:
+                model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages, user_email=user_email)
+                litellm_model = self._get_litellm_model_name(model_name)
+                model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+                if max_tokens is not None:
+                    model_kwargs["max_tokens"] = max_tokens
+
             response = await self._acompletion_with_retry(
                 model=litellm_model,
                 messages=self._prepare_messages(model_name, messages),
@@ -888,6 +1010,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             return content
 
+        except HookBlockedError:
+            # A PreLlmCall hook blocked the call: surface the reason, do not
+            # wrap as a generic LLMServiceError.
+            raise
         except Exception as exc:
             logger.error("Error calling LLM: %s", exc, exc_info=True)
             self._raise_llm_domain_error(exc)
@@ -1031,6 +1157,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry
+        except HookBlockedError:
+            # A PreLlmCall hook blocked the call: do NOT fall back to plain LLM
+            # (the hook's decision applies to the LLM step regardless of RAG).
+            raise
         except Exception as exc:
             logger.error("[LLM+RAG] Error in RAG-integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG] Falling back to plain LLM call due to RAG error")
@@ -1057,6 +1187,15 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
             logger.info(f"LLM call with tools: {len(messages)} messages, {total_chars} chars, {len(tools_schema)} tools")
 
+            # PreLlmCall hook (GH #713)
+            mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email, tools_schema=tools_schema)
+            if mod is not None:
+                model_name, messages, tools_schema = await self._apply_pre_llm_modify(
+                    mod, model_name, messages, tools_schema, user_email=user_email
+                )
+                litellm_model = self._get_litellm_model_name(model_name)
+                model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+
             response = await self._acompletion_with_retry(
                 model=litellm_model,
                 messages=self._prepare_messages(model_name, messages),
@@ -1077,6 +1216,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 model_used=model_name
             )
 
+        except HookBlockedError:
+            raise
         except Exception as exc:
             logger.error("Error calling LLM with tools: %s", exc, exc_info=True)
             self._raise_llm_domain_error(exc, tools_schema=tools_schema)
@@ -1222,6 +1363,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry
+        except HookBlockedError:
+            raise
         except Exception as exc:
             logger.error("[LLM+RAG+Tools] Error in RAG+tools integrated query: %s", exc, exc_info=True)
             logger.warning("[LLM+RAG+Tools] Falling back to tools-only call due to RAG error")

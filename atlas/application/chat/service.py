@@ -20,6 +20,7 @@ from atlas.core.user_identity import normalize_user_email
 from atlas.domain.errors import AuthorizationError, DomainError
 from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
 from atlas.domain.sessions.models import Session
+from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
@@ -239,6 +240,32 @@ class ChatService:
     ) -> Session:
         """Create a new chat session."""
         session = Session(id=session_id, user_email=user_email)
+
+        # SessionStart hook (GH #713): opt-in, zero overhead when no hooks.json.
+        # Fires on every session creation including restore; a hook can reject
+        # the session (deny) or attach metadata to session.context (modify).
+        #
+        # This runs *before* session_repository.create(). Persisting first would
+        # make deny a one-message speed bump: the row would already exist, so the
+        # caller's next message would find it via session_repository.get() and be
+        # answered normally. Nothing is written until the hook allows the session.
+        mgr = get_hook_manager()
+        if mgr is not None and mgr.has_hooks(HookEvent.SESSION_START):
+            outcome = await mgr.run_event(
+                HookEvent.SESSION_START,
+                {"session_id": str(session_id)},
+                session_context={"session_id": str(session_id), "user_email": user_email},
+            )
+            if outcome.verdict == "deny":
+                logger.warning(
+                    "Session %s for user %s blocked by SessionStart hook",
+                    sanitize_for_logging(str(session_id)),
+                    sanitize_for_logging(user_email),
+                )
+                raise DomainError(f"Session creation blocked by hook: {outcome.reason}")
+            if outcome.modified and isinstance(outcome.payload, dict):
+                session.context.update(outcome.payload)
+
         await self.session_repository.create(session)
 
         logger.info(f"Created session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
@@ -1068,3 +1095,21 @@ class ChatService:
         self._incognito_save_floor.pop(session_id, None)
         self._save_floor_locked.discard(session_id)
         logger.info(f"Ended session {sanitize_for_logging(str(session_id))}")
+
+        # SessionEnd hook (GH #713): observability/lifecycle. Cannot block (a
+        # session already ended); deny is treated as continue with a log so a
+        # misconfigured audit hook cannot wedge the teardown path.
+        mgr = get_hook_manager()
+        if mgr is not None and mgr.has_hooks(HookEvent.SESSION_END):
+            try:
+                await mgr.run_event(
+                    HookEvent.SESSION_END,
+                    {"session_id": str(session_id), "user_email": session.user_email},
+                    session_context={
+                        "session_id": str(session_id),
+                        "user_email": session.user_email,
+                        "compliance_level": session.context.get("compliance_level"),
+                    },
+                )
+            except Exception as e:
+                logger.warning("SessionEnd hook failed for %s: %s", session_id, e)

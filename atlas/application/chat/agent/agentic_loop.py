@@ -263,7 +263,12 @@ class AgenticLoop(AgentLoopProtocol):
                     "session_id": context.session_id,
                     "user_email": context.user_email,
                     "files": context.files,
-                    "selected_data_sources": data_sources or [],
+                    # None and [] mean different things downstream: None is "the
+                    # user made no selection" (atlas_rag_query falls back to every
+                    # authorized source), [] is "explicitly no sources" (query
+                    # nothing). Collapsing None to [] would break RAG for every
+                    # agent turn where the user picked no sources.
+                    "selected_data_sources": data_sources,
                     # Trusted compliance level so RAG tools enforce the boundary;
                     # the model cannot set or change this.
                     "compliance_level": context.compliance_level,
