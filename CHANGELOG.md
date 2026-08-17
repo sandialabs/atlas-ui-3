@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #814 - 2026-08-17
+- **Authorization tests keep the developer bypass disabled after application import**: test setup now pins `SKIP_AUTHORIZATION_CHECKS=false` instead of deleting it, preventing `atlas.main` from restoring a true value from the repository `.env` during test collection.
+
 ### PR #811 - 2026-08-17
 - **Authorization tests ignore a developer-local bypass flag**: `tests/conftest.py` now clears `SKIP_AUTHORIZATION_CHECKS` at session start, matching the existing `.env` and external-authorizer isolation guards. Tests that need the bypass still opt in explicitly through `skip_auth_checks_env`, while admin denial tests remain meaningful even when a contributor has the escape hatch exported locally.
 
