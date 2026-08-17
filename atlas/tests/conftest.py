@@ -66,6 +66,16 @@ AppSettings.model_config["env_file"] = None
 for _authorizer_var in ("AUTH_GROUP_CHECK_URL", "AUTH_GROUP_CHECK_API_KEY"):
     os.environ.pop(_authorizer_var, None)
 
+# --- Authorization-bypass isolation --------------------------------------
+# ``SKIP_AUTHORIZATION_CHECKS=true`` is a developer-local escape hatch that makes
+# *every* authenticated user a member of *every* group, including admin. When a
+# contributor has it exported in their shell, admin-route tests that expect a
+# non-admin identity to be rejected silently become meaningless and fail with
+# 200s/400s instead of 403s. Clear it for the test session so the suite exercises
+# the normal authorization paths unless a test explicitly opts into the bypass via
+# ``skip_auth_checks_env``.
+os.environ.pop("SKIP_AUTHORIZATION_CHECKS", None)
+
 # MCP token storage now refuses to start without an explicit encryption key
 # (previously a per-process ephemeral key was generated, which silently lost
 # every stored token on restart). Provide a deterministic test key so module

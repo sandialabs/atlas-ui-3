@@ -22,6 +22,11 @@ def test_env_file_loading_is_disabled_for_tests():
     assert AppSettings.model_config.get("env_file") is None
 
 
+def test_skip_authorization_checks_is_cleared_for_tests():
+    """The developer-local authorization bypass must not leak into the suite."""
+    assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") is None
+
+
 def test_dotenv_on_disk_does_not_leak_into_settings(tmp_path, monkeypatch):
     """A ``.env`` at the location AppSettings would read must be ignored.
 
