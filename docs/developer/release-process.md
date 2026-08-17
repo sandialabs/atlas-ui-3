@@ -1,34 +1,40 @@
 # Release Process
 
-Last updated: 2026-04-23
+Last updated: 2026-08-16
 
-This document is the canonical runbook for cutting a release of Atlas UI 3.
-It covers both the **monthly release cadence** and **hotfix releases**. If
-you are about to publish a version, follow the checklist in
-[Cutting a monthly release](#cutting-a-monthly-release) top-to-bottom.
+This document is the canonical runbook for cutting a release of Atlas
+UI 3. If you are about to publish a version, follow
+[Cutting a release](#cutting-a-release) top-to-bottom.
 
 ---
 
 ## Philosophy
 
-Atlas UI 3 follows a **monthly release cadence**. Each calendar month
-produces at most one minor release; patch releases come out of a
-long-lived `release/YYYY.MM` branch as needed for hotfixes.
+Atlas UI 3 **ships from `main`**. A release is a version-bump PR, a tag
+on the resulting commit, and a GitHub Release — the rest is automation.
+Roughly monthly is the habit, not a rule; ship when there is something
+worth shipping.
 
 The model is small and deliberately boring:
 
 - **`main`** is trunk. It is always deployable. Every PR on `main` must
   pass CI and add a `CHANGELOG.md` entry under `## [Unreleased]`.
-- **`release/YYYY.MM`** is cut from `main` during the last week of each
-  month. It is the stabilization branch for that month's release. The
-  release branch is frozen to bug fixes only until the tag is pushed.
+- **The version bump lands on `main`** like any other PR, so `main`
+  always equals the last shipped version. There is nothing to back-merge
+  and no release branch to keep alive.
 - **`vX.Y.Z`** is the tag that ships. Publishing a GitHub Release (created
   from a `v*.*.*` tag) triggers `pypi-publish.yml`; pushing a `v*.*.*` tag
   triggers `quay-publish.yml`. This is the intended release path.
 
-Automation handles the mechanical parts of cutting the branch; humans
-make the go/no-go call, run the smoke tests, and push the tag. See
-[Guardrails](#guardrails) for what automation will and will not do.
+A stabilization branch (`release/YYYY.MM`, cut by `release-cut.yml`)
+remains available for the case it actually solves — freezing a release
+while unrelated work keeps landing on `main`. It is the exception, not
+the default; see
+[When to use a stabilization branch instead](#when-to-use-a-stabilization-branch-instead).
+
+Humans make the go/no-go call and push the tag. Publishing to PyPI is
+irreversible — a version can be yanked but never replaced — so treat
+`gh release create` as the point of no return.
 
 ### Other publish paths (non-release)
 
@@ -85,163 +91,110 @@ args.
 
 ---
 
-## Cutting a monthly release
+## Cutting a release
 
-### Timeline
+A release is three things: a version-bump commit on `main`, a tag on
+that commit, and a GitHub Release. Everything after the tag is
+automation. There is no stabilization branch and no back-merge — the
+bump lands on `main` directly, so `main` is never behind what shipped.
 
-| When                        | What                                                         | Who       |
-|-----------------------------|--------------------------------------------------------------|-----------|
-| Day 22 of month, 14:00 UTC  | `release-cut.yml` cron opens a draft release PR              | Automation |
-| Day 22–27                   | Stabilization: only bug fixes merged to `release/YYYY.MM`    | Maintainers |
-| Last workday of month       | Final smoke test → tag `vX.Y.Z` → publish                    | Release captain |
-| Day after release           | Merge release branch back into `main` to carry the bump      | Release captain |
+Budget about ten minutes of hands-on work, plus the publish runs.
 
-The automation is idempotent: if the PR already exists for the current
-month, the cron is a no-op.
+### 1. Pick the version
 
-### Step-by-step
-
-#### 1. Automation cuts the branch (day 22)
-
-The `release-cut` workflow fires on the 22nd of each month. It:
-
-1. Reads the current version from `atlas/version.py`.
-2. Computes the next version (minor bump by default).
-3. Creates `release/YYYY.MM` from the current tip of `main`.
-4. Bumps `atlas/version.py` and `pyproject.toml` on that branch.
-5. Rewrites `CHANGELOG.md`: the `## [Unreleased]` contents become
-   `## [X.Y.Z] - YYYY-MM-DD`, and a fresh empty `## [Unreleased]`
-   section is prepended.
-6. Opens a **draft** PR titled `release: X.Y.Z (YYYY-MM)` that targets
-   `main`. The PR body contains the full release checklist (below).
-
-If you need to run this manually (e.g., out-of-cycle release or dry
-run), use **Actions → Release: cut monthly branch → Run workflow**.
-You can override the computed version with the `version` input, and
-`dry_run: true` prints the plan without pushing anything.
-
-If the release branch was pushed but the PR creation failed (network
-blip, permission hiccup), rerun the workflow. It detects the existing
-branch, sees no open PR, and takes the **recovery path**: it opens a
-draft PR against the existing branch without touching any files. The
-recovery PR body is flagged with a banner so the captain knows to
-verify the inferred metadata.
-
-> **Before you cut, reconcile the version state.** The cron is
-> idempotent only *within* a month — it does not reason about releases
-> that already shipped. Two failure modes to check for, especially
-> before an off-cycle cut:
->
-> - **Determine the next version from the highest *published* release**
->   (`gh release list`, git tags, or PyPI), **not** from
->   `pyproject.toml` on `main`. After a release's back-merge, `main`
->   already equals the last shipped version, so reading it yields the
->   *current* version, not the next one.
-> - **Close any superseded release PR first.** A recovery-path PR from a
->   prior month can linger open carrying a *no-op* bump (e.g.
->   `0.2.0 → 0.2.0`) if its version had already shipped by another
->   path. Do not adopt it as the release vehicle — close it and cut a
->   fresh branch for the new version.
-
-#### 2. Release captain takes ownership
-
-A maintainer claims the draft PR (self-assign) and becomes the
-**release captain**. Responsibilities:
-
-- Triage any bug-fix PRs that need to land on the release branch.
-- Run the smoke tests before tagging.
-- Push the tag and create the GitHub Release.
-- Merge the release PR back into `main` after the tag ships.
-
-#### 3. Stabilization window (day 22 → end of month)
-
-Only fixes land on `release/YYYY.MM` during this window. The rule of
-thumb for what qualifies:
-
-- Crashes, data loss, security fixes, install/import failures → yes
-- Small user-visible regressions that landed since the last release → yes
-- New features, refactors, docs-only changes → **no**, those stay on `main`
-
-For a bug that affects both `main` and the release branch, land the
-fix on `main` first (as you normally would), then cherry-pick the
-merge commit onto `release/YYYY.MM`:
+Read the next version off the **highest published release**, not off
+`pyproject.toml`:
 
 ```bash
-git checkout release/2026.05
-git cherry-pick -x <sha-on-main>
-git push
+gh release list -L 3          # or: git tag --sort=-v:refname | head
 ```
 
-Add the cherry-pick under the current release's CHANGELOG section on
-the release branch.
+Because the bump lands on `main`, `pyproject.toml` there equals the
+*last shipped* version — it is the current version, never the next one.
+Normal release: bump MINOR. Fix on top of a shipped version: bump PATCH.
 
-#### 4. Kicking CI on the release PR
+### 2. Bump and open the PR
 
-The release captain must confirm `CI/CD Pipeline` and `Security Checks`
-are green on the release PR before tagging. Which path produces those
-checks depends on how the PR was opened:
-
-- **`RELEASE_PAT` is configured** (recommended). The `release-cut`
-  workflow uses the PAT to push the branch and open the PR, so the
-  `pull_request` event fires normally and both workflows run without
-  any manual kick.
-- **`RELEASE_PAT` is not configured.** The workflow falls back to the
-  default `GITHUB_TOKEN`. GitHub deliberately suppresses workflow
-  triggers for actions taken with `GITHUB_TOKEN`, so the release PR
-  opens with no CI runs attached. The captain must kick CI manually:
-  1. Close and immediately reopen the PR (simplest), **or**
-  2. Push any commit to the release branch from a personal account
-     (e.g., an empty `git commit --allow-empty -m "ci: kick"` then
-     `git push`). The resulting `synchronize` event triggers both
-     workflows.
-
-  The release PR body is pre-populated with a `CI kick required`
-  banner when this fallback is in effect.
-
-> **One-time setup**: to enable the PAT path, a maintainer creates a
-> GitHub PAT (classic, scope `repo` + `workflow`) or a fine-grained
-> token with `Contents: write`, `Pull requests: write`, and `Actions:
-> write`, then stores it as the `RELEASE_PAT` repository secret.
-
-#### 5. Pre-tag checklist
-
-Before tagging, the release captain completes every item on the
-checklist embedded in the release PR (see
-[.github/release-checklist.md](../../.github/release-checklist.md)).
-The critical items:
-
-- [ ] CI is green on the latest commit of `release/YYYY.MM`.
-- [ ] `atlas/version.py` and `pyproject.toml` agree on the new version.
-- [ ] `CHANGELOG.md` has a populated `## [X.Y.Z] - YYYY-MM-DD` section.
-- [ ] Manual smoke test against a packaged wheel (see
-      [Smoke test](#smoke-test) below).
-- [ ] No known P0/P1 bugs filed against the release branch.
-
-#### 6. Tag and publish
-
-When the checklist is green:
+Do the work on a short-lived branch cut from `main` — ideally in a
+worktree, so you do not disturb whatever you have checked out:
 
 ```bash
-# From a local clone, checked out on release/YYYY.MM at the exact
-# commit you want to ship.
-git checkout release/YYYY.MM
-git pull
-git tag -a vX.Y.Z -m "Atlas UI 3 vX.Y.Z"
-git push origin vX.Y.Z
+V=0.6.0
+git fetch origin main
+git worktree add -b release/$V ../atlas-release-$V origin/main
+cd ../atlas-release-$V
 ```
 
-Then create a GitHub Release from that tag. The easiest path is the
-web UI (**Releases → Draft a new release → pick the tag → paste the
-`## [X.Y.Z] - YYYY-MM-DD` section of `CHANGELOG.md` as the body**).
+Three files change, in one commit:
 
-To do it from the CLI, extract the current release's CHANGELOG section
-into a scratch file first — do not try to inline it with process
-substitution, it is fragile and does not handle the first-ever release
-(which has no following `## [` to delimit the section):
+- `atlas/version.py` — `VERSION = "X.Y.Z"`
+- `pyproject.toml` — the top-level `version = "X.Y.Z"` (not a
+  dependency pin that happens to match)
+- `CHANGELOG.md` — the `## [Unreleased]` heading becomes
+  `## [X.Y.Z] - YYYY-MM-DD`, with a fresh empty `## [Unreleased]`
+  inserted above it. The entries themselves are not touched; they were
+  written by the PRs that landed them.
 
 ```bash
-# Set V to the bare version once, and let the script do the extraction.
-V=X.Y.Z
+python3 - "$V" <<'PY'
+import pathlib, re, sys, datetime
+version = sys.argv[1]
+today = datetime.date.today().isoformat()
+
+for path, key in (("atlas/version.py", "VERSION"), ("pyproject.toml", "version")):
+    p = pathlib.Path(path)
+    new, n = re.subn(rf'^{key} = "[^"]+"', f'{key} = "{version}"',
+                     p.read_text(), count=1, flags=re.M)
+    if n != 1:
+        raise SystemExit(f"{path}: expected 1 {key} line, found {n}")
+    p.write_text(new)
+
+p = pathlib.Path("CHANGELOG.md")
+text = p.read_text()
+m = re.search(r'^## \[Unreleased\][ \t]*$', text, re.M)
+if not m:
+    raise SystemExit("CHANGELOG.md has no '## [Unreleased]' section")
+p.write_text(text[:m.start()] + "## [Unreleased]\n\n"
+             + f"## [{version}] - {today}" + text[m.end():])
+print(f"bumped to {version} ({today})")
+PY
+
+git commit -am "chore(release): v$V"
+git push -u origin "release/$V"
+gh pr create --base main --title "release: $V" --body "Version bump for the $V release."
+```
+
+The `pypi-publish.yml` build job re-checks that `atlas/version.py` and
+`pyproject.toml` agree and fails the publish if they do not, so a
+half-applied bump cannot ship.
+
+### 3. Merge
+
+CI on the bump PR is the gate. The diff is three lines of metadata on
+top of a `main` that was already green, so this is a formality — but do
+not skip it, because the changelog reshape can be malformed in ways
+only a build catches.
+
+```bash
+gh pr merge <number> --squash --delete-branch
+```
+
+### 4. Tag and publish
+
+Tag the squashed commit on `main` — not the branch you just deleted:
+
+```bash
+git fetch origin main
+git tag -a "v$V" -m "Atlas UI 3 v$V" origin/main
+git push origin "v$V"
+```
+
+Then extract this version's changelog section and publish the Release.
+Do not try to inline the extraction with process substitution; it is
+fragile and does not handle the first-ever release (which has no
+following `## [` to delimit the section):
+
+```bash
 python3 - "$V" > /tmp/release-notes.md <<'PY'
 import re, sys, pathlib
 version = sys.argv[1]
@@ -254,70 +207,142 @@ if not m:
 sys.stdout.write(m.group(1).rstrip() + "\n")
 PY
 
-gh release create "v$V" \
-  --title "v$V" \
-  --notes-file /tmp/release-notes.md \
-  --target "release/$(date -u +%Y.%m)"
+gh release create "v$V" --title "v$V" --verify-tag \
+  --notes-file /tmp/release-notes.md
 ```
 
-Publishing a GitHub Release triggers `pypi-publish.yml`. Pushing the
-`vX.Y.Z` tag also triggers `quay-publish.yml`. Watch both in the
-Actions tab and confirm:
+Two workflows fire:
 
-- `atlas-chat X.Y.Z` is visible on <https://pypi.org/project/atlas-chat/>.
-- `quay.io/<namespace>/atlas-ui-3:X.Y.Z` and `:X.Y` tags exist.
+- Pushing the tag triggers **`quay-publish.yml`** → `X.Y.Z`, `X.Y`, `X`,
+  `latest`, and `vX.Y.Z-<sha>` image tags.
+- Publishing the Release triggers **`pypi-publish.yml`** → builds the
+  frontend, bundles `frontend/dist` into `atlas/static`, uploads the
+  wheel and sdist to PyPI, then attaches both to the GitHub Release.
 
-#### 7. Carry the bump back to main
+### 5. Verify
 
-Open a PR merging `release/YYYY.MM` into `main`. This carries the
-version bump commit and any hotfix cherry-picks that did not originate
-on `main` back into the trunk. Fast-forward when possible; use a
-no-ff merge commit if the branches have diverged.
+```bash
+gh run list -L 5                                    # both publishes green
+curl -s https://pypi.org/simple/atlas-chat/ | grep "$V"
+curl -s "https://quay.io/api/v1/repository/<ns>/atlas-ui-3/tag/?onlyActiveTags=true" \
+  | python3 -c "import json,sys; print([t['name'] for t in json.load(sys.stdin)['tags']][:10])"
+```
 
-After this merge, `main` is now at version `X.Y.Z` and ready to
-accumulate PRs under a fresh `## [Unreleased]` section.
+The PyPI **JSON** API (`/pypi/atlas-chat/json`) is cached and can report
+the previous version for several minutes after a successful upload —
+check the simple index instead before concluding the publish failed.
+
+Then remove the release worktree. Nothing else is owed: no back-merge,
+no branch to keep alive.
+
+> **Publishing is one-way.** A PyPI version cannot be replaced, only
+> yanked and superseded. Everything before `gh release create` is
+> reversible; nothing after it is. See
+> [Rolling back a bad release](#rolling-back-a-bad-release).
+
+---
+
+## When to use a stabilization branch instead
+
+`release-cut.yml` (cron, 14:00 UTC on the 22nd) opens a draft
+`release/YYYY.MM` PR: it creates the branch from `main`, applies the
+same three-file bump, reshapes the changelog, and fills the PR body
+from [.github/release-checklist.md](../../.github/release-checklist.md).
+Run it by hand with **Actions → Release: cut monthly branch → Run
+workflow** (`version` overrides the computed bump; `dry_run: true`
+prints the plan without pushing).
+
+Reach for it only when a release genuinely needs a **freeze**: work you
+do not want in the release keeps landing on `main` while the release
+stabilizes, so fixes must be cherry-picked onto a branch that is held
+back. That is the entire benefit, and it costs a branch, a checklist
+PR, a cherry-pick discipline, and a back-merge afterwards.
+
+When `main` is already shippable — the normal case — those steps buy
+nothing, and the four steps above are the flow.
+
+If you do take this path, the details that bite:
+
+- **Reconcile the version state first.** The cron is idempotent only
+  *within* a month; it does not reason about releases that already
+  shipped. Read the next version from the highest published release,
+  and close any superseded release PR (a recovery-path PR from a prior
+  month can linger carrying a no-op bump like `0.2.0 → 0.2.0`) rather
+  than adopting it as the release vehicle.
+- **The cut PR doubles as the back-merge PR.** It already targets
+  `main`; merge it after tagging. Do not open a second one.
+- **CI may need a manual kick.** With `RELEASE_PAT` configured the PR
+  is opened with the PAT and CI runs normally. Without it the workflow
+  falls back to `GITHUB_TOKEN`, which deliberately does not trigger
+  `pull_request` workflows — close and immediately reopen the PR, or
+  push an empty commit from a personal account. The PR body carries a
+  `CI kick required` banner when this fallback is in effect. (One-time
+  fix: store a PAT with `repo` + `workflow`, or a fine-grained token
+  with `Contents: write`, `Pull requests: write`, `Actions: write`, as
+  the `RELEASE_PAT` secret.)
+- **Only fixes land during the freeze.** Crashes, data loss, security,
+  install/import failures, and regressions since the last release
+  qualify. Features, refactors, and docs-only changes stay on `main`.
+  Land the fix on `main` first, then `git cherry-pick -x <sha>` onto
+  `release/YYYY.MM`, and add it under that release's CHANGELOG section
+  on the branch.
+
+The workflow will **never** push a tag, create a non-draft PR, publish
+to any registry, or touch a branch other than `release/YYYY.MM`.
+Scheduled runs are gated on `github.repository == 'sandialabs/atlas-ui-3'`
+so forks do not cut releases. It is idempotent: branch plus open PR is
+a no-op; branch without an open PR takes a recovery path that opens a
+draft PR without rewriting the branch.
 
 ---
 
 ## Hotfix releases
 
-For an urgent fix to an already-released minor version:
+Because releases ship from `main`, an urgent fix is an ordinary
+release at a PATCH version: land the fix on `main` as a normal PR, then
+run [Cutting a release](#cutting-a-release) bumping `0.2.0 → 0.2.1`.
+Nothing special is required.
 
-1. Branch from the release branch, not main:
-   ```bash
-   git checkout release/2026.05
-   git checkout -b hotfix/2026.05-file-upload-fix
-   ```
-2. Commit the fix and a CHANGELOG entry under a new patch section:
-   ```markdown
-   ## [0.2.1] - 2026-05-12
-   - **Fix**: ...
-   ```
-3. Bump `atlas/version.py` and `pyproject.toml` to the patch version
-   (`0.2.0 → 0.2.1`).
-4. PR into `release/2026.05`, get review, merge.
-5. Tag `v0.2.1` on the release branch tip and push. Publishing is
-   automatic from there.
-6. Merge the hotfix commit (or cherry-pick) to `main` and open a PR
-   so the fix is not lost on the next monthly cut.
+That works as long as everything else sitting on `main` is also
+shippable — which is the usual case, since `main` is kept deployable.
 
-Never hotfix from `main` — by the time a patch release is needed,
-`main` has usually moved on and is not the state you shipped.
+**When it is not**, `main` has moved on and shipping it would carry
+changes you are not ready to release. Only then, branch from the tag
+you shipped and treat that branch as the release:
+
+```bash
+git checkout -b hotfix/0.2.1 v0.2.0
+# commit the fix, bump both version files to 0.2.1, add a
+# `## [0.2.1] - YYYY-MM-DD` CHANGELOG section
+git push -u origin hotfix/0.2.1
+git tag -a v0.2.1 -m "Atlas UI 3 v0.2.1" && git push origin v0.2.1
+gh release create v0.2.1 --verify-tag --notes-file /tmp/release-notes.md
+```
+
+Then open a PR carrying the fix (and the bump) back to `main`, so the
+next release does not regress it. Prefer cherry-picking the fix onto
+`main` first and re-verifying there, rather than trusting that a fix
+validated against the old tag still holds against current trunk.
 
 ---
 
 ## Smoke test
 
-Before tagging, install the candidate wheel into a clean venv and
-verify the basics end-to-end:
+Optional, and CI is the real gate — reach for this when a release
+touches packaging, the CLI entry points, or the bundled frontend, or
+when you want a real-LLM check that no test suite covers.
+
+The honest version of this test uses the artifact CI builds, not one
+you build locally: after merging the bump PR but **before tagging**,
+dispatch **Actions → Publish Python Package to PyPI → `target:
+testpypi`**, then install from there.
 
 ```bash
-# On the release branch, build a local wheel
-uv build --wheel
-
-# Install it into a throwaway venv
 uv venv /tmp/atlas-smoke --python 3.11
-/tmp/atlas-smoke/bin/python -m pip install dist/atlas_chat-X.Y.Z-py3-none-any.whl
+/tmp/atlas-smoke/bin/python -m pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "atlas-chat==X.Y.Z"
 
 # From a scratch directory
 cd /tmp && rm -rf atlas-smoke-work && mkdir atlas-smoke-work && cd atlas-smoke-work
@@ -340,9 +365,11 @@ curl -fsS http://127.0.0.1:18000/api/health | jq .version
 kill %1
 ```
 
-If any step fails, the release is **not** shippable. File a bug, fix
-on `main`, cherry-pick to the release branch, and re-run the smoke
-test before tagging.
+If any step fails, the release is **not** shippable — and since nothing
+is tagged yet, there is nothing to undo. Fix it on `main`, then release
+from there; the TestPyPI upload of the aborted version is harmless
+(re-dispatching at the same version is a no-op, since the job passes
+`skip-existing`).
 
 For container images, pull the candidate and run `/api/health`:
 
@@ -352,9 +379,11 @@ podman run --rm -p 18000:8000 --env-file .env \
 curl -fsS http://127.0.0.1:18000/api/health
 ```
 
-Note: the Quay image is built on tag push. You will not have an image
-to smoke-test until after you push the tag. If you want a pre-tag
-image, build locally from the release branch using `podman build`.
+Note: the semver-tagged Quay image is built on tag push, so there is no
+`X.Y.Z` image to smoke-test until after you tag. There *is* a
+`main-<sha>` image for every merge to `main`, including the bump
+commit — pull that if you want a pre-tag image, or build locally with
+`podman build`.
 
 ---
 
@@ -366,8 +395,9 @@ PyPI releases cannot be overwritten. If a release is broken:
    only uploads. Use the PyPI web UI → project → Manage → Yank.
    Yanking keeps existing installs working but hides the version from
    `pip install atlas-chat` resolution.
-2. Cut a patch release (`X.Y.(Z+1)`) using the hotfix flow above. This
-   is almost always the right fix — rolling forward beats rolling back.
+2. Ship a patch release (`X.Y.(Z+1)`) using the
+   [hotfix flow](#hotfix-releases) above. This is almost always the
+   right fix — rolling forward beats rolling back.
 3. For container images, retag `:latest` to the previous known-good:
    ```bash
    podman pull quay.io/<ns>/atlas-ui-3:X.Y.(Z-1)
@@ -380,55 +410,25 @@ PyPI releases cannot be overwritten. If a release is broken:
 
 ---
 
-## Guardrails
-
-The `release-cut.yml` workflow will **never**:
-
-- Push a tag.
-- Create a non-draft PR.
-- Publish to PyPI, Quay, or any other registry.
-- Touch any branch other than `release/YYYY.MM` and its internal bump
-  commits.
-- Run on a repo fork — scheduled workflows and PR creation are gated on
-  `github.repository == 'sandialabs/atlas-ui-3'`.
-
-What automation *does* do: cuts the branch, bumps version files,
-reshapes `CHANGELOG.md`, and opens a draft PR with the checklist. Every
-step from "run smoke tests" forward is manual and requires a human.
-
-The workflow is idempotent with a recovery path:
-
-- If `release/YYYY.MM` exists **with** an open PR, the run is a no-op.
-- If `release/YYYY.MM` exists **without** an open PR (e.g., a prior run
-  pushed the branch but `gh pr create` failed), the next run takes the
-  recovery path: it reads version metadata from the branch tip, builds
-  the PR body, and opens a draft PR. It does not rewrite the branch.
-- If the branch does not exist, the run does the full cut.
-
-If you need to override automation (off-cycle release, custom version,
-etc.), use the workflow's `workflow_dispatch` inputs. Use `dry_run:
-true` first to preview.
-
----
-
 ## Open policy decisions
 
 These are left for a maintainer decision; flag a PR against this doc
 when one is made.
 
-1. **SemVer vs CalVer.** Today we ship SemVer (`0.1.5`). A monthly
-   cadence often pairs naturally with CalVer (`2026.5.0`), and the
-   release branch is already named `release/YYYY.MM`. If we switch,
-   the PyPI version jumps and downstreams pinning `atlas-chat<1.0`
-   will break. Recommendation: keep SemVer, revisit at 1.0.
-2. **Release captain rotation.** Today the cut PR is opened as a
-   draft with no assignee. We could either auto-assign the prior
-   captain, round-robin a list in `.github/CODEOWNERS`, or keep it
-   manual. Manual is fine until we miss a release.
-3. **Branch protection on `release/*`.** We should require CI-green
-   and at least one review on merges into any `release/*` branch.
-   That is a GitHub repo setting, not code; capture the decision here
-   when it is applied.
+1. **SemVer vs CalVer.** Today we ship SemVer (`0.5.0`). If we switch
+   to CalVer (`2026.8.0`), the PyPI version jumps and downstreams
+   pinning `atlas-chat<1.0` will break. Recommendation: keep SemVer,
+   revisit at 1.0.
+2. **Keep the monthly cron?** `release-cut.yml` still fires on the
+   22nd and opens a draft `release/YYYY.MM` PR that nobody is
+   obligated to use. It is harmless (it never publishes) but it does
+   manufacture a branch and a PR every month. Options: leave it,
+   restrict it to `workflow_dispatch`, or delete it and keep the
+   stabilization path as a documented manual procedure.
+3. **Should the bump PR require a review?** `main` currently requires
+   a PR but zero approvals, which is what makes the four-step flow
+   fast. A release is exactly when a second pair of eyes is cheapest
+   and most valuable — decide whether that is worth the latency.
 4. **Announcement channel.** Where do external users learn about a
    new release? Options: GitHub Release notes only (current), plus a
    README badge, plus a mailing list. Pick one and document it here.
@@ -440,8 +440,8 @@ when one is made.
 
 ## Related files
 
-- [.github/workflows/release-cut.yml](../../.github/workflows/release-cut.yml) — the cron automation
-- [.github/workflows/pypi-publish.yml](../../.github/workflows/pypi-publish.yml) — publishes on GitHub Release; also has a `workflow_dispatch` escape hatch
+- [.github/workflows/release-cut.yml](../../.github/workflows/release-cut.yml) — the cron automation, used only by the stabilization-branch path
+- [.github/workflows/pypi-publish.yml](../../.github/workflows/pypi-publish.yml) — publishes on GitHub Release; also has a `workflow_dispatch` escape hatch (`target: testpypi` for a pre-tag smoke artifact)
 - [.github/workflows/quay-publish.yml](../../.github/workflows/quay-publish.yml) — publishes semver-tagged images on `v*.*.*` tag push, and branch-named images on push to `main`/`develop`/`quay`
 - [.github/release-checklist.md](../../.github/release-checklist.md) — PR body used by automation
 - [CHANGELOG.md](../../CHANGELOG.md) — format contract for release notes
