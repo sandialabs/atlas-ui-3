@@ -39,35 +39,26 @@ jobs:
           type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
     
-    - name: Build test Docker image (debug mode)
+    - name: Build test Docker image
       uses: docker/build-push-action@v7
       with:
         context: .
         file: ./Dockerfile-test
         load: true
-        tags: test-image-debug:latest
+        tags: test-image:latest
         labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
     
     - name: Run tests in debug mode
       run: |
         echo "Running tests in debug mode (DEBUG_MODE=true)"
-        docker run --rm --workdir /app test-image-debug:latest bash /app/test/run_tests.sh all
-    
-    - name: Build test Docker image (production mode)
-      uses: docker/build-push-action@v7
-      with:
-        context: .
-        file: ./Dockerfile-test
-        build-args: |
-          DEBUG_MODE=false
-        load: true
-        tags: test-image-prod:latest
-        labels: ${{ steps.meta.outputs.labels }}
+        docker run --rm --workdir /app -e DEBUG_MODE=true test-image:latest bash /app/test/run_tests.sh all
     
     - name: Run tests in production mode
       run: |
         echo "Running tests in production mode (DEBUG_MODE=false)"
-        docker run --rm --workdir /app test-image-prod:latest bash /app/test/run_tests.sh all
+        docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh all
 
     - name: Get build metadata
       id: build_meta
@@ -75,11 +66,12 @@ jobs:
         echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
         echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
 
-    - name: Build production Docker image
+    - name: Build and push production Docker image
       uses: docker/build-push-action@v7
       with:
         context: .
         load: true
+        push: true
         build-args: |
           VITE_APP_NAME=ATLAS
           VITE_FEATURE_ANIMATED_LOGO=true
@@ -89,6 +81,8 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
     - name: Build runtime-only Docker image
       uses: docker/build-push-action@v7
@@ -105,18 +99,5 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: runtime-only-image:latest
         labels: ${{ steps.meta.outputs.labels }}
-
-    - name: Push production Docker image
-      uses: docker/build-push-action@v7
-      with:
-        context: .
-        push: true
-        build-args: |
-          VITE_APP_NAME=ATLAS
-          VITE_FEATURE_ANIMATED_LOGO=true
-          VITE_FEATURE_POWERED_BY_ATLAS=false
-          VITE_FEATURE_RAG_CITATIONS=false
-          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
-          APP_VERSION=${{ steps.build_meta.outputs.version }}
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
