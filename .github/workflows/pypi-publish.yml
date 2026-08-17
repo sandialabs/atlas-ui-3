@@ -95,11 +95,17 @@ jobs:
           name: python-package-distributions
           path: dist/
 
+      # Authenticates via OIDC trusted publishing — no token secret. The
+      # matching publisher on test.pypi.org is scoped to this workflow file
+      # and the `testpypi` environment above; changing either name breaks
+      # the exchange with `invalid-publisher`. `skip-existing` keeps a
+      # re-dispatch at an already-uploaded version from failing the job,
+      # since this path exists to be retried by hand.
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          skip-existing: true
 
   publish-pypi:
     name: Publish to PyPI

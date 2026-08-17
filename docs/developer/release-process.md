@@ -49,6 +49,15 @@ to end users:
   as a last resort. Prefer cutting a patch release via the hotfix flow
   over reaching for this lever.
 
+  `target: testpypi` authenticates through **OIDC trusted publishing**,
+  not a token secret. The matching publisher on test.pypi.org is scoped
+  to project `atlas-chat`, owner `sandialabs`, repo `atlas-ui-3`,
+  workflow `pypi-publish.yml`, environment `testpypi` — renaming the
+  workflow file or the `testpypi` environment breaks the exchange with
+  `invalid-publisher`, which is a publisher-config error on PyPI's side
+  and not something a repo secret can fix. `target: pypi` still uses the
+  `PYPI_API_TOKEN` secret.
+
 ### Versioning
 
 The project uses **SemVer**: `MAJOR.MINOR.PATCH`.
