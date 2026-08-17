@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #806 - 2026-08-16
+- **TestPyPI publishes are authenticated again**: the `target: testpypi` escape hatch in `pypi-publish.yml` passed `password: ${{ secrets.TEST_PYPI_API_TOKEN }}`, but that secret was never created — an empty password makes `gh-action-pypi-publish` fall back to OIDC trusted publishing, which failed with `invalid-publisher` because test.pypi.org had no publisher (nor an `atlas-chat` project) configured. Every dispatch of that target has failed since it was added, leaving the `testpypi` deployment environment permanently red. The job now uses trusted publishing deliberately — the `password:` line is gone and a pending publisher is registered on test.pypi.org for this repo, workflow file, and the `testpypi` environment — so there is no token to store or rotate. `skip-existing: true` keeps a re-dispatch at an already-uploaded version from failing, since this path exists to be retried by hand. Production PyPI is untouched and still uses `PYPI_API_TOKEN`.
+
 ## [0.5.0] - 2026-08-16
 
 ### PR #802 - 2026-08-15
