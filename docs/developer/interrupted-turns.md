@@ -48,14 +48,26 @@ session as savable.
 Persisted `tool_call` and `agent_intermediate` rows are display-only
 (`DISPLAY_ONLY_MESSAGE_TYPES`) and the agent loop's working `assistant`/`tool`
 transcript is local to the turn, so neither reaches a later request. Instead,
-each agent turn's closing assistant message carries a compact digest of the
-calls it made in `metadata["agent_tool_digest"]`, and
+the turn's closing assistant message carries a compact digest of the calls it
+made in `metadata["agent_tool_digest"]`, and
 `ConversationHistory.get_messages_for_llm()` folds that digest into **that
 message's content**.
 
 Folding into an existing message (rather than appending a new one) keeps the
 role sequence identical, so no provider sees back-to-back assistant turns and no
 orphaned `tool` message is ever replayed.
+
+The digest is attached by every mode that runs tools:
+
+| Mode | Closing site | Interrupted site |
+| --- | --- | --- |
+| Agent | `AgentModeRunner._close_turn` | `AgentModeRunner._close_turn` (cancel path) |
+| Tools | `ToolsModeRunner._close_turn` (three sites: `run`, `run_streaming` synthesis, `_finalize_text_response`) | `close_open_turn` in `interrupted_turn.py` |
+
+Tools mode is the default, so this is the path the digest has to reach for the
+fix to matter -- agent mode alone (the original #755 scope) misses most
+conversations. Both modes share the same `build_tool_digest` helper, the same
+`agent_tool_digest` metadata key, and the same fold in `get_messages_for_llm`.
 
 Bounds, all in `agent_digest.py` and `domain/messages/models.py`:
 
