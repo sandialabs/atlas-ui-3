@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-16
+
 ### PR #802 - 2026-08-15
 - **Tools mode now carries a cross-turn tool digest** (closes #798): the digest added in #755 was attached only in agent mode, so a normal turn -- which runs in tools mode by default -- never carried it and tool work was invisible to every later turn. `ToolsModeRunner` now attaches `agent_tool_digest` at all three of its closing sites (`run`, `run_streaming` synthesis, and `_finalize_text_response`) via a new `_close_turn` helper that mirrors `AgentModeRunner._close_turn`. `close_open_turn` in `interrupted_turn.py` also attaches a digest from the flushed `tool_call` rows on the interrupted path, so a stopped tools-mode turn's tool work is visible to the next request too. The regression surface is small: `get_messages_for_llm` already caps folds at 3 digests / 12000 chars and folds into an existing message, so role alternation is unchanged; costs are prompt growth on tool-heavy chats (shared budget with agent digests) and inheriting the digest's untrusted-data quoting as-is. Flipping the `agent_mode` default would be the wrong fix -- it changes latency, cost, step budgets, and the emitted event stream for every user, and it still would not help the turns downgraded back to tools mode by `orchestrator.py` when the model lacks tool calling or no tools are selected.
 
