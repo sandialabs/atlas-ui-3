@@ -14,12 +14,29 @@ guard in place so it cannot be silently removed.
 
 import os
 
+from dotenv import load_dotenv
+
 from atlas.modules.config.settings import AppSettings
 
 
 def test_env_file_loading_is_disabled_for_tests():
     """The session-wide guard in conftest must keep .env loading off."""
     assert AppSettings.model_config.get("env_file") is None
+
+
+def test_skip_authorization_checks_is_disabled_for_tests():
+    """The developer-local authorization bypass must not leak into the suite."""
+    assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
+
+
+def test_dotenv_cannot_reenable_skip_authorization_checks(tmp_path):
+    """A later dotenv load must not re-enable the developer-local bypass."""
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("SKIP_AUTHORIZATION_CHECKS=true\n")
+
+    load_dotenv(dotenv_path=dotenv_path)
+
+    assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
 
 
 def test_dotenv_on_disk_does_not_leak_into_settings(tmp_path, monkeypatch):

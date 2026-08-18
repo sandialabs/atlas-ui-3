@@ -66,6 +66,17 @@ AppSettings.model_config["env_file"] = None
 for _authorizer_var in ("AUTH_GROUP_CHECK_URL", "AUTH_GROUP_CHECK_API_KEY"):
     os.environ.pop(_authorizer_var, None)
 
+# --- Authorization-bypass isolation --------------------------------------
+# ``SKIP_AUTHORIZATION_CHECKS=true`` is a developer-local escape hatch that makes
+# *every* authenticated user a member of *every* group, including admin. When a
+# contributor has it exported in their shell, admin-route tests that expect a
+# non-admin identity to be rejected silently become meaningless and fail with
+# 200s/400s instead of 403s. Pin it off for the test session rather than removing
+# it: ``atlas.main`` loads the repository .env during collection, and dotenv
+# would otherwise restore a developer-local true value. Tests can still opt into
+# the bypass via ``skip_auth_checks_env``.
+os.environ["SKIP_AUTHORIZATION_CHECKS"] = "false"
+
 # MCP token storage now refuses to start without an explicit encryption key
 # (previously a per-process ephemeral key was generated, which silently lost
 # every stored token on restart). Provide a deterministic test key so module
