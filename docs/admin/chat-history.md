@@ -77,7 +77,10 @@ repairs the rows that exist today but leaves the same failure mode armed for
 tomorrow. Local datasets are small enough that a full scan is cheap.
 
 This applies to DuckDB only. PostgreSQL keeps its indexes, which are correct
-there and matter at production scale.
+there and matter at production scale. The behavior is selected by the dialect
+of the configured URL, so any deployment left on the default DuckDB backend
+(no `CHAT_HISTORY_DB_URL` set) runs without these indexes — one more reason to
+point production at PostgreSQL.
 
 A database that predates this behavior repairs itself on the next startup. To
 repair a file out of band, stop the application (DuckDB holds an exclusive
@@ -88,9 +91,14 @@ python scripts/repair_duckdb_indexes.py data/chat_history.db
 ```
 
 Pass `--check` to inspect without modifying, or `--rebuild` to recreate the
-indexes instead of leaving them off. The script copies the database before
-making changes. No row data is lost in either case — only the indexes are
-wrong.
+indexes instead of leaving them off. `--rebuild` restores correct lookups for
+the rows that exist today but re-arms the same failure mode, and the
+application drops the rebuilt indexes again on its next startup — it is a
+diagnostic option, not a repair. The script copies the database (to
+`<name>.prerepair-<timestamp>.db`, alongside the original and covered by the
+same `.gitignore` rules) once it has the file open, so a run that fails on
+DuckDB's exclusive lock leaves no copy behind. No row data is lost in either
+case — only the indexes are wrong.
 
 ## Database Schema
 

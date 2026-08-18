@@ -100,3 +100,12 @@ def test_init_database_leaves_no_indexes(tmp_path, monkeypatch):
     engine = chat_db.init_database(f"duckdb:///{tmp_path / 'chat.db'}")
 
     assert _duckdb_index_names(engine) == []
+
+
+def test_reports_nothing_dropped_when_already_gone(tmp_path, metadata):
+    """The count is work done, not statements issued, so a second run is 0."""
+    engine = create_engine(f"duckdb:///{tmp_path / 'widgets.db'}")
+    metadata.create_all(engine)
+    assert drop_duckdb_secondary_indexes(engine, metadata) == 2
+
+    assert drop_duckdb_secondary_indexes(engine, metadata) == 0

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #816 - 2026-08-18
+- **DuckDB no longer relies on its secondary indexes**: DuckDB's ART indexes can silently stop matching rows that are present in the file, which surfaced as conversations opening with no messages and custom prompts vanishing from the list; the declared secondary indexes are now dropped at startup on the DuckDB dialect only (chat-history and agent-portal stores), which also repairs an already-affected file. PostgreSQL keeps its indexes and production behavior is unchanged. `scripts/repair_duckdb_indexes.py` inspects (`--check`), drops, or rebuilds (`--rebuild`) a file out of band.
+
 ## [0.5.0] - 2026-08-16
 
 ### PR #802 - 2026-08-15

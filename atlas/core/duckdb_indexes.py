@@ -39,12 +39,44 @@ def drop_duckdb_secondary_indexes(engine: Engine, metadata: MetaData) -> int:
     if engine.dialect.name != "duckdb":
         return 0
 
-    # ``Index.drop(checkfirst=True)`` cannot be used here: it probes the index
-    # via reflection, which duckdb-engine does not implement, so it silently
-    # skips every drop while reporting success. Emit the DDL directly instead.
+    declared = {
+        index.name
+        for table in metadata.sorted_tables
+        for index in table.indexes
+        if index.name
+    }
+    if not declared:
+        return 0
+
+    # Only drop indexes that are actually there, so the returned count -- and
+    # the log line below -- describe work done rather than statements issued.
+    # ``inspect().get_indexes()`` cannot be used: duckdb-engine does not
+    # implement index reflection and always returns an empty list, so read
+    # ``duckdb_indexes()`` directly.
+    try:
+        with engine.connect() as conn:
+            present = {
+                row[0]
+                for row in conn.exec_driver_sql(
+                    "select index_name from duckdb_indexes()"
+                ).fetchall()
+            }
+    except Exception:
+        logger.warning(
+            "Could not list DuckDB indexes; assuming every declared index is "
+            "present so the drop still runs.",
+            exc_info=True,
+        )
+        present = declared
+
+    # ``Index.drop(checkfirst=True)`` cannot be used here either: it probes the
+    # index via the same missing reflection, so it silently skips every drop
+    # while reporting success. Emit the DDL directly instead.
     dropped = 0
     for table in metadata.sorted_tables:
-        for index in table.indexes:
+        for index in sorted(table.indexes, key=lambda i: i.name or ""):
+            if index.name not in present:
+                continue
             try:
                 with engine.begin() as conn:
                     conn.exec_driver_sql(f'DROP INDEX IF EXISTS "{index.name}"')
