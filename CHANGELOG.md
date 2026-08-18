@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #818 - 2026-08-18
+- **Test suite no longer shares state between tests or with the developer's checkout**: removed an import-time `sys.modules` fake and a misnamed singleton reset that made the suite order-dependent, redirected every persistent store (chat-history and agent-portal DuckDB files, audit log, feedback, capture, token and log directories) to a per-session temp directory, and scoped the env vars, `sys.path` entries and mock patchers that leaked past their tests. See [docs/developer/test-isolation.md](docs/developer/test-isolation.md).
+- **`logs/security_high_risk.jsonl` follows `APP_LOG_DIR`**: the prompt-risk audit log previously always resolved to `<project_root>/logs/`, ignoring the log-directory override every other log honors. Operators with `APP_LOG_DIR` set will find it in that directory now; move or symlink the old file if a collector still tails the repository path.
+
 ### PR #816 - 2026-08-18
 - **DuckDB no longer relies on its secondary indexes**: DuckDB's ART indexes can silently stop matching rows that are present in the file, which surfaced as conversations opening with no messages and custom prompts vanishing from the list; the declared secondary indexes are now dropped at startup on the DuckDB dialect only (chat-history and agent-portal stores), which also repairs an already-affected file. PostgreSQL keeps its indexes and production behavior is unchanged. `scripts/repair_duckdb_indexes.py` inspects (`--check`), drops, or rebuilds (`--rebuild`) a file out of band.
 

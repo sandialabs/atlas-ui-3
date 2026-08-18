@@ -1,7 +1,11 @@
+import asyncio
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+from sqlalchemy.engine import Engine
 
 # Ensure the atlas package root is on sys.path for absolute imports like 'infrastructure.*'
 atlas_root = Path(__file__).resolve().parents[1]
@@ -28,7 +32,38 @@ if str(project_root) not in sys.path:
 #      ``OpenTelemetryConfig`` calls become no-ops for the duration of
 #      the pytest session.
 _TELEMETRY_TMPDIR = tempfile.mkdtemp(prefix="atlas-test-telemetry-")
-os.environ.setdefault("APP_LOG_DIR", _TELEMETRY_TMPDIR)
+# Forced, not ``setdefault``: docs/getting-started/installation.md tells
+# contributors to set APP_LOG_DIR to a path *inside* the checkout, so honoring
+# an exported value is exactly the case that writes test telemetry and
+# security-risk records into the repository's logs/.
+os.environ["APP_LOG_DIR"] = _TELEMETRY_TMPDIR
+
+# --- Persistent-store isolation ------------------------------------------
+# Several stores resolve their location relative to the repository root and
+# are opened as a side effect of *importing* the app: ``AppFactory()`` is
+# constructed at import time in ``atlas/infrastructure/app_factory.py`` and
+# calls ``get_session_factory()``, so merely importing ``main`` (which ~30
+# test modules do) binds the process-wide chat-history engine to the real
+# ``<project_root>/data/chat_history.db``. Measured consequences before this
+# guard: ``test_security_header_injection`` inserted a real conversation row
+# on every run (318 accumulated rows, all from test identities), the
+# agent-portal e2e tests appended 1181 audit rows to ``data/agent_portal.db``
+# plus ``data/agent_portal_audit.jsonl``, and a feedback route test dropped a
+# JSON file into ``runtime/feedback/`` each run.
+#
+# That is developer-data corruption on its own, and it also makes any
+# emptiness/count assertion depend on what previous tests -- and previous
+# *runs* -- happened to write. Redirect every such store into a throwaway
+# session directory. These are forced (not ``setdefault``) so an exported
+# shell value cannot re-point the suite at a real database; tests that need a
+# specific value still override them with ``monkeypatch``.
+_STATE_TMPDIR = tempfile.mkdtemp(prefix="atlas-test-state-")
+os.environ["CHAT_HISTORY_DB_URL"] = f"duckdb:///{_STATE_TMPDIR}/chat_history.db"
+os.environ["AGENT_PORTAL_DB_URL"] = f"duckdb:///{_STATE_TMPDIR}/agent_portal.db"
+os.environ["AGENT_PORTAL_AUDIT_PATH"] = f"{_STATE_TMPDIR}/agent_portal_audit.jsonl"
+os.environ["RUNTIME_FEEDBACK_DIR"] = f"{_STATE_TMPDIR}/feedback"
+os.environ["RUNTIME_CAPTURE_DIR"] = f"{_STATE_TMPDIR}/finetune_capture"
+os.environ["MCP_TOKEN_STORAGE_DIR"] = f"{_STATE_TMPDIR}/tokens"
 
 # --- .env isolation ------------------------------------------------------
 # ``AppSettings`` is configured to load ``../.env`` (see
@@ -99,10 +134,13 @@ try:
 except Exception:  # pragma: no cover — defensive, tests run without OTel too
     pass
 
-# Pre-import critical modules before any test files can replace them with fakes.
-# This prevents test pollution where one test file patches sys.modules and other
-# tests import the fake instead of the real module.
-# See test_capability_tokens_and_injection.py which patches LiteLLMCaller.
+# Pre-import the LiteLLM caller so the real module is the one every later
+# import binds to. ``test_capability_tokens_and_injection`` used to install a
+# fake in ``sys.modules`` at import time; anything imported while that fake was
+# installed kept it for the rest of the session, which broke 86 tests across
+# five files whenever collection order put the fake first. The fake is gone --
+# tests that need a stand-in patch the attribute instead -- and this pre-import
+# stays as a cheap guard against the pattern coming back.
 import atlas.modules.llm.litellm_caller  # noqa: E402, F401
 
 # Explicitly reference the module to satisfy static analyzers that flag unused imports.
@@ -148,6 +186,106 @@ def _isolate_config_cache():
     finally:
         for attr, value in saved.items():
             setattr(_config_manager, attr, value)
+
+
+# Process-wide singletons that app code memoizes in a module global. Tests that
+# pin one (a temp-backed PortalStore, a HookManager, a ProcessManager) or that
+# merely touch a lazy getter leave it populated for every later test, which is a
+# silent channel between tests: a leaked ProcessManager carries its whole
+# process table forward, and a leaked HookManager makes later turns fire hooks
+# they never asked for. Both were observed in the suite before this fixture.
+#
+# Snapshot-and-restore rather than reset-to-None: restoring the prior value is
+# correct whether the module global was empty or already legitimately populated.
+_SINGLETON_GLOBALS = (
+    ("atlas.modules.chat_history.database", "_engine"),
+    ("atlas.modules.chat_history.database", "_session_factory"),
+    ("atlas.modules.process_manager.manager", "_singleton"),
+    ("atlas.modules.process_manager.manager", "_idle_sweeper_task"),
+    ("atlas.modules.agent_portal.portal_store", "_singleton"),
+    ("atlas.modules.agent_portal.presets_store", "_singleton"),
+    ("atlas.modules.agent_portal.database", "_engine"),
+    ("atlas.modules.agent_portal.database", "_session_factory"),
+    ("atlas.modules.agent_portal.audit_log", "_resolved_path"),
+    ("atlas.modules.mcp_tools.token_storage", "_token_storage"),
+    ("atlas.modules.mcp_tools.wormhole_token_store", "_wormhole_store"),
+    ("atlas.hooks.manager", "_hook_manager"),
+    ("atlas.core.compliance", "_compliance_manager"),
+    ("atlas.application.chat.approval_manager", "_approval_manager"),
+    ("atlas.application.chat.elicitation_manager", "_elicitation_manager"),
+    ("atlas.modules.file_storage.content_extractor", "_extractor_instance"),
+    ("atlas.routes.telemetry_routes", "_reader_override"),
+)
+
+
+def _release(value) -> None:
+    """Best-effort release of a resource-owning singleton we are about to drop.
+
+    Restoring a global by plain assignment would otherwise strand whatever the
+    test left there: a SQLAlchemy engine keeps its pooled DuckDB connection
+    until garbage collection, and a sweeper task keeps running.
+
+    Dispatch is by *type*, never by method name. ``ProcessManager.cancel`` is
+    ``async def cancel(self, process_id, *, sigkill_after=3.0)`` -- a
+    name-based ``value.cancel()`` would raise TypeError, and the surrounding
+    ``except`` would hide it. Types not listed here are simply dropped, which
+    is what restoring the previous value already did.
+    """
+    try:
+        if isinstance(value, Engine):
+            value.dispose()
+        elif isinstance(value, asyncio.Task) and not value.done():
+            # Best effort: the task's loop is usually already closed by the
+            # time a test finishes, so this marks it cancelled without being
+            # able to unwind the coroutine. Nothing here can await it.
+            value.cancel()
+    except Exception:  # pragma: no cover - teardown must not raise
+        pass
+
+
+def snapshot_singletons():
+    """Capture the current value of every global in ``_SINGLETON_GLOBALS``.
+
+    A module that is not imported yet is captured as ``None``: if the test
+    imports it, the global it leaves behind was created by that test, and the
+    pristine value to restore is the module's declared default -- ``None`` for
+    every entry here, since they are all lazily-populated caches. Without that
+    branch a subset run leaks any singleton whose module is first imported
+    inside a test.
+    """
+    saved = []
+    for module_name, attr in _SINGLETON_GLOBALS:
+        module = sys.modules.get(module_name)
+        if module is None:
+            saved.append((module_name, attr, None))
+        elif hasattr(module, attr):
+            saved.append((module_name, attr, getattr(module, attr)))
+    return saved
+
+
+def restore_singletons(saved):
+    """Restore a ``snapshot_singletons()`` result, releasing what it displaces."""
+    for module_name, attr, value in saved:
+        module = sys.modules.get(module_name)
+        if module is None or not hasattr(module, attr):
+            # A module that never defined the global gets nothing invented on
+            # it; every real entry declares its default at import time, and
+            # ``test_env_isolation`` asserts that.
+            continue
+        current = getattr(module, attr)
+        if current is not value:
+            _release(current)
+        setattr(module, attr, value)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_module_singletons():
+    """Restore app-level singleton module globals after every test."""
+    saved = snapshot_singletons()
+    try:
+        yield
+    finally:
+        restore_singletons(saved)
 
 
 # Groups the debug-only mock table in ``core.auth`` grants to the *non-admin*
@@ -288,3 +426,16 @@ def skip_auth_checks_env():
             else:
                 os.environ[key] = val
         _config_manager.reload_configs()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove the session's temp directories.
+
+    ``mkdtemp`` has to run at import time -- the redirects above must be in
+    place before any test module imports app code -- so pytest's own
+    ``tmp_path_factory`` is not available yet, and the cleanup pytest would
+    normally do for us is not either. Without this every run orphans two
+    directories under the system temp dir.
+    """
+    for path in (_STATE_TMPDIR, _TELEMETRY_TMPDIR):
+        shutil.rmtree(path, ignore_errors=True)
