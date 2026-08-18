@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-08-18
+- **Workspaces**: the long-dormant `FEATURE_WORKSPACES_ENABLED` flag now does something. A workspace is a named bundle of the active prompt, RAG data sources, and MCP tool selections, so switching between contexts (work / home / project-A) is one click in the new header switcher instead of re-picking every selection. Workspaces persist per user in the chat-history database via `/api/workspaces` (create / rename / update / delete), and the flag is gated on `FEATURE_CHAT_HISTORY_ENABLED` — with nowhere to persist them the switcher stays hidden and the API returns 404. Previously the flag was wired end to end as data but had no consumer anywhere in the UI, so turning it on changed nothing.
+
 ### PR #816 - 2026-08-18
 - **DuckDB no longer relies on its secondary indexes**: DuckDB's ART indexes can silently stop matching rows that are present in the file, which surfaced as conversations opening with no messages and custom prompts vanishing from the list; the declared secondary indexes are now dropped at startup on the DuckDB dialect only (chat-history and agent-portal stores), which also repairs an already-affected file. PostgreSQL keeps its indexes and production behavior is unchanged. `scripts/repair_duckdb_indexes.py` inspects (`--check`), drops, or rebuilds (`--rebuild`) a file out of band.
 

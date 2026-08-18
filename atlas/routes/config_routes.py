@@ -169,7 +169,7 @@ async def get_config_shell(
         "agent_mode_available": app_settings.agent_mode_available,
         "banner_enabled": app_settings.banner_enabled,
         "features": {
-            "workspaces": app_settings.feature_workspaces_enabled,
+            "workspaces": app_settings.workspaces_effective,
             "rag": app_settings.feature_rag_enabled,
             "tools": app_settings.feature_tools_enabled,
             "marketplace": app_settings.feature_marketplace_enabled,
@@ -496,7 +496,7 @@ async def get_config(
             "tools": filtered_tool_approvals
         },
         "features": {
-            "workspaces": app_settings.feature_workspaces_enabled,
+            "workspaces": app_settings.workspaces_effective,
             "rag": app_settings.feature_rag_enabled,
             "tools": app_settings.feature_tools_enabled,
             "marketplace": app_settings.feature_marketplace_enabled,

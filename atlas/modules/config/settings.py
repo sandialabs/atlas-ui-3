@@ -393,6 +393,19 @@ class AppSettings(BaseSettings):
         return bool(
             self.feature_custom_prompts_enabled and self.feature_chat_history_enabled
         )
+
+    @property
+    def workspaces_effective(self) -> bool:
+        """Whether the workspace switcher is actually usable.
+
+        Workspaces persist as per-user rows in the chat-history database, so
+        like custom prompts the feature is only effective when chat history is
+        also enabled. This derived flag is the authoritative gate shared by the
+        config payload and the workspace CRUD routes.
+        """
+        return bool(
+            self.feature_workspaces_enabled and self.feature_chat_history_enabled
+        )
     chat_history_db_url: str = Field(
         default="duckdb:///data/chat_history.db",
         description="Database URL for chat history. Use duckdb:///path for local, postgresql://... for production",

@@ -128,6 +128,39 @@ export function useSelections() {
     setRagEnabled(prev => !prev)
   }, [setRagEnabled])
 
+  // --- Workspaces -----------------------------------------------------------
+  // A workspace is a saved snapshot of the selections below. Snapshot/apply
+  // live here (rather than in the workspace hook) because this hook owns the
+  // canonical shape of a selection; keeping them together means adding a new
+  // selection dimension is a single-file change.
+
+  const snapshotSelections = useCallback(() => ({
+    active_prompt_key: activePromptKey || null,
+    selected_tools: toArray(selectedTools),
+    selected_prompts: toArray(selectedPrompts),
+    selected_data_sources: toArray(selectedDataSources),
+    rag_enabled: !!ragEnabled,
+  }), [activePromptKey, selectedTools, selectedPrompts, selectedDataSources, ragEnabled])
+
+  const applyWorkspace = useCallback(config => {
+    if (!config || typeof config !== 'object') return
+    const list = v => (Array.isArray(v) ? v.filter(k => typeof k === 'string') : [])
+    // Replace rather than merge: a workspace describes the whole context, so
+    // leftovers from the previous one would silently widen tool/RAG access.
+    setToolsRaw(list(config.selected_tools))
+    setPromptsRaw(list(config.selected_prompts))
+    setDataSourcesRaw(list(config.selected_data_sources))
+    setRagEnabled(!!config.rag_enabled)
+    const promptKey = typeof config.active_prompt_key === 'string' && config.active_prompt_key
+      ? config.active_prompt_key
+      : null
+    setActivePromptKey(promptKey)
+    // An MCP active prompt must also be loaded, mirroring makePromptActive.
+    if (promptKey && !isUserPromptKey(promptKey)) {
+      setPromptsRaw(prev => (prev.includes(promptKey) ? prev : [...prev, promptKey]))
+    }
+  }, [setToolsRaw, setPromptsRaw, setDataSourcesRaw, setRagEnabled, setActivePromptKey])
+
   const clearToolsAndPrompts = useCallback(() => {
     setToolsRaw([])
     setPromptsRaw([])
@@ -153,6 +186,8 @@ export function useSelections() {
     clearActivePrompt,
     addDataSources,
     clearDataSources,
+    snapshotSelections,
+    applyWorkspace,
     clearToolsAndPrompts,
     complianceLevelFilter,
     setComplianceLevelFilter,
