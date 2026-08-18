@@ -28,12 +28,25 @@ def test_calculate_prompt_injection_risk_levels(text, expected_level):
         assert res["risk_level"] == "high"
 
 
-def test_high_risk_log_path_honors_app_log_dir(tmp_path, monkeypatch):
-    """APP_LOG_DIR redirects the security log, as it does for the other logs."""
+def test_high_risk_log_path_resolution_matches_the_other_logs(tmp_path, monkeypatch):
+    """Env var, then configured setting, then the repository's logs/ directory.
+
+    Same order as ``telemetry_routes._log_base_dir`` / ``admin_routes._log_base_dir``,
+    so a deployment that relocates its logs does not leave this one behind.
+    """
+    from atlas.modules.config import config_manager
+
+    settings = config_manager.app_settings
+    configured = tmp_path / "configured"
+
     monkeypatch.setenv("APP_LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(settings, "app_log_dir", str(configured))
     assert high_risk_log_path() == tmp_path / "security_high_risk.jsonl"
 
     monkeypatch.delenv("APP_LOG_DIR", raising=False)
+    assert high_risk_log_path() == configured / "security_high_risk.jsonl"
+
+    monkeypatch.setattr(settings, "app_log_dir", None)
     assert high_risk_log_path().parent.name == "logs"
 
 

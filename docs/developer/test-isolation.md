@@ -50,21 +50,30 @@ real database.
 
 ## Checking for order dependence
 
-The suite has no randomizing plugin, so order dependence is checked by hand.
-Any of these should stay green:
+`scripts/pytest_test_order.py` reorders collected tests so a leak that the
+alphabetical order hides becomes a failure. It is inert unless
+`ATLAS_TEST_ORDER` is set, so passing `-p` to a normal run changes nothing.
 
 ```bash
 cd atlas
-PYTHONPATH=$(git rev-parse --show-toplevel) python -m pytest tests -q      # normal order
-PYTHONPATH=$(git rev-parse --show-toplevel) python -m pytest tests/<one_file>.py -q
+ROOT=$(git rev-parse --show-toplevel)
+export PYTHONPATH="$ROOT:$ROOT/scripts"
+
+python -m pytest tests -q                                            # normal order
+ATLAS_TEST_ORDER=reverse python -m pytest tests -q -p pytest_test_order
+ATLAS_TEST_ORDER=1 python -m pytest tests -q -p pytest_test_order    # shuffle files
+ATLAS_TEST_ORDER=1 ATLAS_TEST_ORDER_SCOPE=test \
+    python -m pytest tests -q -p pytest_test_order                   # shuffle tests
+python -m pytest tests/<one_file>.py -q                              # file in isolation
 ```
 
-To exercise a different order, drop a small `conftest`-style plugin that
-reverses or shuffles `items` in `pytest_collection_modifyitems` and run with
-`-p`. A failure that appears only under reordering is a leak, not a flake:
-find the state the earlier test left behind rather than adding a retry.
+A failure that appears only under reordering is a leak, not a flake: find the
+state the earlier test left behind rather than adding a retry.
 
-Note that reordering *collected items* does not reorder *module imports* --
-those follow collection order. Import-time side effects therefore need the
-pairwise check instead: run the suspect file first, followed by the file you
-think it affects.
+Reordering *collected items* does not reorder *module imports* -- those follow
+collection order. Import-time side effects therefore need a pairwise run
+instead: the suspect file first, then the file you think it affects.
+
+```bash
+python -m pytest tests/<suspect>.py tests/<victim>.py -q
+```

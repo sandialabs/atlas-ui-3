@@ -173,12 +173,22 @@ def _calculate_entropy(text: str) -> float:
 def high_risk_log_path() -> Path:
     """Return the path of the high-risk security log.
 
-    Mirrors ``telemetry._tool_output_dir``: ``APP_LOG_DIR`` wins when set, and
-    the repository's ``logs/`` directory is the fallback. Honoring the override
-    keeps test runs (which point ``APP_LOG_DIR`` at a temp dir) from appending
-    to -- or truncating -- a real deployment's security log.
+    Resolution matches ``telemetry_routes._log_base_dir`` and
+    ``admin_routes._log_base_dir``: the ``APP_LOG_DIR`` environment variable
+    first, then ``app_settings.app_log_dir`` (so a deployment that configures
+    the log directory in its .env keeps every log together), then the
+    repository's ``logs/`` directory. Honoring the override also keeps test
+    runs, which point ``APP_LOG_DIR`` at a temp directory, from appending to --
+    or truncating -- a real deployment's security log.
     """
     override = os.getenv("APP_LOG_DIR")
+    if not override:
+        try:
+            from atlas.modules.config import config_manager
+
+            override = config_manager.app_settings.app_log_dir
+        except Exception:  # pragma: no cover - config unavailable; use the default
+            override = None
     base = Path(override) if override else Path(__file__).resolve().parents[2] / "logs"
     return base / "security_high_risk.jsonl"
 

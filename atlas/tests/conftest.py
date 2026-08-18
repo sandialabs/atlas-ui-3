@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -210,6 +211,27 @@ _SINGLETON_GLOBALS = (
 )
 
 
+def _release(value) -> None:
+    """Best-effort release of a resource-owning singleton we are about to drop.
+
+    Restoring a global by plain assignment would otherwise strand whatever the
+    test left there: a SQLAlchemy engine keeps its pooled DuckDB connection
+    until garbage collection, and an asyncio task keeps running. Both failures
+    are quiet, so release explicitly and ignore errors -- a half-torn-down
+    object from a failing test must not turn into a second, confusing failure.
+    """
+    for method in ("dispose", "cancel"):
+        release = getattr(value, method, None)
+        if callable(release):
+            try:
+                if method == "cancel" and getattr(value, "done", lambda: False)():
+                    return
+                release()
+            except Exception:  # pragma: no cover - teardown must not raise
+                pass
+            return
+
+
 @pytest.fixture(autouse=True)
 def _isolate_module_singletons():
     """Restore app-level singleton module globals after every test.
@@ -227,6 +249,9 @@ def _isolate_module_singletons():
         yield
     finally:
         for module, attr, value in saved:
+            current = getattr(module, attr, None)
+            if current is not value:
+                _release(current)
             setattr(module, attr, value)
 
 
@@ -368,3 +393,16 @@ def skip_auth_checks_env():
             else:
                 os.environ[key] = val
         _config_manager.reload_configs()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove the session's temp directories.
+
+    ``mkdtemp`` has to run at import time -- the redirects above must be in
+    place before any test module imports app code -- so pytest's own
+    ``tmp_path_factory`` is not available yet, and the cleanup pytest would
+    normally do for us is not either. Without this every run orphans two
+    directories under the system temp dir.
+    """
+    for path in (_STATE_TMPDIR, _TELEMETRY_TMPDIR):
+        shutil.rmtree(path, ignore_errors=True)
