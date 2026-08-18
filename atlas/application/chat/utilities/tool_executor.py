@@ -14,6 +14,7 @@ from atlas.core.capabilities import create_download_url
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.llm import LLMResponse
+from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 from ..approval_manager import get_approval_manager
@@ -662,6 +663,9 @@ async def execute_single_tool(
                     "compliance_level": session_context.get("compliance_level"),
                     # pass update callback so MCP client can emit progress
                     "update_callback": update_callback,
+                    # Per-turn scratchpad (agent mode only) that the built-in
+                    # sleep tool uses to bound a turn's cumulative wait.
+                    TURN_BUDGET_KEY: session_context.get(TURN_BUDGET_KEY),
                 }
             )
 

@@ -74,6 +74,35 @@ When `FEATURE_MCP_AUTO_RECONNECT_ENABLED=true`, the backend starts a background 
 - This avoids hammering flaky or down MCP servers while still ensuring they are retried over time.
 - You can monitor this behavior via `GET /admin/mcp/status`, which reports per-server backoff details and whether the auto-reconnect loop is currently running.
 
+### Agent Sleep Tool
+
+Agent mode has a built-in `atlas_agent_sleep` tool that pauses a turn so the model can wait for
+long-running external work (a simulation, a submitted job) before checking on it again. It runs
+in process rather than through an MCP server, so `MCP_CALL_TIMEOUT` does not apply to it.
+
+```bash
+# Maximum seconds a single atlas_agent_sleep call may wait (default: 7200 = 2 hours).
+# Requests above this are shortened to it; 0 disables the tool entirely.
+AGENT_SLEEP_MAX_SECONDS=7200
+
+# Maximum seconds one turn may spend sleeping across all calls (default: 7200).
+# The per-call cap alone bounds nothing, because the model may call the tool again
+# on every step; this is the limit that decides how long a turn can hold resources.
+AGENT_SLEEP_MAX_TURN_SECONDS=7200
+```
+
+- **Kill switch**: `AGENT_SLEEP_MAX_SECONDS=0` removes the tool from the tools panel, from tool
+  authorization, and from the schema sent to the model, and refuses it at execution.
+- **Step budget**: a sleep consumes one agent step, so `AGENT_MAX_STEPS` also bounds how many
+  times a turn can wait. Clients cannot request more steps than `AGENT_MAX_STEPS`.
+- **Stopping a run** cancels an in-flight sleep immediately.
+- **Reverse proxies**: a turn holds its WebSocket open for the whole wait and sends nothing
+  during it. If your proxy has an idle timeout shorter than the waits you allow, it will drop
+  the connection before the sleep returns - either raise the proxy timeout or lower these caps
+  to fit it.
+- **Deploys**: a turn parked in a long sleep delays graceful shutdown; expect such turns to be
+  killed by a rolling restart.
+
 ## Security Configuration (CSP and Headers)
 
 The application includes security headers middleware that sets browser security policies. These are configured via environment variables in `.env`.

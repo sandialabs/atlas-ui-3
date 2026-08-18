@@ -97,3 +97,39 @@ def test_atlas_rag_pseudo_server_skipped_when_dedicated_flag_disabled(monkeypatc
                 object.__setattr__(config_manager.app_settings, 'feature_rag_enabled', original_rag)
                 object.__setattr__(config_manager.app_settings, 'feature_atlas_rag_tools_enabled', original_atlas)
                 object.__setattr__(config_manager.app_settings, 'feature_tools_enabled', original_tools)
+
+
+def _config_tools(monkeypatch, sleep_cap):
+    """Fetch /api/config with the sleep cap forced to *sleep_cap*."""
+    _set_proxy_secret_on_app()
+    cm = app_factory.get_config_manager()
+    original_cap = cm.app_settings.agent_sleep_max_seconds
+    original_tools = cm.app_settings.feature_tools_enabled
+    object.__setattr__(cm.app_settings, 'agent_sleep_max_seconds', sleep_cap)
+    object.__setattr__(cm.app_settings, 'feature_tools_enabled', True)
+    try:
+        client = TestClient(app)
+        resp = client.get("/api/config", headers=_headers())
+        assert resp.status_code == 200
+        return resp.json()
+    finally:
+        object.__setattr__(cm.app_settings, 'agent_sleep_max_seconds', original_cap)
+        object.__setattr__(cm.app_settings, 'feature_tools_enabled', original_tools)
+
+
+def test_atlas_agent_pseudo_server_exposed_when_sleep_enabled(monkeypatch):
+    """The sleep tool must be selectable in the tools panel when it is enabled."""
+    data = _config_tools(monkeypatch, 7200)
+
+    entry = next((t for t in data["tools"] if t.get("server") == "atlas_agent"), None)
+    assert entry is not None
+    assert entry["tools"] == ["sleep"]
+    assert "atlas_agent" in data["authorized_servers"]
+
+
+def test_atlas_agent_pseudo_server_hidden_when_sleep_disabled(monkeypatch):
+    """AGENT_SLEEP_MAX_SECONDS=0 is the kill switch, including in the panel."""
+    data = _config_tools(monkeypatch, 0)
+
+    assert all(tool.get("server") != "atlas_agent" for tool in data["tools"])
+    assert "atlas_agent" not in data["authorized_servers"]

@@ -12,6 +12,7 @@ docs that describe how the system works today, see the
 
 - [Agentic Loop](agentic-loop-2026-02-23.md) - The single native agent loop (PR #664)
 - [Multi-Tool Calling](multi-tool-calling-2026-02-22.md) - Parallel execution of tool calls
+- [Built-in Agent Sleep Tool](agent-sleep-tool-2026-08-18.md) - In-process wait for long-running external work (issue #779)
 - [LLM Token Streaming](llm-token-streaming-2026-02-22.md) - Token streaming architecture
 - [Follow-up Question Suggestions](follow-up-suggestions-2026-03-18.md) - Suggested follow-up prompts
 - [Config Loading Strategy](config-loading-strategy-2026-03-12.md) - localStorage cache + split config endpoint
