@@ -175,6 +175,9 @@ def _calculate_entropy(text: str) -> float:
 # and later breaks again warns again.
 _WRITE_FAILURE_WARNED_PATHS: set = set()
 
+# The relocation notice below is a one-time migration aid, not per-event state.
+_RELOCATION_NOTICE_EMITTED = False
+
 
 def high_risk_log_path() -> Path:
     """Return the path of the high-risk security log.
@@ -199,10 +202,41 @@ def high_risk_log_path() -> Path:
             override = config_manager.app_settings.app_log_dir
         except Exception:  # pragma: no cover - config unavailable; use the default
             override = None
-    base = Path(override) if override else Path(__file__).resolve().parents[2] / "logs"
+    base = Path(override) if override else _default_log_dir()
     # expanduser/resolve so a ``~``-prefixed or CWD-relative configured value
     # lands somewhere predictable rather than following the process's cwd.
-    return (base.expanduser().resolve() / "security_high_risk.jsonl")
+    path = (base.expanduser().resolve() / "security_high_risk.jsonl")
+    _warn_once_if_relocated(path)
+    return path
+
+
+def _default_log_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "logs"
+
+
+def _warn_once_if_relocated(path: Path) -> None:
+    """Say so, once, when a stale copy of this log exists at the old location.
+
+    Before this log honored ``APP_LOG_DIR`` it always lived in the repository's
+    ``logs/``. A collector still tailing that file would go quiet and read as
+    "no attacks observed", so name both paths -- but only when the old file
+    actually exists, so deployments that never had one stay silent.
+    """
+    global _RELOCATION_NOTICE_EMITTED
+    if _RELOCATION_NOTICE_EMITTED:
+        return
+    _RELOCATION_NOTICE_EMITTED = True
+    try:
+        legacy = _default_log_dir() / "security_high_risk.jsonl"
+        if path != legacy and legacy.exists():
+            logger.warning(
+                "High-risk security log now writes to %s (APP_LOG_DIR); a "
+                "stale copy remains at %s and is no longer updated -- point "
+                "any collector at the new path.",
+                path, legacy,
+            )
+    except Exception:  # pragma: no cover - a notice must never break logging
+        pass
 
 
 def log_high_risk_event(*, source: str, user: Optional[str], content: str, score: int, risk_level: str, triggers: List[str], extra: Optional[Dict[str, object]] = None) -> None:
@@ -235,6 +269,10 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         record["snippet"] = snippet
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        # Writing again means the location is healthy; drop its key so a path
+        # that breaks a second time warns a second time. Without this the
+        # "repaired and later broken warns again" behavior below is a lie.
+        _WRITE_FAILURE_WARNED_PATHS.discard(str(log_path))
     except Exception as e:
         # A security audit record that cannot be written is an operational
         # problem: without a signal, a misconfigured or unwritable path is

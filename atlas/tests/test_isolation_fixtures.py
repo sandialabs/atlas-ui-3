@@ -162,6 +162,10 @@ class TestSingletonSnapshot:
                 delattr(module, "_no_such_global")
 
 
+def _raise_on_open(*args, **kwargs):
+    raise OSError("disk gone")
+
+
 class TestHighRiskWriteFailureWarning:
     """A failed security-audit write warns once per path, then drops to debug."""
 
@@ -224,6 +228,41 @@ class TestHighRiskWriteFailureWarning:
             if r.levelno == logging.WARNING and "high risk" in r.getMessage()
         ]
         assert len(warnings) == 2
+
+    def test_a_repaired_path_warns_again_when_it_breaks_again(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """A successful write clears the key, so a later failure is not silent."""
+        from atlas.core import prompt_risk
+
+        monkeypatch.setattr(prompt_risk, "_WRITE_FAILURE_WARNED_PATHS", set())
+        log_dir = tmp_path / "logs"
+        monkeypatch.setenv("APP_LOG_DIR", str(log_dir))
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            # Broken: a file sits where the log directory needs to be.
+            log_dir.write_text("")
+            self._emit(prompt_risk)
+
+            # Repaired.
+            log_dir.unlink()
+            self._emit(prompt_risk)
+            assert prompt_risk.high_risk_log_path().exists()
+
+            # Broken again, same path. A module-global ``open`` shadows the
+            # builtin the writer uses, so this fails the append without
+            # depending on filesystem permissions (tests run as root in some
+            # containers, where chmod would not bite).
+            monkeypatch.setattr(prompt_risk, "open", _raise_on_open, raising=False)
+            self._emit(prompt_risk)
+
+        warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "high risk" in r.getMessage()
+        ]
+        assert len(warnings) == 2, (
+            "a path that is repaired and breaks again must warn again"
+        )
 
     def test_two_unresolvable_configs_each_warn(self, monkeypatch, caplog):
         """A resolver that raises still keys the warning by what was configured.

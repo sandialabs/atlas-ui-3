@@ -53,6 +53,23 @@ jobs:
         echo "Running tests in debug mode (DEBUG_MODE=true)"
         docker run --rm --workdir /app test-image-debug:latest bash /app/test/run_tests.sh all
     
+    - name: Run tests in reverse collection order
+      # The suite runs in one process, so a test that leaks state can be
+      # masked by the alphabetical order CI happens to use. Re-running it
+      # reversed is what caught the process-manager leak fixed in #818.
+      # Non-blocking for now: it shares the suite's existing flakes (see the
+      # wall-clock assertion in test_calculator_tool), and this leg is here to
+      # surface *isolation* regressions, not to gate on timing noise. Flip to
+      # blocking once it has a clean track record.
+      continue-on-error: true
+      run: |
+        echo "Re-running the suite in reverse order (test-isolation guard)"
+        docker run --rm --workdir /app/atlas \
+          -e ATLAS_TEST_ORDER=reverse \
+          -e PYTHONPATH=/app:/app/scripts \
+          test-image-debug:latest \
+          python -m pytest tests -q --tb=short -p pytest_test_order
+
     - name: Build test Docker image (production mode)
       uses: docker/build-push-action@v7
       with:
