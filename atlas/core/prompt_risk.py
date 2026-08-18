@@ -241,7 +241,16 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         # indistinguishable from "no attacks observed". Warn once (this runs
         # per event, and a persistently bad path would otherwise flood the
         # log), then fall back to debug.
-        failed_path = str(log_path) if log_path is not None else "<unresolved>"
+        # Key on the resolved path, or -- when the resolver itself raised, so
+        # there is no path -- on the configured value that produced the
+        # failure. A bare "<unresolved>" constant would collapse every
+        # misconfiguration onto one key, so the second bad APP_LOG_DIR would
+        # only ever be logged at debug.
+        if log_path is not None:
+            failed_path = str(log_path)
+        else:
+            configured = os.getenv("APP_LOG_DIR") or "<unset>"
+            failed_path = f"<unresolved:{configured}>"
         if failed_path not in _WRITE_FAILURE_WARNED_PATHS:
             _WRITE_FAILURE_WARNED_PATHS.add(failed_path)
             logger.warning(

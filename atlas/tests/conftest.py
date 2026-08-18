@@ -267,9 +267,12 @@ def restore_singletons(saved):
     """Restore a ``snapshot_singletons()`` result, releasing what it displaces."""
     for module_name, attr, value in saved:
         module = sys.modules.get(module_name)
-        if module is None:
+        if module is None or not hasattr(module, attr):
+            # A module that never defined the global gets nothing invented on
+            # it; every real entry declares its default at import time, and
+            # ``test_env_isolation`` asserts that.
             continue
-        current = getattr(module, attr, None)
+        current = getattr(module, attr)
         if current is not value:
             _release(current)
         setattr(module, attr, value)

@@ -147,12 +147,19 @@ class TestSingletonSnapshot:
         """
         name = "atlas.modules.agent_portal.presets_store"
         module = sys.modules[name]
-        saved = [(name, "_no_such_global", None)]
+        assert not hasattr(module, "_no_such_global")
 
-        restore_singletons(saved)
+        try:
+            restore_singletons([(name, "_no_such_global", None)])
 
-        assert getattr(module, "_no_such_global", "unset") is None
-        delattr(module, "_no_such_global")
+            assert not hasattr(module, "_no_such_global"), (
+                "restore must not create a global the module never declared"
+            )
+        finally:
+            # Only reached if the assertion above failed, but the cleanup has
+            # to run regardless or the stray attribute outlives this test.
+            if hasattr(module, "_no_such_global"):
+                delattr(module, "_no_such_global")
 
 
 class TestHighRiskWriteFailureWarning:
@@ -217,6 +224,33 @@ class TestHighRiskWriteFailureWarning:
             if r.levelno == logging.WARNING and "high risk" in r.getMessage()
         ]
         assert len(warnings) == 2
+
+    def test_two_unresolvable_configs_each_warn(self, monkeypatch, caplog):
+        """A resolver that raises still keys the warning by what was configured.
+
+        Keying every resolver failure on one constant would report the first
+        bad ``APP_LOG_DIR`` and silence the next one at debug.
+        """
+        from atlas.core import prompt_risk
+
+        monkeypatch.setattr(prompt_risk, "_WRITE_FAILURE_WARNED_PATHS", set())
+
+        def _raise():
+            raise RuntimeError("cannot resolve")
+
+        monkeypatch.setattr(prompt_risk, "high_risk_log_path", _raise)
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            monkeypatch.setenv("APP_LOG_DIR", "~nosuchuser/one")
+            self._emit(prompt_risk)
+            monkeypatch.setenv("APP_LOG_DIR", "~nosuchuser/two")
+            self._emit(prompt_risk)
+
+        warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "high risk" in r.getMessage()
+        ]
+        assert len(warnings) == 2, "each distinct misconfiguration must warn"
 
     def test_a_successful_write_logs_nothing(self, tmp_path, monkeypatch, caplog):
         from atlas.core import prompt_risk
