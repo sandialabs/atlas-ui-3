@@ -195,6 +195,9 @@ def high_risk_log_path() -> Path:
     Honoring the override is also what keeps a test run, which points
     ``APP_LOG_DIR`` at a temp directory, from appending to -- or truncating --
     a real deployment's security log.
+
+    Pure: no filesystem access, no logging, no module state. The one-time
+    relocation notice lives in ``log_high_risk_event``.
     """
     override = os.getenv("APP_LOG_DIR")
     if not override:
@@ -207,9 +210,7 @@ def high_risk_log_path() -> Path:
     base = Path(override) if override else _default_log_dir()
     # expanduser/resolve so a ``~``-prefixed or CWD-relative configured value
     # lands somewhere predictable rather than following the process's cwd.
-    path = (base.expanduser().resolve() / "security_high_risk.jsonl")
-    _warn_once_if_relocated(path)
-    return path
+    return (base.expanduser().resolve() / "security_high_risk.jsonl")
 
 
 def _default_log_dir() -> Path:
@@ -223,13 +224,17 @@ def _warn_once_if_relocated(path: Path) -> None:
     ``logs/``. A collector still tailing that file would go quiet and read as
     "no attacks observed", so name both paths -- but only when the old file
     actually exists, so deployments that never had one stay silent.
+
+    The path is recorded only once the notice has actually been emitted: marking
+    it up front would swallow the announcement for a stale file that appears
+    after the first write (a backup restore, a rolled-back deploy).
     """
     if str(path) in _RELOCATION_NOTICE_PATHS:
         return
-    _RELOCATION_NOTICE_PATHS.add(str(path))
     try:
         legacy = _default_log_dir() / "security_high_risk.jsonl"
         if path != legacy and legacy.exists():
+            _RELOCATION_NOTICE_PATHS.add(str(path))
             logger.warning(
                 "High-risk security log now writes to %s (APP_LOG_DIR); a "
                 "stale copy remains at %s and is no longer updated -- point "
@@ -251,6 +256,10 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         if risk_level not in ("medium", "high"):
             return
         log_path = high_risk_log_path()
+        # Emitted here rather than inside the resolver: ``high_risk_log_path``
+        # stays a pure function, and the extra stat is paid only on a turn that
+        # actually writes a record.
+        _warn_once_if_relocated(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now(timezone.utc).isoformat() + "Z",

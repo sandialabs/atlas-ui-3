@@ -32,6 +32,8 @@ affects. See docs/developer/test-isolation.md.
 import os
 import random
 
+import pytest
+
 
 def pytest_collection_modifyitems(session, config, items):
     order = os.environ.get("ATLAS_TEST_ORDER")
@@ -46,7 +48,9 @@ def pytest_collection_modifyitems(session, config, items):
     try:
         seed = int(order)
     except ValueError:
-        raise SystemExit(
+        # UsageError, not SystemExit: in the CI ordering leg a typo must read as
+        # "you configured this wrong", not as a failing test run.
+        raise pytest.UsageError(
             f"ATLAS_TEST_ORDER={order!r} is not 'reverse' or an integer seed"
         )
 
@@ -62,7 +66,7 @@ def pytest_collection_modifyitems(session, config, items):
         rng.shuffle(modules)
         items[:] = [item for module in modules for item in by_module[module]]
     else:
-        raise SystemExit(
+        raise pytest.UsageError(
             f"ATLAS_TEST_ORDER_SCOPE={scope!r} is not 'module' or 'test'"
         )
 
