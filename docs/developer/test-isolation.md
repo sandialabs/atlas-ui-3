@@ -28,6 +28,15 @@ The store redirects are deliberately unconditional assignments rather than
 `setdefault`: an exported shell value must not be able to point the suite at a
 real database.
 
+**The redirects are per session, not per test.** One temp directory backs the
+whole run, so a test that asserts "no conversations exist" or counts rows still
+sees whatever earlier tests in the same session wrote. The redirects stop the
+suite from touching real developer state and from carrying data across *runs*;
+they do not make each test's store empty. A test that needs a store of its own
+should build one against `tmp_path` and pin it for the duration, the way the
+agent-portal fixtures pin a `PortalStore`, or reset the relevant singleton (see
+`reset_engine` in `atlas/modules/chat_history/database.py`).
+
 ## Rules for test authors
 
 - **Mutate the environment only through `monkeypatch`.** `os.environ[...] = ...`
