@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #820 - 2026-08-18
+- **Lands the review fixes that missed the #818 squash-merge**: `high_risk_log_path()` is a pure resolver again (the one-time relocation notice moved into `log_high_risk_event`), that notice now records a path only once it has actually fired so a stale log appearing later is still announced, `_release()`'s comment no longer claims a closed-loop task ends up cancelled (it raises and stays PENDING), and the ordering plugin raises `pytest.UsageError` so a mistyped `ATLAS_TEST_ORDER` exits 4 rather than looking like a test failure to #818's new CI leg.
+
 ### PR #818 - 2026-08-18
 - **Test suite no longer shares state between tests or with the developer's checkout**: removed an import-time `sys.modules` fake and a misnamed singleton reset that made the suite order-dependent, redirected every persistent store (chat-history and agent-portal DuckDB files, audit log, feedback, capture, token and log directories) to a per-session temp directory, and scoped the env vars, `sys.path` entries and mock patchers that leaked past their tests. See [docs/developer/test-isolation.md](docs/developer/test-isolation.md).
 - **`logs/security_high_risk.jsonl` follows `APP_LOG_DIR`**: the prompt-risk audit log previously always resolved to `<project_root>/logs/`, ignoring the log-directory override every other log honors. Operators with `APP_LOG_DIR` set will find it in that directory now; move or symlink the old file if a collector still tails the repository path.
