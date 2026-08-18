@@ -81,6 +81,25 @@ cancels the asyncio task driving the turn, and `asyncio.sleep` raises
 `CancelledError` at the await point, so an in-flight sleep aborts with the rest
 of the turn. `test_sleep_aborts_when_the_run_is_cancelled` pins this behavior.
 
+## Verification of the wait itself
+
+The unit tests monkeypatch `asyncio.sleep`, so they pin the arithmetic and the
+control flow but not the one property the feature exists for. That was measured
+separately, against `MCPToolManager.execute_tool` -- the same entry point the
+agent loop calls:
+
+```
+MCP_CALL_TIMEOUT = 120
+start 2026-08-18T07:30:57
+end   2026-08-18T07:33:27
+elapsed=150.1s success=True content=Slept for 150 seconds. Reason: verify the wait outlives MCP_CALL_TIMEOUT
+```
+
+150s of real time through the tool manager with the MCP call timeout at 120s,
+returning success. The transport timeout does not apply because no MCP client
+is on this path. This was driven directly rather than through a live model
+turn, so it demonstrates the timeout boundary, not the model's use of the tool.
+
 ## Known limits
 
 - The turn holds its WebSocket connection open for the duration of the sleep. A
