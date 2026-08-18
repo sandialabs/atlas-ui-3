@@ -175,8 +175,10 @@ def _calculate_entropy(text: str) -> float:
 # and later breaks again warns again.
 _WRITE_FAILURE_WARNED_PATHS: set = set()
 
-# The relocation notice below is a one-time migration aid, not per-event state.
-_RELOCATION_NOTICE_EMITTED = False
+# Resolved paths the relocation notice has already been emitted for. A set
+# rather than a rebound global: same reason as above, and it means a runtime
+# change of APP_LOG_DIR gets its own notice instead of being swallowed.
+_RELOCATION_NOTICE_PATHS: set = set()
 
 
 def high_risk_log_path() -> Path:
@@ -222,10 +224,9 @@ def _warn_once_if_relocated(path: Path) -> None:
     "no attacks observed", so name both paths -- but only when the old file
     actually exists, so deployments that never had one stay silent.
     """
-    global _RELOCATION_NOTICE_EMITTED
-    if _RELOCATION_NOTICE_EMITTED:
+    if str(path) in _RELOCATION_NOTICE_PATHS:
         return
-    _RELOCATION_NOTICE_EMITTED = True
+    _RELOCATION_NOTICE_PATHS.add(str(path))
     try:
         legacy = _default_log_dir() / "security_high_risk.jsonl"
         if path != legacy and legacy.exists():

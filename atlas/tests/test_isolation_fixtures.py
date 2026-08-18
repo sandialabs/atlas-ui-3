@@ -166,6 +166,58 @@ def _raise_on_open(*args, **kwargs):
     raise OSError("disk gone")
 
 
+class TestRelocationNotice:
+    """Moving the log must not silently orphan a collector on the old path."""
+
+    @pytest.fixture
+    def relocated(self, tmp_path, monkeypatch):
+        from atlas.core import prompt_risk
+
+        legacy_dir = tmp_path / "repo-logs"
+        legacy_dir.mkdir()
+        monkeypatch.setattr(prompt_risk, "_default_log_dir", lambda: legacy_dir)
+        monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
+        monkeypatch.setenv("APP_LOG_DIR", str(tmp_path / "new-logs"))
+        return prompt_risk, legacy_dir
+
+    def _notices(self, caplog):
+        return [r for r in caplog.records if "no longer updated" in r.getMessage()]
+
+    def test_warns_once_when_a_stale_log_remains(self, relocated, caplog):
+        prompt_risk, legacy_dir = relocated
+        (legacy_dir / "security_high_risk.jsonl").write_text("{}\n")
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            prompt_risk.high_risk_log_path()
+            prompt_risk.high_risk_log_path()
+
+        notices = self._notices(caplog)
+        assert len(notices) == 1, "the migration notice must not repeat per call"
+        assert str(legacy_dir / "security_high_risk.jsonl") in notices[0].getMessage()
+
+    def test_silent_when_no_stale_log_exists(self, relocated, caplog):
+        prompt_risk, _ = relocated
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            prompt_risk.high_risk_log_path()
+
+        assert self._notices(caplog) == []
+
+    def test_silent_when_the_location_has_not_moved(self, tmp_path, monkeypatch, caplog):
+        """Same directory, existing log: nothing has moved, so say nothing."""
+        from atlas.core import prompt_risk
+
+        monkeypatch.setattr(prompt_risk, "_default_log_dir", lambda: tmp_path)
+        monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
+        monkeypatch.setenv("APP_LOG_DIR", str(tmp_path))
+        (tmp_path / "security_high_risk.jsonl").write_text("{}\n")
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            prompt_risk.high_risk_log_path()
+
+        assert self._notices(caplog) == []
+
+
 class TestHighRiskWriteFailureWarning:
     """A failed security-audit write warns once per path, then drops to debug."""
 
