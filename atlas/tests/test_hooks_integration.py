@@ -26,28 +26,7 @@ from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.hooks import HookBlockedError, HookConfig, HooksConfig, set_hook_manager_for_testing
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 from atlas.modules.config.config_loader import ConfigManager
-
-
-def _real_litellm_caller_cls():
-    """Return the real LiteLLMCaller class, working around a pre-existing
-    test-isolation quirk: ``test_capability_tokens_and_injection`` replaces
-    ``sys.modules["atlas.modules.llm.litellm_caller"]`` with a fake at import
-    time and only restores it via a module-scoped fixture that runs after its
-    own tests. When those tests are deselected (e.g. ``-k``), the fake persists
-    for the whole session, so a plain ``from ... import LiteLLMCaller`` binds to
-    ``_FakeLLM``. We detect that and fall back to the saved original module.
-    """
-    import atlas.modules.llm.litellm_caller as mod
-
-    cls = getattr(mod, "LiteLLMCaller", None)
-    if cls is not None and "test_capability_tokens_and_injection" not in getattr(cls, "__module__", ""):
-        return cls
-    try:
-        from atlas.tests.test_capability_tokens_and_injection import _ORIGINAL_LITELLM_MODULE
-
-        return _ORIGINAL_LITELLM_MODULE.LiteLLMCaller
-    except Exception:
-        return cls  # last resort: whatever is bound
+from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
 
 def _write_hook(tmp_path: Path, name: str, body: str) -> str:
@@ -486,7 +465,7 @@ class TestPreLlmCall:
         # depend on which models happen to be in the active llmconfig (which
         # varies with collection context). The hook fires after resolution, so
         # we make resolution a deterministic no-op.
-        caller = _real_litellm_caller_cls()()
+        caller = LiteLLMCaller()
         monkeypatch.setattr(caller, "_get_litellm_model_name", lambda name: name)
         monkeypatch.setattr(caller, "_get_model_kwargs", lambda name, t=None, user_email=None: {})
         return caller
@@ -668,7 +647,7 @@ class TestNoConfigInvariant:
             spawned.append(1)
             raise RuntimeError("should not spawn")
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-        caller = _real_litellm_caller_cls()()
+        caller = LiteLLMCaller()
         monkeypatch.setattr(caller, "_get_litellm_model_name", lambda name: name)
         monkeypatch.setattr(caller, "_get_model_kwargs", lambda name, t=None, user_email=None: {})
         async def fake_acompletion(**kwargs):

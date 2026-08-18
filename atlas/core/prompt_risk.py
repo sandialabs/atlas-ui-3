@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import math
+import os
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -169,14 +170,29 @@ def _calculate_entropy(text: str) -> float:
     return ent
 
 
+def high_risk_log_path() -> Path:
+    """Return the path of the high-risk security log.
+
+    Mirrors ``telemetry._tool_output_dir``: ``APP_LOG_DIR`` wins when set, and
+    the repository's ``logs/`` directory is the fallback. Honoring the override
+    keeps test runs (which point ``APP_LOG_DIR`` at a temp dir) from appending
+    to -- or truncating -- a real deployment's security log.
+    """
+    override = os.getenv("APP_LOG_DIR")
+    base = Path(override) if override else Path(__file__).resolve().parents[2] / "logs"
+    return base / "security_high_risk.jsonl"
+
+
 def log_high_risk_event(*, source: str, user: Optional[str], content: str, score: int, risk_level: str, triggers: List[str], extra: Optional[Dict[str, object]] = None) -> None:
-    """Append a JSONL record for medium/high events to logs/security_high_risk.jsonl."""
+    """Append a JSONL record for medium/high events to the high-risk log.
+
+    See ``high_risk_log_path`` for how the location is resolved.
+    """
     try:
         # Only log medium/high
         if risk_level not in ("medium", "high"):
             return
-        base_dir = Path(__file__).resolve().parents[2]
-        log_path = base_dir / "logs" / "security_high_risk.jsonl"
+        log_path = high_risk_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now(timezone.utc).isoformat() + "Z",

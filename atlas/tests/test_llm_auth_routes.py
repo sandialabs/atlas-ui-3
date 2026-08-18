@@ -279,79 +279,62 @@ class TestGroupRestrictedModels:
     listing-layer hiding.
     """
 
-    def _deps(self):
-        """Patch config + storage + auth so only admin@test.com is in `admin`."""
+    @pytest.fixture
+    def deps(self):
+        """Patch config + storage + auth so only admin@test.com is in `admin`.
+
+        A fixture rather than a helper that calls ``patcher.start()``: the old
+        version started three patches (one of them on the shared
+        ``atlas.core.model_access.is_user_in_group``) before the caller's
+        ``try`` block existed, so any failure between the first ``start()`` and
+        the caller's ``finally`` left global patches active for the rest of the
+        session. Fixture teardown always runs.
+        """
         async def only_admin(user_email, group):
             return group == "admin" and user_email == "admin@test.com"
 
-        factory_patch = patch("atlas.routes.llm_auth_routes.app_factory")
-        storage_patch = patch("atlas.routes.llm_auth_routes.get_token_storage")
-        auth_patch = patch(
-            "atlas.core.model_access.is_user_in_group", side_effect=only_admin
-        )
-        mock_factory = factory_patch.start()
-        mock_storage = storage_patch.start()
-        auth_patch.start()
+        with patch("atlas.routes.llm_auth_routes.app_factory") as mock_factory, \
+                patch("atlas.routes.llm_auth_routes.get_token_storage") as mock_storage, \
+                patch("atlas.core.model_access.is_user_in_group", side_effect=only_admin):
+            llm_config = _mock_llm_config({
+                "open-user-model": {"api_key_source": "user"},
+                "admin-user-model": {"api_key_source": "user", "groups": ["admin"]},
+            })
+            mock_cm = MagicMock()
+            mock_cm.llm_config = llm_config
+            mock_factory.get_config_manager.return_value = mock_cm
 
-        llm_config = _mock_llm_config({
-            "open-user-model": {"api_key_source": "user"},
-            "admin-user-model": {"api_key_source": "user", "groups": ["admin"]},
-        })
-        mock_cm = MagicMock()
-        mock_cm.llm_config = llm_config
-        mock_factory.get_config_manager.return_value = mock_cm
+            mock_ts = MagicMock()
+            mock_ts.get_token.return_value = None
+            mock_stored = MagicMock()
+            mock_stored.expires_at = None
+            mock_ts.store_token.return_value = mock_stored
+            mock_storage.return_value = mock_ts
 
-        mock_ts = MagicMock()
-        mock_ts.get_token.return_value = None
-        mock_stored = MagicMock()
-        mock_stored.expires_at = None
-        mock_ts.store_token.return_value = mock_stored
-        mock_storage.return_value = mock_ts
+            yield mock_ts
 
-        return [factory_patch, storage_patch, auth_patch], mock_ts
+    def test_status_hides_restricted_model_from_non_member(self, deps):
+        client = TestClient(create_test_app(user_override="user@test.com"))
+        resp = client.get("/api/llm/auth/status")
+        assert resp.status_code == 200
+        names = {m["model_name"] for m in resp.json()["models"]}
+        assert names == {"open-user-model"}
 
-    def test_status_hides_restricted_model_from_non_member(self):
-        patches, _ = self._deps()
-        try:
-            client = TestClient(create_test_app(user_override="user@test.com"))
-            resp = client.get("/api/llm/auth/status")
-            assert resp.status_code == 200
-            names = {m["model_name"] for m in resp.json()["models"]}
-            assert names == {"open-user-model"}
-        finally:
-            for p in patches:
-                p.stop()
+    def test_status_shows_restricted_model_to_member(self, deps):
+        client = TestClient(create_test_app(user_override="admin@test.com"))
+        resp = client.get("/api/llm/auth/status")
+        names = {m["model_name"] for m in resp.json()["models"]}
+        assert names == {"open-user-model", "admin-user-model"}
 
-    def test_status_shows_restricted_model_to_member(self):
-        patches, _ = self._deps()
-        try:
-            client = TestClient(create_test_app(user_override="admin@test.com"))
-            resp = client.get("/api/llm/auth/status")
-            names = {m["model_name"] for m in resp.json()["models"]}
-            assert names == {"open-user-model", "admin-user-model"}
-        finally:
-            for p in patches:
-                p.stop()
+    def test_upload_rejected_for_restricted_model_non_member(self, deps):
+        client = TestClient(create_test_app(user_override="user@test.com"))
+        resp = client.post("/api/llm/auth/admin-user-model/token", json={"token": "sk-x"})
+        # 404 (indistinguishable from nonexistent) and no token stored.
+        assert resp.status_code == 404
+        deps.store_token.assert_not_called()
 
-    def test_upload_rejected_for_restricted_model_non_member(self):
-        patches, mock_ts = self._deps()
-        try:
-            client = TestClient(create_test_app(user_override="user@test.com"))
-            resp = client.post("/api/llm/auth/admin-user-model/token", json={"token": "sk-x"})
-            # 404 (indistinguishable from nonexistent) and no token stored.
-            assert resp.status_code == 404
-            mock_ts.store_token.assert_not_called()
-        finally:
-            for p in patches:
-                p.stop()
-
-    def test_upload_allowed_for_restricted_model_member(self):
-        patches, mock_ts = self._deps()
-        try:
-            client = TestClient(create_test_app(user_override="admin@test.com"))
-            resp = client.post("/api/llm/auth/admin-user-model/token", json={"token": "sk-x"})
-            assert resp.status_code == 200
-            mock_ts.store_token.assert_called_once()
-        finally:
-            for p in patches:
-                p.stop()
+    def test_upload_allowed_for_restricted_model_member(self, deps):
+        client = TestClient(create_test_app(user_override="admin@test.com"))
+        resp = client.post("/api/llm/auth/admin-user-model/token", json={"token": "sk-x"})
+        assert resp.status_code == 200
+        deps.store_token.assert_called_once()
