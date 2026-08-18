@@ -367,12 +367,18 @@ class TestRelocationNotice:
         monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
         monkeypatch.setenv("APP_LOG_DIR", str(link_dir))
 
-        legacy = link_dir / "security_high_risk.jsonl"
+        # Both spellings: the product may stat the symlinked path (before the
+        # fix) or the resolved one (if the early-return memo is deleted), and
+        # filtering on only one of them would leave half the behavior unpinned.
+        legacy_names = {
+            str(link_dir / "security_high_risk.jsonl"),
+            str(real_dir / "security_high_risk.jsonl"),
+        }
         stats = []
         real_exists = Path.exists
 
         def counting_exists(self):
-            if self == legacy:
+            if str(self) in legacy_names:
                 stats.append(str(self))
             return real_exists(self)
 
@@ -396,6 +402,38 @@ class TestRelocationNotice:
         # The events really were written, so the count above is not vacuous.
         assert len(prompt_risk.high_risk_log_path().read_text().splitlines()) == 3
         assert self._notices(caplog) == []
+
+    def test_silent_when_the_log_file_itself_is_a_symlink(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """A rotation setup symlinks the log file; that is not a relocation.
+
+        Resolving the whole legacy path (rather than just its directory) makes
+        it resolve through the symlink to a different string than the write
+        path, and the notice fires against a log that is very much still live.
+        """
+        from atlas.core import prompt_risk
+
+        target_dir = tmp_path / "rotated"
+        target_dir.mkdir()
+        (target_dir / "security_high_risk.jsonl").write_text("{}\n")
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "security_high_risk.jsonl").symlink_to(
+            target_dir / "security_high_risk.jsonl"
+        )
+
+        monkeypatch.setattr(prompt_risk, "_default_log_dir", lambda: log_dir)
+        monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
+        monkeypatch.setenv("APP_LOG_DIR", str(log_dir))
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            self._emit(prompt_risk)
+
+        assert self._notices(caplog) == [], (
+            "a symlinked log file is still the same log, not a relocation"
+        )
 
     def test_silent_when_the_location_has_not_moved(self, tmp_path, monkeypatch, caplog):
         """Same directory, existing log: nothing has moved, so say nothing."""

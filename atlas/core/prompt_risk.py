@@ -232,11 +232,13 @@ def _warn_once_if_relocated(path: Path) -> None:
     if str(path) in _RELOCATION_NOTICE_PATHS:
         return
     try:
-        # Resolved on both sides: ``path`` comes back resolved, so comparing it
-        # against an unresolved legacy path reports "relocated" for a checkout
-        # reached through a symlink -- and then stats the legacy file on every
-        # event forever.
-        legacy = (_default_log_dir() / "security_high_risk.jsonl").expanduser().resolve()
+        # Built exactly the way ``high_risk_log_path`` builds its return value:
+        # resolve the *directory*, then append the filename. Comparing against
+        # an unresolved legacy path reports "relocated" for a checkout reached
+        # through a symlink; resolving the whole path instead reports it for a
+        # symlinked log *file*, which is what a rotation setup looks like.
+        # Either mismatch stats the legacy file on every event, forever.
+        legacy = _default_log_dir().expanduser().resolve() / "security_high_risk.jsonl"
         if path == legacy:
             # Nothing moved, so there is nothing to announce and no reason to
             # stat anything. This runs per medium/high event, and the
