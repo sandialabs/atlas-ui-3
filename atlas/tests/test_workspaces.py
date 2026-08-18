@@ -220,15 +220,21 @@ class _FakeRepo:
 def test_routes_404_when_feature_disabled(monkeypatch):
     """The workspace API is hidden when the feature flag is off."""
     client = _client(monkeypatch, enabled=False, repo=_FakeRepo())
-    assert client.get("/api/workspaces").status_code == 404
-    assert client.post("/api/workspaces", json={"name": "W"}).status_code == 404
-    assert client.delete("/api/workspaces/1").status_code == 404
+    # Requests are issued outside the assert so `python -O` cannot strip them.
+    listed = client.get("/api/workspaces")
+    created = client.post("/api/workspaces", json={"name": "W"})
+    deleted = client.delete("/api/workspaces/1")
+    assert listed.status_code == 404
+    assert created.status_code == 404
+    assert deleted.status_code == 404
 
 
 def test_routes_reject_blank_name(monkeypatch):
     client = _client(monkeypatch, repo=_FakeRepo())
-    assert client.post("/api/workspaces", json={"name": "   "}).status_code == 400
-    assert client.put("/api/workspaces/1", json={"name": "  "}).status_code == 400
+    created = client.post("/api/workspaces", json={"name": "   "})
+    updated = client.put("/api/workspaces/1", json={"name": "  "})
+    assert created.status_code == 400
+    assert updated.status_code == 400
 
 
 def test_routes_reject_unknown_config_keys(monkeypatch):
@@ -258,7 +264,8 @@ def test_routes_create_passes_full_config(monkeypatch):
 def test_routes_503_without_repository(monkeypatch):
     """Writes fail loudly when chat history (the persistence layer) is absent."""
     client = _client(monkeypatch, repo=None)
-    assert client.post("/api/workspaces", json={"name": "W"}).status_code == 503
+    created = client.post("/api/workspaces", json={"name": "W"})
+    assert created.status_code == 503
     # Listing degrades gracefully instead so the UI can render an empty state.
     resp = client.get("/api/workspaces")
     assert resp.status_code == 200
@@ -267,8 +274,10 @@ def test_routes_503_without_repository(monkeypatch):
 
 def test_routes_delete_missing_returns_404(monkeypatch):
     client = _client(monkeypatch, repo=_FakeRepo())
-    assert client.delete("/api/workspaces/1").status_code == 200
-    assert client.delete("/api/workspaces/nope").status_code == 404
+    deleted = client.delete("/api/workspaces/1")
+    missing = client.delete("/api/workspaces/nope")
+    assert deleted.status_code == 200
+    assert missing.status_code == 404
 
 
 # --- settings gate --------------------------------------------------------
