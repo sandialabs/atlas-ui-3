@@ -27,8 +27,9 @@ from conftest import (  # the suite's own conftest
 from sqlalchemy import create_engine
 
 
-async def _make_task_on(loop, coro):
-    return asyncio.ensure_future(coro, loop=loop)
+async def _pending_task():
+    """Start a long task on the *running* loop and hand it back."""
+    return asyncio.ensure_future(asyncio.sleep(30))
 
 
 class TestRelease:
@@ -75,10 +76,9 @@ class TestRelease:
         comment in ``_release`` must not claim the task ends up cancelled.
         """
         loop = asyncio.new_event_loop()
-        task = loop.run_until_complete(
-            _make_task_on(loop, asyncio.sleep(30))
-        )
+        task = loop.run_until_complete(_pending_task())
         loop.close()
+        assert task.get_loop() is loop and not task.done()
 
         _release(task)  # must not raise
 

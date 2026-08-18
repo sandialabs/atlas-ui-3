@@ -233,7 +233,13 @@ def _warn_once_if_relocated(path: Path) -> None:
         return
     try:
         legacy = _default_log_dir() / "security_high_risk.jsonl"
-        if path != legacy and legacy.exists():
+        if path == legacy:
+            # Nothing moved, so there is nothing to announce and no reason to
+            # stat anything. This runs per medium/high event, and the
+            # un-relocated deployment is the common case.
+            _RELOCATION_NOTICE_PATHS.add(str(path))
+            return
+        if legacy.exists():
             _RELOCATION_NOTICE_PATHS.add(str(path))
             logger.warning(
                 "High-risk security log now writes to %s (APP_LOG_DIR); a "
