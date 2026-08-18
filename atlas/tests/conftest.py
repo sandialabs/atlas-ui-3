@@ -247,8 +247,9 @@ def _release(value) -> None:
 def _isolate_module_singletons():
     """Restore app-level singleton module globals after every test.
 
-    Only modules already imported are touched, so this never forces an import
-    just to isolate it.
+    Modules are never imported just to isolate them; one that is not loaded at
+    setup is snapshotted as ``None`` (the declared default of every entry) so a
+    singleton created by an import *inside* the test is still cleaned up.
     """
     saved = []
     for module_name, attr in _SINGLETON_GLOBALS:
