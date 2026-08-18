@@ -170,7 +170,10 @@ def _calculate_entropy(text: str) -> float:
     return ent
 
 
-_WRITE_FAILURE_WARNED = False
+# Paths already warned about, so a persistently unwritable log cannot flood the
+# very log it is meant to make legible. Keyed by path: a location that is fixed
+# and later breaks again warns again.
+_WRITE_FAILURE_WARNED_PATHS: set = set()
 
 
 def high_risk_log_path() -> Path:
@@ -207,6 +210,7 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
 
     See ``high_risk_log_path`` for how the location is resolved.
     """
+    log_path: Optional[Path] = None
     try:
         # Only log medium/high
         if risk_level not in ("medium", "high"):
@@ -237,13 +241,13 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         # indistinguishable from "no attacks observed". Warn once (this runs
         # per event, and a persistently bad path would otherwise flood the
         # log), then fall back to debug.
-        global _WRITE_FAILURE_WARNED
-        if not _WRITE_FAILURE_WARNED:
-            _WRITE_FAILURE_WARNED = True
+        failed_path = str(log_path) if log_path is not None else "<unresolved>"
+        if failed_path not in _WRITE_FAILURE_WARNED_PATHS:
+            _WRITE_FAILURE_WARNED_PATHS.add(failed_path)
             logger.warning(
                 "Failed to write high risk security log at %s: %s "
-                "(further failures logged at debug)",
-                high_risk_log_path(), e,
+                "(further failures for this path logged at debug)",
+                failed_path, e,
             )
         else:
             logger.debug("Failed to write high risk log: %s", e)

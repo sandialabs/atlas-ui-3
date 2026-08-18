@@ -2,11 +2,13 @@
 
 Last updated: 2026-08-18
 
-The Python suite runs in a single process, in one alphabetical pass, with no
-per-test forking. Everything a test leaves behind -- an env var, a module
-global, a row in a database -- is visible to every test that runs after it, and
-to the next run on the same machine. This page states what `atlas/tests/conftest.py`
-guarantees, and what a test author still has to do.
+The Python suite runs in a single process, in one pass, with no per-test
+forking. Collection order is not a contract pytest makes -- today it happens to
+be alphabetical, which is exactly why a leak can hide behind it. Everything a
+test leaves behind -- an env var, a module global, a row in a database -- is
+visible to every test that runs after it, and to the next run on the same
+machine. This page states what `atlas/tests/conftest.py` guarantees, and what a
+test author still has to do.
 
 ## What conftest guarantees
 
