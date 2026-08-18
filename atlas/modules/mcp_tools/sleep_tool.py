@@ -13,6 +13,7 @@ immediately, so an in-flight sleep aborts with the rest of the turn.
 
 import asyncio
 import logging
+import math
 from typing import Any, Dict, Optional
 
 from atlas.domain.messages.models import ToolCall, ToolResult
@@ -86,7 +87,7 @@ async def execute_sleep_tool(
         except (TypeError, ValueError):
             seconds = None
 
-    if seconds is None or seconds != seconds or seconds <= 0:  # NaN-safe
+    if seconds is None or math.isnan(seconds) or seconds <= 0:
         error = "'seconds' must be a number greater than 0."
         return ToolResult(
             tool_call_id=tool_call.id,

@@ -92,7 +92,8 @@ def _atlas_rag_tools_info() -> dict:
 
 
 ATLAS_AGENT_SERVER_DESCRIPTION = (
-    "Built-in agent helpers that run inside ATLAS rather than on an MCP server."
+    "Wait a set number of seconds before continuing, for agents polling "
+    "long-running external work. Runs inside ATLAS rather than on an MCP server."
 )
 
 
@@ -110,10 +111,7 @@ def _atlas_agent_tools_info() -> dict:
             "inputSchema": function.get("parameters", {}),
         }],
         "tool_count": 1,
-        "description": (
-            "Wait a set number of seconds before continuing, for agents polling "
-            "long-running external work."
-        ),
+        "description": ATLAS_AGENT_SERVER_DESCRIPTION,
         "author": "Atlas",
         "short_description": "Wait between agent steps",
         "help_email": "",

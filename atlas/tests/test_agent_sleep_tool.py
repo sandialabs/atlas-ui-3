@@ -93,7 +93,7 @@ async def test_sleep_aborts_when_the_run_is_cancelled():
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):
-        await task
+        await asyncio.wait_for(task, timeout=1)
 
 
 @pytest.mark.asyncio
