@@ -232,7 +232,11 @@ def _warn_once_if_relocated(path: Path) -> None:
     if str(path) in _RELOCATION_NOTICE_PATHS:
         return
     try:
-        legacy = _default_log_dir() / "security_high_risk.jsonl"
+        # Resolved on both sides: ``path`` comes back resolved, so comparing it
+        # against an unresolved legacy path reports "relocated" for a checkout
+        # reached through a symlink -- and then stats the legacy file on every
+        # event forever.
+        legacy = (_default_log_dir() / "security_high_risk.jsonl").expanduser().resolve()
         if path == legacy:
             # Nothing moved, so there is nothing to announce and no reason to
             # stat anything. This runs per medium/high event, and the

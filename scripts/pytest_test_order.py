@@ -40,6 +40,15 @@ def pytest_collection_modifyitems(session, config, items):
     if not order:
         return
 
+    # Validated before branching on ``order``: a typo'd scope used to pass
+    # silently with ATLAS_TEST_ORDER=reverse and fail only with a seed, so the
+    # same mistake behaved differently depending on the other variable.
+    scope = os.environ.get("ATLAS_TEST_ORDER_SCOPE", "module")
+    if scope not in ("module", "test"):
+        raise pytest.UsageError(
+            f"ATLAS_TEST_ORDER_SCOPE={scope!r} is not 'module' or 'test'"
+        )
+
     if order == "reverse":
         items.reverse()
         print(f"\n[pytest_test_order] reversed {len(items)} tests")
@@ -55,19 +64,14 @@ def pytest_collection_modifyitems(session, config, items):
         )
 
     rng = random.Random(seed)
-    scope = os.environ.get("ATLAS_TEST_ORDER_SCOPE", "module")
     if scope == "test":
         rng.shuffle(items)
-    elif scope == "module":
+    else:
         by_module = {}
         for item in items:
             by_module.setdefault(item.nodeid.split("::")[0], []).append(item)
         modules = list(by_module)
         rng.shuffle(modules)
         items[:] = [item for module in modules for item in by_module[module]]
-    else:
-        raise pytest.UsageError(
-            f"ATLAS_TEST_ORDER_SCOPE={scope!r} is not 'module' or 'test'"
-        )
 
     print(f"\n[pytest_test_order] shuffled {len(items)} tests (scope={scope}, seed={seed})")
