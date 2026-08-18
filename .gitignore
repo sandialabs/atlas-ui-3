@@ -94,9 +94,11 @@ data/minio/
 minio-data/
 backend/minio-data/
 
-# Chat history database
+# Chat history database (including the pre-repair copies written by
+# scripts/repair_duckdb_indexes.py, which hold real conversation data)
 data/*.db
 data/*.wal
+data/*.prerepair-*
 
 # Legacy S3 Mock Storage (deprecated)
 mocks/s3-mock/s3-mock-storage/
