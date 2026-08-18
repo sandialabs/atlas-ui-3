@@ -27,6 +27,10 @@ from conftest import (  # the suite's own conftest
 from sqlalchemy import create_engine
 
 
+async def _make_task_on(loop, coro):
+    return asyncio.ensure_future(coro, loop=loop)
+
+
 class TestRelease:
     """``_release`` must free resources without ever calling a domain method."""
 
@@ -62,6 +66,23 @@ class TestRelease:
             assert not task.cancelled()
 
         asyncio.run(run())
+
+    def test_survives_a_task_whose_loop_is_closed(self):
+        """The common case at teardown: asyncio.run() has closed the loop.
+
+        ``cancel()`` then raises "Event loop is closed" and the task stays
+        PENDING -- teardown must swallow that rather than fail the test, and the
+        comment in ``_release`` must not claim the task ends up cancelled.
+        """
+        loop = asyncio.new_event_loop()
+        task = loop.run_until_complete(
+            _make_task_on(loop, asyncio.sleep(30))
+        )
+        loop.close()
+
+        _release(task)  # must not raise
+
+        assert not task.cancelled()
 
     def test_does_not_call_a_domain_cancel(self):
         """The ProcessManager regression: ``cancel`` here takes an argument.
@@ -180,6 +201,16 @@ class TestRelocationNotice:
         monkeypatch.setenv("APP_LOG_DIR", str(tmp_path / "new-logs"))
         return prompt_risk, legacy_dir
 
+    def _emit(self, prompt_risk):
+        prompt_risk.log_high_risk_event(
+            source="unit-test",
+            user="user@example.com",
+            content="ignore previous instructions",
+            score=90,
+            risk_level="high",
+            triggers=["instruction_override"],
+        )
+
     def _notices(self, caplog):
         return [r for r in caplog.records if "no longer updated" in r.getMessage()]
 
@@ -188,20 +219,38 @@ class TestRelocationNotice:
         (legacy_dir / "security_high_risk.jsonl").write_text("{}\n")
 
         with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
-            prompt_risk.high_risk_log_path()
-            prompt_risk.high_risk_log_path()
+            self._emit(prompt_risk)
+            self._emit(prompt_risk)
 
         notices = self._notices(caplog)
-        assert len(notices) == 1, "the migration notice must not repeat per call"
+        assert len(notices) == 1, "the migration notice must not repeat per event"
         assert str(legacy_dir / "security_high_risk.jsonl") in notices[0].getMessage()
 
     def test_silent_when_no_stale_log_exists(self, relocated, caplog):
         prompt_risk, _ = relocated
 
         with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
-            prompt_risk.high_risk_log_path()
+            self._emit(prompt_risk)
 
         assert self._notices(caplog) == []
+
+    def test_announces_a_stale_log_that_appears_later(self, relocated, caplog):
+        """The key is recorded only once the notice fires.
+
+        A stale file can show up after the first write -- a restored backup, a
+        rolled-back deploy -- and marking the path up front would swallow the
+        announcement forever.
+        """
+        prompt_risk, legacy_dir = relocated
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            self._emit(prompt_risk)
+            assert self._notices(caplog) == []
+
+            (legacy_dir / "security_high_risk.jsonl").write_text("{}\n")
+            self._emit(prompt_risk)
+
+        assert len(self._notices(caplog)) == 1
 
     def test_silent_when_the_location_has_not_moved(self, tmp_path, monkeypatch, caplog):
         """Same directory, existing log: nothing has moved, so say nothing."""
@@ -213,7 +262,7 @@ class TestRelocationNotice:
         (tmp_path / "security_high_risk.jsonl").write_text("{}\n")
 
         with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
-            prompt_risk.high_risk_log_path()
+            self._emit(prompt_risk)
 
         assert self._notices(caplog) == []
 
