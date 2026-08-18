@@ -135,6 +135,13 @@ class TestRelease:
         _release(engine)  # must not raise; teardown cannot fail the suite
 
 
+class _FakeItem:
+    """Minimal stand-in for a pytest item: the hook only reads ``nodeid``."""
+
+    def __init__(self, nodeid):
+        self.nodeid = nodeid
+
+
 class TestOrderingPluginUsageErrors:
     """A misconfigured ordering run must read as usage, not as a test failure.
 
@@ -169,12 +176,40 @@ class TestOrderingPluginUsageErrors:
         with pytest.raises(pytest.UsageError, match="ATLAS_TEST_ORDER='nonsense'"):
             self._hook()(session=None, config=None, items=[])
 
-    def test_invalid_scope_raises_usage_error(self, monkeypatch):
-        monkeypatch.setenv("ATLAS_TEST_ORDER", "7")
+    @pytest.mark.parametrize("order", ["7", "reverse"])
+    def test_invalid_scope_raises_usage_error(self, order, monkeypatch):
+        """Including the ``reverse`` case, which is the point of the change.
+
+        Scope is validated before the order branch, so the same typo fails the
+        same way whichever ordering is asked for. With validation left on the
+        shuffle path only, ``reverse`` exited 0 and a seed exited 4.
+        """
+        monkeypatch.setenv("ATLAS_TEST_ORDER", order)
         monkeypatch.setenv("ATLAS_TEST_ORDER_SCOPE", "sideways")
 
         with pytest.raises(pytest.UsageError, match="ATLAS_TEST_ORDER_SCOPE='sideways'"):
             self._hook()(session=None, config=None, items=[])
+
+    def test_seeded_shuffle_is_deterministic_and_scope_aware(self, monkeypatch):
+        """The shuffle branch: same seed, same order; module scope keeps files together."""
+        items = [_FakeItem(f"tests/test_{f}.py::test_{i}") for f in "ab" for i in range(3)]
+
+        def run(order, scope, source):
+            monkeypatch.setenv("ATLAS_TEST_ORDER", order)
+            monkeypatch.setenv("ATLAS_TEST_ORDER_SCOPE", scope)
+            copy = list(source)
+            self._hook()(session=None, config=None, items=copy)
+            return [i.nodeid for i in copy]
+
+        by_module = run("11", "module", items)
+        assert by_module == run("11", "module", items), "same seed must repeat"
+        files = [n.split("::")[0] for n in by_module]
+        assert files == sorted(files, key=files.index) and len(set(files)) == 2
+        # Module scope keeps each file's tests contiguous; test scope need not.
+        assert files[:3] == [files[0]] * 3
+
+        by_test = run("11", "test", items)
+        assert sorted(by_test) == sorted(by_module)
 
     def test_unset_leaves_order_untouched(self, monkeypatch):
         monkeypatch.delenv("ATLAS_TEST_ORDER", raising=False)
@@ -402,6 +437,39 @@ class TestRelocationNotice:
         # The events really were written, so the count above is not vacuous.
         assert len(prompt_risk.high_risk_log_path().read_text().splitlines()) == 3
         assert self._notices(caplog) == []
+
+    def test_silent_when_the_old_path_is_symlinked_at_the_new_log(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """The migration the #818 upgrade note recommends must not self-warn.
+
+        "move or symlink the old one": an operator points the repository path
+        at the live log and sets APP_LOG_DIR to its directory. ``exists()``
+        follows that link, so a path comparison alone calls the file "no longer
+        updated" while it is receiving every record.
+        """
+        from atlas.core import prompt_risk
+
+        new_dir = tmp_path / "var-log"
+        new_dir.mkdir()
+        (new_dir / "security_high_risk.jsonl").write_text("{}\n")
+
+        repo_logs = tmp_path / "repo-logs"
+        repo_logs.mkdir()
+        (repo_logs / "security_high_risk.jsonl").symlink_to(
+            new_dir / "security_high_risk.jsonl"
+        )
+
+        monkeypatch.setattr(prompt_risk, "_default_log_dir", lambda: repo_logs)
+        monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
+        monkeypatch.setenv("APP_LOG_DIR", str(new_dir))
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            self._emit(prompt_risk)
+
+        assert self._notices(caplog) == [], (
+            "the old path is a symlink at the live log; nothing is stale"
+        )
 
     def test_silent_when_the_log_file_itself_is_a_symlink(
         self, tmp_path, monkeypatch, caplog

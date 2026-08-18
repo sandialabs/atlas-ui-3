@@ -196,8 +196,10 @@ def high_risk_log_path() -> Path:
     ``APP_LOG_DIR`` at a temp directory, from appending to -- or truncating --
     a real deployment's security log.
 
-    Pure: no filesystem access, no logging, no module state. The one-time
-    relocation notice lives in ``log_high_risk_event``.
+    Free of side effects: no logging and no module state. (``resolve()`` does
+    read the filesystem to follow symlinks -- "pure" in the sense that callers
+    can call it as often as they like, not that it never touches disk.) The
+    one-time relocation notice lives in ``log_high_risk_event``.
     """
     override = os.getenv("APP_LOG_DIR")
     if not override:
@@ -245,7 +247,13 @@ def _warn_once_if_relocated(path: Path) -> None:
             # un-relocated deployment is the common case.
             _RELOCATION_NOTICE_PATHS.add(str(path))
             return
-        if legacy.exists():
+        # ``samefile`` rather than a path comparison: an operator following the
+        # upgrade note may *symlink* the old path at the new file, and
+        # ``exists()`` follows that link -- calling a file "no longer updated"
+        # while it receives every record. When the new location has no file
+        # yet, there is nothing to compare and the old log really is stale, so
+        # the notice stands.
+        if legacy.exists() and not (path.exists() and legacy.samefile(path)):
             _RELOCATION_NOTICE_PATHS.add(str(path))
             logger.warning(
                 "High-risk security log now writes to %s (APP_LOG_DIR); a "
