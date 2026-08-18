@@ -105,6 +105,15 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("FEATURE_AGENT_MODE_AVAILABLE", "AGENT_MODE_AVAILABLE")
     )  # Accept both old and new env var names
     agent_max_steps: int = 10
+    agent_sleep_max_seconds: float = Field(
+        default=7200.0,
+        ge=0,
+        description=(
+            "Maximum seconds a single atlas_agent_sleep call may wait. Longer "
+            "requests are clamped to this value; 0 disables the tool entirely."
+        ),
+        validation_alias=AliasChoices("AGENT_SLEEP_MAX_SECONDS"),
+    )
     agent_loop_strategy: str = Field(
         default="agentic",
         description=(

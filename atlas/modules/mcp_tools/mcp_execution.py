@@ -23,6 +23,12 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_task_forbidden_error,
     _is_task_forbidden_result,
 )
+from atlas.modules.mcp_tools.sleep_tool import (
+    SLEEP_TOOL_NAME,
+    execute_sleep_tool,
+    get_max_sleep_seconds,
+    sleep_tool_enabled,
+)
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 from atlas.modules.rag.client import RAG_MODE_RAW, RAG_MODES
 
@@ -459,6 +465,19 @@ class ExecutionMixin:
             )
         if tool_call.name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
             return await self._execute_atlas_rag_tool(tool_call, context)
+        if tool_call.name == SLEEP_TOOL_NAME:
+            app_settings = _client().config_manager.app_settings
+            if not sleep_tool_enabled(app_settings):
+                error_msg = f"Tool '{SLEEP_TOOL_NAME}' is disabled (AGENT_SLEEP_MAX_SECONDS=0)"
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=error_msg,
+                    success=False,
+                    error=error_msg,
+                )
+            return await execute_sleep_tool(
+                tool_call, get_max_sleep_seconds(app_settings), context
+            )
 
         # Use the tool index to get server and tool name (avoids parsing issues with dashes/underscores)
         if not hasattr(self, "_tool_index") or not getattr(self, "_tool_index"):

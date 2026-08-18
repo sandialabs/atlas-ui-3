@@ -13,6 +13,8 @@ from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 
+from .sleep_tool import SLEEP_SERVER_NAME, SLEEP_TOOL_NAME, SLEEP_TOOL_SCHEMA
+
 logger = logging.getLogger(__name__)
 
 _ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
@@ -511,6 +513,8 @@ class DiscoveryMixin:
         """
         if tool_name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
             return "atlas_rag"
+        if tool_name == SLEEP_TOOL_NAME:
+            return SLEEP_SERVER_NAME
         index = getattr(self, "_tool_index", None)
         if not index:
             try:
@@ -611,6 +615,8 @@ class DiscoveryMixin:
         for requested in tool_names:
             if requested in _ATLAS_RAG_TOOL_SCHEMAS:
                 matched.append(_ATLAS_RAG_TOOL_SCHEMAS[requested])
+            elif requested == SLEEP_TOOL_NAME:
+                matched.append(SLEEP_TOOL_SCHEMA)
 
 
 
