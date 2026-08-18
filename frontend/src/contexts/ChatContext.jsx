@@ -5,7 +5,7 @@ import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
 import { useUserPrompts } from '../hooks/useUserPrompts'
-import { useWorkspaces } from '../hooks/useWorkspaces'
+import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
@@ -125,18 +125,21 @@ export const ChatProvider = ({ children }) => {
 
 	// Drop a stale pointer: the workspace may have been deleted in another tab,
 	// or the feature turned off, and a dangling id would light up the switcher
-	// with a name that no longer exists.
+	// with a name that no longer exists. Gated on `configReady` and `loaded` so a
+	// page refresh does not clear the pointer against defaults that have not been
+	// replaced by the real config and workspace list yet.
+	const workspacesLoaded = workspaces.loaded
 	useEffect(() => {
-		if (!activeWorkspaceId) return
-		if (!workspacesEnabled) {
+		if (isStaleWorkspacePointer({
+			activeWorkspaceId,
+			configReady: config.configReady,
+			enabled: workspacesEnabled,
+			loaded: workspacesLoaded,
+			workspaces: workspaceList,
+		})) {
 			setActiveWorkspaceId(null)
-			return
 		}
-		if (workspaces.loading) return
-		if (!workspaceList.some(w => w.id === activeWorkspaceId)) {
-			setActiveWorkspaceId(null)
-		}
-	}, [activeWorkspaceId, workspacesEnabled, workspaces.loading, workspaceList, setActiveWorkspaceId])
+	}, [activeWorkspaceId, config.configReady, workspacesEnabled, workspacesLoaded, workspaceList, setActiveWorkspaceId])
 
 	const switchWorkspace = useCallback(workspaceId => {
 		const ws = workspaceList.find(w => w.id === workspaceId)

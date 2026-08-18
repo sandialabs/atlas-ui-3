@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #819 - 2026-08-18
+- **Workspace switcher keeps its selection across a page refresh**: the active-workspace pointer persists in `localStorage` while the feature flags and the workspace list both arrive asynchronously, and the stale-pointer cleanup ran against those pre-fetch defaults — so every reload cleared the pointer and the header fell back to "Workspace" even though the selections it applied were still in place. The cleanup now waits for the config payload and the first successful workspace fetch (`isStaleWorkspacePointer`).
 - **Workspaces**: the long-dormant `FEATURE_WORKSPACES_ENABLED` flag now does something. A workspace is a named bundle of the active prompt, RAG data sources, and MCP tool selections, so switching between contexts (work / home / project-A) is one click in the new header switcher instead of re-picking every selection. Workspaces persist per user in the chat-history database via `/api/workspaces` (create / rename / update / delete), and the flag is gated on `FEATURE_CHAT_HISTORY_ENABLED` — with nowhere to persist them the switcher stays hidden and the API returns 404. Previously the flag was wired end to end as data but had no consumer anywhere in the UI, so turning it on changed nothing.
 
 ### PR #816 - 2026-08-18

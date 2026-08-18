@@ -1,6 +1,32 @@
 import { useState, useCallback, useEffect } from 'react'
 
 /**
+ * Whether a persisted active-workspace id should be dropped.
+ *
+ * The pointer survives refreshes in localStorage, but both facts it is checked
+ * against arrive asynchronously, and treating either as known too early wipes
+ * the pointer on every page load:
+ *
+ * - `configReady` -- feature flags default to off until the config payload
+ *   lands, so an early check reads the feature as disabled.
+ * - `loaded` -- the workspace list is empty until the fetch resolves, so
+ *   "not in the list" is meaningless before then.
+ */
+export function isStaleWorkspacePointer({
+  activeWorkspaceId,
+  configReady,
+  enabled,
+  loaded,
+  workspaces,
+}) {
+  if (!activeWorkspaceId) return false
+  if (!configReady) return false
+  if (!enabled) return true
+  if (!loaded) return false
+  return !(workspaces || []).some(w => w.id === activeWorkspaceId)
+}
+
+/**
  * Manages the per-user workspace library.
  *
  * A workspace is a named bundle of chat-context selections (active prompt, RAG
@@ -15,12 +41,17 @@ export function useWorkspaces(enabled = true) {
   const [workspaces, setWorkspaces] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  // False until a list has actually come back. An empty `workspaces` before the
+  // first fetch is indistinguishable from "this user has none", so consumers
+  // need this to avoid acting on a list that has not loaded yet.
+  const [loaded, setLoaded] = useState(false)
 
   const fetchWorkspaces = useCallback(async () => {
     if (!enabled) {
       setWorkspaces([])
       setLoading(false)
       setError(null)
+      setLoaded(false)
       return
     }
     setLoading(true)
@@ -30,6 +61,9 @@ export function useWorkspaces(enabled = true) {
       if (!res.ok) throw new Error(`Failed to load workspaces (${res.status})`)
       const data = await res.json()
       setWorkspaces(Array.isArray(data.workspaces) ? data.workspaces : [])
+      // Only a successful response counts as loaded: a failed fetch must not
+      // let consumers treat the empty list as authoritative.
+      setLoaded(true)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -96,6 +130,7 @@ export function useWorkspaces(enabled = true) {
   return {
     workspaces,
     loading,
+    loaded,
     error,
     fetchWorkspaces,
     createWorkspace,

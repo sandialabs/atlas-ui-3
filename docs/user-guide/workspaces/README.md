@@ -25,6 +25,11 @@ no surface" rule the custom prompt library follows.
 The **Workspace** button sits in the header next to *New Chat* (it turns purple
 and shows the name while a workspace is active).
 
+![Workspace switcher](screenshots/ws-01-switcher.png)
+
+Each row shows the workspace name, its description, and a summary of what it
+holds (`4 tools · 2 sources · custom prompt`), with rename and delete actions.
+
 1. Select the prompt, data sources, and tools you want, the way you normally
    would.
 2. Open the workspace dropdown → **Save current context as workspace**, give it
@@ -37,7 +42,28 @@ and shows the name while a workspace is active).
 
 Applying a workspace **replaces** the current selections rather than merging
 into them — carrying leftovers over from the previous context would silently
-widen which tools and data sources a chat can reach.
+widen which tools and data sources a chat can reach. One click swaps the whole
+context; below, the same session under `HR & Policy` and then `Project Atlas`:
+
+![HR & Policy applied](screenshots/ws-02-hr-policy-context.png)
+
+![Project Atlas applied](screenshots/ws-03-project-atlas-context.png)
+
+Note what changed: the data sources (`Company Policies` alone versus
+`Technical Documentation` + `Product Knowledge Base`) and the active tools
+(`canvas`, `evaluate` versus `canvas`, `read_file`, `write_file`,
+`list_directory`). Nothing leaks across.
+
+Saving prompts for a name and an optional description, and deleting asks for
+confirmation:
+
+![Save dialog](screenshots/ws-04-save-dialog.png)
+
+![Delete confirmation](screenshots/ws-05-delete-confirm.png)
+
+With the feature disabled the header carries no workspace button at all:
+
+![Header with the feature disabled](screenshots/ws-06-flag-off.png)
 
 ## What a workspace stores
 
