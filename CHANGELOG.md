@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-08-18
+### PR #819 - 2026-08-18
 - **Workspaces**: the long-dormant `FEATURE_WORKSPACES_ENABLED` flag now does something. A workspace is a named bundle of the active prompt, RAG data sources, and MCP tool selections, so switching between contexts (work / home / project-A) is one click in the new header switcher instead of re-picking every selection. Workspaces persist per user in the chat-history database via `/api/workspaces` (create / rename / update / delete), and the flag is gated on `FEATURE_CHAT_HISTORY_ENABLED` — with nowhere to persist them the switcher stays hidden and the API returns 404. Previously the flag was wired end to end as data but had no consumer anywhere in the UI, so turning it on changed nothing.
 
 ### PR #816 - 2026-08-18
