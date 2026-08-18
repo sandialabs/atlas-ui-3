@@ -27,6 +27,7 @@ from atlas.modules.mcp_tools.sleep_tool import (
     SLEEP_TOOL_NAME,
     execute_sleep_tool,
     get_max_sleep_seconds,
+    get_max_turn_sleep_seconds,
     sleep_tool_enabled,
 )
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
@@ -476,7 +477,10 @@ class ExecutionMixin:
                     error=error_msg,
                 )
             return await execute_sleep_tool(
-                tool_call, get_max_sleep_seconds(app_settings), context
+                tool_call,
+                get_max_sleep_seconds(app_settings),
+                context,
+                max_turn_seconds=get_max_turn_sleep_seconds(app_settings),
             )
 
         # Use the tool index to get server and tool name (avoids parsing issues with dashes/underscores)

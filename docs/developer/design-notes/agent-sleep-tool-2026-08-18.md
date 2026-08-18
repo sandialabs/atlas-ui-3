@@ -43,6 +43,35 @@ result says so explicitly ("call this tool again to keep waiting"), which keeps
 a polling agent moving instead of ending its turn on a tool error. Invalid
 durations -- zero, negative, non-numeric, NaN, and `true` -- are tool errors.
 
+That per-call cap bounds nothing on its own, precisely because the clamp
+message invites another call: with the shipped defaults a turn could take
+`AGENT_MAX_STEPS` x 7200s of held connection, session, and MCP-client state.
+So `AGENT_SLEEP_MAX_TURN_SECONDS` (default 7200) bounds the *turn*. The agent
+loop creates one scratchpad dict per turn and passes it down through
+`session_context` -> `execute_tool`'s context; the tool accumulates slept
+seconds in it. A call that would exceed what is left is clamped to the
+remainder, and once the budget is spent the tool returns an error worded
+without the "call again" invitation. The scratchpad is a local in
+`_run_steps`, not an attribute on the loop: `AgentLoopFactory` caches one loop
+object and reuses it across turns, so state on `self` would leak one turn's
+budget into the next. Outside the agent loop (tools mode, a direct call) no
+scratchpad is supplied and the per-call cap is the only bound.
+
+**Who enforces "disabled".** Agent mode is the mode this tool exists for, and
+it never runs `filter_authorized_tools` -- the orchestrator applies that only
+on the non-agent branch. So the gate that decides whether a disabled tool is
+advertised to the model is `get_tools_schema`, which omits the schema when the
+cap is 0; the ACL check still covers tools mode and execution refuses the call
+regardless. Without the schema gate, `AGENT_SLEEP_MAX_SECONDS=0` would still
+cost a step before anything refused.
+
+**Client-supplied step counts.** `agent_max_steps` arrives verbatim in the
+WebSocket payload and was never bounded by the configured `AGENT_MAX_STEPS`.
+That predates this tool, but a 7200s in-process wait per step turns it into a
+cheap way to pin server-side state, so `ChatOrchestrator._bounded_agent_steps`
+now clamps it at the routing choke point (covering the CLI and API callers,
+not just the WebSocket).
+
 **Kill switch.** `AGENT_SLEEP_MAX_SECONDS=0` disables the tool entirely: it
 disappears from the tools panel, is dropped by ACL filtering, and is refused at
 execution. One knob is both the cap and the switch.
@@ -57,7 +86,13 @@ of the turn. `test_sleep_aborts_when_the_run_is_cancelled` pins this behavior.
 - The turn holds its WebSocket connection open for the duration of the sleep. A
   proxy with an idle timeout shorter than the wait can drop the connection
   before the sleep returns; no keepalive or progress event is emitted during the
-  wait.
+  wait. The UI shows a static `CALLING` badge for the duration, with no elapsed
+  time, which is hard to tell apart from a hung backend.
+- A turn parked in a long sleep delays graceful shutdown, and Uvicorn runs
+  without `timeout_graceful_shutdown`, so a rolling deploy will SIGKILL it.
+  Sleeping in chunks against a shutdown flag would fix both this and the
+  missing progress signal; it is the obvious follow-up and is deliberately not
+  in this change.
 - The sleep occupies one agent step out of `AGENT_MAX_STEPS`, so a long poll
   loop spends its step budget on waiting.
 - Approval, if enabled for the tool, is requested before the wait starts and

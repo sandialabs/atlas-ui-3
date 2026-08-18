@@ -9,7 +9,12 @@ from atlas.application.chat.policies.tool_authorization import ToolAuthorization
 from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools import client as mcp_client
 from atlas.modules.mcp_tools.client import MCPToolManager
-from atlas.modules.mcp_tools.sleep_tool import SLEEP_TOOL_NAME, execute_sleep_tool
+from atlas.modules.mcp_tools.sleep_tool import (
+    SLEEP_SERVER_NAME,
+    SLEEP_TOOL_NAME,
+    TURN_BUDGET_KEY,
+    execute_sleep_tool,
+)
 
 
 def _manager() -> MCPToolManager:
@@ -73,7 +78,7 @@ async def test_sleep_clamps_to_maximum(monkeypatch):
 
     assert result.success is True
     assert slept == [7200.0]
-    assert "exceeded the maximum" in result.content
+    assert "exceeded" in result.content
 
 
 @pytest.mark.asyncio
@@ -142,3 +147,114 @@ async def test_tool_authorization_gates_sleep_on_the_cap(max_seconds, expected):
     )
 
     assert await service.filter_authorized_tools([SLEEP_TOOL_NAME], "u@example.com") == expected
+
+
+@pytest.mark.asyncio
+async def test_turn_budget_is_spent_across_calls_then_refuses(monkeypatch):
+    """The per-call cap bounds nothing on its own -- the model may call again."""
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+    context = {TURN_BUDGET_KEY: {}}
+
+    first = await execute_sleep_tool(
+        _call(seconds=60), max_seconds=60, context=context, max_turn_seconds=100
+    )
+    second = await execute_sleep_tool(
+        _call(seconds=60), max_seconds=60, context=context, max_turn_seconds=100
+    )
+    third = await execute_sleep_tool(
+        _call(seconds=60), max_seconds=60, context=context, max_turn_seconds=100
+    )
+
+    assert first.success is True
+    # The second call is clamped to what the turn has left, not to the per-call cap.
+    assert second.success is True
+    assert slept == [60.0, 40.0]
+    # Once the budget is gone the tool refuses, and must not invite another call.
+    assert third.success is False
+    assert "Do not call" in third.content
+    assert "call this tool again" not in third.content
+
+
+@pytest.mark.asyncio
+async def test_clamp_message_stops_inviting_another_call_at_the_budget_edge(monkeypatch):
+    async def fake_sleep(seconds):
+        return None
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+
+    result = await execute_sleep_tool(
+        _call(seconds=500),
+        max_seconds=300,
+        context={TURN_BUDGET_KEY: {}},
+        max_turn_seconds=300,
+    )
+
+    assert result.success is True
+    assert "call this tool again" not in result.content
+    assert "Do not call" in result.content
+
+
+@pytest.mark.asyncio
+async def test_separate_turns_get_separate_budgets(monkeypatch):
+    async def fake_sleep(seconds):
+        return None
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+
+    for _ in range(3):
+        # A fresh scratchpad is what the loop builds per turn.
+        result = await execute_sleep_tool(
+            _call(seconds=100), max_seconds=100, context={TURN_BUDGET_KEY: {}}, max_turn_seconds=100
+        )
+        assert result.success is True
+
+
+def test_disabled_tool_is_not_advertised_to_the_model(monkeypatch):
+    """Agent mode never ACL-filters, so the schema is the gate that matters."""
+    manager = _manager()
+    _patch_settings(monkeypatch, 0)
+
+    assert manager.get_tools_schema([SLEEP_TOOL_NAME]) == []
+
+
+def test_enabled_tool_is_advertised(monkeypatch):
+    manager = _manager()
+    _patch_settings(monkeypatch, 7200)
+
+    assert [s["function"]["name"] for s in manager.get_tools_schema([SLEEP_TOOL_NAME])] == [
+        SLEEP_TOOL_NAME
+    ]
+    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == SLEEP_SERVER_NAME
+
+
+def test_client_supplied_step_count_is_clamped_to_the_configured_maximum():
+    """A client can ask for any step count; the server decides the ceiling."""
+    from atlas.application.chat.orchestrator import ChatOrchestrator
+
+    orchestrator = ChatOrchestrator.__new__(ChatOrchestrator)
+    orchestrator.config_manager = SimpleNamespace(
+        app_settings=SimpleNamespace(agent_max_steps=30)
+    )
+
+    assert orchestrator._bounded_agent_steps(5) == 5
+    assert orchestrator._bounded_agent_steps(30) == 30
+    assert orchestrator._bounded_agent_steps(10_000) == 30
+    assert orchestrator._bounded_agent_steps(0) == 1
+    assert orchestrator._bounded_agent_steps(-4) == 1
+    assert orchestrator._bounded_agent_steps("nonsense") == 10
+    assert orchestrator._bounded_agent_steps(None) == 10
+
+
+def test_step_clamp_falls_back_when_no_config_manager():
+    from atlas.application.chat.orchestrator import ChatOrchestrator
+
+    orchestrator = ChatOrchestrator.__new__(ChatOrchestrator)
+    orchestrator.config_manager = None
+
+    assert orchestrator._bounded_agent_steps(10_000) == 10
+    assert orchestrator._bounded_agent_steps(3) == 3

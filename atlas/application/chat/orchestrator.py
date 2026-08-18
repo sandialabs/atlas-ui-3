@@ -147,6 +147,38 @@ class ChatOrchestrator:
         except Exception:
             return True
 
+    def _bounded_agent_steps(self, requested: Any) -> int:
+        """Clamp the client-supplied step count to the configured maximum.
+
+        The step count arrives verbatim in the WebSocket payload, and every
+        step can hold server-side state (the connection, the session, MCP
+        client cache entries, and -- with the built-in sleep tool -- an
+        in-process wait). Unbounded, a client can pin that state for as long as
+        it likes at no cost, so the server's own AGENT_MAX_STEPS is the ceiling
+        rather than a default the client may exceed.
+        """
+        configured = 10
+        settings = getattr(self.config_manager, "app_settings", None)
+        if settings is not None:
+            try:
+                configured = int(getattr(settings, "agent_max_steps", 10) or 10)
+            except (TypeError, ValueError):
+                configured = 10
+        configured = max(configured, 1)
+
+        if requested is None:
+            return min(10, configured)
+        try:
+            value = int(requested)
+        except (TypeError, ValueError):
+            return min(10, configured)
+        if value > configured:
+            logger.warning(
+                "Requested agent_max_steps=%s exceeds the configured maximum of %s; clamping",
+                value, configured,
+            )
+        return max(1, min(value, configured))
+
     async def _ensure_model_authorized(self, model: str, user_email: Optional[str]) -> None:
         """Reject the turn if the user may not access the requested model.
 
@@ -406,7 +438,7 @@ class ChatOrchestrator:
                 messages=messages,
                 selected_tools=selected_tools,
                 selected_data_sources=selected_data_sources,
-                max_steps=kwargs.get("agent_max_steps", 10),
+                max_steps=self._bounded_agent_steps(kwargs.get("agent_max_steps")),
                 temperature=temperature,
                 agent_loop_strategy=kwargs.get("agent_loop_strategy"),
             )

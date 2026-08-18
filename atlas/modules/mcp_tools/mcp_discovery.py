@@ -13,7 +13,12 @@ from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 
-from .sleep_tool import SLEEP_SERVER_NAME, SLEEP_TOOL_NAME, SLEEP_TOOL_SCHEMA
+from .sleep_tool import (
+    SLEEP_SERVER_NAME,
+    SLEEP_TOOL_NAME,
+    SLEEP_TOOL_SCHEMA,
+    sleep_tool_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +621,22 @@ class DiscoveryMixin:
             if requested in _ATLAS_RAG_TOOL_SCHEMAS:
                 matched.append(_ATLAS_RAG_TOOL_SCHEMAS[requested])
             elif requested == SLEEP_TOOL_NAME:
-                matched.append(SLEEP_TOOL_SCHEMA)
+                # Agent mode reaches the loop without ACL filtering (the
+                # orchestrator runs filter_authorized_tools only on the
+                # non-agent branch), so this is the gate that decides whether a
+                # disabled sleep tool is advertised to the model at all.
+                # Without it AGENT_SLEEP_MAX_SECONDS=0 would still cost a step
+                # before execution refused the call.
+                try:
+                    enabled = sleep_tool_enabled(_client().config_manager.app_settings)
+                except Exception:
+                    logger.warning(
+                        "Could not read the sleep tool cap; omitting %s from the schema",
+                        SLEEP_TOOL_NAME,
+                    )
+                    enabled = False
+                if enabled:
+                    matched.append(SLEEP_TOOL_SCHEMA)
 
 
 

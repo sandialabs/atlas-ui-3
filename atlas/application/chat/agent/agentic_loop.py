@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
@@ -199,6 +200,11 @@ class AgenticLoop(AgentLoopProtocol):
         """
         steps = 0
         final_answer: Optional[str] = None
+        # Per-turn scratchpad for the built-in sleep tool. A local here (not an
+        # instance attribute) is the turn's lifetime: AgentLoopFactory caches
+        # one loop object and reuses it across turns, so state hung off `self`
+        # would let one turn inherit another's spent sleep budget.
+        turn_sleep_budget: Dict[str, Any] = {}
 
         while steps < max_steps:
             steps += 1
@@ -280,6 +286,10 @@ class AgenticLoop(AgentLoopProtocol):
                     # scoping) so direct callers that omit conversation_id still
                     # get one stable persistent session instead of None.
                     "conversation_id": context.conversation_id or str(context.session_id),
+                    # Mutable, one per turn: atlas_agent_sleep accumulates the
+                    # seconds it has slept here so the turn's total wait is
+                    # bounded, not just each individual call.
+                    TURN_BUDGET_KEY: turn_sleep_budget,
                 },
                 tool_manager=self.tool_manager,
                 update_callback=recorder,
