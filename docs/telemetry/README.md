@@ -32,6 +32,7 @@ Resulting layout (whether default `<project_root>/logs/` or your custom
 <APP_LOG_DIR>/
 ├── spans.jsonl              # one JSON line per span (always this name)
 ├── app.jsonl                # structured application logs
+├── security_high_risk.jsonl # prompt-injection risk events (medium/high only)
 └── tool_outputs/            # only when ATLAS_LOG_TOOL_OUTPUTS=true
     └── <span_id>.txt        # one file per successful tool call
 ```

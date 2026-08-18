@@ -73,7 +73,7 @@ def test_persistent_stores_are_redirected_off_the_repository():
     back to the repository copy, so assert on the resolved values rather than
     trusting the conftest to stay correct.
     """
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[2].resolve()
 
     for var in (
         "CHAT_HISTORY_DB_URL",
@@ -86,11 +86,20 @@ def test_persistent_stores_are_redirected_off_the_repository():
     ):
         value = os.environ.get(var)
         assert value, f"{var} must be redirected for the test session"
-        path = Path(value.replace("duckdb:///", ""))
+
+        if "://" in value and not value.startswith("duckdb:///"):
+            # A server-backed URL (``postgresql://...``) has no local path to
+            # contain; ``_resolve_db_url`` only rewrites the file-backed form.
+            continue
+
+        # ``resolve()`` before comparing: an unresolved path hides both a
+        # ``..`` component and a TMPDIR that symlinks back into the checkout,
+        # which is precisely what this assertion exists to catch.
+        path = Path(value.replace("duckdb:///", "")).resolve()
         assert path.is_absolute(), f"{var}={value!r} must be an absolute path"
-        assert project_root not in path.parents, (
-            f"{var}={value!r} points inside the repository; the suite would "
-            "read and write real developer state"
+        assert project_root not in path.parents and path != project_root, (
+            f"{var}={value!r} resolves to {path}, inside the repository; the "
+            "suite would read and write real developer state"
         )
 
 

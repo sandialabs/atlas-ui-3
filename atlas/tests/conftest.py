@@ -1,8 +1,11 @@
+import asyncio
 import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+from sqlalchemy.engine import Engine
 
 # Ensure the atlas package root is on sys.path for absolute imports like 'infrastructure.*'
 atlas_root = Path(__file__).resolve().parents[1]
@@ -29,7 +32,11 @@ if str(project_root) not in sys.path:
 #      ``OpenTelemetryConfig`` calls become no-ops for the duration of
 #      the pytest session.
 _TELEMETRY_TMPDIR = tempfile.mkdtemp(prefix="atlas-test-telemetry-")
-os.environ.setdefault("APP_LOG_DIR", _TELEMETRY_TMPDIR)
+# Forced, not ``setdefault``: docs/getting-started/installation.md tells
+# contributors to set APP_LOG_DIR to a path *inside* the checkout, so honoring
+# an exported value is exactly the case that writes test telemetry and
+# security-risk records into the repository's logs/.
+os.environ["APP_LOG_DIR"] = _TELEMETRY_TMPDIR
 
 # --- Persistent-store isolation ------------------------------------------
 # Several stores resolve their location relative to the repository root and
@@ -216,20 +223,24 @@ def _release(value) -> None:
 
     Restoring a global by plain assignment would otherwise strand whatever the
     test left there: a SQLAlchemy engine keeps its pooled DuckDB connection
-    until garbage collection, and an asyncio task keeps running. Both failures
-    are quiet, so release explicitly and ignore errors -- a half-torn-down
-    object from a failing test must not turn into a second, confusing failure.
+    until garbage collection, and a sweeper task keeps running.
+
+    Dispatch is by *type*, never by method name. ``ProcessManager.cancel`` is
+    ``async def cancel(self, process_id, *, sigkill_after=3.0)`` -- a
+    name-based ``value.cancel()`` would raise TypeError, and the surrounding
+    ``except`` would hide it. Types not listed here are simply dropped, which
+    is what restoring the previous value already did.
     """
-    for method in ("dispose", "cancel"):
-        release = getattr(value, method, None)
-        if callable(release):
-            try:
-                if method == "cancel" and getattr(value, "done", lambda: False)():
-                    return
-                release()
-            except Exception:  # pragma: no cover - teardown must not raise
-                pass
-            return
+    try:
+        if isinstance(value, Engine):
+            value.dispose()
+        elif isinstance(value, asyncio.Task) and not value.done():
+            # Best effort: the task's loop is usually already closed by the
+            # time a test finishes, so this marks it cancelled without being
+            # able to unwind the coroutine. Nothing here can await it.
+            value.cancel()
+    except Exception:  # pragma: no cover - teardown must not raise
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -242,13 +253,25 @@ def _isolate_module_singletons():
     saved = []
     for module_name, attr in _SINGLETON_GLOBALS:
         module = sys.modules.get(module_name)
-        if module is None or not hasattr(module, attr):
+        if module is None:
+            # Not imported yet. If the test imports it, the global it leaves
+            # behind was created by that test, so the pristine value to restore
+            # is the module's declared default -- ``None`` for every entry in
+            # ``_SINGLETON_GLOBALS`` (they are all lazily-populated caches).
+            # Without this branch a subset run leaks any singleton whose module
+            # is first imported inside a test.
+            saved.append((module_name, attr, None))
             continue
-        saved.append((module, attr, getattr(module, attr)))
+        if not hasattr(module, attr):
+            continue
+        saved.append((module_name, attr, getattr(module, attr)))
     try:
         yield
     finally:
-        for module, attr, value in saved:
+        for module_name, attr, value in saved:
+            module = sys.modules.get(module_name)
+            if module is None:
+                continue
             current = getattr(module, attr, None)
             if current is not value:
                 _release(current)

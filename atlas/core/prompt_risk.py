@@ -170,16 +170,23 @@ def _calculate_entropy(text: str) -> float:
     return ent
 
 
+_WRITE_FAILURE_WARNED = False
+
+
 def high_risk_log_path() -> Path:
     """Return the path of the high-risk security log.
 
-    Resolution matches ``telemetry_routes._log_base_dir`` and
-    ``admin_routes._log_base_dir``: the ``APP_LOG_DIR`` environment variable
-    first, then ``app_settings.app_log_dir`` (so a deployment that configures
-    the log directory in its .env keeps every log together), then the
-    repository's ``logs/`` directory. Honoring the override also keeps test
-    runs, which point ``APP_LOG_DIR`` at a temp directory, from appending to --
-    or truncating -- a real deployment's security log.
+    Resolution is ``APP_LOG_DIR`` env var, then ``app_settings.app_log_dir``,
+    then the repository's ``logs/`` directory -- the same order as
+    ``routes/telemetry_routes._log_base_dir``. (``routes/admin_routes._log_base_dir``
+    consults only the setting and ``core/telemetry._tool_output_dir`` only the
+    env var; the union of the two is what a deployment actually expects, so
+    that is what this uses. Unifying all four is worth doing, but it is a
+    behavior change for those call sites and does not belong in this change.)
+
+    Honoring the override is also what keeps a test run, which points
+    ``APP_LOG_DIR`` at a temp directory, from appending to -- or truncating --
+    a real deployment's security log.
     """
     override = os.getenv("APP_LOG_DIR")
     if not override:
@@ -190,7 +197,9 @@ def high_risk_log_path() -> Path:
         except Exception:  # pragma: no cover - config unavailable; use the default
             override = None
     base = Path(override) if override else Path(__file__).resolve().parents[2] / "logs"
-    return base / "security_high_risk.jsonl"
+    # expanduser/resolve so a ``~``-prefixed or CWD-relative configured value
+    # lands somewhere predictable rather than following the process's cwd.
+    return (base.expanduser().resolve() / "security_high_risk.jsonl")
 
 
 def log_high_risk_event(*, source: str, user: Optional[str], content: str, score: int, risk_level: str, triggers: List[str], extra: Optional[Dict[str, object]] = None) -> None:
@@ -223,4 +232,18 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
-        logger.debug("Failed to write high risk log: %s", e)
+        # A security audit record that cannot be written is an operational
+        # problem: without a signal, a misconfigured or unwritable path is
+        # indistinguishable from "no attacks observed". Warn once (this runs
+        # per event, and a persistently bad path would otherwise flood the
+        # log), then fall back to debug.
+        global _WRITE_FAILURE_WARNED
+        if not _WRITE_FAILURE_WARNED:
+            _WRITE_FAILURE_WARNED = True
+            logger.warning(
+                "Failed to write high risk security log at %s: %s "
+                "(further failures logged at debug)",
+                high_risk_log_path(), e,
+            )
+        else:
+            logger.debug("Failed to write high risk log: %s", e)

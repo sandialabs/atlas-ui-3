@@ -3,29 +3,37 @@ Unit tests for the env-demo MCP server.
 Tests the environment variable demonstration functionality.
 """
 import os
+from pathlib import Path
 
 import pytest
 
+ENV_DEMO_MAIN = (
+    Path(__file__).resolve().parents[1] / "mcp" / "env-demo" / "main.py"
+)
 
-# Test that the server can be imported
+
 def test_server_imports():
-    """Test that the env-demo server module can be imported."""
+    """The env-demo server module must actually import.
+
+    The previous version pointed at a hard-coded ``/home/runner/work/...`` path
+    and only built a spec -- ``spec_from_file_location`` does not stat the file
+    and nothing executed the module, so the test passed everywhere regardless
+    of whether the server existed or was importable.
+    """
+    if not ENV_DEMO_MAIN.exists():
+        pytest.skip(f"env-demo server not present at {ENV_DEMO_MAIN}")
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("env_demo_main", ENV_DEMO_MAIN)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
     try:
-        # Import the module by file path since directory has hyphen. (No
-        # sys.path mutation: the old ``sys.path.insert`` added a CI-only path
-        # that does not exist off the runner and was never removed, leaving it
-        # on sys.path for every later test in the session.)
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "env_demo_main",
-            "/home/runner/work/atlas-ui-3/atlas-ui-3/backend/mcp/env-demo/main.py"
-        )
-        module = importlib.util.module_from_spec(spec)
-        # Don't execute - just verify it can be loaded
-        assert spec is not None
-        assert module is not None
+        spec.loader.exec_module(module)
     except Exception as e:
         pytest.fail(f"Failed to import env-demo server: {e}")
+
+    assert hasattr(module, "mcp"), "env-demo server must expose an MCP server object"
 
 
 def test_env_var_configuration(monkeypatch):
