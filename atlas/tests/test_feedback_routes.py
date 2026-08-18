@@ -52,8 +52,11 @@ def mock_admin_check(admin_test_user, admin_group):
 class TestFeedbackRouteRegistration:
     """Test that feedback routes are properly registered (issue #200)."""
 
-    def test_post_feedback_route_exists(self, test_user_headers):
+    def test_post_feedback_route_exists(self, mock_feedback_dir, test_user_headers):
         """POST /api/feedback should not return 404."""
+        # Takes ``mock_feedback_dir`` like every other test that POSTs: without
+        # it this route-registration check wrote a real feedback JSON file into
+        # the repository's ``runtime/feedback/`` on every run.
         client = TestClient(app)
         resp = client.post(
             "/api/feedback",

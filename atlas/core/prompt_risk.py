@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import math
+import os
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -169,14 +170,87 @@ def _calculate_entropy(text: str) -> float:
     return ent
 
 
+# Paths already warned about, so a persistently unwritable log cannot flood the
+# very log it is meant to make legible. Keyed by path: a location that is fixed
+# and later breaks again warns again.
+_WRITE_FAILURE_WARNED_PATHS: set = set()
+
+# Resolved paths the relocation notice has already been emitted for. A set
+# rather than a rebound global: same reason as above, and it means a runtime
+# change of APP_LOG_DIR gets its own notice instead of being swallowed.
+_RELOCATION_NOTICE_PATHS: set = set()
+
+
+def high_risk_log_path() -> Path:
+    """Return the path of the high-risk security log.
+
+    Resolution is ``APP_LOG_DIR`` env var, then ``app_settings.app_log_dir``,
+    then the repository's ``logs/`` directory -- the same order as
+    ``routes/telemetry_routes._log_base_dir``. (``routes/admin_routes._log_base_dir``
+    consults only the setting and ``core/telemetry._tool_output_dir`` only the
+    env var; the union of the two is what a deployment actually expects, so
+    that is what this uses. Unifying all four is worth doing, but it is a
+    behavior change for those call sites and does not belong in this change.)
+
+    Honoring the override is also what keeps a test run, which points
+    ``APP_LOG_DIR`` at a temp directory, from appending to -- or truncating --
+    a real deployment's security log.
+    """
+    override = os.getenv("APP_LOG_DIR")
+    if not override:
+        try:
+            from atlas.modules.config import config_manager
+
+            override = config_manager.app_settings.app_log_dir
+        except Exception:  # pragma: no cover - config unavailable; use the default
+            override = None
+    base = Path(override) if override else _default_log_dir()
+    # expanduser/resolve so a ``~``-prefixed or CWD-relative configured value
+    # lands somewhere predictable rather than following the process's cwd.
+    path = (base.expanduser().resolve() / "security_high_risk.jsonl")
+    _warn_once_if_relocated(path)
+    return path
+
+
+def _default_log_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "logs"
+
+
+def _warn_once_if_relocated(path: Path) -> None:
+    """Say so, once, when a stale copy of this log exists at the old location.
+
+    Before this log honored ``APP_LOG_DIR`` it always lived in the repository's
+    ``logs/``. A collector still tailing that file would go quiet and read as
+    "no attacks observed", so name both paths -- but only when the old file
+    actually exists, so deployments that never had one stay silent.
+    """
+    if str(path) in _RELOCATION_NOTICE_PATHS:
+        return
+    _RELOCATION_NOTICE_PATHS.add(str(path))
+    try:
+        legacy = _default_log_dir() / "security_high_risk.jsonl"
+        if path != legacy and legacy.exists():
+            logger.warning(
+                "High-risk security log now writes to %s (APP_LOG_DIR); a "
+                "stale copy remains at %s and is no longer updated -- point "
+                "any collector at the new path.",
+                path, legacy,
+            )
+    except Exception:  # pragma: no cover - a notice must never break logging
+        pass
+
+
 def log_high_risk_event(*, source: str, user: Optional[str], content: str, score: int, risk_level: str, triggers: List[str], extra: Optional[Dict[str, object]] = None) -> None:
-    """Append a JSONL record for medium/high events to logs/security_high_risk.jsonl."""
+    """Append a JSONL record for medium/high events to the high-risk log.
+
+    See ``high_risk_log_path`` for how the location is resolved.
+    """
+    log_path: Optional[Path] = None
     try:
         # Only log medium/high
         if risk_level not in ("medium", "high"):
             return
-        base_dir = Path(__file__).resolve().parents[2]
-        log_path = base_dir / "logs" / "security_high_risk.jsonl"
+        log_path = high_risk_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now(timezone.utc).isoformat() + "Z",
@@ -196,5 +270,32 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         record["snippet"] = snippet
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        # Writing again means the location is healthy; drop its key so a path
+        # that breaks a second time warns a second time. Without this the
+        # "repaired and later broken warns again" behavior below is a lie.
+        _WRITE_FAILURE_WARNED_PATHS.discard(str(log_path))
     except Exception as e:
-        logger.debug("Failed to write high risk log: %s", e)
+        # A security audit record that cannot be written is an operational
+        # problem: without a signal, a misconfigured or unwritable path is
+        # indistinguishable from "no attacks observed". Warn once (this runs
+        # per event, and a persistently bad path would otherwise flood the
+        # log), then fall back to debug.
+        # Key on the resolved path, or -- when the resolver itself raised, so
+        # there is no path -- on the configured value that produced the
+        # failure. A bare "<unresolved>" constant would collapse every
+        # misconfiguration onto one key, so the second bad APP_LOG_DIR would
+        # only ever be logged at debug.
+        if log_path is not None:
+            failed_path = str(log_path)
+        else:
+            configured = os.getenv("APP_LOG_DIR") or "<unset>"
+            failed_path = f"<unresolved:{configured}>"
+        if failed_path not in _WRITE_FAILURE_WARNED_PATHS:
+            _WRITE_FAILURE_WARNED_PATHS.add(failed_path)
+            logger.warning(
+                "Failed to write high risk security log at %s: %s "
+                "(further failures for this path logged at debug)",
+                failed_path, e,
+            )
+        else:
+            logger.debug("Failed to write high risk log: %s", e)

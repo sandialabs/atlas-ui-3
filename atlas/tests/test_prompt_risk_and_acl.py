@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from atlas.core.prompt_risk import calculate_prompt_injection_risk
+from atlas.core.prompt_risk import calculate_prompt_injection_risk, high_risk_log_path
 
 
 @pytest.mark.parametrize(
@@ -28,15 +28,37 @@ def test_calculate_prompt_injection_risk_levels(text, expected_level):
         assert res["risk_level"] == "high"
 
 
+def test_high_risk_log_path_resolution_matches_the_other_logs(tmp_path, monkeypatch):
+    """Env var, then configured setting, then the repository's logs/ directory.
+
+    Same order as ``telemetry_routes._log_base_dir`` / ``admin_routes._log_base_dir``,
+    so a deployment that relocates its logs does not leave this one behind.
+    """
+    from atlas.modules.config import config_manager
+
+    settings = config_manager.app_settings
+    configured = tmp_path / "configured"
+
+    monkeypatch.setenv("APP_LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(settings, "app_log_dir", str(configured))
+    assert high_risk_log_path() == tmp_path / "security_high_risk.jsonl"
+
+    monkeypatch.delenv("APP_LOG_DIR", raising=False)
+    assert high_risk_log_path() == configured / "security_high_risk.jsonl"
+
+    monkeypatch.setattr(settings, "app_log_dir", None)
+    assert high_risk_log_path().parent.name == "logs"
+
+
 @pytest.mark.asyncio
 async def test_rag_results_risk_logging(tmp_path, monkeypatch):
-    # Redirect log file path by setting cwd and verifying file output
-    log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "logs", "security_high_risk.jsonl")
-    try:
-        os.remove(log_file)
-    except OSError:
-        # Ignore removal failures to clean up
-        pass
+    # Point the risk log at this test's tmp dir. The previous version deleted
+    # and rewrote the repository's real ``logs/security_high_risk.jsonl``, so a
+    # local run destroyed a developer's log and every later assertion depended
+    # on what earlier tests had appended.
+    monkeypatch.setenv("APP_LOG_DIR", str(tmp_path))
+    log_file = high_risk_log_path()
+    assert not log_file.exists()
 
     from atlas.domain.rag_mcp_service import RAGMCPService
 
@@ -68,9 +90,8 @@ async def test_rag_results_risk_logging(tmp_path, monkeypatch):
     out = await svc.search_raw("alice@example.com", "q", ["docsRag:handbook"], top_k=1)
     assert "results" in out
     # Expect a medium/high risk log line has been written
-    assert os.path.exists(log_file)
-    with open(log_file, "r", encoding="utf-8") as f:
-        lines = [json.loads(x) for x in f.read().splitlines() if x.strip()]
+    assert log_file.exists()
+    lines = [json.loads(x) for x in log_file.read_text(encoding="utf-8").splitlines() if x.strip()]
     assert any(line.get("source") == "rag_chunk" for line in lines)
 
 
