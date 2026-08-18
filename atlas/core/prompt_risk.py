@@ -180,6 +180,12 @@ _WRITE_FAILURE_WARNED_PATHS: set = set()
 # change of APP_LOG_DIR gets its own notice instead of being swallowed.
 _RELOCATION_NOTICE_PATHS: set = set()
 
+# Resolved legacy paths, keyed by the unresolved default directory. In a
+# relocated deployment with nothing stale, the notice deliberately keeps
+# re-checking (a stale file can appear later), so without this it would walk
+# symlinks on every medium/high event just to rebuild the same path.
+_LEGACY_PATH_CACHE: dict = {}
+
 
 def high_risk_log_path() -> Path:
     """Return the path of the high-risk security log.
@@ -240,7 +246,11 @@ def _warn_once_if_relocated(path: Path) -> None:
         # through a symlink; resolving the whole path instead reports it for a
         # symlinked log *file*, which is what a rotation setup looks like.
         # Either mismatch stats the legacy file on every event, forever.
-        legacy = _default_log_dir().expanduser().resolve() / "security_high_risk.jsonl"
+        default_dir = _default_log_dir()
+        legacy = _LEGACY_PATH_CACHE.get(str(default_dir))
+        if legacy is None:
+            legacy = default_dir.expanduser().resolve() / "security_high_risk.jsonl"
+            _LEGACY_PATH_CACHE[str(default_dir)] = legacy
         if path == legacy:
             # Nothing moved, so there is nothing to announce and no reason to
             # stat anything. This runs per medium/high event, and the

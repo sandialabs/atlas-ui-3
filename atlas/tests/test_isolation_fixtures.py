@@ -191,8 +191,15 @@ class TestOrderingPluginUsageErrors:
             self._hook()(session=None, config=None, items=[])
 
     def test_seeded_shuffle_is_deterministic_and_scope_aware(self, monkeypatch):
-        """The shuffle branch: same seed, same order; module scope keeps files together."""
-        items = [_FakeItem(f"tests/test_{f}.py::test_{i}") for f in "ab" for i in range(3)]
+        """The shuffle branch: it really reorders, repeatably, and honors scope.
+
+        Seed 6 over four modules, because seed 11 happens to be the identity
+        permutation -- with that seed the test passed even with ``rng.shuffle``
+        deleted, which is the failure mode a shuffle test exists to catch.
+        """
+        original = [
+            _FakeItem(f"tests/test_{f}.py::test_{i}") for f in "abcd" for i in range(3)
+        ]
 
         def run(order, scope, source):
             monkeypatch.setenv("ATLAS_TEST_ORDER", order)
@@ -201,15 +208,24 @@ class TestOrderingPluginUsageErrors:
             self._hook()(session=None, config=None, items=copy)
             return [i.nodeid for i in copy]
 
-        by_module = run("11", "module", items)
-        assert by_module == run("11", "module", items), "same seed must repeat"
-        files = [n.split("::")[0] for n in by_module]
-        assert files == sorted(files, key=files.index) and len(set(files)) == 2
-        # Module scope keeps each file's tests contiguous; test scope need not.
-        assert files[:3] == [files[0]] * 3
+        nodeids = [i.nodeid for i in original]
 
-        by_test = run("11", "test", items)
-        assert sorted(by_test) == sorted(by_module)
+        by_module = run("6", "module", original)
+        assert by_module != nodeids, "seed 6 must actually reorder the modules"
+        assert by_module == run("6", "module", original), "same seed must repeat"
+        assert sorted(by_module) == sorted(nodeids), "no item may be lost"
+
+        # Module scope keeps each file's tests contiguous.
+        files = [n.split("::")[0] for n in by_module]
+        assert len(set(files)) == 4
+        assert [f for i, f in enumerate(files) if i == 0 or f != files[i - 1]] == list(
+            dict.fromkeys(files)
+        ), f"module scope must not interleave files: {files}"
+
+        by_test = run("6", "test", original)
+        assert by_test != nodeids, "seed 6 must actually reorder the items"
+        assert sorted(by_test) == sorted(nodeids)
+        assert by_test != by_module, "test scope shuffles differently from module scope"
 
     def test_unset_leaves_order_untouched(self, monkeypatch):
         monkeypatch.delenv("ATLAS_TEST_ORDER", raising=False)
@@ -299,6 +315,33 @@ class TestSingletonSnapshot:
 
 def _raise_on_open(*args, **kwargs):
     raise OSError("disk gone")
+
+
+class TestResolverPurity:
+    """``high_risk_log_path`` must stay free of logging and module state.
+
+    Without this, moving the notice back into the resolver -- the thing this
+    change exists to undo -- would leave the suite green.
+    """
+
+    def test_resolving_neither_logs_nor_memoizes(self, tmp_path, monkeypatch, caplog):
+        from atlas.core import prompt_risk
+
+        legacy_dir = tmp_path / "repo-logs"
+        legacy_dir.mkdir()
+        (legacy_dir / "security_high_risk.jsonl").write_text("{}\n")
+        monkeypatch.setattr(prompt_risk, "_default_log_dir", lambda: legacy_dir)
+        monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
+        monkeypatch.setenv("APP_LOG_DIR", str(tmp_path / "new-logs"))
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            for _ in range(3):
+                prompt_risk.high_risk_log_path()
+
+        assert caplog.records == [], "the resolver must not log"
+        assert prompt_risk._RELOCATION_NOTICE_PATHS == set(), (
+            "the resolver must not mutate module state"
+        )
 
 
 class TestRelocationNotice:
@@ -437,6 +480,51 @@ class TestRelocationNotice:
         # The events really were written, so the count above is not vacuous.
         assert len(prompt_risk.high_risk_log_path().read_text().splitlines()) == 3
         assert self._notices(caplog) == []
+
+    def test_relocated_deployment_resolves_the_legacy_path_once(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """A relocated deployment with nothing stale still re-checks, cheaply.
+
+        The notice deliberately keeps looking (a stale file can appear later),
+        so the resolved legacy path is cached -- otherwise every medium/high
+        event walks symlinks again to rebuild the same path.
+        """
+        from atlas.core import prompt_risk
+
+        legacy_dir = tmp_path / "repo-logs"
+        legacy_dir.mkdir()
+        monkeypatch.setattr(prompt_risk, "_default_log_dir", lambda: legacy_dir)
+        monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
+        monkeypatch.setattr(prompt_risk, "_LEGACY_PATH_CACHE", {})
+        monkeypatch.setenv("APP_LOG_DIR", str(tmp_path / "new-logs"))
+
+        resolves = []
+        real_resolve = Path.resolve
+
+        def counting_resolve(self, *args, **kwargs):
+            if self == legacy_dir:
+                resolves.append(str(self))
+            return real_resolve(self, *args, **kwargs)
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            with patch.object(Path, "resolve", counting_resolve):
+                for _ in range(3):
+                    prompt_risk.log_high_risk_event(
+                        source="unit-test",
+                        user="user@example.com",
+                        content="ignore previous instructions",
+                        score=90,
+                        risk_level="high",
+                        triggers=["instruction_override"],
+                    )
+
+        assert len(resolves) == 1, (
+            f"legacy directory resolved {len(resolves)} times across 3 events"
+        )
+        # Nothing stale exists, so nothing is announced -- the re-check is live.
+        assert self._notices(caplog) == []
+        assert len(prompt_risk.high_risk_log_path().read_text().splitlines()) == 3
 
     def test_silent_when_the_old_path_is_symlinked_at_the_new_log(
         self, tmp_path, monkeypatch, caplog
