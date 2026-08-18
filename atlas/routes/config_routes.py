@@ -11,6 +11,12 @@ from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 from atlas.routes.files_routes import get_file_upload_limit_config
 from atlas.modules.mcp_tools.mcp_discovery import _ATLAS_RAG_TOOL_SCHEMAS
+from atlas.modules.mcp_tools.sleep_tool import (
+    SLEEP_SERVER_NAME,
+    SLEEP_TOOL_NAME,
+    SLEEP_TOOL_SCHEMA,
+    sleep_tool_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +85,38 @@ def _atlas_rag_tools_info() -> dict:
         # selectable under compliance filtering; the individual RAG *sources* are
         # still compliance-filtered independently in the RAG panel and at query
         # time, so this does not widen data access.
+        "compliance_level": "Public",
+        "auth_type": "none",
+        "auth_required": False,
+    }
+
+
+ATLAS_AGENT_SERVER_DESCRIPTION = (
+    "Wait a set number of seconds before continuing, for agents polling "
+    "long-running external work. Runs inside ATLAS rather than on an MCP server."
+)
+
+
+def _atlas_agent_tools_info() -> dict:
+    """Build the built-in agent pseudo-server entry for the tools panel."""
+    function = SLEEP_TOOL_SCHEMA["function"]
+    tool_name = SLEEP_TOOL_NAME.removeprefix(f"{SLEEP_SERVER_NAME}_")
+
+    return {
+        "server": SLEEP_SERVER_NAME,
+        "tools": [tool_name],
+        "tools_detailed": [{
+            "name": tool_name,
+            "description": function.get("description", ""),
+            "inputSchema": function.get("parameters", {}),
+        }],
+        "tool_count": 1,
+        "description": ATLAS_AGENT_SERVER_DESCRIPTION,
+        "author": "Atlas",
+        "short_description": "Wait between agent steps",
+        "help_email": "",
+        # Marked Public like the other pseudo-servers so the tools-panel
+        # compliance filter does not hide it; it touches no data.
         "compliance_level": "Public",
         "auth_type": "none",
         "auth_required": False,
@@ -260,6 +298,8 @@ async def get_config(
             and app_settings.feature_atlas_rag_tools_enabled
         ):
             authorized_servers.append("atlas_rag")
+        if sleep_tool_enabled(app_settings):
+            authorized_servers.append(SLEEP_SERVER_NAME)
 
         # Only build tool information for servers the user is authorized to access
         for server_name in authorized_servers:
@@ -291,6 +331,8 @@ async def get_config(
                 })
             elif server_name == "atlas_rag":
                 tools_info.append(_atlas_rag_tools_info())
+            elif server_name == SLEEP_SERVER_NAME:
+                tools_info.append(_atlas_agent_tools_info())
             elif server_name in mcp_manager.available_tools:
                 server_tools = mcp_manager.available_tools[server_name]['tools']
                 server_config = mcp_manager.available_tools[server_name]['config']
