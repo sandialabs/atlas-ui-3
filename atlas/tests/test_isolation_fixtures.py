@@ -19,13 +19,12 @@ import sys
 import types
 
 import pytest
-from sqlalchemy import create_engine
-
 from conftest import (  # the suite's own conftest
     _release,
     restore_singletons,
     snapshot_singletons,
 )
+from sqlalchemy import create_engine
 
 
 class TestRelease:
@@ -49,14 +48,16 @@ class TestRelease:
             _release(task)
             assert task.cancelled() or task.cancelling()
             with pytest.raises(asyncio.CancelledError):
-                await task
+                # Bound rather than a bare ``await task`` statement, which
+                # CodeQL reads as "statement has no effect".
+                _ = await task
 
         asyncio.run(run())
 
     def test_leaves_a_finished_task_alone(self):
         async def run():
             task = asyncio.ensure_future(asyncio.sleep(0))
-            await task
+            assert await task is None  # drives the task to done
             _release(task)
             assert not task.cancelled()
 
