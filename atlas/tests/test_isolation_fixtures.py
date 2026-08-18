@@ -151,6 +151,18 @@ class TestOrderingPluginUsageErrors:
     without spawning a subprocess.
     """
 
+    @pytest.fixture(autouse=True)
+    def _no_ambient_ordering_env(self, monkeypatch):
+        """Start from a clean slate for both ordering variables.
+
+        Without this the tests inherit whatever the developer exported: with
+        ``ATLAS_TEST_ORDER_SCOPE=sideways`` set, two of them failed. Depending
+        on ambient environment is precisely the leak this series removes, so
+        the tests for it should not do it either.
+        """
+        monkeypatch.delenv("ATLAS_TEST_ORDER", raising=False)
+        monkeypatch.delenv("ATLAS_TEST_ORDER_SCOPE", raising=False)
+
     def _hook(self):
         """Load the plugin by path.
 
@@ -347,6 +359,18 @@ class TestResolverPurity:
 class TestRelocationNotice:
     """Moving the log must not silently orphan a collector on the old path."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_prompt_risk_caches(self, monkeypatch):
+        """Clear both module caches for every test in this class.
+
+        They are process-wide memos; a test that populates one and does not
+        clear it decides the next test's answer.
+        """
+        from atlas.core import prompt_risk
+
+        monkeypatch.setattr(prompt_risk, "_RELOCATION_NOTICE_PATHS", set())
+        monkeypatch.setattr(prompt_risk, "_LEGACY_PATH_CACHE", {})
+
     @pytest.fixture
     def relocated(self, tmp_path, monkeypatch):
         from atlas.core import prompt_risk
@@ -405,6 +429,28 @@ class TestRelocationNotice:
             self._emit(prompt_risk)
 
         assert self._notices(caplog) == []
+
+    def test_announces_on_the_first_event_when_the_new_log_has_no_file_yet(
+        self, relocated, caplog
+    ):
+        """The ``path.exists()`` half of the guard.
+
+        The notice runs before the write, so on the very first event the new
+        location has no file. Without that guard ``samefile`` raises
+        FileNotFoundError, the notice is swallowed, and the warning about a
+        genuinely stale log is deferred to the second event -- which may never
+        come on a quiet deployment.
+        """
+        prompt_risk, legacy_dir = relocated
+        (legacy_dir / "security_high_risk.jsonl").write_text("{}\n")
+        assert not prompt_risk.high_risk_log_path().exists()
+
+        with caplog.at_level(logging.DEBUG, logger=prompt_risk.logger.name):
+            self._emit(prompt_risk)
+
+        assert len(self._notices(caplog)) == 1, (
+            "a stale log must be announced on the first event, not the second"
+        )
 
     def test_announces_a_stale_log_that_appears_later(self, relocated, caplog):
         """The key is recorded only once the notice fires.

@@ -14,6 +14,7 @@ import os
 import re
 from collections import Counter
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -221,7 +222,13 @@ def high_risk_log_path() -> Path:
     return (base.expanduser().resolve() / "security_high_risk.jsonl")
 
 
+@lru_cache(maxsize=1)
 def _default_log_dir() -> Path:
+    """The repository's ``logs/`` directory.
+
+    Cached: this resolves ``__file__`` and is consulted on every medium/high
+    event; the answer cannot change within a process.
+    """
     return Path(__file__).resolve().parents[2] / "logs"
 
 
