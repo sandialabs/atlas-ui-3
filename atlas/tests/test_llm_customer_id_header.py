@@ -7,32 +7,10 @@ Tests that LiteLLMCaller sends the logged-in user as the
 Added: 2026-07-09
 """
 
-import importlib
-import sys
 from unittest.mock import MagicMock
 
 from atlas.modules.config.config_manager import ModelConfig
-
-
-def _get_real_litellm_caller():
-    """Return the real LiteLLMCaller class.
-
-    Some test files (e.g. test_capability_tokens_and_injection.py) replace the
-    litellm_caller module's class with a fake at import time. Force a reimport
-    of the real module when that happens. Mirrors the helper in
-    test_llm_env_expansion.py.
-    """
-    module_name = "atlas.modules.llm.litellm_caller"
-    if module_name in sys.modules:
-        old_module = sys.modules.pop(module_name)
-        caller_class = getattr(old_module, "LiteLLMCaller", None)
-        if caller_class is not None and hasattr(caller_class, "_get_model_kwargs"):
-            sys.modules[module_name] = old_module
-            return caller_class
-    return importlib.import_module(module_name).LiteLLMCaller
-
-
-LiteLLMCaller = _get_real_litellm_caller()
+from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
 
 def _make_caller(models_dict):

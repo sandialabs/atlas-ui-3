@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #818 - 2026-08-18
+- **Test suite no longer shares state between tests or with the developer's checkout**: removed an import-time `sys.modules` fake and a misnamed singleton reset that made the suite order-dependent, redirected every persistent store (chat-history and agent-portal DuckDB files, audit log, feedback, capture, token and log directories) to a per-session temp directory, and scoped the env vars, `sys.path` entries and mock patchers that leaked past their tests. See [docs/developer/test-isolation.md](docs/developer/test-isolation.md).
+- **`logs/security_high_risk.jsonl` follows `APP_LOG_DIR`**: the prompt-risk audit log previously always resolved to `<project_root>/logs/`, ignoring the log-directory override every other log honors. Operators with `APP_LOG_DIR` set will find it in that directory now; move or symlink the old file if a collector still tails the repository path.
+
 ### PR #817 - 2026-08-18
 - **Agents can wait** (closes #779): `atlas_agent_sleep` is a built-in pseudo-tool that pauses the turn for a requested number of seconds so an agent can poll long-running external work. It runs in process next to `canvas_canvas` and the `atlas_rag_*` tools rather than behind an MCP server, because MCP tool calls are bounded by `MCP_CALL_TIMEOUT` (120s) and the useful waits are minutes to hours. `AGENT_SLEEP_MAX_SECONDS` (default 7200) caps one call -- longer requests are clamped and the result says so, so a polling agent keeps going instead of ending on a tool error -- and `0` removes the tool from the tools panel, ACL filtering, and execution. Stopping a run already cancels the turn's asyncio task, so an in-flight sleep aborts with it and no cancellation plumbing was added.
 

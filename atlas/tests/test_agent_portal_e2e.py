@@ -54,9 +54,15 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     from atlas.modules.process_manager import manager as pm_mod
     from atlas.routes import agent_portal_routes as ap_routes
 
-    # Fresh state per test
+    # Fresh state per test. ``_singleton`` is the real module global on both
+    # stores -- this fixture used to clear ``pm_mod._singleton_manager``, a name
+    # that does not exist, so the assignment silently created a stray attribute
+    # and the ProcessManager (with every process it tracked) survived from one
+    # test to the next. Reversed or shuffled ordering then failed
+    # ``test_launch_list_get_cancel_round_trip``, which asserts an empty list on
+    # "fresh" state.
     ps_mod._singleton = PresetStore(path=tmp_path / "presets.json")
-    pm_mod._singleton_manager = None  # lazily rebuilt by get_process_manager
+    pm_mod._singleton = None  # lazily rebuilt by get_process_manager
 
     monkeypatch.setattr(ap_routes.app_factory, "get_config_manager", lambda: _CM())
 
@@ -71,7 +77,7 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         yield client
 
     ps_mod._singleton = None
-    pm_mod._singleton_manager = None
+    pm_mod._singleton = None
 
 
 def _wait_for_exit(client: TestClient, process_id: str, timeout_s: float = 5.0) -> dict:
@@ -289,7 +295,9 @@ def test_feature_flag_off_hides_routes(tmp_path: Path, monkeypatch: pytest.Monke
         app_settings = _Off()
 
     monkeypatch.setattr(ap_routes.app_factory, "get_config_manager", lambda: _CM2())
-    ps_mod._singleton = PresetStore(path=tmp_path / "presets.json")
+    monkeypatch.setattr(
+        ps_mod, "_singleton", PresetStore(path=tmp_path / "presets.json")
+    )
 
     app = FastAPI()
     app.include_router(ap_routes.router)

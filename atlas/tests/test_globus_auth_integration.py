@@ -14,14 +14,10 @@ Requires the mock Globus auth server to be running on port 9999:
 Updated: 2026-02-24
 """
 
-import os
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-
-# Override Globus auth base URL BEFORE importing the module
-os.environ["GLOBUS_AUTH_BASE_URL"] = "http://localhost:9999/v2/oauth2"
 
 from atlas.core.globus_auth import (
     build_scopes,
@@ -48,6 +44,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 ALCF_SCOPE = "https://auth.globus.org/scopes/681c10cc-f684-4540-bcd7-0b4df3bc26ef/action_all"
+
+
+@pytest.fixture(autouse=True)
+def _point_globus_at_mock_server(monkeypatch):
+    """Point the Globus client at the local mock server, for these tests only.
+
+    ``_get_auth_base()`` re-reads the env var on every call, so a fixture is
+    enough -- and unlike the module-level assignment this replaces, monkeypatch
+    puts the real ``auth.globus.org`` default back afterwards instead of
+    leaving every later test in the session pointed at localhost:9999.
+    """
+    monkeypatch.setenv("GLOBUS_AUTH_BASE_URL", "http://localhost:9999/v2/oauth2")
 
 
 class TestMockGlobusTokenExchange:
