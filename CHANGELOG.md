@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #817 - 2026-08-18
+- **Agents can wait** (closes #779): `atlas_agent_sleep` is a built-in pseudo-tool that pauses the turn for a requested number of seconds so an agent can poll long-running external work. It runs in process next to `canvas_canvas` and the `atlas_rag_*` tools rather than behind an MCP server, because MCP tool calls are bounded by `MCP_CALL_TIMEOUT` (120s) and the useful waits are minutes to hours. `AGENT_SLEEP_MAX_SECONDS` (default 7200) caps one call -- longer requests are clamped and the result says so, so a polling agent keeps going instead of ending on a tool error -- and `0` removes the tool from the tools panel, ACL filtering, and execution. Stopping a run already cancels the turn's asyncio task, so an in-flight sleep aborts with it and no cancellation plumbing was added.
+
 ### PR #814 - 2026-08-17
 - **Authorization tests keep the developer bypass disabled after application import**: test setup now pins `SKIP_AUTHORIZATION_CHECKS=false` instead of deleting it, preventing `atlas.main` from restoring a true value from the repository `.env` during test collection.
 
