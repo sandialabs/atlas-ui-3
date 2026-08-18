@@ -1,9 +1,13 @@
 # Workspaces
 
 A **workspace** is a named bundle of the selections that define your chat
-context: the active prompt, the RAG data sources, and the MCP tools. Save one
-per context — `Work`, `Home`, `Project A` — and switch between them in one
+context: **the active prompt**, the RAG data sources, and the MCP tools. Save
+one per context — `Work`, `Home`, `Project A` — and switch between them in one
 click instead of re-picking every selection by hand.
+
+The prompt is a first-class part of a workspace, not an afterthought: switching
+workspaces changes which system prompt the model actually runs under, alongside
+the tools and sources.
 
 Workspaces are stored per user in the chat-history database (DuckDB locally,
 PostgreSQL in production) and exposed via `/api/workspaces`.
@@ -28,7 +32,8 @@ and shows the name while a workspace is active).
 ![Workspace switcher](screenshots/ws-01-switcher.png)
 
 Each row shows the workspace name, its description, and a summary of what it
-holds (`4 tools · 2 sources · custom prompt`), with rename and delete actions.
+holds — including **which prompt** it carries, by name
+(`4 tools · 2 sources · Terse Code Reviewer`) — with rename and delete actions.
 
 1. Select the prompt, data sources, and tools you want, the way you normally
    would.
@@ -53,6 +58,34 @@ Note what changed: the data sources (`Company Policies` alone versus
 `Technical Documentation` + `Product Knowledge Base`) and the active tools
 (`canvas`, `evaluate` versus `canvas`, `read_file`, `write_file`,
 `list_directory`). Nothing leaks across.
+
+### The prompt switches too
+
+The active prompt travels with the workspace. Under `Project Atlas` the prompt
+picker shows **Terse Code Reviewer** as active; under `HR & Policy`, **Policy
+Explainer**:
+
+![Project Atlas prompt](screenshots/ws-07-project-atlas-prompt.png)
+
+![HR and Policy prompt](screenshots/ws-08-hr-policy-prompt.png)
+
+That is not just a label — it is the system prompt the model runs under. The
+same question asked in each workspace comes back in the voice each prompt asks
+for, against that workspace's own corpus:
+
+![Answer under HR and Policy](screenshots/ws-09-hr-policy-answer.png)
+
+![Answer under Project Atlas](screenshots/ws-10-project-atlas-answer.png)
+
+`HR & Policy` answers in plain language and cites `pol-001.txt` from
+`company-policies`; `Project Atlas` answers `Risk: … Fix: …` in two sentences
+and cites `tech-002.txt` from `technical-docs`.
+
+Both kinds of prompt are covered. A user-authored prompt from the custom prompt
+library is stored as `userprompt:<id>` and **replaces** the system prompt; an
+MCP server prompt is stored under its `<server>_<name>` key and is loaded into
+`selected_prompts` so it is prepended, exactly as the prompt picker does
+outside a workspace.
 
 Saving prompts for a name and an optional description, and deleting asks for
 confirmation:

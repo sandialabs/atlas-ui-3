@@ -67,8 +67,14 @@ describe('WorkspaceSelector', () => {
   const dialogPrompt = vi.fn()
   const dialogConfirm = vi.fn()
 
+  const USER_PROMPTS = [
+    { id: 'abc', title: 'Terse Code Reviewer', content: 'Be terse.' },
+  ]
+
   const baseContext = {
     workspaces: WORKSPACES,
+    userPrompts: USER_PROMPTS,
+    prompts: [],
     workspacesLoading: false,
     activeWorkspaceId: null,
     switchWorkspace,
@@ -107,8 +113,22 @@ describe('WorkspaceSelector', () => {
     render(<WorkspaceSelector />)
     openDropdown()
     expect(screen.getByText('Day job context')).toBeInTheDocument()
-    expect(screen.getByText('2 tools · 1 source · custom prompt')).toBeInTheDocument()
+    expect(screen.getByText('2 tools · 1 source · Terse Code Reviewer')).toBeInTheDocument()
     expect(screen.getByText('no selections')).toBeInTheDocument()
+  })
+
+  it('names the workspace prompt so you can see which one you are switching into', () => {
+    render(<WorkspaceSelector />)
+    openDropdown()
+    expect(screen.getByText(/Terse Code Reviewer/)).toBeInTheDocument()
+  })
+
+  it('falls back to a generic label when the prompt no longer exists', () => {
+    // A prompt deleted out from under a workspace must not blank the summary.
+    setContext({ userPrompts: [] })
+    render(<WorkspaceSelector />)
+    openDropdown()
+    expect(screen.getByText('2 tools · 1 source · custom prompt')).toBeInTheDocument()
   })
 
   it('applies a workspace when one is clicked', () => {

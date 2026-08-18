@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Layers, ChevronDown, Plus, Save, Trash2, Pencil } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
+import { isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { getMcpNameFromKey } from '../utils/mcpKeys'
 import { useDialog } from './ui/toastContext'
 import { useToast } from './ui/toastContext'
 
@@ -23,6 +25,8 @@ const WorkspaceSelector = () => {
     renameWorkspace,
     deleteWorkspace,
     clearActiveWorkspace,
+    userPrompts = [],
+    prompts = [],
   } = useChat()
 
   const [isOpen, setIsOpen] = useState(false)
@@ -43,6 +47,19 @@ const WorkspaceSelector = () => {
 
   const active = workspaces.find(w => w.id === activeWorkspaceId) || null
 
+  // Name the workspace's prompt rather than just noting that it has one -- the
+  // prompt is as much a part of the context as the tools, and "custom prompt"
+  // does not tell you which one you are about to switch into.
+  const promptLabel = key => {
+    if (!key) return null
+    if (isUserPromptKey(key)) {
+      const match = userPrompts.find(p => p.id === userPromptIdFromKey(key))
+      // A prompt deleted out from under the workspace still deserves a label.
+      return match ? match.title : 'custom prompt'
+    }
+    return getMcpNameFromKey(key, prompts) || 'custom prompt'
+  }
+
   const summarize = ws => {
     const c = ws.config || {}
     const parts = []
@@ -50,7 +67,8 @@ const WorkspaceSelector = () => {
     const sources = c.selected_data_sources?.length || 0
     if (tools) parts.push(`${tools} tool${tools === 1 ? '' : 's'}`)
     if (sources) parts.push(`${sources} source${sources === 1 ? '' : 's'}`)
-    if (c.active_prompt_key) parts.push('custom prompt')
+    const prompt = promptLabel(c.active_prompt_key)
+    if (prompt) parts.push(prompt)
     return parts.length ? parts.join(' · ') : 'no selections'
   }
 
