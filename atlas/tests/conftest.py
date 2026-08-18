@@ -243,40 +243,46 @@ def _release(value) -> None:
         pass
 
 
-@pytest.fixture(autouse=True)
-def _isolate_module_singletons():
-    """Restore app-level singleton module globals after every test.
+def snapshot_singletons():
+    """Capture the current value of every global in ``_SINGLETON_GLOBALS``.
 
-    Modules are never imported just to isolate them; one that is not loaded at
-    setup is snapshotted as ``None`` (the declared default of every entry) so a
-    singleton created by an import *inside* the test is still cleaned up.
+    A module that is not imported yet is captured as ``None``: if the test
+    imports it, the global it leaves behind was created by that test, and the
+    pristine value to restore is the module's declared default -- ``None`` for
+    every entry here, since they are all lazily-populated caches. Without that
+    branch a subset run leaks any singleton whose module is first imported
+    inside a test.
     """
     saved = []
     for module_name, attr in _SINGLETON_GLOBALS:
         module = sys.modules.get(module_name)
         if module is None:
-            # Not imported yet. If the test imports it, the global it leaves
-            # behind was created by that test, so the pristine value to restore
-            # is the module's declared default -- ``None`` for every entry in
-            # ``_SINGLETON_GLOBALS`` (they are all lazily-populated caches).
-            # Without this branch a subset run leaks any singleton whose module
-            # is first imported inside a test.
             saved.append((module_name, attr, None))
+        elif hasattr(module, attr):
+            saved.append((module_name, attr, getattr(module, attr)))
+    return saved
+
+
+def restore_singletons(saved):
+    """Restore a ``snapshot_singletons()`` result, releasing what it displaces."""
+    for module_name, attr, value in saved:
+        module = sys.modules.get(module_name)
+        if module is None:
             continue
-        if not hasattr(module, attr):
-            continue
-        saved.append((module_name, attr, getattr(module, attr)))
+        current = getattr(module, attr, None)
+        if current is not value:
+            _release(current)
+        setattr(module, attr, value)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_module_singletons():
+    """Restore app-level singleton module globals after every test."""
+    saved = snapshot_singletons()
     try:
         yield
     finally:
-        for module_name, attr, value in saved:
-            module = sys.modules.get(module_name)
-            if module is None:
-                continue
-            current = getattr(module, attr, None)
-            if current is not value:
-                _release(current)
-            setattr(module, attr, value)
+        restore_singletons(saved)
 
 
 # Groups the debug-only mock table in ``core.auth`` grants to the *non-admin*

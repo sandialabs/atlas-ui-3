@@ -37,11 +37,25 @@ Resulting layout (whether default `<project_root>/logs/` or your custom
     └── <span_id>.txt        # one file per successful tool call
 ```
 
-Resolution order: `config_manager.app_settings.app_log_dir` →
-`APP_LOG_DIR` env var → `<project_root>/logs/`. Need separate files per
-instance on a shared host? Point each instance at a different
-`APP_LOG_DIR` (e.g. `/var/log/atlas/instance-a/`) — the filenames stay
-`spans.jsonl` / `app.jsonl` inside each directory.
+Resolution order for `spans.jsonl` / `app.jsonl` / `tool_outputs/`:
+`config_manager.app_settings.app_log_dir` → `APP_LOG_DIR` env var →
+`<project_root>/logs/`. Need separate files per instance on a shared host?
+Point each instance at a different `APP_LOG_DIR` (e.g.
+`/var/log/atlas/instance-a/`) — the filenames stay `spans.jsonl` /
+`app.jsonl` inside each directory.
+
+`security_high_risk.jsonl` resolves the other way round — `APP_LOG_DIR` env
+var → `app_settings.app_log_dir` → `<project_root>/logs/` — matching
+`routes/telemetry_routes._log_base_dir`, so an env var exported at runtime
+takes effect without a config reload. The four implementations in the tree
+disagree on this order (`core/otel_config` and `routes/admin_routes` read the
+setting first, `core/telemetry` reads only the env var); unifying them is a
+behavior change for those call sites and has not been done.
+
+**Upgrade note:** `security_high_risk.jsonl` previously always lived at
+`<project_root>/logs/`, ignoring `APP_LOG_DIR`. If you set `APP_LOG_DIR`, the
+file now lands there with the other logs; move or symlink the old one if a
+collector still points at the repository path.
 
 ## Span types
 
