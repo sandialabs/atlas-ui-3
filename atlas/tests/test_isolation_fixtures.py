@@ -17,6 +17,7 @@ import asyncio
 import logging
 import sys
 import types
+from pathlib import Path
 
 import pytest
 from conftest import (  # the suite's own conftest
@@ -78,11 +79,21 @@ class TestRelease:
         loop = asyncio.new_event_loop()
         task = loop.run_until_complete(_pending_task())
         loop.close()
+        # Nothing will ever run this task again; keep asyncio's destructor from
+        # printing "Task was destroyed but it is pending!" into suite output.
+        task._log_destroy_pending = False
         assert task.get_loop() is loop and not task.done()
 
-        _release(task)  # must not raise
+        # Pin the behavior the comment describes, rather than asserting
+        # something that would hold either way: cancelling really does raise
+        # here, and the task really is left PENDING.
+        with pytest.raises(RuntimeError, match="Event loop is closed"):
+            task.cancel()
+
+        _release(task)  # same call, swallowed
 
         assert not task.cancelled()
+        assert not task.done()
 
     def test_does_not_call_a_domain_cancel(self):
         """The ProcessManager regression: ``cancel`` here takes an argument.
@@ -112,6 +123,64 @@ class TestRelease:
         engine.dispose = Boom().dispose
 
         _release(engine)  # must not raise; teardown cannot fail the suite
+
+
+class TestOrderingPluginUsageErrors:
+    """A misconfigured ordering run must read as usage, not as a test failure.
+
+    Bare ``SystemExit`` from a collection hook produces a ~50-line
+    ``INTERNALERROR`` traceback and exit 3; ``pytest.UsageError`` produces one
+    line and exit 4. The hook is a plain function, so this pins the contract
+    without spawning a subprocess.
+    """
+
+    def _hook(self):
+        """Load the plugin by path.
+
+        ``scripts/`` is only on ``PYTHONPATH`` when the ordering leg runs, so a
+        plain ``import pytest_test_order`` would fail in an ordinary suite run.
+        """
+        import importlib.util
+
+        plugin_path = (
+            Path(__file__).resolve().parents[2] / "scripts" / "pytest_test_order.py"
+        )
+        if not plugin_path.exists():
+            pytest.skip(f"ordering plugin not present at {plugin_path}")
+
+        spec = importlib.util.spec_from_file_location("_pytest_test_order", plugin_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.pytest_collection_modifyitems
+
+    def test_invalid_order_value_raises_usage_error(self, monkeypatch):
+        monkeypatch.setenv("ATLAS_TEST_ORDER", "nonsense")
+
+        with pytest.raises(pytest.UsageError, match="ATLAS_TEST_ORDER='nonsense'"):
+            self._hook()(session=None, config=None, items=[])
+
+    def test_invalid_scope_raises_usage_error(self, monkeypatch):
+        monkeypatch.setenv("ATLAS_TEST_ORDER", "7")
+        monkeypatch.setenv("ATLAS_TEST_ORDER_SCOPE", "sideways")
+
+        with pytest.raises(pytest.UsageError, match="ATLAS_TEST_ORDER_SCOPE='sideways'"):
+            self._hook()(session=None, config=None, items=[])
+
+    def test_unset_leaves_order_untouched(self, monkeypatch):
+        monkeypatch.delenv("ATLAS_TEST_ORDER", raising=False)
+        items = ["a", "b", "c"]
+
+        self._hook()(session=None, config=None, items=items)
+
+        assert items == ["a", "b", "c"]
+
+    def test_reverse_reverses(self, monkeypatch):
+        monkeypatch.setenv("ATLAS_TEST_ORDER", "reverse")
+        items = ["a", "b", "c"]
+
+        self._hook()(session=None, config=None, items=items)
+
+        assert items == ["c", "b", "a"]
 
 
 class TestSingletonSnapshot:
