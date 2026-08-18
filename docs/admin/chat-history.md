@@ -60,6 +60,38 @@ When using `agent_start.sh`, the script automatically:
 - If DuckDB URL is configured, ensures the `data/` directory exists
 - Tables are created automatically on first startup (via `Base.metadata.create_all`)
 
+### Secondary Indexes on DuckDB
+
+The DuckDB backend runs without the secondary indexes declared in `models.py`;
+they are dropped during startup. DuckDB's ART indexes can silently stop
+matching rows that are present in the file, so an equality lookup such as
+`WHERE user_email = ?` returns nothing while a full scan of the same table
+returns the row. The failure is durable — it survives reopening the database —
+and it is invisible to the application, which renders the empty result as
+"no data". Symptoms are conversations that open with no messages and custom
+prompts missing from the prompt list, while the conversation list still looks
+complete.
+
+Dropping the indexes rather than rebuilding them is deliberate: a rebuild
+repairs the rows that exist today but leaves the same failure mode armed for
+tomorrow. Local datasets are small enough that a full scan is cheap.
+
+This applies to DuckDB only. PostgreSQL keeps its indexes, which are correct
+there and matter at production scale.
+
+A database that predates this behavior repairs itself on the next startup. To
+repair a file out of band, stop the application (DuckDB holds an exclusive
+lock) and run:
+
+```bash
+python scripts/repair_duckdb_indexes.py data/chat_history.db
+```
+
+Pass `--check` to inspect without modifying, or `--rebuild` to recreate the
+indexes instead of leaving them off. The script copies the database before
+making changes. No row data is lost in either case — only the indexes are
+wrong.
+
 ## Database Schema
 
 Four tables are created:

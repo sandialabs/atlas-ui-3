@@ -12,6 +12,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
+from atlas.core.duckdb_indexes import drop_duckdb_secondary_indexes
+
 from .models import Base
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,7 @@ def init_database(db_url: Optional[str] = None) -> Engine:
     """
     engine = get_engine(db_url)
     Base.metadata.create_all(engine)
+    drop_duckdb_secondary_indexes(engine, Base.metadata)
     logger.info("Chat history database tables created/verified")
     return engine
 
