@@ -69,6 +69,84 @@ describe('useSelections', () => {
     expect(result.current.selectedPrompts.has('server_two')).toBe(true)
   })
 
+  it('snapshotSelections captures the full workspace payload', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.addTools(['files_read'])
+      result.current.addDataSources(['corpus-a'])
+    })
+    act(() => {
+      result.current.makePromptActive('userprompt:abc')
+      result.current.toggleRagEnabled()
+    })
+
+    const snapshot = result.current.snapshotSelections()
+    expect(snapshot.active_prompt_key).toBe('userprompt:abc')
+    expect(snapshot.selected_tools).toContain('files_read')
+    expect(snapshot.selected_data_sources).toEqual(['corpus-a'])
+    expect(snapshot.rag_enabled).toBe(true)
+    // A user prompt is client-side only: it must not leak into MCP prompts.
+    expect(snapshot.selected_prompts).not.toContain('userprompt:abc')
+  })
+
+  it('applyWorkspace replaces selections rather than merging them', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.addTools(['stale_tool'])
+      result.current.addDataSources(['stale-source'])
+    })
+
+    act(() => {
+      result.current.applyWorkspace({
+        active_prompt_key: 'userprompt:abc',
+        selected_tools: ['files_read'],
+        selected_prompts: [],
+        selected_data_sources: ['corpus-a'],
+        rag_enabled: true,
+      })
+    })
+
+    // Leftovers from the previous context would silently widen tool/RAG access.
+    expect(result.current.selectedTools.has('stale_tool')).toBe(false)
+    expect(result.current.selectedTools.has('files_read')).toBe(true)
+    expect(result.current.selectedDataSources.has('stale-source')).toBe(false)
+    expect(result.current.selectedDataSources.has('corpus-a')).toBe(true)
+    expect(result.current.activePromptKey).toBe('userprompt:abc')
+    expect(result.current.ragEnabled).toBe(true)
+  })
+
+  it('applyWorkspace loads an MCP active prompt into selected prompts', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.applyWorkspace({
+        active_prompt_key: 'server_one',
+        selected_tools: [],
+        selected_prompts: [],
+        selected_data_sources: [],
+        rag_enabled: false,
+      })
+    })
+
+    expect(result.current.activePromptKey).toBe('server_one')
+    expect(result.current.selectedPrompts.has('server_one')).toBe(true)
+  })
+
+  it('applyWorkspace ignores a malformed config', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.addTools(['keep_me'])
+    })
+    act(() => {
+      result.current.applyWorkspace(null)
+    })
+
+    expect(result.current.selectedTools.has('keep_me')).toBe(true)
+  })
+
   it('makePromptActive adds prompt to loaded prompts when missing', () => {
     const { result } = renderHook(() => useSelections())
 

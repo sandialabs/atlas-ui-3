@@ -8,6 +8,7 @@ from atlas.modules.mcp_tools.mcp_discovery import (
     _ATLAS_RAG_DISCOVER_TOOL,
     _ATLAS_RAG_QUERY_TOOL,
 )
+from atlas.modules.mcp_tools.sleep_tool import SLEEP_TOOL_NAME, sleep_tool_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,12 @@ class ToolAuthorizationService:
                 # dedicated atlas_rag pseudo-tool flag are enabled.
                 if tool == "canvas_canvas":
                     filtered_tools.append(tool)
+                    continue
+                if tool == SLEEP_TOOL_NAME:
+                    # Built-in wait tool: no MCP server behind it, so the only
+                    # gate is the configured maximum wait (0 disables it).
+                    if sleep_tool_enabled(getattr(self.config_manager, "app_settings", None)):
+                        filtered_tools.append(tool)
                     continue
                 if tool in {_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL}:
                     settings = getattr(self.config_manager, "app_settings", None)

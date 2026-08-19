@@ -112,3 +112,30 @@ class UserPromptRecord(Base):
     __table_args__ = (
         Index("ix_user_prompts_user_updated", "user_email", "updated_at"),
     )
+
+
+class UserWorkspaceRecord(Base):
+    """A user-defined workspace: a named bundle of chat context selections.
+
+    A workspace snapshots the prompt, RAG data sources, and MCP tool selections
+    that belong together for one context (e.g. "Work", "Home", "Project A") so
+    the user can switch between them in one click. The selections themselves
+    live in ``config_json`` rather than in columns because their shape is owned
+    by the frontend selection model and grows over time; the repository
+    normalizes the payload on the way in so a malformed blob can never reach
+    the UI.
+    """
+
+    __tablename__ = "user_workspaces"
+
+    id = Column(String(36), primary_key=True, default=_uuid_default)
+    user_email = Column(String(255), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(String(500), nullable=True)
+    config_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_now_utc, onupdate=_now_utc, nullable=False)
+
+    __table_args__ = (
+        Index("ix_user_workspaces_user_updated", "user_email", "updated_at"),
+    )
