@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #821 - 2026-08-18
+- **A worked example for every hook event**: `docs/admin/hook-examples/` ships one runnable hook per lifecycle event, each stating its matcher, stdin payload shape, honored decisions, and `on_error` default in its own header, plus a combined `hooks.json`. The examples are exercised through the real hook engine in CI, so a stale example fails the build rather than an operator's deployment.
+- **Zero-trust mock policy server**: `mocks/zero-trust-mock/` decides per tool call whether to allow, escalate to the approval gate, or block, with a stdlib-only forwarding hook on the Atlas side — a demonstration of runtime authorization where policy lives in a service instead of in each hook script.
+
 ### PR #819 - 2026-08-18
 - **Workspace rows name the prompt they carry**: the switcher summarized a saved prompt as the generic "custom prompt", so you could not tell which prompt you were about to switch into. Rows now read `4 tools · 2 sources · Terse Code Reviewer`, resolving user-library prompts by title and MCP prompts by name, and falling back to the generic label only when the prompt no longer exists.
 - **Workspace switcher keeps its selection across a page refresh**: the active-workspace pointer persists in `localStorage` while the feature flags and the workspace list both arrive asynchronously, and the stale-pointer cleanup ran against those pre-fetch defaults — so every reload cleared the pointer and the header fell back to "Workspace" even though the selections it applied were still in place. The cleanup now waits for the config payload and the first successful workspace fetch (`isStaleWorkspacePointer`).
