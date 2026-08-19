@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional
 
 from atlas.core.compliance import get_compliance_manager
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.core.prompt_risk import calculate_prompt_injection_risk, log_high_risk_event
 
 logger = logging.getLogger(__name__)
 
@@ -392,31 +391,6 @@ class RAGMCPService:
             len(merged),
             list(meta["providers"].keys()),
         )
-
-        # Prompt-injection risk check on retrieved snippets (observe + log)
-        try:
-            for h in merged:
-                if not isinstance(h, dict):
-                    continue
-                text = h.get("snippet") or h.get("chunk") or h.get("text") or ""
-                if not isinstance(text, str) or not text.strip():
-                    continue
-                pi = calculate_prompt_injection_risk(text, mode="general")
-                if pi.get("risk_level") in ("medium", "high"):
-                    log_high_risk_event(
-                        source="rag_chunk",
-                        user=username,
-                        content=text,
-                        score=int(pi.get("score", 0)),
-                        risk_level=str(pi.get("risk_level")),
-                        triggers=list(pi.get("triggers", [])),
-                        extra={
-                            "server": h.get("server"),
-                            "resourceId": h.get("resourceId"),
-                        },
-                    )
-        except Exception:
-            logger.debug("Prompt risk check failed (RAG results)", exc_info=True)
 
         return {
             "results": {
