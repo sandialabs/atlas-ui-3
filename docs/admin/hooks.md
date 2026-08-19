@@ -270,15 +270,32 @@ sys.exit(0)
 `atlas/config/hooks-example/rag_injection_scan.py` is the full version: it
 scores content against a set of injection heuristics (instruction-override
 phrasing, encoded blobs, fake conversation turns, invisible characters) and
-appends medium/high hits as JSONL to `$ATLAS_RAG_SCAN_LOG`.
+appends medium/high hits as JSONL. **Pass the destination as an argv element**
+— `["python3", ".../rag_injection_scan.py", "${ATLAS_PROJECT_DIR}/logs/rag_injection_scan.jsonl"]`.
+Argv is interpolated; a custom environment variable would not work, because
+`_build_env` gives hooks only a fixed allow-list (see the environment
+allow-list under "Security & governance" above).
+
+> **These records are secret-bearing**, the same caution `audit_tool.sh`
+> carries: each one holds the requesting username, the data sources queried,
+> and a 240-character verbatim excerpt of retrieved document text. Treat the
+> destination as a secret store, and keep it out of the config directory.
 
 This replaces a check that used to run unconditionally inside the MCP RAG path
 and write `logs/security_high_risk.jsonl`. It only ever logged, and nothing
 consumed the file, so it now lives here as opt-in operator policy instead of
-core behavior. As shipped it observes only; the heuristics are cheap pattern
-matching that both misses paraphrased attacks and fires on innocent text
-quoting an instruction, so treat a hit as a lead rather than a verdict, and
-tune before wiring it to `deny`.
+core behavior.
+
+Two calibration notes, because `RagResponse` hands over the whole synthesized
+answer rather than one chunk:
+
+- The structural signals (entropy, delimiters, formatting, length) fire on
+  ordinary long markdown — a benign 900-byte answer scores 60 on them alone —
+  so they cannot escalate by themselves. `medium`/`high` requires at least one
+  *content* trigger. Re-tune if you score per chunk instead.
+- The heuristics are cheap pattern matching that both misses paraphrased
+  attacks and fires on innocent text quoting an instruction. Treat a hit as a
+  lead rather than a verdict, and tune before wiring it to `deny`.
 
 ## Relationship to existing extension points
 

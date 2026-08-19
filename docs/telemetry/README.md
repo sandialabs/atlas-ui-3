@@ -56,9 +56,16 @@ prompt-injection risk scores for RAG chunks, produced by a check that only ever
 logged — nothing read the file and nothing acted on it. The scoring now ships as
 an opt-in `RagResponse` hook
 (`atlas/config/hooks-example/rag_injection_scan.py`, see
-[hooks](../admin/hooks.md)), which writes wherever you point it and can block
-rather than just observe. Any existing file is left in place; delete it once
-you have retired whatever pointed at it.
+[hooks](../admin/hooks.md)), which writes wherever you point it (an argv
+element in `hooks.json`, not an env var) and can block rather than just
+observe. Any existing file is left in place; delete it once you have retired
+whatever pointed at it.
+
+`PI_THRESHOLD_LOW` / `PI_THRESHOLD_MEDIUM` / `PI_THRESHOLD_HIGH` are gone with
+it. They are ignored rather than rejected if left in a `.env` (`AppSettings`
+sets `extra: ignore`), so nothing breaks — but a deployment that tuned them
+should know the values no longer do anything. The equivalent knob is the
+`THRESHOLD_*` constants at the top of the copied hook script.
 
 ## Span types
 
