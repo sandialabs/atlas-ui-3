@@ -97,7 +97,7 @@ A JSON object with a stable envelope plus an event-specific `payload`:
   "hook_event_name": "PreToolUse",
   "session_id": "...",
   "user_email": "user@example.gov",
-  "compliance_level": 3,
+  "compliance_level": "Internal",
   "payload": {
     "tool_name": "filesystem__write_file",
     "tool_args": { "path": "/etc/passwd", "content": "..." },
@@ -108,7 +108,10 @@ A JSON object with a stable envelope plus an event-specific `payload`:
 
 `user_email` and `compliance_level` are **informational** — they are stamped
 server-side and re-asserted after the hook returns regardless of what the hook
-says (a hook can never widen or spoof identity/compliance).
+says (a hook can never widen or spoof identity/compliance). `compliance_level`
+is a canonical level *name* from `config/compliance-levels.json` (`"Public"`,
+`"Internal"`, `"HIPAA"`, …) or `null` — the levels are a named set with an
+allowed-with graph, not a ranking, so compare membership rather than order.
 
 ### Exit codes (the fast path)
 
@@ -251,6 +254,18 @@ exit 0
 ```
 
 See `atlas/config/hooks-example/audit_tool.sh` for the full version.
+
+### One example per event
+
+[docs/admin/hook-examples/](hook-examples/README.md) carries a runnable example
+for **each** of the nine events -- each script states its event, matcher,
+payload shape, honored decisions, and `on_error` default in its own header --
+plus a `hooks.json` that registers all nine at once.
+
+For a policy that lives outside the hook, see the
+[zero-trust mock policy server](../../mocks/zero-trust-mock/README.md): one
+forwarding hook, one HTTP service that answers allow / require approval / deny
+per call.
 
 ### Scan retrieved RAG content for prompt injection (python)
 

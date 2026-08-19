@@ -1,0 +1,22 @@
+{
+  "_comment": "Example hooks.json for the zero-trust mock. Copy to <APP_CONFIG_DIR>/hooks.json. The policy URL is passed as argv because hooks do not inherit the server environment and copy hook_client.py to <APP_CONFIG_DIR>/hooks/ (chmod +x). Start the policy server first -- PreToolUse fails closed, so an unreachable server denies every tool call: python mocks/zero-trust-mock/main.py. Note UserPromptSubmit has no approval gate, so a require_approval verdict there is treated as continue; only deny stops a prompt.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "name": "zero-trust-gate",
+        "matcher": ".*",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/hook_client.py", "http://localhost:8099/v1/authorize"],
+        "timeout_ms": 3000,
+        "on_error": "deny"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "name": "zero-trust-prompt-screen",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/hook_client.py", "http://localhost:8099/v1/authorize"],
+        "timeout_ms": 3000,
+        "on_error": "allow"
+      }
+    ]
+  }
+}
