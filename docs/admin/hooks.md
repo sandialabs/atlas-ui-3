@@ -252,6 +252,18 @@ exit 0
 
 See `atlas/config/hooks-example/audit_tool.sh` for the full version.
 
+### One example per event
+
+[docs/admin/hook-examples/](hook-examples/README.md) carries a runnable example
+for **each** of the nine events -- each script states its event, matcher,
+payload shape, honored decisions, and `on_error` default in its own header --
+plus a `hooks.json` that registers all nine at once.
+
+For a policy that lives outside the hook, see the
+[zero-trust mock policy server](../../mocks/zero-trust-mock/README.md): one
+forwarding hook, one HTTP service that answers allow / require approval / deny
+per call.
+
 ## Relationship to existing extension points
 
 - **MCP tools** are how the model invokes external capabilities. Hooks are how

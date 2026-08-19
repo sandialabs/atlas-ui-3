@@ -338,6 +338,15 @@ podman run -p 8000:8000 atlas-ui-3
 
 Podman reads the existing `Dockerfile` natively. Container uses RHEL 9 UBI (GitHub Actions use Ubuntu runners).
 
+## Zero-Trust Mock for Hook Testing
+
+`mocks/zero-trust-mock/` is a tiny policy server that decides, per tool call, whether to allow, escalate to the approval gate, or block. A forwarding hook (`hook_client.py`) sends each event envelope to `POST /v1/authorize`. Use it to exercise the [lifecycle hook system](docs/admin/hooks.md) end to end; one runnable example hook per event lives in `docs/admin/hook-examples/`.
+
+```bash
+python mocks/zero-trust-mock/main.py &            # port 8099
+cd mocks/zero-trust-mock && python smoke_test.py  # block / escalate / allow / fail-closed
+```
+
 ## RAG Mock for Local Testing
 
 The `mocks/atlas-rag-api-mock/` directory contains a FastAPI mock RAG server with 3 realistic corpora (Company Policies, Technical Documentation, Product Knowledge Base — 12 documents total, all with `title`, `url`, and `last_modified` fields). Use it to test RAG features without an external API.

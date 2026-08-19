@@ -1,0 +1,72 @@
+{
+  "_comment": "Documentation example: one hook per lifecycle event. NOT auto-loaded. Copy this file to <APP_CONFIG_DIR>/hooks.json and the scripts beside it to <APP_CONFIG_DIR>/hooks/ (chmod +x) -- the commands below resolve to ${ATLAS_CONFIG_DIR}/hooks/, not to this docs directory. Enable one event at a time: PreToolUse/PermissionRequest/PreLlmCall/RagCall fail closed, so a script that cannot spawn denies every matching operation.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "name": "tag-session",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/session_start.py"],
+        "timeout_ms": 2000
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "name": "redact-secrets",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/user_prompt_submit.py"],
+        "timeout_ms": 3000
+      }
+    ],
+    "PreLlmCall": [
+      {
+        "name": "route-restricted-onprem",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/pre_llm_call.py"],
+        "timeout_ms": 2000
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "name": "auto-approve-read-only",
+        "matcher": ".*",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/permission_request.py"],
+        "timeout_ms": 2000
+      }
+    ],
+    "PreToolUse": [
+      {
+        "name": "workspace-only-files",
+        "matcher": "filesystem__.*",
+        "command": ["${ATLAS_CONFIG_DIR}/hooks/pre_tool_use.sh"],
+        "timeout_ms": 2000
+      }
+    ],
+    "PostToolUse": [
+      {
+        "name": "redact-tool-results",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/post_tool_use.py"],
+        "timeout_ms": 2000,
+        "on_error": "allow"
+      }
+    ],
+    "RagCall": [
+      {
+        "name": "narrow-sensitive-sources",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/rag_call.py"],
+        "timeout_ms": 2000
+      }
+    ],
+    "RagResponse": [
+      {
+        "name": "stamp-handling-caveat",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/rag_response.py"],
+        "timeout_ms": 2000
+      }
+    ],
+    "SessionEnd": [
+      {
+        "name": "session-audit",
+        "command": ["${ATLAS_CONFIG_DIR}/hooks/session_end.sh"],
+        "timeout_ms": 2000,
+        "on_error": "allow"
+      }
+    ]
+  }
+}
