@@ -16,6 +16,7 @@ the behaviors here are regressions that already happened once:
 import asyncio
 import sys
 import types
+from pathlib import Path
 
 import pytest
 from conftest import (  # the suite's own conftest
@@ -24,6 +25,11 @@ from conftest import (  # the suite's own conftest
     snapshot_singletons,
 )
 from sqlalchemy import create_engine
+
+
+async def _pending_task():
+    """Start a long task on the *running* loop and hand it back."""
+    return asyncio.ensure_future(asyncio.sleep(30))
 
 
 class TestRelease:
@@ -62,6 +68,41 @@ class TestRelease:
 
         asyncio.run(run())
 
+    def test_survives_a_task_whose_loop_is_closed(self):
+        """The common case at teardown: asyncio.run() has closed the loop.
+
+        ``cancel()`` then raises "Event loop is closed" and the task stays
+        PENDING -- teardown must swallow that rather than fail the test, and the
+        comment in ``_release`` must not claim the task ends up cancelled.
+        """
+        loop = asyncio.new_event_loop()
+        task = loop.run_until_complete(_pending_task())
+        loop.close()
+        # Nothing will ever run this task again; keep asyncio's destructor from
+        # printing "Task was destroyed but it is pending!" into suite output.
+        task._log_destroy_pending = False
+        assert task.get_loop() is loop and not task.done()
+
+        # Pin the behavior the comment describes, rather than asserting
+        # something that would hold either way: cancelling really does raise
+        # here, and the task really is left PENDING.
+        with pytest.raises(RuntimeError, match="Event loop is closed"):
+            task.cancel()
+
+        # A *second* task, untouched: the first cancel() sets _must_cancel, so
+        # cancelling that one again returns quietly and would not exercise
+        # _release's swallow at all -- deleting the `except` body would keep
+        # this test green.
+        other_loop = asyncio.new_event_loop()
+        other = other_loop.run_until_complete(_pending_task())
+        other_loop.close()
+        other._log_destroy_pending = False
+
+        _release(other)  # the raising call, swallowed
+
+        assert not other.cancelled() and not other.done()
+        assert not task.cancelled() and not task.done()
+
     def test_does_not_call_a_domain_cancel(self):
         """The ProcessManager regression: ``cancel`` here takes an argument.
 
@@ -90,6 +131,127 @@ class TestRelease:
         engine.dispose = Boom().dispose
 
         _release(engine)  # must not raise; teardown cannot fail the suite
+
+
+class _FakeItem:
+    """Minimal stand-in for a pytest item: the hook only reads ``nodeid``."""
+
+    def __init__(self, nodeid):
+        self.nodeid = nodeid
+
+
+class TestOrderingPluginUsageErrors:
+    """A misconfigured ordering run must read as usage, not as a test failure.
+
+    Bare ``SystemExit`` from a collection hook produces a ~50-line
+    ``INTERNALERROR`` traceback and exit 3; ``pytest.UsageError`` produces one
+    line and exit 4. The hook is a plain function, so this pins the contract
+    without spawning a subprocess.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_ambient_ordering_env(self, monkeypatch):
+        """Start from a clean slate for both ordering variables.
+
+        Without this the tests inherit whatever the developer exported: with
+        ``ATLAS_TEST_ORDER_SCOPE=sideways`` set, two of them failed. Depending
+        on ambient environment is precisely the leak this series removes, so
+        the tests for it should not do it either.
+        """
+        monkeypatch.delenv("ATLAS_TEST_ORDER", raising=False)
+        monkeypatch.delenv("ATLAS_TEST_ORDER_SCOPE", raising=False)
+
+    def _hook(self):
+        """Load the plugin by path.
+
+        ``scripts/`` is only on ``PYTHONPATH`` when the ordering leg runs, so a
+        plain ``import pytest_test_order`` would fail in an ordinary suite run.
+        """
+        import importlib.util
+
+        plugin_path = (
+            Path(__file__).resolve().parents[2] / "scripts" / "pytest_test_order.py"
+        )
+        if not plugin_path.exists():
+            pytest.skip(f"ordering plugin not present at {plugin_path}")
+
+        spec = importlib.util.spec_from_file_location("_pytest_test_order", plugin_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.pytest_collection_modifyitems
+
+    def test_invalid_order_value_raises_usage_error(self, monkeypatch):
+        monkeypatch.setenv("ATLAS_TEST_ORDER", "nonsense")
+
+        with pytest.raises(pytest.UsageError, match="ATLAS_TEST_ORDER='nonsense'"):
+            self._hook()(session=None, config=None, items=[])
+
+    @pytest.mark.parametrize("order", ["7", "reverse"])
+    def test_invalid_scope_raises_usage_error(self, order, monkeypatch):
+        """Including the ``reverse`` case, which is the point of the change.
+
+        Scope is validated before the order branch, so the same typo fails the
+        same way whichever ordering is asked for. With validation left on the
+        shuffle path only, ``reverse`` exited 0 and a seed exited 4.
+        """
+        monkeypatch.setenv("ATLAS_TEST_ORDER", order)
+        monkeypatch.setenv("ATLAS_TEST_ORDER_SCOPE", "sideways")
+
+        with pytest.raises(pytest.UsageError, match="ATLAS_TEST_ORDER_SCOPE='sideways'"):
+            self._hook()(session=None, config=None, items=[])
+
+    def test_seeded_shuffle_is_deterministic_and_scope_aware(self, monkeypatch):
+        """The shuffle branch: it really reorders, repeatably, and honors scope.
+
+        Seed 6 over four modules, because seed 11 happens to be the identity
+        permutation -- with that seed the test passed even with ``rng.shuffle``
+        deleted, which is the failure mode a shuffle test exists to catch.
+        """
+        original = [
+            _FakeItem(f"tests/test_{f}.py::test_{i}") for f in "abcd" for i in range(3)
+        ]
+
+        def run(order, scope, source):
+            monkeypatch.setenv("ATLAS_TEST_ORDER", order)
+            monkeypatch.setenv("ATLAS_TEST_ORDER_SCOPE", scope)
+            copy = list(source)
+            self._hook()(session=None, config=None, items=copy)
+            return [i.nodeid for i in copy]
+
+        nodeids = [i.nodeid for i in original]
+
+        by_module = run("6", "module", original)
+        assert by_module != nodeids, "seed 6 must actually reorder the modules"
+        assert by_module == run("6", "module", original), "same seed must repeat"
+        assert sorted(by_module) == sorted(nodeids), "no item may be lost"
+
+        # Module scope keeps each file's tests contiguous.
+        files = [n.split("::")[0] for n in by_module]
+        assert len(set(files)) == 4
+        assert [f for i, f in enumerate(files) if i == 0 or f != files[i - 1]] == list(
+            dict.fromkeys(files)
+        ), f"module scope must not interleave files: {files}"
+
+        by_test = run("6", "test", original)
+        assert by_test != nodeids, "seed 6 must actually reorder the items"
+        assert sorted(by_test) == sorted(nodeids)
+        assert by_test != by_module, "test scope shuffles differently from module scope"
+
+    def test_unset_leaves_order_untouched(self, monkeypatch):
+        monkeypatch.delenv("ATLAS_TEST_ORDER", raising=False)
+        items = ["a", "b", "c"]
+
+        self._hook()(session=None, config=None, items=items)
+
+        assert items == ["a", "b", "c"]
+
+    def test_reverse_reverses(self, monkeypatch):
+        monkeypatch.setenv("ATLAS_TEST_ORDER", "reverse")
+        items = ["a", "b", "c"]
+
+        self._hook()(session=None, config=None, items=items)
+
+        assert items == ["c", "b", "a"]
 
 
 class TestSingletonSnapshot:
