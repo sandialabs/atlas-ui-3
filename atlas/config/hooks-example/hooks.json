@@ -24,6 +24,14 @@
         "on_error": "allow"
       }
     ],
+    "RagResponse": [
+      {
+        "name": "rag-injection-scan",
+        "command": ["python3", "${ATLAS_CONFIG_DIR}/hooks/rag_injection_scan.py"],
+        "timeout_ms": 3000,
+        "on_error": "allow"
+      }
+    ],
     "UserPromptSubmit": [
       {
         "name": "redact-pii",

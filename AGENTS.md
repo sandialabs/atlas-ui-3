@@ -271,7 +271,7 @@ Request -> SecurityHeaders -> RateLimit -> Auth -> Route
 ```
 - Rate limiting before auth to prevent abuse
 - To bypass auth for a new endpoint, add to path check in `AuthMiddleware.dispatch()` (`atlas/core/middleware.py`)
-- Prompt injection risk detection in `atlas/core/prompt_risk.py`
+- Prompt-injection scanning is operator policy, not core behavior: install the `RagResponse` example hook (`atlas/config/hooks-example/rag_injection_scan.py`, see `docs/admin/hooks.md`)
 - Group-based MCP server access control
 
 ### OPSEC: LLM Identity Disclosure

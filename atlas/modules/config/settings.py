@@ -566,12 +566,6 @@ class AppSettings(BaseSettings):
     # Environment mode
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
 
-    # Prompt injection risk thresholds
-    # NOT USED RIGHT NOW.
-    pi_threshold_low: int = Field(default=30, validation_alias="PI_THRESHOLD_LOW")
-    pi_threshold_medium: int = Field(default=50, validation_alias="PI_THRESHOLD_MEDIUM")
-    pi_threshold_high: int = Field(default=80, validation_alias="PI_THRESHOLD_HIGH")
-
     # Runtime directories
     runtime_feedback_dir: Optional[str] = Field(default=None, validation_alias="RUNTIME_FEEDBACK_DIR")
 

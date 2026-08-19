@@ -252,6 +252,34 @@ exit 0
 
 See `atlas/config/hooks-example/audit_tool.sh` for the full version.
 
+### Scan retrieved RAG content for prompt injection (python)
+
+```python
+#!/usr/bin/env python3
+# config/hooks/rag_injection_scan.py  (RagResponse)
+import json, re, sys
+env = json.load(sys.stdin)
+content = env["payload"].get("content") or ""
+if re.search(r"ignore\s+(previous|all|prior)\s+instructions", content, re.I):
+    # observe: record and let it through. To enforce instead, emit
+    # {"decision": "deny"} or a "modify" that strips the offending text.
+    print("possible injection in retrieved content", file=sys.stderr)
+sys.exit(0)
+```
+
+`atlas/config/hooks-example/rag_injection_scan.py` is the full version: it
+scores content against a set of injection heuristics (instruction-override
+phrasing, encoded blobs, fake conversation turns, invisible characters) and
+appends medium/high hits as JSONL to `$ATLAS_RAG_SCAN_LOG`.
+
+This replaces a check that used to run unconditionally inside the MCP RAG path
+and write `logs/security_high_risk.jsonl`. It only ever logged, and nothing
+consumed the file, so it now lives here as opt-in operator policy instead of
+core behavior. As shipped it observes only; the heuristics are cheap pattern
+matching that both misses paraphrased attacks and fires on innocent text
+quoting an instruction, so treat a hit as a lead rather than a verdict, and
+tune before wiring it to `deny`.
+
 ## Relationship to existing extension points
 
 - **MCP tools** are how the model invokes external capabilities. Hooks are how
