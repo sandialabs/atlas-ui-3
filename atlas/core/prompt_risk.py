@@ -14,6 +14,7 @@ import os
 import re
 from collections import Counter
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -180,6 +181,12 @@ _WRITE_FAILURE_WARNED_PATHS: set = set()
 # change of APP_LOG_DIR gets its own notice instead of being swallowed.
 _RELOCATION_NOTICE_PATHS: set = set()
 
+# Resolved legacy paths, keyed by the unresolved default directory. In a
+# relocated deployment with nothing stale, the notice deliberately keeps
+# re-checking (a stale file can appear later), so without this it would walk
+# symlinks on every medium/high event just to rebuild the same path.
+_LEGACY_PATH_CACHE: dict = {}
+
 
 def high_risk_log_path() -> Path:
     """Return the path of the high-risk security log.
@@ -195,6 +202,11 @@ def high_risk_log_path() -> Path:
     Honoring the override is also what keeps a test run, which points
     ``APP_LOG_DIR`` at a temp directory, from appending to -- or truncating --
     a real deployment's security log.
+
+    Free of side effects: no logging and no module state. (``resolve()`` does
+    read the filesystem to follow symlinks -- "pure" in the sense that callers
+    can call it as often as they like, not that it never touches disk.) The
+    one-time relocation notice lives in ``log_high_risk_event``.
     """
     override = os.getenv("APP_LOG_DIR")
     if not override:
@@ -207,12 +219,16 @@ def high_risk_log_path() -> Path:
     base = Path(override) if override else _default_log_dir()
     # expanduser/resolve so a ``~``-prefixed or CWD-relative configured value
     # lands somewhere predictable rather than following the process's cwd.
-    path = (base.expanduser().resolve() / "security_high_risk.jsonl")
-    _warn_once_if_relocated(path)
-    return path
+    return (base.expanduser().resolve() / "security_high_risk.jsonl")
 
 
+@lru_cache(maxsize=1)
 def _default_log_dir() -> Path:
+    """The repository's ``logs/`` directory.
+
+    Cached: this resolves ``__file__`` and is consulted on every medium/high
+    event; the answer cannot change within a process.
+    """
     return Path(__file__).resolve().parents[2] / "logs"
 
 
@@ -223,13 +239,39 @@ def _warn_once_if_relocated(path: Path) -> None:
     ``logs/``. A collector still tailing that file would go quiet and read as
     "no attacks observed", so name both paths -- but only when the old file
     actually exists, so deployments that never had one stay silent.
+
+    The path is recorded only once the notice has actually been emitted: marking
+    it up front would swallow the announcement for a stale file that appears
+    after the first write (a backup restore, a rolled-back deploy).
     """
     if str(path) in _RELOCATION_NOTICE_PATHS:
         return
-    _RELOCATION_NOTICE_PATHS.add(str(path))
     try:
-        legacy = _default_log_dir() / "security_high_risk.jsonl"
-        if path != legacy and legacy.exists():
+        # Built exactly the way ``high_risk_log_path`` builds its return value:
+        # resolve the *directory*, then append the filename. Comparing against
+        # an unresolved legacy path reports "relocated" for a checkout reached
+        # through a symlink; resolving the whole path instead reports it for a
+        # symlinked log *file*, which is what a rotation setup looks like.
+        # Either mismatch stats the legacy file on every event, forever.
+        default_dir = _default_log_dir()
+        legacy = _LEGACY_PATH_CACHE.get(str(default_dir))
+        if legacy is None:
+            legacy = default_dir.expanduser().resolve() / "security_high_risk.jsonl"
+            _LEGACY_PATH_CACHE[str(default_dir)] = legacy
+        if path == legacy:
+            # Nothing moved, so there is nothing to announce and no reason to
+            # stat anything. This runs per medium/high event, and the
+            # un-relocated deployment is the common case.
+            _RELOCATION_NOTICE_PATHS.add(str(path))
+            return
+        # ``samefile`` rather than a path comparison: an operator following the
+        # upgrade note may *symlink* the old path at the new file, and
+        # ``exists()`` follows that link -- calling a file "no longer updated"
+        # while it receives every record. When the new location has no file
+        # yet, there is nothing to compare and the old log really is stale, so
+        # the notice stands.
+        if legacy.exists() and not (path.exists() and legacy.samefile(path)):
+            _RELOCATION_NOTICE_PATHS.add(str(path))
             logger.warning(
                 "High-risk security log now writes to %s (APP_LOG_DIR); a "
                 "stale copy remains at %s and is no longer updated -- point "
@@ -251,6 +293,10 @@ def log_high_risk_event(*, source: str, user: Optional[str], content: str, score
         if risk_level not in ("medium", "high"):
             return
         log_path = high_risk_log_path()
+        # Emitted here rather than inside the resolver: ``high_risk_log_path``
+        # stays a pure function, and the extra stat is paid only on a turn that
+        # actually writes a record.
+        _warn_once_if_relocated(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now(timezone.utc).isoformat() + "Z",

@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #821 - 2026-08-18
+### PR #821 - 2026-08-19
 - **A worked example for every hook event**: `docs/admin/hook-examples/` ships one runnable hook per lifecycle event, each stating its matcher, stdin payload shape, honored decisions, and `on_error` default in its own header, plus a combined `hooks.json`. The examples are exercised through the real hook engine in CI, so a stale example fails the build rather than an operator's deployment.
 - **Zero-trust mock policy server**: `mocks/zero-trust-mock/` decides per tool call whether to allow, escalate to the approval gate, or block, with a stdlib-only forwarding hook on the Atlas side — a demonstration of runtime authorization where policy lives in a service instead of in each hook script.
+
+### PR #820 - 2026-08-18
+- **Lands the review fixes that missed the #818 squash-merge**: `high_risk_log_path()` is a pure resolver again (the one-time relocation notice moved into `log_high_risk_event`), that notice now records a path only once it has actually fired so a stale log appearing later is still announced, `_release()`'s comment no longer claims a closed-loop task ends up cancelled (it raises and stays PENDING), and the ordering plugin raises `pytest.UsageError` so a mistyped `ATLAS_TEST_ORDER` reports one line and exit 4 (usage) instead of a ~50-line `INTERNALERROR` traceback and exit 3.
+- **The relocation notice no longer cries wolf**: it compares the old and new locations with `samefile()`, so the migration the #818 upgrade note recommends -- symlinking the old path at the live log -- is recognized as the same file rather than reported as "no longer updated". `ATLAS_TEST_ORDER_SCOPE` is also now validated for every ordering rather than only the seeded shuffle, so a typo fails the same way whichever order is requested (it previously exited 0 with `reverse` and 4 with a seed).
 
 ### PR #819 - 2026-08-18
 - **Workspace rows name the prompt they carry**: the switcher summarized a saved prompt as the generic "custom prompt", so you could not tell which prompt you were about to switch into. Rows now read `4 tools · 2 sources · Terse Code Reviewer`, resolving user-library prompts by title and MCP prompts by name, and falling back to the generic label only when the prompt no longer exists.

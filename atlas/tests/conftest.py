@@ -235,9 +235,13 @@ def _release(value) -> None:
         if isinstance(value, Engine):
             value.dispose()
         elif isinstance(value, asyncio.Task) and not value.done():
-            # Best effort: the task's loop is usually already closed by the
-            # time a test finishes, so this marks it cancelled without being
-            # able to unwind the coroutine. Nothing here can await it.
+            # Only effective while the task's loop is still open. Once the loop
+            # is closed -- the common case here, since asyncio.run() closes it
+            # on the way out -- ``cancel()`` raises "Event loop is closed" and
+            # the task stays PENDING; the swallowed error is the honest outcome,
+            # and dropping our reference is all that is left to do. Cancelling
+            # such a task properly means doing it before the loop closes, which
+            # is the owning fixture's job, not teardown's.
             value.cancel()
     except Exception:  # pragma: no cover - teardown must not raise
         pass
