@@ -28,6 +28,7 @@ reference. In practice, enable one event at a time.
 
 ```bash
 # 1. Install the scripts where the config interpolation points.
+mkdir -p config/hooks
 cp docs/admin/hook-examples/*.py docs/admin/hook-examples/*.sh config/hooks/
 chmod +x config/hooks/*
 cp docs/admin/hook-examples/hooks.json config/hooks.json
