@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #820 - 2026-08-18
+- **Lands the review fixes that missed the #818 squash-merge**: `high_risk_log_path()` is a pure resolver again (the one-time relocation notice moved into `log_high_risk_event`), that notice now records a path only once it has actually fired so a stale log appearing later is still announced, `_release()`'s comment no longer claims a closed-loop task ends up cancelled (it raises and stays PENDING), and the ordering plugin raises `pytest.UsageError` so a mistyped `ATLAS_TEST_ORDER` reports one line and exit 4 (usage) instead of a ~50-line `INTERNALERROR` traceback and exit 3.
+- **The relocation notice no longer cries wolf**: it compares the old and new locations with `samefile()`, so the migration the #818 upgrade note recommends -- symlinking the old path at the live log -- is recognized as the same file rather than reported as "no longer updated". `ATLAS_TEST_ORDER_SCOPE` is also now validated for every ordering rather than only the seeded shuffle, so a typo fails the same way whichever order is requested (it previously exited 0 with `reverse` and 4 with a seed).
+
 ### PR #819 - 2026-08-18
 - **Workspace rows name the prompt they carry**: the switcher summarized a saved prompt as the generic "custom prompt", so you could not tell which prompt you were about to switch into. Rows now read `4 tools · 2 sources · Terse Code Reviewer`, resolving user-library prompts by title and MCP prompts by name, and falling back to the generic label only when the prompt no longer exists.
 - **Workspace switcher keeps its selection across a page refresh**: the active-workspace pointer persists in `localStorage` while the feature flags and the workspace list both arrive asynchronously, and the stale-pointer cleanup ran against those pre-fetch defaults — so every reload cleared the pointer and the header fell back to "Workspace" even though the selections it applied were still in place. The cleanup now waits for the config payload and the first successful workspace fetch (`isStaleWorkspacePointer`).
