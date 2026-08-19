@@ -5,6 +5,7 @@ import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
 import { useUserPrompts } from '../hooks/useUserPrompts'
+import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
@@ -42,6 +43,9 @@ export const ChatProvider = ({ children }) => {
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
+	// Workspaces: saved bundles of prompt + RAG source + tool selections
+	const workspacesEnabled = !!config.features?.workspaces
+	const workspaces = useWorkspaces(workspacesEnabled)
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
@@ -112,6 +116,64 @@ export const ChatProvider = ({ children }) => {
 			clearActivePrompt()
 		}
 	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
+
+	// Which workspace the current selections came from. Persisted so a refresh
+	// keeps showing the workspace whose selections are still loaded.
+	const [activeWorkspaceId, setActiveWorkspaceId] = usePersistentState('chatui-active-workspace', null)
+	const { applyWorkspace, snapshotSelections } = selections
+	const { workspaces: workspaceList, updateWorkspace: updateWorkspaceApi, deleteWorkspace: deleteWorkspaceApi } = workspaces
+
+	// Drop a stale pointer: the workspace may have been deleted in another tab,
+	// or the feature turned off, and a dangling id would light up the switcher
+	// with a name that no longer exists. Gated on `configReady` and `loaded` so a
+	// page refresh does not clear the pointer against defaults that have not been
+	// replaced by the real config and workspace list yet.
+	const workspacesLoaded = workspaces.loaded
+	useEffect(() => {
+		if (isStaleWorkspacePointer({
+			activeWorkspaceId,
+			configReady: config.configReady,
+			enabled: workspacesEnabled,
+			loaded: workspacesLoaded,
+			workspaces: workspaceList,
+		})) {
+			setActiveWorkspaceId(null)
+		}
+	}, [activeWorkspaceId, config.configReady, workspacesEnabled, workspacesLoaded, workspaceList, setActiveWorkspaceId])
+
+	const switchWorkspace = useCallback(workspaceId => {
+		const ws = workspaceList.find(w => w.id === workspaceId)
+		if (!ws) return false
+		applyWorkspace(ws.config)
+		setActiveWorkspaceId(ws.id)
+		return true
+	}, [workspaceList, applyWorkspace, setActiveWorkspaceId])
+
+	const saveCurrentAsWorkspace = useCallback(async (name, description = null) => {
+		const created = await workspaces.createWorkspace(name, snapshotSelections(), description)
+		if (created) setActiveWorkspaceId(created.id)
+		return created
+	}, [workspaces, snapshotSelections, setActiveWorkspaceId])
+
+	const updateActiveWorkspace = useCallback(async () => {
+		if (!activeWorkspaceId) return null
+		return updateWorkspaceApi(activeWorkspaceId, { config: snapshotSelections() })
+	}, [activeWorkspaceId, updateWorkspaceApi, snapshotSelections])
+
+	const renameWorkspace = useCallback(
+		(workspaceId, name) => updateWorkspaceApi(workspaceId, { name }),
+		[updateWorkspaceApi]
+	)
+
+	const deleteWorkspace = useCallback(async workspaceId => {
+		const deleted = await deleteWorkspaceApi(workspaceId)
+		// Deleting the tracked workspace only drops the pointer; the selections it
+		// applied stay put so the user does not lose their context mid-chat.
+		if (deleted && workspaceId === activeWorkspaceId) setActiveWorkspaceId(null)
+		return deleted
+	}, [deleteWorkspaceApi, activeWorkspaceId, setActiveWorkspaceId])
+
+	const clearActiveWorkspace = useCallback(() => setActiveWorkspaceId(null), [setActiveWorkspaceId])
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -847,6 +909,17 @@ export const ChatProvider = ({ children }) => {
 		deleteUserPrompt: userPrompts.deletePrompt,
 		selectAllServerPrompts,
 		deselectAllServerPrompts,
+		// Workspaces
+		workspaces: workspaceList,
+		workspacesLoading: workspaces.loading,
+		workspacesError: workspaces.error,
+		activeWorkspaceId,
+		switchWorkspace,
+		saveCurrentAsWorkspace,
+		updateActiveWorkspace,
+		renameWorkspace,
+		deleteWorkspace,
+		clearActiveWorkspace,
 		selectedDataSources: selections.selectedDataSources,
 		toggleDataSource: selections.toggleDataSource,
 		addDataSources: selections.addDataSources,

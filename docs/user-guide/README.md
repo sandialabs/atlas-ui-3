@@ -9,3 +9,4 @@ first-run setup, see [getting-started/](../getting-started/README.md).
 
 - [Custom Prompt Library](custom-prompts/README.md) - Save, edit, and reuse your own prompts
 - [Rewind / Edit a Previous Prompt](rewind-edit/README.md) - Edit one of your earlier messages and re-run from there
+- [Workspaces](workspaces/README.md) - Save prompt, data source, and tool selections as named contexts and switch between them

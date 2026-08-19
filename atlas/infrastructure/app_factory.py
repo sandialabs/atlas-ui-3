@@ -78,11 +78,13 @@ class AppFactory:
         # Chat history persistence (feature-flagged)
         self.conversation_repository = None
         self.user_prompt_repository = None
+        self.workspace_repository = None
         if self.config_manager.app_settings.feature_chat_history_enabled:
             try:
                 from atlas.modules.chat_history import (
                     ConversationRepository,
                     UserPromptRepository,
+                    WorkspaceRepository,
                     get_session_factory,
                     init_database,
                 )
@@ -91,6 +93,7 @@ class AppFactory:
                 session_factory = get_session_factory()
                 self.conversation_repository = ConversationRepository(session_factory)
                 self.user_prompt_repository = UserPromptRepository(session_factory)
+                self.workspace_repository = WorkspaceRepository(session_factory)
                 logger.info("Chat history persistence initialized")
             except Exception as e:
                 logger.error("Failed to initialize chat history: %s", e, exc_info=True)

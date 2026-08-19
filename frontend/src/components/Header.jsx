@@ -5,6 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
+import WorkspaceSelector from './WorkspaceSelector'
 import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info, Terminal } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useTheme } from '../contexts/ThemeContext'
@@ -179,6 +180,9 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           </button>
         )}
         
+        {/* Workspace switcher: prompt + data sources + tools as one context */}
+        {features?.workspaces && <WorkspaceSelector />}
+
         {/* New Chat Button */}
         <button
           onClick={() => {
