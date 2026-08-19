@@ -9,6 +9,11 @@ on its own without cross-referencing the reference doc.
 These are **teaching examples**, not a policy baseline. Read one, copy it, and
 replace the rule with yours.
 
+They supersede the older four-script set in `atlas/config/hooks-example/`, which
+covers four events with the same contract; when the two differ, this directory
+is the one kept in step with the engine (CI runs every script here through the
+real `HookManager`).
+
 | Event | Example | Demonstrates |
 | ----- | ------- | ------------ |
 | `SessionStart` | [session_start.py](session_start.py) | `modify` to attach session metadata; `deny` to reject a session before it is persisted |
@@ -26,11 +31,17 @@ reference. In practice, enable one event at a time.
 
 ## Trying them out
 
+> `config/hooks.json` is a single file, so the copy below **replaces** any hook
+> config you already have. Back it up first, and in a real rollout register one
+> event at a time rather than all nine — this quickstart installs everything
+> because seeing each event fire is the point of the exercise.
+
 ```bash
 # 1. Install the scripts where the config interpolation points.
 mkdir -p config/hooks
 cp docs/admin/hook-examples/*.py docs/admin/hook-examples/*.sh config/hooks/
 chmod +x config/hooks/*
+cp -n config/hooks.json config/hooks.json.bak 2>/dev/null || true
 cp docs/admin/hook-examples/hooks.json config/hooks.json
 
 # 2. Restart Atlas (hooks load through ConfigManager).

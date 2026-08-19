@@ -73,4 +73,8 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("ZERO_TRUST_PORT", "8099"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # Loopback by default: /decisions and /decisions/reset are unauthenticated,
+    # and the log holds who asked for what. Set ZERO_TRUST_HOST to bind wider
+    # (a container needs 0.0.0.0), knowingly.
+    host = os.getenv("ZERO_TRUST_HOST", "127.0.0.1")
+    uvicorn.run(app, host=host, port=port)

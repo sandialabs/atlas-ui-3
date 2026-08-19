@@ -17,8 +17,14 @@ import json
 import re
 import sys
 
+# Tool results come back as JSON as often as as plain text, so the key pattern
+# allows an optional quote/prefix around the key ("api_key": "...", DB_PASSWORD=...)
+# and replaces only the value, stopping at the first quote, comma, or brace.
+# Keeping the key and its punctuation intact matters: a greedy \S+ that ate the
+# rest of the line would hand the model a broken JSON document.
 SECRETS = [
-    (re.compile(r"(?i)\b(api[_-]?key|password|secret)\s*[:=]\s*\S+"), r"\1=[REDACTED]"),
+    (re.compile(r'(?i)("?[\w-]*(?:api[_-]?key|password|passwd|secret|token)"?\s*[:=]\s*"?)[^"\n,}]+'),
+     r"\1[REDACTED]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED-AWS-KEY]"),
 ]
 

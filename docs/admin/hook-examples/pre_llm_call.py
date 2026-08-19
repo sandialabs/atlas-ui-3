@@ -10,6 +10,11 @@ Can do:   modify (swap "model", rewrite "messages"/"tools") | deny (raises
           the LLM layer, so use deny to stop a call.
 on_error: deny (per-event default -- this event guards a boundary).
 
+``compliance_level`` in the envelope is a canonical level *name* from
+``config/compliance-levels.json`` ("Public", "Internal", "HIPAA", ...) or null
+-- not a number. Levels are a set with an allowed-with graph, not a ranking, so
+compare against a named set; ``level >= 3`` would never match anything.
+
 A model swap is re-authorized against the same per-model group ACL the
 orchestrator applied to the user's original choice. An unauthorized swap is
 refused and the original model is kept, so this can tighten routing but never
@@ -19,18 +24,15 @@ import json
 import sys
 
 ONPREM_MODEL = "onprem-llama"
-RESTRICTED_COMPLIANCE_LEVEL = 3
+RESTRICTED_LEVELS = {"HIPAA", "FedRAMP"}
 
 env = json.load(sys.stdin)
 payload = env.get("payload") or {}
-level = env.get("compliance_level")
 
-if isinstance(level, int) and level >= RESTRICTED_COMPLIANCE_LEVEL:
-    if payload.get("model") != ONPREM_MODEL:
-        print(json.dumps({
-            "decision": "modify",
-            "payload": {"model": ONPREM_MODEL},
-        }))
-    sys.exit(0)
+if env.get("compliance_level") in RESTRICTED_LEVELS and payload.get("model") != ONPREM_MODEL:
+    print(json.dumps({
+        "decision": "modify",
+        "payload": {"model": ONPREM_MODEL},
+    }))
 
 sys.exit(0)

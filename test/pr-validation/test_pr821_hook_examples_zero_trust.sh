@@ -73,6 +73,18 @@ echo '{"payload":{"tool_name":"email__send","needs_approval":false}}' \
     | "$EXAMPLES/permission_request.py" | grep -q "require_approval"
 print_result $? "PermissionRequest escalates an outbound tool"
 
+out=$(echo '{"payload":{"tool_args":{"path":"/workspace/../../etc/passwd"}}}' \
+      | "$EXAMPLES/pre_tool_use.sh" 2>&1); [ $? -eq 2 ]
+print_result $? "PreToolUse normalizes the path before the /workspace check"
+
+echo 'not json' | "$EXAMPLES/pre_tool_use.sh" >/dev/null 2>&1; [ $? -eq 1 ]
+print_result $? "PreToolUse fails closed on an unparseable payload (exit 1 -> deny)"
+
+out=$(echo '{"payload":{"tool_name":"filesystem__read_file","tool_args":{"path":"/workspace/a"},"admin_required":true}}' \
+      | "$EXAMPLES/permission_request.py")
+[ -z "$out" ]
+print_result $? "PermissionRequest does not auto-approve an admin-required tool"
+
 python3 -c "import json,sys; json.load(open('$EXAMPLES/hooks.json'))" 2>/dev/null
 print_result $? "example hooks.json is valid JSON"
 
@@ -109,6 +121,10 @@ print_result $? "hook fails closed when the policy server is unreachable"
 
 curl -s "http://127.0.0.1:${PORT}/decisions" | grep -q '"tool_name"'
 print_result $? "decision log records a projection of each call"
+
+echo '{"hook_event_name":"PreToolUse","user_email":"test@test.com","payload":{"tool_name":"shell__run","tool_args":{"cmd":"pip install gunicorn"}}}' \
+    | python "$MOCK/hook_client.py" "$URL" | grep -q '"continue"'
+print_result $? "policy matches whole words ('gunicorn' is not 'gun')"
 
 kill $SERVER_PID 2>/dev/null; trap - EXIT
 

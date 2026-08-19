@@ -69,6 +69,9 @@ cd mocks/zero-trust-mock && python smoke_test.py
 ## Configuration
 
 - `ZERO_TRUST_PORT` — server port (default `8099`).
+- `ZERO_TRUST_HOST` — bind address (default `127.0.0.1`). `/decisions` and
+  `/decisions/reset` are unauthenticated and the log records who asked for
+  what, so binding wider than loopback is a deliberate choice.
 - The hook's policy URL and timeout are **argv**, set in `hooks.json`:
 
   ```json

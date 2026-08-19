@@ -13,28 +13,44 @@ keyword matching keeps the demo readable.
 
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, Optional, Tuple
+import re
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 DENY_TERMS = ("bomb", "gun", "weapon", "explosive", "malware")
 ASK_TERMS = ("password", "credential", "secret", "production", "delete")
 
 
-def flatten(value: Any) -> str:
-    """Lower-cased text of every string in a payload, keys included.
+def iter_values(value: Any) -> Iterator[str]:
+    """Yield every string *value* in a payload, at any depth.
 
-    Serializing the payload means a term is caught wherever it appears -- a
-    tool argument, a nested object, a prompt, a retrieved chunk -- instead of
-    only in the one field a hand-written check happened to look at.
+    Walking the structure means a term is caught wherever it appears -- a tool
+    argument, a nested object, a prompt, a retrieved chunk -- instead of only in
+    the one field a hand-written check happened to look at. Keys are skipped:
+    a field literally named ``password`` is a schema detail, not a signal about
+    what this call is doing.
     """
     if isinstance(value, str):
-        return value.lower()
-    return json.dumps(value, default=str).lower()
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from iter_values(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from iter_values(item)
+    elif value is not None:
+        yield str(value)
 
 
-def find_term(text: str, terms: Tuple[str, ...]) -> Optional[str]:
+def find_term(values: Tuple[str, ...], terms: Tuple[str, ...]) -> Optional[str]:
+    """Return the first term appearing as a whole word in any value.
+
+    Word boundaries, not substrings: ``pip install gunicorn`` is not a request
+    about a gun, and ``secretary`` is not a secret. A demo that cannot tell the
+    difference teaches the wrong lesson about keyword policies.
+    """
     for term in terms:
-        if term in text:
+        pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+        if any(pattern.search(value) for value in values):
             return term
     return None
 
@@ -47,16 +63,16 @@ def evaluate(envelope: Dict[str, Any]) -> Dict[str, Any]:
     """
     payload = envelope.get("payload") or {}
     subject = envelope.get("user_email") or "unknown"
-    text = flatten(payload)
+    values = tuple(iter_values(payload))
 
-    denied = find_term(text, DENY_TERMS)
+    denied = find_term(values, DENY_TERMS)
     if denied:
         return {
             "decision": "deny",
             "reason": f"Zero-trust policy: request mentions {denied!r} and is blocked.",
         }
 
-    asked = find_term(text, ASK_TERMS)
+    asked = find_term(values, ASK_TERMS)
     if asked:
         return {
             "decision": "require_approval",

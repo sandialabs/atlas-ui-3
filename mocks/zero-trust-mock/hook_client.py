@@ -39,6 +39,7 @@ import urllib.error
 import urllib.request
 
 DEFAULT_URL = "http://localhost:8099/v1/authorize"
+DECISIONS = frozenset({"continue", "modify", "deny", "require_approval"})
 
 
 def main(argv: list) -> int:
@@ -59,6 +60,14 @@ def main(argv: list) -> int:
     except (urllib.error.URLError, OSError, ValueError) as exc:
         print(f"zero-trust policy server unreachable: {exc}", file=sys.stderr)
         return 1  # not exit 2: this is a hook *error*, so on_error applies
+
+    # Validate before echoing. Atlas reads unrecognized output as "continue",
+    # so a 2xx body that is not a decision -- a captive portal, a proxy error
+    # page rendered as JSON, a rolled-back API -- would silently become
+    # permission to proceed. Treat it as a hook error and let on_error decide.
+    if not isinstance(decision, dict) or decision.get("decision") not in DECISIONS:
+        print(f"zero-trust policy server returned no usable decision: {decision!r}", file=sys.stderr)
+        return 1
 
     print(json.dumps(decision))
     return 0

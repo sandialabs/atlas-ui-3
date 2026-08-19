@@ -11,17 +11,40 @@
 #           auto-approve.
 # on_error: deny (per-event default).
 #
-# This is the whole exit-code contract: 0 = continue, 2 = block with stderr as
-# the reason shown to the user, anything else = hook error (on_error decides).
+# The exit-code contract in full: 0 = continue, 2 = block with stderr as the
+# reason shown to the user, anything else = hook error (on_error decides, which
+# for PreToolUse means deny).
+#
+# Two things this example does on purpose, because a prefix check that skips
+# them is a control that only looks like one:
+#   * the path is normalized before comparison, so /workspace/../../etc/passwd
+#     is not "inside /workspace";
+#   * a payload this script cannot parse exits 1 (hook error -> deny), never 0.
+#     Malformed input is exactly the case a policy hook must not wave through.
 set -eu
 
 envelope="$(cat)"
-path="$(printf '%s' "$envelope" | python3 -c \
-  'import json,sys; print((json.load(sys.stdin).get("payload") or {}).get("tool_args", {}).get("path", ""))' \
-  2>/dev/null || true)"
+
+path="$(printf '%s' "$envelope" | python3 -c '
+import json, os, sys
+args = (json.load(sys.stdin).get("payload") or {}).get("tool_args")
+if args is None:
+    args = {}
+if not isinstance(args, dict):
+    raise SystemExit(1)
+path = args.get("path")
+if path is None:
+    print("")            # no path argument: nothing for this rule to judge
+else:
+    print(os.path.normpath(str(path)))
+' 2>/dev/null)" || {
+    echo "Policy hook could not parse the tool arguments" >&2
+    exit 1
+}
 
 case "$path" in
-  ""|/workspace/*) exit 0 ;;
+  "") exit 0 ;;
+  /workspace|/workspace/*) exit 0 ;;
   *)
     echo "Policy: file tools may only touch /workspace (got: $path)" >&2
     exit 2

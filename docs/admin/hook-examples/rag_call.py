@@ -12,20 +12,23 @@ on_error: deny (per-event default).
 
 Sources the hook lists that were not in the original request are dropped: the
 allow-list can only shrink, never grow beyond what compliance already permitted.
+
+``compliance_level`` is a canonical level *name* ("Public", "Internal", ...) or
+null -- see config/compliance-levels.json. It is a named set, not a ranking, so
+this compares membership rather than ordering.
 """
 import json
 import sys
 
-# Sources that require compliance level 2 or above.
+# Sources only these compliance levels may retrieve from.
 SENSITIVE_SOURCES = {"hr-records", "incident-reports"}
-MIN_LEVEL_FOR_SENSITIVE = 2
+LEVELS_ALLOWED_SENSITIVE = {"Internal", "HIPAA"}
 
 env = json.load(sys.stdin)
 payload = env.get("payload") or {}
 sources = payload.get("qualified_data_sources") or []
-level = env.get("compliance_level")
 
-if isinstance(level, int) and level >= MIN_LEVEL_FOR_SENSITIVE:
+if env.get("compliance_level") in LEVELS_ALLOWED_SENSITIVE:
     sys.exit(0)
 
 allowed = [s for s in sources if s.split("/")[-1] not in SENSITIVE_SOURCES]
