@@ -32,7 +32,6 @@ Resulting layout (whether default `<project_root>/logs/` or your custom
 <APP_LOG_DIR>/
 ├── spans.jsonl              # one JSON line per span (always this name)
 ├── app.jsonl                # structured application logs
-├── security_high_risk.jsonl # prompt-injection risk events (medium/high only)
 └── tool_outputs/            # only when ATLAS_LOG_TOOL_OUTPUTS=true
     └── <span_id>.txt        # one file per successful tool call
 ```
@@ -44,22 +43,29 @@ Point each instance at a different `APP_LOG_DIR` (e.g.
 `/var/log/atlas/instance-a/`) — the filenames stay `spans.jsonl` /
 `app.jsonl` inside each directory.
 
-`security_high_risk.jsonl` resolves the other way round — `APP_LOG_DIR` env
-var → `app_settings.app_log_dir` → `<project_root>/logs/` — matching
-`routes/telemetry_routes._log_base_dir`, so an env var exported at runtime
-takes effect without a config reload. `tool_outputs/` reads **only** the
-`APP_LOG_DIR` env var (`core/telemetry._tool_output_dir`), so a directory
-configured solely through `app_settings.app_log_dir` leaves tool outputs in
-`<project_root>/logs/`. The four implementations in the tree disagree on this
-order (`core/otel_config` and `routes/admin_routes` read the setting first,
-`core/telemetry` only the env var, `routes/telemetry_routes` and the security
-log read the env var then the setting); unifying them is a behavior change for
-those call sites and has not been done.
+`tool_outputs/` reads **only** the `APP_LOG_DIR` env var
+(`core/telemetry._tool_output_dir`), so a directory configured solely through
+`app_settings.app_log_dir` leaves tool outputs in `<project_root>/logs/`. The
+implementations in the tree disagree on this order (`core/otel_config` and
+`routes/admin_routes` read the setting first, `core/telemetry` only the env
+var, `routes/telemetry_routes` the env var then the setting); unifying them is
+a behavior change for those call sites and has not been done.
 
-**Upgrade note:** `security_high_risk.jsonl` previously always lived at
-`<project_root>/logs/`, ignoring `APP_LOG_DIR`. If you set `APP_LOG_DIR`, the
-file now lands there with the other logs; move or symlink the old one if a
-collector still points at the repository path.
+**Upgrade note:** `security_high_risk.jsonl` is no longer written. It held
+prompt-injection risk scores for RAG chunks, produced by a check that only ever
+logged — nothing read the file and nothing acted on it. The scoring now ships as
+an opt-in `RagResponse` hook
+(`atlas/config/hooks-example/rag_injection_scan.py`, see
+[hooks](../admin/hooks.md)), which writes wherever you point it (an argv
+element in `hooks.json`, not an env var) and can block rather than just
+observe. Any existing file is left in place; delete it once you have retired
+whatever pointed at it.
+
+`PI_THRESHOLD_LOW` / `PI_THRESHOLD_MEDIUM` / `PI_THRESHOLD_HIGH` are gone with
+it. They are ignored rather than rejected if left in a `.env` (`AppSettings`
+sets `extra: ignore`), so nothing breaks — but a deployment that tuned them
+should know the values no longer do anything. The equivalent knob is the
+`THRESHOLD_*` constants at the top of the copied hook script.
 
 ## Span types
 
