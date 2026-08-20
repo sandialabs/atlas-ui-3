@@ -464,6 +464,83 @@ class TestParseResponseMetadata:
         assert doc.confidence_score == 0.9
         assert [s.text for s in doc.sections] == ["first snippet", "second snippet"]
 
+    def test_reference_field_becomes_display_label(self, client):
+        """Newer backends send ``reference``; it becomes the shown label."""
+        data = {
+            "metadata": {
+                "response_time": 1,
+                "references": [
+                    {
+                        "reference": "API Authentication Guide, tech-001.txt",
+                        "document_ref": 1,
+                        "filename": "tech-001.txt",
+                        "sections": [
+                            {"section_ref": 1, "text": "snippet", "relevance": 0.5},
+                        ],
+                    }
+                ],
+            },
+        }
+        result = client._parse_response_metadata(data, "technical-docs")
+        doc = result.documents_found[0]
+        assert doc.title == "API Authentication Guide, tech-001.txt"
+
+    def test_filename_used_when_reference_absent(self, client):
+        """Backends that only send ``filename`` render exactly as before."""
+        data = {
+            "metadata": {
+                "response_time": 1,
+                "references": [
+                    {"document_ref": 1, "filename": "tech-001.txt", "sections": []}
+                ],
+            },
+        }
+        result = client._parse_response_metadata(data, "technical-docs")
+        assert result.documents_found[0].title == "tech-001.txt"
+
+    def test_blank_reference_falls_back_to_filename(self, client):
+        data = {
+            "metadata": {
+                "response_time": 1,
+                "references": [
+                    {"reference": "   ", "document_ref": 1,
+                     "filename": "tech-001.txt", "sections": []}
+                ],
+            },
+        }
+        result = client._parse_response_metadata(data, "technical-docs")
+        assert result.documents_found[0].title == "tech-001.txt"
+
+    def test_non_string_reference_falls_back_to_filename(self, client):
+        """A malformed ``reference`` must not break parsing."""
+        data = {
+            "metadata": {
+                "response_time": 1,
+                "references": [
+                    {"reference": 42, "document_ref": 1,
+                     "filename": "tech-001.txt", "sections": []}
+                ],
+            },
+        }
+        result = client._parse_response_metadata(data, "technical-docs")
+        assert result.documents_found[0].title == "tech-001.txt"
+
+    def test_reference_is_sanitized_and_truncated(self, client):
+        """``reference`` goes through the same title validator as filenames."""
+        data = {
+            "metadata": {
+                "response_time": 1,
+                "references": [
+                    {"reference": "Bad\x00Label" + "A" * 300, "document_ref": 1,
+                     "filename": "tech-001.txt", "sections": []}
+                ],
+            },
+        }
+        result = client._parse_response_metadata(data, "technical-docs")
+        title = result.documents_found[0].title
+        assert "\x00" not in title
+        assert len(title) == 200
+
     def test_parses_metadata_no_references(self, client):
         data = {
             "message": {"role": "assistant", "content": "x"},

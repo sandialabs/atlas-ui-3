@@ -191,6 +191,13 @@ class Section(BaseModel):
 
 class Reference(BaseModel):
     citation: Optional[str] = Field(None, description="Citation in IEEE format.")
+    reference: Optional[str] = Field(
+        None,
+        description=(
+            "Human-readable source line the UI shows as the reference label. "
+            "Falls back to filename when absent."
+        ),
+    )
     document_ref: int = Field(..., description="The document reference number for intext citations.")
     filename: str = Field(..., description="Filename of the source document.")
     sections: List[Section] = Field(..., description="Relevant sections from the source document.")
@@ -413,6 +420,20 @@ def _ieee_citation(document_ref: int, title: str, filename: str, url: Optional[s
     return " ".join(parts)
 
 
+def _reference_label(title: str, filename: str) -> str:
+    """Human-readable label a real backend would send as ``reference``.
+
+    Real deployments send a curated source line; the mock composes
+    ``"<title>, <filename>"`` so the UI has a value that is visibly
+    distinct from the bare filename.
+    """
+    if title and title != filename:
+        # Avoid characters _sanitize_label strips downstream (parens,
+        # brackets) so the mock's label survives rendering verbatim.
+        return f"{title}, {filename}"
+    return filename
+
+
 def search_corpus_for_references(
     query: str,
     corpus_id: str,
@@ -456,6 +477,7 @@ def search_corpus_for_references(
         references.append(
             Reference(
                 citation=_ieee_citation(document_ref, title, filename, doc.get("url")),
+                reference=_reference_label(title, filename),
                 document_ref=document_ref,
                 filename=filename,
                 sections=sections,

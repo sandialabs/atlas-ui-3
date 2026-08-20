@@ -26,6 +26,7 @@ Response body (RagResponse):
         "references": [
           {
             "citation": "IEEE format" | null,
+            "reference": "human-readable source line" | null,
             "document_ref": 1,
             "filename": "doc.pdf",
             "sections": [
@@ -769,6 +770,10 @@ class AtlasRAGClient:
         ``sections`` carry the actual snippet text matched to the query.
         The reference's top section relevance becomes ``confidence_score``
         so existing UI/sorting code still works without changes.
+
+        The displayed label prefers the backend's ``reference`` string and
+        falls back to ``filename``, so backends that only send a filename
+        render exactly as before.
         """
         try:
             references_raw = metadata.get("references") or []
@@ -789,6 +794,13 @@ class AtlasRAGClient:
 
                 top_relevance = max((s.relevance for s in sections), default=0.0)
                 filename = ref.get("filename") or ""
+                # Newer backends send a human-readable ``reference`` string
+                # (e.g. an IEEE-style source line) in place of the older
+                # ``citation`` field. Prefer it as the displayed label and
+                # fall back to the filename when it is absent.
+                reference = ref.get("reference")
+                if not isinstance(reference, str) or not reference.strip():
+                    reference = None
 
                 try:
                     doc_metadata = DocumentMetadata(
@@ -797,7 +809,7 @@ class AtlasRAGClient:
                         confidence_score=top_relevance,
                         chunk_id=None,
                         last_modified=None,
-                        title=filename or None,
+                        title=reference or filename or None,
                         url=None,
                         citation=ref.get("citation"),
                         document_ref=ref.get("document_ref"),
