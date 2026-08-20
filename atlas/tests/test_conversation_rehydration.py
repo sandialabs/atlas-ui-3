@@ -339,15 +339,34 @@ async def test_switching_conversations_loads_the_new_one():
     session_id = uuid4()
 
     await _run_turn(service, session_id, conversation_id="conv-1")
-    # A switch only reaches the loader once the live history is cleared; what
-    # matters here is that the server notices the change and asks the store.
-    sessions[session_id].history.messages.clear()
     await _run_turn(service, session_id, conversation_id="conv-2")
 
     assert repository.get_conversation_calls == ["conv-1", "conv-2"]
+    # Replaced, not appended: splicing conv-1's messages onto conv-2 would then
+    # save the combined thread under conv-2's id.
     assert [m.content for m in sessions[session_id].history.messages] == [
         "different thread"
     ]
+
+
+@pytest.mark.asyncio
+async def test_switching_to_an_unknown_conversation_leaves_the_history_alone():
+    """A client-side id the store has never seen must not clear the session.
+
+    ``local``/``none`` save modes mint their own ``local_*`` id part-way
+    through a conversation. Those turns are incognito and never reach the
+    loader, but the store lookup is what actually decides -- so an id the store
+    does not have leaves the live thread intact either way.
+    """
+    repository = _FakeRepository({"conv-1": _stored_conversation(4)})
+    service, sessions = _make_service(repository)
+    session_id = uuid4()
+
+    await _run_turn(service, session_id, conversation_id="conv-1")
+    await _run_turn(service, session_id, conversation_id="local_1234_abcd")
+
+    assert len(sessions[session_id].history.messages) == 4
+    assert sessions[session_id].context["conversation_id"] == "local_1234_abcd"
 
 
 @pytest.mark.asyncio

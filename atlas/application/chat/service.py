@@ -1039,6 +1039,10 @@ class ChatService:
         than whichever fragment the client happens to be holding. Returns the
         number of messages loaded (0 when there is nothing to load).
 
+        Called only when the session's bound conversation changed, so a
+        successful load *replaces* the history rather than extending it; a
+        conversation the store does not have leaves the live history alone.
+
         Skipped for incognito turns: those are never persisted, so there is no
         stored record they could be continuing, and pulling server-side history
         into a session the user asked not to save would be a surprise.
@@ -1049,12 +1053,6 @@ class ChatService:
         prevents an un-hydrated turn from overwriting the stored record.
         """
         if is_incognito or self.conversation_repository is None or not user_email:
-            return 0
-
-        # Only hydrate into an empty history. A session that already holds
-        # messages for this conversation is the live, authoritative thread --
-        # re-loading underneath it would duplicate every message.
-        if session.history.messages:
             return 0
 
         try:
@@ -1078,6 +1076,20 @@ class ChatService:
         messages = conv.get("messages")
         if not isinstance(messages, list) or not messages:
             return 0
+
+        # Anything already in this session's history belongs to the
+        # conversation it was carrying before -- the caller only reaches here
+        # when the bound conversation changed. Appending would splice two
+        # conversations together and then save the result under this id, so
+        # replace rather than extend.
+        #
+        # Nothing is dropped that is not already stored: the only path that
+        # gets here with a non-empty history is a client switching
+        # conversations mid-session, and that session's previous turns were
+        # persisted under their own id as they ran. A conversation the store
+        # does not have (an unsaved id, or a client-side ``local_*`` id)
+        # returned above without touching the live history.
+        session.history.messages.clear()
 
         loaded = load_messages_into_history(
             session.history, messages, conversation_id
