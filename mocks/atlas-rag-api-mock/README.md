@@ -86,6 +86,7 @@ curl -X POST \
     "references": [
       {
         "citation": "[1] \"API Authentication Guide\", tech-001.txt available: https://docs.company.com/api/authentication",
+        "reference": "API Authentication Guide, tech-001.txt",
         "document_ref": 1,
         "filename": "tech-001.txt",
         "sections": [
@@ -107,6 +108,8 @@ curl -X POST \
 ```
 
 The frontend consumes `metadata.references[].sections[].text` to display the underlying evidence snippets in the expanded citation area beneath each reference.
+
+`metadata.references[].reference` is the human-readable source line shown as the reference's label. It is optional: when a backend omits it, the UI falls back to `filename`, which is what older backends effectively rendered.
 
 ### POST /admin/users
 

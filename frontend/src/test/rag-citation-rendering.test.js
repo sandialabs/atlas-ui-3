@@ -283,3 +283,35 @@ describe('RAG references section', () => {
     expect(result).toBe(input)
   })
 })
+
+// --------------------------------------------------------------------------
+// Tests: backend `reference` label (rendered by the backend as the entry label)
+// --------------------------------------------------------------------------
+
+describe('backend reference labels', () => {
+  it('extracts a multi-word reference label containing a comma', () => {
+    const html =
+      '<p><strong>References</strong></p>\n' +
+      '<p>1. API Authentication Guide, tech-001.txt — technical-docs, 50% relevance</p>'
+    const labels = extractSourceLabels(html)
+    expect(labels.get('1').label).toBe('API Authentication Guide, tech-001.txt')
+  })
+
+  it('still extracts a bare filename label when no reference was sent', () => {
+    const html =
+      '<p><strong>References</strong></p>\n' +
+      '<p>1. tech-001.txt — technical-docs, 50% relevance</p>'
+    const labels = extractSourceLabels(html)
+    expect(labels.get('1').label).toBe('tech-001.txt')
+  })
+
+  it('shows the reference label in the collapsed summary', () => {
+    const html =
+      '<p><strong>References</strong></p>\n' +
+      '<p>1. API Authentication Guide, tech-001.txt — technical-docs, 50% relevance</p>'
+    const labels = extractSourceLabels(html)
+    const result = processReferencesSection(html, '', labels)
+    expect(result).toContain('API Authentication Guide, tech-001.txt')
+    expect(result).toContain('id="rag-ref-1"')
+  })
+})
