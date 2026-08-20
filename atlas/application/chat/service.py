@@ -18,7 +18,7 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain.errors import AuthorizationError, DomainError
-from atlas.domain.messages.models import Message, MessageRole, MessageType, ToolResult
+from atlas.domain.messages.models import MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.events import EventPublisher
@@ -42,6 +42,7 @@ from .preprocessors.prompt_override_service import PromptOverrideService
 
 # Import utilities
 from .utilities import error_handler, file_processor
+from .utilities.conversation_loader import load_messages_into_history
 from .utilities.interrupted_turn import close_open_turn
 
 logger = logging.getLogger(__name__)
@@ -332,6 +333,14 @@ class ChatService:
         turn_is_incognito = session_id in self._incognito_sessions
         turn_save_floor = self._incognito_save_floor.get(session_id, 0)
 
+        # Rewind / edit-and-resubmit is the one turn that legitimately ends with
+        # fewer messages than are stored: it drops the edited prompt and
+        # everything after it. Read (don't pop) the flag -- the orchestrator
+        # needs it too -- so the repository's no-shrink guard lets this one
+        # through. An out-of-range index is ignored downstream and simply
+        # leaves the guard relaxed for a turn that does not shrink anything.
+        turn_allows_shrink = kwargs.get("rewind_to_user_index") is not None
+
         # Default to session_id so MCP tool calls share a persistent session (see MCPSessionManager).
         conversation_id = kwargs.pop("conversation_id", None)
         if isinstance(conversation_id, str):
@@ -340,7 +349,26 @@ class ChatService:
             conversation_id = None
         if conversation_id:
             self._validate_conversation_id_owner(conversation_id, user_email)
+            previous_conversation_id = session.context.get("conversation_id")
             session.context["conversation_id"] = conversation_id
+            if previous_conversation_id != conversation_id:
+                # This session is not already carrying the conversation the turn
+                # names. Load it from the store before running the turn.
+                #
+                # Without this, persistence depends on the client: a WebSocket
+                # gets a fresh session_id per connection, so after a reconnect
+                # the server holds an empty history while the browser keeps
+                # sending the old conversation_id (its React state outlives the
+                # socket). The turn would then run with no context *and*
+                # ``_save_conversation`` would write that two-message history
+                # over the stored record -- ``save_conversation`` replaces the
+                # whole message set, so a 50-turn conversation became 2.
+                self._hydrate_session_from_store(
+                    session,
+                    conversation_id,
+                    user_email,
+                    is_incognito=turn_is_incognito,
+                )
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
 
@@ -534,6 +562,7 @@ class ChatService:
             await self._commit_turn(
                 session, session_id, user_email, model, update_callback,
                 is_incognito=turn_is_incognito, save_floor=turn_save_floor,
+                allow_shrink=turn_allows_shrink,
             )
             return result
         except asyncio.CancelledError:
@@ -553,6 +582,7 @@ class ChatService:
                 await self._commit_turn(
                     session, session_id, user_email, model, update_callback,
                     is_incognito=turn_is_incognito, save_floor=turn_save_floor,
+                    allow_shrink=turn_allows_shrink,
                 )
             except asyncio.CancelledError:
                 raise
@@ -580,6 +610,7 @@ class ChatService:
         update_callback: Optional[UpdateCallback],
         is_incognito: bool,
         save_floor: int,
+        allow_shrink: bool = False,
     ) -> None:
         """Persist the turn just executed and notify the client.
 
@@ -592,6 +623,10 @@ class ChatService:
         after ``end_session()`` has already discarded this session's incognito
         state, and a live lookup would then read a torn-down incognito session
         as savable.
+
+        ``allow_shrink`` says this turn is permitted to leave the conversation
+        shorter than it was (rewind / edit-and-resubmit); every other turn is
+        held to the repository's no-shrink guard.
         """
         # Messages accumulated while the session was incognito must never
         # be persisted, even after the user later opts in to saving. Track
@@ -615,6 +650,7 @@ class ChatService:
                     user_email,
                     model,
                     start_index=save_floor,
+                    allow_shrink=allow_shrink,
                 )
                 # Notify frontend only when persistence actually succeeded.
                 # When save_conversation returns None (the TOCTOU window
@@ -767,41 +803,12 @@ class ChatService:
         session.context["conversation_id"] = conversation_id
         session.context["_restored"] = True
 
-        # Load previous messages into session history for LLM context.
-        loaded = 0
-        for msg_data in canonical_messages:
-            role_value = msg_data.get("role", "user") or "user"
-            content = msg_data.get("content", "")
-            try:
-                message_role = MessageRole(role_value)
-            except ValueError:
-                logger.warning(
-                    "Skipping message with invalid role %s in conversation %s",
-                    sanitize_for_logging(str(role_value)),
-                    sanitize_for_logging(conversation_id),
-                )
-                continue
-            # Preserve metadata so display-only rows (e.g. persisted tool_call
-            # messages, issue #684) keep their ``message_type`` and are excluded
-            # from get_messages_for_llm rather than replayed as orphan tool
-            # messages the provider would reject. Also keeps tool input/output
-            # intact if this restored turn is later re-saved.
-            metadata = msg_data.get("metadata")
-            metadata = metadata if isinstance(metadata, dict) else {}
-            # Defense-in-depth: some persisted shapes carry ``message_type`` at
-            # the top level only (e.g. the local IndexedDB autosave, which keeps
-            # it as a sibling of ``metadata`` rather than inside it). Fold it in
-            # so display-only rows are reliably excluded from get_messages_for_llm
-            # instead of being replayed as orphan ``tool`` messages.
-            if "message_type" not in metadata and msg_data.get("message_type"):
-                metadata = {**metadata, "message_type": msg_data["message_type"]}
-            msg = Message(
-                role=message_role,
-                content=content,
-                metadata=metadata,
-            )
-            session.history.add_message(msg)
-            loaded += 1
+        # Load previous messages into session history for LLM context. Shared
+        # with the rehydrate-on-reconnect path so both produce identical
+        # history; see utilities/conversation_loader.py.
+        loaded = load_messages_into_history(
+            session.history, canonical_messages, conversation_id
+        )
 
         logger.info(
             "Restored conversation %s into session %s for user %s (%d messages)",
@@ -1019,8 +1026,85 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to update session from tool results: {e}", exc_info=True)
 
+    def _hydrate_session_from_store(
+        self,
+        session: Session,
+        conversation_id: str,
+        user_email: Optional[str],
+        is_incognito: bool,
+    ) -> int:
+        """Load a stored conversation into ``session`` before its turn runs.
+
+        Makes the server the authority on what a conversation contains, rather
+        than whichever fragment the client happens to be holding. Returns the
+        number of messages loaded (0 when there is nothing to load).
+
+        Skipped for incognito turns: those are never persisted, so there is no
+        stored record they could be continuing, and pulling server-side history
+        into a session the user asked not to save would be a surprise.
+
+        A failure here is logged and swallowed. The alternative -- failing the
+        turn -- would make an unreadable store a total outage, and the
+        no-shrink guard in ``ConversationRepository.save_conversation`` already
+        prevents an un-hydrated turn from overwriting the stored record.
+        """
+        if is_incognito or self.conversation_repository is None or not user_email:
+            return 0
+
+        # Only hydrate into an empty history. A session that already holds
+        # messages for this conversation is the live, authoritative thread --
+        # re-loading underneath it would duplicate every message.
+        if session.history.messages:
+            return 0
+
+        try:
+            conv = self.conversation_repository.get_conversation(
+                conversation_id, user_email
+            )
+        except Exception as e:
+            logger.error(
+                "Could not load conversation %s for rehydration: %s",
+                sanitize_for_logging(conversation_id),
+                e,
+                exc_info=True,
+            )
+            return 0
+
+        if not conv:
+            # A conversation_id the store has never seen: the client is naming a
+            # new conversation, which is the normal first-turn case.
+            return 0
+
+        messages = conv.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return 0
+
+        loaded = load_messages_into_history(
+            session.history, messages, conversation_id
+        )
+        if loaded:
+            # Mark it restored for the same reason the sidebar restore path
+            # does: the title belongs to the conversation's original first
+            # prompt, and regenerating it from this turn's prompt would rename
+            # the conversation on every reconnect.
+            session.context["_restored"] = True
+            logger.info(
+                "Rehydrated conversation %s into session %s for user %s "
+                "(%d messages); the client did not restore it",
+                sanitize_for_logging(conversation_id),
+                sanitize_for_logging(str(session.id)),
+                sanitize_for_logging(user_email),
+                loaded,
+            )
+        return loaded
+
     def _save_conversation(
-        self, session: Session, user_email: str, model: str, start_index: int = 0
+        self,
+        session: Session,
+        user_email: str,
+        model: str,
+        start_index: int = 0,
+        allow_shrink: bool = False,
     ) -> bool:
         """Persist a session's conversation history to the database.
 
@@ -1029,12 +1113,16 @@ class ChatService:
         persisted. This prevents pre-opt-in incognito turns from being saved
         when the user later switches to a saving mode.
 
+        ``allow_shrink`` forwards the caller's assertion that this turn may
+        legitimately leave the conversation shorter than the stored copy
+        (rewind / edit-and-resubmit).
+
         Returns True on successful upsert, False when the repository
-        rejected the write (e.g. another user owns the conversation_id —
-        the validator's TOCTOU window). Callers must not announce
+        rejected the write — another user owns the conversation_id (the
+        validator's TOCTOU window), or the write would have shrunk the
+        conversation without ``allow_shrink``. Callers must not announce
         ``conversation_saved`` when this returns False, otherwise the
-        client believes a turn was persisted under an id the DB does not
-        own.
+        client believes a turn was persisted that was not.
         """
         if not session or not session.history.messages:
             return False
@@ -1070,11 +1158,13 @@ class ChatService:
             metadata={
                 "agent_mode": bool(session.context.get("agent_mode")),
             },
+            allow_shrink=allow_shrink,
         )
         if record is None:
             logger.warning(
-                "Conversation %s save rejected by repository (likely owned by "
-                "another user); not emitting conversation_saved",
+                "Conversation %s save rejected by repository (owned by another "
+                "user, or the write would have shrunk it -- see the repository "
+                "log for which); not emitting conversation_saved",
                 sanitize_for_logging(conv_id),
             )
             return False

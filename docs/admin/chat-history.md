@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-06-28
+Last updated: 2026-08-20
 
 ## Overview
 
@@ -99,6 +99,36 @@ diagnostic option, not a repair. The script copies the database (to
 same `.gitignore` rules) once it has the file open, so a run that fails on
 DuckDB's exclusive lock leaves no copy behind. No row data is lost in either
 case — only the indexes are wrong.
+
+### Saving does not depend on the browser
+
+A conversation is saved from the server's own copy of the history, and the
+server reloads that copy when it does not have one. This matters because a
+WebSocket gets a fresh session for every connection, while the browser keeps
+the conversation it is displaying across a reconnect: after a dropped
+connection the next message names a conversation the server has no history for.
+
+Two behaviors cover that:
+
+- **Rehydration.** When a turn names a conversation the session is not already
+  carrying, the server loads it from the database before running the turn. The
+  model sees the earlier messages and the save that follows is complete, with
+  no reload in the browser and no action from the user. Look for
+  `Rehydrated conversation … the client did not restore it` in the log.
+- **A write may not shrink a conversation.** Each save replaces the
+  conversation's whole message set, so a caller holding a partial history would
+  destroy the rest. A save carrying fewer messages than are stored is refused,
+  logged at ERROR, and reported to the client as a failed save rather than
+  applied. Rewind / edit-and-resubmit is the one turn allowed to shorten a
+  conversation, because dropping a prompt and everything after it is its
+  purpose.
+
+Incognito turns are never rehydrated: they are not persisted, so there is no
+stored record for them to continue.
+
+The two work together. If the database cannot be read, rehydration is skipped
+and the turn still runs — with no earlier context — and the no-shrink guard is
+what stops that turn from overwriting the stored conversation.
 
 ## Database Schema
 
