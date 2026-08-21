@@ -4,6 +4,7 @@ Non-interactive CLI for Atlas chat.
 Usage (as installed package):
     atlas-chat "Summarize the latest docs" --model gpt-4o
     atlas-chat "Use the search tool" --tools server_tool1
+    atlas-chat "Write a script" --agent-mode --tools server_tool1
     atlas-chat --list-tools
     atlas-chat --list-models
     atlas-chat --list-data-sources
@@ -155,6 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default=None, help="LLM model name (uses config default if omitted).")
     parser.add_argument("--tools", default=None, help="Comma-separated list of tool names to enable.")
+    parser.add_argument(
+        "--agent-mode",
+        action="store_true",
+        help="Launch in agent mode (model decides when to use tools).",
+    )
     parser.add_argument("-o", "--output", default=None, help="Write final response to file path.")
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
@@ -377,7 +383,7 @@ async def run(args: argparse.Namespace) -> int:
         result = await client.chat(
             prompt=prompt,
             model=args.model,
-            agent_mode=False,
+            agent_mode=args.agent_mode,
             selected_tools=selected_tools,
             selected_data_sources=selected_data_sources,
             only_rag=args.only_rag,
