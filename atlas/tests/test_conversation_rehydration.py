@@ -151,6 +151,25 @@ def test_loader_preserves_original_timestamps():
     assert history.messages[0].timestamp == original
 
 
+def test_loader_reads_a_trailing_z_timestamp():
+    """Browsers write RFC3339 with a Z: Date.prototype.toISOString().
+
+    Python 3.11 taught ``datetime.fromisoformat`` to read it (the project
+    requires >= 3.11), and a locally autosaved conversation restored into a
+    session arrives in exactly that shape -- silently restamping those to
+    "now" would be the timestamp bug this loader exists to avoid.
+    """
+    history = ConversationHistory()
+
+    load_messages_into_history(
+        history, [{"role": "user", "content": "hi", "timestamp": "2026-08-20T12:00:00Z"}], "c"
+    )
+
+    assert history.messages[0].timestamp == datetime(
+        2026, 8, 20, 12, 0, tzinfo=timezone.utc
+    )
+
+
 def test_loader_falls_back_to_now_for_an_unusable_timestamp():
     history = ConversationHistory()
 
@@ -261,10 +280,20 @@ def _stored_conversation(message_count, user_email=USER):
     }
 
 
-async def _run_turn(service, session_id, user_email=USER, **kwargs):
-    """Dispatch a turn with the orchestrator stubbed out."""
+async def _run_turn(service, session_id, user_email=USER, on_execute=None, **kwargs):
+    """Dispatch a turn with the orchestrator stubbed out.
+
+    ``on_execute`` runs in place of the orchestrator's body, which is where a
+    real rewind records that it removed messages.
+    """
     orchestrator = MagicMock()
-    orchestrator.execute = AsyncMock(return_value={"type": "done"})
+
+    async def _execute(**_ignored):
+        if on_execute is not None:
+            on_execute()
+        return {"type": "done"}
+
+    orchestrator.execute = AsyncMock(side_effect=_execute)
     with patch.object(service, "_get_orchestrator", return_value=orchestrator):
         await service.handle_chat_message(
             session_id=session_id,
@@ -414,8 +443,13 @@ async def test_a_failing_store_does_not_fail_the_turn():
     assert sessions[session_id].history.messages == []
 
 
+def _rewind_removed(sessions, session_id):
+    """What ChatOrchestrator records once truncate_at_user_index removed rows."""
+    return lambda: sessions[session_id].context.__setitem__("rewind_removed", True)
+
+
 @pytest.mark.asyncio
-async def test_rewind_turn_allows_the_shorter_save():
+async def test_rewind_that_removed_messages_allows_the_shorter_save():
     """The one turn that may legitimately shorten the stored conversation."""
     repository = _FakeRepository({"conv-1": _stored_conversation(10)})
     service, sessions = _make_service(repository)
@@ -430,9 +464,87 @@ async def test_rewind_turn_allows_the_shorter_save():
             session_id,
             conversation_id="conv-1",
             rewind_to_user_index=2,
+            on_execute=_rewind_removed(sessions, session_id),
         )
 
     assert captured["allow_shrink"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_rewind_that_removed_nothing_does_not_allow_a_shorter_save():
+    """The field is a request, not a permit.
+
+    An out-of-range or malformed index truncates nothing, so the turn is an
+    ordinary one and must not carry an exemption from the no-shrink guard.
+    """
+    repository = _FakeRepository({"conv-1": _stored_conversation(10)})
+    service, sessions = _make_service(repository)
+    session_id = uuid4()
+    captured = {}
+
+    with patch.object(
+        service, "_save_conversation", side_effect=lambda *a, **kw: captured.update(kw) or True
+    ):
+        await _run_turn(
+            service,
+            session_id,
+            conversation_id="conv-1",
+            rewind_to_user_index=999,
+        )
+
+    assert captured["allow_shrink"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_failed_hydration_revokes_the_shrink_permission():
+    """A truncation measured against a partial session proves nothing.
+
+    If the store could not be read, the session's history is not the stored
+    conversation, so even a real rewind must not be allowed to replace it with
+    something shorter.
+    """
+    repository = _FakeRepository({"conv-1": _stored_conversation(10)})
+    repository.get_conversation = MagicMock(side_effect=RuntimeError("db is down"))
+    service, sessions = _make_service(repository)
+    session_id = uuid4()
+    captured = {}
+
+    with patch.object(
+        service, "_save_conversation", side_effect=lambda *a, **kw: captured.update(kw) or True
+    ):
+        await _run_turn(
+            service,
+            session_id,
+            conversation_id="conv-1",
+            rewind_to_user_index=2,
+            on_execute=_rewind_removed(sessions, session_id),
+        )
+
+    assert captured["allow_shrink"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_shrink_permission_does_not_leak_into_the_next_turn():
+    """It is earned per turn; the session outlives the turn that earned it."""
+    repository = _FakeRepository({"conv-1": _stored_conversation(10)})
+    service, sessions = _make_service(repository)
+    session_id = uuid4()
+    captured = {}
+
+    with patch.object(
+        service, "_save_conversation", side_effect=lambda *a, **kw: captured.update(kw) or True
+    ):
+        await _run_turn(
+            service,
+            session_id,
+            conversation_id="conv-1",
+            rewind_to_user_index=2,
+            on_execute=_rewind_removed(sessions, session_id),
+        )
+        assert captured["allow_shrink"] is True
+        await _run_turn(service, session_id, conversation_id="conv-1")
+
+    assert captured["allow_shrink"] is False
 
 
 @pytest.mark.asyncio
@@ -480,3 +592,68 @@ async def test_default_conversation_id_path_does_not_hit_the_store():
 
     assert sessions[session_id].context["conversation_id"] == str(session_id)
     assert repository.get_conversation_calls == []
+
+
+# --- orchestrator: the marker the shrink permission is derived from ----------
+
+
+async def _run_rewind(rewind_to_user_index):
+    """Run a real rewind through the real orchestrator; return the session."""
+    from atlas.application.chat.orchestrator import ChatOrchestrator
+    from atlas.domain.messages.models import Message, MessageRole
+    from atlas.domain.sessions.models import Session
+    from atlas.infrastructure.sessions.in_memory_repository import (
+        InMemorySessionRepository,
+    )
+
+    repo = InMemorySessionRepository()
+    session_id = uuid4()
+    session = Session(id=session_id, user_email=USER)
+    for i in range(3):
+        session.history.add_message(Message(role=MessageRole.USER, content=f"q{i}"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content=f"a{i}"))
+    await repo.create(session)
+
+    mode = MagicMock()
+    mode.run_streaming = AsyncMock(return_value={})
+    agent = MagicMock()
+    agent.run = AsyncMock(return_value={})
+    orchestrator = ChatOrchestrator(
+        llm=MagicMock(),
+        event_publisher=MagicMock(),
+        session_repository=repo,
+        plain_mode=mode,
+        rag_mode=mode,
+        tools_mode=mode,
+        agent_mode=agent,
+    )
+
+    await orchestrator.execute(
+        session_id=session_id,
+        content="edited",
+        model="test-model",
+        rewind_to_user_index=rewind_to_user_index,
+    )
+    return session
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_records_a_rewind_that_removed_messages():
+    """This marker is the whole basis of the shrink permission."""
+    session = await _run_rewind(1)
+
+    assert session.context.get("rewind_removed") is True
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_records_nothing_for_an_out_of_range_rewind():
+    session = await _run_rewind(99)
+
+    assert "rewind_removed" not in session.context
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_records_nothing_for_a_malformed_rewind_index():
+    session = await _run_rewind("not-an-index")
+
+    assert "rewind_removed" not in session.context

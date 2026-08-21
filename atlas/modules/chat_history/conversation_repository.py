@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import delete, desc
 from sqlalchemy.orm import Session, sessionmaker
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
@@ -92,7 +93,7 @@ class ConversationRepository:
                         "Refusing to save conversation %s: the write holds %d "
                         "message(s) but %d are stored, and replacing them would "
                         "lose the difference. This turn was not persisted.",
-                        conversation_id,
+                        sanitize_for_logging(conversation_id),
                         len(messages),
                         stored_count,
                     )

@@ -335,11 +335,13 @@ class ChatService:
 
         # Rewind / edit-and-resubmit is the one turn that legitimately ends with
         # fewer messages than are stored: it drops the edited prompt and
-        # everything after it. Read (don't pop) the flag -- the orchestrator
-        # needs it too -- so the repository's no-shrink guard lets this one
-        # through. An out-of-range index is ignored downstream and simply
-        # leaves the guard relaxed for a turn that does not shrink anything.
-        turn_allows_shrink = kwargs.get("rewind_to_user_index") is not None
+        # everything after it, so the repository's no-shrink guard has to let it
+        # through. Permission is *earned*, not asserted: these two markers are
+        # cleared here and set later by the code that actually did the work, so
+        # a rewind index that removed nothing (out of range, non-integer, or a
+        # partial session) leaves the guard armed. See _turn_allows_shrink.
+        session.context.pop("rewind_removed", None)
+        session.context.pop("hydration_failed", None)
 
         # Default to session_id so MCP tool calls share a persistent session (see MCPSessionManager).
         conversation_id = kwargs.pop("conversation_id", None)
@@ -562,7 +564,7 @@ class ChatService:
             await self._commit_turn(
                 session, session_id, user_email, model, update_callback,
                 is_incognito=turn_is_incognito, save_floor=turn_save_floor,
-                allow_shrink=turn_allows_shrink,
+                allow_shrink=self._turn_allows_shrink(session),
             )
             return result
         except asyncio.CancelledError:
@@ -582,7 +584,7 @@ class ChatService:
                 await self._commit_turn(
                     session, session_id, user_email, model, update_callback,
                     is_incognito=turn_is_incognito, save_floor=turn_save_floor,
-                    allow_shrink=turn_allows_shrink,
+                    allow_shrink=self._turn_allows_shrink(session),
                 )
             except asyncio.CancelledError:
                 raise
@@ -1026,6 +1028,28 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to update session from tool results: {e}", exc_info=True)
 
+    @staticmethod
+    def _turn_allows_shrink(session: Session) -> bool:
+        """Whether this turn may leave the stored conversation shorter.
+
+        Only one thing earns it: a rewind / edit-and-resubmit that actually
+        removed messages, which the orchestrator records on the session after
+        ``truncate_at_user_index`` returns rows. Deriving the permission from
+        the work done rather than from the client-supplied
+        ``rewind_to_user_index`` field matters -- an out-of-range or malformed
+        index is ignored downstream and truncates nothing, and granting the
+        permission anyway would hand a shrink exemption to a turn that never
+        earned it.
+
+        A failed rehydration revokes it outright. The session's history is then
+        partial or empty, so a truncation measured against it says nothing
+        about the stored conversation, and the no-shrink guard is the only
+        thing standing between that turn and the stored record.
+        """
+        if session.context.get("hydration_failed"):
+            return False
+        return bool(session.context.get("rewind_removed"))
+
     def _hydrate_session_from_store(
         self,
         session: Session,
@@ -1060,6 +1084,12 @@ class ChatService:
                 conversation_id, user_email
             )
         except Exception as e:
+            # Remember the failure for this turn. The session may hold a
+            # partial history (or none at all), so nothing this turn does may
+            # be allowed to shorten the stored conversation -- not even a
+            # rewind, whose truncation would be measured against the wrong
+            # thread. See _turn_allows_shrink.
+            session.context["hydration_failed"] = True
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),

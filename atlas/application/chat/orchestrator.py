@@ -268,6 +268,13 @@ class ChatOrchestrator:
             else:
                 removed = session.history.truncate_at_user_index(rewind_index)
                 if removed:
+                    # This turn has genuinely shortened the thread, so the
+                    # persistence layer's no-shrink guard must let its save
+                    # through. Recorded here, where the truncation actually
+                    # happened, rather than inferred from the request field:
+                    # the branches below reach this point having removed
+                    # nothing, and they must not earn the exemption.
+                    session.context["rewind_removed"] = True
                     logger.info(
                         "Rewind to user message %d: removed %d message(s), "
                         "%d remaining before new prompt",

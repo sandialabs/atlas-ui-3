@@ -121,7 +121,12 @@ Two behaviors cover that:
   logged at ERROR, and reported to the client as a failed save rather than
   applied. Rewind / edit-and-resubmit is the one turn allowed to shorten a
   conversation, because dropping a prompt and everything after it is its
-  purpose.
+  purpose. That exemption is earned rather than requested: it follows a
+  truncation that actually removed messages, not the presence of the
+  `rewind_to_user_index` field, so an out-of-range or malformed index leaves
+  the guard armed. A rehydration that could not read the store revokes it for
+  that turn as well -- a truncation measured against a partial session says
+  nothing about what is stored.
 
 Incognito turns are never rehydrated: they are not persisted, so there is no
 stored record for them to continue.
