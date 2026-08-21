@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import delete, desc
 from sqlalchemy.orm import Session, sessionmaker
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
@@ -46,11 +47,24 @@ class ConversationRepository:
         model: Optional[str],
         messages: List[Dict[str, Any]],
         metadata: Optional[Dict[str, Any]] = None,
+        allow_shrink: bool = False,
     ) -> Optional[ConversationRecord]:
         """Save or update a conversation with all its messages.
 
         Upsert: if conversation exists for this user, replaces all messages.
-        Returns None if the conversation_id belongs to a different user.
+        Returns None if the conversation_id belongs to a different user, or if
+        the write would shrink the conversation and ``allow_shrink`` is not set.
+
+        Because the update replaces the whole message set, a caller holding a
+        partial history would silently destroy the rest of the conversation.
+        That is not hypothetical: a WebSocket reconnect used to leave the server
+        with an empty session still bound to the old conversation_id, and the
+        next turn wrote two messages over fifty. Callers are rehydrated before
+        their turn runs so this should be unreachable, but the guard is the
+        durable backstop -- it is the layer that actually owns the data.
+
+        ``allow_shrink=True`` is for the legitimate shrink: rewind /
+        edit-and-resubmit drops a prompt and everything after it.
 
         Normalizes ``user_email`` so callers using mixed case (e.g. one
         connection arrives as ``Alice@Test.com`` and a later connection as
@@ -66,6 +80,25 @@ class ConversationRepository:
             ).first()
 
             if existing:
+                # Count the rows rather than trusting ``message_count``: the
+                # rows are what the replace below deletes, so they are what the
+                # guard has to reason about. A stored count of zero therefore
+                # fails open, which is the right direction -- an empty
+                # conversation has nothing to lose.
+                stored_count = session.query(MessageRecord).filter(
+                    MessageRecord.conversation_id == conversation_id
+                ).count()
+                if not allow_shrink and len(messages) < stored_count:
+                    logger.error(
+                        "Refusing to save conversation %s: the write holds %d "
+                        "message(s) but %d are stored, and replacing them would "
+                        "lose the difference. This turn was not persisted.",
+                        sanitize_for_logging(conversation_id),
+                        len(messages),
+                        stored_count,
+                    )
+                    return None
+
                 existing.title = title or existing.title
                 existing.model = model or existing.model
                 existing.updated_at = datetime.now(timezone.utc)
