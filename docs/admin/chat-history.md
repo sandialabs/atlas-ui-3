@@ -129,7 +129,16 @@ Two behaviors cover that:
   nothing about what is stored.
 
 Incognito turns are never rehydrated: they are not persisted, so there is no
-stored record for them to continue.
+stored record for them to continue. Turning saving back on part-way through a
+conversation that was opened from the sidebar **branches** it: the messages
+taken while incognito can never be written, so the segment after them is not a
+continuation of the stored conversation. It is saved as a new conversation
+instead of replacing the original, and the client adopts the new id from the
+`conversation_saved` frame. Look for `the savable segment is stored as new
+conversation …` in the log.
+
+A rehydration that failed on an unreadable store is retried on the next turn
+rather than leaving the session bound to a conversation it has no history for.
 
 The two work together. If the database cannot be read, rehydration is skipped
 and the turn still runs — with no earlier context — and the no-shrink guard is

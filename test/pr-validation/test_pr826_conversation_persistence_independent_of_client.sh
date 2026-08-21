@@ -11,7 +11,11 @@
 #   presence of the client-supplied rewind_to_user_index field
 # - Restore and rehydrate share one loader, so a rehydrated conversation is
 #   saved back in the same shape a restored one is
-# - Unit suites for the loader, the guard, and the service hydration path
+# - Unit suites for the loader, the guard, and the service hydration path,
+#   including the two paths driven end-to-end through a real DuckDB-backed
+#   ConversationRepository: a failed read is retried on the next turn, and
+#   resuming after an incognito interlude branches into a new conversation
+#   rather than replacing the one it was opened from
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

@@ -15,6 +15,7 @@ defences:
    caller is a rewind/edit-and-resubmit that legitimately shortens it.
 """
 
+import tempfile
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -26,6 +27,7 @@ from atlas.application.chat.utilities.conversation_loader import (
     load_messages_into_history,
 )
 from atlas.domain.messages.models import ConversationHistory
+from atlas.domain.sessions.models import Session
 from atlas.modules.chat_history.conversation_repository import ConversationRepository
 from atlas.modules.chat_history.database import (
     get_session_factory,
@@ -248,6 +250,15 @@ def _make_service(repository=None):
     async def _update(session):
         sessions[session.id] = session
 
+    # A bare MagicMock config manager answers every attribute with a truthy
+    # mock, so CaptureService builds its store under a directory literally
+    # named "MagicMock/mock.app_settings.runtime_capture_dir" in the repo root.
+    # Point it at scratch space and turn the feature off.
+    config_manager = MagicMock()
+    config_manager.app_settings.runtime_capture_dir = tempfile.mkdtemp()
+    config_manager.app_settings.feature_finetune_capture_enabled = False
+    config_manager.app_settings.capture_user_salt = "test-salt"
+
     session_repo = MagicMock()
     session_repo.get = AsyncMock(side_effect=_get)
     session_repo.create = AsyncMock(side_effect=_create)
@@ -257,7 +268,7 @@ def _make_service(repository=None):
         llm=MagicMock(),
         tool_manager=MagicMock(),
         connection=MagicMock(),
-        config_manager=MagicMock(),
+        config_manager=config_manager,
         session_repository=session_repo,
         conversation_repository=repository,
     )
@@ -657,3 +668,170 @@ async def test_orchestrator_records_nothing_for_a_malformed_rewind_index():
     session = await _run_rewind("not-an-index")
 
     assert "rewind_removed" not in session.context
+
+
+# --- end to end: the real repository behind the real service -----------------
+
+
+async def _turn_with_reply(service, session_id, content, **kwargs):
+    """A turn whose 'LLM' appends a user/assistant pair, as a real one does."""
+    from atlas.domain.messages.models import Message, MessageRole
+
+    orchestrator = MagicMock()
+
+    async def _execute(**_ignored):
+        session = await service.session_repository.get(session_id)
+        session.history.add_message(Message(role=MessageRole.USER, content=content))
+        session.history.add_message(
+            Message(role=MessageRole.ASSISTANT, content=f"reply to {content}")
+        )
+        return {"type": "done"}
+
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(service, "_get_orchestrator", return_value=orchestrator):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content=content,
+            model="test-model",
+            user_email=USER,
+            conversation_id="conv-e2e",
+            **kwargs,
+        )
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_reconnect_keeps_the_whole_conversation(repo):
+    """The seam this PR exists to close, with nothing faked between the two ends.
+
+    A long conversation is built over one session and persisted through the
+    real repository. The socket then drops: the next turn arrives on a brand
+    new session_id still carrying the conversation_id the browser held. Before
+    this change that turn saved its two messages over all fifty.
+    """
+    service, sessions = _make_service(repo)
+
+    first_session = uuid4()
+    sessions[first_session] = Session(id=first_session, user_email=USER)
+    for i in range(25):
+        await _turn_with_reply(service, first_session, f"question {i}")
+
+    stored = repo.get_conversation("conv-e2e", USER)
+    assert len(stored["messages"]) == 50
+    original_title = stored["title"]
+    original_first_timestamp = stored["messages"][0]["timestamp"]
+
+    # --- the socket drops; the browser keeps its conversation_id ---
+    second_session = uuid4()
+    sessions[second_session] = Session(id=second_session, user_email=USER)
+    await _turn_with_reply(service, second_session, "after the reconnect")
+
+    assert len(sessions[second_session].history.messages) == 52, (
+        "the reconnecting session must run against the stored conversation"
+    )
+    stored = repo.get_conversation("conv-e2e", USER)
+    assert len(stored["messages"]) == 52
+    assert stored["messages"][0]["content"] == "question 0"
+    assert stored["title"] == original_title, "a reconnect must not rename it"
+    assert stored["messages"][0]["timestamp"] == original_first_timestamp, (
+        "restoring must not restamp messages that were already stored"
+    )
+
+
+@pytest.mark.asyncio
+async def test_hydration_is_retried_after_a_transient_store_failure(repo):
+    """A failed read must not lock the session out of hydration for good.
+
+    Otherwise the session's history grows back turn by turn while the
+    no-shrink guard refuses every save, until the count catches up and the
+    partial thread replaces the real one.
+    """
+    service, sessions = _make_service(repo)
+
+    seed = uuid4()
+    sessions[seed] = Session(id=seed, user_email=USER)
+    for i in range(5):
+        await _turn_with_reply(service, seed, f"question {i}")
+    assert len(repo.get_conversation("conv-e2e", USER)["messages"]) == 10
+
+    reconnected = uuid4()
+    sessions[reconnected] = Session(id=reconnected, user_email=USER)
+
+    real_get = repo.get_conversation
+    with patch.object(
+        repo, "get_conversation", side_effect=RuntimeError("db is down")
+    ):
+        await _turn_with_reply(service, reconnected, "during the outage")
+    assert len(sessions[reconnected].history.messages) == 2
+    assert len(real_get("conv-e2e", USER)["messages"]) == 10, (
+        "the guard held the line while the store was unreadable"
+    )
+
+    # The store comes back. The session is still bound to the conversation but
+    # holds a partial history, so the next turn must try again.
+    sessions[reconnected].history.messages.clear()
+    await _turn_with_reply(service, reconnected, "after the outage")
+
+    assert len(sessions[reconnected].history.messages) == 12
+    assert len(repo.get_conversation("conv-e2e", USER)["messages"]) == 12
+
+
+@pytest.mark.asyncio
+async def test_resuming_after_an_incognito_interlude_branches_the_conversation(repo):
+    """The savable segment is a new conversation, not a replacement.
+
+    The messages taken while incognito can never be persisted, so the segment
+    after it is not a continuation of the stored conversation -- writing it
+    back would destroy everything before the incognito turn, and refusing it
+    would wedge every remaining turn of the session.
+    """
+    service, sessions = _make_service(repo)
+
+    seed = uuid4()
+    sessions[seed] = Session(id=seed, user_email=USER)
+    for i in range(5):
+        await _turn_with_reply(service, seed, f"question {i}")
+    assert len(repo.get_conversation("conv-e2e", USER)["messages"]) == 10
+
+    # A new session opens that conversation from the sidebar while incognito,
+    # takes a turn off the record, then switches saving back on. The save floor
+    # is the count at that point, so every later save is a slice.
+    resumed = uuid4()
+    sessions[resumed] = Session(id=resumed, user_email=USER)
+    await service.handle_restore_conversation(
+        session_id=resumed,
+        conversation_id="conv-e2e",
+        messages=[],
+        user_email=USER,
+    )
+    await _turn_with_reply(service, resumed, "off the record", incognito=True)
+
+    saved_frames = []
+    await _turn_with_reply(
+        service, resumed, "on the record again", incognito=False,
+        update_callback=lambda frame: saved_frames.append(frame) or _noop(),
+    )
+
+    original = repo.get_conversation("conv-e2e", USER)
+    assert len(original["messages"]) == 10, (
+        "the conversation the session branched from is untouched"
+    )
+
+    branched_id = sessions[resumed].context["conversation_id"]
+    assert branched_id != "conv-e2e"
+    branched = repo.get_conversation(branched_id, USER)
+    assert branched is not None, "the resumed segment was persisted somewhere"
+    assert [m["content"] for m in branched["messages"]] == [
+        "on the record again",
+        "reply to on the record again",
+    ], "only the post-incognito segment, and none of the off-the-record turn"
+    assert branched["title"] == "on the record again"
+
+    # The client is told the new id, so its next turn names the branch.
+    assert any(
+        f.get("type") == "conversation_saved" and f.get("conversation_id") == branched_id
+        for f in saved_frames
+    )
+
+
+async def _noop():
+    return None

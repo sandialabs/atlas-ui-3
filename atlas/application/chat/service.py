@@ -353,7 +353,16 @@ class ChatService:
             self._validate_conversation_id_owner(conversation_id, user_email)
             previous_conversation_id = session.context.get("conversation_id")
             session.context["conversation_id"] = conversation_id
-            if previous_conversation_id != conversation_id:
+            # An empty history re-attempts the load even when the session is
+            # already bound to this conversation. Two cases reach here that
+            # way: a brand-new conversation, where the store returns nothing
+            # and the lookup costs one miss on the first turn only; and a
+            # session whose earlier hydration failed on an unreadable store,
+            # which would otherwise be locked out of hydration for the rest of
+            # its life while its history slowly grew back toward the stored
+            # count -- at which point the no-shrink guard stops refusing and
+            # the partial thread replaces the real one.
+            if previous_conversation_id != conversation_id or not session.history.messages:
                 # This session is not already carrying the conversation the turn
                 # names. Load it from the store before running the turn.
                 #
@@ -365,7 +374,7 @@ class ChatService:
                 # ``_save_conversation`` would write that two-message history
                 # over the stored record -- ``save_conversation`` replaces the
                 # whole message set, so a 50-turn conversation became 2.
-                self._hydrate_session_from_store(
+                await self._hydrate_session_from_store(
                     session,
                     conversation_id,
                     user_email,
@@ -1050,7 +1059,7 @@ class ChatService:
             return False
         return bool(session.context.get("rewind_removed"))
 
-    def _hydrate_session_from_store(
+    async def _hydrate_session_from_store(
         self,
         session: Session,
         conversation_id: str,
@@ -1080,8 +1089,14 @@ class ChatService:
             return 0
 
         try:
-            conv = self.conversation_repository.get_conversation(
-                conversation_id, user_email
+            # Off the event loop: get_conversation issues several synchronous
+            # queries and JSON-decodes every message's metadata, and this runs
+            # before the model call for every reconnecting client at once after
+            # a restart.
+            conv = await asyncio.to_thread(
+                self.conversation_repository.get_conversation,
+                conversation_id,
+                user_email,
             )
         except Exception as e:
             # Remember the failure for this turn. The session may hold a
@@ -1182,6 +1197,28 @@ class ChatService:
 
         # Use stored conversation_id if set, otherwise use session_id
         conv_id = session.context.get("conversation_id", str(session.id))
+
+        # An incognito interlude splits the thread. ``start_index`` means the
+        # messages before it are unsavable, so this write is a *slice* of the
+        # session, not the conversation the session is bound to -- and that
+        # conversation has stored messages the slice does not contain (that is
+        # what ``_restored`` records: the history came from the store). Writing
+        # the slice over it would destroy the rest, and the no-shrink guard
+        # would otherwise refuse every remaining turn of the session with no
+        # way out. Give the resumed segment its own conversation instead. The
+        # client adopts the new id from the ``conversation_saved`` frame.
+        if start_index > 0 and session.context.get("_restored"):
+            conv_id = str(uuid4())
+            session.context["conversation_id"] = conv_id
+            # The segment is a new conversation, so it gets a title from its
+            # own first prompt rather than inheriting the original's.
+            session.context.pop("_restored", None)
+            logger.info(
+                "Conversation resumed after an incognito interlude; the "
+                "savable segment is stored as new conversation %s rather than "
+                "replacing the conversation it branched from",
+                sanitize_for_logging(conv_id),
+            )
 
         # Only generate title for new conversations (not restored ones)
         title = None
