@@ -4,6 +4,7 @@ Non-interactive CLI for Atlas chat.
 Usage (as installed package):
     atlas-chat "Summarize the latest docs" --model gpt-4o
     atlas-chat "Use the search tool" --tools server_tool1
+    atlas-chat "Write a script" --agent-mode --tools server_tool1
     atlas-chat --list-tools
     atlas-chat --list-models
     atlas-chat --list-data-sources
@@ -155,6 +156,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default=None, help="LLM model name (uses config default if omitted).")
     parser.add_argument("--tools", default=None, help="Comma-separated list of tool names to enable.")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--agent-mode",
+        action="store_true",
+        help="Launch in agent mode (model decides when to use tools).",
+    )
+    mode_group.add_argument(
+        "--only-rag",
+        action="store_true",
+        help="Use only RAG without tools (RAG-only mode).",
+    )
     parser.add_argument("-o", "--output", default=None, help="Write final response to file path.")
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
@@ -164,11 +176,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--data-sources",
         default=None,
         help="Comma-separated list of RAG data source names to query.",
-    )
-    parser.add_argument(
-        "--only-rag",
-        action="store_true",
-        help="Use only RAG without tools (RAG-only mode).",
     )
     parser.add_argument(
         "--list-data-sources",
@@ -377,7 +384,7 @@ async def run(args: argparse.Namespace) -> int:
         result = await client.chat(
             prompt=prompt,
             model=args.model,
-            agent_mode=False,
+            agent_mode=args.agent_mode,
             selected_tools=selected_tools,
             selected_data_sources=selected_data_sources,
             only_rag=args.only_rag,

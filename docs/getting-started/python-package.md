@@ -428,6 +428,9 @@ atlas-chat "Explain relativity" --model gpt-4o
 # Use tools
 atlas-chat "Search for Python tutorials" --tools web_search
 
+# Agent mode (model decides when/how to use tools)
+atlas-chat "Research and summarize the latest AI news" --agent-mode --tools web_search
+
 # List available tools
 atlas-chat --list-tools
 
