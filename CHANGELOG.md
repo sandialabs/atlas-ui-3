@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #829 - 2026-08-21
+### PR #830 - 2026-08-21
 - **Product direction: the in-app agent loop is now a first-class citizen.** Reverses the prior stance that the in-app agent loop was not the focus and that agent work should route to a separate Agent Portal. The Agent Portal still exists for governed launch/stream of host subprocesses, but the in-chat agent loop (agent mode, multi-step tool use, streaming, surrounding UX) is now a primary surface on equal footing with chat, RAG, and MCP tools. Updated the copy in `AGENTS.md`, the `agentic-loop-2026-02-23` design note, and the RAG API v2 planning doc; no code or UI behavior changes.
 
 ### PR #826 - 2026-08-20
