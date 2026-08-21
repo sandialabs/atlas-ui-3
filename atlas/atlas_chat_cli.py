@@ -156,10 +156,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default=None, help="LLM model name (uses config default if omitted).")
     parser.add_argument("--tools", default=None, help="Comma-separated list of tool names to enable.")
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--agent-mode",
         action="store_true",
         help="Launch in agent mode (model decides when to use tools).",
+    )
+    mode_group.add_argument(
+        "--only-rag",
+        action="store_true",
+        help="Use only RAG without tools (RAG-only mode).",
     )
     parser.add_argument("-o", "--output", default=None, help="Write final response to file path.")
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
@@ -170,11 +176,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--data-sources",
         default=None,
         help="Comma-separated list of RAG data source names to query.",
-    )
-    parser.add_argument(
-        "--only-rag",
-        action="store_true",
-        help="Use only RAG without tools (RAG-only mode).",
     )
     parser.add_argument(
         "--list-data-sources",

@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #828 - 2026-08-21
-- **`atlas-chat` now supports `--agent-mode`** (closes #827): the CLI registers the flag and passes `agent_mode=args.agent_mode` to `client.chat()`, enabling headless agent mode when tools are selected.
+- **`atlas-chat` now supports `--agent-mode`** (closes #827): the CLI registers the flag and passes `agent_mode=args.agent_mode` to `client.chat()`, enabling headless agent mode when tools are selected. `--agent-mode` and `--only-rag` are now mutually exclusive (argparse rejects the combination) so the orchestrator never receives both — it dispatches agent mode before checking `only_rag`, which would otherwise let tools run despite `--only-rag`.
 
 ### PR #830 - 2026-08-21
 - **Product direction: the in-app agent loop is now a first-class citizen.** Reverses the prior stance that the in-app agent loop was not the focus and that agent work should route to a separate Agent Portal. The Agent Portal still exists for governed launch/stream of host subprocesses, but the in-chat agent loop (agent mode, multi-step tool use, streaming, surrounding UX) is now a primary surface on equal footing with chat, RAG, and MCP tools. Updated the copy in `AGENTS.md`, the `agentic-loop-2026-02-23` design note, and the RAG API v2 planning doc; no code or UI behavior changes.

@@ -252,6 +252,20 @@ class TestCLIArgParsing:
         assert args.agent_mode is True
         assert args.tools == "server_tool1,server_tool2"
 
+    def test_agent_mode_and_only_rag_are_mutually_exclusive(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["prompt", "--agent-mode", "--only-rag"])
+
+    def test_only_rag_defaults_false(self):
+        from atlas_chat_cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["prompt"])
+        assert args.only_rag is False
+
     def test_list_data_sources_flag(self):
         from atlas_chat_cli import build_parser
 
