@@ -1,6 +1,6 @@
 # Agentic Loop (the single agent loop)
 
-Last updated: 2026-06-20
+Last updated: 2026-08-21
 
 > **Update (PR #664):** ATLAS now has exactly one agent loop — the native
 > `agentic` loop described here. The former `react`, `think-act`, and `act`
@@ -9,8 +9,8 @@ Last updated: 2026-06-20
 > by several providers and the control-tool/JSON parsing was fragile. The
 > `AGENT_LOOP_STRATEGY` setting and the `agent_loop_strategy` request field
 > are still accepted for backward compatibility but always resolve to the
-> agentic loop. This matches the product direction in `AGENTS.md` ("the in-app
-> agent loop is not the focus").
+> agentic loop. The agent loop is now a first-class citizen of ATLAS — see
+> the Product Direction section in `AGENTS.md`.
 
 ## Overview
 

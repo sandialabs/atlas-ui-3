@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-03-19
+Last updated: 2026-08-21
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -10,9 +10,9 @@ This file provides guidance to AI coding agents (Claude Code, GitHub Copilot, Go
 
 **Always investigate the actual repository before answering any diagnostic, architectural, or debugging question.** Do not rely on memory, prior conversation context, or assumptions about how the code "probably" works. Read the relevant files, grep for the real symbols, run the tests, and check git history as needed. If you are asked *why* something behaves a certain way, *where* something lives, *how* a flow is wired, or *what* is broken — open the code and verify before responding. A confident-sounding answer built on stale assumptions is worse than a short delay to check. When an investigation would be expensive, say so and ask the user before guessing.
 
-## Product Direction: Agent Loop Is Not the Focus
+## Product Direction: The Agent Loop Is a First-Class Citizen
 
-The in-app agent loop inside ATLAS is **not** the main focus of this product. The plan is for the ATLAS app to continue as-is with its core capabilities — **chat, RAG, and MCP tools** — and to add a separate **Agent Portal** that lets users launch and control agents from a UI-friendly surface with **governed controls suitable for enterprise and government use** (authorization, auditing, approval gates, resource limits, and role-scoped access). When working on agent-related features, prefer investment in the Agent Portal and its governance surface over deepening the in-chat agent loop. If a request would expand the in-chat agent loop in a significant way, flag it and ask whether it belongs in the Agent Portal instead.
+The in-app agent loop inside ATLAS is a **first-class citizen** of the product, on equal footing with the core capabilities — **chat, RAG, and MCP tools**. The ATLAS app invests in the in-chat agent loop directly: agent mode, multi-step tool use, streaming, and the surrounding UX are primary surfaces, not secondary ones. The separate **Agent Portal** continues to provide a UI-friendly surface for launching and controlling host subprocesses with **governed controls suitable for enterprise and government use** (authorization, auditing, approval gates, resource limits, and role-scoped access); work that genuinely belongs there — launching and streaming long-running host processes under governance — should still be routed there. But requests that deepen the in-chat agent loop (new tool-use behaviors, richer agent UX, better step/progress surfacing, agent-scoped governance hooks) are now in-scope and welcome; do not auto-flag them for redirection to the Agent Portal.
 
 ## Project Overview
 
