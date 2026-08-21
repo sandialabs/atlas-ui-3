@@ -9,7 +9,7 @@ import mimetypes
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 from urllib.parse import urlsplit
 
 import requests
@@ -109,6 +109,50 @@ def _max_read_bytes() -> int:
     except ValueError:
         return DEFAULT_MAX_READ_BYTES
     return value if value > 0 else DEFAULT_MAX_READ_BYTES
+
+
+# Default number of lines shown at the head and tail of a text file when the
+# full content is too long to inject verbatim into the chat context. The
+# complete file is still returned as a base64 artifact so the agent can forward
+# it to another tool. Override with MCP_TRANSFER_PREVIEW_LINES.
+DEFAULT_PREVIEW_LINES = 50
+
+
+def _preview_lines() -> int:
+    """Return the number of head/tail lines shown for a truncated text file."""
+    configured = os.getenv("MCP_TRANSFER_PREVIEW_LINES")
+    if not configured:
+        return DEFAULT_PREVIEW_LINES
+    try:
+        value = int(configured)
+    except ValueError:
+        return DEFAULT_PREVIEW_LINES
+    return value if value > 0 else DEFAULT_PREVIEW_LINES
+
+
+def _text_preview(file_bytes: bytes, preview_lines: int) -> Tuple[str, bool]:
+    """Build a head+tail preview of a UTF-8 text file.
+
+    Returns ``(text, truncated)``. When the file has at most
+    ``2 * preview_lines`` lines the full decoded text is returned and
+    ``truncated`` is False; otherwise the first ``preview_lines`` lines and the
+    last ``preview_lines`` lines are joined by an omission marker and
+    ``truncated`` is True. The full bytes are preserved separately in the
+    artifact so the agent can still send the complete file to a downstream
+    tool.
+    """
+    text = file_bytes.decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    if len(lines) <= 2 * preview_lines:
+        return text, False
+    head = "".join(lines[:preview_lines])
+    tail = "".join(lines[-preview_lines:])
+    omitted = len(lines) - 2 * preview_lines
+    marker = (
+        f"\n... [{omitted} lines omitted; "
+        f"{len(lines)} total lines; full content in artifact] ...\n"
+    )
+    return head + marker + tail, True
 
 
 def _backend_base_url() -> str:
@@ -215,7 +259,14 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
     """Read a local file into the chat session as an MCP artifact.
 
     This local-development helper reads a file and returns it as a base64
-    artifact. UTF-8 text files also include decoded text in the tool result.
+    artifact so the full bytes are available in the session context for the
+    agent to forward to another tool. To avoid flooding the model context, the
+    text placed directly in the tool result is a **head+tail preview**: the
+    first and last ``MCP_TRANSFER_PREVIEW_LINES`` lines (default 50 each) of a
+    UTF-8 file, with an omission marker between them. Short files (at most
+    twice the preview line budget) are returned in full. Binary files produce
+    no text in the tool result — the bytes travel only as the artifact.
+
     Relative paths resolve below the primary root (`MCP_TRANSFER_BASE_DIR`, or
     the home directory when unset); absolute paths are read as given. By default
     access is confined to that root (plus any `MCP_TRANSFER_ALLOWED_DIRS`) and
@@ -228,7 +279,8 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
         path: File path to read. Relative paths resolve below the configured base directory.
 
     Returns:
-        MCP tool result with file metadata and an artifact containing the file bytes.
+        MCP tool result with file metadata, a text preview (when decodable as
+        UTF-8), and an artifact containing the full file bytes.
     """
     start = time.perf_counter()
     operation = "read_file_from_disk"
@@ -267,9 +319,14 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
             "status": "success",
         }
         try:
-            results["content"] = file_bytes.decode("utf-8")
+            preview, truncated = _text_preview(file_bytes, _preview_lines())
+            results["content"] = preview
+            if truncated:
+                results["truncated"] = True
         except UnicodeDecodeError:
-            results["content_base64"] = artifact["b64"]
+            # Binary file: the bytes travel only as the artifact, not as text
+            # in the tool result, to avoid flooding the model context.
+            pass
 
         return {
             "results": results,

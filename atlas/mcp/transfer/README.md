@@ -5,7 +5,7 @@ It is not intended for production use.
 
 ## Tools
 
-- `read_file_from_disk(path)`: reads a file below the configured base directory and returns it as an MCP artifact. UTF-8 files also include decoded text in the result.
+- `read_file_from_disk(path)`: reads a file below the configured base directory and returns it as an MCP artifact (full bytes). The tool-result text is a head+tail preview — the first and last `MCP_TRANSFER_PREVIEW_LINES` lines (default 50 each) — so the model context is not flooded with the entire file. Short files (at most twice the preview budget) are returned in full. Binary files produce no text in the tool result; the bytes travel only as the artifact.
 - `write_file_to_disk(path, content, content_is_base64=false)`: writes text or base64-encoded bytes from the chat session to a file below the configured base directory.
 
 ## Base directory
@@ -17,6 +17,10 @@ Set `MCP_TRANSFER_BASE_DIR` to choose the directory the server can access. If un
 ## Read size limit
 
 `read_file_from_disk` rejects files larger than `MCP_TRANSFER_MAX_BYTES` (default 10 MiB) so a single read cannot pull unbounded content into chat context or server memory. Set `MCP_TRANSFER_MAX_BYTES` to raise or lower the cap.
+
+## Read preview
+
+To avoid injecting an entire file into the model context, the text in the tool result is trimmed to the first and last `MCP_TRANSFER_PREVIEW_LINES` lines (default 50 each) when the file exceeds twice that line count. The full file is still returned as a base64 artifact, so the agent can forward it to another tool (e.g. `write_file_to_disk`) without needing to re-read it. Non-positive values of `MCP_TRANSFER_PREVIEW_LINES` are ignored and the default is used.
 
 ## Configuration
 

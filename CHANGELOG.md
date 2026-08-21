@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #831 - 2026-08-21
+- **Transfer MCP `read_file_from_disk` no longer injects the entire file into the model context** (closes #831): the tool-result text is now a head+tail preview — the first and last `MCP_TRANSFER_PREVIEW_LINES` lines (default 50 each) of a UTF-8 file, joined by an omission marker when the file exceeds twice the line budget. Short files (at most 2 x the budget) are returned in full. The complete file still travels as a base64 artifact so the agent can forward it to a downstream tool (e.g. `write_file_to_disk`) without re-reading. Binary files no longer inject a redundant `content_base64` into the tool result — the bytes travel only as the artifact. New env var `MCP_TRANSFER_PREVIEW_LINES` controls the head/tail line budget.
+
 ### PR #828 - 2026-08-21
 - **`atlas-chat` now supports `--agent-mode`** (closes #827): the CLI registers the flag and passes `agent_mode=args.agent_mode` to `client.chat()`, enabling headless agent mode when tools are selected. `--agent-mode` and `--only-rag` are now mutually exclusive (argparse rejects the combination) so the orchestrator never receives both — it dispatches agent mode before checking `only_rag`, which would otherwise let tools run despite `--only-rag`.
 

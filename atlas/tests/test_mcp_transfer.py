@@ -188,6 +188,104 @@ def test_read_allows_files_within_size_cap(monkeypatch, tmp_path):
     assert result["results"]["content"] == "ok"
 
 
+def test_read_truncates_long_text_file_to_head_and_tail(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "2")
+
+    lines = [f"line {i:03d}\n" for i in range(20)]
+    (tmp_path / "long.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("long.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    content = result["results"]["content"]
+    # Head: first 2 lines, tail: last 2 lines, with an omission marker.
+    assert "line 000\n" in content
+    assert "line 001\n" in content
+    assert "line 018\n" in content
+    assert "line 019\n" in content
+    assert "line 002\n" not in content
+    assert "line 017\n" not in content
+    assert result["results"]["truncated"] is True
+    assert "16 lines omitted" in content
+    assert "20 total lines" in content
+    assert "full content in artifact" in content
+
+
+def test_read_short_file_returned_in_full(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "5")
+
+    text = "\n".join(f"line {i}" for i in range(10)) + "\n"
+    (tmp_path / "short.txt").write_text(text)
+
+    result = transfer.read_file_from_disk("short.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["content"] == text
+    assert "truncated" not in result["results"]
+
+
+def test_read_full_file_always_in_artifact(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "1")
+
+    lines = [f"line {i}\n" for i in range(10)]
+    (tmp_path / "full.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("full.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    # The artifact carries the complete file even when the text is trimmed.
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == "".join(lines).encode("utf-8")
+    assert result["artifacts"][0]["size"] == len("".join(lines))
+
+
+def test_read_binary_file_has_no_text_in_result(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+
+    payload = b"\x00\x01\x02binary\xff\xfe"
+    (tmp_path / "blob.bin").write_bytes(payload)
+
+    result = transfer.read_file_from_disk("blob.bin")
+
+    assert result["meta_data"]["is_error"] is False
+    # Binary files must not inject text or base64 into the tool result.
+    assert "content" not in result["results"]
+    assert "content_base64" not in result["results"]
+    # The full bytes still travel as the artifact.
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == payload
+
+
+def test_read_preview_lines_env_var_controls_budget(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "3")
+
+    lines = [f"row {i}\n" for i in range(30)]
+    (tmp_path / "data.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("data.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    content = result["results"]["content"]
+    assert "row 0\n" in content
+    assert "row 1\n" in content
+    assert "row 2\n" in content
+    assert "row 27\n" in content
+    assert "row 28\n" in content
+    assert "row 29\n" in content
+    assert "row 3\n" not in content
+    assert "row 26\n" not in content
+    assert result["results"]["truncated"] is True
+    assert "24 lines omitted" in content
+
+
 class _FakeResponse:
     """Minimal stand-in for a streamed ``requests`` response."""
 
