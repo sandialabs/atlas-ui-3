@@ -386,6 +386,78 @@ def test_read_byte_cap_trims_single_long_line(monkeypatch, tmp_path):
     assert base64.b64decode(result["artifacts"][0]["b64"]) == payload.encode("utf-8")
 
 
+def test_read_byte_cap_measures_encoded_bytes_not_code_points(monkeypatch, tmp_path):
+    """The byte ceiling is measured on encoded bytes, so CJK content (3 bytes
+    per char in UTF-8) is capped correctly, not by code-point count."""
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_BYTES", "300")
+    # One line of CJK chars: each char is 3 bytes in UTF-8.
+    # 200 chars = 600 bytes, well over the 300-byte ceiling but only 1 line.
+    payload = "\u4e00" * 200 + "\n"
+    (tmp_path / "cjk.txt").write_text(payload, encoding="utf-8")
+
+    result = transfer.read_file_from_disk("cjk.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert result["results"]["total_lines"] == 1
+    assert result["results"]["omitted_lines"] == 0
+    assert "content" not in result["results"]
+    preview = result["results"]["content_preview"]
+    # The preview must be under the byte ceiling (not the code-point count).
+    assert len(preview.encode("utf-8")) <= 300
+    assert "preview trimmed to 300 bytes" in preview
+    # Full file still in artifact.
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == payload.encode("utf-8")
+
+
+def test_read_combined_line_and_byte_truncation_recomputes_omitted(monkeypatch, tmp_path):
+    """When both line and byte truncation apply, omitted_lines is recomputed
+    from the lines actually shown after the byte trim."""
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "50")
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_BYTES", "200")
+
+    # 200 lines, each 80 chars: 16000 bytes total. Line budget would show
+    # 100 lines (50 head + 50 tail), but the 200-byte ceiling trims to ~2
+    # lines per side.
+    lines = [f"line {i:03d} " + "X" * 70 + "\n" for i in range(200)]
+    (tmp_path / "combined.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("combined.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert result["results"]["total_lines"] == 200
+    # omitted_lines must reflect lines actually omitted (not just the line
+    # budget gap), so total_lines - omitted_lines == lines shown.
+    omitted = result["results"]["omitted_lines"]
+    shown = result["results"]["total_lines"] - omitted
+    assert shown < 100  # byte trim cut well below the 100-line line budget
+    # The preview text is under the byte ceiling.
+    preview = result["results"]["content_preview"]
+    assert len(preview.encode("utf-8")) <= 200
+
+
+def test_read_very_small_byte_ceiling_does_not_exceed_budget(monkeypatch, tmp_path):
+    """A very small preview_bytes (below the marker size) still produces a
+    result that does not exceed the byte ceiling."""
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_BYTES", "50")
+
+    (tmp_path / "tiny.txt").write_text("A" * 500 + "\n")
+
+    result = transfer.read_file_from_disk("tiny.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    preview = result["results"]["content_preview"]
+    assert len(preview.encode("utf-8")) <= 50
+
+
 class _FakeResponse:
     """Minimal stand-in for a streamed ``requests`` response."""
 

@@ -145,33 +145,49 @@ def _text_preview(
     """Build a head+tail preview of a UTF-8 text file.
 
     Returns ``(text, truncated, total_lines, omitted_lines)``. The file is
-    returned in full only when it is under **both** the line budget (at most
+returned in full only when it is under **both** the line budget (at most
     ``2 * preview_lines`` lines) and the byte ceiling (``preview_bytes``);
     otherwise the first ``preview_lines`` lines and the last ``preview_lines``
     lines are joined by an omission marker. If the assembled head+tail still
     exceeds ``preview_bytes`` each side is trimmed to half the remaining byte
-    budget. The full bytes are preserved separately in the artifact so the
-    agent can still send the complete file to a downstream tool.
+    budget, working on encoded bytes so multi-byte content (CJK, emoji) is
+    capped by bytes not code points. The full bytes are preserved separately
+    in the artifact so the agent can still send the complete file to a
+    downstream tool.
     """
     text = file_bytes.decode("utf-8")
     lines = text.splitlines(keepends=True)
     total_lines = len(lines)
 
-    if total_lines <= 2 * preview_lines and len(text) <= preview_bytes:
+    # Measure the byte ceiling on encoded bytes, not code points: a CJK or
+    # emoji file can have len(text) well under the byte ceiling while the
+    # encoded bytes far exceed it.
+    if total_lines <= 2 * preview_lines and len(file_bytes) <= preview_bytes:
         return text, False, total_lines, 0
 
-    omitted_lines = max(0, total_lines - 2 * preview_lines)
     head = "".join(lines[:preview_lines])
     tail = "".join(lines[-preview_lines:])
 
     # Byte ceiling: a single long line can make head+tail huge. Reserve room
-    # for the marker and trim each side to half the remaining budget.
+    # for the marker and trim each side to half the remaining budget. Work on
+    # encoded bytes so multi-byte sequences are measured correctly; decode
+    # with errors="ignore" so a split sequence is not replaced with U+FFFD.
     marker_reserve = 160
     byte_budget = max(0, preview_bytes - marker_reserve)
-    if len(head) + len(tail) > byte_budget:
+    head_bytes = head.encode("utf-8")
+    tail_bytes = tail.encode("utf-8")
+    if len(head_bytes) + len(tail_bytes) > byte_budget:
         half = byte_budget // 2
-        head = head[:half]
-        tail = tail[-half:] if half > 0 else ""
+        head_bytes = head_bytes[:half]
+        tail_bytes = tail_bytes[-half:] if half > 0 else b""
+        head = head_bytes.decode("utf-8", errors="ignore")
+        tail = tail_bytes.decode("utf-8", errors="ignore")
+
+    # Recompute omitted_lines from the lines actually shown after byte
+    # trimming, so total_lines - omitted_lines equals the number of complete
+    # lines in the preview.
+    shown_lines = head.count("\n") + tail.count("\n")
+    omitted_lines = max(0, total_lines - shown_lines)
 
     if omitted_lines:
         word = "line" if omitted_lines == 1 else "lines"
@@ -184,7 +200,16 @@ def _text_preview(
             f"\n... [preview trimmed to {preview_bytes} bytes; "
             f"full content in artifact] ...\n"
         )
-    return head + marker + tail, True, total_lines, omitted_lines
+
+    # Final clamp: ensure the assembled result never exceeds the byte ceiling.
+    # This matters for very small preview_bytes where the marker itself is
+    # larger than the budget.
+    result = head + marker + tail
+    result_bytes = result.encode("utf-8")
+    if len(result_bytes) > preview_bytes:
+        result = result_bytes[:preview_bytes].decode("utf-8", errors="ignore")
+
+    return result, True, total_lines, omitted_lines
 
 
 def _backend_base_url() -> str:
