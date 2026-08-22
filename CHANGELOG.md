@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #833 - 2026-08-21
+- **The system prompt now carries the current date/time** (closes #823): every turn appends a "Current Date & Time" line to the rendered system prompt so the model knows what "now" is, and when the gap between turns meets `SYSTEM_PROMPT_TIME_REFRESH_MINUTES` (default 5), an explicit "approximately N minutes have elapsed since the previous message" note is appended so the model can reason about long pauses (a status may have resolved, a deadline may have passed). The current time is always injected; the refresh setting only gates the elapsed-time note (`0` keeps the time, drops the note). The gap is derived from the conversation history's existing message timestamps (preserved across save/reload by the conversation loader), so no new per-session state is required. `SYSTEM_PROMPT_TIMEZONE` (IANA name, default `UTC`; unknown names fall back to UTC) sets the displayed wall-clock; there is no per-user timezone plumbing. The enrichment is runtime addition applied to both the default and a user-supplied custom system prompt (issue #153's "custom replaces default" contract is preserved — the custom text still leads and the default template does not leak), and does not modify the packaged prompt templates.
+
 ### PR #828 - 2026-08-21
 - **`atlas-chat` now supports `--agent-mode`** (closes #827): the CLI registers the flag and passes `agent_mode=args.agent_mode` to `client.chat()`, enabling headless agent mode when tools are selected. `--agent-mode` and `--only-rag` are now mutually exclusive (argparse rejects the combination) so the orchestrator never receives both — it dispatches agent mode before checking `only_rag`, which would otherwise let tools run despite `--only-rag`.
 
