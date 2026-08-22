@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-01-19
+Last updated: 2026-08-21
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -102,6 +102,34 @@ AGENT_SLEEP_MAX_TURN_SECONDS=7200
   to fit it.
 - **Deploys**: a turn parked in a long sleep delays graceful shutdown; expect such turns to be
   killed by a rolling restart.
+
+## System Prompt Time Injection (issue #823)
+
+The current date/time is appended to the rendered system prompt on every turn so the model
+knows what "now" is. When a meaningful gap has opened between turns, an explicit
+"approximately N minutes have elapsed since the previous message" note is appended too, so
+the model can reason about long pauses (a status may have resolved, a deadline may have
+passed). This enrichment is applied to both the default system prompt and a user-supplied
+custom system prompt; it is runtime addition, not part of the prompt template, so existing
+templates are unchanged.
+
+```bash
+# IANA timezone name for the displayed time (default UTC). Unknown names fall
+# back to UTC. No per-user timezone plumbing is required.
+SYSTEM_PROMPT_TIMEZONE=UTC
+# Append the elapsed-time note when the gap between this turn and the previous
+# user message meets/exceeds this many minutes (default 5; 0 disables the note
+# but still injects the current date/time).
+SYSTEM_PROMPT_TIME_REFRESH_MINUTES=5
+```
+
+- **Always on**: the current date/time is injected on every turn regardless of the refresh
+  setting; the refresh only gates the *elapsed-time note*.
+- **No session state**: the gap is derived from the conversation history's existing message
+  timestamps (which the conversation loader preserves across save/reload), so no extra
+  per-session tracking is required.
+- **Custom prompts**: a custom system prompt still fully replaces the default *template*
+  content (issue #153); the time/elapsed lines are appended after the custom text.
 
 ## Security Configuration (CSP and Headers)
 
