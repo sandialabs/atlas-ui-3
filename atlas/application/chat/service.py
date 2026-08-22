@@ -383,6 +383,20 @@ class ChatService:
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
 
+        # The active workspace (issue #829): the frontend sends the workspace
+        # id whose selections are loaded for this turn so the conversation can
+        # be re-bound to its workspace when it is reopened from history. The
+        # id is client-supplied and purely advisory -- it is only persisted in
+        # the conversation metadata, never used for authorization -- so a null
+        # or stale value is harmless. Stored every turn so switching away from
+        # a workspace (or starting a turn without one) records the change.
+        workspace_id = kwargs.pop("workspace_id", None)
+        if isinstance(workspace_id, str):
+            workspace_id = workspace_id.strip() or None
+        else:
+            workspace_id = None
+        session.context["workspace_id"] = workspace_id
+
         # Compliance levels for this turn. Two distinct values are tracked and
         # they must not be conflated:
         #
@@ -1236,6 +1250,7 @@ class ChatService:
             messages=messages,
             metadata={
                 "agent_mode": bool(session.context.get("agent_mode")),
+                "workspace_id": session.context.get("workspace_id"),
             },
             allow_shrink=allow_shrink,
         )

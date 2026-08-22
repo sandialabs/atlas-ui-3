@@ -145,6 +145,43 @@ class TestSaveAndGet:
         assert result["metadata"]["agent_mode"] is True
         assert "search" in result["metadata"]["tools"]
 
+    def test_save_with_workspace_id_metadata(self, repo):
+        """The active workspace id is persisted in conversation metadata so a
+        conversation reopened from history can re-enable its workspace
+        (issue #829)."""
+        repo.save_conversation(
+            conversation_id="conv-ws",
+            user_email="user@test.com",
+            title="Workspace Conversation",
+            model="gpt-4",
+            messages=_make_messages(1),
+            metadata={"agent_mode": False, "workspace_id": "ws-work"},
+        )
+        result = repo.get_conversation("conv-ws", "user@test.com")
+        assert result["metadata"]["workspace_id"] == "ws-work"
+
+    def test_upsert_replaces_workspace_id_metadata(self, repo):
+        """Switching workspaces mid-conversation updates the stored id."""
+        repo.save_conversation(
+            conversation_id="conv-ws-upsert",
+            user_email="user@test.com",
+            title="Upsert Workspace",
+            model="gpt-4",
+            messages=_make_messages(1),
+            metadata={"agent_mode": False, "workspace_id": "ws-a"},
+        )
+        repo.save_conversation(
+            conversation_id="conv-ws-upsert",
+            user_email="user@test.com",
+            title="Upsert Workspace",
+            model="gpt-4",
+            messages=_make_messages(3),
+            metadata={"agent_mode": False, "workspace_id": "ws-b"},
+        )
+        result = repo.get_conversation("conv-ws-upsert", "user@test.com")
+        assert result["metadata"]["workspace_id"] == "ws-b"
+        assert len(result["messages"]) == 3
+
 
 class TestList:
     def test_list_conversations_empty(self, repo):

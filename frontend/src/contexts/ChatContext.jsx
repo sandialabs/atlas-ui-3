@@ -175,6 +175,33 @@ export const ChatProvider = ({ children }) => {
 
 	const clearActiveWorkspace = useCallback(() => setActiveWorkspaceId(null), [setActiveWorkspaceId])
 
+	// Restoring a conversation (issue #829) re-enables the workspace it was
+	// tied to. The workspace list is fetched asynchronously, so a restore that
+	// lands before the list has loaded defers the switch until it does; a
+	// workspace that has since been deleted is silently skipped (best effort),
+	// and a conversation with no recorded workspace leaves the active one
+	// untouched.
+	const pendingWorkspaceRestoreRef = useRef(null)
+
+	const restoreWorkspace = useCallback(workspaceId => {
+		if (!workspaceId || !workspacesEnabled) return
+		if (!workspacesLoaded) {
+			pendingWorkspaceRestoreRef.current = workspaceId
+			return
+		}
+		pendingWorkspaceRestoreRef.current = null
+		switchWorkspace(workspaceId)
+	}, [workspacesEnabled, workspacesLoaded, switchWorkspace])
+
+	// Apply a deferred workspace restore once the list finishes loading.
+	useEffect(() => {
+		const pending = pendingWorkspaceRestoreRef.current
+		if (pending && workspacesLoaded) {
+			pendingWorkspaceRestoreRef.current = null
+			switchWorkspace(pending)
+		}
+	}, [workspacesLoaded, switchWorkspace])
+
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
 			const bytes = atob(base64Content).split('').map(c => c.charCodeAt(0))
@@ -473,6 +500,10 @@ export const ChatProvider = ({ children }) => {
 			// Fine-tune capture correction (issue #622): when present, the backend
 			// records a (rejected, chosen) training pair for the re-run turn.
 			capture_correction: captureCorrection ?? undefined,
+			// Active workspace (issue #829): persisted with the conversation so
+			// reopening it from history can re-enable the workspace it was tied
+			// to. Null when no workspace is active.
+			workspace_id: activeWorkspaceId || undefined,
 		})
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
@@ -511,7 +542,7 @@ export const ChatProvider = ({ children }) => {
 		// it (websocketHandlers).
 		setIsAgentRunning(agent.agentModeEnabled)
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -653,7 +684,15 @@ export const ChatProvider = ({ children }) => {
 					})),
 			})
 		}
-	}, [resetMessages, files, sendMessage, bulkAdd])
+
+		// Re-enable the workspace this conversation was tied to (issue #829).
+		// Best effort: a workspace that has since been deleted is silently
+		// skipped, and if the list has not loaded yet the switch is deferred
+		// until it does. A conversation with no recorded workspace leaves the
+		// currently active workspace untouched.
+		const meta = conversationData.metadata || {}
+		restoreWorkspace(meta.workspace_id)
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace])
 
 	const downloadFile = useCallback((filename) => {
 		if (!files.sessionFiles.files.find(f => f.filename === filename)) return

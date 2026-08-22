@@ -699,6 +699,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             conversation_id=data.get("conversation_id"),
                             rewind_to_user_index=data.get("rewind_to_user_index"),
                             capture_correction=data.get("capture_correction"),
+                            workspace_id=data.get("workspace_id"),
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
