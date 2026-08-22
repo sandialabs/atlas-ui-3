@@ -245,7 +245,7 @@ def test_read_full_file_always_in_artifact(monkeypatch, tmp_path):
     assert "content" not in result["results"]
     assert "content_preview" in result["results"]
     assert base64.b64decode(result["artifacts"][0]["b64"]) == "".join(lines).encode("utf-8")
-    assert result["artifacts"][0]["size"] == len("".join(lines))
+    assert result["artifacts"][0]["size"] == len("".join(lines).encode("utf-8"))
 
 
 def test_read_binary_file_has_no_text_in_result(monkeypatch, tmp_path):
