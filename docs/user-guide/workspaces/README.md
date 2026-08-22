@@ -98,6 +98,30 @@ With the feature disabled the header carries no workspace button at all:
 
 ![Header with the feature disabled](screenshots/ws-06-flag-off.png)
 
+## Reopening a conversation restores its workspace
+
+When you reopen a saved conversation from the history sidebar, the workspace
+that was active when that conversation was last saved is re-enabled
+automatically — you don't have to re-pick the prompt, sources, and tools. The
+active workspace id is stored with each conversation (in its metadata on the
+server, or in the browser record for locally saved conversations) and applied
+on load.
+
+Edge cases:
+
+- **A different workspace is active** when you open the old conversation: it
+  switches to the conversation's workspace (replacing the current selections,
+  as a manual switch does).
+- **The workspace has since been deleted** (or is no longer accessible): the
+  switch is silently skipped — best effort. Your current selections stay as
+  they are, and the next turn you send re-records the now-current workspace
+  (or none) against the conversation.
+- **The conversation never had a workspace** (it was saved before this feature,
+  or started without one): the currently active workspace is left untouched.
+- **The workspace list hasn't finished loading** when the conversation opens:
+  the switch is deferred until it does, so a slow fetch no longer drops the
+  restore.
+
 ## What a workspace stores
 
 ```json
@@ -144,3 +168,4 @@ Every query is scoped to the authenticated user, so another user's id returns
 | Selection snapshot/apply | `frontend/src/hooks/chat/useSelections.js` |
 | CRUD hook | `frontend/src/hooks/useWorkspaces.js` |
 | UI | `frontend/src/components/WorkspaceSelector.jsx` (rendered from `Header.jsx`) |
+| Restore on reload | `loadSavedConversation` / `restoreWorkspace` in `frontend/src/contexts/ChatContext.jsx`; persisted in conversation metadata by `ChatService._save_conversation` (`atlas/application/chat/service.py`) |

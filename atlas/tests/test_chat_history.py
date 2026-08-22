@@ -1175,6 +1175,24 @@ class TestConversationRoutes:
         assert data["id"] == "api-conv2"
         assert len(data["messages"]) == 3
 
+    def test_get_by_id_returns_workspace_id_in_metadata(self, client, repo):
+        """The REST route surfaces the stored workspace_id so the frontend
+        restore path can read it (issue #829)."""
+        repo.save_conversation(
+            conversation_id="api-conv-ws",
+            user_email=config_manager.app_settings.test_user,
+            title="Workspace Conv",
+            model="gpt-4",
+            messages=_make_messages(2),
+            metadata={"agent_mode": False, "workspace_id": "ws-rest"},
+        )
+        resp = client.get(
+            "/api/conversations/api-conv-ws",
+            headers={"X-User-Email": config_manager.app_settings.test_user},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["metadata"]["workspace_id"] == "ws-rest"
+
     def test_search(self, client, repo):
         repo.save_conversation(
             conversation_id="api-search",

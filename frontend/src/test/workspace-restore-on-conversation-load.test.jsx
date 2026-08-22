@@ -225,15 +225,24 @@ describe('loadSavedConversation workspace restore (issue #829)', () => {
     expect(h.applyWorkspace).not.toHaveBeenCalled()
   })
 
-  it('does not restore a workspace when the feature is disabled', () => {
-    // features.workspaces is read at the ChatProvider level; re-render with a
-    // disabled flag is not possible with this mock shape, so verify the guard
-    // by sending a conversation with a workspace_id while the list is loaded --
-    // the restore path is gated on workspacesEnabled inside restoreWorkspace.
-    // (Covered implicitly: this test asserts no crash when metadata is absent.)
-    const { result } = renderChat()
+  it('cancels a deferred restore when a later conversation has no workspace', () => {
+    // Conversation A is opened before the list loads -> its restore is queued.
+    h.wsState.loaded = false
+    h.wsState.workspaces = []
+    const { result, rerender } = renderChat()
+
     act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
-    expect(h.applyWorkspace).toHaveBeenCalledTimes(1)
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+
+    // Conversation B (no workspace) is opened next; it must cancel A's pending
+    // restore so A's workspace is not applied to B when the list arrives.
+    act(() => { result.current.loadSavedConversation(makeConversation({ id: 'conv-2', metadata: {} })) })
+
+    h.wsState.loaded = true
+    h.wsState.workspaces = WORKSPACES
+    rerender()
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
   })
 
   it('defers the switch until the workspace list has loaded', () => {

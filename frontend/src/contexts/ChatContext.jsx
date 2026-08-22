@@ -184,7 +184,15 @@ export const ChatProvider = ({ children }) => {
 	const pendingWorkspaceRestoreRef = useRef(null)
 
 	const restoreWorkspace = useCallback(workspaceId => {
-		if (!workspaceId || !workspacesEnabled) return
+		if (!workspaceId || !workspacesEnabled) {
+			// A conversation with no workspace (or the feature off) cancels any
+			// deferred restore queued by an earlier load: without this, opening
+			// conversation A before the list loaded, then conversation B (no
+			// workspace), would still apply A's workspace to B once the list
+			// arrived.
+			pendingWorkspaceRestoreRef.current = null
+			return
+		}
 		if (!workspacesLoaded) {
 			pendingWorkspaceRestoreRef.current = workspaceId
 			return
@@ -629,6 +637,9 @@ export const ChatProvider = ({ children }) => {
 		setIsWelcomeVisible(true)
 		setActiveConversationId(null)
 		setFollowUpSuggestions([])
+		// A deferred workspace restore queued by a previous load must not
+		// fire into the fresh chat once the workspace list finishes loading.
+		pendingWorkspaceRestoreRef.current = null
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -887,6 +898,10 @@ export const ChatProvider = ({ children }) => {
 				created_at: messages[0]?.timestamp || new Date().toISOString(),
 				messages: messages.map(m => buildPersistedMessage(m)),
 				tags: [],
+				// Persist the active workspace so a locally saved conversation
+				// restores it on reload (issue #829), mirroring the server save
+				// path which stores it in conversation metadata.
+				metadata: { workspace_id: activeWorkspaceId || null },
 			}).catch(e => console.error('Failed to save conversation locally:', e))
 		}, 1000)
 
@@ -894,7 +909,7 @@ export const ChatProvider = ({ children }) => {
 			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [messages?.length, saveMode, activeConversationId, currentModel])
+	}, [messages?.length, saveMode, activeConversationId, currentModel, activeWorkspaceId])
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {
