@@ -95,7 +95,9 @@ class ChatOrchestrator:
             tool_manager=tool_manager, config_manager=config_manager
         )
         self.prompt_override = PromptOverrideService(tool_manager=tool_manager)
-        self.message_builder = MessageBuilder(prompt_provider=prompt_provider)
+        self.message_builder = MessageBuilder(
+            prompt_provider=prompt_provider, config_manager=config_manager
+        )
 
         # Initialize or use provided mode runners
         self.plain_mode = plain_mode or PlainModeRunner(
