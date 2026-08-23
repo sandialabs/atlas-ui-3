@@ -9,7 +9,7 @@ import mimetypes
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 from urllib.parse import urlsplit
 
 import requests
@@ -99,16 +99,117 @@ def _check_access(resolved: Path) -> None:
             )
 
 
-def _max_read_bytes() -> int:
-    """Return the maximum number of bytes a single read may return."""
-    configured = os.getenv("MCP_TRANSFER_MAX_BYTES")
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a positive-int env var, falling back to ``default`` on any miss."""
+    configured = os.getenv(name)
     if not configured:
-        return DEFAULT_MAX_READ_BYTES
+        return default
     try:
         value = int(configured)
     except ValueError:
-        return DEFAULT_MAX_READ_BYTES
-    return value if value > 0 else DEFAULT_MAX_READ_BYTES
+        return default
+    return value if value > 0 else default
+
+
+def _max_read_bytes() -> int:
+    """Return the maximum number of bytes a single read may return."""
+    return _positive_int_env("MCP_TRANSFER_MAX_BYTES", DEFAULT_MAX_READ_BYTES)
+
+
+# Default number of lines shown at the head and tail of a text file when the
+# full content is too long to inject verbatim into the chat context. The
+# complete file is still returned as a base64 artifact so the agent can forward
+# it to another tool. Override with MCP_TRANSFER_PREVIEW_LINES.
+DEFAULT_PREVIEW_LINES = 50
+
+# Hard ceiling on the decoded text placed in the tool result, so a file with
+# very few but very long lines (minified bundles, single-line JSON dumps) does
+# not bypass the line budget and flood the model context. The full bytes still
+# travel as the artifact. Override with MCP_TRANSFER_PREVIEW_BYTES.
+DEFAULT_PREVIEW_BYTES = 16384  # 16 KiB
+
+
+def _preview_lines() -> int:
+    """Return the number of head/tail lines shown for a truncated text file."""
+    return _positive_int_env("MCP_TRANSFER_PREVIEW_LINES", DEFAULT_PREVIEW_LINES)
+
+
+def _preview_bytes() -> int:
+    """Return the byte ceiling on the decoded text in the tool result."""
+    return _positive_int_env("MCP_TRANSFER_PREVIEW_BYTES", DEFAULT_PREVIEW_BYTES)
+
+
+def _text_preview(
+    file_bytes: bytes, preview_lines: int, preview_bytes: int
+) -> Tuple[str, bool, int, int]:
+    """Build a head+tail preview of a UTF-8 text file.
+
+    Returns ``(text, truncated, total_lines, omitted_lines)``. The file is
+returned in full only when it is under **both** the line budget (at most
+    ``2 * preview_lines`` lines) and the byte ceiling (``preview_bytes``);
+    otherwise the first ``preview_lines`` lines and the last ``preview_lines``
+    lines are joined by an omission marker. If the assembled head+tail still
+    exceeds ``preview_bytes`` each side is trimmed to half the remaining byte
+    budget, working on encoded bytes so multi-byte content (CJK, emoji) is
+    capped by bytes not code points. The full bytes are preserved separately
+    in the artifact so the agent can still send the complete file to a
+    downstream tool.
+    """
+    text = file_bytes.decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    total_lines = len(lines)
+
+    # Measure the byte ceiling on encoded bytes, not code points: a CJK or
+    # emoji file can have len(text) well under the byte ceiling while the
+    # encoded bytes far exceed it.
+    if total_lines <= 2 * preview_lines and len(file_bytes) <= preview_bytes:
+        return text, False, total_lines, 0
+
+    head = "".join(lines[:preview_lines])
+    tail = "".join(lines[-preview_lines:])
+
+    # Byte ceiling: a single long line can make head+tail huge. Reserve room
+    # for the marker and trim each side to half the remaining budget. Work on
+    # encoded bytes so multi-byte sequences are measured correctly; decode
+    # with errors="ignore" so a split sequence is not replaced with U+FFFD.
+    marker_reserve = 160
+    byte_budget = max(0, preview_bytes - marker_reserve)
+    head_bytes = head.encode("utf-8")
+    tail_bytes = tail.encode("utf-8")
+    if len(head_bytes) + len(tail_bytes) > byte_budget:
+        half = byte_budget // 2
+        head_bytes = head_bytes[:half]
+        tail_bytes = tail_bytes[-half:] if half > 0 else b""
+        head = head_bytes.decode("utf-8", errors="ignore")
+        tail = tail_bytes.decode("utf-8", errors="ignore")
+
+    # Recompute omitted_lines from the lines actually shown after byte
+    # trimming, so total_lines - omitted_lines equals the number of complete
+    # lines in the preview.
+    shown_lines = head.count("\n") + tail.count("\n")
+    omitted_lines = max(0, total_lines - shown_lines)
+
+    if omitted_lines:
+        word = "line" if omitted_lines == 1 else "lines"
+        marker = (
+            f"\n... [{omitted_lines} {word} omitted; {total_lines} total lines; "
+            f"full content in artifact] ...\n"
+        )
+    else:
+        marker = (
+            f"\n... [preview trimmed to {preview_bytes} bytes; "
+            f"full content in artifact] ...\n"
+        )
+
+    # Final clamp: ensure the assembled result never exceeds the byte ceiling.
+    # This matters for very small preview_bytes where the marker itself is
+    # larger than the budget.
+    result = head + marker + tail
+    result_bytes = result.encode("utf-8")
+    if len(result_bytes) > preview_bytes:
+        result = result_bytes[:preview_bytes].decode("utf-8", errors="ignore")
+
+    return result, True, total_lines, omitted_lines
 
 
 def _backend_base_url() -> str:
@@ -215,7 +316,20 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
     """Read a local file into the chat session as an MCP artifact.
 
     This local-development helper reads a file and returns it as a base64
-    artifact. UTF-8 text files also include decoded text in the tool result.
+    artifact so the full bytes are available in the session context for the
+    agent to forward to another tool. To avoid flooding the model context, the
+    text placed directly in the tool result is a **head+tail preview**: the
+    first and last ``MCP_TRANSFER_PREVIEW_LINES`` lines (default 50 each) of a
+    UTF-8 file, with an omission marker between them. A byte ceiling
+    (``MCP_TRANSFER_PREVIEW_BYTES``, default 16 KiB) caps the preview so a
+    file with few but very long lines cannot bypass the line budget. Short
+    files (under both the line and byte budgets) are returned in full. When
+    the preview is trimmed the text is emitted under ``content_preview`` and
+    the ``content`` key is omitted, so a blind forward into
+    ``write_file_to_disk(content=...)`` fails loudly instead of silently
+    writing the omission marker. Binary files produce no text in the tool
+    result — the bytes travel only as the artifact.
+
     Relative paths resolve below the primary root (`MCP_TRANSFER_BASE_DIR`, or
     the home directory when unset); absolute paths are read as given. By default
     access is confined to that root (plus any `MCP_TRANSFER_ALLOWED_DIRS`) and
@@ -228,7 +342,10 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
         path: File path to read. Relative paths resolve below the configured base directory.
 
     Returns:
-        MCP tool result with file metadata and an artifact containing the file bytes.
+        MCP tool result with file metadata, a text preview (``content`` when
+        complete, ``content_preview`` when trimmed), structured truncation
+        metadata (``truncated``, ``total_lines``, ``omitted_lines``,
+        ``preview_lines``), and an artifact containing the full file bytes.
     """
     start = time.perf_counter()
     operation = "read_file_from_disk"
@@ -267,9 +384,25 @@ def read_file_from_disk(path: str) -> Dict[str, Any]:
             "status": "success",
         }
         try:
-            results["content"] = file_bytes.decode("utf-8")
+            preview, truncated, total_lines, omitted = _text_preview(
+                file_bytes, _preview_lines(), _preview_bytes()
+            )
+            # When truncated the lossy preview goes under a distinct key and
+            # ``content`` is omitted, so a caller forwarding the text blindly
+            # into ``write_file_to_disk(content=...)`` fails loudly instead of
+            # silently writing the omission marker.
+            if truncated:
+                results["content_preview"] = preview
+            else:
+                results["content"] = preview
+            results["truncated"] = truncated
+            results["total_lines"] = total_lines
+            results["omitted_lines"] = omitted
+            results["preview_lines"] = _preview_lines()
         except UnicodeDecodeError:
-            results["content_base64"] = artifact["b64"]
+            # Binary file: the bytes travel only as the artifact, not as text
+            # in the tool result, to avoid flooding the model context.
+            pass
 
         return {
             "results": results,

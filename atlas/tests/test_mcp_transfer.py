@@ -188,6 +188,276 @@ def test_read_allows_files_within_size_cap(monkeypatch, tmp_path):
     assert result["results"]["content"] == "ok"
 
 
+def test_read_truncates_long_text_file_to_head_and_tail(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "2")
+
+    lines = [f"line {i:03d}\n" for i in range(20)]
+    (tmp_path / "long.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("long.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert "content" not in result["results"]
+    content = result["results"]["content_preview"]
+    assert "line 000\n" in content
+    assert "line 001\n" in content
+    assert "line 018\n" in content
+    assert "line 019\n" in content
+    assert "line 002\n" not in content
+    assert "line 017\n" not in content
+    assert result["results"]["truncated"] is True
+    assert result["results"]["total_lines"] == 20
+    assert result["results"]["omitted_lines"] == 16
+    assert result["results"]["preview_lines"] == 2
+
+
+def test_read_short_file_returned_in_full(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "5")
+
+    text = "\n".join(f"line {i}" for i in range(10)) + "\n"
+    (tmp_path / "short.txt").write_text(text)
+
+    result = transfer.read_file_from_disk("short.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["content"] == text
+    assert "content_preview" not in result["results"]
+    assert result["results"]["truncated"] is False
+    assert result["results"]["omitted_lines"] == 0
+
+
+def test_read_full_file_always_in_artifact(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "1")
+
+    lines = [f"line {i}\n" for i in range(10)]
+    (tmp_path / "full.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("full.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert "content" not in result["results"]
+    assert "content_preview" in result["results"]
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == "".join(lines).encode("utf-8")
+    assert result["artifacts"][0]["size"] == len("".join(lines).encode("utf-8"))
+
+
+def test_read_binary_file_has_no_text_in_result(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+
+    payload = b"\x00\x01\x02binary\xff\xfe"
+    (tmp_path / "blob.bin").write_bytes(payload)
+
+    result = transfer.read_file_from_disk("blob.bin")
+
+    assert result["meta_data"]["is_error"] is False
+    assert "content" not in result["results"]
+    assert "content_preview" not in result["results"]
+    assert "content_base64" not in result["results"]
+    assert "truncated" not in result["results"]
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == payload
+
+
+def test_read_preview_lines_env_var_controls_budget(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "3")
+
+    lines = [f"row {i}\n" for i in range(30)]
+    (tmp_path / "data.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("data.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    content = result["results"]["content_preview"]
+    assert "row 0\n" in content
+    assert "row 1\n" in content
+    assert "row 2\n" in content
+    assert "row 27\n" in content
+    assert "row 28\n" in content
+    assert "row 29\n" in content
+    assert "row 3\n" not in content
+    assert "row 26\n" not in content
+    assert result["results"]["truncated"] is True
+    assert result["results"]["omitted_lines"] == 24
+    assert result["results"]["total_lines"] == 30
+
+
+def test_preview_lines_helper_fallbacks(monkeypatch):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.delenv("MCP_TRANSFER_PREVIEW_LINES", raising=False)
+    assert transfer._preview_lines() == transfer.DEFAULT_PREVIEW_LINES
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "")
+    assert transfer._preview_lines() == transfer.DEFAULT_PREVIEW_LINES
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "abc")
+    assert transfer._preview_lines() == transfer.DEFAULT_PREVIEW_LINES
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "0")
+    assert transfer._preview_lines() == transfer.DEFAULT_PREVIEW_LINES
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "-5")
+    assert transfer._preview_lines() == transfer.DEFAULT_PREVIEW_LINES
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "7")
+    assert transfer._preview_lines() == 7
+
+
+def test_read_default_budget_of_50_truncates(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.delenv("MCP_TRANSFER_PREVIEW_LINES", raising=False)
+
+    lines = [f"line {i}\n" for i in range(200)]
+    (tmp_path / "big.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("big.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert result["results"]["preview_lines"] == 50
+    assert result["results"]["total_lines"] == 200
+    assert result["results"]["omitted_lines"] == 100
+    content = result["results"]["content_preview"]
+    assert "line 0\n" in content
+    assert "line 49\n" in content
+    assert "line 50\n" not in content
+    assert "line 199\n" in content
+    assert "line 150\n" in content
+    assert "line 149\n" not in content
+
+
+def test_read_boundary_2n_plus_1_truncates(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.delenv("MCP_TRANSFER_PREVIEW_LINES", raising=False)
+
+    n = transfer.DEFAULT_PREVIEW_LINES
+    lines = [f"row {i}\n" for i in range(2 * n + 1)]
+    (tmp_path / "boundary.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("boundary.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert result["results"]["total_lines"] == 2 * n + 1
+    assert result["results"]["omitted_lines"] == 1
+    assert "1 line omitted" in result["results"]["content_preview"]
+
+
+def test_read_boundary_2n_not_truncated(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.delenv("MCP_TRANSFER_PREVIEW_LINES", raising=False)
+
+    n = transfer.DEFAULT_PREVIEW_LINES
+    text = "".join(f"row {i}\n" for i in range(2 * n))
+    (tmp_path / "exact.txt").write_text(text)
+
+    result = transfer.read_file_from_disk("exact.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is False
+    assert result["results"]["content"] == text
+    assert "content_preview" not in result["results"]
+
+
+def test_read_byte_cap_trims_single_long_line(monkeypatch, tmp_path):
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_BYTES", "200")
+
+    payload = "X" * 4000 + "\n"
+    (tmp_path / "minified.txt").write_text(payload)
+
+    result = transfer.read_file_from_disk("minified.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert result["results"]["total_lines"] == 1
+    assert result["results"]["omitted_lines"] == 0
+    assert "content" not in result["results"]
+    preview = result["results"]["content_preview"]
+    assert "preview trimmed to 200 bytes" in preview
+    assert len(preview.encode("utf-8")) <= 200
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == payload.encode("utf-8")
+
+
+def test_read_byte_cap_measures_encoded_bytes_not_code_points(monkeypatch, tmp_path):
+    """The byte ceiling is measured on encoded bytes, so CJK content (3 bytes
+    per char in UTF-8) is capped correctly, not by code-point count."""
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_BYTES", "300")
+    # One line of CJK chars: each char is 3 bytes in UTF-8.
+    # 200 chars = 600 bytes, well over the 300-byte ceiling but only 1 line.
+    payload = "\u4e00" * 200 + "\n"
+    (tmp_path / "cjk.txt").write_text(payload, encoding="utf-8")
+
+    result = transfer.read_file_from_disk("cjk.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert result["results"]["total_lines"] == 1
+    assert result["results"]["omitted_lines"] == 0
+    assert "content" not in result["results"]
+    preview = result["results"]["content_preview"]
+    # The preview must be under the byte ceiling (not the code-point count).
+    assert len(preview.encode("utf-8")) <= 300
+    assert "preview trimmed to 300 bytes" in preview
+    # Full file still in artifact.
+    assert base64.b64decode(result["artifacts"][0]["b64"]) == payload.encode("utf-8")
+
+
+def test_read_combined_line_and_byte_truncation_recomputes_omitted(monkeypatch, tmp_path):
+    """When both line and byte truncation apply, omitted_lines is recomputed
+    from the lines actually shown after the byte trim."""
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_LINES", "50")
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_BYTES", "200")
+
+    # 200 lines, each 80 chars: 16000 bytes total. Line budget would show
+    # 100 lines (50 head + 50 tail), but the 200-byte ceiling trims to ~2
+    # lines per side.
+    lines = [f"line {i:03d} " + "X" * 70 + "\n" for i in range(200)]
+    (tmp_path / "combined.txt").write_text("".join(lines))
+
+    result = transfer.read_file_from_disk("combined.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    assert result["results"]["total_lines"] == 200
+    # omitted_lines must reflect lines actually omitted (not just the line
+    # budget gap), so total_lines - omitted_lines == lines shown.
+    omitted = result["results"]["omitted_lines"]
+    shown = result["results"]["total_lines"] - omitted
+    assert shown < 100  # byte trim cut well below the 100-line line budget
+    # The preview text is under the byte ceiling.
+    preview = result["results"]["content_preview"]
+    assert len(preview.encode("utf-8")) <= 200
+
+
+def test_read_very_small_byte_ceiling_does_not_exceed_budget(monkeypatch, tmp_path):
+    """A very small preview_bytes (below the marker size) still produces a
+    result that does not exceed the byte ceiling."""
+    transfer = _load_transfer_module(monkeypatch)
+    monkeypatch.setenv("MCP_TRANSFER_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MCP_TRANSFER_PREVIEW_BYTES", "50")
+
+    (tmp_path / "tiny.txt").write_text("A" * 500 + "\n")
+
+    result = transfer.read_file_from_disk("tiny.txt")
+
+    assert result["meta_data"]["is_error"] is False
+    assert result["results"]["truncated"] is True
+    preview = result["results"]["content_preview"]
+    assert len(preview.encode("utf-8")) <= 50
+
+
 class _FakeResponse:
     """Minimal stand-in for a streamed ``requests`` response."""
 
