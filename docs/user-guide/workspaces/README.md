@@ -107,6 +107,12 @@ active workspace id is stored with each conversation (in its metadata on the
 server, or in the browser record for locally saved conversations) and applied
 on load.
 
+Below, the *Code Review* workspace is active; opening a conversation that was
+saved under *Quarterly Report* switches to it — the workspace pill, its tool
+selection, and a notification explaining the switch:
+
+![Reopening a conversation restores its workspace](screenshots/ws-11-restore-on-reload.png)
+
 Edge cases:
 
 - **A different workspace is active** when you open the old conversation: it
