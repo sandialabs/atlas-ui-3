@@ -211,3 +211,131 @@ async def test_save_without_workspace_id_arg_defaults_null(repo):
     saved = repo.get_conversation(conv_id, TEST_USER)
     assert saved is not None
     assert saved["metadata"].get("workspace_id") is None
+
+
+@pytest.mark.asyncio
+async def test_omitted_workspace_id_does_not_clear_an_existing_binding(repo):
+    """An omitted field is not an explicit null.
+
+    A client that never sends ``workspace_id`` (the CLI, a script, an older
+    bundle) must leave an existing binding alone rather than stripping it on
+    its next turn.
+    """
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    session = sessions[session_id]
+    conv_id = session.context.get("conversation_id")
+
+    # Second turn omits the field entirely.
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="again",
+            model="test-model",
+            user_email=TEST_USER,
+            conversation_id=conv_id,
+        )
+
+    assert session.context.get("workspace_id") == "ws-work"
+    saved = repo.get_conversation(conv_id, TEST_USER)
+    assert saved["metadata"].get("workspace_id") == "ws-work"
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_workspace_id_still_clears_the_binding(repo):
+    """An explicit null is honoured -- only omission is a no-op."""
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    session = sessions[session_id]
+    conv_id = session.context.get("conversation_id")
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="again",
+            model="test-model",
+            user_email=TEST_USER,
+            conversation_id=conv_id,
+            workspace_id=None,
+        )
+
+    assert session.context.get("workspace_id") is None
+
+
+@pytest.mark.asyncio
+async def test_oversized_workspace_id_is_rejected(repo):
+    """A client-supplied id is length-bounded before it reaches metadata."""
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="w" * 5000,
+        )
+
+    assert sessions[session_id].context.get("workspace_id") is None
+
+
+@pytest.mark.asyncio
+async def test_restore_seeds_workspace_id_from_stored_metadata(repo):
+    """Restoring a conversation carries its stored binding into the new
+    session, so a client that never sends the field re-persists it."""
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    conv_id = sessions[session_id].context.get("conversation_id")
+    saved = repo.get_conversation(conv_id, TEST_USER)
+
+    # A fresh session restores the conversation.
+    new_session_id = uuid4()
+    await service.handle_restore_conversation(
+        session_id=new_session_id,
+        conversation_id=conv_id,
+        messages=saved["messages"],
+        user_email=TEST_USER,
+    )
+
+    assert sessions[new_session_id].context.get("workspace_id") == "ws-work"
+
+    # A follow-up turn that omits workspace_id keeps the binding intact.
+    with _stub_orchestrator(service, sessions, new_session_id):
+        await service.handle_chat_message(
+            session_id=new_session_id,
+            content="again",
+            model="test-model",
+            user_email=TEST_USER,
+            conversation_id=conv_id,
+        )
+
+    reloaded = repo.get_conversation(conv_id, TEST_USER)
+    assert reloaded["metadata"].get("workspace_id") == "ws-work"

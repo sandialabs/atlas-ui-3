@@ -111,16 +111,21 @@ Edge cases:
 
 - **A different workspace is active** when you open the old conversation: it
   switches to the conversation's workspace (replacing the current selections,
-  as a manual switch does).
+  as a manual switch does) and a notification tells you which workspace it
+  switched to, since the switch replaces selections you may have hand-picked.
 - **The workspace has since been deleted** (or is no longer accessible): the
-  switch is silently skipped — best effort. Your current selections stay as
-  they are, and the next turn you send re-records the now-current workspace
-  (or none) against the conversation.
+  switch is skipped — best effort — and a notification says the workspace is no
+  longer available. Your current selections stay as they are.
 - **The conversation never had a workspace** (it was saved before this feature,
   or started without one): the currently active workspace is left untouched.
-- **The workspace list hasn't finished loading** when the conversation opens:
-  the switch is deferred until it does, so a slow fetch no longer drops the
-  restore.
+- **The workspace list (or the app config) hasn't finished loading** when the
+  conversation opens: the switch is deferred until it has, so a slow fetch no
+  longer drops the restore. Anything you do in the meantime — switching or
+  clearing the workspace yourself, or starting a new chat — cancels the pending
+  restore, so a late switch never overrides a deliberate choice.
+- **Simply opening a conversation never re-binds it.** The stored workspace is
+  only rewritten when you actually send a turn, so browsing through history
+  cannot silently retag old conversations with whatever workspace is active.
 
 ## What a workspace stores
 

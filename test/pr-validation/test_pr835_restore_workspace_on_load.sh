@@ -33,16 +33,25 @@ cd "$PROJECT_ROOT"
 source .venv/bin/activate
 export PYTHONPATH="$PROJECT_ROOT"
 
+# `duckdb:///:memory:` is not an in-memory URL for this driver -- it creates a
+# real file literally named ':memory:' in the working directory, so rows leak
+# between runs and can mask a persistence bug. Use a fresh per-run temp file and
+# remove it on exit.
+TMP_DB_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DB_DIR"' EXIT
+# Each step below exports its own TEST_DB_URL so no state carries across steps.
+
 echo "=== PR #835: Restore Workspace on Conversation Load (#829) ==="
 echo ""
 
 # --- 1. Repository persists workspace_id in conversation metadata ---
 echo "--- Repository: workspace_id in metadata ---"
-python -c "
+TEST_DB_URL="duckdb:///$TMP_DB_DIR/step1.duckdb" python -c "
 from atlas.modules.chat_history import ConversationRepository, get_session_factory, init_database
 from atlas.modules.chat_history.database import reset_engine
+import os
 reset_engine()
-init_database('duckdb:///:memory:')
+init_database(os.environ['TEST_DB_URL'])
 repo = ConversationRepository(get_session_factory())
 repo.save_conversation(
     conversation_id='conv-ws',
@@ -63,11 +72,12 @@ print_result $? "save_conversation persists workspace_id in metadata"
 # --- 2. Upsert updates the workspace_id ---
 echo ""
 echo "--- Repository: upsert updates workspace_id ---"
-python -c "
+TEST_DB_URL="duckdb:///$TMP_DB_DIR/step2.duckdb" python -c "
 from atlas.modules.chat_history import ConversationRepository, get_session_factory, init_database
 from atlas.modules.chat_history.database import reset_engine
+import os
 reset_engine()
-init_database('duckdb:///:memory:')
+init_database(os.environ['TEST_DB_URL'])
 repo = ConversationRepository(get_session_factory())
 repo.save_conversation('c1','user@test.com','t','gpt-4',[{'role':'user','content':'a'}], metadata={'agent_mode': False, 'workspace_id': 'ws-a'})
 repo.save_conversation('c1','user@test.com','t','gpt-4',[{'role':'user','content':'a'},{'role':'assistant','content':'b'}], metadata={'agent_mode': False, 'workspace_id': 'ws-b'})
@@ -82,11 +92,12 @@ print_result $? "upsert replaces workspace_id"
 # --- 3. Null workspace_id round-trips ---
 echo ""
 echo "--- Repository: null workspace_id round-trips ---"
-python -c "
+TEST_DB_URL="duckdb:///$TMP_DB_DIR/step3.duckdb" python -c "
 from atlas.modules.chat_history import ConversationRepository, get_session_factory, init_database
 from atlas.modules.chat_history.database import reset_engine
+import os
 reset_engine()
-init_database('duckdb:///:memory:')
+init_database(os.environ['TEST_DB_URL'])
 repo = ConversationRepository(get_session_factory())
 repo.save_conversation('c2','user@test.com','t','gpt-4',[{'role':'user','content':'a'}], metadata={'agent_mode': False, 'workspace_id': None})
 result = repo.get_conversation('c2', 'user@test.com')
@@ -99,16 +110,17 @@ print_result $? "null workspace_id round-trips"
 # --- 4. ChatService captures workspace_id and persists it ---
 echo ""
 echo "--- Service: handle_chat_message captures + persists workspace_id ---"
-python -c "
+TEST_DB_URL="duckdb:///$TMP_DB_DIR/step4.duckdb" python -c "
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from atlas.application.chat.service import ChatService
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.modules.chat_history import ConversationRepository, get_session_factory, init_database
 from atlas.modules.chat_history.database import reset_engine
+import os
 from atlas.modules.config.config_manager import config_manager
 reset_engine()
-init_database('duckdb:///:memory:')
+init_database(os.environ['TEST_DB_URL'])
 repo = ConversationRepository(get_session_factory())
 sessions = {}
 async def _get(sid): return sessions.get(sid)
@@ -136,13 +148,15 @@ reset_engine()
 print_result $? "handle_chat_message captures and persists workspace_id"
 
 # --- 5. REST route returns workspace_id in metadata (route boundary) ---
-# Exercised by the pytest suite below (TestConversationRoutes in
-# test_chat_history.py) under the project's conftest isolation, which the
-# bare `python -c` here does not have. The suite uses FastAPI's TestClient
-# against the real route -> repository path.
+# Runs the route-level suite on its own so this step asserts the route ->
+# repository boundary itself rather than only printing. It needs the project's
+# conftest isolation (FastAPI TestClient against the real route), which the bare
+# `python -c` blocks above do not have, so it is run through pytest.
 echo ""
-echo "--- REST route check: covered by backend unit tests (TestConversationRoutes) ---"
-print_result 0 "REST route workspace_id check is covered by pytest"
+echo "--- REST route: GET /api/conversations/{id} returns workspace_id ---"
+python -m pytest atlas/tests/test_chat_history.py -q \
+    -k "TestConversationRoutes and workspace_id" 2>&1 | tail -5
+print_result ${PIPESTATUS[0]} "REST route returns workspace_id in metadata"
 
 # --- 6. Backend unit tests for the feature ---
 echo ""

@@ -23,6 +23,7 @@ const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  toastInfo: vi.fn(),
   // selection spies
   applyWorkspace: vi.fn(),
   snapshotSelections: vi.fn(() => ({})),
@@ -30,6 +31,13 @@ const h = vi.hoisted(() => ({
   wsState: { workspaces: [], loaded: true },
   // initial active workspace id for usePersistentState
   activeWorkspaceId: null,
+  // config state, mutable per test: `configReady` is false until the config
+  // fetch lands, and `workspacesEnabled` is the feature flag it carries.
+  configReady: true,
+  workspacesEnabled: true,
+  // local-save spy + the persisted save mode that gates it
+  saveLocalConv: vi.fn(() => Promise.resolve()),
+  saveMode: 'none',
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -41,7 +49,7 @@ vi.mock('../contexts/WSContext', () => ({
 }))
 
 vi.mock('../components/ui/toastContext', () => ({
-  useToast: () => ({ error: h.toastError, success: h.toastSuccess }),
+  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: h.toastInfo }),
 }))
 
 vi.mock('../hooks/chat/useChatConfig', () => ({
@@ -49,8 +57,8 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
     currentModel: 'test-model',
     user: 'tester@example.com',
     ragServers: [],
-    configReady: false,
-    features: { workspaces: true },
+    configReady: h.configReady,
+    features: { workspaces: h.workspacesEnabled },
     prompts: [],
     appName: 'Atlas',
     isInAdminGroup: false,
@@ -119,6 +127,13 @@ vi.mock('../hooks/chat/useFiles', () => ({
   }),
 }))
 
+vi.mock('../utils/localConversationDB', () => ({
+  saveConversation: (...args) => h.saveLocalConv(...args),
+  getConversation: vi.fn(),
+  listConversations: vi.fn(() => Promise.resolve([])),
+  deleteConversation: vi.fn(),
+}))
+
 vi.mock('../hooks/useSettings', () => ({
   useSettings: () => ({ settings: {}, updateSettings: vi.fn() }),
 }))
@@ -126,6 +141,7 @@ vi.mock('../hooks/useSettings', () => ({
 vi.mock('../hooks/chat/usePersistentState', () => ({
   usePersistentState: (key, initial) => {
     if (key === 'chatui-active-workspace') return [h.activeWorkspaceId, vi.fn()]
+    if (key === 'chatui-save-mode') return [h.saveMode, vi.fn()]
     return [initial, vi.fn()]
   },
 }))
@@ -193,6 +209,10 @@ beforeEach(() => {
   h.wsState.workspaces = WORKSPACES
   h.wsState.loaded = true
   h.activeWorkspaceId = null
+  h.configReady = true
+  h.workspacesEnabled = true
+  h.saveLocalConv.mockImplementation(() => Promise.resolve())
+  h.saveMode = 'none'
 })
 
 describe('loadSavedConversation workspace restore (issue #829)', () => {
@@ -299,5 +319,124 @@ describe('sendChatMessage forwards the active workspace id (issue #829)', () => 
     const chatCall = h.sendMessage.mock.calls.find(c => c[0]?.type === 'chat')
     expect(chatCall).toBeTruthy()
     expect(chatCall[0].workspace_id).toBeUndefined()
+  })
+})
+
+describe('workspace restore guards (issue #829)', () => {
+  it('does not restore when the workspaces feature is disabled', () => {
+    h.workspacesEnabled = false
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('defers rather than discards a restore while the config is still loading', () => {
+    // `workspacesEnabled` reads the config, which is false for everyone until
+    // the fetch lands -- an early open must not throw the id away for good.
+    h.configReady = false
+    const { result, rerender } = renderChat()
+
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+
+    h.configReady = true
+    rerender()
+
+    expect(h.applyWorkspace).toHaveBeenCalledTimes(1)
+    expect(h.applyWorkspace).toHaveBeenCalledWith(WORKSPACES[0].config)
+  })
+
+  it('drops the queued restore once the config says the feature is off', () => {
+    h.configReady = false
+    const { result, rerender } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+
+    h.configReady = true
+    h.workspacesEnabled = false
+    rerender()
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('cancels a queued restore when the user explicitly switches workspace', () => {
+    // The restore is queued because the config has not resolved yet, while the
+    // workspace list already has -- so the user can pick a workspace in the
+    // meantime, and that deliberate choice must win.
+    h.configReady = false
+    const { result, rerender } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+
+    act(() => { result.current.switchWorkspace('ws-home') })
+
+    h.configReady = true
+    rerender()
+
+    // Home was applied, and the queued restore did not overwrite it with Work.
+    expect(h.applyWorkspace).toHaveBeenCalledTimes(1)
+    expect(h.applyWorkspace).toHaveBeenCalledWith(WORKSPACES[1].config)
+  })
+
+  it('cancels a queued restore when the user explicitly clears the workspace', () => {
+    h.wsState.loaded = false
+    h.wsState.workspaces = []
+    const { result, rerender } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+
+    act(() => { result.current.clearActiveWorkspace() })
+
+    h.wsState.loaded = true
+    h.wsState.workspaces = WORKSPACES
+    rerender()
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('cancels a queued restore when a later workspace-less conversation loads before the list resolves', () => {
+    h.wsState.loaded = false
+    h.wsState.workspaces = []
+    const { result, rerender } = renderChat()
+
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+    act(() => { result.current.loadSavedConversation(makeConversation({ id: 'conv-2', metadata: {} })) })
+
+    h.wsState.loaded = true
+    h.wsState.workspaces = WORKSPACES
+    rerender()
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('tells the user when it switches workspace and when the workspace is gone', () => {
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+    expect(h.toastInfo).toHaveBeenCalledWith(expect.stringContaining('Work'))
+
+    h.toastInfo.mockClear()
+    act(() => { result.current.loadSavedConversation(makeConversation({ id: 'c3', metadata: { workspace_id: 'ws-gone' } })) })
+    expect(h.toastInfo).toHaveBeenCalledWith(expect.stringContaining('no longer available'))
+  })
+})
+
+describe('local autosave preserves the conversation binding (issue #829)', () => {
+  it('does not re-bind a loaded conversation to the workspace that happens to be active', async () => {
+    // Local save mode fires ~1s after a conversation is loaded. It must persist
+    // the workspace the conversation was saved with, not whatever is active now,
+    // or merely opening a conversation destroys its binding with no user action.
+    vi.useFakeTimers()
+    try {
+      h.activeWorkspaceId = 'ws-home'
+      h.saveMode = 'local'
+      const { result } = renderChat()
+      act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+      act(() => { vi.advanceTimersByTime(1500) })
+
+      expect(h.saveLocalConv).toHaveBeenCalled()
+      const saved = h.saveLocalConv.mock.calls.at(-1)[0]
+      expect(saved.metadata.workspace_id).toBe('ws-work')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

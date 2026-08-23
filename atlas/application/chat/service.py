@@ -47,6 +47,14 @@ from .utilities.interrupted_turn import close_open_turn
 
 logger = logging.getLogger(__name__)
 
+# Distinguishes "the client did not send this field" from "the client sent
+# null"; the two mean different things for the conversation's workspace binding.
+_UNSET = object()
+
+# Upper bound on a client-supplied workspace id persisted in conversation metadata.
+_MAX_WORKSPACE_ID_LEN = 128
+
+
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -390,12 +398,20 @@ class ChatService:
         # the conversation metadata, never used for authorization -- so a null
         # or stale value is harmless. Stored every turn so switching away from
         # a workspace (or starting a turn without one) records the change.
-        workspace_id = kwargs.pop("workspace_id", None)
-        if isinstance(workspace_id, str):
-            workspace_id = workspace_id.strip() or None
-        else:
-            workspace_id = None
-        session.context["workspace_id"] = workspace_id
+        # An omitted field is *not* an explicit null: clients that never send it
+        # (the CLI, a cached bundle, a script) must not strip an existing
+        # binding on their next turn, so only assign when a value was supplied.
+        workspace_id = kwargs.pop("workspace_id", _UNSET)
+        if workspace_id is not _UNSET:
+            if isinstance(workspace_id, str):
+                workspace_id = workspace_id.strip() or None
+                # Bound the length: the value is client-supplied and only ever
+                # echoed back, but it should not grow the metadata without limit.
+                if workspace_id and len(workspace_id) > _MAX_WORKSPACE_ID_LEN:
+                    workspace_id = None
+            else:
+                workspace_id = None
+            session.context["workspace_id"] = workspace_id
 
         # Compliance levels for this turn. Two distinct values are tracked and
         # they must not be conflated:
@@ -803,6 +819,7 @@ class ChatService:
         # source — the client-supplied ``messages`` arg is treated as
         # display-only fallback and is NOT persisted back.
         canonical_messages = messages
+        stored_workspace_id = None
         if getattr(self, "conversation_repository", None) is not None:
             conv = self.conversation_repository.get_conversation(conversation_id, user_email)
             if conv is None:
@@ -819,6 +836,9 @@ class ChatService:
             db_messages = conv.get("messages")
             if isinstance(db_messages, list):
                 canonical_messages = db_messages
+            conv_metadata = conv.get("metadata")
+            if isinstance(conv_metadata, dict):
+                stored_workspace_id = conv_metadata.get("workspace_id")
 
         # Reset the session
         await self.end_session(session_id)
@@ -827,6 +847,12 @@ class ChatService:
         # Store the conversation_id mapping and mark as restored
         session.context["conversation_id"] = conversation_id
         session.context["_restored"] = True
+        # Carry the stored workspace binding into the fresh session (issue #829)
+        # so a client that never sends `workspace_id` (the CLI, a script, an
+        # older bundle) re-persists the binding on its next turn instead of
+        # clearing it.
+        if stored_workspace_id:
+            session.context["workspace_id"] = stored_workspace_id
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical

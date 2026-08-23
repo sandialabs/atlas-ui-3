@@ -141,9 +141,25 @@ export const ChatProvider = ({ children }) => {
 		}
 	}, [activeWorkspaceId, config.configReady, workspacesEnabled, workspacesLoaded, workspaceList, setActiveWorkspaceId])
 
+	// A conversation load can ask for a workspace restore before the workspace
+	// list -- or the config that gates the feature -- has arrived. The request is
+	// parked here and applied once both are ready. Every explicit user action
+	// (switching, clearing or deleting a workspace, starting a new chat) cancels
+	// it, so a late restore can never overwrite a deliberate choice.
+	const pendingWorkspaceRestoreRef = useRef(null)
+
+	// The workspace this conversation is bound to, as opposed to the one that
+	// happens to be active right now. Only a load (which reads it from the saved
+	// metadata) or the user actually sending a turn updates it, so the local
+	// autosave cannot silently re-bind a conversation just because it was opened
+	// while a different workspace was active.
+	const conversationWorkspaceIdRef = useRef(null)
+
 	const switchWorkspace = useCallback(workspaceId => {
 		const ws = workspaceList.find(w => w.id === workspaceId)
 		if (!ws) return false
+		// An explicit switch supersedes any queued restore.
+		pendingWorkspaceRestoreRef.current = null
 		applyWorkspace(ws.config)
 		setActiveWorkspaceId(ws.id)
 		return true
@@ -170,26 +186,53 @@ export const ChatProvider = ({ children }) => {
 		// Deleting the tracked workspace only drops the pointer; the selections it
 		// applied stay put so the user does not lose their context mid-chat.
 		if (deleted && workspaceId === activeWorkspaceId) setActiveWorkspaceId(null)
+		// Never restore into a workspace that has just been deleted.
+		if (deleted && pendingWorkspaceRestoreRef.current === workspaceId) {
+			pendingWorkspaceRestoreRef.current = null
+		}
 		return deleted
 	}, [deleteWorkspaceApi, activeWorkspaceId, setActiveWorkspaceId])
 
-	const clearActiveWorkspace = useCallback(() => setActiveWorkspaceId(null), [setActiveWorkspaceId])
+	const clearActiveWorkspace = useCallback(() => {
+		// Explicitly dropping the workspace also cancels a restore that has not
+		// fired yet, which would otherwise re-apply it moments later.
+		pendingWorkspaceRestoreRef.current = null
+		setActiveWorkspaceId(null)
+	}, [setActiveWorkspaceId])
 
-	// Restoring a conversation (issue #829) re-enables the workspace it was
-	// tied to. The workspace list is fetched asynchronously, so a restore that
-	// lands before the list has loaded defers the switch until it does; a
-	// workspace that has since been deleted is silently skipped (best effort),
-	// and a conversation with no recorded workspace leaves the active one
-	// untouched.
-	const pendingWorkspaceRestoreRef = useRef(null)
+	// Restoring a conversation (issue #829) re-enables the workspace it was tied
+	// to, and says so: the switch replaces the tools, prompt and RAG sources the
+	// user may have hand-picked, and a workspace that has since been deleted
+	// would otherwise leave the header asserting an unrelated one.
+	const applyWorkspaceRestore = useCallback(workspaceId => {
+		if (workspaceId === activeWorkspaceId) return true
+		const ws = workspaceList.find(w => w.id === workspaceId)
+		if (!ws) {
+			toast.info("This conversation's workspace is no longer available -- your current selections were kept.")
+			return false
+		}
+		switchWorkspace(workspaceId)
+		toast.info(`Switched to the "${ws.name}" workspace this conversation was saved with.`)
+		return true
+	}, [activeWorkspaceId, workspaceList, switchWorkspace, toast])
 
 	const restoreWorkspace = useCallback(workspaceId => {
-		if (!workspaceId || !workspacesEnabled) {
-			// A conversation with no workspace (or the feature off) cancels any
-			// deferred restore queued by an earlier load: without this, opening
-			// conversation A before the list loaded, then conversation B (no
-			// workspace), would still apply A's workspace to B once the list
-			// arrived.
+		if (!workspaceId) {
+			// A conversation with no workspace cancels any deferred restore queued
+			// by an earlier load: without this, opening conversation A before the
+			// list loaded, then conversation B (no workspace), would still apply
+			// A's workspace to B once the list arrived.
+			pendingWorkspaceRestoreRef.current = null
+			return
+		}
+		// `workspacesEnabled` reads a config that is fetched asynchronously and is
+		// false for everyone until it lands, so "config not ready" means "not known
+		// yet" -- defer, or an early open would throw the id away permanently.
+		if (!config.configReady) {
+			pendingWorkspaceRestoreRef.current = workspaceId
+			return
+		}
+		if (!workspacesEnabled) {
 			pendingWorkspaceRestoreRef.current = null
 			return
 		}
@@ -198,17 +241,21 @@ export const ChatProvider = ({ children }) => {
 			return
 		}
 		pendingWorkspaceRestoreRef.current = null
-		switchWorkspace(workspaceId)
-	}, [workspacesEnabled, workspacesLoaded, switchWorkspace])
+		applyWorkspaceRestore(workspaceId)
+	}, [config.configReady, workspacesEnabled, workspacesLoaded, applyWorkspaceRestore])
 
-	// Apply a deferred workspace restore once the list finishes loading.
+	// Apply a deferred restore once the config and the workspace list are both in.
 	useEffect(() => {
 		const pending = pendingWorkspaceRestoreRef.current
-		if (pending && workspacesLoaded) {
+		if (!pending || !config.configReady) return
+		if (!workspacesEnabled) {
 			pendingWorkspaceRestoreRef.current = null
-			switchWorkspace(pending)
+			return
 		}
-	}, [workspacesLoaded, switchWorkspace])
+		if (!workspacesLoaded) return
+		pendingWorkspaceRestoreRef.current = null
+		applyWorkspaceRestore(pending)
+	}, [config.configReady, workspacesEnabled, workspacesLoaded, applyWorkspaceRestore])
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -513,6 +560,9 @@ export const ChatProvider = ({ children }) => {
 			// to. Null when no workspace is active.
 			workspace_id: activeWorkspaceId || undefined,
 		})
+		// Sending a turn is the only user action that re-binds a conversation to
+		// the active workspace; opening one must not.
+		conversationWorkspaceIdRef.current = activeWorkspaceId || null
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
 		// hang on "Thinking...".
@@ -640,6 +690,7 @@ export const ChatProvider = ({ children }) => {
 		// A deferred workspace restore queued by a previous load must not
 		// fire into the fresh chat once the workspace list finishes loading.
 		pendingWorkspaceRestoreRef.current = null
+		conversationWorkspaceIdRef.current = null
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -702,6 +753,9 @@ export const ChatProvider = ({ children }) => {
 		// until it does. A conversation with no recorded workspace leaves the
 		// currently active workspace untouched.
 		const meta = conversationData.metadata || {}
+		// Remember the binding as loaded so the local autosave re-persists *this*
+		// conversation's workspace rather than whatever is active at save time.
+		conversationWorkspaceIdRef.current = meta.workspace_id || null
 		restoreWorkspace(meta.workspace_id)
 	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace])
 
@@ -901,7 +955,10 @@ export const ChatProvider = ({ children }) => {
 				// Persist the active workspace so a locally saved conversation
 				// restores it on reload (issue #829), mirroring the server save
 				// path which stores it in conversation metadata.
-				metadata: { workspace_id: activeWorkspaceId || null },
+				// The conversation's own binding -- not `activeWorkspaceId`, which would
+				// rewrite the stored workspace ~1s after merely opening the
+				// conversation and destroy the binding with no user action.
+				metadata: { agent_mode: !!agent?.agentModeEnabled, workspace_id: conversationWorkspaceIdRef.current || null },
 			}).catch(e => console.error('Failed to save conversation locally:', e))
 		}, 1000)
 
@@ -909,7 +966,7 @@ export const ChatProvider = ({ children }) => {
 			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [messages?.length, saveMode, activeConversationId, currentModel, activeWorkspaceId])
+	}, [messages?.length, saveMode, activeConversationId, currentModel])
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {
