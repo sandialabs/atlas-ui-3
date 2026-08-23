@@ -36,9 +36,8 @@ logger = logging.getLogger(__name__)
 _TIME_SECTION = "\n\n---\n### Current Date & Time\n{now}\n"
 _ELAPSED_SECTION = (
     "\n### Time Since Previous Message\n"
-    "Approximately {minutes} minutes have elapsed since the previous message "
-    "in this conversation; take the passage of time into account where it is "
-    "relevant to your answer.\n"
+    "Approximately {minutes} minutes have elapsed since your previous prompt; "
+    "take the passage of time into account where it is relevant to your answer.\n"
 )
 
 

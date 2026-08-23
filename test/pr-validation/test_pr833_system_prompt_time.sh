@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Validation script for issue #823: inject time and date into system prompt automatically.
+# Test script for PR #833: inject current date/time into the system prompt (issue #823).
 #
 # Test plan:
 # - Config: SYSTEM_PROMPT_TIMEZONE and SYSTEM_PROMPT_TIME_REFRESH_MINUTES settings
 #   exist on AppSettings and are read from the environment
-# - Helper: enrich_system_prompt_with_time injects the current date/time and
-#   appends an elapsed-time note only when the gap meets the threshold
-# - Integration: MessageBuilder appends the current date/time to the system
+# - Helper + wiring: enrich_system_prompt_with_time is defined and wired into
+#   MessageBuilder; the orchestrator passes config_manager to MessageBuilder
+# - Docs: .env.example documents the two new variables
+# - Behavior: MessageBuilder injects the current date/time into the system
 #   prompt (default and custom) and appends the elapsed note after a long gap;
 #   the prompt provider itself is unchanged (pure template render)
-# - Docs: .env.example documents the two new variables
 # - Unit tests: atlas/tests/test_system_prompt_time.py + backend suite
+#
+# Every assertion below can fail this script: grep/python/pytest statuses are
+# captured directly (no `|| true` + `print_result $?` pattern, no unconditional
+# PASS), and fallible commands run under `set -euo pipefail` via `rc=0; cmd || rc=$?`
+# so a real failure is recorded as FAILED rather than aborting the script.
 
 set -euo pipefail
 
@@ -40,32 +45,51 @@ print_result() {
     fi
 }
 
-echo "=== Issue #823 Validation: System Prompt Time Injection ==="
+# Assert a fixed string is present in a file. Captures the grep status before
+# reporting so a missing target records FAILED rather than being masked.
+check_grep() {
+    local pattern="$1" file="$2" desc="$3"
+    if grep -q "$pattern" "$file"; then
+        print_result 0 "$desc"
+    else
+        print_result 1 "$desc"
+    fi
+}
 
-# 1. Config settings exist on AppSettings
-print_result 0 "grep SYSTEM_PROMPT_TIMEZONE setting in settings.py" \
-    && grep -q "system_prompt_timezone" "$ATLAS_DIR/modules/config/settings.py"
-grep -q "system_prompt_timezone" "$ATLAS_DIR/modules/config/settings.py" || true
-print_result $? "SYSTEM_PROMPT_TIMEZONE field declared"
-grep -q "system_prompt_time_refresh_minutes" "$ATLAS_DIR/modules/config/settings.py" || true
-print_result $? "SYSTEM_PROMPT_TIME_REFRESH_MINUTES field declared"
+echo "=== PR #833 Validation: System Prompt Time Injection (issue #823) ==="
 
-# 2. Helper + wiring exist
-grep -q "enrich_system_prompt_with_time" "$ATLAS_DIR/application/chat/preprocessors/system_prompt_time.py" || true
-print_result $? "enrich_system_prompt_with_time helper defined"
-grep -q "enrich_system_prompt_with_time" "$ATLAS_DIR/application/chat/preprocessors/message_builder.py" || true
-print_result $? "MessageBuilder wires the time-injection helper"
-grep -q "config_manager=config_manager" "$ATLAS_DIR/application/chat/orchestrator.py" || true
-print_result $? "orchestrator passes config_manager to MessageBuilder"
+# 1. Config settings exist on AppSettings.
+check_grep "system_prompt_timezone" \
+    "$ATLAS_DIR/modules/config/settings.py" \
+    "SYSTEM_PROMPT_TIMEZONE field declared"
+check_grep "system_prompt_time_refresh_minutes" \
+    "$ATLAS_DIR/modules/config/settings.py" \
+    "SYSTEM_PROMPT_TIME_REFRESH_MINUTES field declared"
 
-# 3. .env.example documents the new variables
-grep -q "SYSTEM_PROMPT_TIMEZONE" "$PROJECT_ROOT/.env.example" || true
-print_result $? ".env.example documents SYSTEM_PROMPT_TIMEZONE"
-grep -q "SYSTEM_PROMPT_TIME_REFRESH_MINUTES" "$PROJECT_ROOT/.env.example" || true
-print_result $? ".env.example documents SYSTEM_PROMPT_TIME_REFRESH_MINUTES"
+# 2. Helper + wiring exist.
+check_grep "enrich_system_prompt_with_time" \
+    "$ATLAS_DIR/application/chat/preprocessors/system_prompt_time.py" \
+    "enrich_system_prompt_with_time helper defined"
+check_grep "enrich_system_prompt_with_time" \
+    "$ATLAS_DIR/application/chat/preprocessors/message_builder.py" \
+    "MessageBuilder wires the time-injection helper"
+check_grep "config_manager=config_manager" \
+    "$ATLAS_DIR/application/chat/orchestrator.py" \
+    "orchestrator passes config_manager to MessageBuilder"
 
-# 4. End-to-end behavior via the real MessageBuilder + ConfigManager
-python - <<'PY'
+# 3. .env.example documents the new variables.
+check_grep "SYSTEM_PROMPT_TIMEZONE" \
+    "$PROJECT_ROOT/.env.example" \
+    ".env.example documents SYSTEM_PROMPT_TIMEZONE"
+check_grep "SYSTEM_PROMPT_TIME_REFRESH_MINUTES" \
+    "$PROJECT_ROOT/.env.example" \
+    ".env.example documents SYSTEM_PROMPT_TIME_REFRESH_MINUTES"
+
+# 4. End-to-end behavior via the real MessageBuilder + ConfigManager (the same
+#    code path the orchestrator drives). rc is captured so a Python assertion
+#    failure records FAILED instead of aborting under `set -e`.
+rc=0
+python - <<'PY' || rc=$?
 import os
 import sys
 import tempfile
@@ -109,7 +133,7 @@ with tempfile.TemporaryDirectory() as d:
     assert "Time Since Previous Message" not in msgs[0]["content"]
     print("PASSED: default prompt gets current date/time, no note on first turn")
 
-    # Long gap: elapsed note fires.
+    # Long gap: elapsed note fires and uses the corrected wording.
     now = datetime.now(timezone.utc)
     s2 = Session(user_email="t@example.com")
     s2.history.add_message(Message(role=MessageRole.USER, content="hi", timestamp=now - timedelta(minutes=30)))
@@ -117,7 +141,8 @@ with tempfile.TemporaryDirectory() as d:
     msgs2 = asyncio.run(builder.build_messages(session=s2, include_files_manifest=False))
     assert "Time Since Previous Message" in msgs2[0]["content"]
     assert "30 minutes" in msgs2[0]["content"]
-    print("PASSED: elapsed note appended after a 30-minute gap")
+    assert "since your previous prompt" in msgs2[0]["content"], msgs2[0]["content"]
+    print("PASSED: elapsed note appended after a 30-minute gap with corrected wording")
 
     # Custom prompt still gets time; default text does not leak.
     s3 = Session(user_email="t@example.com")
@@ -139,23 +164,26 @@ with tempfile.TemporaryDirectory() as d:
     assert PromptProvider(cm3).get_system_prompt(user_email="a@b.c") == "Assistant for a@b.c."
 print("PASSED: prompt provider output is unchanged (pure template render)")
 PY
-PYTHON_OK=$?
-print_result $PYTHON_OK "end-to-end MessageBuilder behavior"
+print_result $rc "end-to-end MessageBuilder behavior"
 
-# 5. Targeted unit tests for the feature
-( cd "$PROJECT_ROOT" && python -m pytest atlas/tests/test_system_prompt_time.py -q >/dev/null 2>&1 )
-print_result $? "atlas/tests/test_system_prompt_time.py passes"
-( cd "$PROJECT_ROOT" && python -m pytest atlas/tests/test_system_prompt_loading.py -q >/dev/null 2>&1 )
-print_result $? "atlas/tests/test_system_prompt_loading.py passes"
+# 5. Targeted unit tests for the feature.
+rc=0
+( cd "$PROJECT_ROOT" && python -m pytest atlas/tests/test_system_prompt_time.py -q >/dev/null 2>&1 ) || rc=$?
+print_result $rc "atlas/tests/test_system_prompt_time.py passes"
 
-# 6. Backend suite (per PR validation README step 8)
+rc=0
+( cd "$PROJECT_ROOT" && python -m pytest atlas/tests/test_system_prompt_loading.py -q >/dev/null 2>&1 ) || rc=$?
+print_result $rc "atlas/tests/test_system_prompt_loading.py passes"
+
+# 6. Backend suite (per PR validation README step 8).
 if [ -x "$PROJECT_ROOT/test/run_tests.sh" ]; then
-    ( cd "$PROJECT_ROOT" && ./test/run_tests.sh backend >/dev/null 2>&1 )
-    print_result $? "backend test suite (./test/run_tests.sh backend)"
+    rc=0
+    ( cd "$PROJECT_ROOT" && ./test/run_tests.sh backend >/dev/null 2>&1 ) || rc=$?
+    print_result $rc "backend test suite (./test/run_tests.sh backend)"
 fi
 
 echo ""
 echo "=========================================="
-echo "Issue #823 validation: $PASSED passed, $FAILED failed"
+echo "PR #833 validation: $PASSED passed, $FAILED failed"
 echo "=========================================="
 exit $FAILED

@@ -564,7 +564,7 @@ class AppSettings(BaseSettings):
         default=5,
         ge=0,
         description=(
-            "Append an explicit 'time since previous message' note to the system "
+            "Append an explicit 'time since your previous prompt' note to the system "
             "prompt when the gap between this turn and the previous user message "
             "meets or exceeds this many minutes. 0 disables the note (the current "
             "date/time is still injected)."

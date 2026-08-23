@@ -107,11 +107,13 @@ AGENT_SLEEP_MAX_TURN_SECONDS=7200
 
 The current date/time is appended to the rendered system prompt on every turn so the model
 knows what "now" is. When a meaningful gap has opened between turns, an explicit
-"approximately N minutes have elapsed since the previous message" note is appended too, so
+"approximately N minutes have elapsed since your previous prompt" note is appended too, so
 the model can reason about long pauses (a status may have resolved, a deadline may have
-passed). This enrichment is applied to both the default system prompt and a user-supplied
-custom system prompt; it is runtime addition, not part of the prompt template, so existing
-templates are unchanged.
+passed). The gap is measured from the previous *user* message, so the figure reflects the
+time since the user last wrote, not the wall-clock between two assistant turns. This
+enrichment is applied to both the default system prompt and a user-supplied custom system
+prompt; it is runtime addition, not part of the prompt template, so existing templates are
+unchanged.
 
 ```bash
 # IANA timezone name for the displayed time (default UTC). Unknown names fall
