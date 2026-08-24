@@ -545,6 +545,33 @@ class AppSettings(BaseSettings):
     agent_reason_prompt_filename: str = "agent_reason_prompt.md"  # Filename for agent reason phase
     agent_observe_prompt_filename: str = "agent_observe_prompt.md"  # Filename for agent observe phase
 
+    # System prompt time injection (issue #823). The current date/time is
+    # appended to the rendered system prompt every turn so the model knows what
+    # "now" is. When the gap between turns exceeds the threshold below, an
+    # explicit elapsed-time note is appended too, so the model can reason about
+    # long pauses (a status may have resolved, a deadline may have passed).
+    system_prompt_timezone: str = Field(
+        default="UTC",
+        description=(
+            "IANA timezone name (e.g. UTC, America/Denver) used for the current "
+            "date/time injected into the system prompt. Unknown names fall back "
+            "to UTC. Defaults to server UTC; no per-user timezone plumbing is "
+            "required."
+        ),
+        validation_alias=AliasChoices("SYSTEM_PROMPT_TIMEZONE"),
+    )
+    system_prompt_time_refresh_minutes: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "Append an explicit 'time since your previous prompt' note to the system "
+            "prompt when the gap between this turn and the previous user message "
+            "meets or exceeds this many minutes. 0 disables the note (the current "
+            "date/time is still injected)."
+        ),
+        validation_alias=AliasChoices("SYSTEM_PROMPT_TIME_REFRESH_MINUTES"),
+    )
+
     # Config file names (can be overridden via environment variables)
     mcp_config_file: str = Field(default="mcp.json", validation_alias="MCP_CONFIG_FILE")
     rag_sources_config_file: str = Field(default="rag-sources.json", validation_alias="RAG_SOURCES_CONFIG_FILE")
