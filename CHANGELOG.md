@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-08-24
+### PR #839 - 2026-08-24
 - **The top bar's tools, settings, and theme buttons are now one "Tools and Settings" wrench** (closes #836): tools and integrations became a tab of the settings panel alongside Prompts, General, and User Info, and the light/dark toggle moved into General -> Appearance. Admins get an Admin tab with the three most-used dashboard cards -- MCP Configuration & Controls, Banner Messages, and User Feedback -- fully featured rather than read-only, plus a link to the full admin page. The tools tab stays mounted while the panel is open, so pending tool selections survive a tab switch and closing with unsaved selections still prompts to save or discard. The prompt picker under the chat input gained a pencil next to each of your custom prompts and a "New system prompt" button; both open the Prompts tab with that prompt's editor already open.
 
 ### PR #835 - 2026-08-22
