@@ -493,6 +493,11 @@ describe('a queued restore loses to deliberate user actions (issue #829)', () =>
   })
 
   it('does not re-bind the local record when the send never reached the wire', () => {
+    // The autosave still runs (the loaded conversation has messages), so the
+    // binding it writes is observable and must remain the loaded one. Asserted
+    // unconditionally -- the earlier version wrapped this in
+    // `if (saveLocalConv.mock.calls.length)`, which read as a guard against the
+    // save not happening and would have hidden a wrong value just as easily.
     vi.useFakeTimers()
     try {
       h.activeWorkspaceId = 'ws-home'
@@ -503,9 +508,27 @@ describe('a queued restore loses to deliberate user actions (issue #829)', () =>
       act(() => { result.current.sendChatMessage('a prompt') })
       act(() => { vi.advanceTimersByTime(1500) })
 
-      if (h.saveLocalConv.mock.calls.length) {
-        expect(h.saveLocalConv.mock.calls.at(-1)[0].metadata.workspace_id).toBe('ws-work')
-      }
+      expect(h.saveLocalConv).toHaveBeenCalled()
+      expect(h.saveLocalConv.mock.calls.at(-1)[0].metadata.workspace_id).toBe('ws-work')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('re-binds the local record only after a send that did reach the wire', () => {
+    // The positive half of the guard: a successful send updates the binding to
+    // the active workspace, which is what makes the failed-send case meaningful.
+    vi.useFakeTimers()
+    try {
+      h.activeWorkspaceId = 'ws-home'
+      h.saveMode = 'local'
+      const { result } = renderChat()
+      act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+      act(() => { result.current.sendChatMessage('a prompt') })
+      act(() => { vi.advanceTimersByTime(1500) })
+
+      expect(h.saveLocalConv).toHaveBeenCalled()
+      expect(h.saveLocalConv.mock.calls.at(-1)[0].metadata.workspace_id).toBe('ws-home')
     } finally {
       vi.useRealTimers()
     }
@@ -552,5 +575,26 @@ describe('bulk selection also cancels a queued restore (issue #829)', () => {
 
       expect(h.applyWorkspace, `${action} should cancel the restore`).not.toHaveBeenCalled()
     }
+  })
+})
+
+describe('sending a turn cancels a queued restore (issue #829)', () => {
+  it('does not let a queued restore swap selections out from under the turn', () => {
+    // The turn has just told the server which workspace this conversation
+    // belongs to; a restore firing afterwards would contradict it and change
+    // the selections the user sent under.
+    h.configReady = false
+    h.activeWorkspaceId = 'ws-home'
+    const { result, rerender } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+    act(() => { result.current.sendChatMessage('a prompt') })
+
+    const chatCall = h.sendMessage.mock.calls.find(c => c[0]?.type === 'chat')
+    expect(chatCall[0].workspace_id).toBe('ws-home')
+
+    h.configReady = true
+    rerender()
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
   })
 })

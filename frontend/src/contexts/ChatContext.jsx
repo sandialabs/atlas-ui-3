@@ -618,6 +618,11 @@ export const ChatProvider = ({ children }) => {
 		// actually on the wire -- a send that failed must not leave a durable
 		// re-binding in the local record.
 		conversationWorkspaceIdRef.current = activeWorkspaceId || null
+		// A turn is a deliberate action too, and it has just told the server which
+		// workspace this conversation belongs to. Letting a queued restore fire
+		// afterwards would swap the selections out from under the turn the user
+		// just sent, and contradict the binding that turn wrote.
+		cancelPendingWorkspaceRestore()
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
@@ -648,7 +653,7 @@ export const ChatProvider = ({ children }) => {
 		// it (websocketHandlers).
 		setIsAgentRunning(agent.agentModeEnabled)
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped

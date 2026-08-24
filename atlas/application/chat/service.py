@@ -1178,6 +1178,17 @@ class ChatService:
             # new conversation, which is the normal first-turn case.
             return 0
 
+        # Read the binding as soon as the record is in hand, before the message
+        # guards below: a stored conversation with an empty or malformed message
+        # list still has a workspace, and returning past this point with the
+        # binding cleared would write that null back over the stored id.
+        conv_metadata = conv.get("metadata")
+        session.context["workspace_id"] = (
+            conv_metadata.get("workspace_id")
+            if isinstance(conv_metadata, dict)
+            else None
+        )
+
         messages = conv.get("messages")
         if not isinstance(messages, list) or not messages:
             return 0
@@ -1199,17 +1210,6 @@ class ChatService:
         loaded = load_messages_into_history(
             session.history, messages, conversation_id
         )
-        # Carry the stored workspace binding into the session (issue #829).
-        # Without this a mid-conversation reconnect saves a null binding over
-        # the stored one. Runs before this turn's own workspace_id is applied,
-        # so a turn that does carry one still wins.
-        conv_metadata = conv.get("metadata")
-        session.context["workspace_id"] = (
-            conv_metadata.get("workspace_id")
-            if isinstance(conv_metadata, dict)
-            else None
-        )
-
         if loaded:
             # Mark it restored for the same reason the sidebar restore path
             # does: the title belongs to the conversation's original first
