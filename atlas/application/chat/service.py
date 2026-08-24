@@ -47,6 +47,16 @@ from .utilities.interrupted_turn import close_open_turn
 
 logger = logging.getLogger(__name__)
 
+# Distinguishes "the client did not send this field" from "the client sent
+# null"; the two mean different things for the conversation's workspace binding.
+# Public so the transport layer can forward the distinction rather than
+# collapsing an omitted field into an explicit null before it gets here.
+UNSET = object()
+
+# Upper bound on a client-supplied workspace id persisted in conversation metadata.
+_MAX_WORKSPACE_ID_LEN = 128
+
+
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -382,6 +392,36 @@ class ChatService:
                 )
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
+
+        # The active workspace (issue #829): the frontend sends the workspace
+        # id whose selections are loaded for this turn so the conversation can
+        # be re-bound to its workspace when it is reopened from history. The
+        # id is client-supplied and purely advisory -- it is only persisted in
+        # the conversation metadata, never used for authorization -- so a null
+        # or stale value is harmless. Stored every turn so switching away from
+        # a workspace (or starting a turn without one) records the change.
+        # An omitted field is *not* an explicit null: clients that never send it
+        # (the CLI, a cached bundle, a script) must not strip an existing
+        # binding on their next turn, so only assign when a value was supplied.
+        workspace_id = kwargs.pop("workspace_id", UNSET)
+        if workspace_id is not UNSET:
+            if workspace_id is None:
+                # An explicit null is the client unbinding the conversation.
+                session.context["workspace_id"] = None
+            elif (
+                isinstance(workspace_id, str)
+                and workspace_id.strip()
+                and len(workspace_id.strip()) <= _MAX_WORKSPACE_ID_LEN
+            ):
+                session.context["workspace_id"] = workspace_id.strip()
+            else:
+                # Malformed: a non-string, a blank string, or one past the length
+                # bound. Leave any existing binding alone rather than persisting a
+                # cleared one that later well-formed turns could not recover.
+                logger.warning(
+                    "Ignoring malformed workspace_id on a chat turn for session %s",
+                    sanitize_for_logging(str(session_id)),
+                )
 
         # Compliance levels for this turn. Two distinct values are tracked and
         # they must not be conflated:
@@ -789,6 +829,7 @@ class ChatService:
         # source — the client-supplied ``messages`` arg is treated as
         # display-only fallback and is NOT persisted back.
         canonical_messages = messages
+        stored_workspace_id = None
         if getattr(self, "conversation_repository", None) is not None:
             conv = self.conversation_repository.get_conversation(conversation_id, user_email)
             if conv is None:
@@ -805,6 +846,9 @@ class ChatService:
             db_messages = conv.get("messages")
             if isinstance(db_messages, list):
                 canonical_messages = db_messages
+            conv_metadata = conv.get("metadata")
+            if isinstance(conv_metadata, dict):
+                stored_workspace_id = conv_metadata.get("workspace_id")
 
         # Reset the session
         await self.end_session(session_id)
@@ -813,6 +857,13 @@ class ChatService:
         # Store the conversation_id mapping and mark as restored
         session.context["conversation_id"] = conversation_id
         session.context["_restored"] = True
+        # Carry the stored workspace binding into the fresh session (issue #829)
+        # so a client that never sends `workspace_id` (the CLI, a script, an
+        # older bundle) re-persists the binding on its next turn instead of
+        # clearing it. Assigned unconditionally for the same reason as the
+        # rehydrate path: an unbound conversation must read as unbound, never
+        # inherit whatever the session was carrying.
+        session.context["workspace_id"] = stored_workspace_id
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical
@@ -1088,6 +1139,16 @@ class ChatService:
         if is_incognito or self.conversation_repository is None or not user_email:
             return 0
 
+        # The caller only gets here when the session's bound conversation
+        # changed, so whatever binding the session was carrying belongs to the
+        # *previous* conversation. Drop it up front, before any early return:
+        # an unknown conversation id (a new conversation, or a client-side
+        # local_* id) used to leave the old value in place for
+        # _save_conversation to stamp onto the new conversation. The stored
+        # binding, when there is one, is assigned once the record is in hand.
+        previous_workspace_id = session.context.get("workspace_id", UNSET)
+        session.context["workspace_id"] = None
+
         try:
             # Off the event loop: get_conversation issues several synchronous
             # queries and JSON-decodes every message's metadata, and this runs
@@ -1105,6 +1166,13 @@ class ChatService:
             # rewind, whose truncation would be measured against the wrong
             # thread. See _turn_allows_shrink.
             session.context["hydration_failed"] = True
+            # A transient read failure says nothing about the conversation's
+            # workspace, so put back whatever the session was carrying rather
+            # than persisting the null cleared above over a good binding.
+            if previous_workspace_id is UNSET:
+                session.context.pop("workspace_id", None)
+            else:
+                session.context["workspace_id"] = previous_workspace_id
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),
@@ -1117,6 +1185,17 @@ class ChatService:
             # A conversation_id the store has never seen: the client is naming a
             # new conversation, which is the normal first-turn case.
             return 0
+
+        # Read the binding as soon as the record is in hand, before the message
+        # guards below: a stored conversation with an empty or malformed message
+        # list still has a workspace, and returning past this point with the
+        # binding cleared would write that null back over the stored id.
+        conv_metadata = conv.get("metadata")
+        session.context["workspace_id"] = (
+            conv_metadata.get("workspace_id")
+            if isinstance(conv_metadata, dict)
+            else None
+        )
 
         messages = conv.get("messages")
         if not isinstance(messages, list) or not messages:
@@ -1236,6 +1315,7 @@ class ChatService:
             messages=messages,
             metadata={
                 "agent_mode": bool(session.context.get("agent_mode")),
+                "workspace_id": session.context.get("workspace_id"),
             },
             allow_shrink=allow_shrink,
         )

@@ -98,6 +98,43 @@ With the feature disabled the header carries no workspace button at all:
 
 ![Header with the feature disabled](screenshots/ws-06-flag-off.png)
 
+## Reopening a conversation restores its workspace
+
+When you reopen a saved conversation from the history sidebar, the workspace
+that was active when that conversation was last saved is re-enabled
+automatically — you don't have to re-pick the prompt, sources, and tools. The
+active workspace id is stored with each conversation (in its metadata on the
+server, or in the browser record for locally saved conversations) and applied
+on load.
+
+Below: the *Code Review* workspace is active; opening a conversation saved
+under *Quarterly Report* switches to it — the workspace pill, its tool
+selection, and a notification explaining the switch. The third panel shows a
+conversation whose workspace has since been deleted: you are told, and your
+current selections are kept.
+
+![Reopening a conversation restores its workspace](screenshots/ws-11-restore-on-reload.png)
+
+Edge cases:
+
+- **A different workspace is active** when you open the old conversation: it
+  switches to the conversation's workspace (replacing the current selections,
+  as a manual switch does) and a notification tells you which workspace it
+  switched to, since the switch replaces selections you may have hand-picked.
+- **The workspace has since been deleted** (or is no longer accessible): the
+  switch is skipped — best effort — and a notification says the workspace is no
+  longer available. Your current selections stay as they are.
+- **The conversation never had a workspace** (it was saved before this feature,
+  or started without one): the currently active workspace is left untouched.
+- **The workspace list (or the app config) hasn't finished loading** when the
+  conversation opens: the switch is deferred until it has, so a slow fetch no
+  longer drops the restore. Anything you do in the meantime — switching or
+  clearing the workspace yourself, or starting a new chat — cancels the pending
+  restore, so a late switch never overrides a deliberate choice.
+- **Simply opening a conversation never re-binds it.** The stored workspace is
+  only rewritten when you actually send a turn, so browsing through history
+  cannot silently retag old conversations with whatever workspace is active.
+
 ## What a workspace stores
 
 ```json
@@ -144,3 +181,4 @@ Every query is scoped to the authenticated user, so another user's id returns
 | Selection snapshot/apply | `frontend/src/hooks/chat/useSelections.js` |
 | CRUD hook | `frontend/src/hooks/useWorkspaces.js` |
 | UI | `frontend/src/components/WorkspaceSelector.jsx` (rendered from `Header.jsx`) |
+| Restore on reload | `loadSavedConversation` / `restoreWorkspace` in `frontend/src/contexts/ChatContext.jsx`; persisted in conversation metadata by `ChatService._save_conversation` (`atlas/application/chat/service.py`) |
