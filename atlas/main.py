@@ -38,6 +38,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
+from atlas.application.chat.service import UNSET
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
@@ -699,7 +700,12 @@ async def websocket_endpoint(websocket: WebSocket):
                             conversation_id=data.get("conversation_id"),
                             rewind_to_user_index=data.get("rewind_to_user_index"),
                             capture_correction=data.get("capture_correction"),
-                            workspace_id=data.get("workspace_id"),
+                            # Forward the omitted-vs-null distinction intact
+                            # (issue #829): `.get(...)` alone would turn an
+                            # omitted field into an explicit null and clear the
+                            # conversation's workspace binding for any client
+                            # that does not send it.
+                            workspace_id=data.get("workspace_id", UNSET),
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")

@@ -14,6 +14,7 @@ These tests cover:
   frontend restore path can read it.
 """
 
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -339,3 +340,136 @@ async def test_restore_seeds_workspace_id_from_stored_metadata(repo):
 
     reloaded = repo.get_conversation(conv_id, TEST_USER)
     assert reloaded["metadata"].get("workspace_id") == "ws-work"
+
+
+@pytest.mark.asyncio
+async def test_malformed_workspace_id_leaves_existing_binding(repo):
+    """A malformed id is ignored, not persisted as a cleared binding.
+
+    Otherwise a single bad frame would drop the binding and later well-formed
+    turns could not recover it.
+    """
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    session = sessions[session_id]
+    conv_id = session.context.get("conversation_id")
+
+    for bad in (12345, {"id": "x"}, "  ", "w" * 5000):
+        with _stub_orchestrator(service, sessions, session_id):
+            await service.handle_chat_message(
+                session_id=session_id,
+                content="again",
+                model="test-model",
+                user_email=TEST_USER,
+                conversation_id=conv_id,
+                workspace_id=bad,
+            )
+        assert session.context.get("workspace_id") == "ws-work", f"clobbered by {bad!r}"
+
+    saved = repo.get_conversation(conv_id, TEST_USER)
+    assert saved["metadata"].get("workspace_id") == "ws-work"
+
+
+@pytest.mark.asyncio
+async def test_rehydrate_on_reconnect_preserves_workspace_binding(repo):
+    """A mid-conversation reconnect must not save a null over the stored
+    binding: the rehydrate path seeds the session from stored metadata."""
+    service, sessions = _make_service(repo)
+    first_session = uuid4()
+
+    with _stub_orchestrator(service, sessions, first_session):
+        await service.handle_chat_message(
+            session_id=first_session,
+            content="hello",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    conv_id = sessions[first_session].context.get("conversation_id")
+
+    # The client reconnects: a brand-new session continues the same conversation
+    # and (being e.g. the CLI) does not send workspace_id.
+    reconnected = uuid4()
+    with _stub_orchestrator(service, sessions, reconnected):
+        await service.handle_chat_message(
+            session_id=reconnected,
+            content="after reconnect",
+            model="test-model",
+            user_email=TEST_USER,
+            conversation_id=conv_id,
+        )
+
+    assert sessions[reconnected].context.get("workspace_id") == "ws-work"
+    saved = repo.get_conversation(conv_id, TEST_USER)
+    assert saved["metadata"].get("workspace_id") == "ws-work"
+
+
+class TestWebSocketChatFrameWorkspaceId:
+    """The transport layer must forward the omitted-vs-null distinction.
+
+    ``data.get("workspace_id")`` alone turns an omitted field into an explicit
+    null before the service's ``UNSET`` branch can be reached, so the binding
+    would still be cleared for any client that does not send the field. These
+    drive the real endpoint rather than the service in isolation.
+    """
+
+    @pytest.fixture
+    def ws_client(self):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        with patch("main.app_factory") as mock_factory:
+            mock_config = MagicMock()
+            mock_config.app_settings.test_user = TEST_USER
+            mock_config.app_settings.debug_mode = True
+            mock_config.app_settings.auth_user_header = "X-User-Email"
+            mock_config.app_settings.feature_proxy_secret_enabled = False
+            mock_factory.get_config_manager.return_value = mock_config
+
+            chat_service = MagicMock()
+            chat_service.handle_chat_message = AsyncMock(return_value={})
+            chat_service.end_session = AsyncMock()
+            chat_service.session_repository.get = AsyncMock(return_value=None)
+            mock_factory.create_chat_service.return_value = chat_service
+
+            yield TestClient(app), chat_service
+
+    @staticmethod
+    def _sent_workspace_id(chat_service):
+        chat_service.handle_chat_message.assert_awaited()
+        return chat_service.handle_chat_message.await_args.kwargs["workspace_id"]
+
+    def _send(self, ws_client, frame):
+        client, chat_service = ws_client
+        with client.websocket_connect(
+            "/ws", headers={"X-User-Email": TEST_USER}
+        ) as websocket:
+            websocket.send_json({"type": "chat", "content": "hi", "model": "m", **frame})
+            # Give the server task a moment to consume the frame.
+            for _ in range(50):
+                if chat_service.handle_chat_message.await_count:
+                    break
+                time.sleep(0.02)
+        return self._sent_workspace_id(chat_service)
+
+    def test_omitted_workspace_id_forwards_unset(self, ws_client):
+        """No field on the frame -> UNSET, so the service leaves the binding."""
+        from atlas.application.chat.service import UNSET
+
+        assert self._send(ws_client, {}) is UNSET
+
+    def test_explicit_null_forwards_none(self, ws_client):
+        """An explicit null still reaches the service as None, so it clears."""
+        assert self._send(ws_client, {"workspace_id": None}) is None
+
+    def test_value_forwards_unchanged(self, ws_client):
+        assert self._send(ws_client, {"workspace_id": "ws-work"}) == "ws-work"

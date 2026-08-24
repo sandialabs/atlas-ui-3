@@ -49,7 +49,9 @@ logger = logging.getLogger(__name__)
 
 # Distinguishes "the client did not send this field" from "the client sent
 # null"; the two mean different things for the conversation's workspace binding.
-_UNSET = object()
+# Public so the transport layer can forward the distinction rather than
+# collapsing an omitted field into an explicit null before it gets here.
+UNSET = object()
 
 # Upper bound on a client-supplied workspace id persisted in conversation metadata.
 _MAX_WORKSPACE_ID_LEN = 128
@@ -401,17 +403,25 @@ class ChatService:
         # An omitted field is *not* an explicit null: clients that never send it
         # (the CLI, a cached bundle, a script) must not strip an existing
         # binding on their next turn, so only assign when a value was supplied.
-        workspace_id = kwargs.pop("workspace_id", _UNSET)
-        if workspace_id is not _UNSET:
-            if isinstance(workspace_id, str):
-                workspace_id = workspace_id.strip() or None
-                # Bound the length: the value is client-supplied and only ever
-                # echoed back, but it should not grow the metadata without limit.
-                if workspace_id and len(workspace_id) > _MAX_WORKSPACE_ID_LEN:
-                    workspace_id = None
+        workspace_id = kwargs.pop("workspace_id", UNSET)
+        if workspace_id is not UNSET:
+            if workspace_id is None:
+                # An explicit null is the client unbinding the conversation.
+                session.context["workspace_id"] = None
+            elif (
+                isinstance(workspace_id, str)
+                and workspace_id.strip()
+                and len(workspace_id.strip()) <= _MAX_WORKSPACE_ID_LEN
+            ):
+                session.context["workspace_id"] = workspace_id.strip()
             else:
-                workspace_id = None
-            session.context["workspace_id"] = workspace_id
+                # Malformed: a non-string, a blank string, or one past the length
+                # bound. Leave any existing binding alone rather than persisting a
+                # cleared one that later well-formed turns could not recover.
+                logger.warning(
+                    "Ignoring malformed workspace_id on a chat turn for session %s",
+                    sanitize_for_logging(str(session_id)),
+                )
 
         # Compliance levels for this turn. Two distinct values are tracked and
         # they must not be conflated:
@@ -1179,6 +1189,14 @@ class ChatService:
         loaded = load_messages_into_history(
             session.history, messages, conversation_id
         )
+        # Carry the stored workspace binding into the session (issue #829).
+        # Without this a mid-conversation reconnect saves a null binding over
+        # the stored one. Runs before this turn's own workspace_id is applied,
+        # so a turn that does carry one still wins.
+        conv_metadata = conv.get("metadata")
+        if isinstance(conv_metadata, dict) and conv_metadata.get("workspace_id"):
+            session.context["workspace_id"] = conv_metadata["workspace_id"]
+
         if loaded:
             # Mark it restored for the same reason the sidebar restore path
             # does: the title belongs to the conversation's original first

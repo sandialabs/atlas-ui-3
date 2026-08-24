@@ -28,7 +28,7 @@ const h = vi.hoisted(() => ({
   applyWorkspace: vi.fn(),
   snapshotSelections: vi.fn(() => ({})),
   // workspace list state, mutable per test
-  wsState: { workspaces: [], loaded: true },
+  wsState: { workspaces: [], loaded: true, error: null },
   // initial active workspace id for usePersistentState
   activeWorkspaceId: null,
   // config state, mutable per test: `configReady` is false until the config
@@ -151,7 +151,7 @@ vi.mock('../hooks/useWorkspaces', () => ({
     workspaces: h.wsState.workspaces,
     loading: false,
     loaded: h.wsState.loaded,
-    error: null,
+    error: h.wsState.error,
     fetchWorkspaces: vi.fn(),
     createWorkspace: vi.fn(),
     updateWorkspace: vi.fn(),
@@ -208,6 +208,7 @@ beforeEach(() => {
   h.sendMessage.mockImplementation(() => true)
   h.wsState.workspaces = WORKSPACES
   h.wsState.loaded = true
+  h.wsState.error = null
   h.activeWorkspaceId = null
   h.configReady = true
   h.workspacesEnabled = true
@@ -311,14 +312,18 @@ describe('sendChatMessage forwards the active workspace id (issue #829)', () => 
     expect(chatCall[0].workspace_id).toBe('ws-work')
   })
 
-  it('omits workspace_id when no workspace is active', () => {
+  it('sends an explicit null when no workspace is active, so the binding can be cleared', () => {
+    // Not `undefined`: JSON.stringify drops it, and the backend reads an omitted
+    // field as "leave the binding alone" -- so clearing a workspace would never
+    // unbind the conversation.
     h.activeWorkspaceId = null
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('a prompt') })
 
     const chatCall = h.sendMessage.mock.calls.find(c => c[0]?.type === 'chat')
     expect(chatCall).toBeTruthy()
-    expect(chatCall[0].workspace_id).toBeUndefined()
+    expect(chatCall[0].workspace_id).toBeNull()
+    expect('workspace_id' in chatCall[0]).toBe(true)
   })
 })
 
@@ -438,5 +443,19 @@ describe('local autosave preserves the conversation binding (issue #829)', () =>
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('workspace restore notifications (issue #829)', () => {
+  it('does not claim the workspace was deleted when the list failed to load', () => {
+    // A failed fetch is indistinguishable from a deletion by the list alone;
+    // telling the user it is gone would be wrong.
+    h.wsState.workspaces = []
+    h.wsState.error = 'network error'
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+    expect(h.toastInfo).not.toHaveBeenCalled()
   })
 })

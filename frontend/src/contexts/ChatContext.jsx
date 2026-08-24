@@ -129,6 +129,7 @@ export const ChatProvider = ({ children }) => {
 	// page refresh does not clear the pointer against defaults that have not been
 	// replaced by the real config and workspace list yet.
 	const workspacesLoaded = workspaces.loaded
+	const workspacesError = workspaces.error
 	useEffect(() => {
 		if (isStaleWorkspacePointer({
 			activeWorkspaceId,
@@ -208,13 +209,18 @@ export const ChatProvider = ({ children }) => {
 		if (workspaceId === activeWorkspaceId) return true
 		const ws = workspaceList.find(w => w.id === workspaceId)
 		if (!ws) {
-			toast.info("This conversation's workspace is no longer available -- your current selections were kept.")
+			// Only claim the workspace is gone when the list actually loaded. If the
+			// fetch failed we cannot tell "deleted" from "not fetched", and saying
+			// it was deleted would be wrong.
+			if (!workspacesError) {
+				toast.info("This conversation's workspace is no longer available -- your current selections were kept.")
+			}
 			return false
 		}
 		switchWorkspace(workspaceId)
 		toast.info(`Switched to the "${ws.name}" workspace this conversation was saved with.`)
 		return true
-	}, [activeWorkspaceId, workspaceList, switchWorkspace, toast])
+	}, [activeWorkspaceId, workspaceList, workspacesError, switchWorkspace, toast])
 
 	const restoreWorkspace = useCallback(workspaceId => {
 		if (!workspaceId) {
@@ -557,8 +563,11 @@ export const ChatProvider = ({ children }) => {
 			capture_correction: captureCorrection ?? undefined,
 			// Active workspace (issue #829): persisted with the conversation so
 			// reopening it from history can re-enable the workspace it was tied
-			// to. Null when no workspace is active.
-			workspace_id: activeWorkspaceId || undefined,
+			// to. Explicitly null -- not undefined -- when no workspace is active:
+			// `undefined` is dropped by JSON.stringify, and the backend treats an
+			// omitted field as "leave the binding alone", so a user who cleared
+			// their workspace could never unbind the conversation.
+			workspace_id: activeWorkspaceId ?? null,
 		})
 		// Sending a turn is the only user action that re-binds a conversation to
 		// the active workspace; opening one must not.
