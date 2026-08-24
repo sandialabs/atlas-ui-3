@@ -1139,6 +1139,15 @@ class ChatService:
         if is_incognito or self.conversation_repository is None or not user_email:
             return 0
 
+        # The caller only gets here when the session's bound conversation
+        # changed, so whatever binding the session was carrying belongs to the
+        # *previous* conversation. Drop it up front, before any early return:
+        # an unknown conversation id (a new conversation, or a client-side
+        # local_* id) and an unreadable store both used to leave the old value
+        # in place for _save_conversation to stamp onto the new conversation.
+        # The stored binding, when there is one, is assigned below.
+        session.context["workspace_id"] = None
+
         try:
             # Off the event loop: get_conversation issues several synchronous
             # queries and JSON-decodes every message's metadata, and this runs
@@ -1194,10 +1203,6 @@ class ChatService:
         # Without this a mid-conversation reconnect saves a null binding over
         # the stored one. Runs before this turn's own workspace_id is applied,
         # so a turn that does carry one still wins.
-        # Assigned unconditionally, including when the stored value is absent:
-        # this session may have been carrying another conversation's binding, and
-        # a truthy-only assignment would leave it in place for _save_conversation
-        # to stamp onto a conversation the user never bound.
         conv_metadata = conv.get("metadata")
         session.context["workspace_id"] = (
             conv_metadata.get("workspace_id")

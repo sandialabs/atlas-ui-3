@@ -306,7 +306,9 @@ async def test_oversized_workspace_id_is_rejected(repo):
             workspace_id="w" * 5000,
         )
 
-    assert sessions[session_id].context.get("workspace_id") is None
+    # Key absence, not falsiness: `.get(...) is None` would hold simply because
+    # nothing was ever written, so it would pass with the length check removed.
+    assert "workspace_id" not in sessions[session_id].context
 
 
 @pytest.mark.asyncio
@@ -549,3 +551,43 @@ async def test_switching_conversations_in_one_session_does_not_leak_the_binding(
     # A keeps its own binding.
     saved_a = repo.get_conversation(conv_a, TEST_USER)
     assert saved_a["metadata"].get("workspace_id") == "ws-work"
+
+
+@pytest.mark.asyncio
+async def test_unknown_conversation_id_does_not_inherit_the_previous_binding(repo):
+    """Switching to a conversation the store has never seen starts unbound.
+
+    The rehydrate path returns early for an unknown id (the normal first-turn
+    case). If the carried binding were only cleared after that return, the new
+    conversation would be saved with the previous conversation's workspace.
+    """
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="first",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    session = sessions[session_id]
+
+    # A conversation id the store has never seen, with no workspace_id sent.
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="brand new",
+            model="test-model",
+            user_email=TEST_USER,
+            conversation_id="conv-never-stored",
+        )
+
+    # The binding is what this pins: it is what _save_conversation would stamp
+    # onto the new conversation. (The save itself is not asserted here -- this
+    # session still holds the previous conversation's messages, since the
+    # rehydrate path deliberately leaves history alone for an id the store does
+    # not have, and re-saving them under a second id trips a primary-key
+    # constraint. That behavior predates this change and is unrelated to it.)
+    assert session.context.get("workspace_id") is None, "inherited the previous binding"

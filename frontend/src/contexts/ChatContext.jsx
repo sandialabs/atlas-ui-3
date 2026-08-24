@@ -491,25 +491,33 @@ export const ChatProvider = ({ children }) => {
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [config.prompts])
 
+	// A bulk select/deselect cancels a queued restore just like a single toggle.
+	// The cancel is on the *action*, not on whether any key actually changed:
+	// "Deselect All" with nothing selected is still the user saying what they
+	// want, and it should not be quietly undone by a restore a second later.
 	const selectAllServerTools = useCallback((server) => {
+		cancelPendingWorkspaceRestore()
 		const group = config.tools.find(t => t.server === server); if (!group) return
 		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (!selectedTools.has(key)) selections.toggleTool(key) })
-	}, [config.tools, selectedTools, selections])
+	}, [config.tools, selectedTools, selections, cancelPendingWorkspaceRestore])
 
 	const deselectAllServerTools = useCallback((server) => {
+		cancelPendingWorkspaceRestore()
 		const group = config.tools.find(t => t.server === server); if (!group) return
 		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (selectedTools.has(key)) selections.toggleTool(key) })
-	}, [config.tools, selectedTools, selections])
+	}, [config.tools, selectedTools, selections, cancelPendingWorkspaceRestore])
 
 	const selectAllServerPrompts = useCallback((server) => {
+		cancelPendingWorkspaceRestore()
 		const group = config.prompts.find(p => p.server === server); if (!group) return
 		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (!selectedPrompts.has(key)) selections.togglePrompt(key) })
-	}, [config.prompts, selectedPrompts, selections])
+	}, [config.prompts, selectedPrompts, selections, cancelPendingWorkspaceRestore])
 
 	const deselectAllServerPrompts = useCallback((server) => {
+		cancelPendingWorkspaceRestore()
 		const group = config.prompts.find(p => p.server === server); if (!group) return
 		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (selectedPrompts.has(key)) selections.togglePrompt(key) })
-	}, [config.prompts, selectedPrompts, selections])
+	}, [config.prompts, selectedPrompts, selections, cancelPendingWorkspaceRestore])
 
 	// Flatten ragServers into a list of all available data source IDs (qualified with server name)
 	const getAllRagSourceIds = useCallback(() => {

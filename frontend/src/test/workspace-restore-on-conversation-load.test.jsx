@@ -57,6 +57,8 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
     currentModel: 'test-model',
     user: 'tester@example.com',
     ragServers: [],
+    tools: [{ server: 'files', tools: ['read', 'write'] }],
+    prompts: [],
     configReady: h.configReady,
     features: { workspaces: h.workspacesEnabled },
     prompts: [],
@@ -531,5 +533,24 @@ describe('a deleted workspace that is still the active pointer (issue #829)', ()
 
     expect(h.applyWorkspace).not.toHaveBeenCalled()
     expect(h.toastInfo).not.toHaveBeenCalled()
+  })
+})
+
+describe('bulk selection also cancels a queued restore (issue #829)', () => {
+  it('is cancelled by Select All / Deselect All on a tool server', () => {
+    for (const action of ['selectAllServerTools', 'deselectAllServerTools']) {
+      vi.clearAllMocks()
+      h.configReady = false
+      const { result, rerender } = renderChat()
+      act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+
+      // A bulk pick is as deliberate as a single toggle.
+      act(() => { result.current[action]('files') })
+
+      h.configReady = true
+      rerender()
+
+      expect(h.applyWorkspace, `${action} should cancel the restore`).not.toHaveBeenCalled()
+    }
   })
 })
