@@ -29,8 +29,11 @@ const h = vi.hoisted(() => ({
   snapshotSelections: vi.fn(() => ({})),
   // workspace list state, mutable per test
   wsState: { workspaces: [], loaded: true, error: null },
-  // initial active workspace id for usePersistentState
+  // initial active workspace id for usePersistentState, plus the setter, so
+  // tests can assert the header pointer actually moves and not merely that the
+  // selections were applied.
   activeWorkspaceId: null,
+  setActiveWorkspaceId: vi.fn(),
   // config state, mutable per test: `configReady` is false until the config
   // fetch lands, and `workspacesEnabled` is the feature flag it carries.
   configReady: true,
@@ -142,7 +145,7 @@ vi.mock('../hooks/useSettings', () => ({
 
 vi.mock('../hooks/chat/usePersistentState', () => ({
   usePersistentState: (key, initial) => {
-    if (key === 'chatui-active-workspace') return [h.activeWorkspaceId, vi.fn()]
+    if (key === 'chatui-active-workspace') return [h.activeWorkspaceId, h.setActiveWorkspaceId]
     if (key === 'chatui-save-mode') return [h.saveMode, vi.fn()]
     return [initial, vi.fn()]
   },
@@ -212,6 +215,7 @@ beforeEach(() => {
   h.wsState.loaded = true
   h.wsState.error = null
   h.activeWorkspaceId = null
+  h.setActiveWorkspaceId.mockClear()
   h.configReady = true
   h.workspacesEnabled = true
   h.saveLocalConv.mockImplementation(() => Promise.resolve())
@@ -225,6 +229,9 @@ describe('loadSavedConversation workspace restore (issue #829)', () => {
 
     expect(h.applyWorkspace).toHaveBeenCalledTimes(1)
     expect(h.applyWorkspace).toHaveBeenCalledWith(WORKSPACES[0].config)
+    // The header pointer moves too: applying the selections without updating it
+    // would leave the pill naming the previous workspace.
+    expect(h.setActiveWorkspaceId).toHaveBeenCalledWith('ws-work')
     // The backend restore frame is still sent.
     const restoreCall = h.sendMessage.mock.calls.find(c => c[0]?.type === 'restore_conversation')
     expect(restoreCall).toBeTruthy()
@@ -235,6 +242,7 @@ describe('loadSavedConversation workspace restore (issue #829)', () => {
     act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-gone' } })) })
 
     expect(h.applyWorkspace).not.toHaveBeenCalled()
+    expect(h.setActiveWorkspaceId).not.toHaveBeenCalled()
     // The restore frame still goes out.
     const restoreCall = h.sendMessage.mock.calls.find(c => c[0]?.type === 'restore_conversation')
     expect(restoreCall).toBeTruthy()
@@ -284,6 +292,7 @@ describe('loadSavedConversation workspace restore (issue #829)', () => {
 
     expect(h.applyWorkspace).toHaveBeenCalledTimes(1)
     expect(h.applyWorkspace).toHaveBeenCalledWith(WORKSPACES[0].config)
+    expect(h.setActiveWorkspaceId).toHaveBeenCalledWith('ws-work')
   })
 
   it('drops a deferred restore whose workspace never arrives (best effort)', () => {
@@ -450,15 +459,27 @@ describe('local autosave preserves the conversation binding (issue #829)', () =>
 
 describe('workspace restore notifications (issue #829)', () => {
   it('does not claim the workspace was deleted when the list failed to load', () => {
-    // A failed fetch is indistinguishable from a deletion by the list alone;
-    // telling the user it is gone would be wrong.
+    // A failed fetch leaves `loaded` false (only a successful list sets it), so
+    // the restore defers instead of announcing a deletion it cannot know about.
     h.wsState.workspaces = []
+    h.wsState.loaded = false
     h.wsState.error = 'network error'
     const { result } = renderChat()
     act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
 
     expect(h.applyWorkspace).not.toHaveBeenCalled()
     expect(h.toastInfo).not.toHaveBeenCalled()
+  })
+
+  it('still reports a deleted workspace when an unrelated CRUD call has errored', () => {
+    // `workspaces.error` is shared with the CRUD calls and sticky, so gating the
+    // notification on it would silence this for the rest of the session.
+    h.wsState.loaded = true
+    h.wsState.error = 'a previous rename failed'
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-gone' } })) })
+
+    expect(h.toastInfo).toHaveBeenCalledWith(expect.stringContaining('no longer available'))
   })
 })
 
@@ -589,8 +610,11 @@ describe('sending a turn cancels a queued restore (issue #829)', () => {
     act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
     act(() => { result.current.sendChatMessage('a prompt') })
 
+    // The frame carries the *conversation's* workspace, not the pointer still
+    // showing the previous selections -- sending 'ws-home' here would overwrite
+    // the stored binding and lose it, and sending null would unbind entirely.
     const chatCall = h.sendMessage.mock.calls.find(c => c[0]?.type === 'chat')
-    expect(chatCall[0].workspace_id).toBe('ws-home')
+    expect(chatCall[0].workspace_id).toBe('ws-work')
 
     h.configReady = true
     rerender()

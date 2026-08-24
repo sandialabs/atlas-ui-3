@@ -591,3 +591,50 @@ async def test_unknown_conversation_id_does_not_inherit_the_previous_binding(rep
     # not have, and re-saving them under a second id trips a primary-key
     # constraint. That behavior predates this change and is unrelated to it.)
     assert session.context.get("workspace_id") is None, "inherited the previous binding"
+
+
+@pytest.mark.asyncio
+async def test_store_read_failure_preserves_the_stored_binding(repo):
+    """A transient read error must not persist a null over a good binding.
+
+    The rehydrate path clears the carried binding before reading the store, so
+    the failure branch has to put it back; otherwise a blip in the store unbinds
+    the conversation whenever the no-shrink guard does not block the write.
+    """
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="hello",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    session = sessions[session_id]
+    conv_id = session.context.get("conversation_id")
+
+    # A second conversation id forces the rehydrate path, and the read blows up.
+    other_id = "conv-read-fails"
+    real_get = repo.get_conversation
+
+    def _boom(conversation_id, user_email):
+        if conversation_id == other_id:
+            raise RuntimeError("transient store failure")
+        return real_get(conversation_id, user_email)
+
+    with patch.object(repo, "get_conversation", side_effect=_boom):
+        with _stub_orchestrator(service, sessions, session_id):
+            await service.handle_chat_message(
+                session_id=session_id,
+                content="after the blip",
+                model="test-model",
+                user_email=TEST_USER,
+                conversation_id=other_id,
+            )
+
+    # The binding the session was carrying survives the failed read.
+    assert session.context.get("workspace_id") == "ws-work"
+    # And the original conversation's stored binding is untouched.
+    assert repo.get_conversation(conv_id, TEST_USER)["metadata"].get("workspace_id") == "ws-work"

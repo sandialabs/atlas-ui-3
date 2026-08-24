@@ -36,6 +36,16 @@ export const useChat = () => {
 	return ctx
 }
 
+// Every selection action that changes what the user has chosen. A queued
+// workspace restore must lose to any of them (issue #829); see `guarded` below.
+const MUTATING_SELECTION_ACTIONS = [
+	'toggleTool', 'addTools', 'removeTools',
+	'togglePrompt', 'addPrompts', 'removePrompts', 'setSinglePrompt',
+	'makePromptActive', 'clearActivePrompt', 'clearToolsAndPrompts',
+	'toggleDataSource', 'addDataSources', 'clearDataSources',
+	'setRagEnabled', 'toggleRagEnabled',
+]
+
 export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
@@ -108,7 +118,7 @@ export const ChatProvider = ({ children }) => {
 		const { sendMessage, addMessageHandler, isConnected } = useWS()
 	const toast = useToast()
 	const { currentModel } = config
-	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled, toggleRagEnabled } = selections
+	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled } = selections
 
 	useEffect(() => {
 		if (!config.configReady || customPromptsEnabled) return
@@ -129,7 +139,6 @@ export const ChatProvider = ({ children }) => {
 	// page refresh does not clear the pointer against defaults that have not been
 	// replaced by the real config and workspace list yet.
 	const workspacesLoaded = workspaces.loaded
-	const workspacesError = workspaces.error
 	useEffect(() => {
 		if (isStaleWorkspacePointer({
 			activeWorkspaceId,
@@ -211,12 +220,13 @@ export const ChatProvider = ({ children }) => {
 		// on the pointer alone would report success and never tell the user.
 		const ws = workspaceList.find(w => w.id === workspaceId)
 		if (!ws) {
-			// Only claim the workspace is gone when the list actually loaded. If the
-			// fetch failed we cannot tell "deleted" from "not fetched", and saying
-			// it was deleted would be wrong.
-			if (!workspacesError) {
-				toast.info('This conversation\'s workspace is no longer available. Your current selections were kept.')
-			}
+			// Safe to say it is gone: both callers gate on `workspacesLoaded`, which
+			// only a *successful* list fetch sets, so reaching here means we hold an
+			// authoritative list rather than one that failed to arrive. (Checking
+			// `workspaces.error` instead would be wrong -- it is shared with the CRUD
+			// calls and sticky, so an unrelated earlier failure would silence this
+			// notification for the rest of the session.)
+			toast.info('This conversation\'s workspace is no longer available. Your current selections were kept.')
 			return false
 		}
 		// Already on it: deliberately do not re-apply. Re-applying would discard
@@ -226,7 +236,7 @@ export const ChatProvider = ({ children }) => {
 		switchWorkspace(workspaceId)
 		toast.info(`Switched to the "${ws.name}" workspace this conversation was saved with.`)
 		return true
-	}, [activeWorkspaceId, workspaceList, workspacesError, switchWorkspace, toast])
+	}, [activeWorkspaceId, workspaceList, switchWorkspace, toast])
 
 	const restoreWorkspace = useCallback(workspaceId => {
 		if (!workspaceId) {
@@ -282,15 +292,20 @@ export const ChatProvider = ({ children }) => {
 		return fn(...args)
 	}, [cancelPendingWorkspaceRestore])
 
-	const toggleTool = useMemo(() => withRestoreCancelled(selections.toggleTool), [withRestoreCancelled, selections.toggleTool])
-	const addTools = useMemo(() => withRestoreCancelled(selections.addTools), [withRestoreCancelled, selections.addTools])
-	const removeTools = useMemo(() => withRestoreCancelled(selections.removeTools), [withRestoreCancelled, selections.removeTools])
-	const togglePrompt = useMemo(() => withRestoreCancelled(selections.togglePrompt), [withRestoreCancelled, selections.togglePrompt])
-	const setSinglePrompt = useMemo(() => withRestoreCancelled(selections.setSinglePrompt), [withRestoreCancelled, selections.setSinglePrompt])
-	const makePromptActive = useMemo(() => withRestoreCancelled(selections.makePromptActive), [withRestoreCancelled, selections.makePromptActive])
-	const toggleDataSource = useMemo(() => withRestoreCancelled(selections.toggleDataSource), [withRestoreCancelled, selections.toggleDataSource])
-	const addDataSources = useMemo(() => withRestoreCancelled(selections.addDataSources), [withRestoreCancelled, selections.addDataSources])
-	const clearDataSources = useMemo(() => withRestoreCancelled(selections.clearDataSources), [withRestoreCancelled, selections.clearDataSources])
+	// Guarded once, at the boundary, rather than action by action: every mutating
+	// selection action is wrapped by name, so a new one added to this list is
+	// covered by default instead of silently becoming another way for a queued
+	// restore to overwrite the user. `applyWorkspace` is deliberately absent --
+	// it is how a restore applies, and wrapping it would cancel the restore
+	// mid-flight.
+	const guarded = useMemo(
+		() => Object.fromEntries(
+			MUTATING_SELECTION_ACTIONS
+				.filter(name => typeof selections[name] === 'function')
+				.map(name => [name, withRestoreCancelled(selections[name])])
+		),
+		[selections, withRestoreCancelled]
+	)
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -498,26 +513,26 @@ export const ChatProvider = ({ children }) => {
 	const selectAllServerTools = useCallback((server) => {
 		cancelPendingWorkspaceRestore()
 		const group = config.tools.find(t => t.server === server); if (!group) return
-		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (!selectedTools.has(key)) selections.toggleTool(key) })
-	}, [config.tools, selectedTools, selections, cancelPendingWorkspaceRestore])
+		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (!selectedTools.has(key)) guarded.toggleTool(key) })
+	}, [config.tools, selectedTools, guarded, cancelPendingWorkspaceRestore])
 
 	const deselectAllServerTools = useCallback((server) => {
 		cancelPendingWorkspaceRestore()
 		const group = config.tools.find(t => t.server === server); if (!group) return
-		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (selectedTools.has(key)) selections.toggleTool(key) })
-	}, [config.tools, selectedTools, selections, cancelPendingWorkspaceRestore])
+		group.tools.forEach(tool => { const key = `${server}_${tool}`; if (selectedTools.has(key)) guarded.toggleTool(key) })
+	}, [config.tools, selectedTools, guarded, cancelPendingWorkspaceRestore])
 
 	const selectAllServerPrompts = useCallback((server) => {
 		cancelPendingWorkspaceRestore()
 		const group = config.prompts.find(p => p.server === server); if (!group) return
-		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (!selectedPrompts.has(key)) selections.togglePrompt(key) })
-	}, [config.prompts, selectedPrompts, selections, cancelPendingWorkspaceRestore])
+		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (!selectedPrompts.has(key)) guarded.togglePrompt(key) })
+	}, [config.prompts, selectedPrompts, guarded, cancelPendingWorkspaceRestore])
 
 	const deselectAllServerPrompts = useCallback((server) => {
 		cancelPendingWorkspaceRestore()
 		const group = config.prompts.find(p => p.server === server); if (!group) return
-		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (selectedPrompts.has(key)) selections.togglePrompt(key) })
-	}, [config.prompts, selectedPrompts, selections, cancelPendingWorkspaceRestore])
+		group.prompts.forEach(p => { const key = `${server}_${p.name}`; if (selectedPrompts.has(key)) guarded.togglePrompt(key) })
+	}, [config.prompts, selectedPrompts, guarded, cancelPendingWorkspaceRestore])
 
 	// Flatten ragServers into a list of all available data source IDs (qualified with server name)
 	const getAllRagSourceIds = useCallback(() => {
@@ -600,11 +615,15 @@ export const ChatProvider = ({ children }) => {
 			capture_correction: captureCorrection ?? undefined,
 			// Active workspace (issue #829): persisted with the conversation so
 			// reopening it from history can re-enable the workspace it was tied
-			// to. Explicitly null -- not undefined -- when no workspace is active:
-			// `undefined` is dropped by JSON.stringify, and the backend treats an
-			// omitted field as "leave the binding alone", so a user who cleared
-			// their workspace could never unbind the conversation.
-			workspace_id: activeWorkspaceId ?? null,
+			// to. A restore that has not fired yet means the *conversation's*
+			// workspace is the queued one, not the pointer still showing the
+			// previous selections -- sending the pointer here would overwrite the
+			// stored binding (usually with null) and lose it for good.
+			// Explicitly null -- not undefined -- when there is genuinely no
+			// workspace: `undefined` is dropped by JSON.stringify, and the backend
+			// treats an omitted field as "leave the binding alone", so a user who
+			// cleared their workspace could never unbind the conversation.
+			workspace_id: pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null,
 		})
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
@@ -616,8 +635,10 @@ export const ChatProvider = ({ children }) => {
 		// Sending a turn is the only user action that re-binds a conversation to
 		// the active workspace; opening one must not. Only once the frame is
 		// actually on the wire -- a send that failed must not leave a durable
-		// re-binding in the local record.
-		conversationWorkspaceIdRef.current = activeWorkspaceId || null
+		// re-binding in the local record. Mirrors the frame: a queued restore
+		// means the conversation's binding is the queued one.
+		conversationWorkspaceIdRef.current =
+			pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null
 		// A turn is a deliberate action too, and it has just told the server which
 		// workspace this conversation belongs to. Letting a queued restore fire
 		// afterwards would swap the selections out from under the turn the user
@@ -1050,18 +1071,18 @@ export const ChatProvider = ({ children }) => {
 		currentModel: config.currentModel,
 		setCurrentModel: config.setCurrentModel,
 		selectedTools: selections.selectedTools,
-		toggleTool,
+		toggleTool: guarded.toggleTool,
 		selectAllServerTools,
 		deselectAllServerTools,
 		selectedPrompts: selections.selectedPrompts,
-		togglePrompt,
-		addTools,
-		removeTools,
-		addPrompts: selections.addPrompts,
-		setSinglePrompt,
-		removePrompts: selections.removePrompts,
-		makePromptActive,
-		clearActivePrompt: selections.clearActivePrompt,
+		togglePrompt: guarded.togglePrompt,
+		addTools: guarded.addTools,
+		removeTools: guarded.removeTools,
+		addPrompts: guarded.addPrompts,
+		setSinglePrompt: guarded.setSinglePrompt,
+		removePrompts: guarded.removePrompts,
+		makePromptActive: guarded.makePromptActive,
+		clearActivePrompt: guarded.clearActivePrompt,
 		activePromptKey: selections.activePromptKey,
 		// User-authored custom prompt library (issue #153)
 		userPrompts: userPrompts.prompts,
@@ -1085,12 +1106,12 @@ export const ChatProvider = ({ children }) => {
 		deleteWorkspace,
 		clearActiveWorkspace,
 		selectedDataSources: selections.selectedDataSources,
-		toggleDataSource,
-		addDataSources,
-		clearDataSources,
+		toggleDataSource: guarded.toggleDataSource,
+		addDataSources: guarded.addDataSources,
+		clearDataSources: guarded.clearDataSources,
 		ragEnabled,
-		toggleRagEnabled,
-		clearToolsAndPrompts: selections.clearToolsAndPrompts,
+		toggleRagEnabled: guarded.toggleRagEnabled,
+		clearToolsAndPrompts: guarded.clearToolsAndPrompts,
 		complianceLevelFilter: selections.complianceLevelFilter,
 		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,
 		agentModeEnabled: agent.agentModeEnabled,

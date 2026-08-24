@@ -1143,9 +1143,10 @@ class ChatService:
         # changed, so whatever binding the session was carrying belongs to the
         # *previous* conversation. Drop it up front, before any early return:
         # an unknown conversation id (a new conversation, or a client-side
-        # local_* id) and an unreadable store both used to leave the old value
-        # in place for _save_conversation to stamp onto the new conversation.
-        # The stored binding, when there is one, is assigned below.
+        # local_* id) used to leave the old value in place for
+        # _save_conversation to stamp onto the new conversation. The stored
+        # binding, when there is one, is assigned once the record is in hand.
+        previous_workspace_id = session.context.get("workspace_id", UNSET)
         session.context["workspace_id"] = None
 
         try:
@@ -1165,6 +1166,13 @@ class ChatService:
             # rewind, whose truncation would be measured against the wrong
             # thread. See _turn_allows_shrink.
             session.context["hydration_failed"] = True
+            # A transient read failure says nothing about the conversation's
+            # workspace, so put back whatever the session was carrying rather
+            # than persisting the null cleared above over a good binding.
+            if previous_workspace_id is UNSET:
+                session.context.pop("workspace_id", None)
+            else:
+                session.context["workspace_id"] = previous_workspace_id
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),
