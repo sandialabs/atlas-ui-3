@@ -166,9 +166,13 @@ async def test_message_builder_custom_prompt_replaces_default(tmp_path):
     )
 
     assert messages[0]["role"] == "system"
-    assert messages[0]["content"] == "You are a pirate. Arr."
+    # The custom text is preserved verbatim and leads the message (issue #153
+    # contract: the default template does not leak in). The current date/time
+    # is appended as runtime enrichment (issue #823).
+    assert messages[0]["content"].startswith("You are a pirate. Arr.")
     # The default prompt must not appear at all.
     assert "Default assistant" not in messages[0]["content"]
+    assert "Current Date & Time" in messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -242,8 +246,11 @@ async def test_custom_system_prompt_sent_to_llm():
         msgs = captured.get("messages")
         assert msgs, "LLM was not called or messages not captured"
         assert msgs[0]["role"] == "system"
-        assert msgs[0]["content"] == "You only speak in haiku."
+        # Custom text leads; default template text does not leak (issue #153). The
+        # current date/time is appended as runtime enrichment (issue #823).
+        assert msgs[0]["content"].startswith("You only speak in haiku.")
         assert "Default for" not in msgs[0]["content"]
+        assert "Current Date & Time" in msgs[0]["content"]
 
 
 @pytest.mark.asyncio

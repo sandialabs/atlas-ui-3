@@ -7,6 +7,7 @@ from atlas.domain.sessions.models import Session
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import file_processor
+from .system_prompt_time import enrich_system_prompt_with_time
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +86,36 @@ class MessageBuilder:
     Combines conversation history with files manifest and system prompt.
     """
 
-    def __init__(self, prompt_provider: Optional[PromptProvider] = None):
+    def __init__(self, prompt_provider: Optional[PromptProvider] = None, config_manager: Optional[Any] = None):
         """
         Initialize message builder.
 
         Args:
             prompt_provider: Optional prompt provider for loading system prompt
+            config_manager: Optional config manager; used to read the
+                SYSTEM_PROMPT_TIMEZONE / SYSTEM_PROMPT_TIME_REFRESH_MINUTES
+                settings that inject the current date/time into the system
+                prompt (issue #823). When absent the provider's config_manager
+                is used as a fallback; if neither is available no time is
+                injected (preserving the previous behavior).
         """
         self.prompt_provider = prompt_provider
+        self._config_manager = config_manager
+
+    def _time_settings(self):
+        """Return (timezone_name, refresh_minutes) or None when unavailable."""
+        cm = self._config_manager
+        if cm is None and self.prompt_provider is not None:
+            cm = getattr(self.prompt_provider, "config_manager", None)
+        settings = getattr(cm, "app_settings", None) if cm is not None else None
+        if settings is None:
+            return None
+        timezone_name = getattr(settings, "system_prompt_timezone", "UTC") or "UTC"
+        try:
+            refresh = int(getattr(settings, "system_prompt_time_refresh_minutes", 5))
+        except (TypeError, ValueError):
+            refresh = 5
+        return timezone_name, refresh
 
     async def build_messages(
         self,
@@ -136,6 +159,21 @@ class MessageBuilder:
                     user_email=session.user_email
                 )
             if system_prompt:
+                # Inject the current date/time (and, after a long gap, an
+                # elapsed-time note) into the system prompt (issue #823). This
+                # is runtime enrichment of whatever prompt text was selected --
+                # default or custom -- so the model always knows "now" and can
+                # reason about pauses. No session state is mutated: the gap is
+                # derived from the conversation history's message timestamps.
+                time_settings = self._time_settings()
+                if time_settings is not None:
+                    timezone_name, refresh_minutes = time_settings
+                    system_prompt = enrich_system_prompt_with_time(
+                        system_prompt,
+                        session,
+                        timezone_name,
+                        refresh_minutes,
+                    )
                 messages.append({"role": "system", "content": system_prompt})
                 logger.debug(f"Added system prompt (len={len(system_prompt)})")
 
