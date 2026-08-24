@@ -73,7 +73,11 @@ check_grep "enrich_system_prompt_with_time" \
 check_grep "enrich_system_prompt_with_time" \
     "$ATLAS_DIR/application/chat/preprocessors/message_builder.py" \
     "MessageBuilder wires the time-injection helper"
-check_grep "config_manager=config_manager" \
+# Anchor to the MessageBuilder construction (prompt_provider + config_manager
+# together), not the bare `config_manager=config_manager` substring, which also
+# matches the unrelated ToolAuthorizationService call earlier in the file and
+# would still pass if the MessageBuilder wiring were reverted.
+check_grep "prompt_provider=prompt_provider, config_manager=config_manager" \
     "$ATLAS_DIR/application/chat/orchestrator.py" \
     "orchestrator passes config_manager to MessageBuilder"
 
