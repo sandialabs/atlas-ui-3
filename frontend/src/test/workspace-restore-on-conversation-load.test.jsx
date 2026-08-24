@@ -57,8 +57,8 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
     currentModel: 'test-model',
     user: 'tester@example.com',
     ragServers: [],
+    // Needed by the bulk select/deselect helpers.
     tools: [{ server: 'files', tools: ['read', 'write'] }],
-    prompts: [],
     configReady: h.configReady,
     features: { workspaces: h.workspacesEnabled },
     prompts: [],
