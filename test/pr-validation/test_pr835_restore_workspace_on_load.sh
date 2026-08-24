@@ -154,22 +154,38 @@ print_result $? "handle_chat_message captures and persists workspace_id"
 # `python -c` blocks above do not have, so it is run through pytest.
 echo ""
 echo "--- REST route: GET /api/conversations/{id} returns workspace_id ---"
-python -m pytest atlas/tests/test_chat_history.py -q \
-    -k "TestConversationRoutes and workspace_id" 2>&1 | tail -5
+# Pinned to an explicit node id, not a -k selector: a selector that matches
+# nothing exits 0 and would still be reported as PASSED.
+ROUTE_TEST="atlas/tests/test_chat_history.py::TestConversationRoutes::test_get_by_id_returns_workspace_id_in_metadata"
+python -m pytest "$ROUTE_TEST" -q 2>&1 | tail -5
 print_result ${PIPESTATUS[0]} "REST route returns workspace_id in metadata"
 
 # --- 6. Backend unit tests for the feature ---
 echo ""
 echo "--- Backend unit tests ---"
-python -m pytest atlas/tests/test_workspace_conversation_binding.py atlas/tests/test_chat_history.py -q 2>&1 | tail -5
-print_result ${PIPESTATUS[0]} "backend unit tests pass"
+PYTEST_OUT=$(python -m pytest atlas/tests/test_workspace_conversation_binding.py atlas/tests/test_chat_history.py -q 2>&1)
+PYTEST_STATUS=$?
+echo "$PYTEST_OUT" | tail -5
+# "no tests ran" also exits 0 in some configurations; require real passes.
+if [ $PYTEST_STATUS -eq 0 ] && echo "$PYTEST_OUT" | grep -Eq "[0-9]+ passed"; then
+    print_result 0 "backend unit tests pass"
+else
+    print_result 1 "backend unit tests pass (no tests collected, or failures)"
+fi
 
 # --- 7. Frontend unit tests for the feature ---
 echo ""
 echo "--- Frontend unit tests ---"
 cd "$PROJECT_ROOT/frontend"
-npx vitest run src/test/workspace-restore-on-conversation-load.test.jsx src/test/workspace-pointer.test.js 2>&1 | tail -8
-print_result ${PIPESTATUS[0]} "frontend workspace tests pass"
+VITEST_OUT=$(npx vitest run src/test/workspace-restore-on-conversation-load.test.jsx src/test/workspace-pointer.test.js 2>&1)
+VITEST_STATUS=$?
+echo "$VITEST_OUT" | tail -8
+# A vitest run that collected nothing still exits 0, so require both files.
+if [ $VITEST_STATUS -eq 0 ] && echo "$VITEST_OUT" | grep -q "Test Files  2 passed"; then
+    print_result 0 "frontend workspace tests pass"
+else
+    print_result 1 "frontend workspace tests pass (expected 2 test files to run)"
+fi
 
 # --- 8. Frontend build ---
 echo ""

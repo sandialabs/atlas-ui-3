@@ -14,7 +14,7 @@ These tests cover:
   frontend restore path can read it.
 """
 
-import time
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -116,8 +116,13 @@ async def test_handle_chat_message_captures_workspace_id(repo):
 
 
 @pytest.mark.asyncio
-async def test_handle_chat_message_strips_blank_workspace_id(repo):
-    """A blank/whitespace workspace_id is normalized to None."""
+async def test_handle_chat_message_ignores_blank_workspace_id(repo):
+    """A blank/whitespace workspace_id is ignored, leaving no binding.
+
+    Asserts the key is *absent* rather than falsy: `.get(...) is None` would
+    hold simply because nothing was ever written, so it would pass even if the
+    ignore logic were deleted.
+    """
     service, sessions = _make_service(repo)
     session_id = uuid4()
 
@@ -131,7 +136,7 @@ async def test_handle_chat_message_strips_blank_workspace_id(repo):
         )
 
     session = sessions[session_id]
-    assert session.context.get("workspace_id") is None
+    assert "workspace_id" not in session.context
 
 
 @pytest.mark.asyncio
@@ -193,9 +198,13 @@ async def test_save_persists_null_workspace_id(repo):
 
 
 @pytest.mark.asyncio
-async def test_save_without_workspace_id_arg_defaults_null(repo):
-    """Omitting workspace_id entirely (older clients) persists null rather
-    than raising."""
+async def test_save_without_workspace_id_arg_leaves_context_unset(repo):
+    """Omitting workspace_id entirely (older clients) writes nothing to the
+    session and persists null, rather than raising.
+
+    Asserts the key is absent, not merely falsy, so the UNSET branch is really
+    what is under test.
+    """
     service, sessions = _make_service(repo)
     session_id = uuid4()
 
@@ -208,6 +217,7 @@ async def test_save_without_workspace_id_arg_defaults_null(repo):
         )
 
     session = sessions[session_id]
+    assert "workspace_id" not in session.context
     conv_id = session.context.get("conversation_id")
     saved = repo.get_conversation(conv_id, TEST_USER)
     assert saved is not None
@@ -449,16 +459,28 @@ class TestWebSocketChatFrameWorkspaceId:
         return chat_service.handle_chat_message.await_args.kwargs["workspace_id"]
 
     def _send(self, ws_client, frame):
+        """Send one chat frame and return the workspace_id the service saw.
+
+        Waits on an Event signalled by the mock rather than polling: this is the
+        only coverage of the atlas/main.py wiring, and a busy-wait that times out
+        under CI load would surface as a misleading "not awaited" failure.
+        """
         client, chat_service = ws_client
+        received = threading.Event()
+
+        async def _capture(**kwargs):
+            received.set()
+            return {}
+
+        chat_service.handle_chat_message.side_effect = _capture
+
         with client.websocket_connect(
             "/ws", headers={"X-User-Email": TEST_USER}
         ) as websocket:
             websocket.send_json({"type": "chat", "content": "hi", "model": "m", **frame})
-            # Give the server task a moment to consume the frame.
-            for _ in range(50):
-                if chat_service.handle_chat_message.await_count:
-                    break
-                time.sleep(0.02)
+            assert received.wait(timeout=10), (
+                "the server never invoked handle_chat_message for the chat frame"
+            )
         return self._sent_workspace_id(chat_service)
 
     def test_omitted_workspace_id_forwards_unset(self, ws_client):
@@ -473,3 +495,57 @@ class TestWebSocketChatFrameWorkspaceId:
 
     def test_value_forwards_unchanged(self, ws_client):
         assert self._send(ws_client, {"workspace_id": "ws-work"}) == "ws-work"
+
+
+@pytest.mark.asyncio
+async def test_switching_conversations_in_one_session_does_not_leak_the_binding(repo):
+    """A session that switches to an unbound conversation must not re-bind it.
+
+    The seeding added for the reconnect case makes this reachable: a truthy-only
+    assignment would leave conversation A's workspace in ``session.context``, and
+    ``_save_conversation`` would then stamp it onto conversation B, which the
+    user never bound to any workspace.
+    """
+    service, sessions = _make_service(repo)
+    session_id = uuid4()
+
+    # Conversation A is bound to a workspace.
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="first",
+            model="test-model",
+            user_email=TEST_USER,
+            workspace_id="ws-work",
+        )
+    session = sessions[session_id]
+    conv_a = session.context.get("conversation_id")
+
+    # Conversation B was saved with no workspace at all.
+    conv_b = "conv-unbound"
+    repo.save_conversation(
+        conversation_id=conv_b,
+        user_email=TEST_USER,
+        title="Unbound",
+        model="test-model",
+        messages=[{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yo"}],
+        metadata={"agent_mode": False, "workspace_id": None},
+    )
+
+    # The same long-lived session switches to B without sending workspace_id.
+    with _stub_orchestrator(service, sessions, session_id):
+        await service.handle_chat_message(
+            session_id=session_id,
+            content="second",
+            model="test-model",
+            user_email=TEST_USER,
+            conversation_id=conv_b,
+        )
+
+    assert session.context.get("workspace_id") is None
+    saved_b = repo.get_conversation(conv_b, TEST_USER)
+    assert saved_b["metadata"].get("workspace_id") is None, "B inherited A's workspace"
+
+    # A keeps its own binding.
+    saved_a = repo.get_conversation(conv_a, TEST_USER)
+    assert saved_a["metadata"].get("workspace_id") == "ws-work"

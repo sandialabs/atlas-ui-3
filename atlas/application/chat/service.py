@@ -860,9 +860,10 @@ class ChatService:
         # Carry the stored workspace binding into the fresh session (issue #829)
         # so a client that never sends `workspace_id` (the CLI, a script, an
         # older bundle) re-persists the binding on its next turn instead of
-        # clearing it.
-        if stored_workspace_id:
-            session.context["workspace_id"] = stored_workspace_id
+        # clearing it. Assigned unconditionally for the same reason as the
+        # rehydrate path: an unbound conversation must read as unbound, never
+        # inherit whatever the session was carrying.
+        session.context["workspace_id"] = stored_workspace_id
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical
@@ -1193,9 +1194,16 @@ class ChatService:
         # Without this a mid-conversation reconnect saves a null binding over
         # the stored one. Runs before this turn's own workspace_id is applied,
         # so a turn that does carry one still wins.
+        # Assigned unconditionally, including when the stored value is absent:
+        # this session may have been carrying another conversation's binding, and
+        # a truthy-only assignment would leave it in place for _save_conversation
+        # to stamp onto a conversation the user never bound.
         conv_metadata = conv.get("metadata")
-        if isinstance(conv_metadata, dict) and conv_metadata.get("workspace_id"):
-            session.context["workspace_id"] = conv_metadata["workspace_id"]
+        session.context["workspace_id"] = (
+            conv_metadata.get("workspace_id")
+            if isinstance(conv_metadata, dict)
+            else None
+        )
 
         if loaded:
             # Mark it restored for the same reason the sidebar restore path

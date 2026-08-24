@@ -1,5 +1,5 @@
 // Slim ChatContext (clean refactor)
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
@@ -206,17 +206,23 @@ export const ChatProvider = ({ children }) => {
 	// user may have hand-picked, and a workspace that has since been deleted
 	// would otherwise leave the header asserting an unrelated one.
 	const applyWorkspaceRestore = useCallback(workspaceId => {
-		if (workspaceId === activeWorkspaceId) return true
+		// Resolve first, *before* the already-active check: a workspace can be
+		// deleted while its id is still the active pointer, and short-circuiting
+		// on the pointer alone would report success and never tell the user.
 		const ws = workspaceList.find(w => w.id === workspaceId)
 		if (!ws) {
 			// Only claim the workspace is gone when the list actually loaded. If the
 			// fetch failed we cannot tell "deleted" from "not fetched", and saying
 			// it was deleted would be wrong.
 			if (!workspacesError) {
-				toast.info("This conversation's workspace is no longer available -- your current selections were kept.")
+				toast.info('This conversation\'s workspace is no longer available. Your current selections were kept.')
 			}
 			return false
 		}
+		// Already on it: deliberately do not re-apply. Re-applying would discard
+		// selection edits the user made on top of this workspace, and the
+		// conversation is already bound to it, so nothing is lost by skipping.
+		if (workspaceId === activeWorkspaceId) return true
 		switchWorkspace(workspaceId)
 		toast.info(`Switched to the "${ws.name}" workspace this conversation was saved with.`)
 		return true
@@ -262,6 +268,29 @@ export const ChatProvider = ({ children }) => {
 		pendingWorkspaceRestoreRef.current = null
 		applyWorkspaceRestore(pending)
 	}, [config.configReady, workspacesEnabled, workspacesLoaded, applyWorkspaceRestore])
+
+	// A queued restore must lose to any deliberate selection the user makes while
+	// it waits. Workspace actions already cancel it; so must editing the tools,
+	// prompt, or RAG sources directly, or a slow config/workspace fetch would
+	// silently overwrite those picks seconds later.
+	const cancelPendingWorkspaceRestore = useCallback(() => {
+		pendingWorkspaceRestoreRef.current = null
+	}, [])
+
+	const withRestoreCancelled = useCallback(fn => (...args) => {
+		cancelPendingWorkspaceRestore()
+		return fn(...args)
+	}, [cancelPendingWorkspaceRestore])
+
+	const toggleTool = useMemo(() => withRestoreCancelled(selections.toggleTool), [withRestoreCancelled, selections.toggleTool])
+	const addTools = useMemo(() => withRestoreCancelled(selections.addTools), [withRestoreCancelled, selections.addTools])
+	const removeTools = useMemo(() => withRestoreCancelled(selections.removeTools), [withRestoreCancelled, selections.removeTools])
+	const togglePrompt = useMemo(() => withRestoreCancelled(selections.togglePrompt), [withRestoreCancelled, selections.togglePrompt])
+	const setSinglePrompt = useMemo(() => withRestoreCancelled(selections.setSinglePrompt), [withRestoreCancelled, selections.setSinglePrompt])
+	const makePromptActive = useMemo(() => withRestoreCancelled(selections.makePromptActive), [withRestoreCancelled, selections.makePromptActive])
+	const toggleDataSource = useMemo(() => withRestoreCancelled(selections.toggleDataSource), [withRestoreCancelled, selections.toggleDataSource])
+	const addDataSources = useMemo(() => withRestoreCancelled(selections.addDataSources), [withRestoreCancelled, selections.addDataSources])
+	const clearDataSources = useMemo(() => withRestoreCancelled(selections.clearDataSources), [withRestoreCancelled, selections.clearDataSources])
 
 	const triggerFileDownload = useCallback((filename, base64Content) => {
 		try {
@@ -569,9 +598,6 @@ export const ChatProvider = ({ children }) => {
 			// their workspace could never unbind the conversation.
 			workspace_id: activeWorkspaceId ?? null,
 		})
-		// Sending a turn is the only user action that re-binds a conversation to
-		// the active workspace; opening one must not.
-		conversationWorkspaceIdRef.current = activeWorkspaceId || null
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
 		// hang on "Thinking...".
@@ -579,6 +605,11 @@ export const ChatProvider = ({ children }) => {
 			toast.error('Not connected. Waiting to reconnect before sending.')
 			return false
 		}
+		// Sending a turn is the only user action that re-binds a conversation to
+		// the active workspace; opening one must not. Only once the frame is
+		// actually on the wire -- a send that failed must not leave a durable
+		// re-binding in the local record.
+		conversationWorkspaceIdRef.current = activeWorkspaceId || null
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
@@ -1006,17 +1037,17 @@ export const ChatProvider = ({ children }) => {
 		currentModel: config.currentModel,
 		setCurrentModel: config.setCurrentModel,
 		selectedTools: selections.selectedTools,
-		toggleTool: selections.toggleTool,
+		toggleTool,
 		selectAllServerTools,
 		deselectAllServerTools,
 		selectedPrompts: selections.selectedPrompts,
-		togglePrompt: selections.togglePrompt,
-		addTools: selections.addTools,
-		removeTools: selections.removeTools,
+		togglePrompt,
+		addTools,
+		removeTools,
 		addPrompts: selections.addPrompts,
-		setSinglePrompt: selections.setSinglePrompt,
+		setSinglePrompt,
 		removePrompts: selections.removePrompts,
-		makePromptActive: selections.makePromptActive,
+		makePromptActive,
 		clearActivePrompt: selections.clearActivePrompt,
 		activePromptKey: selections.activePromptKey,
 		// User-authored custom prompt library (issue #153)
@@ -1041,9 +1072,9 @@ export const ChatProvider = ({ children }) => {
 		deleteWorkspace,
 		clearActiveWorkspace,
 		selectedDataSources: selections.selectedDataSources,
-		toggleDataSource: selections.toggleDataSource,
-		addDataSources: selections.addDataSources,
-		clearDataSources: selections.clearDataSources,
+		toggleDataSource,
+		addDataSources,
+		clearDataSources,
 		ragEnabled,
 		toggleRagEnabled,
 		clearToolsAndPrompts: selections.clearToolsAndPrompts,

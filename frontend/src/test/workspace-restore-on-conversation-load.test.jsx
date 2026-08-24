@@ -459,3 +459,77 @@ describe('workspace restore notifications (issue #829)', () => {
     expect(h.toastInfo).not.toHaveBeenCalled()
   })
 })
+
+describe('a queued restore loses to deliberate user actions (issue #829)', () => {
+  it('is cancelled by editing tools directly while the config is still loading', () => {
+    h.configReady = false
+    const { result, rerender } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+
+    // The user picks a tool while the restore is still queued.
+    act(() => { result.current.toggleTool('files_write') })
+
+    h.configReady = true
+    rerender()
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('is cancelled by choosing a prompt or a data source', () => {
+    for (const action of ['setSinglePrompt', 'toggleDataSource']) {
+      vi.clearAllMocks()
+      h.configReady = false
+      const { result, rerender } = renderChat()
+      act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+      act(() => { result.current[action]('something') })
+
+      h.configReady = true
+      rerender()
+
+      expect(h.applyWorkspace, `${action} should cancel the restore`).not.toHaveBeenCalled()
+    }
+  })
+
+  it('does not re-bind the local record when the send never reached the wire', () => {
+    vi.useFakeTimers()
+    try {
+      h.activeWorkspaceId = 'ws-home'
+      h.saveMode = 'local'
+      h.sendMessage.mockImplementation(() => false) // socket dropped
+      const { result } = renderChat()
+      act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+      act(() => { result.current.sendChatMessage('a prompt') })
+      act(() => { vi.advanceTimersByTime(1500) })
+
+      if (h.saveLocalConv.mock.calls.length) {
+        expect(h.saveLocalConv.mock.calls.at(-1)[0].metadata.workspace_id).toBe('ws-work')
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('a deleted workspace that is still the active pointer (issue #829)', () => {
+  it('notifies instead of silently reporting success', () => {
+    // The pointer can still name a workspace that has since been deleted;
+    // short-circuiting on the pointer alone would never tell the user.
+    h.activeWorkspaceId = 'ws-gone'
+    h.wsState.workspaces = WORKSPACES // 'ws-gone' is not in the list
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-gone' } })) })
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+    expect(h.toastInfo).toHaveBeenCalledWith(expect.stringContaining('no longer available'))
+  })
+
+  it('does not re-apply a workspace that is already active', () => {
+    // Deliberate: re-applying would discard selection edits made on top of it.
+    h.activeWorkspaceId = 'ws-work'
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation({ metadata: { workspace_id: 'ws-work' } })) })
+
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+    expect(h.toastInfo).not.toHaveBeenCalled()
+  })
+})
