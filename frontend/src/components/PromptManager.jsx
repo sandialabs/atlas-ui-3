@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Pencil, Trash2, Check, X, Sparkles } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
@@ -9,10 +9,14 @@ import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/ch
  * Users create, edit, and delete reusable custom prompts here. Picking which
  * one is active for a chat happens in the prompt selector above the chat input;
  * this panel is the management surface and also lets you activate one directly.
+ *
+ * `intent` lets a caller open straight into an editor -- the prompt selector's
+ * per-prompt "edit" and "new system prompt" buttons use it (issue #836).
+ * Shape: `{ type: 'create' }` or `{ type: 'edit', id }`.
  */
 const emptyDraft = { title: '', content: '' }
 
-const PromptManager = () => {
+const PromptManager = ({ intent = null }) => {
   const {
     userPrompts = [],
     userPromptsLoading,
@@ -29,6 +33,26 @@ const PromptManager = () => {
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState(emptyDraft)
   const [saving, setSaving] = useState(false)
+  // Each intent object is applied at most once so a later prompt-list refresh
+  // never re-opens the editor over what the user is typing.
+  const appliedIntentRef = useRef(null)
+
+  useEffect(() => {
+    if (!intent || appliedIntentRef.current === intent) return
+    if (intent.type === 'create') {
+      appliedIntentRef.current = intent
+      setEditingId('new')
+      setDraft(emptyDraft)
+      return
+    }
+    if (intent.type === 'edit') {
+      const target = userPrompts.find(p => p.id === intent.id)
+      if (!target) return  // list may still be loading
+      appliedIntentRef.current = intent
+      setEditingId(target.id)
+      setDraft({ title: target.title, content: target.content })
+    }
+  }, [intent, userPrompts])
 
   const activeId = isUserPromptKey(activePromptKey) ? userPromptIdFromKey(activePromptKey) : null
   const canSave = draft.title.trim().length > 0 && draft.content.trim().length > 0

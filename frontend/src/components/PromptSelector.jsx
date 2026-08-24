@@ -1,8 +1,9 @@
 import { useChat } from '../contexts/ChatContext'
-import { ChevronDown, Sparkles, User } from 'lucide-react'
+import { ChevronDown, Sparkles, User, Pencil, Plus } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
+import { openSettingsPanel } from '../utils/settingsPanelEvents'
 
 const PromptSelector = () => {
   const {
@@ -55,6 +56,18 @@ const PromptSelector = () => {
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [isOpen])
+
+  // Jump straight to the prompt's editor in the Tools and Settings panel so
+  // users can find and fix their own prompts without hunting (issue #836).
+  const editUserPrompt = (id) => {
+    setIsOpen(false)
+    openSettingsPanel({ tab: 'prompts', promptIntent: { type: 'edit', id } })
+  }
+
+  const createUserPrompt = () => {
+    setIsOpen(false)
+    openSettingsPanel({ tab: 'prompts', promptIntent: { type: 'create' } })
+  }
 
   const handlePromptSelect = (promptKey) => {
     // Just make this prompt active without reordering
@@ -179,41 +192,61 @@ const PromptSelector = () => {
           })}
 
           {/* User-authored custom prompts (issue #153) */}
-          {customPromptsEnabled && userPrompts.length > 0 && (
+          {customPromptsEnabled && (
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
-                <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                  <User className="w-3 h-3 text-emerald-400" />
-                  My Prompts
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                    <User className="w-3 h-3 text-emerald-400" />
+                    My Prompts
+                  </div>
+                  <button
+                    onClick={createUserPrompt}
+                    title="Create a new system prompt"
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    New system prompt
+                  </button>
                 </div>
                 <div className="text-xs text-gray-400 mt-1">
-                  Your saved prompts (manage in Settings)
+                  {userPrompts.length > 0
+                    ? 'Your saved prompts -- use the pencil to edit one'
+                    : 'No saved prompts yet'}
                 </div>
               </div>
               {userPrompts.map((p) => {
                 const key = userPromptKey(p.id)
                 const isActive = key === activePromptKey
                 return (
-                  <button
+                  <div
                     key={key}
-                    onClick={() => handlePromptSelect(key)}
-                    className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0 ${
+                    className={`flex items-center border-b border-gray-700 last:border-b-0 ${
                       isActive ? 'bg-blue-900/30' : ''
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-200 flex items-center gap-2">
-                          {isActive && <span className="text-blue-400">✓</span>}
-                          <span className="truncate">{p.title}</span>
-                          {isActive && <span className="text-xs text-blue-400">(active)</span>}
-                        </div>
-                        <div className="text-xs text-gray-400 mt-1 line-clamp-2">
-                          {p.content}
-                        </div>
+                    <button
+                      onClick={() => handlePromptSelect(key)}
+                      className="flex-1 min-w-0 px-3 py-2 text-left hover:bg-gray-700 transition-colors"
+                    >
+                      <div className="font-medium text-gray-200 flex items-center gap-2">
+                        {isActive && <span className="text-blue-400">✓</span>}
+                        <span className="truncate">{p.title}</span>
+                        {isActive && <span className="text-xs text-blue-400">(active)</span>}
                       </div>
-                    </div>
-                  </button>
+                      <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                        {p.content}
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => editUserPrompt(p.id)}
+                      title={`Edit "${p.title}"`}
+                      aria-label={`Edit prompt ${p.title}`}
+                      className="mr-2 p-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors flex-shrink-0"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )
               })}
             </>

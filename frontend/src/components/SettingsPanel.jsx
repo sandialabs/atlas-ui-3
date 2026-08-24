@@ -1,20 +1,38 @@
-import { X, RotateCcw, LogIn, LogOut, RefreshCw, CheckCircle, AlertCircle, Sparkles, SlidersHorizontal, UserCircle } from 'lucide-react'
-import { useState, useEffect, useCallback } from 'react'
+import { X, RotateCcw, LogIn, LogOut, RefreshCw, CheckCircle, AlertCircle, Sparkles, SlidersHorizontal, UserCircle, Wrench, Shield, Sun, Moon } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
+import { useTheme } from '../contexts/ThemeContext'
 import { useGlobusAuth } from '../hooks/useGlobusAuth'
 import PromptManager from './PromptManager'
+import ToolsPanel from './ToolsPanel'
+import AdminQuickPanel from './admin/AdminQuickPanel'
 import CaptureConsentSection from './CaptureConsentSection'
 
+// Every tab this panel can show, in display order. Which ones are actually
+// visible depends on feature flags and admin membership (see visibleTabs).
 const TABS = [
+  { id: 'tools', label: 'Tools & Integrations', icon: Wrench },
   { id: 'prompts', label: 'Prompts', icon: Sparkles },
   { id: 'general', label: 'General', icon: SlidersHorizontal },
   { id: 'userInfo', label: 'User Info', icon: UserCircle },
+  { id: 'admin', label: 'Admin', icon: Shield },
 ]
 
-const SettingsPanel = ({ isOpen, onClose }) => {
-  // Active settings tab. Prompt manager is first since it is the most-used
-  // surface (issue #153); General holds the legacy settings.
-  const [activeTab, setActiveTab] = useState('prompts')
+/**
+ * The combined "Tools and Settings" panel (issue #836).
+ *
+ * One wrench button in the header opens this; tools and integrations, the
+ * prompt library, general settings (including the light/dark toggle that used
+ * to sit in the top bar), and the most-used admin controls are tabs here
+ * instead of separate top-bar entry points.
+ */
+const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null }) => {
+  // Tools open first when available -- it is what the wrench button reads as.
+  // The effect below falls back to the first visible tab when it is not.
+  const [activeTab, setActiveTab] = useState('tools')
+  const [toolsDirty, setToolsDirty] = useState(false)
+  const toolsCloseGuardRef = useRef(null)
+  const { theme, toggleTheme } = useTheme()
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
@@ -26,11 +44,27 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   const [hasChanges, setHasChanges] = useState(false)
 
   // Also get live settings from ChatContext for always-in-sync fields
-  const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable } = useChat()
+  const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable, isInAdminGroup } = useChat()
   const customPromptsEnabled = !!features?.custom_prompts
-  const visibleTabs = customPromptsEnabled
-    ? TABS
-    : TABS.filter(tab => tab.id !== 'prompts')
+  const toolsEnabled = !!features?.tools
+  const visibleTabs = useMemo(() => TABS.filter(tab => {
+    if (tab.id === 'prompts') return customPromptsEnabled
+    if (tab.id === 'tools') return toolsEnabled
+    if (tab.id === 'admin') return !!isInAdminGroup
+    return true
+  }), [customPromptsEnabled, toolsEnabled, isInAdminGroup])
+
+  // Close attempts route through the tools tab first so unsaved tool
+  // selections still raise the confirmation dialog.
+  const requestClose = useCallback(() => {
+    const guard = toolsCloseGuardRef.current
+    if (guard && toolsDirty) {
+      setActiveTab('tools')
+      guard()
+      return
+    }
+    onClose()
+  }, [onClose, toolsDirty])
 
   // Globus auth state
   const {
@@ -54,11 +88,19 @@ const SettingsPanel = ({ isOpen, onClose }) => {
     fetchGlobusIfEnabled()
   }, [fetchGlobusIfEnabled])
 
+  // Keep the active tab valid as feature flags/admin membership resolve.
   useEffect(() => {
-    if (!customPromptsEnabled && activeTab === 'prompts') {
-      setActiveTab('general')
+    if (visibleTabs.length === 0) return
+    if (!visibleTabs.some(tab => tab.id === activeTab)) {
+      setActiveTab(visibleTabs[0].id)
     }
-  }, [activeTab, customPromptsEnabled])
+  }, [activeTab, visibleTabs])
+
+  // Callers can open the panel straight onto a tab (header wrench, the
+  // marketplace return trip, the prompt selector's edit buttons).
+  useEffect(() => {
+    if (isOpen && initialTab) setActiveTab(initialTab)
+  }, [isOpen, initialTab])
 
   // Check for Globus auth callback params in URL
   useEffect(() => {
@@ -130,7 +172,7 @@ const SettingsPanel = ({ isOpen, onClose }) => {
       setSettings(defaultSettings)
     }
     setHasChanges(false)
-    onClose()
+    requestClose()
   }
 
   if (!isOpen) return null
@@ -138,25 +180,29 @@ const SettingsPanel = ({ isOpen, onClose }) => {
   return (
     <div 
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
-        className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[85vh] mx-4 flex flex-col"
+        className="bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full h-[85vh] mx-4 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-700 flex-shrink-0">
-          <h2 className="text-xl font-semibold text-gray-100">Settings</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0">
+          <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
+            <Wrench className="w-5 h-5 text-blue-400" />
+            Tools and Settings
+          </h2>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            aria-label="Close tools and settings"
           >
             <X className="w-6 h-6" />
           </button>
         </div>
 
         {/* Tab navigation */}
-        <div className="flex items-center gap-1 px-4 border-b border-gray-700 flex-shrink-0">
+        <div className="flex items-center gap-1 px-4 border-b border-gray-700 flex-shrink-0 overflow-x-auto">
           {visibleTabs.map((tab) => {
             const Icon = tab.icon
             return (
@@ -176,10 +222,30 @@ const SettingsPanel = ({ isOpen, onClose }) => {
           })}
         </div>
 
+        {/* Tools & Integrations tab. Kept mounted for the life of the panel so
+            pending tool selections survive switching tabs. */}
+        {toolsEnabled && (
+          <ToolsPanel
+            embedded
+            isOpen={isOpen}
+            active={activeTab === 'tools'}
+            onClose={onClose}
+            closeGuardRef={toolsCloseGuardRef}
+            onDirtyChange={setToolsDirty}
+          />
+        )}
+
+        {/* Admin quick controls tab (issue #836) */}
+        {isInAdminGroup && activeTab === 'admin' && (
+          <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
+            <AdminQuickPanel isOpen={isOpen} onNavigate={onClose} />
+          </div>
+        )}
+
         {/* Prompts tab (issue #153) */}
         {customPromptsEnabled && activeTab === 'prompts' && (
           <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
-            <PromptManager />
+            <PromptManager intent={activeTab === 'prompts' ? promptIntent : null} />
           </div>
         )}
 
@@ -200,6 +266,24 @@ const SettingsPanel = ({ isOpen, onClose }) => {
         {/* General settings tab */}
         {activeTab === 'general' && (
         <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6 space-y-6">
+          {/* Appearance -- moved off the top bar in issue #836 */}
+          <div className="bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-gray-50 font-medium">Appearance</label>
+              <button
+                onClick={toggleTheme}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors text-sm font-medium"
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              </button>
+            </div>
+            <p className="text-sm text-gray-400">
+              Currently using {theme === 'dark' ? 'dark' : 'light'} mode.
+            </p>
+          </div>
+
           {/* LLM Temperature Setting */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">

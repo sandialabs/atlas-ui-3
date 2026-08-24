@@ -13,7 +13,17 @@ const DEFAULT_PARAM_TYPE = 'any'
 // Truncation message constant for better maintainability
 const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start and end of content.'
 
-const ToolsPanel = ({ isOpen, onClose }) => {
+/**
+ * Tools, integrations, and prompt selection.
+ *
+ * Renders as a standalone modal by default. When `embedded` is set it renders
+ * only its body so it can live inside the combined "Tools and Settings" panel
+ * (issue #836) as a tab: the parent supplies the modal chrome, keeps this
+ * mounted across tab switches (`active` toggles visibility so pending
+ * selections survive), and routes its own close attempts through
+ * `closeGuardRef` so unsaved tool changes still prompt.
+ */
+const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [expandedPrompts, setExpandedPrompts] = useState(new Set())
@@ -192,6 +202,20 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const handleCancelDialog = () => {
     setShowUnsavedDialog(false)
   }
+
+  // Let an embedding parent know whether there are unsaved selections.
+  useEffect(() => {
+    onDirtyChange?.(hasChanges)
+  }, [hasChanges, onDirtyChange])
+
+  // When embedded, let the parent panel route its close attempts through the
+  // same unsaved-changes guard. Re-registered every render so the ref always
+  // holds a handler closed over current state.
+  useEffect(() => {
+    if (!embedded || !closeGuardRef) return undefined
+    closeGuardRef.current = handleCloseAttempt
+    return () => { closeGuardRef.current = null }
+  })
 
   // Handle token upload for JWT/bearer auth servers
   const handleTokenUpload = async (tokenData) => {
@@ -474,26 +498,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null
 
-  return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={handleCloseAttempt}
-    >
-      <div 
-        className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] mx-4 flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-gray-100">Tools & Integrations</h2>
-          <button
-            onClick={handleCloseAttempt}
-            className="p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
+  const panelBody = (
+    <>
         {/* Controls Section */}
         <div className="px-4 py-3 border-b border-gray-700 flex-shrink-0 space-y-3">
           {/* Top Row: Add from Marketplace and Clear All */}
@@ -879,8 +885,11 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             Save Changes
           </button>
         </div>
-      </div>
+    </>
+  )
 
+  const panelModals = (
+    <>
       {/* Unsaved Changes Confirmation Dialog */}
       <UnsavedChangesDialog
         isOpen={showUnsavedDialog}
@@ -940,6 +949,42 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           </div>
         </div>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div className={`flex-1 min-h-0 flex-col ${active ? 'flex' : 'hidden'}`}>
+        {panelBody}
+        {panelModals}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={handleCloseAttempt}
+    >
+      <div
+        className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] mx-4 flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
+          <h2 className="text-lg font-semibold text-gray-100">Tools & Integrations</h2>
+          <button
+            onClick={handleCloseAttempt}
+            className="p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {panelBody}
+      </div>
+
+      {panelModals}
     </div>
   )
 }

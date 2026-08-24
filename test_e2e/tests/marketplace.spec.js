@@ -26,11 +26,11 @@ test.describe('MCP Marketplace E2E Tests', () => {
     // Resize browser for consistent testing
     await page.setViewportSize({ width: 1400, height: 1000 });
     
-    // Click the Toggle Tools button to open the tools panel
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
+    // Open the combined Tools and Settings panel (issue #836)
+    await page.getByRole('button', { name: 'Tools and Settings' }).click();
     
-    // Verify the Tools & Integrations panel is visible
-    await expect(page.locator('h2:has-text("Tools & Integrations")')).toBeVisible();
+    // Verify the Tools & Integrations tab is present
+    await expect(page.getByRole('button', { name: 'Tools & Integrations' })).toBeVisible();
     
     // Verify the Marketplace button is visible
     await expect(page.getByRole('button', { name: 'Marketplace', exact: true })).toBeVisible();
@@ -44,7 +44,7 @@ test.describe('MCP Marketplace E2E Tests', () => {
     await page.setViewportSize({ width: 1400, height: 1000 });
     
     // Open the tools panel
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
+    await page.getByRole('button', { name: 'Tools and Settings' }).click();
     
     // Navigate to marketplace
     await page.getByRole('button', { name: 'Marketplace', exact: true }).click();
@@ -65,7 +65,7 @@ test.describe('MCP Marketplace E2E Tests', () => {
     await page.setViewportSize({ width: 1400, height: 1000 });
     
     // Navigate to marketplace
-    await page.getByRole('button', { name: 'Toggle Tools' }).click();
+    await page.getByRole('button', { name: 'Tools and Settings' }).click();
     await page.getByRole('button', { name: 'Marketplace', exact: true }).click();
     
     // Take screenshot of the marketplace
@@ -106,7 +106,7 @@ test.describe('MCP Marketplace E2E Tests', () => {
   //   await page.setViewportSize({ width: 1400, height: 1000 });
     
   //   // Navigate to marketplace
-  //   await page.getByRole('button', { name: 'Toggle Tools' }).click();
+  //   await page.getByRole('button', { name: 'Tools and Settings' }).click();
   //   await page.getByRole('button', { name: 'Marketplace', exact: true }).click();
     
   //   // Take screenshot of initial state
@@ -139,7 +139,7 @@ test.describe('MCP Marketplace E2E Tests', () => {
   //   await page.setViewportSize({ width: 1400, height: 1000 });
     
   //   // Navigate to marketplace
-  //   await page.getByRole('button', { name: 'Toggle Tools' }).click();
+  //   await page.getByRole('button', { name: 'Tools and Settings' }).click();
   //   await page.getByRole('button', { name: 'Marketplace', exact: true }).click();
     
   //   // Take screenshot of control buttons
@@ -164,7 +164,7 @@ test.describe('MCP Marketplace E2E Tests', () => {
   //   await page.setViewportSize({ width: 1400, height: 1000 });
     
   //   // Navigate to marketplace
-  //   await page.getByRole('button', { name: 'Toggle Tools' }).click();
+  //   await page.getByRole('button', { name: 'Tools and Settings' }).click();
   //   await page.getByRole('button', { name: 'Marketplace', exact: true }).click();
     
   //   // Verify help section is displayed

@@ -6,9 +6,8 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
 import WorkspaceSelector from './WorkspaceSelector'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info, Terminal } from 'lucide-react'
+import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Eye, Info, Terminal } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
-import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from './ui/toastContext'
 
 // Save mode display config: label, icon component, button classes, title text
@@ -36,7 +35,7 @@ const SAVE_MODE_CONFIG = {
   },
 }
 
-const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
+const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
   const {
     user,
@@ -60,7 +59,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   } = useChat()
   const { isComplianceAccessible, complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
-  const { theme, toggleTheme } = useTheme()
   const toast = useToast()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
@@ -474,22 +472,16 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             </button>
           )}
 
-          {/* Theme Toggle */}
+          {/* Tools and Settings -- tools, integrations, prompts, general
+              settings (including light/dark), and admin quick controls all
+              live behind this one button (issue #836). */}
           <button
-            onClick={toggleTheme}
+            onClick={() => onToggleSettings()}
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title="Tools and Settings"
+            aria-label="Tools and Settings"
           >
-            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
-
-          {/* Settings Button */}
-          <button
-            onClick={onToggleSettings}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-            title="Settings"
-          >
-            <Settings className="w-5 h-5" />
+            <Wrench className="w-5 h-5" />
           </button>
 
           {/* Help Button */}
@@ -514,23 +506,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             </button>
           )}
 
-          {/* Tools Panel Toggle */}
-          {(() => {
-            if (features?.tools) {
-              return (
-                <button
-                  onClick={onToggleTools}
-                  className="p-2 rounded-lg bg-yellow-500 border border-red-500 block"
-                  title="Toggle Tools, Integrations, and Prompts"
-                >
-                  <Wrench className="w-5 h-5" />
-                </button>
-              );
-            } else {
-              return null; // Render nothing if not showing
-            }
-          })()}
-          
           {/* File Manager Panel Toggle */}
           {features?.files_panel && (
             <button
@@ -709,19 +684,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 </button>
               )}
 
-              {/* Theme Toggle */}
-              <button
-                onClick={() => {
-                  toggleTheme()
-                  setMobileMenuOpen(false)
-                }}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
-              >
-                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-              </button>
-
-              {/* Settings Button */}
+              {/* Tools and Settings (issue #836) */}
               <button
                 onClick={() => {
                   onToggleSettings()
@@ -729,8 +692,8 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 }}
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
               >
-                <Settings className="w-5 h-5" />
-                <span>Settings</span>
+                <Wrench className="w-5 h-5" />
+                <span>Tools and Settings</span>
               </button>
 
               {/* Help Button */}
@@ -759,20 +722,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 </button>
               )}
 
-              {/* Tools Panel Toggle */}
-              {features?.tools && (
-                <button
-                  onClick={() => {
-                    onToggleTools()
-                    setMobileMenuOpen(false)
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-yellow-500 border border-red-500 text-sm transition-colors"
-                >
-                  <Wrench className="w-5 h-5" />
-                  <span>Tools & Prompts</span>
-                </button>
-              )}
-              
               {/* File Manager Panel Toggle */}
               {features?.files_panel && (
                 <button
