@@ -91,6 +91,20 @@ describe('ToolElapsedTime -- atlas_agent_sleep (#838)', () => {
     expect(container.textContent).toContain('completing...')
   })
 
+  it('shows the completing hint the instant the requested wait is reached', () => {
+    // elapsed == requested should already read as overdue (>=, not >), so the
+    // hint appears immediately at the boundary instead of lagging a second.
+    const { container } = render(
+      <ToolElapsedTime
+        timestamp={isoNow()}
+        toolName="atlas_agent_sleep"
+        arguments={{ seconds: 5 }}
+      />
+    )
+    tick(5)
+    expect(container.textContent).toContain('completing...')
+  })
+
   it('does not show the completing hint before the requested wait', () => {
     const { container } = render(
       <ToolElapsedTime

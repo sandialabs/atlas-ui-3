@@ -62,7 +62,7 @@ const ToolElapsedTime = ({ timestamp, toolName, arguments: args }) => {
   ) ? Number(rawSeconds) : null
 
   if (sleepSeconds != null) {
-    const overdue = elapsed > sleepSeconds
+    const overdue = elapsed >= sleepSeconds
     // Keep both numbers on the same clock style: once either side crosses the
     // hour boundary, render both as HH:MM:SS so the elapsed / requested pair
     // never reads like `01:00 of 2:00:00`.
