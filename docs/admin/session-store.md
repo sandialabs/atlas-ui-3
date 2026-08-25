@@ -47,6 +47,15 @@ The implementation must satisfy the `SessionRepository` protocol in
 - Only the `memory` implementation ships in-tree. A distributed implementation
   (Redis, shared DB, etc.) must be registered by the deployment.
 
+- **Object identity matters**: `ChatService.handle_chat_message` and
+  `ChatOrchestrator.execute` each call `session_repository.get(session_id)` and
+  expect the same in-memory object (the in-memory repo returns the same
+  reference on every `get`). A distributed implementation that deserializes a
+  fresh copy on each `get` would break this assumption -- the orchestrator's
+  mutations would not be visible to the service's persistence block. A future
+  distributed adapter must either cache the session per request or pass the
+  session object through the call chain rather than re-fetching it.
+
 - Decoupling session identity from the WebSocket connection (so a reconnect
   can reattach to an existing session) is future work; today each WebSocket
   gets a fresh `session_id = uuid4()`. See issue #760 for the design direction.
