@@ -238,6 +238,22 @@ class AppSettings(BaseSettings):
         validation_alias="WEBSOCKET_KEEPALIVE_INTERVAL_SECONDS",
     )
 
+    # Session storage. The default ("memory") is process-local, so a
+    # clustered deployment must use sticky sessions or every WebSocket
+    # that lands on a different replica loses its session state (issue #760).
+    # A deployment that plugs in a distributed implementation (Redis, shared
+    # DB, etc.) through this setting removes that undocumented constraint.
+    session_repository_type: str = Field(
+        default="memory",
+        description=(
+            "Session store implementation: 'memory' (process-local, default) "
+            "or a custom type registered in create_session_repository. "
+            "A non-memory implementation is required for multi-replica "
+            "deployments without sticky sessions (issue #760)."
+        ),
+        validation_alias="SESSION_REPOSITORY_TYPE",
+    )
+
     # MCP Token Storage settings
     mcp_token_storage_dir: Optional[str] = Field(
         default=None,

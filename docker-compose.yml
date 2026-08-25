@@ -101,6 +101,9 @@ services:
       - FEATURE_CHAT_HISTORY_ENABLED=true
       # Per-user custom prompt library (requires chat history)
       - FEATURE_CUSTOM_PROMPTS_ENABLED=false
+      # Session store: "memory" (process-local, default) or a custom type
+      # registered in atlas.infrastructure.sessions.factory (issue #760)
+      - SESSION_REPOSITORY_TYPE=memory
       # Chat history DB (choose one):
       # DuckDB (default, no extra services required):
       - CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db
