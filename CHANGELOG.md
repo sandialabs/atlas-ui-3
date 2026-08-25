@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #842 - 2026-08-25
+- **Stopped agent conversations now survive a browser refresh when chat history is enabled** (closes #842): the default save mode was Incognito (`none`, PR #619), so no conversations — including stopped agent runs the user expected to resume — were persisted to DuckDB. A one-shot upgrade now defaults first-run users to Saved to Server (`server`) when `FEATURE_CHAT_HISTORY_ENABLED=true` and the user has never interacted with the save-mode toggle (localStorage key absent). Explicit user choices are always respected; deployments with chat history disabled are unaffected.
+
 ### PR #840 - 2026-08-25
 - **Session store is now pluggable** (refs #760): `SESSION_REPOSITORY_TYPE` (default `memory`) selects the session repository implementation at startup, so a multi-replica deployment can plug in a distributed store through `atlas.infrastructure.sessions.factory.create_session_repository` instead of inheriting the process-local `InMemorySessionRepository` that forces sticky sessions. Also adds an end-to-end test verifying that a client disconnect mid-turn persists the completed work through `cleanup_disconnected_session`.
 

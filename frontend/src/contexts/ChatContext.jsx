@@ -82,9 +82,30 @@ export const ChatProvider = ({ children }) => {
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
 	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
+	// The stored default is 'none' (PR #619, privacy), but when the backend has
+	// chat history enabled a first-run user with no explicit preference should
+	// default to 'server' — otherwise every conversation (including stopped
+	// agent runs the user expects to resume) silently disappears on refresh
+	// (issue #842). The upgrade is one-shot: once any value is in localStorage
+	// the user's explicit choice is respected.
 	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'none')
 	const [activeConversationId, setActiveConversationId] = useState(null)
 	const localSaveTimerRef = useRef(null)
+
+	// One-shot upgrade: default to 'server' when chat history is enabled and
+	// the user has never interacted with the save-mode toggle.
+	useEffect(() => {
+		if (!config.configReady) return
+		if (!config.features?.chat_history) return
+		try {
+			if (localStorage.getItem('chatui-save-mode') === null) {
+				setSaveMode('server')
+			}
+		} catch {
+			// localStorage may be unavailable (private browsing); skip the upgrade
+		}
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [config.configReady])
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {

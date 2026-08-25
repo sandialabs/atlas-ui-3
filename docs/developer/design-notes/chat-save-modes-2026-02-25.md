@@ -1,6 +1,6 @@
 # 3-State Chat Save Mode
 
-Last updated: 2026-05-29
+Last updated: 2026-08-25
 
 ## Overview
 
@@ -13,6 +13,8 @@ Chat history supports three save modes that the user cycles through by clicking 
 | Saved to Server | Cloud | Green | Backend database |
 
 The default mode is **Incognito** (`none`); the cycle order is Incognito -> Saved Locally -> Saved to Server. The selected mode persists across page refreshes via `usePersistentState` (localStorage key: `chatui-save-mode`).
+
+> **Issue #842 update (2026-08-25):** When the backend has chat history enabled (`FEATURE_CHAT_HISTORY_ENABLED=true`), a first-run user with no explicit `chatui-save-mode` preference is upgraded to **Saved to Server** (`server`) on the first config load. This is a one-shot upgrade: once any value is in localStorage the user's explicit choice is respected. Without this, every conversation — including stopped agent runs the user expects to resume — silently disappears on browser refresh. The stored default in `usePersistentState` remains `'none'` so deployments with chat history disabled are unaffected.
 
 ## Architecture
 
