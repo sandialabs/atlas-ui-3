@@ -620,6 +620,7 @@ async def execute_single_tool(
                                 tool_call.function.name,
                                 tool_manager
                             )
+                            display_args = _sanitize_args_for_ui(dict(filtered_args))
                         else:
                             # No actual changes, but response included arguments - keep original filtered_args
                             logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
