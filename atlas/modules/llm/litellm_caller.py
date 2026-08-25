@@ -643,8 +643,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 display_parts = [self._parse_qualified_data_source(s) for s in sources]
                 display = ", ".join(display_parts)
                 failures.append(
-                    f"The data source '{display}' could not be queried because "
-                    f"the RAG service returned an error."
+                    f"The data source '{display}' could not be queried "
+                    f"(the RAG service returned an error or could not be reached)."
                 )
             else:
                 successful.append(result)
@@ -703,8 +703,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return ""
         bullets = "\n".join(f"- {message}" for message in failures)
         return (
-            "\n\nThe following selected data sources could NOT be queried because "
-            f"the RAG service returned an error, and no context was retrieved from them:\n"
+            "\n\nThe following selected data sources could NOT be queried (the "
+            "RAG service returned an error or could not be reached), and no "
+            f"context was retrieved from them:\n"
             f"{bullets}\n"
             "You MUST tell the user in your first sentence that these data sources "
             "could not be reached. Then answer the user's question from any context "
