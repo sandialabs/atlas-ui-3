@@ -28,8 +28,10 @@ class LiteLLMStreamingMixin:
       - _get_litellm_model_name(model_name) -> str
       - _get_model_kwargs(model_name, temperature, user_email) -> dict
       - _prepare_messages(model_name, messages) -> list
-      - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
+      - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> (successful, exclusions, failures)
       - _build_rag_completion_response(rag_response, display_source) -> str
+      - _build_rag_exclusion_notice(exclusions) -> str
+      - _build_rag_failure_notice(failures) -> str
       - _combine_rag_contexts(source_responses) -> tuple
       - _rag_insert_index(messages) -> int
       - _rag_service attribute
@@ -318,11 +320,37 @@ class LiteLLMStreamingMixin:
             raise ValueError("RAG service not configured")
 
         # Query RAG sources (non-streaming)
-        source_responses, rag_exclusions = await self._query_all_rag_sources(
+        source_responses, rag_exclusions, rag_failures = await self._query_all_rag_sources(
             data_sources, rag_service, user_email, messages,
         )
 
         if not source_responses:
+            if rag_failures:
+                # Every RAG query failed: tell the LLM (and thus the user)
+                # instead of silently answering as if nothing happened (GH #844).
+                logger.warning(
+                    "[stream+RAG] All RAG sources failed (%d); informing LLM and user",
+                    len(rag_failures),
+                )
+                messages_with_rag = messages.copy()
+                messages_with_rag.insert(
+                    self._rag_insert_index(messages_with_rag),
+                    {
+                        "role": "system",
+                        "content": (
+                            "The user selected data sources for RAG retrieval, but "
+                            "every query failed and no context was retrieved.\n"
+                            f"{self._build_rag_failure_notice(rag_failures).strip()}\n\n"
+                            "Answer the user's question, but begin by telling them you "
+                            "were unable to retrieve any context from their selected "
+                            "data sources and that they may need to retry or contact "
+                            "an administrator."
+                        ),
+                    },
+                )
+                async for chunk in self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email):
+                    yield chunk
+                return
             async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
                 yield chunk
             return
@@ -352,6 +380,7 @@ class LiteLLMStreamingMixin:
             "content": (
                 f"{context_label}:\n\n{rag_content}"
                 f"{self._build_rag_exclusion_notice(rag_exclusions)}"
+                f"{self._build_rag_failure_notice(rag_failures)}"
                 f"{citation_block}\n\n"
                 "Use this context to inform your response. "
                 "Cite sources inline using [1], [2], etc. where applicable."
@@ -394,11 +423,40 @@ class LiteLLMStreamingMixin:
         if rag_service is None:
             raise ValueError("RAG service not configured")
 
-        source_responses, rag_exclusions = await self._query_all_rag_sources(
+        source_responses, rag_exclusions, rag_failures = await self._query_all_rag_sources(
             data_sources, rag_service, user_email, messages,
         )
 
         if not source_responses:
+            if rag_failures:
+                # Every RAG query failed: tell the LLM (and thus the user)
+                # instead of silently answering as if nothing happened (GH #844).
+                logger.warning(
+                    "[stream+RAG+Tools] All RAG sources failed (%d); informing LLM and user",
+                    len(rag_failures),
+                )
+                messages_with_rag = messages.copy()
+                messages_with_rag.insert(
+                    self._rag_insert_index(messages_with_rag),
+                    {
+                        "role": "system",
+                        "content": (
+                            "The user selected data sources for RAG retrieval, but "
+                            "every query failed and no context was retrieved.\n"
+                            f"{self._build_rag_failure_notice(rag_failures).strip()}\n\n"
+                            "Answer the user's question (you may still use the available "
+                            "tools), but begin by telling them you were unable to retrieve "
+                            "any context from their selected data sources and that they may "
+                            "need to retry or contact an administrator."
+                        ),
+                    },
+                )
+                async for item in self.stream_with_tools(
+                    model_name, messages_with_rag, tools_schema, tool_choice,
+                    temperature=temperature, user_email=user_email
+                ):
+                    yield item
+                return
             async for item in self.stream_with_tools(
                 model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
             ):
@@ -430,6 +488,7 @@ class LiteLLMStreamingMixin:
             "content": (
                 f"{context_label}:\n\n{rag_content}"
                 f"{self._build_rag_exclusion_notice(rag_exclusions)}"
+                f"{self._build_rag_failure_notice(rag_failures)}"
                 f"{citation_block}\n\n"
                 "Use this context to inform your response. "
                 "Cite sources inline using [1], [2], etc. where applicable."

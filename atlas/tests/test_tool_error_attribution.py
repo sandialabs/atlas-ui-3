@@ -421,7 +421,7 @@ async def test_rag_and_tools_does_not_retry_a_rejected_request():
             content="context",
             metadata=None,
             is_completion=False,
-        ))], [])
+        ))], [], [])
     )
     caller.call_with_tools = AsyncMock(side_effect=rejection)
 

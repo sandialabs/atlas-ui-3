@@ -551,7 +551,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         rag_service,
         user_email: str,
         messages: List[Dict[str, str]],
-    ) -> Tuple[List[Tuple[str, Any]], List[str]]:
+    ) -> Tuple[List[Tuple[str, Any]], List[str], List[str]]:
         """Query all RAG data sources in parallel, batching by server.
 
         Sources sharing the same server are sent as a single batched request
@@ -565,6 +565,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         then nothing to answer from and silently degrading to a non-RAG answer
         is exactly the failure mode this path exists to prevent.
 
+        A source whose query failed with a non-permission error (e.g. the RAG
+        service returned a 500) is also dropped rather than failing the whole
+        turn, but -- unlike a permission denial -- the failure is *reported*
+        to the caller via ``failures`` so the LLM can be told the query broke
+        and instructed to tell the user, instead of answering as if nothing
+        happened (GH #844).
+
         Args:
             data_sources: Qualified data source identifiers (server:source_id).
             rag_service: UnifiedRAGService instance.
@@ -572,10 +579,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             messages: Conversation messages for RAG context.
 
         Returns:
-            ``(successful, exclusions)`` -- ``successful`` is a list of
-            (display_source, rag_response) tuples, one per surviving server
-            batch; ``exclusions`` holds one user-facing message per rejected
-            group, each naming the source and the remedy.
+            ``(successful, exclusions, failures)`` -- ``successful`` is a list
+            of (display_source, rag_response) tuples, one per surviving
+            server batch; ``exclusions`` holds one user-facing message per
+            permission-denied group, each naming the source and the remedy;
+            ``failures`` holds one user-facing message per server batch that
+            errored for any other reason, each naming the source so the LLM
+            can tell the user which data sources could not be queried.
 
         Raises:
             DataSourcePermissionError: Every selected group was rejected.
@@ -618,12 +628,24 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         successful: List[Tuple[str, Any]] = []
         denials: List[DataSourcePermissionError] = []
-        for (server_name, _sources), result in zip(server_groups.items(), results):
+        failures: List[str] = []
+        for (server_name, sources), result in zip(server_groups.items(), results):
             if isinstance(result, Exception):
                 if isinstance(result, DataSourcePermissionError):
                     denials.append(result)
                     continue
                 logger.error("[RAG] Failed to query server %s: %s", server_name, result)
+                # Report the failure to the LLM rather than dropping it
+                # silently (GH #844). Name the corpus(es) the user selected so
+                # they recognise the source; keep the reason generic so the
+                # raw error text (which may carry internal details) never
+                # reaches the model or the user.
+                display_parts = [self._parse_qualified_data_source(s) for s in sources]
+                display = ", ".join(display_parts)
+                failures.append(
+                    f"The data source '{display}' could not be queried because "
+                    f"the RAG service returned an error."
+                )
             else:
                 successful.append(result)
 
@@ -640,7 +662,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 len(exclusions),
                 len(server_groups),
             )
-        return successful, exclusions
+        if failures:
+            logger.warning(
+                "[RAG] %d of %d server group(s) failed to query; reporting to LLM",
+                len(failures),
+                len(server_groups),
+            )
+        return successful, exclusions, failures
 
     @staticmethod
     def _build_rag_exclusion_notice(exclusions: List[str]) -> str:
@@ -658,6 +686,30 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             f"absent from the context above:\n{bullets}\n"
             "Open your reply by stating in one sentence that these sources were "
             "excluded, then answer from the context that is present."
+        )
+
+    @staticmethod
+    def _build_rag_failure_notice(failures: List[str]) -> str:
+        """Render failed-query messages for inclusion in the RAG context block.
+
+        A *failure* (unlike an :func:`_build_rag_exclusion_notice` exclusion)
+        means the RAG service returned an error, so no context was retrieved
+        from that source at all. The notice rides in the RAG system message so
+        it reaches the user identically on the streaming and non-streaming
+        paths, and instructs the model to tell the user rather than answering
+        as if nothing happened (GH #844).
+        """
+        if not failures:
+            return ""
+        bullets = "\n".join(f"- {message}" for message in failures)
+        return (
+            "\n\nThe following selected data sources could NOT be queried because "
+            f"the RAG service returned an error, and no context was retrieved from them:\n"
+            f"{bullets}\n"
+            "You MUST tell the user in your first sentence that these data sources "
+            "could not be reached. Then answer the user's question from any context "
+            "that is present, or from your general knowledge if none is, but make "
+            "clear that the RAG retrieval failed."
         )
 
     @staticmethod
@@ -1064,12 +1116,40 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         try:
             # Query all RAG sources in parallel
-            source_responses, rag_exclusions = await self._query_all_rag_sources(
+            source_responses, rag_exclusions, rag_failures = await self._query_all_rag_sources(
                 data_sources, rag_service, user_email, messages,
             )
 
             if not source_responses:
-                logger.warning("[LLM+RAG] All RAG sources failed, falling back to plain LLM call")
+                if rag_failures:
+                    # Every RAG query failed: tell the LLM (and thus the user)
+                    # instead of silently answering as if nothing happened
+                    # (GH #844). Inject a system message and call the LLM so
+                    # the user gets a response that names the failure.
+                    logger.warning(
+                        "[LLM+RAG] All RAG sources failed (%d); informing LLM and user",
+                        len(rag_failures),
+                    )
+                    messages_with_rag = messages.copy()
+                    messages_with_rag.insert(
+                        self._rag_insert_index(messages_with_rag),
+                        {
+                            "role": "system",
+                            "content": (
+                                "The user selected data sources for RAG retrieval, but "
+                                "every query failed and no context was retrieved.\n"
+                                f"{self._build_rag_failure_notice(rag_failures).strip()}\n\n"
+                                "Answer the user's question, but begin by telling them you "
+                                "were unable to retrieve any context from their selected "
+                                "data sources and that they may need to retry or contact "
+                                "an administrator."
+                            ),
+                        },
+                    )
+                    return await self.call_plain(
+                        model_name, messages_with_rag, temperature=temperature, user_email=user_email
+                    )
+                logger.warning("[LLM+RAG] No RAG responses and no failures recorded; falling back to plain LLM call")
                 return await self.call_plain(model_name, messages, temperature=temperature, user_email=user_email)
 
             # Single source: preserve existing is_completion shortcut
@@ -1114,6 +1194,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 "content": (
                     f"{context_label}:\n\n{rag_content}"
                     f"{self._build_rag_exclusion_notice(rag_exclusions)}"
+                    f"{self._build_rag_failure_notice(rag_failures)}"
                     f"{citation_block}\n\n"
                     "Use this context to inform your response. "
                     "Cite sources inline using [1], [2], etc. where applicable."
@@ -1270,12 +1351,41 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
         try:
             # Query all RAG sources in parallel
-            source_responses, rag_exclusions = await self._query_all_rag_sources(
+            source_responses, rag_exclusions, rag_failures = await self._query_all_rag_sources(
                 data_sources, rag_service, user_email, messages,
             )
 
             if not source_responses:
-                logger.warning("[LLM+RAG+Tools] All RAG sources failed, falling back to tools-only call")
+                if rag_failures:
+                    # Every RAG query failed: tell the LLM (and thus the user)
+                    # instead of silently answering as if nothing happened
+                    # (GH #844). Inject a system message and call the LLM with
+                    # tools so the user gets a response that names the failure.
+                    logger.warning(
+                        "[LLM+RAG+Tools] All RAG sources failed (%d); informing LLM and user",
+                        len(rag_failures),
+                    )
+                    messages_with_rag = messages.copy()
+                    messages_with_rag.insert(
+                        self._rag_insert_index(messages_with_rag),
+                        {
+                            "role": "system",
+                            "content": (
+                                "The user selected data sources for RAG retrieval, but "
+                                "every query failed and no context was retrieved.\n"
+                                f"{self._build_rag_failure_notice(rag_failures).strip()}\n\n"
+                                "Answer the user's question (you may still use the available "
+                                "tools), but begin by telling them you were unable to retrieve "
+                                "any context from their selected data sources and that they may "
+                                "need to retry or contact an administrator."
+                            ),
+                        },
+                    )
+                    return await self.call_with_tools(
+                        model_name, messages_with_rag, tools_schema, tool_choice,
+                        temperature=temperature, user_email=user_email,
+                    )
+                logger.warning("[LLM+RAG+Tools] No RAG responses and no failures recorded; falling back to tools-only call")
                 return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email)
 
             # Single source: preserve existing is_completion shortcut
@@ -1316,6 +1426,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 "content": (
                     f"{context_label}:\n\n{rag_content}"
                     f"{self._build_rag_exclusion_notice(rag_exclusions)}"
+                    f"{self._build_rag_failure_notice(rag_failures)}"
                     f"{citation_block}\n\n"
                     "Use this context to inform your response. "
                     "Cite sources inline using [1], [2], etc. where applicable."

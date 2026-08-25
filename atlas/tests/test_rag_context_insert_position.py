@@ -27,7 +27,7 @@ def _make_caller():
     caller._llm_config = MagicMock()
     caller._model_configs = {}
     caller._query_all_rag_sources = AsyncMock(
-        return_value=([("test-source", RAGResponse(content="Some raw context"))], [])
+        return_value=([("test-source", RAGResponse(content="Some raw context"))], [], [])
     )
     return caller
 
