@@ -269,7 +269,7 @@ class _RecordingConversationRepo:
         return MagicMock()
 
 
-def _make_real_chat_service(session, sessions, conversation_repo):
+def _make_real_chat_service(sessions, conversation_repo):
     """Build a real ChatService wired to a fake session repository."""
     from atlas.application.chat.service import ChatService
 
@@ -315,9 +315,10 @@ async def test_disconnect_persists_in_flight_turn():
     session.context["conversation_id"] = "conv-test-760"
     sessions = {session_id: session}
     repo = _RecordingConversationRepo()
-    service = _make_real_chat_service(session, sessions, repo)
+    service = _make_real_chat_service(sessions, repo)
 
     started = asyncio.Event()
+    block_forever = asyncio.Event()
 
     async def fake_execute(**kwargs):
         # Simulate work completed before the disconnect lands.
@@ -336,8 +337,10 @@ async def test_disconnect_persists_in_flight_turn():
             )
         )
         started.set()
-        # Block until the disconnect cancels us.
-        await asyncio.sleep(30)
+        # Block until cancelled. An Event that never fires is immediately
+        # cancellable and fails fast if the cancel never arrives (the await
+        # does not hold a 30s timeout hostage).
+        await asyncio.wait_for(block_forever.wait(), timeout=30)
 
     mock_orchestrator = MagicMock()
     mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
