@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #842 - 2026-08-25
+### PR #843 - 2026-08-25 (closes #842)
 - **Stopped agent conversations now survive a browser refresh when chat history is enabled** (closes #842): the default save mode was Incognito (`none`, PR #619), so no conversations — including stopped agent runs the user expected to resume — were persisted to DuckDB. A one-shot upgrade now defaults first-run users to Saved to Server (`server`) when `FEATURE_CHAT_HISTORY_ENABLED=true` and the user has never interacted with the save-mode toggle (localStorage key absent). Explicit user choices are always respected; deployments with chat history disabled are unaffected.
 
 ### PR #840 - 2026-08-25
