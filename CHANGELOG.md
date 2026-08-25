@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #840 - 2026-08-25
+- **Session store is now pluggable** (refs #760): `SESSION_REPOSITORY_TYPE` (default `memory`) selects the session repository implementation at startup, so a multi-replica deployment can plug in a distributed store through `atlas.infrastructure.sessions.factory.create_session_repository` instead of inheriting the process-local `InMemorySessionRepository` that forces sticky sessions. Also adds an end-to-end test verifying that a client disconnect mid-turn persists the completed work through `cleanup_disconnected_session`.
+
 ### PR #835 - 2026-08-22
 - **Reopening a conversation from history re-enables its workspace** (closes #829): the active workspace id is persisted with each conversation and restored on load, so you no longer re-pick the prompt, sources, and tools. A notification names the workspace it switched to, since the switch replaces hand-picked tools, prompt, and RAG selections. Best effort — a workspace that has since been deleted is skipped with a notification saying so, a workspace-less conversation leaves the active one untouched, and a restore that lands before the workspace list (or the app config) has loaded is deferred until it has, with any explicit workspace action you take in the meantime cancelling it. Simply opening a conversation never re-binds it: the stored workspace is only rewritten when you send a turn. Applies to both server- and browser-saved conversations.
 
