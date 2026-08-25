@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #841 - 2026-08-25
+- **`atlas_agent_sleep` no longer shows a misleading "taking longer than expected" warning** (closes #838): the generic 30-second slow-tool threshold is meaningless for a tool whose job is to wait minutes or hours, so an active sleep now shows a progress clock against the requested duration (`MM:SS of MM:SS`, or `HH:MM:SS` for hour-plus waits) and switches to a "completing..." hint once the requested wait has elapsed. Other tools keep the existing timer + threshold behavior. Falls back to the generic timer when the sleep tool's `seconds` argument is missing, non-positive, or non-numeric.
+
 ### PR #840 - 2026-08-25
 - **Session store is now pluggable** (refs #760): `SESSION_REPOSITORY_TYPE` (default `memory`) selects the session repository implementation at startup, so a multi-replica deployment can plug in a distributed store through `atlas.infrastructure.sessions.factory.create_session_repository` instead of inheriting the process-local `InMemorySessionRepository` that forces sticky sessions. Also adds an end-to-end test verifying that a client disconnect mid-turn persists the completed work through `cleanup_disconnected_session`.
 

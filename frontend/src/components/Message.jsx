@@ -299,7 +299,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 </span>
               )}
               <span className="font-medium text-sm min-w-0 break-words">{message.tool_name}</span>
-              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} />}
             </button>
           ) : (
             <button
@@ -332,7 +332,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               </span>
               <span className="font-medium min-w-0 break-words">{message.tool_name}</span>
               <span className="text-gray-400 text-sm min-w-0 break-words">({message.server_name})</span>
-              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} />}
             </button>
           )}
 
