@@ -93,7 +93,9 @@ export const ChatProvider = ({ children }) => {
 	const localSaveTimerRef = useRef(null)
 
 	// One-shot upgrade: default to 'server' when chat history is enabled and
-	// the user has never interacted with the save-mode toggle.
+	// the user has never interacted with the save-mode toggle. Re-runs when
+	// the live feature value changes (a stale config cache can report
+	// chat_history=false before the network response corrects it to true).
 	useEffect(() => {
 		if (!config.configReady) return
 		if (!config.features?.chat_history) return
@@ -105,7 +107,7 @@ export const ChatProvider = ({ children }) => {
 			// localStorage may be unavailable (private browsing); skip the upgrade
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [config.configReady])
+	}, [config.configReady, config.features?.chat_history])
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {

@@ -190,4 +190,31 @@ describe('saveMode default — issue #842', () => {
     })
     expect(result.current.saveMode).toBe('none')
   })
+
+  it('upgrades when feature flips from false to true (stale cache corrected by network)', async () => {
+    // Simulate a stale config cache that says chat_history=false, then the
+    // network response corrects it to true. The effect must re-run.
+    h.chatHistoryEnabled = false
+    const { result } = renderHook(() => {
+      const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'none')
+      return { saveMode, setSaveMode }
+    })
+    // First run: feature is false, no upgrade
+    act(() => {
+      if (h.configReady && h.chatHistoryEnabled && localStorage.getItem('chatui-save-mode') === null) {
+        result.current.setSaveMode('server')
+      }
+    })
+    expect(result.current.saveMode).toBe('none')
+
+    // Network response arrives: feature flips to true
+    h.chatHistoryEnabled = true
+    act(() => {
+      if (h.configReady && h.chatHistoryEnabled && localStorage.getItem('chatui-save-mode') === null) {
+        result.current.setSaveMode('server')
+      }
+    })
+    expect(result.current.saveMode).toBe('server')
+    expect(localStorage.getItem('chatui-save-mode')).toBe(JSON.stringify('server'))
+  })
 })
