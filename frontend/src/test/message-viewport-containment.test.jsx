@@ -290,9 +290,14 @@ describe('mobile full-width responsive layout', () => {
     )
     // The agent-pending and thinking bubbles must use flex-1 min-w-0, not
     // w-full, so they don't overflow the row beside the avatar at sm+.
-    // Match the full className of each div.
+    // Match the full className of each div without embedding the asserted
+    // classes in the pattern, so the assertions are real checks.
     const agentBubble = chatArea.match(/className="([^"]*border-purple-700[^"]*)"/)
-    const thinkingBubble = chatArea.match(/isThinking && \([\s\S]*?className="(flex-1[^"]*rounded-lg[^"]*p-3 sm:p-4)"/)
+    // Match the bubble inside the isThinking block by finding the second
+    // occurrence of "rounded-lg p-3 sm:p-4" after "isThinking".
+    const thinkingStart = chatArea.indexOf('isThinking && (')
+    const thinkingSlice = chatArea.slice(thinkingStart)
+    const thinkingBubble = thinkingSlice.match(/className="([^"]*rounded-lg[^"]*p-3 sm:p-4)"/)
     for (const [label, match] of [['agent', agentBubble], ['thinking', thinkingBubble]]) {
       expect(match, `${label} bubble not found`).not.toBeNull()
       const cls = new Set(match[1].split(/\s+/))
