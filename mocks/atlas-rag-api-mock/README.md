@@ -1,6 +1,6 @@
 # ATLAS RAG API Mock
 
-Mock service for testing the `AtlasRAGClient` integration without requiring access to the real ATLAS RAG API. Matches the newest ATLAS RAG OpenAPI spec (v0.3.0.dev1+), including per-reference `sections` with `text` snippets.
+Mock service for testing the `AtlasRAGClient` integration without requiring access to the real ATLAS RAG API. Matches the ATLAS RAG OpenAPI spec (v0.8.0), including the v2 query-oriented interface and per-reference `sections` with `text` snippets.
 
 ## Quick Start
 
@@ -110,6 +110,59 @@ curl -X POST \
 The frontend consumes `metadata.references[].sections[].text` to display the underlying evidence snippets in the expanded citation area beneath each reference.
 
 `metadata.references[].reference` is the human-readable source line shown as the reference's label. It is optional: when a backend omits it, the UI falls back to `filename`, which is what older backends effectively rendered.
+
+### GET /api/v2/discover/datasources
+
+v2 discovery (OpenAPI v0.8.0). Same `DataSource` response shape as v1.
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer test-atlas-rag-token" \
+     "http://localhost:8002/api/v2/discover/datasources?role=read&as_user=test@test.com"
+```
+
+### POST /api/v2/rag/query
+
+v2 query (OpenAPI v0.8.0). Sends an explicit query string plus optional
+`search_kwargs`; returns a synthesized `response` string and the `references`
+behind it.
+
+**Request Body** (`RagRequest`):
+```json
+{
+  "query": "What is the API authentication?",
+  "corpora": ["technical-docs"],
+  "search_kwargs": {"top_k_final": 5, "rerank": true}
+}
+```
+
+**Example:**
+```bash
+curl -X POST \
+     -H "Authorization: Bearer test-atlas-rag-token" \
+     -H "Content-Type: application/json" \
+     -d '{"query":"Tell me about API authentication","corpora":["technical-docs"],"search_kwargs":{"top_k_final":2}}' \
+     "http://localhost:8002/api/v2/rag/query?as_user=test@test.com"
+```
+
+**Response** (`RagResponse`):
+```json
+{
+  "response": "Based on searching 1 data source(s), I found 1 relevant document(s):...",
+  "metadata": {
+    "response_time": 1,
+    "references": [
+      {
+        "filename": "tech-001.txt",
+        "sections": [
+          {"text": "API Authentication Guide ... OAuth 2.0 with JWT tokens", "relevance": 1.0}
+        ],
+        "reference": "API Authentication Guide, tech-001.txt"
+      }
+    ]
+  }
+}
+```
 
 ### POST /admin/users
 

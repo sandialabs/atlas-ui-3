@@ -1,6 +1,6 @@
 # RAG Configuration
 
-Last updated: 2026-08-13
+Last updated: 2026-08-26
 
 This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atlas UI.
 
@@ -105,8 +105,8 @@ For external HTTP REST API RAG backends:
 | `top_k` | No | `4` | Number of documents to retrieve |
 | `timeout` | No | `60.0` | Request timeout in seconds |
 | `strip_domain` | No | `false` | Strip `@domain` from usernames before sending to RAG API (e.g. `user@corp.com` → `user`) |
-| `api_version` | No | `"v1"` | Which contract the backend speaks: `"v1"` (conversation → completion) or `"v2"` (explicit query → evidence or answer). See [API v2](#api-v2-tool-oriented-query-interface) |
-| `default_mode` | No | `"synthesized"` | v2 only. Response shape when the caller does not ask for one: `"synthesized"` (backend answers) or `"raw"` (evidence for Atlas' own LLM) |
+| `api_version` | No | `"v1"` | Which contract the backend speaks: `"v1"` (conversation → completion) or `"v2"` (explicit query → answer + references). See [API v2](#api-v2-query-oriented-interface) |
+| `default_mode` | No | `"synthesized"` | v2 only. Client-side knob: how Atlas consumes the response. `"synthesized"` uses the backend's answer verbatim; `"raw"` builds an evidence block from references for Atlas' own LLM. Never sent on the wire. |
 | `discovery_endpoint` | No | per `api_version` | Override the discovery path |
 | `query_endpoint` | No | per `api_version` | Override the query path |
 | `groups` | No | `[]` | Required groups for access |
@@ -186,31 +186,40 @@ GET /discover/datasources?as_user=alice@corp.com
 
 ## API Contract (HTTP Sources)
 
-This is the **v1** contract, used unless a source sets `"api_version": "v2"`
-(see [API v2](#api-v2-tool-oriented-query-interface)). HTTP RAG sources must
-implement these endpoints:
+HTTP RAG sources speak one of two contracts, selected by the `api_version`
+field on the source config (`"v1"` default, `"v2"` for the query-oriented
+interface). Both share the same authentication (`Bearer` token), `as_user`
+impersonation, group/compliance authorization and `strip_domain` behaviour --
+the version decides the request/response shape, not who may read what.
 
-### Discovery Endpoint
+### v1 Contract
+
+Used unless a source sets `"api_version": "v2"`. v1 ships the full
+conversation to the RAG backend, which derives the query from the last user
+message.
+
+#### Discovery (v1)
 
 ```
-GET /discover/datasources?as_user={user_email}
+GET /api/v1/discover/datasources?role=read&as_user={user_email}
 Authorization: Bearer {token}
 ```
 
-**Response:**
+**Response** (a bare list of `DataSource`):
 ```json
-{
-  "data_sources": [
-    {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "Engineering docs covering API auth, database schema, and deployment"},
-    {"id": "company-wiki", "label": "Company Wiki", "compliance_level": "Public", "description": "Public company knowledge base"}
-  ]
-}
+[
+  {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "Engineering docs covering API auth, database schema, and deployment"},
+  {"id": "company-wiki", "label": "Company Wiki", "compliance_level": "Public", "description": "Public company knowledge base"}
+]
 ```
 
-### Query Endpoint
+(The client also accepts a `{"data_sources": [...]}` envelope for backends
+that still wrap the list.)
+
+#### Query (v1)
 
 ```
-POST /rag/completions?as_user={user_email}
+POST /api/v1/rag/completions?as_user={user_email}
 Authorization: Bearer {token}
 Content-Type: application/json
 ```
@@ -220,46 +229,48 @@ Content-Type: application/json
 {
   "messages": [{"role": "user", "content": "What is our API architecture?"}],
   "stream": false,
-  "model": "openai/gpt-oss-120b",
-  "top_k": 4,
   "corpora": ["technical-docs"]
 }
 ```
 
-**Response (OpenAI ChatCompletion format with RAG metadata):**
+`corpora` may be a single string or a list of strings.
+
+**Response:**
 ```json
 {
-  "id": "chatcmpl-abc123",
-  "object": "chat.completion",
-  "created": 1234567890,
-  "model": "openai/gpt-oss-120b",
-  "choices": [{
-    "index": 0,
-    "message": {"role": "assistant", "content": "Based on the documentation..."},
-    "finish_reason": "stop"
-  }],
-  "rag_metadata": {
-    "query_processing_time_ms": 150,
-    "documents_found": [{
-      "id": "doc-001",
-      "corpus_id": "technical-docs",
-      "text": "API Gateway handles authentication...",
-      "confidence_score": 0.95
-    }],
-    "data_sources": ["technical-docs"],
-    "retrieval_method": "similarity"
+  "message": {"role": "assistant", "content": "Based on the documentation..."},
+  "metadata": {
+    "response_time": 1,
+    "references": [
+      {
+        "citation": "[1] \"API Auth Guide\", tech-001.txt",
+        "reference": "API Auth Guide, tech-001.txt",
+        "document_ref": 1,
+        "filename": "tech-001.txt",
+        "sections": [
+          {"section_ref": 1, "text": "Our API uses OAuth 2.0 with JWT tokens...", "relevance": 0.95}
+        ]
+      }
+    ]
   }
 }
 ```
 
-## API v2: Tool-Oriented Query Interface
+v1 always returns a completion (`is_completion=True`); Atlas renders the
+`message.content` directly and shows the `metadata.references` as citations.
 
-Last updated: 2026-08-13
+## API v2: Query-Oriented Interface
+
+Last updated: 2026-08-26
 
 v2 exists because v1 ships the **entire conversation** to the RAG backend on
 every query, even though the backend only uses the last user message. v2 sends
-an explicit `query` string and nothing else, and lets the caller choose whether
-it wants evidence or an answer.
+an explicit `query` string and a `search_kwargs` block -- and nothing else.
+
+The v0.8.0 schema defines a single response shape: a synthesized `response`
+string plus the `references` behind it. There is **no `mode` field on the
+wire**. `mode` is an Atlas client-side knob that decides how to consume the
+response (see [What changes in Atlas UI](#what-changes-in-atlas-ui)).
 
 Set `"api_version": "v2"` on an HTTP source to use it. v1 remains the default,
 and both contracts share the same authentication, `as_user` impersonation,
@@ -286,12 +297,11 @@ GET /api/v2/discover/datasources?role=read&as_user={user_email}
 Authorization: Bearer {token}
 ```
 
-Same response shape as v1, plus an optional `api_version` per source so a
-backend can declare what it speaks:
+Same `DataSource` response shape as v1 (a bare list):
 
 ```json
 [
-  {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "...", "api_version": "v2"}
+  {"id": "technical-docs", "label": "Technical Documentation", "compliance_level": "Internal", "description": "..."}
 ]
 ```
 
@@ -309,71 +319,77 @@ Content-Type: application/json
 |-------|------|----------|---------|-------------|
 | `query` | string | Yes | - | The specific question to ask. Non-empty. |
 | `corpora` | string \| string[] | Yes | - | Corpus id(s) to search |
-| `mode` | `"raw"` \| `"synthesized"` | No | `"raw"` | Shape of the response |
-| `top_k` | int | No | source `top_k` | Max results per corpus |
-| `filters` | object | No | - | Server-defined metadata filters, forwarded as-is |
-| `synthesis_params` | object | No | - | Knobs for `synthesized`; not sent in `raw` mode |
+| `search_kwargs` | object | No | server defaults | Search behaviour knobs (see below) |
+
+`search_kwargs` fields (all optional, each has a server default):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `rerank` | bool | `true` | Whether to rerank search results |
+| `rerank_model_name` | string | `dev/BAAI/bge-reranker-v2-m3` | Reranker model |
+| `top_k_vector` | int | `5` | Semantic-search result count |
+| `top_k_full_text` | int | `5` | Full-text result count |
+| `top_k_final` | int | `5` | Final combined result count |
+| `rank_strategy` | `"weighted"` \| `"rrf"` | `"weighted"` | How ranks are combined |
+| `threshold` | number | `0.75` | Relevance threshold [0-1] |
+| `expanded_window` | [int, int] | `[0, 0]` | Extra chars left/right of each chunk |
 
 ```json
 {
   "query": "What is the maximum PTO carryover per year?",
   "corpora": ["company-policies"],
-  "mode": "raw",
-  "top_k": 5
+  "search_kwargs": {"top_k_final": 5, "rerank": true}
 }
 ```
 
-**Response — `mode: "raw"`** (retrieved evidence; Atlas' LLM writes the answer):
+**Response** (always this shape — a synthesized answer plus references):
 
 ```json
 {
-  "query": "What is the maximum PTO carryover per year?",
-  "mode": "raw",
-  "results": {
-    "hits": [
+  "response": "Employees may carry over up to 240 hours. [1]",
+  "metadata": {
+    "response_time": 2,
+    "references": [
       {
-        "document_ref": 1,
         "filename": "pto-policy.pdf",
-        "title": "PTO Policy",
-        "citation": "[1] PTO Policy, pto-policy.pdf",
         "sections": [
-          {"section_ref": 1, "text": "Employees may carry over up to 240 hours...", "relevance": 0.91}
-        ]
+          {"text": "Employees may carry over up to 240 hours...", "relevance": 0.91}
+        ],
+        "reference": "PTO Policy, pto-policy.pdf"
       }
-    ],
-    "stats": {"total_found": 1, "top_k": 5}
-  },
-  "metadata": {"response_time_ms": 128, "corpora_searched": ["company-policies"]}
-}
-```
-
-**Response — `mode: "synthesized"`** (the backend's own answer, used verbatim):
-
-```json
-{
-  "query": "What is the maximum PTO carryover per year?",
-  "mode": "synthesized",
-  "results": {
-    "answer": "Employees may carry over up to 240 hours. [1]",
-    "citations": [
-      {"document_ref": 1, "filename": "pto-policy.pdf", "citation": "[1] PTO Policy, pto-policy.pdf"}
     ]
-  },
-  "metadata": {"response_time_ms": 305, "corpora_searched": ["company-policies"], "fallback_used": false}
+  }
 }
 ```
+
+| Response field | Type | Description |
+|----------------|------|-------------|
+| `response` | string | The synthesized RAG answer |
+| `metadata.response_time` | int | Time to generate, in **seconds** |
+| `metadata.references` | array \| null | References used to generate the response |
+| `references[].filename` | string \| null | Filename of the source document |
+| `references[].sections` | array | Relevant snippets from the document |
+| `references[].sections[].text` | string | Snippet text |
+| `references[].sections[].relevance` | number | Cosine similarity score [0-1] |
+| `references[].reference` | string | Human-readable source label |
 
 An empty `query` must be rejected with `400`; `403` and `404` mean the same
 things they do on v1.
 
 ### What changes in Atlas UI
 
-- **`raw` hits are rendered as an evidence block** with `[N]` document markers,
-  which is the same citation form the UI already parses — a v2 raw answer cites
-  like a v1 one.
-- **`raw` sets `is_completion=false`**, so the retrieved text is context for the
-  configured LLM. `synthesized` sets `is_completion=true` and short-circuits it,
-  matching v1 behaviour.
+- **`mode` is client-side, not on the wire.** The v0.8.0 backend always
+  returns a synthesized `response` string plus `references`. Atlas decides
+  how to use it: `mode: "raw"` builds an evidence block from the reference
+  snippets (`is_completion=false`, so the configured LLM reasons over them);
+  `mode: "synthesized"` uses the `response` verbatim (`is_completion=true`,
+  short-circuiting the LLM, matching v1 behaviour).
+- **`top_k` maps to `search_kwargs.top_k_final`.** The source config's `top_k`
+  is forwarded as `search_kwargs.top_k_final` when the caller does not supply
+  an explicit `search_kwargs` dict.
+- **`raw` evidence carries `[N]` document markers**, the same citation form
+  the UI already parses — a v2 raw answer cites like a v1 one. Because the
+  v0.8.0 schema has no `document_ref`, references are numbered sequentially.
 - **The `atlas_rag_query` agent tool asks for `raw` by default** and accepts an
   optional `mode` argument. The model reasons over the evidence alongside other
   tool results instead of relaying a backend-written answer. On v1 sources the
@@ -383,7 +399,7 @@ things they do on v1.
 
 Design notes and the remaining phases (discovery-driven negotiation, removing
 the completion short-circuit, retiring v1) are in
-[RAG API v2: Tool-Oriented Query Interface](../planning/rag-api-v2-tool-interface.md).
+[RAG API v2: Query-Oriented Interface](../planning/rag-api-v2-tool-interface.md).
 
 ## Testing with the Mock Service
 
@@ -398,8 +414,9 @@ bash run.sh
 
 The mock runs on `http://localhost:8002` with token `test-atlas-rag-token`,
 and serves both contracts: `/api/v1/discover/datasources` +
-`/api/v1/rag/completions`, and `/api/v2/discover/datasources` +
-`/api/v2/rag/query`. Point a source at v2 by adding `"api_version": "v2"`.
+`/api/v1/rag/completions` (v1), and `/api/v2/discover/datasources` +
+`/api/v2/rag/query` (v2, OpenAPI v0.8.0). Point a source at v2 by adding
+`"api_version": "v2"`.
 
 ### Test Users
 
@@ -421,22 +438,28 @@ and serves both contracts: `/api/v1/discover/datasources` +
 
 ## RAG Completions vs Raw Results
 
-Last updated: 2026-02-01
+Last updated: 2026-08-26
 
-Atlas UI supports two types of RAG responses:
+Atlas UI supports two types of RAG responses, tracked by the `is_completion`
+flag on `RAGResponse`:
 
-1. **Raw Results**: The RAG API returns document chunks or context. Atlas sends this context to the configured LLM for interpretation and response generation. This is the standard flow for most RAG queries.
+1. **Completions** (`is_completion=true`): The RAG API returns an
+   already-synthesized answer. Atlas renders it directly without an additional
+   LLM call, reducing latency and API costs. v1 sources always produce
+   completions. v2 sources produce completions when `mode: "synthesized"` (the
+   default for non-agent RAG).
 
-2. **Completions**: The RAG API returns an already-interpreted response (detected by `"object": "chat.completion"` in the JSON response). Atlas detects this automatically and returns the content directly to the user without additional LLM processing.
+2. **Raw Results** (`is_completion=false`): The RAG API returns evidence
+   (document snippets). Atlas sends this context to the configured LLM for
+   interpretation and response generation. v2 sources produce raw results when
+   `mode: "raw"` (the default for the `atlas_rag_query` agent tool).
 
-When a RAG source returns a completion, Atlas:
-- Skips the LLM call entirely, reducing latency and API costs
-- Prepends a note indicating the response came from the RAG completions endpoint
-- Appends RAG metadata (sources, processing time) if available
+The `is_completion` flag is set by `AtlasRAGClient`: `True` for v1 `query_rag`
+(always synthesized) and for v2 `query_v2` with `mode: "synthesized"`; `False`
+for v2 `query_v2` with `mode: "raw"`.
 
-The `is_completion` flag on `RAGResponse` tracks whether the response is already LLM-interpreted. This is set automatically by `AtlasRAGClient` when it detects `"object": "chat.completion"` in the API response.
-
-This behavior applies to both `call_with_rag` (RAG-only mode) and `call_with_rag_and_tools` (RAG + tools mode) in the LLM caller.
+This behavior applies to both `call_with_rag` (RAG-only mode) and
+`call_with_rag_and_tools` (RAG + tools mode) in the LLM caller.
 
 ## UI Behavior (2026-03-18)
 

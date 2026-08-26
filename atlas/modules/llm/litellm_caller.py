@@ -1611,7 +1611,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 if safe_citation:
                     lines.append(f"   *{safe_citation}*")
 
-            for sec in doc.sections:
+            for sec_idx, sec in enumerate(doc.sections, start=1):
                 snippet = LiteLLMCaller._sanitize_snippet(sec.text)
                 if not snippet:
                     continue
@@ -1619,12 +1619,15 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 # Render snippets as a blockquote with explicit class hook so
                 # the frontend can style them inside the expanded references
                 # <details> element. ``§N`` carries the section_ref through
-                # to the UI without needing extra schema.
+                # to the UI without needing extra schema. v0.8.0 sections have
+                # no section_ref, so fall back to a per-document sequential
+                # index to avoid rendering ``§None``.
+                sec_ref = sec.section_ref if sec.section_ref is not None else sec_idx
                 snippet_oneline = snippet.replace("\n", " ")
                 lines.append(
                     "   > "
-                    f'<span class="rag-ref-snippet" data-section-ref="{sec.section_ref}">'
-                    f"§{sec.section_ref} ({snippet_relevance}%): {snippet_oneline}"
+                    f'<span class="rag-ref-snippet" data-section-ref="{sec_ref}">'
+                    f"§{sec_ref} ({snippet_relevance}%): {snippet_oneline}"
                     "</span>"
                 )
 
