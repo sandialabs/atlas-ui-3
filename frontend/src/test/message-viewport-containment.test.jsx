@@ -216,13 +216,21 @@ describe('transcript containment styles (#747)', () => {
 })
 
 describe('mobile full-width responsive layout', () => {
+  // Split a className string into a Set of exact tokens so that e.g. `p-3`
+  // does not match inside `sm:p-3` and an inverted breakpoint would fail.
+  const tokens = (el) => new Set(el.className.split(/\s+/))
+
   it('hides the message avatar below the sm breakpoint', () => {
     const { container } = render(
       <Message message={{ role: 'assistant', content: 'Hello' }} />
     )
     const avatar = container.querySelector('.rounded-full')
-    expect(avatar.className).toContain('hidden')
-    expect(avatar.className).toContain('sm:flex')
+    const cls = tokens(avatar)
+    expect(cls.has('hidden')).toBe(true)
+    expect(cls.has('sm:flex')).toBe(true)
+    // No bare `flex` that could override `hidden` depending on Tailwind's
+    // emission order — correctness rests on `hidden sm:flex`, not `flex hidden`.
+    expect(cls.has('flex')).toBe(false)
   })
 
   it('collapses the avatar gap on mobile and restores it at sm', () => {
@@ -230,8 +238,9 @@ describe('mobile full-width responsive layout', () => {
       <Message message={{ role: 'assistant', content: 'Hello' }} />
     )
     const row = container.querySelector('.flex.items-start')
-    expect(row.className).toContain('gap-0')
-    expect(row.className).toContain('sm:gap-3')
+    const cls = tokens(row)
+    expect(cls.has('gap-0')).toBe(true)
+    expect(cls.has('sm:gap-3')).toBe(true)
   })
 
   it('uses reduced bubble padding on mobile and full padding at sm', () => {
@@ -239,8 +248,9 @@ describe('mobile full-width responsive layout', () => {
       <Message message={{ role: 'assistant', content: 'Hello' }} />
     )
     const bubble = container.querySelector('.bg-gray-800.rounded-lg')
-    expect(bubble.className).toContain('p-3')
-    expect(bubble.className).toContain('sm:p-4')
+    const cls = tokens(bubble)
+    expect(cls.has('p-3')).toBe(true)
+    expect(cls.has('sm:p-4')).toBe(true)
   })
 
   it('widens the user bubble max-w on mobile and narrows it at sm', () => {
@@ -248,8 +258,9 @@ describe('mobile full-width responsive layout', () => {
       <Message message={{ role: 'user', content: 'Hello' }} />
     )
     const bubble = container.querySelector('.user-message-bubble')
-    expect(bubble.className).toContain('max-w-[85%]')
-    expect(bubble.className).toContain('sm:max-w-[70%]')
+    const cls = tokens(bubble)
+    expect(cls.has('max-w-[85%]')).toBe(true)
+    expect(cls.has('sm:max-w-[70%]')).toBe(true)
   })
 
   it('drops the compact row indent on mobile and restores it at sm', () => {
@@ -267,8 +278,28 @@ describe('mobile full-width responsive layout', () => {
     )
     // The compact row is the top-level div inside the rendered container.
     const row = container.querySelector('div')
-    expect(row.className).toContain('pl-0')
-    expect(row.className).toContain('sm:pl-11')
+    const cls = tokens(row)
+    expect(cls.has('pl-0')).toBe(true)
+    expect(cls.has('sm:pl-11')).toBe(true)
+  })
+
+  it('uses flex-1 min-w-0 (not w-full) on thinking and agent bubbles', () => {
+    const chatArea = readFileSync(
+      resolve(process.cwd(), 'src/components/ChatArea.jsx'),
+      'utf8'
+    )
+    // The agent-pending and thinking bubbles must use flex-1 min-w-0, not
+    // w-full, so they don't overflow the row beside the avatar at sm+.
+    // Match the full className of each div.
+    const agentBubble = chatArea.match(/className="([^"]*border-purple-700[^"]*)"/)
+    const thinkingBubble = chatArea.match(/isThinking && \([\s\S]*?className="(flex-1[^"]*rounded-lg[^"]*p-3 sm:p-4)"/)
+    for (const [label, match] of [['agent', agentBubble], ['thinking', thinkingBubble]]) {
+      expect(match, `${label} bubble not found`).not.toBeNull()
+      const cls = new Set(match[1].split(/\s+/))
+      expect(cls.has('flex-1'), `${label} bubble must have flex-1`).toBe(true)
+      expect(cls.has('min-w-0'), `${label} bubble must have min-w-0`).toBe(true)
+      expect(cls.has('w-full'), `${label} bubble must not have w-full`).toBe(false)
+    }
   })
 
   it('reduces the transcript container padding on mobile and restores it at sm', () => {
@@ -278,7 +309,8 @@ describe('mobile full-width responsive layout', () => {
     )
     const main = chatArea.match(/<main[\s\S]*?className=\{`([^`]*)`\}/)
     expect(main).not.toBeNull()
-    expect(main[1]).toContain('p-2')
-    expect(main[1]).toContain('sm:p-4')
+    const cls = new Set(main[1].split(/\s+/))
+    expect(cls.has('p-2')).toBe(true)
+    expect(cls.has('sm:p-4')).toBe(true)
   })
 })

@@ -705,7 +705,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
 
   return (
     <div className={`flex items-start gap-0 sm:gap-3 ${isUser ? 'flex-row-reverse' : 'w-full'} group`}>
-      <div className={`w-8 h-8 rounded-full ${avatarBg} flex items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex`}>
+      <div className={`w-8 h-8 rounded-full ${avatarBg} items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex`}>
         {avatarText}
       </div>
 

@@ -842,7 +842,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
         ))}
         {agentModeEnabled && agentPendingQuestion && (
           <div className="flex items-start gap-0 sm:gap-3 w-full">
-            <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
+            <div className="w-8 h-8 rounded-full bg-purple-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
               A
             </div>
             <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4 border border-purple-700">
@@ -867,7 +867,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
         )}
         {isThinking && (
           <div className="flex items-start gap-0 sm:gap-3 w-full">
-            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
+            <div className="w-8 h-8 rounded-full bg-blue-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
               A
             </div>
             <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4">

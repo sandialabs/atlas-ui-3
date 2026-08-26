@@ -26,7 +26,7 @@ export default function AgentBusyIndicator({
 
   return (
     <div className="flex items-start gap-0 sm:gap-3 w-full" data-testid="agent-busy-indicator">
-      <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
+      <div className="w-8 h-8 rounded-full bg-blue-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
         A
       </div>
       {/* flex-1 min-w-0, not w-full: as a flex sibling of the avatar, a
