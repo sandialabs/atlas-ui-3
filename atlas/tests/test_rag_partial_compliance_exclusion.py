@@ -62,7 +62,7 @@ async def test_one_denied_group_does_not_discard_the_others():
         "denied:corpus": _denial("denied-corpus"),
     })
 
-    successful, exclusions = await caller._query_all_rag_sources(
+    successful, exclusions, failures = await caller._query_all_rag_sources(
         ["allowed:corpus", "denied:corpus"],
         service,
         "user@test.com",
@@ -72,6 +72,7 @@ async def test_one_denied_group_does_not_discard_the_others():
     assert [response.content for _label, response in successful] == ["good context"]
     assert len(exclusions) == 1
     assert "denied-corpus" in exclusions[0]
+    assert failures == []
 
 
 @pytest.mark.asyncio
@@ -93,17 +94,19 @@ async def test_all_groups_denied_raises():
 
 
 @pytest.mark.asyncio
-async def test_non_permission_failures_still_degrade_quietly():
-    """An unreachable backend is not an authorization problem: keep the old
-    best-effort behaviour rather than failing the turn."""
+async def test_non_permission_failures_are_reported_not_silent():
+    """An unreachable backend is not an authorization problem, so the turn
+    must keep going (no raise). But the failure is no longer dropped silently
+    (GH #844): it is returned so the LLM can tell the user which source could
+    not be queried."""
     caller = _make_caller()
     service = _rag_service({
-        "allowed:corpus": RAGResponse(content="good context"),
-        "broken:corpus": RuntimeError("connection refused"),
+        "allowed:policies": RAGResponse(content="good context"),
+        "broken:techdocs": RuntimeError("connection refused"),
     })
 
-    successful, exclusions = await caller._query_all_rag_sources(
-        ["allowed:corpus", "broken:corpus"],
+    successful, exclusions, failures = await caller._query_all_rag_sources(
+        ["allowed:policies", "broken:techdocs"],
         service,
         "user@test.com",
         [{"role": "user", "content": "q"}],
@@ -111,6 +114,36 @@ async def test_non_permission_failures_still_degrade_quietly():
 
     assert len(successful) == 1
     assert exclusions == []
+    assert len(failures) == 1
+    # The corpus name (not the raw error) reaches the user-facing message:
+    # _parse_qualified_data_source strips the server prefix, so the display
+    # name is the corpus the user selected.
+    assert "techdocs" in failures[0]
+    assert "connection refused" not in failures[0]
+
+
+@pytest.mark.asyncio
+async def test_all_sources_fail_does_not_raise():
+    """Every source erroring is still not an authorization problem; the turn
+    does not raise (the caller informs the LLM instead)."""
+    caller = _make_caller()
+    service = _rag_service({
+        "broken-a:techdocs": RuntimeError("500: RAG service error"),
+        "broken-b:policies": RuntimeError("connection refused"),
+    })
+
+    successful, exclusions, failures = await caller._query_all_rag_sources(
+        ["broken-a:techdocs", "broken-b:policies"],
+        service,
+        "user@test.com",
+        [{"role": "user", "content": "q"}],
+    )
+
+    assert successful == []
+    assert exclusions == []
+    assert len(failures) == 2
+    assert any("techdocs" in f for f in failures)
+    assert any("policies" in f for f in failures)
 
 
 def test_exclusion_notice_names_each_dropped_source():
@@ -159,3 +192,225 @@ async def test_exclusion_notice_reaches_the_rag_system_message():
         m["content"] for m in captured["messages"] if m["role"] == "system"
     ]
     assert any("denied" in block and "NOT searched" in block for block in system_blocks)
+
+
+# -- RAG query failures (GH #844) -------------------------------------------
+
+
+def test_failure_notice_names_each_failed_source():
+    """The failure notice names the source and instructs the LLM to tell the user."""
+    from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+    notice = LiteLLMCaller._build_rag_failure_notice(
+        ["The data source 'atlas_rag-prod' could not be queried because the "
+         "RAG service returned an error."]
+    )
+
+    assert "atlas_rag-prod" in notice
+    assert "could NOT be queried" in notice
+    # The LLM must be instructed to tell the user, not answer silently.
+    assert "tell the user" in notice.lower()
+
+
+def test_failure_notice_is_empty_when_nothing_failed():
+    from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+    assert LiteLLMCaller._build_rag_failure_notice([]) == ""
+
+
+@pytest.mark.asyncio
+async def test_partial_failure_notice_reaches_the_rag_system_message():
+    """A partial failure (some sources ok, some broken) rides in the RAG
+    context block alongside the retrieved context (GH #844)."""
+    caller = _make_caller()
+    service = _rag_service({
+        "allowed:policies": RAGResponse(content="good context"),
+        "broken:techdocs": RuntimeError("500: RAG service error"),
+    })
+
+    captured = {}
+
+    async def fake_call_plain(model_name, messages, **kwargs):
+        captured["messages"] = messages
+        return "answer"
+
+    caller.call_plain = AsyncMock(side_effect=fake_call_plain)
+
+    await caller.call_with_rag(
+        "test-model",
+        [{"role": "user", "content": "q"}],
+        ["allowed:policies", "broken:techdocs"],
+        "user@test.com",
+        rag_service=service,
+    )
+
+    system_blocks = [
+        m["content"] for m in captured["messages"] if m["role"] == "system"
+    ]
+    # The retrieved context is still present...
+    assert any("good context" in block for block in system_blocks)
+    # ...and the failure notice names the broken corpus and instructs the LLM.
+    assert any(
+        "techdocs" in block and "could NOT be queried" in block
+        for block in system_blocks
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_sources_fail_informs_llm_instead_of_silent_fallback():
+    """When every RAG source fails, the LLM must be told the query failed and
+    instructed to tell the user -- not silently fall back to a plain call with
+    no indication anything went wrong (GH #844)."""
+    caller = _make_caller()
+    service = _rag_service({
+        "broken:techdocs": RuntimeError("500: RAG service error"),
+    })
+
+    captured = {}
+
+    async def fake_call_plain(model_name, messages, **kwargs):
+        captured["messages"] = messages
+        return "I was unable to retrieve context from your data sources."
+
+    caller.call_plain = AsyncMock(side_effect=fake_call_plain)
+
+    result = await caller.call_with_rag(
+        "test-model",
+        [{"role": "user", "content": "q"}],
+        ["broken:techdocs"],
+        "user@test.com",
+        rag_service=service,
+    )
+
+    # The LLM was still called (no raise)...
+    caller.call_plain.assert_awaited_once()
+    # ...but with a system message telling it the RAG query failed.
+    system_blocks = [
+        m["content"] for m in captured["messages"] if m["role"] == "system"
+    ]
+    assert system_blocks, "expected a system message informing the LLM of the failure"
+    assert any(
+        "every query failed" in block and "techdocs" in block and "tell" in block.lower()
+        for block in system_blocks
+    )
+    assert result == "I was unable to retrieve context from your data sources."
+
+
+@pytest.mark.asyncio
+async def test_all_sources_fail_informs_llm_with_tools():
+    """Same guarantee on the RAG+tools path: a total RAG failure injects a
+    system message and still calls the LLM with tools (GH #844)."""
+    from atlas.modules.llm.models import LLMResponse
+
+    caller = _make_caller()
+    service = _rag_service({
+        "broken:techdocs": RuntimeError("500: RAG service error"),
+    })
+
+    captured = {}
+
+    async def fake_call_with_tools(model_name, messages, tools_schema, tool_choice="auto",
+                                    temperature=0.7, user_email=None):
+        captured["messages"] = messages
+        return LLMResponse(content="unable to reach your data sources")
+
+    caller.call_with_tools = AsyncMock(side_effect=fake_call_with_tools)
+
+    result = await caller.call_with_rag_and_tools(
+        "test-model",
+        [{"role": "user", "content": "q"}],
+        ["broken:techdocs"],
+        [{"type": "function", "function": {"name": "test_tool"}}],
+        "user@test.com",
+        rag_service=service,
+    )
+
+    caller.call_with_tools.assert_awaited_once()
+    system_blocks = [
+        m["content"] for m in captured["messages"] if m["role"] == "system"
+    ]
+    assert system_blocks
+    assert any(
+        "every query failed" in block and "techdocs" in block
+        for block in system_blocks
+    )
+    assert result.content == "unable to reach your data sources"
+
+
+@pytest.mark.asyncio
+async def test_all_sources_fail_streaming_informs_llm():
+    """The streaming RAG path must also tell the LLM, not stream a silent
+    plain answer (GH #844)."""
+    caller = _make_caller()
+    service = _rag_service({
+        "broken:techdocs": RuntimeError("500: RAG service error"),
+    })
+
+    captured = {}
+
+    async def fake_stream_plain(model_name, messages, temperature=0.7, user_email=None):
+        captured["messages"] = messages
+        yield "I could not reach your data sources."
+
+    caller.stream_plain = fake_stream_plain
+
+    chunks = []
+    async for chunk in caller.stream_with_rag(
+        "test-model",
+        [{"role": "user", "content": "q"}],
+        ["broken:techdocs"],
+        "user@test.com",
+        rag_service=service,
+    ):
+        chunks.append(chunk)
+
+    system_blocks = [
+        m["content"] for m in captured["messages"] if m["role"] == "system"
+    ]
+    assert system_blocks
+    assert any(
+        "every query failed" in block and "techdocs" in block
+        for block in system_blocks
+    )
+    assert chunks == ["I could not reach your data sources."]
+
+
+@pytest.mark.asyncio
+async def test_all_sources_fail_streaming_with_tools_informs_llm():
+    """The streaming RAG+tools path must also tell the LLM (GH #844)."""
+    from atlas.modules.llm.models import LLMResponse
+
+    caller = _make_caller()
+    service = _rag_service({
+        "broken:techdocs": RuntimeError("500: RAG service error"),
+    })
+
+    captured = {}
+
+    async def fake_stream_with_tools(model_name, messages, tools_schema, tool_choice="auto",
+                                     temperature=0.7, user_email=None):
+        captured["messages"] = messages
+        yield LLMResponse(content="unable to reach your data sources")
+
+    caller.stream_with_tools = fake_stream_with_tools
+
+    items = []
+    async for item in caller.stream_with_rag_and_tools(
+        "test-model",
+        [{"role": "user", "content": "q"}],
+        ["broken:techdocs"],
+        [{"type": "function", "function": {"name": "test_tool"}}],
+        "user@test.com",
+        rag_service=service,
+    ):
+        items.append(item)
+
+    system_blocks = [
+        m["content"] for m in captured["messages"] if m["role"] == "system"
+    ]
+    assert system_blocks
+    assert any(
+        "every query failed" in block and "techdocs" in block
+        for block in system_blocks
+    )
+    assert items and items[0].content == "unable to reach your data sources"

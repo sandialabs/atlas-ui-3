@@ -41,7 +41,7 @@ async def test_is_completion_does_not_bypass_tools():
 
     rag_resp = _rag_response("Pre-synthesized answer", is_completion=True)
     caller._query_all_rag_sources = AsyncMock(
-        return_value=([("test-source", rag_resp)], [])
+        return_value=([("test-source", rag_resp)], [], [])
     )
 
     expected_llm_response = LLMResponse(content="LLM used tools and context")
@@ -75,7 +75,7 @@ async def test_non_completion_rag_with_tools_uses_retrieved_context_label():
 
     rag_resp = _rag_response("Some raw context", is_completion=False)
     caller._query_all_rag_sources = AsyncMock(
-        return_value=([("test-source", rag_resp)], [])
+        return_value=([("test-source", rag_resp)], [], [])
     )
 
     expected_llm_response = LLMResponse(content="LLM response")
@@ -104,7 +104,7 @@ async def test_rag_only_is_completion_returns_directly():
 
     rag_resp = _rag_response("Direct RAG answer", is_completion=True)
     caller._query_all_rag_sources = AsyncMock(
-        return_value=([("test-source", rag_resp)], [])
+        return_value=([("test-source", rag_resp)], [], [])
     )
 
     # Mock call_plain to track if LLM is called (it should NOT be)
@@ -133,7 +133,7 @@ async def test_streaming_is_completion_does_not_bypass_tools():
 
     rag_resp = _rag_response("Streamed pre-synth", is_completion=True)
     caller._query_all_rag_sources = AsyncMock(
-        return_value=([("test-source", rag_resp)], [])
+        return_value=([("test-source", rag_resp)], [], [])
     )
 
     # Mock stream_with_tools as an async generator
