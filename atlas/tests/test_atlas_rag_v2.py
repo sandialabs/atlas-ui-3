@@ -1,9 +1,12 @@
-"""Tests for the v2 tool-oriented RAG interface (issue #791).
+"""Tests for the v2 query-oriented RAG interface (OpenAPI v0.8.0).
 
-v2 sends an explicit ``query`` instead of the conversation and lets the caller
-pick the shape of the answer with ``mode``. These tests pin the request body
-(what leaves the process), both response shapes, and the routing decision that
-sends a source to v1 or v2.
+v2 sends an explicit ``query`` plus ``search_kwargs`` instead of the
+conversation. The backend always returns a synthesized ``response`` string
+and the ``references`` behind it; ``mode`` is a client-side knob that decides
+whether ATLAS uses the response verbatim (``synthesized``) or rebuilds an
+evidence block from the reference snippets (``raw``). These tests pin the
+request body (what leaves the process), the response parsing, and the routing
+decision that sends a source to v1 or v2.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,54 +37,30 @@ def _mock_post(json_payload, status_code=200):
     return patcher, mock_instance
 
 
-RAW_RESPONSE = {
-    "query": "What is the PTO carryover limit?",
-    "mode": "raw",
-    "results": {
-        "hits": [
-            {
-                "document_ref": 1,
-                "filename": "pto-policy.pdf",
-                "title": "PTO Policy",
-                "citation": "[1] PTO Policy, pto-policy.pdf",
-                "sections": [
-                    {"section_ref": 1, "text": "Carry over up to 240 hours.", "relevance": 0.91},
-                    {"section_ref": 2, "text": "Excess hours are forfeited.", "relevance": 0.55},
-                ],
-            },
-            {
-                "document_ref": 2,
-                "filename": "handbook.pdf",
-                "title": "Handbook",
-                "citation": "[2] Handbook, handbook.pdf",
-                "sections": [
-                    {"section_ref": 1, "text": "See the PTO policy.", "relevance": 0.42},
-                ],
-            },
-        ],
-        "stats": {"total_found": 2, "top_k": 5},
-    },
-    "metadata": {"response_time_ms": 128, "corpora_searched": ["company-policies"]},
-}
-
-SYNTHESIZED_RESPONSE = {
-    "query": "What is the PTO carryover limit?",
-    "mode": "synthesized",
-    "results": {
-        "answer": "Employees may carry over up to 240 hours. [1]",
-        "citations": [
-            {
-                "document_ref": 1,
-                "filename": "pto-policy.pdf",
-                "title": "PTO Policy",
-                "citation": "[1] PTO Policy, pto-policy.pdf",
-            },
-        ],
-    },
+# The v0.8.0 wire response is the same regardless of how the caller uses it --
+# the backend always returns a synthesized ``response`` plus ``references``.
+# ``mode`` (raw vs synthesized) is a client-side interpretation knob.
+V2_RESPONSE = {
+    "response": "Employees may carry over up to 240 hours. [1]",
     "metadata": {
-        "response_time_ms": 305,
-        "corpora_searched": ["company-policies"],
-        "fallback_used": False,
+        "response_time": 2,
+        "references": [
+            {
+                "filename": "pto-policy.pdf",
+                "sections": [
+                    {"text": "Carry over up to 240 hours.", "relevance": 0.91},
+                    {"text": "Excess hours are forfeited.", "relevance": 0.55},
+                ],
+                "reference": "PTO Policy, pto-policy.pdf",
+            },
+            {
+                "filename": "handbook.pdf",
+                "sections": [
+                    {"text": "See the PTO policy.", "relevance": 0.42},
+                ],
+                "reference": "Handbook, handbook.pdf",
+            },
+        ],
     },
 }
 
@@ -122,8 +101,8 @@ class TestV2RequestShape:
     """What actually leaves the process."""
 
     @pytest.mark.asyncio
-    async def test_sends_query_not_messages(self, v2_client):
-        patcher, mock_instance = _mock_post(RAW_RESPONSE)
+    async def test_sends_query_and_search_kwargs_not_messages(self, v2_client):
+        patcher, mock_instance = _mock_post(V2_RESPONSE)
         try:
             await v2_client.query_v2(
                 "alice@corp.com",
@@ -139,31 +118,47 @@ class TestV2RequestShape:
         assert call_args[0][0] == "https://rag-api.example.com/api/v2/rag/query"
         assert call_args[1]["params"] == {"as_user": "alice@corp.com"}
         payload = call_args[1]["json"]
-        assert payload == {
-            "query": "What is the PTO carryover limit?",
-            "corpora": "company-policies",
-            "mode": "raw",
-            "top_k": 5,
-        }
+        assert payload["query"] == "What is the PTO carryover limit?"
+        assert payload["corpora"] == "company-policies"
+        # top_k is mapped into search_kwargs.top_k_final, not sent at top level.
+        assert payload["search_kwargs"] == {"top_k_final": 5}
+        # mode is client-side only -- never on the wire.
+        assert "mode" not in payload
         # The whole point of v2: no conversation history on the wire.
         assert "messages" not in payload
 
     @pytest.mark.asyncio
     async def test_top_k_defaults_to_client_config(self, v2_client):
-        patcher, mock_instance = _mock_post(RAW_RESPONSE)
+        patcher, mock_instance = _mock_post(V2_RESPONSE)
         try:
             await v2_client.query_v2("u", query="q", corpora=["a", "b"])
         finally:
             patcher.stop()
 
         payload = mock_instance.post.call_args[1]["json"]
-        assert payload["top_k"] == 4
+        assert payload["search_kwargs"]["top_k_final"] == 4
         assert payload["corpora"] == ["a", "b"]
-        assert payload["mode"] == "raw"
 
     @pytest.mark.asyncio
-    async def test_filters_and_synthesis_params_forwarded(self, v2_client):
-        patcher, mock_instance = _mock_post(SYNTHESIZED_RESPONSE)
+    async def test_explicit_search_kwargs_forwarded(self, v2_client):
+        patcher, mock_instance = _mock_post(V2_RESPONSE)
+        try:
+            await v2_client.query_v2(
+                "u",
+                query="q",
+                corpora="a",
+                search_kwargs={"top_k_final": 3, "rerank": False, "threshold": 0.5},
+            )
+        finally:
+            patcher.stop()
+
+        payload = mock_instance.post.call_args[1]["json"]
+        assert payload["search_kwargs"] == {"top_k_final": 3, "rerank": False, "threshold": 0.5}
+
+    @pytest.mark.asyncio
+    async def test_filters_and_synthesis_params_not_sent(self, v2_client):
+        """The v0.8.0 schema has no filters/synthesis_params fields."""
+        patcher, mock_instance = _mock_post(V2_RESPONSE)
         try:
             await v2_client.query_v2(
                 "u",
@@ -177,28 +172,15 @@ class TestV2RequestShape:
             patcher.stop()
 
         payload = mock_instance.post.call_args[1]["json"]
-        assert payload["filters"] == {"doc_type": "policy"}
-        assert payload["synthesis_params"] == {"length": "short"}
-
-    @pytest.mark.asyncio
-    async def test_synthesis_params_dropped_in_raw_mode(self, v2_client):
-        """``synthesis_params`` has no meaning without synthesis; don't send it."""
-        patcher, mock_instance = _mock_post(RAW_RESPONSE)
-        try:
-            await v2_client.query_v2(
-                "u", query="q", corpora="a", mode="raw", synthesis_params={"length": "short"},
-            )
-        finally:
-            patcher.stop()
-
-        assert "synthesis_params" not in mock_instance.post.call_args[1]["json"]
+        assert "filters" not in payload
+        assert "synthesis_params" not in payload
 
     @pytest.mark.asyncio
     async def test_strip_domain_applies(self):
         client = AtlasRAGClient(
             base_url="https://rag-api.example.com", api_version="v2", strip_domain=True,
         )
-        patcher, mock_instance = _mock_post(RAW_RESPONSE)
+        patcher, mock_instance = _mock_post(V2_RESPONSE)
         try:
             await client.query_v2("alice@corp.com", query="q", corpora="a")
         finally:
@@ -228,11 +210,11 @@ class TestV2CallerErrors:
 
 
 class TestV2RawMode:
-    """``raw`` returns evidence for our own LLM, so it is not a completion."""
+    """``raw`` builds an evidence block from references, so it is not a completion."""
 
     @pytest.mark.asyncio
-    async def test_parses_hits_into_documents(self, v2_client):
-        patcher, _ = _mock_post(RAW_RESPONSE)
+    async def test_parses_references_into_documents(self, v2_client):
+        patcher, _ = _mock_post(V2_RESPONSE)
         try:
             result = await v2_client.query_v2("u", query="q", corpora="company-policies")
         finally:
@@ -242,21 +224,23 @@ class TestV2RawMode:
         assert result.is_completion is False
         assert result.metadata is not None
         assert len(result.metadata.documents_found) == 2
-        assert result.metadata.query_processing_time_ms == 128
+        # response_time is in seconds (2); surfaced as ms for the UI footer.
+        assert result.metadata.query_processing_time_ms == 2000
         assert result.metadata.data_source_name == "company-policies"
         assert result.metadata.retrieval_method == "v2_raw"
 
         doc = result.metadata.documents_found[0]
-        assert doc.title == "PTO Policy"
-        assert doc.document_ref == 1
-        assert doc.citation == "[1] PTO Policy, pto-policy.pdf"
+        # The ``reference`` label becomes the title; ``filename`` is on source.
+        assert doc.title == "PTO Policy, pto-policy.pdf"
+        assert doc.source == "company-policies"
+        assert doc.document_ref is None  # v0.8.0 has no document_ref
         assert len(doc.sections) == 2
         # Confidence comes from the best-scoring section.
         assert doc.confidence_score == pytest.approx(0.91)
 
     @pytest.mark.asyncio
     async def test_content_is_an_evidence_block_with_markers(self, v2_client):
-        patcher, _ = _mock_post(RAW_RESPONSE)
+        patcher, _ = _mock_post(V2_RESPONSE)
         try:
             result = await v2_client.query_v2("u", query="q", corpora="company-policies")
         finally:
@@ -264,18 +248,18 @@ class TestV2RawMode:
 
         assert "Retrieved 2 document(s)" in result.content
         # [N] markers are what the existing citation pipeline matches on.
-        assert "[1] PTO Policy" in result.content
-        assert "[2] Handbook" in result.content
+        # The v0.8.0 schema has no document_ref, so references are numbered
+        # sequentially.
+        assert "[1] PTO Policy, pto-policy.pdf" in result.content
+        assert "[2] Handbook, handbook.pdf" in result.content
         assert "Carry over up to 240 hours." in result.content
         assert "Excess hours are forfeited." in result.content
 
     @pytest.mark.asyncio
-    async def test_no_hits_says_so(self, v2_client):
+    async def test_no_references_says_so(self, v2_client):
         patcher, _ = _mock_post({
-            "query": "q",
-            "mode": "raw",
-            "results": {"hits": [], "stats": {"total_found": 0, "top_k": 4}},
-            "metadata": {"response_time_ms": 9, "corpora_searched": ["a"]},
+            "response": "No results found.",
+            "metadata": {"response_time": 1, "references": []},
         })
         try:
             result = await v2_client.query_v2("u", query="q", corpora="a")
@@ -288,19 +272,18 @@ class TestV2RawMode:
     @pytest.mark.asyncio
     async def test_malformed_entries_are_skipped_not_fatal(self, v2_client):
         patcher, _ = _mock_post({
-            "query": "q",
-            "mode": "raw",
-            "results": {
-                "hits": [
+            "response": "ok",
+            "metadata": {
+                "response_time": 1,
+                "references": [
                     "not-a-dict",
                     {
-                        "document_ref": 1,
                         "filename": "ok.pdf",
-                        "sections": ["not-a-dict", {"section_ref": 1, "text": "t", "relevance": 0.5}],
+                        "sections": ["not-a-dict", {"text": "t", "relevance": 0.5}],
+                        "reference": "OK Doc, ok.pdf",
                     },
                 ],
             },
-            "metadata": {},
         })
         try:
             result = await v2_client.query_v2("u", query="q", corpora="a")
@@ -312,11 +295,11 @@ class TestV2RawMode:
 
 
 class TestV2SynthesizedMode:
-    """``synthesized`` returns an answer, so it *is* a completion."""
+    """``synthesized`` uses the backend's response verbatim, so it is a completion."""
 
     @pytest.mark.asyncio
-    async def test_answer_and_citations(self, v2_client):
-        patcher, _ = _mock_post(SYNTHESIZED_RESPONSE)
+    async def test_answer_uses_response_field(self, v2_client):
+        patcher, _ = _mock_post(V2_RESPONSE)
         try:
             result = await v2_client.query_v2(
                 "u", query="q", corpora="company-policies", mode="synthesized",
@@ -326,16 +309,16 @@ class TestV2SynthesizedMode:
 
         assert result.is_completion is True
         assert result.content == "Employees may carry over up to 240 hours. [1]"
-        assert len(result.metadata.documents_found) == 1
-        assert result.metadata.documents_found[0].document_ref == 1
-        assert result.metadata.documents_found[0].title == "PTO Policy"
+        assert len(result.metadata.documents_found) == 2
+        assert result.metadata.documents_found[0].title == "PTO Policy, pto-policy.pdf"
         assert result.metadata.retrieval_method == "v2_synthesized"
-        assert result.metadata.query_processing_time_ms == 305
+        assert result.metadata.query_processing_time_ms == 2000
 
     @pytest.mark.asyncio
-    async def test_missing_answer_falls_back_to_placeholder(self, v2_client):
+    async def test_missing_response_falls_back_to_placeholder(self, v2_client):
         patcher, _ = _mock_post({
-            "query": "q", "mode": "synthesized", "results": {}, "metadata": {},
+            "response": "",
+            "metadata": {"response_time": 0, "references": None},
         })
         try:
             result = await v2_client.query_v2("u", query="q", corpora="a", mode="synthesized")
@@ -343,19 +326,6 @@ class TestV2SynthesizedMode:
             patcher.stop()
 
         assert result.content == "No response from RAG system."
-
-    @pytest.mark.asyncio
-    async def test_mode_is_the_caller_s_not_the_server_s(self, v2_client):
-        """A server echoing a different mode cannot reshape the response."""
-        echoed_raw = dict(SYNTHESIZED_RESPONSE, mode="raw")
-        patcher, _ = _mock_post(echoed_raw)
-        try:
-            result = await v2_client.query_v2("u", query="q", corpora="a", mode="synthesized")
-        finally:
-            patcher.stop()
-
-        assert result.is_completion is True
-        assert result.content == "Employees may carry over up to 240 hours. [1]"
 
 
 class TestV2HTTPErrors:

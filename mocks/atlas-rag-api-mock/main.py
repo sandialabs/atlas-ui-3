@@ -1,32 +1,41 @@
 #!/usr/bin/env python3
-"""ATLAS RAG API Mock Service (OpenAPI v0.3.0.dev1+).
+"""ATLAS RAG API Mock Service (OpenAPI v0.8.0).
 
-Implements the newest ATLAS RAG API shape:
-
-  - GET  /api/v1/discover/datasources?role=read|write&as_user=<user>
-  - POST /api/v1/rag/completions?as_user=<user>
-
-plus the v2 tool-oriented interface:
+Implements the ATLAS RAG API v2 contract:
 
   - GET  /api/v2/discover/datasources?role=read|write&as_user=<user>
   - POST /api/v2/rag/query?as_user=<user>
 
-v2 request body (RagQueryRequest):
+The v1 contract is kept for backward compatibility during the transition:
+
+  - GET  /api/v1/discover/datasources?role=read|write&as_user=<user>
+  - POST /api/v1/rag/completions?as_user=<user>
+
+v2 request body (RagRequest):
 
     {"query": "...", "corpora": "<id>" | ["<id>", ...],
-     "mode": "raw" | "synthesized", "top_k": 4}
+     "search_kwargs": {"top_k_final": 5, "rerank": true, ...}}
 
-v2 response body (RagQueryResponse):
+v2 response body (RagResponse):
 
-    {"query": "...", "mode": "raw",
-     "results": {"hits": [...], "stats": {...}},
-     "metadata": {"response_time_ms": 12, "corpora_searched": [...]}}
+    {"response": "<synthesized answer string>",
+     "metadata": {
+       "response_time": <int seconds>,
+       "references": [
+         {
+           "filename": "doc.pdf" | null,
+           "sections": [{"text": "snippet...", "relevance": 0.92}, ...],
+           "reference": "<human-readable source label>"
+         },
+         ...
+       ]
+     }}
 
-Request body (RagRequest):
+v1 request body (RagRequest):
 
     {"messages": [...], "stream": false, "corpora": "<id>" | ["<id>", ...]}
 
-Response body (RagResponse):
+v1 response body (RagResponse):
 
     {
       "message":  {"role": "assistant", "content": "..."},
@@ -35,6 +44,7 @@ Response body (RagResponse):
         "references": [
           {
             "citation": "IEEE format" | null,
+            "reference": "human-readable source line" | null,
             "document_ref": 1,
             "filename": "doc.pdf",
             "sections": [
@@ -137,7 +147,7 @@ verifier = StaticTokenVerifier(
 app = FastAPI(
     title="ATLAS RAG API",
     description="Generates RAG response based on user query",
-    version="0.3.0.dev1",
+    version="0.8.0",
 )
 
 PUBLIC_PATHS = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
@@ -221,70 +231,72 @@ class RagResponse(BaseModel):
     metadata: RagMetadata
 
 
-# --- v2: tool-oriented query interface -----------------------------------
+# --- v2: query-oriented interface (OpenAPI v0.8.0) -----------------------
 
-class DataSourceV2(DataSource):
-    """v2 discovery entry.
+class SearchKwargs(BaseModel):
+    """Search behaviour knobs forwarded to the atlas-search hybrid endpoint.
 
-    Same shape as v1 plus ``api_version``, which is how a backend tells
-    ATLAS-UI which contract a given source speaks.
+    Mirrors the ``SearchKwargs`` component in the v0.8.0 OpenAPI schema.
+    The mock only consumes ``top_k_final``; the remaining fields are
+    accepted and ignored so the contract round-trips faithfully.
     """
-    api_version: str = Field("v2", description="RAG API contract this source speaks.")
-
-
-class RagQueryRequest(BaseModel):
-    """v2 request: an explicit query, never the conversation."""
-    query: str = Field(..., description="The specific question to ask.")
-    corpora: Union[str, List[str]] = Field(..., description="Corpus id(s) to search.")
-    mode: Literal["raw", "synthesized"] = Field(
-        "raw", description="raw returns evidence chunks; synthesized returns an answer."
+    rerank: bool = Field(True, description="Whether to rerank search results.")
+    rerank_model_name: str = Field(
+        "dev/BAAI/bge-reranker-v2-m3",
+        description="Reranker to use when rerank is true.",
     )
-    top_k: int = Field(4, ge=1, le=50, description="Max results per corpus.")
-    filters: Optional[Dict[str, Any]] = Field(
-        None, description="Server-defined metadata filters (unused by the mock)."
+    top_k_vector: int = Field(5, description="Semantic-search result count.")
+    top_k_full_text: int = Field(5, description="Full-text result count.")
+    top_k_final: int = Field(5, description="Final combined result count.")
+    rank_strategy: Literal["weighted", "rrf"] = Field(
+        "weighted", description="How semantic and full-text ranks are combined."
     )
-    synthesis_params: Optional[Dict[str, Any]] = Field(
-        None, description="Mode-specific knobs for synthesized (unused by the mock)."
+    threshold: float = Field(0.75, description="Relevance threshold [0-1].")
+    expanded_window: Tuple[int, int] = Field(
+        (0, 0),
+        description="Extra characters to include left/right of each chunk.",
     )
 
 
-class Hit(BaseModel):
-    """One retrieved document and the sections that matched, for ``raw`` mode."""
-    document_ref: int
-    filename: str
-    title: Optional[str] = None
-    citation: Optional[str] = None
-    sections: List[Section]
+class QuerySection(BaseModel):
+    """A relevant snippet from a source document (v0.8.0 ``Section``)."""
+    text: str = Field(..., description="Relevant text snippet from source document.")
+    relevance: float = Field(..., description="Cosine similarity score for the snippet.")
 
 
-class Citation(BaseModel):
-    """One document a ``synthesized`` answer was built from."""
-    document_ref: int
-    filename: str
-    title: Optional[str] = None
-    citation: Optional[str] = None
-
-
-class RawResults(BaseModel):
-    hits: List[Hit]
-    stats: Dict[str, int]
-
-
-class SynthesizedResults(BaseModel):
-    answer: str
-    citations: List[Citation]
+class QueryReference(BaseModel):
+    """A source document the RAG pipeline used (v0.8.0 ``Reference``)."""
+    filename: Optional[str] = Field(
+        None, description="Filename of the source document."
+    )
+    sections: List[QuerySection] = Field(
+        ..., description="Relevant sections from the source document."
+    )
+    reference: str = Field(..., description="Human-readable source label.")
 
 
 class RagQueryMetadata(BaseModel):
-    response_time_ms: int
-    corpora_searched: List[str]
-    fallback_used: bool = False
+    """Metadata returned from the v2 RAG pipeline."""
+    response_time: int = Field(
+        ..., description="Time to generate the response, in seconds."
+    )
+    references: Optional[List[QueryReference]] = Field(
+        ..., description="References used to generate the response."
+    )
+
+
+class RagQueryRequest(BaseModel):
+    """v2 request: an explicit query plus optional search knobs."""
+    query: str = Field(..., description="The specific question to ask.")
+    corpora: Union[str, List[str]] = Field(..., description="Corpus id(s) to search.")
+    search_kwargs: Optional[SearchKwargs] = Field(
+        None, description="Kwargs forwarded to the hybrid search endpoint."
+    )
 
 
 class RagQueryResponse(BaseModel):
-    query: str
-    mode: Literal["raw", "synthesized"]
-    results: Union[RawResults, SynthesizedResults]
+    """v2 response: a synthesized answer plus the references behind it."""
+    response: str = Field(..., description="The synthesized RAG response.")
     metadata: RagQueryMetadata
 
 
@@ -640,16 +652,16 @@ async def rag_completions(
     )
 
 
-@app.get("/api/v2/discover/datasources", response_model=List[DataSourceV2])
+@app.get("/api/v2/discover/datasources", response_model=List[DataSource])
 async def discover_data_sources_v2(
     role: Literal["read", "write"] = Query("read"),
     as_user: Optional[str] = Query(None, description="User ID to impersonate"),
 ):
-    """v2 discovery: the v1 list, with each source declaring ``api_version``."""
+    """v2 discovery: the same ``DataSource`` list as v1 (OpenAPI v0.8.0)."""
     user = as_user or ""
     logger.info("Discovery request (v2): user=%s role=%s", safe_log(user), role)
     accessible = get_accessible_corpora(user)
-    return [DataSourceV2(**src.model_dump(), api_version="v2") for src in accessible]
+    return accessible
 
 
 def _resolve_corpora(corpora: Union[str, List[str]], user: str) -> List[str]:
@@ -670,22 +682,33 @@ def _resolve_corpora(corpora: Union[str, List[str]], user: str) -> List[str]:
     return corpora_to_search
 
 
+def _to_query_reference(ref: Reference) -> QueryReference:
+    """Convert a v1 ``Reference`` (used internally for search) to the v0.8.0 shape."""
+    return QueryReference(
+        filename=ref.filename or None,
+        sections=[
+            QuerySection(text=s.text, relevance=s.relevance) for s in ref.sections
+        ],
+        reference=ref.reference or ref.filename,
+    )
+
+
 @app.post("/api/v2/rag/query", response_model=RagQueryResponse)
 async def rag_query_v2(
     request: RagQueryRequest,
     as_user: Optional[str] = Query(None, description="User ID to impersonate"),
 ):
-    """v2 query: explicit query in, evidence (``raw``) or an answer (``synthesized``) out."""
+    """v2 query: explicit query in, a synthesized response plus references out."""
     start_time = time.time()
 
     user = as_user or ""
+    top_k = request.search_kwargs.top_k_final if request.search_kwargs else 5
     logger.info("---------- RAG query (v2) ----------")
     logger.info(
-        "RAG v2 query user=%s corpora=%s mode=%s top_k=%d query_chars=%d",
+        "RAG v2 query user=%s corpora=%s top_k=%d query_chars=%d",
         safe_log(user),
         safe_log(request.corpora),
-        request.mode,
-        request.top_k,
+        top_k,
         len(request.query),
     )
 
@@ -698,51 +721,22 @@ async def rag_query_v2(
     next_doc_ref = 1
     for corpus in corpora_to_search:
         corpus_refs = search_corpus_for_references(
-            request.query, corpus, top_k=request.top_k, start_doc_ref=next_doc_ref,
+            request.query, corpus, top_k=top_k, start_doc_ref=next_doc_ref,
         )
         references.extend(corpus_refs)
         next_doc_ref += len(corpus_refs)
 
-    response_time_ms = max(1, int((time.time() - start_time) * 1000))
-    metadata = RagQueryMetadata(
-        response_time_ms=response_time_ms,
-        corpora_searched=corpora_to_search,
-        fallback_used=False,
-    )
+    response_text = _compose_assistant_content(corpora_to_search, references, request.query)
 
-    if request.mode == "synthesized":
-        results: Union[RawResults, SynthesizedResults] = SynthesizedResults(
-            answer=_compose_assistant_content(corpora_to_search, references, request.query),
-            citations=[
-                Citation(
-                    document_ref=ref.document_ref,
-                    filename=ref.filename,
-                    title=ref.filename,
-                    citation=ref.citation,
-                )
-                for ref in references
-            ],
-        )
-    else:
-        results = RawResults(
-            hits=[
-                Hit(
-                    document_ref=ref.document_ref,
-                    filename=ref.filename,
-                    title=ref.filename,
-                    citation=ref.citation,
-                    sections=ref.sections,
-                )
-                for ref in references
-            ],
-            stats={"total_found": len(references), "top_k": request.top_k},
-        )
+    # The v0.8.0 schema describes response_time as an integer number of seconds.
+    response_time_seconds = max(1, int(time.time() - start_time + 1))
 
     return RagQueryResponse(
-        query=request.query,
-        mode=request.mode,
-        results=results,
-        metadata=metadata,
+        response=response_text,
+        metadata=RagQueryMetadata(
+            response_time=response_time_seconds,
+            references=[_to_query_reference(r) for r in references] or None,
+        ),
     )
 
 
@@ -778,19 +772,19 @@ async def register_test_user(req: RegisterUserRequest):
 async def root():
     return {
         "service": "ATLAS RAG API Mock",
-        "version": "0.3.0.dev1",
-        "openapi": "v0.3.0.dev1+",
+        "version": "0.8.0",
+        "openapi": "v0.8.0",
         "data_sources": list(DATA_SOURCES.keys()),
         "test_users": list(USERS_GROUPS_DB.keys()),
         "endpoints": {
             "GET /api/v1/discover/datasources?role=read|write&as_user=<user>":
-                "List accessible data sources",
+                "List accessible data sources (v1, backward compat)",
             "POST /api/v1/rag/completions?as_user=<user>":
-                "Search and query (returns RagResponse with references/sections)",
+                "Search and query (v1, returns message + references/sections)",
             "GET /api/v2/discover/datasources?role=read|write&as_user=<user>":
-                "List accessible data sources, each declaring api_version",
+                "List accessible data sources (v2)",
             "POST /api/v2/rag/query?as_user=<user>":
-                "Query with an explicit query string (mode=raw|synthesized)",
+                "Query with an explicit query string (returns response + references)",
             "POST /admin/users": "Register/update a test user's groups (test-only)",
             "GET /health": "Health check",
         },

@@ -231,7 +231,7 @@ Models can set `api_key_source: "globus"` with a `globus_scope` field. The Globu
 ### RAG Over MCP
 - Expected tools: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
 - Resources and servers may include `complianceLevel`
-- HTTP RAG discovery (ATLAS RAG API v2) returns `{data_sources: [{id, label, compliance_level, description}]}`
+- HTTP RAG discovery (ATLAS RAG API v2) returns a bare list `[{id, label, compliance_level, description}]` (the client also accepts a `{data_sources: [...]}` envelope)
 
 ### Testing MCP
 Example configs in `atlas/config/mcp-example-configs/`.

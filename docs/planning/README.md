@@ -14,7 +14,7 @@ Once a plan ships or is abandoned, move it to [archive/](../archive/README.md).
 - [File Content Extraction Plan](file-content-extraction-plan-2026-01-18.md) - Contract for automatic file content extraction
 - [Message Broker — Plan A](plan-a-message-broker.md) - Decoupling tool execution (RabbitMQ option)
 - [Message Broker — Plan B](plan-b-message-broker.md) - Decoupling tool execution (phased option)
-- [RAG API v2: Tool-Oriented Query Interface](rag-api-v2-tool-interface.md) - Replace message-dumping with an explicit query + retrieval/synthesis modes
+- [RAG API v2: Query-Oriented Interface](rag-api-v2-tool-interface.md) - Replace message-dumping with an explicit query + search_kwargs (v0.8.0 schema)
 
 ## Security
 
