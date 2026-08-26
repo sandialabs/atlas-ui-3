@@ -726,10 +726,13 @@ async def rag_query_v2(
         references.extend(corpus_refs)
         next_doc_ref += len(corpus_refs)
 
+    # top_k_final is the final combined result count, not a per-corpus cap.
+    references = references[:top_k]
+
     response_text = _compose_assistant_content(corpora_to_search, references, request.query)
 
     # The v0.8.0 schema describes response_time as an integer number of seconds.
-    response_time_seconds = max(1, int(time.time() - start_time + 1))
+    response_time_seconds = max(1, int(time.time() - start_time))
 
     return RagQueryResponse(
         response=response_text,
