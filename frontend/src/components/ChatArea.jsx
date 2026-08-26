@@ -824,7 +824,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       <main
         ref={messagesRef}
-        className={`chat-messages overflow-y-auto overflow-x-hidden custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
+        className={`chat-messages overflow-y-auto overflow-x-hidden custom-scrollbar p-2 sm:p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
         {/* withUserOrdinals assigns each rewindable user message its 0-based
             ordinal (null for non-rewindable rows -- assistant/tool/system and
@@ -841,11 +841,11 @@ const ChatArea = ({ onOpenRagPanel }) => {
           />
         ))}
         {agentModeEnabled && agentPendingQuestion && (
-          <div className="flex items-start gap-3 w-full">
-            <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+          <div className="flex items-start gap-0 sm:gap-3 w-full">
+            <div className="w-8 h-8 rounded-full bg-purple-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
               A
             </div>
-            <div className="w-full bg-gray-800 rounded-lg p-4 border border-purple-700">
+            <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4 border border-purple-700">
               <div className="text-sm font-medium text-purple-300 mb-2">Agent needs your input</div>
               <div className="text-gray-200 mb-3">{agentPendingQuestion}</div>
               <div className="flex gap-2">
@@ -866,11 +866,11 @@ const ChatArea = ({ onOpenRagPanel }) => {
           </div>
         )}
         {isThinking && (
-          <div className="flex items-start gap-3 w-full">
-            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+          <div className="flex items-start gap-0 sm:gap-3 w-full">
+            <div className="w-8 h-8 rounded-full bg-blue-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
               A
             </div>
-            <div className="w-full bg-gray-800 rounded-lg p-4">
+            <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4">
               <div className="text-sm font-medium text-gray-300 mb-2">{appName}</div>
               <div className="flex items-center gap-2 text-gray-400">
                 <svg className="w-4 h-4 spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -907,8 +907,8 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       {/* Follow-up suggestion buttons */}
       {followUpSuggestions.length > 0 && !isThinking && !isStreaming && (
-        <div className="px-4 py-1 flex-shrink-0">
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide ml-11">
+        <div className="px-2 sm:px-4 py-1 flex-shrink-0">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide ml-0 sm:ml-11">
             {followUpSuggestions.map((question, idx) => (
               <button
                 key={`${idx}-${question.substring(0, 20)}`}

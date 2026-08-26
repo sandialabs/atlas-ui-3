@@ -25,13 +25,13 @@ export default function AgentBusyIndicator({
     : 'Agent thinking...'
 
   return (
-    <div className="flex items-start gap-3 w-full" data-testid="agent-busy-indicator">
-      <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+    <div className="flex items-start gap-0 sm:gap-3 w-full" data-testid="agent-busy-indicator">
+      <div className="w-8 h-8 rounded-full bg-blue-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
         A
       </div>
       {/* flex-1 min-w-0, not w-full: as a flex sibling of the avatar, a
           w-full bubble claims the whole row on top of the avatar and gap. */}
-      <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-4">
+      <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4">
         <div className="text-sm font-medium text-gray-300 mb-2">{appName}</div>
         <div className="flex items-center gap-2 text-gray-400">
           <svg className="w-4 h-4 spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

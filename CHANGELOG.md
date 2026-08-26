@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #847 - 2026-08-26
+- **AI output now uses full screen width on mobile** (fixes mobile layout): on viewports below the `sm` breakpoint (640px), the message avatar (32px circle + 12px gap), the chat container padding (16px), and the bubble padding (16px) consumed ~60px on the left side, leaving only ~80% of the screen for AI-generated text. On mobile the avatar is now hidden, the gap removed, and the container/bubble padding reduced to 8px/12px respectively, so the assistant bubble spans ~96% of the viewport. User messages get a wider `max-w` (85% vs 70%) on mobile for the same reason. Compact tool-call rows drop their `pl-11` indent. Desktop layout (640px+) is unchanged — avatars, gaps, and padding all restore at the `sm` breakpoint.
+
 ### PR #844 - 2026-08-25
 - **A RAG query failure is no longer silent** (closes #844): when a selected data source errors (e.g. the RAG service returns a 500), the LLM is now told the query failed and instructed to tell the user, instead of the turn silently falling back to a plain answer as if nothing happened. `_query_all_rag_sources` now returns the failed server batches as a third element (`failures`) alongside the existing `exclusions`; a new `_build_rag_failure_notice` rides into the RAG context message on the partial-failure path, and on the all-sources-failed path a system message is injected that tells the model the retrieval failed and to begin its reply by telling the user. Applies uniformly to `call_with_rag`, `call_with_rag_and_tools`, `stream_with_rag`, and `stream_with_rag_and_tools`. The raw error text is kept out of the model-facing message (only the corpus name is named); permission denials and LLM domain errors still behave exactly as before.
 
