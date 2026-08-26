@@ -214,3 +214,71 @@ describe('transcript containment styles (#747)', () => {
     expect(main[1]).toContain('overflow-x-hidden')
   })
 })
+
+describe('mobile full-width responsive layout', () => {
+  it('hides the message avatar below the sm breakpoint', () => {
+    const { container } = render(
+      <Message message={{ role: 'assistant', content: 'Hello' }} />
+    )
+    const avatar = container.querySelector('.rounded-full')
+    expect(avatar.className).toContain('hidden')
+    expect(avatar.className).toContain('sm:flex')
+  })
+
+  it('collapses the avatar gap on mobile and restores it at sm', () => {
+    const { container } = render(
+      <Message message={{ role: 'assistant', content: 'Hello' }} />
+    )
+    const row = container.querySelector('.flex.items-start')
+    expect(row.className).toContain('gap-0')
+    expect(row.className).toContain('sm:gap-3')
+  })
+
+  it('uses reduced bubble padding on mobile and full padding at sm', () => {
+    const { container } = render(
+      <Message message={{ role: 'assistant', content: 'Hello' }} />
+    )
+    const bubble = container.querySelector('.bg-gray-800.rounded-lg')
+    expect(bubble.className).toContain('p-3')
+    expect(bubble.className).toContain('sm:p-4')
+  })
+
+  it('widens the user bubble max-w on mobile and narrows it at sm', () => {
+    const { container } = render(
+      <Message message={{ role: 'user', content: 'Hello' }} />
+    )
+    const bubble = container.querySelector('.user-message-bubble')
+    expect(bubble.className).toContain('max-w-[85%]')
+    expect(bubble.className).toContain('sm:max-w-[70%]')
+  })
+
+  it('drops the compact row indent on mobile and restores it at sm', () => {
+    const { container } = render(
+      <Message
+        message={{
+          role: 'assistant',
+          type: 'tool_call',
+          tool_name: 'test_tool',
+          server_name: 'test_server',
+          status: 'completed',
+          arguments: {},
+        }}
+      />
+    )
+    // The compact row is the top-level div inside the rendered container.
+    const row = container.querySelector('div')
+    expect(row.className).toContain('pl-0')
+    expect(row.className).toContain('sm:pl-11')
+  })
+
+  it('reduces the transcript container padding on mobile and restores it at sm', () => {
+    const chatArea = readFileSync(
+      resolve(process.cwd(), 'src/components/ChatArea.jsx'),
+      'utf8'
+    )
+    const main = chatArea.match(/<main[\s\S]*?className=\{`([^`]*)`\}/)
+    expect(main).not.toBeNull()
+    expect(main[1]).toContain('p-2')
+    expect(main[1]).toContain('sm:p-4')
+  })
+})
