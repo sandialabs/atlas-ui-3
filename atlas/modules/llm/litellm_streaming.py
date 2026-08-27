@@ -15,8 +15,14 @@ from litellm.types.utils import ChatCompletionMessageToolCall, Function
 from atlas.application.chat.capture.capture_context import record_llm_call
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
+from atlas.domain.errors import LLMMalformedToolCallError
 
-from .models import LLMResponse, split_provider
+from .models import (
+    LLMResponse,
+    partition_tool_calls_by_json_validity,
+    split_provider,
+    tool_call_function_field,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +143,52 @@ class LiteLLMStreamingMixin:
                 logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
                 self._raise_llm_domain_error(exc)
 
+    def _handle_malformed_tool_calls(
+        self,
+        malformed: List[Any],
+        kept: List[Any],
+        finish_reason: Optional[str],
+        model_name: str,
+        span: Any = None,
+    ) -> None:
+        """Log dropped tool calls and fail the turn when none are left.
+
+        Dropping is always right -- unparseable arguments cannot be executed
+        faithfully, and re-sending them breaks every later request. What differs
+        is whether the turn can still make progress: if at least one well-formed
+        call survives, the model gets those results and can reissue the rest.
+        If nothing survives, raise, so the user is told the turn failed instead
+        of silently receiving a reply that skipped the work it announced.
+        """
+        names = [
+            tool_call_function_field(tc, "name", "") or "unknown"
+            for tc in malformed
+        ]
+        truncated = finish_reason == "length"
+        logger.error(
+            "Dropping %d malformed tool call(s) from %s (finish_reason=%s, names=%s); "
+            "%d well-formed call(s) kept",
+            len(malformed), model_name, finish_reason, names, len(kept),
+        )
+        set_attrs(span, {
+            "malformed_tool_calls": len(malformed),
+            "finish_reason": finish_reason or "",
+        })
+        if kept:
+            return
+        if truncated:
+            message = (
+                "The model ran out of room while writing its tool call, so the "
+                "request was cut off mid-argument. Please try again -- starting a "
+                "new conversation or asking for less at once usually clears it."
+            )
+        else:
+            message = (
+                "The model produced a tool call that was not valid JSON, so it "
+                "could not be run. Please try again."
+            )
+        raise LLMMalformedToolCallError(message, tool_names=names)
+
     async def stream_with_tools(
         self,
         model_name: str,
@@ -204,9 +256,16 @@ class LiteLLMStreamingMixin:
                 accumulated_content = ""
                 accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
                 chunk_count = 0
+                finish_reason: Optional[str] = None
 
                 async for chunk in response:
-                    delta = chunk.choices[0].delta if chunk.choices else None
+                    choice = chunk.choices[0] if chunk.choices else None
+                    if choice is not None:
+                        # Providers send the reason on the final chunk; keep the
+                        # last non-empty one so a truncated turn ("length") can
+                        # be told apart from a model that simply emitted bad JSON.
+                        finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                    delta = choice.delta if choice is not None else None
                     if not delta:
                         continue
 
@@ -262,6 +321,27 @@ class LiteLLMStreamingMixin:
                                 arguments=tc["function"]["arguments"],
                             ),
                         ))
+
+                # Reject tool calls whose arguments are not parseable JSON
+                # before they can be executed or appended to the conversation.
+                # A model that runs out of output tokens mid-tool-call leaves a
+                # fragment like ``{"filename": "long-name.c``; the provider
+                # re-parses every tool call on the next request, so persisting
+                # one poisons the conversation permanently -- every later turn
+                # comes back as a 400 that no retry can clear.
+                if tool_calls_list:
+                    tool_calls_list, malformed = partition_tool_calls_by_json_validity(
+                        tool_calls_list
+                    )
+                    if malformed:
+                        self._handle_malformed_tool_calls(
+                            malformed,
+                            kept=tool_calls_list,
+                            finish_reason=finish_reason,
+                            model_name=model_name,
+                            span=span,
+                        )
+                    tool_calls_list = tool_calls_list or None
 
                 log_metric(
                     "llm_call", user_email, model=model_name,

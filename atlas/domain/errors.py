@@ -112,6 +112,23 @@ class LLMTimeoutError(LLMError):
     pass
 
 
+class LLMMalformedToolCallError(LLMError):
+    """Raised when the model returned a tool call whose arguments are not valid JSON.
+
+    Almost always a truncated call: the model ran out of output tokens partway
+    through the argument object, leaving something like ``{"path": "long-na``.
+    Such a call must never be executed or written back into the conversation --
+    the provider re-parses every tool call on the next request, so one bad
+    fragment in history rejects every subsequent turn with a 400 and the
+    conversation is dead for good. Unlike ``LLMBadRequestError`` this is
+    transient: the same turn usually succeeds on a retry.
+    """
+
+    def __init__(self, message: str, tool_names: Optional[list] = None, code: Optional[str] = None):
+        super().__init__(message, code)
+        self.tool_names = list(tool_names or [])
+
+
 class ContextWindowExceededError(LLMError):
     """Raised when input exceeds the LLM's context window limit."""
     pass

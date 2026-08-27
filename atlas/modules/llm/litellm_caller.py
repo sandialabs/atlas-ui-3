@@ -46,6 +46,7 @@ from atlas.domain.errors import (
     DataSourcePermissionError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMError,
     LLMServiceError,
     LLMTimeoutError,
     RateLimitError,
@@ -53,7 +54,11 @@ from atlas.domain.errors import (
 from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
-from .models import LLMResponse, split_provider
+from .models import (
+    LLMResponse,
+    partition_tool_calls_by_json_validity,
+    split_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +317,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         (RateLimitError, LLMTimeoutError, etc.) instead of a generic Exception,
         which allows it to send meaningful error messages to the frontend.
         """
+        # An error we already classified (e.g. a malformed tool call detected
+        # while accumulating the stream) carries a precise, user-safe message.
+        # Re-running it through the keyword matching below would demote it to a
+        # generic service error and match on its own wording, not the failure.
+        if isinstance(exc, LLMError):
+            raise exc
+
         error_str = str(exc)
         error_type = type(exc).__name__
         lowered = error_str.lower()
@@ -1289,6 +1301,20 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             message = response.choices[0].message
 
             tool_calls = getattr(message, 'tool_calls', None)
+            # Same guard as the streaming path: a tool call whose arguments are
+            # not parseable JSON (a model that hit its output limit mid-call)
+            # must not be executed or written into the conversation, or every
+            # later request in that conversation is rejected with a 400.
+            if tool_calls:
+                tool_calls, malformed = partition_tool_calls_by_json_validity(tool_calls)
+                if malformed:
+                    self._handle_malformed_tool_calls(
+                        malformed,
+                        kept=tool_calls,
+                        finish_reason=getattr(response.choices[0], "finish_reason", None),
+                        model_name=model_name,
+                    )
+                tool_calls = tool_calls or None
             tool_count = len(tool_calls) if tool_calls else 0
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages), tool_count=tool_count)
 
