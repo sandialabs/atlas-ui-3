@@ -136,8 +136,8 @@ class MCPToolManager(
                 servers_data = {"servers": data}
                 mcp_config = MCPConfig(**servers_data)
                 self.servers_config = _drop_reserved_servers(
-                {name: server.model_dump() for name, server in mcp_config.servers.items()}
-            )
+                    {name: server.model_dump() for name, server in mcp_config.servers.items()}
+                )
             else:
                 logger.warning(f"Custom config path specified but file not found: {config_path}")
                 self.servers_config = {}

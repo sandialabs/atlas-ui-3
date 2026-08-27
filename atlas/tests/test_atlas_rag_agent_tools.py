@@ -35,6 +35,19 @@ def _enable_search(monkeypatch, enabled: bool = True) -> None:
     monkeypatch.setattr(settings, "feature_atlas_rag_tools_enabled", enabled, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _search_enabled(monkeypatch):
+    """Every test here exercises the search tool, so run with RAG turned on.
+
+    The flags gate both the advertised schema and execution, so leaving them at
+    their (off) test defaults would make every case below assert against a
+    refusal rather than the behaviour it is checking. Tests that want the
+    disabled path call ``_enable_search(monkeypatch, enabled=False)``, which
+    wins because it patches later.
+    """
+    _enable_search(monkeypatch)
+
+
 class FakeUnifiedRAG:
     """Configurable fake unified RAG service for exercising the pseudo-tools.
 
@@ -606,3 +619,25 @@ async def test_atlas_search_requires_a_query(monkeypatch):
 
     assert result.success is False
     assert "atlas_search" in result.content
+
+
+@pytest.mark.asyncio
+async def test_atlas_search_refuses_to_execute_when_rag_is_disabled(monkeypatch):
+    """Schema omission stops the model being offered it; this stops a replay.
+
+    A saved conversation or a non-UI client can name a tool the schema never
+    advertised, so the feature flag is enforced at execution too.
+    """
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["policies"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+    _enable_search(monkeypatch, enabled=False)
+
+    result = await manager.execute_tool(
+        ToolCall(id="s-off", name="atlas_search", arguments={"query": "anything"}),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is False
+    assert "disabled" in result.content
+    assert unified.query_calls == []

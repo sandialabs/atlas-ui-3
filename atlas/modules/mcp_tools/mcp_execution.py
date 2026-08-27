@@ -17,10 +17,8 @@ from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
     SEARCH_TOOL_NAME,
-    normalize_tool_name,
-)
-from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
+    normalize_tool_name,
 )
 from atlas.modules.mcp_tools.mcp_discovery import (
     _ATLAS_RAG_DISCOVER_TOOL,
@@ -477,6 +475,25 @@ class ExecutionMixin:
                 success=True
             )
         if resolved_name == SEARCH_TOOL_NAME or tool_call.name == _ATLAS_RAG_DISCOVER_TOOL:
+            # Gate at execution, not only in the schema: omitting a disabled
+            # tool from the schema stops the model being offered it, but a
+            # replayed conversation or a non-UI client can still name it. The
+            # sleep tool is gated the same way, one line below.
+            app_settings = _client().config_manager.app_settings
+            if not (
+                getattr(app_settings, "feature_rag_enabled", False)
+                and getattr(app_settings, "feature_atlas_rag_tools_enabled", False)
+            ):
+                error_msg = (
+                    f"Tool '{SEARCH_TOOL_NAME}' is disabled "
+                    "(RAG or the built-in ATLAS RAG tools are turned off)"
+                )
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=error_msg,
+                    success=False,
+                    error=error_msg,
+                )
             return await self._execute_atlas_rag_tool(tool_call, context)
         if resolved_name == ATLAS_SLEEP_TOOL_NAME:
             app_settings = _client().config_manager.app_settings

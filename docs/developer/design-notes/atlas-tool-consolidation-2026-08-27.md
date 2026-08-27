@@ -96,6 +96,11 @@ A disabled built-in is omitted from the schema rather than advertised and then
 refused: agent mode reaches the loop without ACL filtering, so a tool in the
 schema costs a step before execution can reject the call.
 
+Omission is not the only gate, though. A replayed conversation or a non-UI
+client can name a tool the schema never advertised, so `execute_tool` refuses a
+disabled `atlas_sleep` or `atlas_search` outright with an error naming the
+switch that turned it off.
+
 ### Two things the rename could have broken quietly
 
 * **Hook matchers.** `matcher` in `config/hooks.json` is an operator-written
