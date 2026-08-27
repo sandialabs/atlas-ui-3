@@ -35,10 +35,18 @@ print_result() {
 }
 
 cd "$PROJECT_ROOT"
-# shellcheck disable=SC1091
+# Activate the venv when present (local dev); in CI the container's Python is
+# already on PATH. Do not mask a missing atlas import -- fail loudly instead
+# of silently running against the wrong interpreter.
 source .venv/bin/activate 2>/dev/null || true
 
 export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+
+python -c "import atlas.application.chat.agent.steering" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "FAILED: atlas is not importable on this interpreter ($(which python))"
+    exit 1
+fi
 
 # --- Drive the real AgenticLoop with a fake LLM and a steering channel ----
 python - <<'PYEOF'
@@ -180,9 +188,11 @@ asyncio.run(main())
 PYEOF
 print_result $? "AgenticLoop steering injection end-to-end (fake LLM)"
 
-# Final: run backend unit tests for the affected areas.
-python -m pytest atlas/tests/test_agentic_loop.py atlas/tests/test_agent_mode_integration.py -q > /dev/null 2>&1
-print_result $? "Backend unit tests (agentic loop + agent mode integration)"
+# Final: run backend unit tests for the affected areas. Show the tail so a
+# failure is visible rather than swallowed by a redirected stream.
+python -m pytest atlas/tests/test_agentic_loop.py atlas/tests/test_agent_mode_integration.py atlas/tests/test_agent_steering_transport.py -q 2>&1 | tail -15
+pytest_rc=${PIPESTATUS[0]}
+print_result "$pytest_rc" "Backend unit tests (agentic loop + agent mode integration + steering transport)"
 
 # Summary
 echo ""

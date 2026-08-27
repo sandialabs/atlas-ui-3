@@ -21,7 +21,14 @@ be silently lost.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Dict, Optional
+
+# Bound on how many steering messages may be queued for one agent turn. The
+# channel is drained at each iteration boundary, so in normal use this holds at
+# most a couple of messages; the bound just stops a long-running turn from being
+# flooded with queued turns that all land in history and in every subsequent
+# prompt (issue #824 review).
+STEERING_QUEUE_MAXSIZE = 8
 
 
 class SteeringChannel:
@@ -35,7 +42,7 @@ class SteeringChannel:
     """
 
     def __init__(self) -> None:
-        self.queue: "asyncio.Queue[Any]" = asyncio.Queue()
+        self.queue: "asyncio.Queue[Any]" = asyncio.Queue(maxsize=STEERING_QUEUE_MAXSIZE)
         self.active: bool = False
 
     def activate(self) -> None:
@@ -57,3 +64,47 @@ class SteeringChannel:
     def has_pending(self) -> bool:
         """Whether any steering message is waiting to be drained."""
         return not self.queue.empty()
+
+    def drain_leftovers(self) -> list:
+        """Non-blocking drain of whatever the loop never consumed.
+
+        Used by the agent runner after a turn ends: any message still queued
+        arrived too late to be injected (the loop had stopped draining), and is
+        surfaced to the user instead of being silently lost (issue #824).
+        """
+        leftovers = []
+        while True:
+            try:
+                leftovers.append(self.queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return leftovers
+
+
+def should_steer(
+    active_chat_task: Dict[str, Any],
+    frame_conversation_id: Optional[str],
+) -> bool:
+    """Whether a new chat frame should be routed into the running agent's channel.
+
+    Pure and transport-agnostic so the routing decision is unit-testable. The
+    transport keys ``active_chat_task`` with ``task`` (an ``asyncio.Task`` or
+    ``None``), ``steering`` (a ``SteeringChannel`` or ``None``), and
+    ``conversation_id`` (the running turn's conversation id, or ``None``).
+
+    Only steer when a loop is genuinely consuming (task live, channel active)
+    AND the frame is for the same conversation the loop is running in -- so a
+    message typed after the user switched conversations starts a fresh turn in
+    the new conversation instead of being injected into the old one's context
+    and persisted in its transcript (issue #824 review).
+    """
+    task = active_chat_task.get("task")
+    steering = active_chat_task.get("steering")
+    if task is None or steering is None or not steering.active:
+        return False
+    done = getattr(task, "done", None)
+    if done is not None and done():
+        return False
+    if active_chat_task.get("conversation_id") != frame_conversation_id:
+        return False
+    return True

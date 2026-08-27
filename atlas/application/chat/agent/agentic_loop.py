@@ -36,6 +36,12 @@ from .streaming_final_answer import stream_final_answer
 
 logger = logging.getLogger(__name__)
 
+# Cap on a single injected steering message. Steering is a short instruction
+# that re-directs a running agent; an unbounded payload could dominate the
+# prompt and the persisted history. Oversized messages are truncated, not
+# dropped, so the user's intent still reaches the model (issue #824 review).
+_STEERING_MAX_CHARS = 8000
+
 
 def _to_tool_call_dict(tc: Any) -> Dict[str, Any]:
     """Normalize a tool call to a plain OpenAI-format dict.
@@ -245,13 +251,16 @@ class AgenticLoop(AgentLoopProtocol):
                 # channel -- folding the response in as intermediate narration
                 # and continuing lets the model address the new instruction
                 # instead of handing the user a final answer that ignores it.
-                # The loop is not stopped; the next iteration drains the
-                # steering and calls the LLM again.
+                # The loop is not stopped; the next iteration's boundary drain
+                # injects the steering and calls the LLM again. The drain is
+                # deliberately NOT done here: at the step-budget boundary the
+                # ``continue`` exits the loop, and injecting here would persist
+                # a USER turn no model ever saw. Leaving it in the channel lets
+                # the runner surface it as a leftover instead (issue #824).
                 if steering is not None and steering.has_pending():
                     _fold_text_only_as_intermediate(
                         messages, context, llm_response, steps,
                     )
-                    _inject_steering(steering, messages, context, steps)
                     continue
                 final_answer = llm_response.content or ""
                 break
@@ -496,7 +505,9 @@ def _inject_steering(
     ``message_type``, so later turns include it via ``get_messages_for_llm`` --
     it is a genuine user turn, not a steering annotation.
 
-    Returns the count of messages injected so callers can log/observe.
+    Oversized payloads are truncated to ``_STEERING_MAX_CHARS`` so a single
+    queued steer cannot dominate the prompt or the history. Returns the count of
+    messages injected so callers can log/observe.
     """
     if steering is None:
         return 0
@@ -511,6 +522,12 @@ def _inject_steering(
         text = content if isinstance(content, str) else str(content)
         if not text:
             continue
+        if len(text) > _STEERING_MAX_CHARS:
+            text = text[:_STEERING_MAX_CHARS]
+            logger.warning(
+                "Truncated a steering message from %d to %d chars at step %d",
+                len(text), _STEERING_MAX_CHARS, step,
+            )
         messages.append({"role": "user", "content": text})
         context.history.add_message(Message(
             role=MessageRole.USER,

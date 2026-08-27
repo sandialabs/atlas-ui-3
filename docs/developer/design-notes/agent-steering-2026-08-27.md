@@ -70,10 +70,18 @@ separate steering annotation.
 
 ## What is not handled
 
-- Steering is text-only: no mid-run tool/selection changes or rewind.
+- Steering is text-only: a steered frame contributes its `content` to the loop;
+  attachments, model/tool selections, and rewind on the same frame are not
+  carried through (the agent is mid-run with its own tools). The transport
+  routes only the text and acknowledges it with a `steering_queued` event so
+  "queued" is distinguishable from "dropped" at the client.
 - If the step budget is exhausted while a steer is pending, the steer is not
-  consumed (the budget is a hard limit), matching today’s behavior for any
-  unfinished turn.
+  consumed by the loop (the budget is a hard limit). Anything still queued when
+  the loop stops draining is surfaced to the user as a warning telling them to
+  resend, rather than silently dropped or persisted as a USER turn no model saw.
+- The channel is bounded (`STEERING_QUEUE_MAXSIZE`); a flood of steers is
+  rejected with a `steering_queue_full` error frame instead of stacking into
+  history and every later prompt.
 - The pre-existing, unused `agent_user_input` / `agentPendingQuestion`
   frontend path (dead code from a removed control-tool loop) is left
   untouched.

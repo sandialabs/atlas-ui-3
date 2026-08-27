@@ -262,6 +262,29 @@ class AgentModeRunner:
             steps=result.steps
         )
 
+        # Issue #824: any steering message still queued when the loop stopped
+        # draining arrived too late to be injected (the loop had already
+        # exited -- e.g. a steer typed during the final-answer tail or after
+        # the step budget ran out). The frontend has already shown the user's
+        # message, so surface it explicitly rather than silently dropping it.
+        if steering is not None:
+            leftovers = steering.drain_leftovers()
+            if leftovers:
+                logger.warning(
+                    "Agent turn ended with %d undrained steering message(s); "
+                    "notifying the user to resend", len(leftovers),
+                )
+                try:
+                    await self.event_publisher.publish_warning(
+                        message=(
+                            "Your message arrived as the agent was finishing "
+                            "its turn and was not applied to this run. Please "
+                            "send it again to start a new turn."
+                        ),
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug("Failed to publish steering-leftover warning: %s", exc)
+
         return event_notifier.create_chat_response(result.final_answer)
 
     def _close_turn(
