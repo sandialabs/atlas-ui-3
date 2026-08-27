@@ -120,7 +120,8 @@
     "compliance_level": "Public"
   },
   "perplexity": {
-    "command": ["npx", "-yq", "@perplexity-ai/mcp-server@1.2.0"],
+    "enabled": false,
+    "command": ["npx", "-yq", "--ignore-scripts", "@perplexity-ai/mcp-server@1.2.0"],
     "transport": "stdio",
     "env": {
       "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
@@ -128,8 +129,8 @@
       "HOME": "${HOME}"
     },
     "groups": ["users"],
-    "description": "Official Perplexity MCP server (@perplexity-ai/mcp-server, pinned to 1.2.0) exposing real-time web search, ask, research, and reasoning tools through the Perplexity API. Launched as a stdio subprocess via npx; requires Node.js on PATH and PERPLEXITY_API_KEY in the environment. Tools: perplexity_search, perplexity_ask, perplexity_research, perplexity_reason.",
-    "short_description": "Perplexity web search & research",
+    "description": "Official Perplexity MCP server (pinned @perplexity-ai/mcp-server@1.2.0) exposing perplexity_search, perplexity_ask, perplexity_research, and perplexity_reason via the Perplexity API. Queries are sent to Perplexity (external API / data egress). Shipped DISABLED; set enabled:true to opt in. Requires Node.js on PATH and PERPLEXITY_API_KEY. See docs/admin/mcp-servers.md.",
+    "short_description": "Perplexity web search & research (opt-in)",
     "author": "Perplexity AI",
     "compliance_level": "Public"
   }

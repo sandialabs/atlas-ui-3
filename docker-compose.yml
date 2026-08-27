@@ -78,9 +78,12 @@ services:
       - OPENROUTER_API_KEY=sk-or
       - CEREBRAS_API_KEY=your_cerebras_api_key_here
       - GROQ_API_KEY=your-groq_api_key_here
-      # Perplexity MCP server (official @perplexity-ai/mcp-server). Required for
-      # the bundled "perplexity" MCP server in atlas/config/mcp.json to expose its tools.
-      - PERPLEXITY_API_KEY=your_perplexity_api_key_here
+      # Perplexity MCP server (bundled, disabled by default in atlas/config/mcp.json).
+      # Left commented so the container does NOT always set a placeholder key (which
+      # would advertise Perplexity tools that then fail at call time). To enable:
+      # uncomment with a real key, or pass PERPLEXITY_API_KEY via the host env / an
+      # env_file. When unset, ATLAS skips the server gracefully. See .env.example.
+      # - PERPLEXITY_API_KEY=your_perplexity_api_key_here
       
       # Banner system configuration
       - BANNER_ENABLED=true

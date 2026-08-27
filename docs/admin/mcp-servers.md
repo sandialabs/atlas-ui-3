@@ -224,9 +224,11 @@ The official Perplexity MCP server ([`@perplexity-ai/mcp-server`](https://www.np
 - `perplexity_research` — deep, comprehensive research (Agent API `high` preset; can take minutes and streams progress).
 - `perplexity_reason` — advanced reasoning and analysis (Agent API `medium` preset).
 
+**Disabled by default (opt-in).** The bundled entry ships with `enabled: false` because enabling it means the LLM can forward user query text (and any context it passes the tool) to Perplexity's external API — a data-egress behavior that should be a deliberate, per-deployment decision, not a default. To turn it on, set `enabled: true` in a `config/mcp.json` override and ensure `PERPLEXITY_API_KEY` is present. Until enabled, the server is not loaded at all (no subprocess, no advertised tools).
+
 **Prerequisites** (the server is skipped if any are missing):
 
-- **Node.js + `npx` on `PATH`.** The server is launched with `npx -yq @perplexity-ai/mcp-server@1.2.0`. `-yq` auto-installs the package quietly so `npx` install banners do not corrupt the stdio JSON-RPC stream (the official README recommends this for strict MCP clients). The version is **pinned** so a bundled default resolves a known-good server rather than whatever is currently published; bump the pin deliberately to pick up upstream releases.
+- **Node.js + `npx` on `PATH`.** The server is launched with `npx -yq --ignore-scripts @perplexity-ai/mcp-server@1.2.0`. `-yq` auto-installs the package quietly so `npx` install banners do not corrupt the stdio JSON-RPC stream (the official README recommends this for strict MCP clients). `--ignore-scripts` skips npm install lifecycle scripts (supply-chain hardening; verified to work with this package). The version is **pinned** so a bundled default resolves a known-good server rather than whatever is currently published; bump the pin deliberately to pick up upstream releases.
 - **`PERPLEXITY_API_KEY`** set in the backend environment (e.g. in `.env`). The config resolves it with `${PERPLEXITY_API_KEY}` substitution; if the variable is unset the server is skipped with a clear log line rather than spawned half-initialized.
 - **`PATH` and `HOME`** set in the backend environment. They are passed to the subprocess via `${PATH}`/`${HOME}` substitution so `npx`/`node` can resolve and use the npm cache. Both are present in virtually all service/unit contexts; if either is unset the server is skipped (logged) rather than spawned with a broken environment.
 
@@ -235,7 +237,8 @@ The official Perplexity MCP server ([`@perplexity-ai/mcp-server`](https://www.np
 ```json
 {
   "perplexity": {
-    "command": ["npx", "-yq", "@perplexity-ai/mcp-server@1.2.0"],
+    "enabled": false,
+    "command": ["npx", "-yq", "--ignore-scripts", "@perplexity-ai/mcp-server@1.2.0"],
     "transport": "stdio",
     "env": {
       "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
@@ -250,7 +253,9 @@ The official Perplexity MCP server ([`@perplexity-ai/mcp-server`](https://www.np
 
 `PATH` and `HOME` are passed via substitution so the `npx` subprocess can resolve `node`, locate its npm cache, and run without inheriting the whole backend environment. Optional Perplexity env vars (`PERPLEXITY_TIMEOUT_MS`, `PERPLEXITY_BASE_URL`, `PERPLEXITY_LOG_LEVEL`, `PERPLEXITY_PROXY` / `HTTPS_PROXY` for corporate egress) can be added to the `env` block or to a `config/mcp.json` override.
 
-**Compliance level:** `Public` (the server returns publicly accessible web data). Because compliance levels use an explicit allowlist, only `Public`-level sessions can combine with it; an `Internal`/`SOC2`/`HIPAA` session will not see the server. Reclassify to `External` in your local override if your policy treats third-party SaaS APIs as `External`.
+**Compliance level:** `Public` — settled here, not left open. The server returns publicly accessible web data, so `Public` is the correct classification; the explicit-allowlist model then means only `Public`-level sessions can combine with it (`Internal`/`SOC2`/`HIPAA` sessions will not see it). The separate data-egress concern (query text leaves for Perplexity) is handled by the `enabled: false` default, not by the compliance level. Reclassify to `External` in a local override only if your policy treats the Perplexity SaaS endpoint itself as an `External` resource.
+
+**`perplexity_research` timeout:** this tool can run for minutes; the ATLAS client call timeout (`MCP_CALL_TIMEOUT`, default 120s) will abort it client-side while the upstream Perplexity request stays open. Deployments that enable Perplexity should raise `MCP_CALL_TIMEOUT` (and/or set `PERPLEXITY_TIMEOUT_MS` in the `env` block below the client timeout so the server returns a clean error first).
 
 **Notes for restricted environments:** `npx -yq` fetches the package from the npm registry at first run. Air-gapped or egress-restricted deployments should pre-install the package (`npm i -g @perplexity-ai/mcp-server@1.2.0`) and either keep `npx` on `PATH` or replace the `command` with the resolved binary path in a `config/mcp.json` override.
 

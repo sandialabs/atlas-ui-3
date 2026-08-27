@@ -117,6 +117,11 @@ def test_docker_compose_has_required_env_vars():
         'VITE_FEATURE_POWERED_BY_ATLAS',  # Build-time arg, not runtime env var in docker-compose
         'VITE_FEATURE_ANIMATED_LOGO',  # Build-time arg, not runtime env var in docker-compose
         'VITE_FEATURE_RAG_CITATIONS',  # Build-time arg, not runtime env var in docker-compose
+        # Perplexity MCP server key is intentionally commented out in
+        # docker-compose.yml (see comment there) so a placeholder is never
+        # forced into the container; operators pass a real key via host env /
+        # env_file. Documented in .env.example.
+        'PERPLEXITY_API_KEY',
         # Note: The following are in .env.example as commented out, not as active vars,
         # so they won't appear in env_example_vars and don't need to be listed here:
         # - ATLAS_HOST (Docker-specific, set to 0.0.0.0 for container networking)
