@@ -45,6 +45,7 @@ def _search_config_paths(config_manager, filename):
             project_root / filename,
         ]
 
+
 def _atlas_tools_info(*, sleep_enabled: bool, search_enabled: bool) -> dict:
     """Build the consolidated built-in ``atlas`` server entry for the tools panel.
 

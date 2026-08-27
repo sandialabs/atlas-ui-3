@@ -21,32 +21,8 @@ from .atlas_server import (
     is_atlas_tool,
     normalize_tool_name,
 )
-from .sleep_tool import (
-    sleep_tool_enabled,
-)
+from .sleep_tool import sleep_tool_enabled
 
-
-def _atlas_tool_flags() -> tuple:
-    """(sleep_enabled, search_enabled) for the built-in ``atlas`` server.
-
-    Read defensively: discovery runs in contexts (tests, CLI) where the config
-    manager may not be wired up, and a missing setting must not take the whole
-    schema build down with it.
-    """
-    try:
-        settings = _client().config_manager.app_settings
-    except Exception:
-        logger.warning("Could not read app settings; omitting gated atlas tools")
-        return False, False
-    try:
-        sleep_enabled = sleep_tool_enabled(settings)
-    except Exception:
-        sleep_enabled = False
-    search_enabled = bool(
-        getattr(settings, "feature_rag_enabled", False)
-        and getattr(settings, "feature_atlas_rag_tools_enabled", False)
-    )
-    return sleep_enabled, search_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +97,29 @@ def _client():
     from atlas.modules.mcp_tools import client
     return client
 
+
+
+def _atlas_tool_flags() -> tuple:
+    """(sleep_enabled, search_enabled) for the built-in ``atlas`` server.
+
+    Read defensively: discovery runs in contexts (tests, CLI) where the config
+    manager may not be wired up, and a missing setting must not take the whole
+    schema build down with it.
+    """
+    try:
+        settings = _client().config_manager.app_settings
+    except Exception:
+        logger.warning("Could not read app settings; omitting gated atlas tools")
+        return False, False
+    try:
+        sleep_enabled = sleep_tool_enabled(settings)
+    except Exception:
+        sleep_enabled = False
+    search_enabled = bool(
+        getattr(settings, "feature_rag_enabled", False)
+        and getattr(settings, "feature_atlas_rag_tools_enabled", False)
+    )
+    return sleep_enabled, search_enabled
 
 
 def _build_tool_index(available_tools) -> Dict[str, Dict[str, Any]]:
