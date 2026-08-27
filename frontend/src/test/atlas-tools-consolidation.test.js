@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { renderHook, act } from '@testing-library/react'
 import { useSelections } from '../hooks/chat/useSelections'
 import {
   CANVAS_TOOL,
@@ -69,6 +69,19 @@ describe('useSelections built-in tool migration', () => {
     const { result } = renderHook(() => useSelections())
 
     expect([...result.current.selectedTools]).toEqual([CANVAS_TOOL])
+  })
+
+  it('converges storage onto the new names when a selection is written', () => {
+    localStorageMock._seed('chatui-selected-tools', ['canvas_canvas'])
+
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.addTools(['math_add'])
+    })
+
+    expect(JSON.parse(localStorageMock.getItem('chatui-selected-tools')))
+      .toEqual([CANVAS_TOOL, 'math_add'])
   })
 
   it('upgrades a selection persisted before the consolidation', () => {

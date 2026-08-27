@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { usePersistentState } from './usePersistentState'
-import { CANVAS_TOOL, migrateToolNames } from '../../constants/atlasTools'
+import { CANVAS_TOOL, migrateToolName, migrateToolNames } from '../../constants/atlasTools'
 
 const toSet = arr => new Set(arr)
 const toArray = set => Array.from(set)
@@ -47,16 +47,19 @@ export function useSelections() {
     setUpdater(toArray(next))
   }
 
-  const toggleTool = useCallback(k => toggleSetItem(selectedTools, setToolsRaw, k), [selectedTools, setToolsRaw])
+  const toggleTool = useCallback(k => toggleSetItem(selectedTools, setToolsRaw, migrateToolName(k)), [selectedTools, setToolsRaw])
   const togglePrompt = useCallback(k => toggleSetItem(selectedPrompts, setPromptsRaw, k), [selectedPrompts, setPromptsRaw])
   const toggleDataSource = useCallback(k => toggleSetItem(selectedDataSources, setDataSourcesRaw, k), [selectedDataSources, setDataSourcesRaw])
 
   // Batch operations (avoid stale snapshot when toggling many items sequentially)
+  // Both operate on the migrated form of what is persisted, so a write also
+  // converges storage onto the post-#855 names instead of leaving a legacy
+  // name sitting beside its replacement forever.
   const addTools = useCallback(keys => {
     if (!Array.isArray(keys) || keys.length === 0) return
     setToolsRaw(prev => {
-      const next = new Set(prev)
-      keys.forEach(k => next.add(k))
+      const next = new Set(migrateToolNames(prev))
+      migrateToolNames(keys).forEach(k => next.add(k))
       return toArray(next)
     })
   }, [setToolsRaw])
@@ -64,8 +67,8 @@ export function useSelections() {
   const removeTools = useCallback(keys => {
     if (!Array.isArray(keys) || keys.length === 0) return
     setToolsRaw(prev => {
-      const next = new Set(prev)
-      keys.forEach(k => next.delete(k))
+      const next = new Set(migrateToolNames(prev))
+      migrateToolNames(keys).forEach(k => next.delete(k))
       return toArray(next)
     })
   }, [setToolsRaw])
