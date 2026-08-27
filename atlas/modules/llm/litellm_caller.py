@@ -1301,6 +1301,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             message = response.choices[0].message
 
             tool_calls = getattr(message, 'tool_calls', None)
+            dropped_tool_calls: List[str] = []
             # Same guard as the streaming path: a tool call whose arguments are
             # not parseable JSON (a model that hit its output limit mid-call)
             # must not be executed or written into the conversation, or every
@@ -1311,11 +1312,12 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     tool_calls, truncated=finish_reason == "length",
                 )
                 if malformed:
-                    self._handle_malformed_tool_calls(
+                    dropped_tool_calls = self._handle_malformed_tool_calls(
                         malformed,
                         kept=tool_calls,
                         finish_reason=finish_reason,
                         model_name=model_name,
+                        user_email=user_email,
                     )
                 tool_calls = tool_calls or None
             tool_count = len(tool_calls) if tool_calls else 0
@@ -1324,7 +1326,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return LLMResponse(
                 content=getattr(message, 'content', None) or "",
                 tool_calls=tool_calls,
-                model_used=model_name
+                model_used=model_name,
+                dropped_tool_calls=dropped_tool_calls or None,
             )
 
         except HookBlockedError:

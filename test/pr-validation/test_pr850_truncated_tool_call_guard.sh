@@ -381,9 +381,160 @@ print('classified as:', error_type_for(cls))
 print_result $? "classify_llm_error and _raise_llm_domain_error preserve the error"
 
 # ==========================================
-# Check 9: unit tests
+# Check 9: brace-only damage is repaired, not rejected
 # ==========================================
-print_header "Check 9: unit tests"
+print_header "Check 9: missing braces are repaired in place and written back"
+
+python3 -c "
+import asyncio, json
+$HARNESS
+
+async def main():
+    c = caller()
+    # Some models emit arguments without the enclosing braces. That shape was
+    # repaired and executed long before the guard existed; failing the turn over
+    # it would be a regression.
+    _, final = await drain(c, [
+        chunk(tool_id='call-1', name='search', args='\"q\": \"hi\"'),
+        chunk(finish_reason='tool_calls'),
+    ])
+    assert final.tool_calls, 'a repairable call was dropped'
+    args = final.tool_calls[0].function.arguments
+    # Written back, so the history copy is parseable on every later request.
+    assert json.loads(args) == {'q': 'hi'}, args
+    print('repaired to:', args)
+
+asyncio.run(main())
+"
+print_result $? "brace-only damage is repaired and the repair reaches history"
+
+# ==========================================
+# Check 10: a truncated call cut off before its first argument
+# ==========================================
+print_header "Check 10: empty arguments on a truncated response are malformed"
+
+python3 -c "
+import asyncio
+$HARNESS
+from atlas.domain.errors import LLMMalformedToolCallError
+
+async def main():
+    c = caller()
+    # Cut off before any argument delta: parses fine as 'no arguments' and would
+    # execute with {}, silently running the wrong action for an all-optional tool.
+    try:
+        await drain(c, [
+            chunk(tool_id='call-1', name='delete_all', args=''),
+            chunk(finish_reason='length'),
+        ])
+    except LLMMalformedToolCallError:
+        pass
+    else:
+        raise AssertionError('a call truncated before its arguments was executed')
+
+    # The same call in a response that completed is a legitimate no-arg call.
+    _, final = await drain(c, [
+        chunk(tool_id='call-1', name='now', args=''),
+        chunk(finish_reason='tool_calls'),
+    ])
+    assert final.tool_calls and final.tool_calls[0].id == 'call-1'
+    print('no-arg call honoured when nothing was truncated')
+
+asyncio.run(main())
+"
+print_result $? "empty arguments are judged by finish_reason, not accepted blindly"
+
+# ==========================================
+# Check 11: a partial drop is announced and counted
+# ==========================================
+print_header "Check 11: a dropped sibling call is not invisible"
+
+python3 -c "
+import asyncio
+$HARNESS
+
+async def main():
+    c = caller()
+    _, final = await drain(c, [
+        chunk(index=0, tool_id='ok', name='search', args='{\"q\": \"hi\"}'),
+        chunk(index=1, tool_id='bad', name='read_file', args=TRUNCATED),
+        chunk(finish_reason='length'),
+    ])
+    assert final.dropped_tool_calls == ['read_file'], final.dropped_tool_calls
+    print('reported dropped:', final.dropped_tool_calls)
+
+asyncio.run(main())
+"
+print_result $? "the response reports the dropped call so consumers can warn"
+
+# ==========================================
+# Check 12: a failed turn is never saved without an assistant reply
+# ==========================================
+print_header "Check 12: streamed narration survives the failure"
+
+python3 -c "
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+from atlas.domain.errors import LLMMalformedToolCallError
+from atlas.domain.messages.models import Message, MessageRole
+from atlas.domain.sessions.models import Session
+
+class StreamThenFail:
+    async def stream_with_tools(self, model, messages, tools_schema, tool_choice='auto',
+                                temperature=0.7, user_email=None):
+        yield 'Let me read that file for you.'
+        raise LLMMalformedToolCallError('The model ran out of room.', tool_names=['read_file'])
+
+    async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+        yield 'unused'
+
+async def main():
+    from atlas.application.chat.modes.tools import ToolsModeRunner
+    tm = MagicMock()
+    tm.get_tools_schema = MagicMock(return_value=[{'type': 'function'}])
+    session = MagicMock()
+    session.history = MagicMock()
+    session.session_id = 's1'
+    session.files = {}
+    runner = ToolsModeRunner(llm=StreamThenFail(), tool_manager=tm,
+                             event_publisher=AsyncMock(), config_manager=None)
+    with patch('atlas.application.chat.modes.tools.tool_executor') as te:
+        te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(session=session, model='gemma',
+                                   messages=[{'role': 'user', 'content': 'read it'}],
+                                   selected_tools=['read_file'])
+    saved = [c.args[0].content for c in session.history.add_message.call_args_list]
+    assert any('Let me read that file' in t for t in saved), saved
+    print('tools mode persisted the narration')
+
+    # Agent mode closes the turn instead of leaving it with no assistant reply.
+    from atlas.application.chat.agent.factory import AgentLoopFactory
+    from atlas.application.chat.modes.agent import AgentModeRunner, MALFORMED_TOOL_CALL_TURN_CONTENT
+    s2 = Session()
+    s2.history.add_message(Message(role=MessageRole.USER, content='read it'))
+    conn = MagicMock(); conn.send_json = AsyncMock()
+    runner2 = AgentModeRunner(
+        agent_loop_factory=AgentLoopFactory(llm=StreamThenFail(), tool_manager=MagicMock(),
+                                            connection=conn),
+        event_publisher=AsyncMock())
+    try:
+        await runner2.run(session=s2, model='gemma',
+                          messages=[{'role': 'user', 'content': 'read it'}],
+                          selected_tools=['read_file'], selected_data_sources=None, max_steps=3)
+    except LLMMalformedToolCallError:
+        pass
+    assistant = [m for m in s2.history.messages if m.role == MessageRole.ASSISTANT]
+    assert assistant and assistant[-1].content == MALFORMED_TOOL_CALL_TURN_CONTENT, assistant
+    print('agent mode closed the turn')
+
+asyncio.run(main())
+"
+print_result $? "neither mode saves the turn without an assistant reply"
+
+# ==========================================
+# Check 13: unit tests
+# ==========================================
+print_header "Check 13: unit tests"
 
 cd "$ATLAS_DIR" || exit 1
 python3 -m pytest tests/test_malformed_tool_call_guard.py \

@@ -14,6 +14,7 @@ from atlas.core.capabilities import create_download_url
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.llm import LLMResponse
+from atlas.modules.llm.models import repair_structural_json
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -24,38 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
-    """Attempt to repair *structurally* incomplete JSON from tool arguments.
+    """Repair structurally incomplete tool arguments (missing braces only).
 
-    Scope is deliberately narrow: balance missing braces, and nothing else. A
-    repair may complete the shape of the object, never the content of a value.
-
-    The primary defence against a truncated tool call is upstream, in the LLM
-    layer: ``partition_tool_calls_by_json_validity`` drops any call whose
-    arguments do not parse, so a call cut off mid-argument now fails the turn
-    with ``LLMMalformedToolCallError`` instead of reaching this function.
-
-    This function used to also close an open string value -- ``{"e": "355/113``
-    became ``{"e": "355/113"}`` -- which is safe only when the cut-off value
-    happens to still be meaningful. For the failure that motivated the guard it
-    was not: the production fragment
-    ``{"filename": "1787784579_..._topic`` repaired into a *different, valid
-    looking* filename, and the tool would have executed confidently against the
-    wrong file. Guessing at a value the model never finished sending trades a
-    visible error for a silent wrong answer, which is the worse of the two.
+    Delegates to ``repair_structural_json``, which is the single definition of
+    what a repair may do: complete the shape of an object, never the content of
+    a value. The LLM layer applies the same repair while accumulating a
+    response, so a call reaching the executor has normally been repaired
+    already; this remains for arguments that arrive from elsewhere (an
+    approval-time edit, a replayed history row).
     """
-    s = raw.strip()
-    # Add missing braces
-    if not s.startswith("{"):
-        s = "{" + s
-    if not s.endswith("}"):
-        s = s + "}"
-    try:
-        result = json.loads(s)
-        if isinstance(result, dict):
-            return result
-    except Exception:
-        pass
-    return None
+    return repair_structural_json(raw)
 
 
 # Type hint for update callback

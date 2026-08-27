@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -19,6 +20,14 @@ from ..events.agent_event_relay import AgentEventRelay
 from ..utilities import event_notifier
 from ..utilities.agent_digest import build_tool_digest
 from ..utilities.interrupted_turn import INTERRUPTED_TURN_CONTENT
+
+# Closing text for a turn that ended because the model's tool call could not be
+# parsed. Mirrors INTERRUPTED_TURN_CONTENT: the turn must not be saved without an
+# assistant reply, and the next turn should see why it stopped.
+MALFORMED_TOOL_CALL_TURN_CONTENT = (
+    "(This turn ended early: the model's tool call was cut off before it "
+    "finished and could not be run.)"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +190,19 @@ class AgentModeRunner:
                 turn_start_index,
                 content=INTERRUPTED_TURN_CONTENT,
                 metadata={"agent_mode": True, "interrupted": True},
+            )
+            await self._publish_completion(steps=0)
+            raise
+        except LLMMalformedToolCallError:
+            # Same contract as the interrupted-turn path above: the loop raised
+            # before it could append anything for this step, so without a
+            # closing message the turn is saved with no assistant reply and the
+            # next turn sees no trace of it.
+            self._close_turn(
+                session,
+                turn_start_index,
+                content=MALFORMED_TOOL_CALL_TURN_CONTENT,
+                metadata={"agent_mode": True, "incomplete": True},
             )
             await self._publish_completion(steps=0)
             raise

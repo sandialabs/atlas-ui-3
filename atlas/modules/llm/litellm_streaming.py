@@ -27,6 +27,12 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# The OpenAI-compatible finish_reason vocabulary. Anything else is provider text
+# and is reported as "other" rather than interpolated into a log line or a span.
+KNOWN_FINISH_REASONS = frozenset(
+    {"stop", "length", "tool_calls", "function_call", "content_filter"}
+)
+
 
 class LiteLLMStreamingMixin:
     """Mixin providing streaming LLM methods for LiteLLMCaller.
@@ -151,7 +157,8 @@ class LiteLLMStreamingMixin:
         finish_reason: Optional[str],
         model_name: str,
         span: Any = None,
-    ) -> None:
+        user_email: Optional[str] = None,
+    ) -> List[str]:
         """Log dropped tool calls and fail the turn when none are left.
 
         Dropping is always right -- unparseable arguments cannot be executed
@@ -160,6 +167,9 @@ class LiteLLMStreamingMixin:
         call survives, the model gets those results and can reissue the rest.
         If nothing survives, raise, so the user is told the turn failed instead
         of silently receiving a reply that skipped the work it announced.
+
+        Returns the dropped names so the caller can put them on the response and
+        the consumers can warn about a partial drop.
         """
         # The names come from model output, so they reach the log only after
         # sanitizing: a name carrying a newline could otherwise forge a log line.
@@ -168,22 +178,30 @@ class LiteLLMStreamingMixin:
             for tc in malformed
         ]
         truncated = finish_reason == "length"
+        # Allow-listed rather than interpolated: finish_reason is provider text.
+        safe_reason = finish_reason if finish_reason in KNOWN_FINISH_REASONS else "other"
         logger.error(
             "Dropping %d malformed tool call(s) from %s (finish_reason=%s, names=%s); "
             "%d well-formed call(s) kept",
-            len(malformed), model_name, finish_reason, names, len(kept),
+            len(malformed), model_name, safe_reason, names, len(kept),
         )
         set_attrs(span, {
             "malformed_tool_calls": len(malformed),
-            "finish_reason": finish_reason or "",
+            "finish_reason": safe_reason,
         })
+        log_metric(
+            "malformed_tool_call", user_email, model=model_name,
+            dropped=len(malformed), kept=len(kept), finish_reason=safe_reason,
+        )
         if kept:
-            return
+            return names
         if truncated:
             message = (
                 "The model ran out of room while writing its tool call, so the "
-                "request was cut off mid-argument. Please try again -- starting a "
-                "new conversation or asking for less at once usually clears it."
+                "request was cut off mid-argument. Please try again -- asking for "
+                "one thing at a time usually clears it. (Starting a new "
+                "conversation shortens the input, which does not help here: the "
+                "limit was reached on the way out, not on the way in.)"
             )
         else:
             message = (
@@ -260,6 +278,7 @@ class LiteLLMStreamingMixin:
                 accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
                 chunk_count = 0
                 finish_reason: Optional[str] = None
+                dropped_tool_calls: List[str] = []
 
                 async for chunk in response:
                     choice = chunk.choices[0] if chunk.choices else None
@@ -337,12 +356,13 @@ class LiteLLMStreamingMixin:
                         tool_calls_list, truncated=finish_reason == "length",
                     )
                     if malformed:
-                        self._handle_malformed_tool_calls(
+                        dropped_tool_calls = self._handle_malformed_tool_calls(
                             malformed,
                             kept=tool_calls_list,
                             finish_reason=finish_reason,
                             model_name=model_name,
                             span=span,
+                            user_email=user_email,
                         )
                     tool_calls_list = tool_calls_list or None
 
@@ -369,6 +389,7 @@ class LiteLLMStreamingMixin:
                     content=accumulated_content,
                     tool_calls=tool_calls_list,
                     model_used=model_name,
+                    dropped_tool_calls=dropped_tool_calls or None,
                 )
 
             except Exception as exc:

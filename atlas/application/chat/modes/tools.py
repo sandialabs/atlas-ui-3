@@ -24,6 +24,15 @@ from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
 
+
+def _dropped_call_warning(names) -> str:
+    """User-facing note that a tool call was discarded but the turn continued."""
+    listed = ", ".join(f"'{name}'" for name in names)
+    return (
+        f"The model's call to {listed} was cut off and could not be run, so it was "
+        "skipped. The other tool calls in this step ran normally."
+    )
+
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -285,6 +294,16 @@ class ToolsModeRunner:
                 streaming_error,
             )
             logger.error("Streaming tools classified error: %s", log_msg)
+            if accumulated_content:
+                # The user watched this text stream in. Returning without
+                # persisting it saves the turn with no assistant reply at all,
+                # so the narration vanishes on reload while the error frame --
+                # which is transient UI -- is all that was ever shown.
+                session.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=accumulated_content,
+                    metadata={"incomplete": True, "error_type": error_handler.error_type_for(error_class)},
+                ))
             await self.event_publisher.send_json({
                 "type": "error",
                 "message": user_msg,
@@ -309,6 +328,14 @@ class ToolsModeRunner:
             session.history.add_message(assistant_message)
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(content)
+
+        # A dropped-but-not-fatal call is otherwise invisible: the turn keeps
+        # going with the calls that parsed, and neither the user nor the model
+        # is told that one was discarded.
+        if final_llm_response and final_llm_response.dropped_tool_calls:
+            await self.event_publisher.publish_warning(
+                message=_dropped_call_warning(final_llm_response.dropped_tool_calls),
+            )
 
         # Has tool calls: signal end of initial stream if we sent tokens
         if accumulated_content:

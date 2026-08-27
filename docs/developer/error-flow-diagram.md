@@ -243,11 +243,31 @@ been streamed, on the reasoning that partial output beats none. This error is
 exempt: the model announced work it could not perform, and reporting the
 narration as a finished answer would hide the gap.
 
-The executor's `_try_repair_json()` deliberately does **not** overlap with this
-guard. It balances missing braces and nothing more — a repair may complete the
-shape of an object, never the content of a value. Closing an open string turned
-the production fragment into a different, valid-looking filename that the tool
-would have executed against.
+Before a call is declared malformed it gets one structural repair:
+`repair_structural_json()` balances missing braces and nothing more. Some models
+emit `"q": "hi"` rather than `{"q": "hi"}` — a well-formed intent in a sloppy
+envelope, accepted long before this guard existed — and the repaired string is
+written **back onto the call**, which is what keeps the history copy parseable
+on every later request. Repairing downstream in the executor never did that.
+
+A repair may complete the shape of an object, never the content of a value.
+Closing an open string turned the production fragment into a different,
+valid-looking filename that the tool would have executed against confidently, so
+that branch is gone. `_try_repair_json()` in the executor now delegates to the
+same function, so the two layers cannot drift apart.
+
+When some calls are dropped but others survive, the turn continues and
+`LLMResponse.dropped_tool_calls` carries the discarded names. Both mode runners
+publish a `{"type": "warning"}` frame from it and a `malformed_tool_call` metric
+records the drop — otherwise a partial drop is invisible, and the user sees an
+answer built on less work than the model intended.
+
+Neither mode saves a failed turn empty. `ToolsModeRunner` persists the narration
+it already streamed (flagged `incomplete`) before returning the error, and
+`AgentModeRunner` closes the turn with `MALFORMED_TOOL_CALL_TURN_CONTENT`, the
+same contract the interrupted-turn path follows: text the user watched stream in
+must not vanish on reload, and the turn must not be saved with no assistant
+reply.
 
 ## Key Points
 

@@ -15,6 +15,7 @@ and fails the turn with an accurate, retryable message when nothing usable is
 left.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,6 +26,8 @@ from atlas.application.chat.utilities.error_handler import (
     error_type_for,
 )
 from atlas.domain.errors import LLMMalformedToolCallError, LLMServiceError
+from atlas.domain.messages.models import Message, MessageRole
+from atlas.interfaces.llm import LLMResponse
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 from atlas.modules.llm.models import partition_tool_calls_by_json_validity
 
@@ -119,6 +122,9 @@ class TestStreamingGuard:
         # bad-request message this failure is transient.
         assert "try again" in info.value.message.lower()
         assert "cut off" in info.value.message.lower()
+        # The advice must fit an *output* limit: shortening the input cannot
+        # relieve one, so "one thing at a time" leads.
+        assert "one thing at a time" in info.value.message.lower()
 
     async def test_message_does_not_blame_the_token_limit_without_evidence(self):
         """Bad JSON with a normal finish_reason is not a truncation."""
@@ -443,3 +449,234 @@ class TestRepairDoesNotInventValues:
 
         assert _try_repair_json('"q": "hi"') == {"q": "hi"}
         assert _try_repair_json('{"q": "hi"') == {"q": "hi"}
+
+
+@pytest.mark.asyncio
+class TestNonStreamingReturnShape:
+    """The all-malformed branch of `call_with_tools` and the shape it returns."""
+
+    async def test_tool_calls_is_none_not_empty_when_all_are_dropped(self):
+        """An empty list is not the same as no tool calls.
+
+        `has_tool_calls()` is false either way, but an empty `tool_calls` array
+        is a shape providers reject on the follow-up request -- the loop strips
+        it defensively for exactly that reason. Normalizing to None at the source
+        means there is nothing to strip.
+        """
+        caller = _caller()
+        # Content alongside the bad call, so the guard does not raise and the
+        # return shape is observable.
+        message = SimpleNamespace(
+            content="Let me look that up.",
+            tool_calls=[SimpleNamespace(
+                id="bad", type="function",
+                function=SimpleNamespace(name="read_file", arguments=TRUNCATED_ARGS),
+            )],
+        )
+        caller._acompletion_with_retry = AsyncMock(return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="length")],
+        ))
+
+        with pytest.raises(LLMMalformedToolCallError):
+            await caller.call_with_tools(
+                "gemma", [{"role": "user", "content": "hi"}], [{"type": "function"}],
+            )
+
+    async def test_surviving_call_reports_the_dropped_sibling(self):
+        caller = _caller()
+        good = SimpleNamespace(
+            id="ok", type="function",
+            function=SimpleNamespace(name="search", arguments='{"q": "hi"}'),
+        )
+        bad = SimpleNamespace(
+            id="bad", type="function",
+            function=SimpleNamespace(name="read_file", arguments=TRUNCATED_ARGS),
+        )
+        message = SimpleNamespace(content=None, tool_calls=[good, bad])
+        caller._acompletion_with_retry = AsyncMock(return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="length")],
+        ))
+
+        response = await caller.call_with_tools(
+            "gemma", [{"role": "user", "content": "hi"}], [{"type": "function"}],
+        )
+
+        assert [tc.id for tc in response.tool_calls] == ["ok"]
+        assert response.dropped_tool_calls == ["read_file"]
+
+
+class TestBraceOnlyDamageIsRepairedNotRejected:
+    """Missing braces is a sloppy envelope, not a truncation.
+
+    Some models emit `"q": "hi"` rather than `{"q": "hi"}`. That shape was
+    repaired and executed long before this guard existed, so failing the turn
+    over it would be a regression. The repair happens here, at accumulation, and
+    the repaired string is written back -- which is what keeps history parseable,
+    something repairing downstream in the executor never did.
+    """
+
+    def test_missing_braces_are_repaired_in_place(self):
+        sloppy = SimpleNamespace(function=SimpleNamespace(name="search", arguments='"q": "hi"'))
+
+        valid, malformed = partition_tool_calls_by_json_validity([sloppy])
+
+        assert (valid, malformed) == ([sloppy], [])
+        assert json.loads(sloppy.function.arguments) == {"q": "hi"}
+
+    def test_repair_is_written_back_for_dict_shaped_calls(self):
+        sloppy = {"id": "1", "function": {"name": "search", "arguments": '{"q": "hi"'}}
+
+        valid, malformed = partition_tool_calls_by_json_validity([sloppy])
+
+        assert (valid, malformed) == ([sloppy], [])
+        assert json.loads(sloppy["function"]["arguments"]) == {"q": "hi"}
+
+    def test_a_cut_off_value_is_still_rejected(self):
+        """The repair must not rescue a truncation by inventing the rest."""
+        cut_off = SimpleNamespace(
+            function=SimpleNamespace(name="read_file", arguments=TRUNCATED_ARGS),
+        )
+
+        valid, malformed = partition_tool_calls_by_json_validity([cut_off])
+
+        assert (valid, malformed) == ([], [cut_off])
+
+    def test_executor_and_guard_share_one_repair_definition(self):
+        """One policy, one implementation -- the two layers cannot drift apart."""
+        from atlas.application.chat.utilities.tool_executor import _try_repair_json
+
+        assert _try_repair_json('"q": "hi"') == {"q": "hi"}
+        assert _try_repair_json(TRUNCATED_ARGS) is None
+
+
+@pytest.mark.asyncio
+class TestPartialDropIsAnnounced:
+    """A dropped-but-not-fatal call must not be invisible.
+
+    The turn keeps going with the calls that parsed, so without an explicit
+    warning neither the user nor the model learns that one was discarded --
+    the user just sees an answer built on less work than the model intended.
+    """
+
+    async def test_streaming_response_carries_the_dropped_names(self):
+        caller = _caller()
+
+        final = await _drain(caller, [
+            _chunk(index=0, tool_id="ok", name="search", args='{"q": "hi"}'),
+            _chunk(index=1, tool_id="bad", name="read_file", args=TRUNCATED_ARGS),
+            _chunk(finish_reason="length"),
+        ])
+
+        assert final.dropped_tool_calls == ["read_file"]
+
+    async def test_tools_mode_publishes_a_warning(self):
+        from atlas.application.chat.modes.tools import ToolsModeRunner
+        from atlas.domain.messages.models import ToolResult
+
+        class PartialDropLLM:
+            async def stream_with_tools(self, model, messages, tools_schema,
+                                        tool_choice="auto", temperature=0.7, user_email=None):
+                yield LLMResponse(
+                    content="", model_used="gemma",
+                    tool_calls=[SimpleNamespace(
+                        id="ok", type="function",
+                        function=SimpleNamespace(name="search", arguments='{"q": "hi"}'))],
+                    dropped_tool_calls=["read_file"],
+                )
+
+            async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+                yield "Here is what I found."
+
+        publisher = AsyncMock()
+        tool_manager = MagicMock()
+        tool_manager.get_tools_schema = MagicMock(return_value=[{"type": "function"}])
+        runner = ToolsModeRunner(
+            llm=PartialDropLLM(), tool_manager=tool_manager,
+            event_publisher=publisher, config_manager=None,
+        )
+        session = MagicMock()
+        session.history = MagicMock()
+        session.session_id = "s1"
+        session.files = {}
+
+        async def _execute(tool_calls, session_context, tool_manager,
+                           update_callback=None, config_manager=None, skip_approval=False):
+            return [ToolResult(tool_call_id=tc.id, content="ok", success=True)
+                    for tc in tool_calls]
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.execute_multiple_tools = _execute
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            await runner.run_streaming(
+                session=session, model="gemma",
+                messages=[{"role": "user", "content": "find it"}],
+                selected_tools=["search"],
+            )
+
+        warned = [c.kwargs.get("message", "") for c in publisher.publish_warning.await_args_list]
+        assert warned, "a dropped sibling call was never announced"
+        assert "read_file" in warned[0]
+
+
+@pytest.mark.asyncio
+class TestTheTurnIsNeverSavedEmpty:
+    """Failing the turn must not also erase what the user already saw."""
+
+    async def test_tools_mode_persists_the_narration_it_streamed(self):
+        from atlas.application.chat.modes.tools import ToolsModeRunner
+
+        publisher = AsyncMock()
+        tool_manager = MagicMock()
+        tool_manager.get_tools_schema = MagicMock(return_value=[{"type": "function"}])
+        runner = ToolsModeRunner(
+            llm=_StreamThenFail(), tool_manager=tool_manager,
+            event_publisher=publisher, config_manager=None,
+        )
+        session = MagicMock()
+        session.history = MagicMock()
+        session.session_id = "s1"
+        session.files = {}
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            await runner.run_streaming(
+                session=session, model="gemma",
+                messages=[{"role": "user", "content": "read it"}],
+                selected_tools=["read_file"],
+            )
+
+        saved = [c.args[0].content for c in session.history.add_message.call_args_list]
+        assert any("Let me read that file" in text for text in saved), (
+            "text the user watched stream in was lost on reload"
+        )
+
+    async def test_agent_mode_closes_the_turn(self):
+        from atlas.application.chat.agent.factory import AgentLoopFactory
+        from atlas.application.chat.modes.agent import (
+            MALFORMED_TOOL_CALL_TURN_CONTENT,
+            AgentModeRunner,
+        )
+        from atlas.domain.sessions.models import Session
+
+        session = Session()
+        session.history.add_message(Message(role=MessageRole.USER, content="read it"))
+
+        connection = MagicMock()
+        connection.send_json = AsyncMock()
+        factory = AgentLoopFactory(
+            llm=_StreamThenFail(), tool_manager=MagicMock(), connection=connection,
+        )
+        runner = AgentModeRunner(agent_loop_factory=factory, event_publisher=AsyncMock())
+
+        with pytest.raises(LLMMalformedToolCallError):
+            await runner.run(
+                session=session, model="gemma",
+                messages=[{"role": "user", "content": "read it"}],
+                selected_tools=["read_file"],
+                selected_data_sources=None,
+                max_steps=3,
+            )
+
+        assistant = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+        assert assistant, "the turn was saved with no assistant reply at all"
+        assert assistant[-1].content == MALFORMED_TOOL_CALL_TURN_CONTENT

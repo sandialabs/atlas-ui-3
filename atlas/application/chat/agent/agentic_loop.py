@@ -34,6 +34,15 @@ from .streaming_final_answer import stream_final_answer
 logger = logging.getLogger(__name__)
 
 
+def _dropped_call_warning(names) -> str:
+    """User-facing note that a tool call was discarded but the turn continued."""
+    listed = ", ".join(f"'{name}'" for name in names)
+    return (
+        f"The model's call to {listed} was cut off and could not be run, so it was "
+        "skipped. The other tool calls in this step ran normally."
+    )
+
+
 def _to_tool_call_dict(tc: Any) -> Dict[str, Any]:
     """Normalize a tool call to a plain OpenAI-format dict.
 
@@ -421,6 +430,13 @@ class AgenticLoop(AgentLoopProtocol):
             final_response = LLMResponse(content=accumulated_content)
         elif accumulated_content and not final_response.content:
             final_response.content = accumulated_content
+
+        # Same as tools mode: a partial drop keeps the turn alive, so it has to
+        # be said out loud or it is invisible.
+        if final_response.dropped_tool_calls:
+            await event_publisher.publish_warning(
+                message=_dropped_call_warning(final_response.dropped_tool_calls),
+            )
 
         # Close any streamed text, including narration for tool-call turns, so
         # each iteration finalizes as its own UI bubble before tool rows render.
