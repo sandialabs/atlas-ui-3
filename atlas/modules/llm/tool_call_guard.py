@@ -97,6 +97,25 @@ def tool_call_arguments_are_empty(tool_call: Any) -> bool:
     return not arguments
 
 
+# Reasons that mean the model finished saying what it meant to say. Anything
+# else -- an output limit, a content filter, an unrecognized provider string --
+# means the response may stop mid-thought, so a structural repair on the last
+# call would be completing a shape that is not known to be complete.
+CLEAN_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call"})
+
+
+def response_was_cut_off(finish_reason: Optional[str]) -> bool:
+    """Whether ``finish_reason`` indicates the response may be incomplete.
+
+    ``None`` counts as clean: many providers omit the field on the chunks Atlas
+    accumulates, and treating a missing value as a truncation would drop
+    legitimate no-argument calls across the board.
+    """
+    if finish_reason is None:
+        return False
+    return finish_reason not in CLEAN_FINISH_REASONS
+
+
 def partition_tool_calls_by_json_validity(
     tool_calls: Optional[List[Any]],
     truncated: bool = False,

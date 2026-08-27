@@ -124,9 +124,19 @@ class LLMMalformedToolCallError(LLMError):
     transient: the same turn usually succeeds on a retry.
     """
 
-    def __init__(self, message: str, tool_names: Optional[list] = None, code: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        tool_names: Optional[list] = None,
+        code: Optional[str] = None,
+        truncated: bool = False,
+    ):
         super().__init__(message, code)
         self.tool_names = list(tool_names or [])
+        # Whether the provider cut the response off, as opposed to the model
+        # emitting unparseable JSON within its limits. Callers persist a
+        # user-visible summary, which must not assert the wrong cause.
+        self.truncated = truncated
 
 
 class ContextWindowExceededError(LLMError):

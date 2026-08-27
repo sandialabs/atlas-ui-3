@@ -509,7 +509,7 @@ async def main():
 
     # Agent mode closes the turn instead of leaving it with no assistant reply.
     from atlas.application.chat.agent.factory import AgentLoopFactory
-    from atlas.application.chat.modes.agent import AgentModeRunner, MALFORMED_TOOL_CALL_TURN_CONTENT
+    from atlas.application.chat.modes.agent import AgentModeRunner, MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON
     s2 = Session()
     s2.history.add_message(Message(role=MessageRole.USER, content='read it'))
     conn = MagicMock(); conn.send_json = AsyncMock()
@@ -524,7 +524,9 @@ async def main():
     except LLMMalformedToolCallError:
         pass
     assistant = [m for m in s2.history.messages if m.role == MessageRole.ASSISTANT]
-    assert assistant and assistant[-1].content == MALFORMED_TOOL_CALL_TURN_CONTENT, assistant
+    # This failure carried no truncation flag, so the persisted text must not
+    # claim one -- it is written into history and read back later.
+    assert assistant and assistant[-1].content == MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON, assistant
     print('agent mode closed the turn')
 
 asyncio.run(main())

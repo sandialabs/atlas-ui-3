@@ -23,11 +23,11 @@ from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
-from atlas.modules.llm.tool_call_guard import dropped_call_warning
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
+from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .streaming_final_answer import stream_final_answer
@@ -346,14 +346,18 @@ class AgenticLoop(AgentLoopProtocol):
             )
 
         if data_sources and context.user_email:
-            return await self.llm.call_with_rag_and_tools(
+            response = await self.llm.call_with_rag_and_tools(
                 model, messages, data_sources, tools_schema,
                 context.user_email, "auto", temperature=temperature,
             )
-        return await self.llm.call_with_tools(
-            model, messages, tools_schema, "auto",
-            temperature=temperature, user_email=context.user_email,
-        )
+        else:
+            response = await self.llm.call_with_tools(
+                model, messages, tools_schema, "auto",
+                temperature=temperature, user_email=context.user_email,
+            )
+        # Streaming off must not make a dropped call silent.
+        await publish_dropped_call_warning(event_publisher, response)
+        return response
 
     async def _call_llm_streaming(
         self,
@@ -437,15 +441,9 @@ class AgenticLoop(AgentLoopProtocol):
         elif accumulated_content and not final_response.content:
             final_response.content = accumulated_content
 
-        # Same as tools mode: a partial drop keeps the turn alive, so it has to
-        # be said out loud or it is invisible.
-        if final_response.dropped_tool_calls:
-            await event_publisher.publish_warning(
-                message=dropped_call_warning(
-                    final_response.dropped_tool_calls,
-                    truncated=final_response.dropped_tool_calls_truncated,
-                ),
-            )
+        # A partial drop keeps the turn alive, so it has to be said out loud or
+        # it is invisible.
+        await publish_dropped_call_warning(event_publisher, final_response)
 
         # Close any streamed text, including narration for tool-call turns, so
         # each iteration finalizes as its own UI bubble before tool rows render.

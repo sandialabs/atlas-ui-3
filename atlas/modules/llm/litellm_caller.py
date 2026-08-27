@@ -55,7 +55,10 @@ from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse, split_provider
-from .tool_call_guard import partition_tool_calls_by_json_validity
+from .tool_call_guard import (
+    partition_tool_calls_by_json_validity,
+    response_was_cut_off,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1307,7 +1310,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             if tool_calls:
                 finish_reason = getattr(response.choices[0], "finish_reason", None)
                 tool_calls, malformed = partition_tool_calls_by_json_validity(
-                    tool_calls, truncated=finish_reason == "length",
+                    tool_calls, truncated=response_was_cut_off(finish_reason),
                 )
                 if malformed:
                     dropped_tool_calls = self._handle_malformed_tool_calls(
@@ -1317,6 +1320,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                         model_name=model_name,
                         user_email=user_email,
                     )
+                    # Copy is keyed on the output limit; see the streaming path.
                     dropped_were_truncated = finish_reason == "length"
                 # See the streaming path: an empty array is a shape providers
                 # reject on the follow-up request.

@@ -33,6 +33,7 @@ from atlas.modules.llm.litellm_caller import LiteLLMCaller
 from atlas.modules.llm.tool_call_guard import (
     dropped_call_warning,
     partition_tool_calls_by_json_validity,
+    response_was_cut_off,
 )
 
 # A real fragment shape: the model stopped mid-string inside the arguments.
@@ -696,7 +697,7 @@ class TestTheTurnIsNeverSavedEmpty:
     async def test_agent_mode_closes_the_turn(self):
         from atlas.application.chat.agent.factory import AgentLoopFactory
         from atlas.application.chat.modes.agent import (
-            MALFORMED_TOOL_CALL_TURN_CONTENT,
+            MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON,
             AgentModeRunner,
         )
         from atlas.domain.sessions.models import Session
@@ -722,6 +723,47 @@ class TestTheTurnIsNeverSavedEmpty:
 
         assistant = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
         assert assistant, "the turn was saved with no assistant reply at all"
+        # This failure carried no truncation flag, so the persisted text must
+        # not assert one -- it is written into history and read back later.
+        assert assistant[-1].content == MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON
+        assert "cut off" not in assistant[-1].content
+
+    async def test_agent_mode_says_which_failure_it_was(self):
+        """The turn-closing text is persisted, so it must name the real cause."""
+        from atlas.application.chat.agent.factory import AgentLoopFactory
+        from atlas.application.chat.modes.agent import (
+            MALFORMED_TOOL_CALL_TURN_CONTENT,
+            AgentModeRunner,
+        )
+        from atlas.domain.sessions.models import Session
+
+        class TruncatedLLM:
+            async def stream_with_tools(self, model, messages, tools_schema,
+                                        tool_choice="auto", temperature=0.7, user_email=None):
+                raise LLMMalformedToolCallError(
+                    "The model ran out of room.", tool_names=["read_file"], truncated=True,
+                )
+                yield  # pragma: no cover - generator marker
+
+        session = Session()
+        session.history.add_message(Message(role=MessageRole.USER, content="read it"))
+        connection = MagicMock()
+        connection.send_json = AsyncMock()
+        runner = AgentModeRunner(
+            agent_loop_factory=AgentLoopFactory(
+                llm=TruncatedLLM(), tool_manager=MagicMock(), connection=connection,
+            ),
+            event_publisher=AsyncMock(),
+        )
+
+        with pytest.raises(LLMMalformedToolCallError):
+            await runner.run(
+                session=session, model="gemma",
+                messages=[{"role": "user", "content": "read it"}],
+                selected_tools=["read_file"], selected_data_sources=None, max_steps=3,
+            )
+
+        assistant = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
         assert assistant[-1].content == MALFORMED_TOOL_CALL_TURN_CONTENT
 
 
@@ -854,3 +896,66 @@ async def test_agent_mode_keeps_the_narration_it_streamed():
     assert "Let me read that file" in saved[0].content
     assert saved[0].metadata["incomplete"] is True
     assert saved[0].metadata["message_type"] == "agent_intermediate"
+
+
+class TestWhatCountsAsCutOff:
+    """An output limit is not the only way a response stops mid-thought."""
+
+    def test_clean_finishes_are_not_truncations(self):
+        assert response_was_cut_off("stop") is False
+        assert response_was_cut_off("tool_calls") is False
+
+    def test_content_filter_and_unknown_reasons_are(self):
+        """Both can stop a response mid-object, so the last call is suspect."""
+        assert response_was_cut_off("length") is True
+        assert response_was_cut_off("content_filter") is True
+        assert response_was_cut_off("guardrail_intervened") is True
+
+    def test_a_missing_reason_is_treated_as_clean(self):
+        """Providers routinely omit it; treating that as truncation would drop
+        legitimate no-argument calls across the board."""
+        assert response_was_cut_off(None) is False
+
+    def test_a_content_filtered_last_call_is_not_brace_repaired(self):
+        cut_off = SimpleNamespace(function=SimpleNamespace(
+            name="list_dir", arguments='{"path": "/data", "recursive": true',
+        ))
+
+        valid, malformed = partition_tool_calls_by_json_validity(
+            [cut_off], truncated=response_was_cut_off("content_filter"),
+        )
+
+        assert (valid, malformed) == ([], [cut_off])
+
+
+@pytest.mark.asyncio
+class TestNonStreamingAlsoWarns:
+    """With streaming off, a dropped sibling call must not be silent."""
+
+    async def test_agent_loop_warns_on_the_non_streaming_path(self):
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
+
+        class NonStreamingLLM:
+            async def call_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                      temperature=0.7, user_email=None):
+                return LLMResponse(
+                    content="", model_used="gemma",
+                    tool_calls=[SimpleNamespace(
+                        id="ok", type="function",
+                        function=SimpleNamespace(name="search", arguments="{}"))],
+                    dropped_tool_calls=["read_file"],
+                    dropped_tool_calls_truncated=True,
+                )
+
+        loop = AgenticLoop(llm=NonStreamingLLM(), tool_manager=None, prompt_provider=None)
+        publisher = AsyncMock()
+        context = MagicMock()
+        context.user_email = "u@example.com"
+
+        await loop._call_llm(
+            "gemma", [{"role": "user", "content": "find it"}], [{"type": "function"}],
+            None, context, 0.7, False, publisher,
+        )
+
+        warned = [c.kwargs.get("message", "") for c in publisher.publish_warning.await_args_list]
+        assert warned and "read_file" in warned[0]

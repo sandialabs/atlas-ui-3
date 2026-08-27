@@ -14,12 +14,12 @@ from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
-from atlas.modules.llm.tool_call_guard import dropped_call_warning
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
 from ..utilities import error_handler, event_notifier, tool_executor
 from ..utilities.agent_digest import build_tool_digest
+from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
 
@@ -117,6 +117,8 @@ class ToolsModeRunner:
             tool_choice="auto",
             temperature=temperature,
         )
+        # Streaming off must not make a dropped call silent.
+        await publish_dropped_call_warning(self.event_publisher, llm_response)
 
         # No tool calls -> treat as plain content
         if not llm_response or not llm_response.has_tool_calls():
@@ -324,13 +326,7 @@ class ToolsModeRunner:
         # A dropped-but-not-fatal call is otherwise invisible: the turn keeps
         # going with the calls that parsed, and neither the user nor the model
         # is told that one was discarded.
-        if final_llm_response and final_llm_response.dropped_tool_calls:
-            await self.event_publisher.publish_warning(
-                message=dropped_call_warning(
-                    final_llm_response.dropped_tool_calls,
-                    truncated=final_llm_response.dropped_tool_calls_truncated,
-                ),
-            )
+        await publish_dropped_call_warning(self.event_publisher, final_llm_response)
 
         # Has tool calls: signal end of initial stream if we sent tokens
         if accumulated_content:

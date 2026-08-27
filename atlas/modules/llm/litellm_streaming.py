@@ -21,6 +21,7 @@ from atlas.domain.errors import LLMMalformedToolCallError
 from .models import LLMResponse, split_provider
 from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
+    response_was_cut_off,
     tool_call_function_field,
 )
 
@@ -180,6 +181,10 @@ class LiteLLMStreamingMixin:
             sanitize_for_logging(tool_call_function_field(tc, "name", "")) or "unknown"
             for tc in malformed
         ]
+        # The copy is keyed on the output limit specifically: a content filter
+        # also cuts a response off, but "ran out of room" would be a false
+        # explanation. The *repair policy* uses the broader check, because any
+        # unclean finish means the last call may be incomplete.
         truncated = finish_reason == "length"
         # Allow-listed rather than interpolated: finish_reason is provider text.
         safe_reason = finish_reason if finish_reason in KNOWN_FINISH_REASONS else "other"
@@ -215,7 +220,7 @@ class LiteLLMStreamingMixin:
                 "The model produced a tool call that was not valid JSON, so it "
                 "could not be run. Please try again."
             )
-        raise LLMMalformedToolCallError(message, tool_names=names)
+        raise LLMMalformedToolCallError(message, tool_names=names, truncated=truncated)
 
     async def stream_with_tools(
         self,
@@ -361,7 +366,7 @@ class LiteLLMStreamingMixin:
                 # comes back as a 400 that no retry can clear.
                 if tool_calls_list:
                     tool_calls_list, malformed = partition_tool_calls_by_json_validity(
-                        tool_calls_list, truncated=finish_reason == "length",
+                        tool_calls_list, truncated=response_was_cut_off(finish_reason),
                     )
                     if malformed:
                         dropped_tool_calls = self._handle_malformed_tool_calls(

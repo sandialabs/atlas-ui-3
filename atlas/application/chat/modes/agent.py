@@ -28,6 +28,10 @@ MALFORMED_TOOL_CALL_TURN_CONTENT = (
     "(This turn ended early: the model's tool call was cut off before it "
     "finished and could not be run.)"
 )
+MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON = (
+    "(This turn ended early: the model's tool call could not be read as valid "
+    "JSON and could not be run.)"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +197,7 @@ class AgentModeRunner:
             )
             await self._publish_completion(steps=0)
             raise
-        except LLMMalformedToolCallError:
+        except LLMMalformedToolCallError as malformed:
             # Same contract as the interrupted-turn path above: the loop raised
             # before it could append anything for this step, so without a
             # closing message the turn is saved with no assistant reply and the
@@ -201,7 +205,11 @@ class AgentModeRunner:
             self._close_turn(
                 session,
                 turn_start_index,
-                content=MALFORMED_TOOL_CALL_TURN_CONTENT,
+                content=(
+                    MALFORMED_TOOL_CALL_TURN_CONTENT
+                    if getattr(malformed, "truncated", False)
+                    else MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON
+                ),
                 metadata={"agent_mode": True, "incomplete": True},
             )
             await self._publish_completion(steps=0)
