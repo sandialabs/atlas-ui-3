@@ -13,6 +13,7 @@ from litellm import acompletion
 from litellm.types.utils import ChatCompletionMessageToolCall, Function
 
 from atlas.application.chat.capture.capture_context import record_llm_call
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import LLMMalformedToolCallError
@@ -160,8 +161,10 @@ class LiteLLMStreamingMixin:
         If nothing survives, raise, so the user is told the turn failed instead
         of silently receiving a reply that skipped the work it announced.
         """
+        # The names come from model output, so they reach the log only after
+        # sanitizing: a name carrying a newline could otherwise forge a log line.
         names = [
-            tool_call_function_field(tc, "name", "") or "unknown"
+            sanitize_for_logging(tool_call_function_field(tc, "name", "")) or "unknown"
             for tc in malformed
         ]
         truncated = finish_reason == "length"

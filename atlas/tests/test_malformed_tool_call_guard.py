@@ -212,3 +212,95 @@ class TestErrorClassification:
     def test_untyped_errors_still_classify(self):
         with pytest.raises(LLMServiceError):
             LiteLLMCaller._raise_llm_domain_error(RuntimeError("something odd"))
+
+
+class _StreamThenFail:
+    """An LLM whose stream emits narration and then fails the malformed check.
+
+    The real shape of the bug: the model says "Let me read that file", starts a
+    tool call, and runs out of tokens mid-argument. The guard raises only after
+    the narration has already been yielded.
+    """
+
+    def __init__(self, narration="Let me read that file for you."):
+        self.narration = narration
+
+    async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                temperature=0.7, user_email=None):
+        if self.narration:
+            yield self.narration
+        raise LLMMalformedToolCallError(
+            "The model ran out of room while writing its tool call.",
+            tool_names=["read_file"],
+        )
+
+    async def stream_with_rag_and_tools(self, model, messages, data_sources, tools_schema,
+                                        user_email, tool_choice="auto", temperature=0.7):
+        async for item in self.stream_with_tools(model, messages, tools_schema, tool_choice):
+            yield item
+
+    async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+        yield "unused"
+
+
+@pytest.mark.asyncio
+class TestNarrationDoesNotHideTheFailure:
+    """Partial text must not turn a skipped tool call into a "successful" answer.
+
+    Both streaming consumers swallow a mid-stream error once any text has been
+    streamed, on the reasoning that partial output beats none. That is right for
+    a transport fault, but wrong here: the model announced work, the call was
+    dropped, and reporting the narration as the final answer shows the user a
+    reply that silently skipped what it promised.
+    """
+
+    async def test_agentic_loop_propagates_after_partial_text(self):
+        from atlas.application.chat.agent.agentic_loop import AgenticLoop
+
+        loop = AgenticLoop(llm=_StreamThenFail(), tool_manager=None, prompt_provider=None)
+        publisher = AsyncMock()
+        context = MagicMock()
+        context.user_email = "u@example.com"
+
+        with pytest.raises(LLMMalformedToolCallError):
+            await loop._call_llm_streaming(
+                "gemma", [{"role": "user", "content": "read it"}],
+                [{"type": "function"}], None, context, 0.7, publisher,
+            )
+
+        # The open bubble is closed before the error, so the UI does not leave a
+        # live cursor blinking underneath it.
+        assert publisher.publish_token_stream.await_args.kwargs["is_last"] is True
+
+    async def test_tools_mode_reports_the_error_after_partial_text(self):
+        from atlas.application.chat.modes.tools import ToolsModeRunner
+
+        publisher = AsyncMock()
+        tool_manager = MagicMock()
+        tool_manager.get_tools_schema = MagicMock(return_value=[{"type": "function"}])
+        runner = ToolsModeRunner(
+            llm=_StreamThenFail(),
+            tool_manager=tool_manager,
+            event_publisher=publisher,
+            config_manager=None,
+        )
+        session = MagicMock()
+        session.history = MagicMock()
+        session.session_id = "s1"
+        session.files = {}
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            await runner.run_streaming(
+                session=session,
+                model="gemma",
+                messages=[{"role": "user", "content": "read it"}],
+                selected_tools=["read_file"],
+            )
+
+        errors = [
+            call.args[0] for call in publisher.send_json.await_args_list
+            if call.args and call.args[0].get("type") == "error"
+        ]
+        assert errors, "the dropped tool call must be reported, not hidden by narration"
+        assert errors[0]["error_type"] == "malformed_tool_call"

@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -272,8 +273,14 @@ class ToolsModeRunner:
                 token="", is_first=False, is_last=True,
             )
 
-        # If streaming failed and we got no content, send the error to the frontend
-        if streaming_error and not accumulated_content:
+        # If streaming failed and we got no content, send the error to the
+        # frontend. A malformed tool call is reported even when narration was
+        # already streamed: the model announced work it could not perform, and
+        # presenting that narration as a finished answer would hide the gap.
+        if streaming_error and (
+            not accumulated_content
+            or isinstance(streaming_error, LLMMalformedToolCallError)
+        ):
             error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
             )

@@ -1242,12 +1242,12 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return llm_response
 
         except (
-            RateLimitError,
-            LLMTimeoutError,
+            # ``LLMError`` covers the whole family (rate limit, timeout, service,
+            # bad request, context window, malformed tool call) so a newly added
+            # member is never silently downgraded into the fallback retry below.
+            # The other two sit outside that hierarchy and are listed explicitly.
+            LLMError,
             LLMAuthenticationError,
-            LLMServiceError,
-            LLMBadRequestError,
-            ContextWindowExceededError,
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry
@@ -1492,12 +1492,12 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return llm_response
 
         except (
-            RateLimitError,
-            LLMTimeoutError,
+            # ``LLMError`` covers the whole family (rate limit, timeout, service,
+            # bad request, context window, malformed tool call) so a newly added
+            # member is never silently downgraded into the fallback retry below.
+            # The other two sit outside that hierarchy and are listed explicitly.
+            LLMError,
             LLMAuthenticationError,
-            LLMServiceError,
-            LLMBadRequestError,
-            ContextWindowExceededError,
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry

@@ -38,11 +38,14 @@ def split_provider(litellm_model: str) -> Tuple[str, str]:
     return "unknown", litellm_model
 
 
-def tool_call_function_field(tool_call: Any, field: str, default: str = "") -> str:
+def tool_call_function_field(tool_call: Any, field: str, default: Any = "") -> Any:
     """Read ``function.<field>`` from a tool call in either shape.
 
     Tool calls arrive as litellm pydantic models (attribute access) from the
-    provider and as plain dicts from history round-trips and tests.
+    provider and as plain dicts from history round-trips and tests. The value is
+    returned as the provider sent it -- usually a string, but ``arguments`` can
+    arrive already decoded as a dict or list -- so the return type is not
+    narrowed to ``str``; callers that need one coerce it themselves.
     """
     function = None
     if isinstance(tool_call, dict):
