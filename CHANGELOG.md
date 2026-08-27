@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #851 - 2026-08-26
+### PR #852 - 2026-08-26
 - **Ships the official Perplexity MCP server as a bundled stdio server** (`atlas/config/mcp.json`): the `@perplexity-ai/mcp-server` npm package is launched with `npx -yq`, exposing `perplexity_search`, `perplexity_ask`, `perplexity_research`, and `perplexity_reason`. Requires Node.js on `PATH` and `PERPLEXITY_API_KEY` in the backend environment; the server is skipped gracefully (logged, non-fatal) when either is missing. `PERPLEXITY_API_KEY` is documented in `.env.example`/`docker-compose.yml`, and `docs/admin/mcp-servers.md` gains a "Bundled MCP Servers" section covering the tools, prerequisites, `${ENV}` substitution, compliance-level (`Public`) behavior, and air-gapped/proxy notes.
 
 ### PR #849 - 2026-08-26
