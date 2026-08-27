@@ -173,7 +173,10 @@ class LiteLLMStreamingMixin:
         """
         # Names come from model output and the model id is request-supplied, so
         # both reach the log only after sanitizing: either carrying a newline
-        # could otherwise forge a log line.
+        # could otherwise forge a log line. Each value is sanitized directly at
+        # the point it is interpolated -- .github/codeql/extensions.yml models
+        # sanitize_for_logging's return value as safe, and that model tracks a
+        # direct call, not taint laundered through a list first.
         names = [
             sanitize_for_logging(tool_call_function_field(tc, "name", "")) or "unknown"
             for tc in malformed
@@ -184,7 +187,11 @@ class LiteLLMStreamingMixin:
         logger.error(
             "Dropping %d malformed tool call(s) from %s (finish_reason=%s, names=%s); "
             "%d well-formed call(s) kept",
-            len(malformed), sanitize_for_logging(model_name), safe_reason, names, len(kept),
+            len(malformed),
+            sanitize_for_logging(model_name),
+            safe_reason,
+            sanitize_for_logging(", ".join(names)),
+            len(kept),
         )
         set_attrs(span, {
             "malformed_tool_calls": len(malformed),
