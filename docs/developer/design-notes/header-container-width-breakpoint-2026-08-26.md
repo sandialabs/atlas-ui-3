@@ -52,10 +52,15 @@ Three supporting changes:
   could push its neighbours and recreate the collision above any threshold.
 - The three wrappable labels ("Sources", "New Chat", the save-mode label) are
   `whitespace-nowrap`, keeping the header one row tall.
-- An effect closes the compact menu when `showDesktopActions` becomes true. The
-  menu panel and backdrop used to be hidden by the same CSS breakpoint that hid
-  the hamburger; now that both are driven by measured width, an open menu would
-  otherwise be stranded on screen with no button to dismiss it.
+- The compact menu's overlay is gated on the render itself
+  (`mobileMenuOpen && !showDesktopActions`). The panel and backdrop used to be
+  hidden by the same CSS breakpoint that hid the hamburger; now that both are
+  driven by measured width, an open menu would otherwise be stranded on screen
+  with no button to dismiss it. Gating on an effect alone is not enough --
+  effects run after paint, so the backdrop would cover the desktop cluster for a
+  frame, long enough to swallow a click. Overlay and hamburger read the same
+  state and flip in the same commit. An effect still resets `mobileMenuOpen`, so
+  the menu does not spring back open if the header narrows again.
 
 ## Why not a CSS container query
 
