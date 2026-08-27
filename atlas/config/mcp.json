@@ -118,5 +118,19 @@
     "short_description": "Username override security demo",
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
+  },
+  "perplexity": {
+    "command": ["npx", "-yq", "@perplexity-ai/mcp-server"],
+    "transport": "stdio",
+    "env": {
+      "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
+      "PATH": "${PATH}",
+      "HOME": "${HOME}"
+    },
+    "groups": ["users"],
+    "description": "Official Perplexity MCP server (@perplexity-ai/mcp-server) exposing real-time web search, ask, research, and reasoning tools through the Perplexity API. Launched as a stdio subprocess via npx; requires Node.js on PATH and PERPLEXITY_API_KEY in the environment. Tools: perplexity_search, perplexity_ask, perplexity_research, perplexity_reason.",
+    "short_description": "Perplexity web search & research",
+    "author": "Perplexity AI",
+    "compliance_level": "Public"
   }
 }

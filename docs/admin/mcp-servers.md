@@ -1,6 +1,6 @@
 # MCP Server Configuration
 
-Last updated: 2026-01-25
+Last updated: 2026-08-26
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
@@ -210,6 +210,48 @@ You can restrict access to MCP servers based on user groups. This is a critical 
 
 As a security measure, if a tool is designed to accept an `_atlas_user` argument, the Atlas UI backend will **always** overwrite this argument with the authenticated user's identity before calling the tool. Ordinary `username` arguments are left under LLM control. This ensures tools that opt in to Atlas user context run with the correct user and prevents the LLM from impersonating another user through the injected field.
 
+
+## Bundled MCP Servers
+
+The package default `atlas/config/mcp.json` ships a few MCP servers ready to use. They are skipped gracefully (logged, not fatal) if their runtime prerequisites are missing, so an instance without the prerequisite only misses that server — the rest of the app starts normally.
+
+### Perplexity (`perplexity`)
+
+The official Perplexity MCP server ([`@perplexity-ai/mcp-server`](https://www.npmjs.com/package/@perplexity-ai/mcp-server)) exposes Perplexity's real-time web search and research capabilities as stdio tools:
+
+- `perplexity_search` — direct web search via the Perplexity Search API (recency/domain filters).
+- `perplexity_ask` — conversational AI with live web search (Agent API `fast` preset).
+- `perplexity_research` — deep, comprehensive research (Agent API `high` preset; can take minutes and streams progress).
+- `perplexity_reason` — advanced reasoning and analysis (Agent API `medium` preset).
+
+**Prerequisites** (the server is skipped if any are missing):
+
+- **Node.js + `npx` on `PATH`.** The server is launched with `npx -yq @perplexity-ai/mcp-server`. `-yq` auto-installs the package quietly so `npx` install banners do not corrupt the stdio JSON-RPC stream (the official README recommends this for strict MCP clients).
+- **`PERPLEXITY_API_KEY`** set in the backend environment (e.g. in `.env`). The config resolves it with `${PERPLEXITY_API_KEY}` substitution; if the variable is unset the server is skipped with a clear log line rather than spawned half-initialized.
+
+**Configuration** (shipped in `atlas/config/mcp.json`):
+
+```json
+{
+  "perplexity": {
+    "command": ["npx", "-yq", "@perplexity-ai/mcp-server"],
+    "transport": "stdio",
+    "env": {
+      "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
+      "PATH": "${PATH}",
+      "HOME": "${HOME}"
+    },
+    "groups": ["users"],
+    "compliance_level": "Public"
+  }
+}
+```
+
+`PATH` and `HOME` are passed via substitution so the `npx` subprocess can resolve `node`, locate its npm cache, and run without inheriting the whole backend environment. Optional Perplexity env vars (`PERPLEXITY_TIMEOUT_MS`, `PERPLEXITY_BASE_URL`, `PERPLEXITY_LOG_LEVEL`, `PERPLEXITY_PROXY` / `HTTPS_PROXY` for corporate egress) can be added to the `env` block or to a `config/mcp.json` override.
+
+**Compliance level:** `Public` (the server returns publicly accessible web data). Because compliance levels use an explicit allowlist, only `Public`-level sessions can combine with it; an `Internal`/`SOC2`/`HIPAA` session will not see the server. Reclassify to `External` in your local override if your policy treats third-party SaaS APIs as `External`.
+
+**Notes for restricted environments:** `npx -yq` fetches the package from the npm registry at first run. Air-gapped or egress-restricted deployments should pre-install the package (`npm i -g @perplexity-ai/mcp-server`) and either keep `npx` on `PATH` or replace the `command` with the resolved binary path in a `config/mcp.json` override.
 
 ## Advanced MCP Features
 
