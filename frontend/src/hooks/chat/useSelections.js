@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { usePersistentState } from './usePersistentState'
+import { CANVAS_TOOL, migrateToolNames } from '../../constants/atlasTools'
 
 const toSet = arr => new Set(arr)
 const toArray = set => Array.from(set)
@@ -17,7 +18,7 @@ export const userPromptIdFromKey = key => (isUserPromptKey(key) ? key.slice(USER
 
 export function useSelections() {
   // Auto-select canvas tool if empty
-  const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', ['canvas_canvas'])
+  const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', [CANVAS_TOOL])
   const [promptsRaw, setPromptsRaw] = usePersistentState('chatui-selected-prompts', [])
   const [dataSourcesRaw, setDataSourcesRaw] = usePersistentState('chatui-selected-data-sources', [])
   const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState('chatui-compliance-level-filter', null)
@@ -28,7 +29,9 @@ export function useSelections() {
   // New state: activePromptKey stores which prompt is currently active (null = use default)
   const [activePromptKey, setActivePromptKey] = usePersistentState('chatui-active-prompt', null)
 
-  const selectedTools = useMemo(() => toSet(toolsRaw), [toolsRaw])
+  // Browsers still hold pre-#855 built-in names ('canvas_canvas' and friends);
+  // migrate on read so an old selection keeps working without a reset.
+  const selectedTools = useMemo(() => toSet(migrateToolNames(toolsRaw)), [toolsRaw])
   const selectedPrompts = useMemo(() => toSet(promptsRaw), [promptsRaw])
   const selectedDataSources = useMemo(() => toSet(dataSourcesRaw), [dataSourcesRaw])
   

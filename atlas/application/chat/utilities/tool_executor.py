@@ -16,6 +16,12 @@ from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.llm import LLMResponse
 from atlas.modules.llm.tool_call_guard import repair_structural_json
+from atlas.modules.mcp_tools.atlas_server import (
+    ATLAS_SERVER_NAME,
+    CANVAS_TOOL_NAME,
+    LEGACY_SERVER_NAMES,
+    normalize_tool_name,
+)
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -260,7 +266,7 @@ def build_mcp_data(tool_manager) -> Dict[str, Any]:
         return {"available_servers": available_servers}
 
     for server_name, server_data in tool_manager.available_tools.items():
-        if server_name == "canvas":
+        if server_name == ATLAS_SERVER_NAME or server_name in LEGACY_SERVER_NAMES:
             continue
 
         tools_list = server_data.get("tools", []) or []
@@ -967,7 +973,10 @@ async def handle_synthesis_decision(
     # calls at all (None or []): that is not "canvas-only" and must fall through
     # to synthesis instead of claiming content was displayed in the canvas.
     response_tool_calls = llm_response.tool_calls or []
-    canvas_tool_calls = [tc for tc in response_tool_calls if tc.function.name == "canvas_canvas"]
+    canvas_tool_calls = [
+        tc for tc in response_tool_calls
+        if normalize_tool_name(tc.function.name) == CANVAS_TOOL_NAME
+    ]
     has_only_canvas_tools = bool(response_tool_calls) and len(canvas_tool_calls) == len(response_tool_calls)
 
     if has_only_canvas_tools:

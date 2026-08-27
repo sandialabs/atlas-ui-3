@@ -22,6 +22,19 @@ def _manager() -> MCPToolManager:
     return MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
 
 
+def _enable_search(monkeypatch, enabled: bool = True) -> None:
+    """Turn the RAG feature flags that gate ``atlas_search`` on (or off).
+
+    The schema build omits a disabled built-in rather than advertising it, so
+    the flags decide whether search reaches the model at all.
+    """
+    from atlas.modules.mcp_tools import client as mcp_client
+
+    settings = mcp_client.config_manager.app_settings
+    monkeypatch.setattr(settings, "feature_rag_enabled", enabled, raising=False)
+    monkeypatch.setattr(settings, "feature_atlas_rag_tools_enabled", enabled, raising=False)
+
+
 class FakeUnifiedRAG:
     """Configurable fake unified RAG service for exercising the pseudo-tools.
 
@@ -74,16 +87,27 @@ def _patch_app_factory(monkeypatch, unified_rag=None, rag_mcp=None):
     monkeypatch.setattr(app_factory_module, "app_factory", FakeAppFactory())
 
 
-def test_get_tools_schema_includes_atlas_rag_pseudo_tools():
+def test_get_tools_schema_exposes_consolidated_search_tool(monkeypatch):
+    """#855: one ``atlas_search`` tool, taking only a query."""
     manager = _manager()
-    schemas = manager.get_tools_schema(
-        ["atlas_rag_discover_data_sources", "atlas_rag_query"]
-    )
+    _enable_search(monkeypatch)
+    schemas = manager.get_tools_schema(["atlas_search"])
 
-    names = {schema["function"]["name"] for schema in schemas}
-    assert "atlas_rag_discover_data_sources" in names
-    assert "atlas_rag_query" in names
-    assert manager.get_server_for_tool("atlas_rag_query") == "atlas_rag"
+    assert [schema["function"]["name"] for schema in schemas] == ["atlas_search"]
+    params = schemas[0]["function"]["parameters"]
+    assert list(params["properties"]) == ["query"]
+    assert params["required"] == ["query"]
+    assert manager.get_server_for_tool("atlas_search") == "atlas"
+
+
+def test_legacy_rag_query_name_resolves_to_the_search_tool(monkeypatch):
+    """Saved conversations and stored selections still carry the old name."""
+    manager = _manager()
+    _enable_search(monkeypatch)
+    schemas = manager.get_tools_schema(["atlas_rag_query"])
+
+    assert [schema["function"]["name"] for schema in schemas] == ["atlas_search"]
+    assert manager.get_server_for_tool("atlas_rag_query") == "atlas"
 
 
 @pytest.mark.asyncio
@@ -508,3 +532,77 @@ async def test_execute_atlas_rag_query_honors_explicit_empty_selection(monkeypat
     assert result.success is False
     assert unified.query_calls == []
     assert unified.batch_calls == []
+
+
+def test_search_is_not_advertised_when_rag_is_disabled(monkeypatch):
+    """A disabled built-in is omitted, not advertised-and-refused."""
+    manager = _manager()
+    _enable_search(monkeypatch, enabled=False)
+
+    assert manager.get_tools_schema(["atlas_search"]) == []
+
+
+@pytest.mark.asyncio
+async def test_atlas_search_uses_the_selected_sources(monkeypatch):
+    """#855: the UI selection is what search reads."""
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs", "policies"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(id="s-1", name="atlas_search", arguments={"query": "vacation policy"}),
+        context={
+            "user_email": "test@example.com",
+            "selected_data_sources": ["atlas_rag:policies"],
+        },
+    )
+
+    assert result.success is True
+    assert unified.query_calls == ["atlas_rag:policies"]
+
+
+@pytest.mark.asyncio
+async def test_atlas_search_ignores_model_supplied_sources(monkeypatch):
+    """Search takes a query only; a hallucinated ``data_sources`` cannot widen it.
+
+    The authorization gate already intersects with the user's discovered set,
+    so this is defence in depth rather than the only barrier -- but a model must
+    not be able to reach past the user's selection to another authorized source.
+    """
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs", "policies"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="s-2",
+            name="atlas_search",
+            arguments={
+                "query": "vacation policy",
+                "data_sources": ["atlas_rag:technical-docs"],
+                "mode": "synthesized",
+            },
+        ),
+        context={
+            "user_email": "test@example.com",
+            "selected_data_sources": ["atlas_rag:policies"],
+        },
+    )
+
+    assert result.success is True
+    assert unified.query_calls == ["atlas_rag:policies"]
+
+
+@pytest.mark.asyncio
+async def test_atlas_search_requires_a_query(monkeypatch):
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["policies"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(id="s-3", name="atlas_search", arguments={"query": "   "}),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is False
+    assert "atlas_search" in result.content

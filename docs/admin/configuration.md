@@ -76,12 +76,14 @@ When `FEATURE_MCP_AUTO_RECONNECT_ENABLED=true`, the backend starts a background 
 
 ### Agent Sleep Tool
 
-Agent mode has a built-in `atlas_agent_sleep` tool that pauses a turn so the model can wait for
+Agent mode has a built-in `atlas_sleep` tool (part of the built-in `atlas` server, alongside
+`atlas_canvas` and `atlas_search`) that pauses a turn so the model can wait for
 long-running external work (a simulation, a submitted job) before checking on it again. It runs
 in process rather than through an MCP server, so `MCP_CALL_TIMEOUT` does not apply to it.
+The pre-consolidation name `atlas_agent_sleep` is still accepted (see issue #855).
 
 ```bash
-# Maximum seconds a single atlas_agent_sleep call may wait (default: 7200 = 2 hours).
+# Maximum seconds a single atlas_sleep call may wait (default: 7200 = 2 hours).
 # Requests above this are shortened to it; 0 disables the tool entirely.
 AGENT_SLEEP_MAX_SECONDS=7200
 

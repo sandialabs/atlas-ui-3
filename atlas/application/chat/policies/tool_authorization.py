@@ -4,11 +4,16 @@ import logging
 from typing import Any, List, Optional
 
 from atlas.core.auth import is_user_in_group
-from atlas.modules.mcp_tools.mcp_discovery import (
-    _ATLAS_RAG_DISCOVER_TOOL,
-    _ATLAS_RAG_QUERY_TOOL,
+from atlas.modules.mcp_tools.mcp_discovery import _ATLAS_RAG_DISCOVER_TOOL
+from atlas.modules.mcp_tools.atlas_server import (
+    CANVAS_TOOL_NAME,
+    SEARCH_TOOL_NAME,
+    normalize_tool_name,
 )
-from atlas.modules.mcp_tools.sleep_tool import SLEEP_TOOL_NAME, sleep_tool_enabled
+from atlas.modules.mcp_tools.atlas_server import (
+    SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
+)
+from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -68,19 +73,19 @@ class ToolAuthorizationService:
             # Filter tools by server prefix
             filtered_tools: List[str] = []
             for tool in selected_tools:
-                # Special case: canvas_canvas is always allowed. atlas_rag
-                # pseudo-tools are only allowed when both general RAG and the
-                # dedicated atlas_rag pseudo-tool flag are enabled.
-                if tool == "canvas_canvas":
+                # Built-in ``atlas`` tools have no MCP server behind them, so
+                # each carries its own gate: the canvas is always allowed, the
+                # wait is capped by configuration, and search follows the RAG
+                # feature flags. Legacy names resolve to the same gates.
+                resolved = normalize_tool_name(tool)
+                if resolved == CANVAS_TOOL_NAME:
                     filtered_tools.append(tool)
                     continue
-                if tool == SLEEP_TOOL_NAME:
-                    # Built-in wait tool: no MCP server behind it, so the only
-                    # gate is the configured maximum wait (0 disables it).
+                if resolved == ATLAS_SLEEP_TOOL_NAME:
                     if sleep_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue
-                if tool in {_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL}:
+                if resolved == SEARCH_TOOL_NAME or tool == _ATLAS_RAG_DISCOVER_TOOL:
                     settings = getattr(self.config_manager, "app_settings", None)
                     if (
                         settings is not None

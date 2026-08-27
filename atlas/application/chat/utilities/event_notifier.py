@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urlparse
+from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ async def notify_tool_complete(
     }
 
     # Canvas tool special handling
-    if tool_call.function.name == "canvas_canvas":
+    if normalize_tool_name(tool_call.function.name) == CANVAS_TOOL_NAME:
         await notify_canvas_content(parsed_args, update_callback)
 
     # Send artifacts to frontend if available
