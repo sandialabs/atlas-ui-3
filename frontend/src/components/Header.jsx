@@ -96,10 +96,10 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
     setExpandedModelInfo(null)
   }
 
-  // Close the compact menu once the header is wide enough to show the desktop
-  // cluster. The menu used to be hidden by the same CSS breakpoint that hid the
-  // hamburger; now that both are driven by measured width, an open menu would
-  // otherwise be left on screen with no button to dismiss it.
+  // Reset the compact menu once the header is wide enough for the desktop
+  // cluster, so it does not spring back open if the header narrows again. The
+  // render above is already gated on !showDesktopActions, so this is state
+  // hygiene rather than what actually hides the menu.
   useEffect(() => {
     if (showDesktopActions) setMobileMenuOpen(false)
   }, [showDesktopActions])
@@ -585,8 +585,11 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         </button>
       </div>
 
-      {/* Mobile Menu Overlay */}
-      {mobileMenuOpen && (
+      {/* Mobile Menu Overlay. Gated on the render, not just on the effect below:
+          an effect runs after paint, so keying this on state alone would flash
+          the backdrop over the desktop cluster for a frame -- and let it swallow
+          a click -- while the header is being widened past the threshold. */}
+      {mobileMenuOpen && !showDesktopActions && (
         <>
           {/* Backdrop */}
           <div 
