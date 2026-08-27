@@ -24,10 +24,24 @@ logger = logging.getLogger(__name__)
 
 
 def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
-    """Attempt to repair truncated JSON from LLM tool arguments.
+    """Attempt to repair *structurally* incomplete JSON from tool arguments.
 
-    Common cases: missing opening/closing braces, trailing quote.
-    Returns parsed dict on success, None on failure.
+    Scope is deliberately narrow: balance missing braces, and nothing else. A
+    repair may complete the shape of the object, never the content of a value.
+
+    The primary defence against a truncated tool call is upstream, in the LLM
+    layer: ``partition_tool_calls_by_json_validity`` drops any call whose
+    arguments do not parse, so a call cut off mid-argument now fails the turn
+    with ``LLMMalformedToolCallError`` instead of reaching this function.
+
+    This function used to also close an open string value -- ``{"e": "355/113``
+    became ``{"e": "355/113"}`` -- which is safe only when the cut-off value
+    happens to still be meaningful. For the failure that motivated the guard it
+    was not: the production fragment
+    ``{"filename": "1787784579_..._topic`` repaired into a *different, valid
+    looking* filename, and the tool would have executed confidently against the
+    wrong file. Guessing at a value the model never finished sending trades a
+    visible error for a silent wrong answer, which is the worse of the two.
     """
     s = raw.strip()
     # Add missing braces
@@ -41,15 +55,6 @@ def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
             return result
     except Exception:
         pass
-    # Try closing an open string value: e.g. {"expression": "355/113
-    if s.count('"') % 2 != 0:
-        s = s.rstrip("}") + '"}'
-        try:
-            result = json.loads(s)
-            if isinstance(result, dict):
-                return result
-        except Exception:
-            pass
     return None
 
 

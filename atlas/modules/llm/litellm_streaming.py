@@ -334,7 +334,7 @@ class LiteLLMStreamingMixin:
                 # comes back as a 400 that no retry can clear.
                 if tool_calls_list:
                     tool_calls_list, malformed = partition_tool_calls_by_json_validity(
-                        tool_calls_list
+                        tool_calls_list, truncated=finish_reason == "length",
                     )
                     if malformed:
                         self._handle_malformed_tool_calls(

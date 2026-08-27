@@ -199,10 +199,55 @@ transient-keyword tests, for the same reason: a 400 is deterministic, and one
 that happens to contain `timeout` would otherwise be retried three times with
 backoff before failing.
 
-`LLMBadRequestError` is also in the passthrough tuples of `call_with_rag()` and
-`call_with_rag_and_tools()`. Those methods fall back to a simpler call when RAG
-breaks; a provider rejection is not a RAG failure, so without the passthrough the
-same rejected request is sent a second time and the logs blame RAG.
+Both `call_with_rag()` and `call_with_rag_and_tools()` fall back to a simpler
+call when RAG breaks, so their passthrough tuples catch `LLMError` — a provider
+rejection is not a RAG failure, and without the passthrough the same rejected
+request is sent a second time, the injected RAG context is discarded, and the
+logs blame RAG. The tuples name the *base* class rather than enumerating its
+subclasses so a newly added error cannot be silently downgraded into that
+fallback. `LLMAuthenticationError` and `DataSourcePermissionError` sit outside
+the `LLMError` hierarchy and stay listed explicitly.
+
+## Malformed tool calls (`malformed_tool_call`)
+
+A model that runs out of output tokens partway through a tool call leaves an
+`arguments` fragment that is not valid JSON. Providers re-parse every tool call
+in the message history on each request, so persisting one poisons the whole
+conversation: every later turn comes back as a 400 (`Unterminated string
+starting at: line 1 column 73`) that no retry can clear, because the fault is in
+the history rather than the request.
+
+`partition_tool_calls_by_json_validity()` therefore drops unparseable calls
+where they are accumulated, on both the streaming and non-streaming paths,
+before they can be executed or written to history. Two rules:
+
+- A call whose arguments do not parse is always dropped.
+- When `finish_reason == "length"`, the **last** call is also dropped if its
+  arguments are empty — truncation before the first argument delta parses fine
+  as "no arguments" and would otherwise execute with `{}`. Earlier calls in the
+  same response completed before the limit, so a genuine no-argument call among
+  them is honoured.
+
+When well-formed calls survive, the turn continues with those and the model can
+reissue the rest. When none do, the turn fails with `LLMMalformedToolCallError`.
+Unlike `LLMBadRequestError` this failure is **retryable** — the same turn
+usually succeeds on a second attempt — and the message says so, naming the token
+limit only when `finish_reason` is evidence of one.
+
+`classify_llm_error()` short-circuits on it for the same reason it does on
+`LLMBadRequestError`: the message is already user-facing.
+
+Both streaming consumers (`ToolsModeRunner.run_streaming` and
+`AgenticLoop._call_llm_streaming`) suppress a mid-stream error once text has
+been streamed, on the reasoning that partial output beats none. This error is
+exempt: the model announced work it could not perform, and reporting the
+narration as a finished answer would hide the gap.
+
+The executor's `_try_repair_json()` deliberately does **not** overlap with this
+guard. It balances missing braces and nothing more — a repair may complete the
+shape of an object, never the content of a value. Closing an open string turned
+the production fragment into a different, valid-looking filename that the tool
+would have executed against.
 
 ## Key Points
 

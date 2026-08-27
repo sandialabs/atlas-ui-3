@@ -304,3 +304,142 @@ class TestNarrationDoesNotHideTheFailure:
         ]
         assert errors, "the dropped tool call must be reported, not hidden by narration"
         assert errors[0]["error_type"] == "malformed_tool_call"
+
+
+class TestTruncatedBeforeAnyArguments:
+    """Parseability alone cannot see a call cut off before its first argument.
+
+    Empty arguments parse fine as "no arguments" and would execute with ``{}``.
+    For a tool whose parameters are all optional that is not a visible failure --
+    it is the wrong action performed silently.
+    """
+
+    def test_empty_arguments_are_malformed_when_the_response_was_truncated(self):
+        cut_off = SimpleNamespace(function=SimpleNamespace(name="delete_all", arguments=""))
+
+        valid, malformed = partition_tool_calls_by_json_validity([cut_off], truncated=True)
+
+        assert (valid, malformed) == ([], [cut_off])
+
+    def test_empty_arguments_stay_valid_when_the_response_completed(self):
+        """A no-argument tool call is legitimate when nothing was cut off."""
+        no_args = SimpleNamespace(function=SimpleNamespace(name="now", arguments=""))
+
+        valid, malformed = partition_tool_calls_by_json_validity([no_args], truncated=False)
+
+        assert (valid, malformed) == ([no_args], [])
+
+    def test_only_the_last_call_is_judged_by_truncation(self):
+        """Truncation can only have reached the final call.
+
+        Earlier calls in the same response completed before the limit was hit, so
+        a genuine no-argument call among them must still be honoured.
+        """
+        earlier = SimpleNamespace(function=SimpleNamespace(name="now", arguments=""))
+        last = SimpleNamespace(function=SimpleNamespace(name="delete_all", arguments=""))
+
+        valid, malformed = partition_tool_calls_by_json_validity(
+            [earlier, last], truncated=True,
+        )
+
+        assert valid == [earlier]
+        assert malformed == [last]
+
+
+@pytest.mark.asyncio
+class TestHistoryIsNeverPoisoned:
+    """The defect was in what got *written*, not in what the turn returned.
+
+    Every tool call that survives must survive the round-trip the agentic loop
+    puts it through -- serialized into the assistant message and re-parsed by the
+    provider on each later request. That is the assertion the original bug would
+    have failed.
+    """
+
+    async def test_assembled_assistant_message_always_reparses(self):
+        import json
+
+        from atlas.application.chat.agent.agentic_loop import _to_tool_call_dict
+
+        caller = _caller()
+        final = await _drain(caller, [
+            _chunk(index=0, tool_id="ok", name="search", args='{"q": "hi"}'),
+            _chunk(index=1, tool_id="bad", name="read_file", args=TRUNCATED_ARGS),
+            _chunk(finish_reason="length"),
+        ])
+
+        serialized = [_to_tool_call_dict(tc) for tc in final.tool_calls]
+        for tool_call in serialized:
+            # Providers re-parse this on every subsequent request. A fragment
+            # here is what made the conversation unrecoverable.
+            json.loads(tool_call["function"]["arguments"])
+        assert TRUNCATED_ARGS not in json.dumps(serialized)
+
+
+@pytest.mark.asyncio
+class TestNonStreamingParity:
+    """The non-streaming path must apply the guard on the same terms."""
+
+    async def _call(self, tool_calls, finish_reason):
+        caller = _caller()
+        message = SimpleNamespace(content=None, tool_calls=tool_calls)
+        caller._acompletion_with_retry = AsyncMock(return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
+        ))
+        return await caller.call_with_tools(
+            "gemma", [{"role": "user", "content": "hi"}], [{"type": "function"}],
+        )
+
+    async def test_well_formed_sibling_survives(self):
+        good = SimpleNamespace(
+            id="ok", type="function",
+            function=SimpleNamespace(name="search", arguments='{"q": "hi"}'),
+        )
+        bad = SimpleNamespace(
+            id="bad", type="function",
+            function=SimpleNamespace(name="read_file", arguments=TRUNCATED_ARGS),
+        )
+
+        response = await self._call([good, bad], "length")
+
+        assert [tc.id for tc in response.tool_calls] == ["ok"]
+
+    async def test_empty_arguments_on_a_truncated_response_fail_the_turn(self):
+        cut_off = SimpleNamespace(
+            id="call-1", type="function",
+            function=SimpleNamespace(name="delete_all", arguments=""),
+        )
+
+        with pytest.raises(LLMMalformedToolCallError):
+            await self._call([cut_off], "length")
+
+    async def test_empty_arguments_on_a_complete_response_still_run(self):
+        no_args = SimpleNamespace(
+            id="call-1", type="function",
+            function=SimpleNamespace(name="now", arguments=""),
+        )
+
+        response = await self._call([no_args], "tool_calls")
+
+        assert [tc.id for tc in response.tool_calls] == ["call-1"]
+
+
+class TestRepairDoesNotInventValues:
+    """The executor's JSON repair must not finish a value the model never sent.
+
+    `_try_repair_json` used to close an open string, so the production fragment
+    `{"filename": "1787784579_..._topic` became a *different, valid-looking*
+    filename and the tool would have executed against the wrong file. A repair
+    may complete the shape of the object, never the content of a value.
+    """
+
+    def test_a_cut_off_string_value_is_not_guessed_at(self):
+        from atlas.application.chat.utilities.tool_executor import _try_repair_json
+
+        assert _try_repair_json(TRUNCATED_ARGS) is None
+
+    def test_structural_repair_still_works(self):
+        from atlas.application.chat.utilities.tool_executor import _try_repair_json
+
+        assert _try_repair_json('"q": "hi"') == {"q": "hi"}
+        assert _try_repair_json('{"q": "hi"') == {"q": "hi"}

@@ -1306,12 +1306,15 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             # must not be executed or written into the conversation, or every
             # later request in that conversation is rejected with a 400.
             if tool_calls:
-                tool_calls, malformed = partition_tool_calls_by_json_validity(tool_calls)
+                finish_reason = getattr(response.choices[0], "finish_reason", None)
+                tool_calls, malformed = partition_tool_calls_by_json_validity(
+                    tool_calls, truncated=finish_reason == "length",
+                )
                 if malformed:
                     self._handle_malformed_tool_calls(
                         malformed,
                         kept=tool_calls,
-                        finish_reason=getattr(response.choices[0], "finish_reason", None),
+                        finish_reason=finish_reason,
                         model_name=model_name,
                     )
                 tool_calls = tool_calls or None

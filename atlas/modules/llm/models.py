@@ -82,8 +82,19 @@ def tool_call_arguments_are_valid_json(tool_call: Any) -> bool:
     return True
 
 
+def tool_call_arguments_are_empty(tool_call: Any) -> bool:
+    """Whether a tool call carries no arguments at all."""
+    arguments = tool_call_function_field(tool_call, "arguments", "")
+    if arguments is None:
+        return True
+    if isinstance(arguments, str):
+        return not arguments.strip()
+    return not arguments
+
+
 def partition_tool_calls_by_json_validity(
     tool_calls: Optional[List[Any]],
+    truncated: bool = False,
 ) -> Tuple[List[Any], List[Any]]:
     """Split tool calls into ``(valid, malformed)`` by argument parseability.
 
@@ -91,11 +102,28 @@ def partition_tool_calls_by_json_validity(
     arguments are unparseable, so the call cannot be run faithfully, and
     re-sending them makes the provider reject every later turn in the
     conversation (see ``LLMMalformedToolCallError``).
+
+    ``truncated`` marks a response the provider cut off at the token limit
+    (``finish_reason == "length"``). It closes a hole that parseability alone
+    cannot see: a call cut off *before* its first argument delta arrives has
+    ``arguments == ""``, which parses fine as "no arguments" and would execute
+    with ``{}``. For a tool whose parameters are all optional, that is not a
+    failure the user sees -- it is the wrong action performed silently. Only the
+    **last** call is judged this way, because that is the only one truncation can
+    have reached; earlier calls in the same response completed before the limit
+    was hit, so a genuine no-argument call among them is still honoured.
     """
+    calls = [tool_call for tool_call in (tool_calls or []) if tool_call is not None]
     valid: List[Any] = []
     malformed: List[Any] = []
-    for tool_call in tool_calls or []:
-        if tool_call is None:
-            continue
-        (valid if tool_call_arguments_are_valid_json(tool_call) else malformed).append(tool_call)
+    for index, tool_call in enumerate(calls):
+        ok = tool_call_arguments_are_valid_json(tool_call)
+        if (
+            ok
+            and truncated
+            and index == len(calls) - 1
+            and tool_call_arguments_are_empty(tool_call)
+        ):
+            ok = False
+        (valid if ok else malformed).append(tool_call)
     return valid, malformed
