@@ -13,6 +13,7 @@ from atlas.domain.errors import (
     ContextWindowExceededError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMMalformedToolCallError,
     LLMServiceError,
     LLMTimeoutError,
     RateLimitError,
@@ -80,6 +81,7 @@ _ERROR_TYPE_BY_CLASS = (
     (ContextWindowExceededError, "context_window_exceeded"),
     (ValidationError, "validation"),
     (LLMBadRequestError, "bad_request"),
+    (LLMMalformedToolCallError, "malformed_tool_call"),
     (LLMServiceError, "domain"),
 )
 
@@ -108,6 +110,12 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     # below would classify the message rather than the original failure.
     if isinstance(error, LLMBadRequestError):
         return (LLMBadRequestError, error.message, f"LLM rejected the request: {error.message}")
+    if isinstance(error, LLMMalformedToolCallError):
+        return (
+            LLMMalformedToolCallError,
+            error.message,
+            f"Model returned an unusable tool call: {error.message}",
+        )
 
     error_str = str(error)
     error_type_name = type(error).__name__
@@ -186,6 +194,15 @@ async def safe_call_llm_with_tools(
         # Classify the error and raise appropriate error type
         error_class, user_msg, log_msg = classify_llm_error(e)
         logger.error(log_msg, exc_info=True)
+        if error_class is LLMMalformedToolCallError:
+            # Rebuilding drops everything the original carried. `truncated`
+            # decides the turn-closing text that gets *persisted into history*,
+            # so losing it here silently reports the wrong cause forever after.
+            raise LLMMalformedToolCallError(
+                user_msg,
+                tool_names=getattr(e, "tool_names", None),
+                truncated=getattr(e, "truncated", False),
+            )
         if error_class is LLMBadRequestError:
             # Rebuilding the error would drop the attribution it carries.
             raise LLMBadRequestError(user_msg, tool_names=getattr(e, "tool_names", None))

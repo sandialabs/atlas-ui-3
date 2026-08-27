@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -18,6 +19,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 from ..preprocessors.message_builder import build_session_context
 from ..utilities import error_handler, event_notifier, tool_executor
 from ..utilities.agent_digest import build_tool_digest
+from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
 
@@ -115,6 +117,8 @@ class ToolsModeRunner:
             tool_choice="auto",
             temperature=temperature,
         )
+        # Streaming off must not make a dropped call silent.
+        await publish_dropped_call_warning(self.event_publisher, llm_response)
 
         # No tool calls -> treat as plain content
         if not llm_response or not llm_response.has_tool_calls():
@@ -272,12 +276,28 @@ class ToolsModeRunner:
                 token="", is_first=False, is_last=True,
             )
 
-        # If streaming failed and we got no content, send the error to the frontend
-        if streaming_error and not accumulated_content:
+        # If streaming failed and we got no content, send the error to the
+        # frontend. A malformed tool call is reported even when narration was
+        # already streamed: the model announced work it could not perform, and
+        # presenting that narration as a finished answer would hide the gap.
+        if streaming_error and (
+            not accumulated_content
+            or isinstance(streaming_error, LLMMalformedToolCallError)
+        ):
             error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
             )
             logger.error("Streaming tools classified error: %s", log_msg)
+            if accumulated_content:
+                # The user watched this text stream in. Returning without
+                # persisting it saves the turn with no assistant reply at all,
+                # so the narration vanishes on reload while the error frame --
+                # which is transient UI -- is all that was ever shown.
+                session.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=accumulated_content,
+                    metadata={"incomplete": True, "error_type": error_handler.error_type_for(error_class)},
+                ))
             await self.event_publisher.send_json({
                 "type": "error",
                 "message": user_msg,
@@ -302,6 +322,11 @@ class ToolsModeRunner:
             session.history.add_message(assistant_message)
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(content)
+
+        # A dropped-but-not-fatal call is otherwise invisible: the turn keeps
+        # going with the calls that parsed, and neither the user nor the model
+        # is told that one was discarded.
+        await publish_dropped_call_warning(self.event_publisher, final_llm_response)
 
         # Has tool calls: signal end of initial stream if we sent tokens
         if accumulated_content:

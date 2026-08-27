@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
@@ -26,6 +27,7 @@ from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
+from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .streaming_final_answer import stream_final_answer
@@ -344,14 +346,18 @@ class AgenticLoop(AgentLoopProtocol):
             )
 
         if data_sources and context.user_email:
-            return await self.llm.call_with_rag_and_tools(
+            response = await self.llm.call_with_rag_and_tools(
                 model, messages, data_sources, tools_schema,
                 context.user_email, "auto", temperature=temperature,
             )
-        return await self.llm.call_with_tools(
-            model, messages, tools_schema, "auto",
-            temperature=temperature, user_email=context.user_email,
-        )
+        else:
+            response = await self.llm.call_with_tools(
+                model, messages, tools_schema, "auto",
+                temperature=temperature, user_email=context.user_email,
+            )
+        # Streaming off must not make a dropped call silent.
+        await publish_dropped_call_warning(event_publisher, response)
+        return response
 
     async def _call_llm_streaming(
         self,
@@ -389,6 +395,33 @@ class AgenticLoop(AgentLoopProtocol):
                     is_first = False
                 elif isinstance(item, LLMResponse):
                     final_response = item
+        except LLMMalformedToolCallError:
+            # The model announced tool calls that could not be run, and none
+            # survived the JSON check. Treating the narration as a finished
+            # answer would hand the user a reply that silently skipped the work
+            # it just promised, so this failure propagates even when text was
+            # already streamed. Close the open bubble first so the UI does not
+            # keep a live cursor behind the error.
+            logger.warning("Malformed tool call ended the streaming agent turn")
+            if accumulated_content:
+                await event_publisher.publish_token_stream(
+                    token="", is_first=False, is_last=True,
+                )
+                # Match tools mode: text the user watched stream in is kept, as
+                # the same display-only agent_intermediate row a completed step
+                # writes, so a reload shows what actually happened rather than
+                # a turn that appears to have said nothing.
+                context.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=accumulated_content,
+                    metadata={
+                        "agent_mode": True,
+                        "agent_intermediate": True,
+                        "message_type": "agent_intermediate",
+                        "incomplete": True,
+                    },
+                ))
+            raise
         except Exception:
             logger.exception("Error during streaming LLM call in agentic loop")
             if not accumulated_content:
@@ -407,6 +440,10 @@ class AgenticLoop(AgentLoopProtocol):
             final_response = LLMResponse(content=accumulated_content)
         elif accumulated_content and not final_response.content:
             final_response.content = accumulated_content
+
+        # A partial drop keeps the turn alive, so it has to be said out loud or
+        # it is invisible.
+        await publish_dropped_call_warning(event_publisher, final_response)
 
         # Close any streamed text, including narration for tool-call turns, so
         # each iteration finalizes as its own UI bubble before tool rows render.

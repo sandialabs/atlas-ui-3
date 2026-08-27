@@ -7,18 +7,30 @@ These methods are mixed into LiteLLMCaller via LiteLLMStreamingMixin.
 import asyncio
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 from litellm import acompletion
 from litellm.types.utils import ChatCompletionMessageToolCall, Function
 
 from atlas.application.chat.capture.capture_context import record_llm_call
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
+from atlas.domain.errors import LLMMalformedToolCallError
 
 from .models import LLMResponse, split_provider
+from .tool_call_guard import (
+    partition_tool_calls_by_json_validity,
+    tool_call_function_field,
+)
 
 logger = logging.getLogger(__name__)
+
+# The OpenAI-compatible finish_reason vocabulary. Anything else is provider text
+# and is reported as "other" rather than interpolated into a log line or a span.
+KNOWN_FINISH_REASONS = frozenset(
+    {"stop", "length", "tool_calls", "function_call", "content_filter"}
+)
 
 
 class LiteLLMStreamingMixin:
@@ -137,6 +149,113 @@ class LiteLLMStreamingMixin:
                 logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
                 self._raise_llm_domain_error(exc)
 
+    def _handle_malformed_tool_calls(
+        self,
+        malformed: List[Any],
+        kept: List[Any],
+        finish_reason: Optional[str],
+        model_name: str,
+        span: Any = None,
+        user_email: Optional[str] = None,
+    ) -> List[str]:
+        """Log dropped tool calls and fail the turn when none are left.
+
+        Dropping is always right -- unparseable arguments cannot be executed
+        faithfully, and re-sending them breaks every later request. What differs
+        is whether the turn can still make progress: if at least one well-formed
+        call survives, the model gets those results and can reissue the rest.
+        If nothing survives, raise, so the user is told the turn failed instead
+        of silently receiving a reply that skipped the work it announced.
+
+        Returns the dropped names so the caller can put them on the response and
+        the consumers can warn about a partial drop.
+        """
+        # Names come from model output and the model id is request-supplied, so
+        # both reach the log only after sanitizing: either carrying a newline
+        # could otherwise forge a log line. Each value is sanitized directly at
+        # the point it is interpolated -- .github/codeql/extensions.yml models
+        # sanitize_for_logging's return value as safe, and that model tracks a
+        # direct call, not taint laundered through a list first.
+        names = [
+            sanitize_for_logging(tool_call_function_field(tc, "name", "")) or "unknown"
+            for tc in malformed
+        ]
+        # The copy is keyed on the output limit specifically: a content filter
+        # also cuts a response off, but "ran out of room" would be a false
+        # explanation. The *repair policy* uses the broader check, because any
+        # unclean finish means the last call may be incomplete.
+        truncated = finish_reason == "length"
+        # Allow-listed rather than interpolated: finish_reason is provider text.
+        safe_reason = finish_reason if finish_reason in KNOWN_FINISH_REASONS else "other"
+        logger.error(
+            "Dropping %d malformed tool call(s) from %s (finish_reason=%s, names=%s); "
+            "%d well-formed call(s) kept",
+            len(malformed),
+            sanitize_for_logging(model_name),
+            safe_reason,
+            sanitize_for_logging(", ".join(names)),
+            len(kept),
+        )
+        set_attrs(span, {
+            "malformed_tool_calls": len(malformed),
+            "finish_reason": safe_reason,
+        })
+        log_metric(
+            "malformed_tool_call", user_email, model=model_name,
+            dropped=len(malformed), kept=len(kept), finish_reason=safe_reason,
+        )
+        if kept:
+            return names
+        if truncated:
+            message = (
+                "The model ran out of room while writing its tool call, so the "
+                "request was cut off mid-argument. Please try again -- asking for "
+                "one thing at a time usually clears it. (Starting a new "
+                "conversation shortens the input, which does not help here: the "
+                "limit was reached on the way out, not on the way in.)"
+            )
+        else:
+            message = (
+                "The model produced a tool call that was not valid JSON, so it "
+                "could not be run. Please try again."
+            )
+        raise LLMMalformedToolCallError(message, tool_names=names, truncated=truncated)
+
+    def _guard_tool_calls(
+        self,
+        tool_calls: Optional[List[Any]],
+        finish_reason: Optional[str],
+        model_name: str,
+        user_email: Optional[str] = None,
+        span: Any = None,
+    ) -> Tuple[Optional[List[Any]], List[str], bool]:
+        """Apply the malformed-tool-call guard to one response.
+
+        Shared by the streaming and non-streaming callers so the policy -- and
+        the ``finish_reason`` rule behind the user-facing copy -- lives in one
+        place and cannot drift between them. Returns
+        ``(kept_calls, dropped_names, dropped_were_truncated)``; raises
+        ``LLMMalformedToolCallError`` when nothing usable survives.
+        """
+        if not tool_calls:
+            return tool_calls or None, [], False
+        kept, malformed = partition_tool_calls_by_json_validity(
+            tool_calls, finish_reason=finish_reason,
+        )
+        dropped: List[str] = []
+        if malformed:
+            dropped = self._handle_malformed_tool_calls(
+                malformed,
+                kept=kept,
+                finish_reason=finish_reason,
+                model_name=model_name,
+                span=span,
+                user_email=user_email,
+            )
+        # An empty array is a shape providers reject on the follow-up request,
+        # so normalize it away rather than leaving it for the loop to strip.
+        return kept or None, dropped, finish_reason == "length"
+
     async def stream_with_tools(
         self,
         model_name: str,
@@ -204,9 +323,16 @@ class LiteLLMStreamingMixin:
                 accumulated_content = ""
                 accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
                 chunk_count = 0
+                finish_reason: Optional[str] = None
 
                 async for chunk in response:
-                    delta = chunk.choices[0].delta if chunk.choices else None
+                    choice = chunk.choices[0] if chunk.choices else None
+                    if choice is not None:
+                        # Providers send the reason on the final chunk; keep the
+                        # last non-empty one so a truncated turn ("length") can
+                        # be told apart from a model that simply emitted bad JSON.
+                        finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                    delta = choice.delta if choice is not None else None
                     if not delta:
                         continue
 
@@ -263,6 +389,20 @@ class LiteLLMStreamingMixin:
                             ),
                         ))
 
+                # Reject tool calls whose arguments are not parseable JSON
+                # before they can be executed or appended to the conversation.
+                # A model that runs out of output tokens mid-tool-call leaves a
+                # fragment like ``{"filename": "long-name.c``; the provider
+                # re-parses every tool call on the next request, so persisting
+                # one poisons the conversation permanently -- every later turn
+                # comes back as a 400 that no retry can clear.
+                tool_calls_list, dropped_tool_calls, dropped_were_truncated = (
+                    self._guard_tool_calls(
+                        tool_calls_list, finish_reason, model_name,
+                        user_email=user_email, span=span,
+                    )
+                )
+
                 log_metric(
                     "llm_call", user_email, model=model_name,
                     message_count=len(messages),
@@ -286,6 +426,8 @@ class LiteLLMStreamingMixin:
                     content=accumulated_content,
                     tool_calls=tool_calls_list,
                     model_used=model_name,
+                    dropped_tool_calls=dropped_tool_calls or None,
+                    dropped_tool_calls_truncated=dropped_were_truncated,
                 )
 
             except Exception as exc:

@@ -11,9 +11,11 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
+from atlas.domain.errors import ToolError
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.llm import LLMResponse
+from atlas.modules.llm.tool_call_guard import repair_structural_json
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -24,33 +26,16 @@ logger = logging.getLogger(__name__)
 
 
 def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
-    """Attempt to repair truncated JSON from LLM tool arguments.
+    """Repair structurally incomplete tool arguments (missing braces only).
 
-    Common cases: missing opening/closing braces, trailing quote.
-    Returns parsed dict on success, None on failure.
+    Delegates to ``repair_structural_json``, which is the single definition of
+    what a repair may do: complete the shape of an object, never the content of
+    a value. The LLM layer applies the same repair while accumulating a
+    response, so a call reaching the executor has normally been repaired
+    already; this remains for arguments that arrive from elsewhere (an
+    approval-time edit, a replayed history row).
     """
-    s = raw.strip()
-    # Add missing braces
-    if not s.startswith("{"):
-        s = "{" + s
-    if not s.endswith("}"):
-        s = s + "}"
-    try:
-        result = json.loads(s)
-        if isinstance(result, dict):
-            return result
-    except Exception:
-        pass
-    # Try closing an open string value: e.g. {"expression": "355/113
-    if s.count('"') % 2 != 0:
-        s = s.rstrip("}") + '"}'
-        try:
-            result = json.loads(s)
-            if isinstance(result, dict):
-                return result
-        except Exception:
-            pass
-    return None
+    return repair_structural_json(raw)
 
 
 # Type hint for update callback
@@ -875,11 +860,21 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
                     )
                     parsed_args = repaired
                 else:
+                    # Running with {} is the silent-wrong-answer case this whole
+                    # guard exists to prevent: for a tool whose parameters are
+                    # all optional it succeeds and returns a plausible result for
+                    # a request the user never made. Fail the call instead --
+                    # execute_single_tool turns this into a failed ToolResult, so
+                    # the model is told and can reissue.
+                    name = getattr(tool_call.function, "name", "<unknown>")
                     logger.warning(
-                        "Failed to parse tool arguments as JSON for %s, using empty dict. Raw: %r",
-                        getattr(tool_call.function, "name", "<unknown>"), raw_args
+                        "Failed to parse tool arguments as JSON for %s. Raw: %r",
+                        name, raw_args,
                     )
-                    parsed_args = {}
+                    raise ToolError(
+                        f"The arguments for '{name}' were not valid JSON, so the "
+                        "tool was not run."
+                    )
 
     # Inject _atlas_user and file URL mappings with schema awareness
     return inject_context_into_args(parsed_args, session_context, tool_call.function.name, tool_manager)
