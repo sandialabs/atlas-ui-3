@@ -263,11 +263,24 @@ executor raises `ToolError` rather than running the tool with `{}` — for a too
 whose parameters are all optional that fallback succeeded and returned a
 plausible result for a request the user never made.
 
-The repair is also skipped entirely for the last call of a truncated response.
-Brace-balancing a mid-object truncation (`{"path": "/data", "recursive": true`)
-produces valid JSON whose remaining keys were silently dropped: it executes, and
-it is written to history, looking entirely well-formed. Completing the shape is
-only honest when nothing is known to be missing.
+Which half of the repair applies is decided by *shape*, not by `finish_reason`
+alone. Text that opens with a brace and never closes it is the cut-off
+signature (`{"path": "/data", "recursive": true`): supplying the closing brace
+produces valid JSON whose remaining keys were never sent, so that half requires
+positive evidence the response finished (`finish_reason` in
+`CLEAN_FINISH_REASONS`), and earlier calls in the response get it unconditionally
+since a cut can only have reached the last one. Text missing the *opening* brace
+is a sloppy envelope around a complete intent and is always repaired — a cut
+lands at the end, not the start.
+
+This matters because `finish_reason` has three states, not two. Absent (`None`)
+is the common case on accumulated chunks: it is not evidence of truncation, so
+empty arguments are still honoured as a no-argument call, but it is not evidence
+of completeness either, so the closing-brace repair stays off.
+
+One helper, `LiteLLMStreamingMixin._guard_tool_calls()`, applies all of this for
+both the streaming and non-streaming callers, so the policy and the
+`finish_reason` rule behind the user-facing copy cannot drift between them.
 
 When some calls are dropped but others survive, the turn continues and
 `LLMResponse.dropped_tool_calls` carries the discarded names. Both mode runners

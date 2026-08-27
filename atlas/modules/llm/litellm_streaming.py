@@ -7,7 +7,7 @@ These methods are mixed into LiteLLMCaller via LiteLLMStreamingMixin.
 import asyncio
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 from litellm import acompletion
 from litellm.types.utils import ChatCompletionMessageToolCall, Function
@@ -21,7 +21,6 @@ from atlas.domain.errors import LLMMalformedToolCallError
 from .models import LLMResponse, split_provider
 from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
-    response_was_cut_off,
     tool_call_function_field,
 )
 
@@ -222,6 +221,41 @@ class LiteLLMStreamingMixin:
             )
         raise LLMMalformedToolCallError(message, tool_names=names, truncated=truncated)
 
+    def _guard_tool_calls(
+        self,
+        tool_calls: Optional[List[Any]],
+        finish_reason: Optional[str],
+        model_name: str,
+        user_email: Optional[str] = None,
+        span: Any = None,
+    ) -> Tuple[Optional[List[Any]], List[str], bool]:
+        """Apply the malformed-tool-call guard to one response.
+
+        Shared by the streaming and non-streaming callers so the policy -- and
+        the ``finish_reason`` rule behind the user-facing copy -- lives in one
+        place and cannot drift between them. Returns
+        ``(kept_calls, dropped_names, dropped_were_truncated)``; raises
+        ``LLMMalformedToolCallError`` when nothing usable survives.
+        """
+        if not tool_calls:
+            return tool_calls or None, [], False
+        kept, malformed = partition_tool_calls_by_json_validity(
+            tool_calls, finish_reason=finish_reason,
+        )
+        dropped: List[str] = []
+        if malformed:
+            dropped = self._handle_malformed_tool_calls(
+                malformed,
+                kept=kept,
+                finish_reason=finish_reason,
+                model_name=model_name,
+                span=span,
+                user_email=user_email,
+            )
+        # An empty array is a shape providers reject on the follow-up request,
+        # so normalize it away rather than leaving it for the loop to strip.
+        return kept or None, dropped, finish_reason == "length"
+
     async def stream_with_tools(
         self,
         model_name: str,
@@ -290,8 +324,6 @@ class LiteLLMStreamingMixin:
                 accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
                 chunk_count = 0
                 finish_reason: Optional[str] = None
-                dropped_tool_calls: List[str] = []
-                dropped_were_truncated = False
 
                 async for chunk in response:
                     choice = chunk.choices[0] if chunk.choices else None
@@ -364,25 +396,12 @@ class LiteLLMStreamingMixin:
                 # re-parses every tool call on the next request, so persisting
                 # one poisons the conversation permanently -- every later turn
                 # comes back as a 400 that no retry can clear.
-                if tool_calls_list:
-                    tool_calls_list, malformed = partition_tool_calls_by_json_validity(
-                        tool_calls_list, truncated=response_was_cut_off(finish_reason),
+                tool_calls_list, dropped_tool_calls, dropped_were_truncated = (
+                    self._guard_tool_calls(
+                        tool_calls_list, finish_reason, model_name,
+                        user_email=user_email, span=span,
                     )
-                    if malformed:
-                        dropped_tool_calls = self._handle_malformed_tool_calls(
-                            malformed,
-                            kept=tool_calls_list,
-                            finish_reason=finish_reason,
-                            model_name=model_name,
-                            span=span,
-                            user_email=user_email,
-                        )
-                        dropped_were_truncated = finish_reason == "length"
-                    # A provider can hand back a list that holds nothing usable
-                    # (every entry None). An empty array is a shape providers
-                    # reject on the follow-up request, so normalize it away here
-                    # rather than leaving it for the loop to strip.
-                    tool_calls_list = tool_calls_list or None
+                )
 
                 log_metric(
                     "llm_call", user_email, model=model_name,

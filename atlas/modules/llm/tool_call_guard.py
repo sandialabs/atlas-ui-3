@@ -57,7 +57,10 @@ def tool_call_arguments_are_valid_json(tool_call: Any) -> bool:
     return True
 
 
-def repair_structural_json(raw: str) -> Optional[Dict[str, Any]]:
+def repair_structural_json(
+    raw: str,
+    allow_closing_brace: bool = True,
+) -> Optional[Dict[str, Any]]:
     """Repair JSON that is only *structurally* incomplete, or return ``None``.
 
     Scope is deliberately narrow: balance missing braces, and nothing else. A
@@ -76,6 +79,15 @@ def repair_structural_json(raw: str) -> Optional[Dict[str, Any]]:
     visible error for a silent wrong answer.
     """
     text = raw.strip()
+    # Text that opens with a brace but never closes it is the signature of a
+    # cut-off response: `{"path": "/data", "recursive": true`. Supplying the
+    # closing brace there produces a complete-looking call whose remaining keys
+    # were never sent, so callers that cannot rule truncation out turn it off.
+    # Text missing the opening brace is a different animal -- a sloppy envelope
+    # around a complete intent (`"q": "hi"`) -- and is always repaired.
+    looks_cut_off = text.startswith("{") and not text.endswith("}")
+    if looks_cut_off and not allow_closing_brace:
+        return None
     if not text.startswith("{"):
         text = "{" + text
     if not text.endswith("}"):
@@ -118,7 +130,7 @@ def response_was_cut_off(finish_reason: Optional[str]) -> bool:
 
 def partition_tool_calls_by_json_validity(
     tool_calls: Optional[List[Any]],
-    truncated: bool = False,
+    finish_reason: Optional[str] = None,
 ) -> Tuple[List[Any], List[Any]]:
     """Split tool calls into ``(valid, malformed)`` by argument parseability.
 
@@ -127,35 +139,46 @@ def partition_tool_calls_by_json_validity(
     re-sending them makes the provider reject every later turn in the
     conversation (see ``LLMMalformedToolCallError``).
 
-    ``truncated`` marks a response the provider cut off at the token limit
-    (``finish_reason == "length"``). It closes a hole that parseability alone
-    cannot see: a call cut off *before* its first argument delta arrives has
-    ``arguments == ""``, which parses fine as "no arguments" and would execute
-    with ``{}``. For a tool whose parameters are all optional, that is not a
-    failure the user sees -- it is the wrong action performed silently. Only the
-    **last** call is judged this way, because that is the only one truncation can
-    have reached; earlier calls in the same response completed before the limit
-    was hit, so a genuine no-argument call among them is still honoured.
+    Everything extra hangs off ``finish_reason``, which has three meaningful
+    states rather than two, and the **last** call is the only one they apply to
+    -- it is the only one a cut-off can have reached, so a genuine no-argument
+    call earlier in the same response is always honoured:
+
+    * **clean** (``stop``/``tool_calls``): the model said everything it meant to.
+      Repair anything repairable.
+    * **cut off** (``length``, ``content_filter``, or a reason we do not know):
+      the response may stop mid-thought. Empty arguments are treated as a call
+      truncated before its first delta rather than a no-argument call.
+    * **absent** (``None``): providers routinely omit it on the chunks Atlas
+      accumulates. Treating that as a cut-off would drop legitimate no-argument
+      calls across the board, so empty arguments are still honoured -- but it is
+      not positive evidence of completeness either, so the closing-brace repair
+      below stays off.
+
+    Supplying a missing *closing* brace is what turns
+    ``{"path": "/data", "recursive": true`` into a complete-looking call whose
+    remaining keys were never sent. That half of the repair therefore requires
+    positive evidence the response finished; a missing *opening* brace is only a
+    sloppy envelope and is always repaired.
     """
     calls = [tool_call for tool_call in (tool_calls or []) if tool_call is not None]
+    known_complete = finish_reason in CLEAN_FINISH_REASONS
+    cut_off = response_was_cut_off(finish_reason)
     valid: List[Any] = []
     malformed: List[Any] = []
     for index, tool_call in enumerate(calls):
-        # Truncation can only have reached the final call, and there a structural
-        # repair is not safe: brace-balancing `{"path": "/data", "recursive": true`
-        # yields a *valid-looking* call whose remaining keys were silently
-        # dropped, which then executes and is written to history. Completing the
-        # shape is only honest when nothing is known to be missing.
-        cut_off = truncated and index == len(calls) - 1
+        is_last = index == len(calls) - 1
         ok = tool_call_arguments_are_valid_json(tool_call)
-        if not ok and not cut_off:
-            # Missing enclosing braces is a sloppy envelope around a well-formed
-            # intent, not a truncation, and it was accepted long before this
-            # guard. Repair it in place -- writing the repaired string back is
-            # what keeps history parseable on the next request, which repairing
-            # downstream in the executor never did.
-            ok = _repair_arguments_in_place(tool_call)
-        if ok and cut_off and tool_call_arguments_are_empty(tool_call):
+        if not ok:
+            # Writing the repair back is what keeps history parseable on the
+            # next request, which repairing downstream in the executor never did.
+            ok = _repair_arguments_in_place(
+                tool_call,
+                # Earlier calls completed before anything was cut off, so they
+                # get the full repair regardless of how the response ended.
+                allow_closing_brace=known_complete or not is_last,
+            )
+        if ok and is_last and cut_off and tool_call_arguments_are_empty(tool_call):
             # Cut off before the first argument delta: parses fine as "no
             # arguments" and would execute with {}.
             ok = False
@@ -185,7 +208,7 @@ def dropped_call_warning(names: List[str], truncated: bool) -> str:
     )
 
 
-def _repair_arguments_in_place(tool_call: Any) -> bool:
+def _repair_arguments_in_place(tool_call: Any, allow_closing_brace: bool = True) -> bool:
     """Try a structural repair of ``arguments``; write it back and report success.
 
     The repaired string replaces the original so the assistant message written
@@ -194,7 +217,7 @@ def _repair_arguments_in_place(tool_call: Any) -> bool:
     arguments = tool_call_function_field(tool_call, "arguments", "")
     if not isinstance(arguments, str) or not arguments.strip():
         return False
-    repaired = repair_structural_json(arguments)
+    repaired = repair_structural_json(arguments, allow_closing_brace=allow_closing_brace)
     if repaired is None:
         return False
     encoded = json.dumps(repaired)

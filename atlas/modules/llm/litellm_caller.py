@@ -55,10 +55,6 @@ from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse, split_provider
-from .tool_call_guard import (
-    partition_tool_calls_by_json_validity,
-    response_was_cut_off,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -1301,30 +1297,16 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             message = response.choices[0].message
 
             tool_calls = getattr(message, 'tool_calls', None)
-            dropped_tool_calls: List[str] = []
-            dropped_were_truncated = False
-            # Same guard as the streaming path: a tool call whose arguments are
-            # not parseable JSON (a model that hit its output limit mid-call)
-            # must not be executed or written into the conversation, or every
-            # later request in that conversation is rejected with a 400.
-            if tool_calls:
-                finish_reason = getattr(response.choices[0], "finish_reason", None)
-                tool_calls, malformed = partition_tool_calls_by_json_validity(
-                    tool_calls, truncated=response_was_cut_off(finish_reason),
-                )
-                if malformed:
-                    dropped_tool_calls = self._handle_malformed_tool_calls(
-                        malformed,
-                        kept=tool_calls,
-                        finish_reason=finish_reason,
-                        model_name=model_name,
-                        user_email=user_email,
-                    )
-                    # Copy is keyed on the output limit; see the streaming path.
-                    dropped_were_truncated = finish_reason == "length"
-                # See the streaming path: an empty array is a shape providers
-                # reject on the follow-up request.
-                tool_calls = tool_calls or None
+            # Exactly the same guard as the streaming path, through the same
+            # helper: a tool call whose arguments are not parseable JSON must
+            # not be executed or written into the conversation, or every later
+            # request in that conversation is rejected with a 400.
+            tool_calls, dropped_tool_calls, dropped_were_truncated = self._guard_tool_calls(
+                tool_calls,
+                getattr(response.choices[0], "finish_reason", None),
+                model_name,
+                user_email=user_email,
+            )
             tool_count = len(tool_calls) if tool_calls else 0
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages), tool_count=tool_count)
 

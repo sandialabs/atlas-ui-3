@@ -33,6 +33,7 @@ from atlas.modules.llm.litellm_caller import LiteLLMCaller
 from atlas.modules.llm.tool_call_guard import (
     dropped_call_warning,
     partition_tool_calls_by_json_validity,
+    repair_structural_json,
     response_was_cut_off,
 )
 
@@ -328,7 +329,7 @@ class TestTruncatedBeforeAnyArguments:
     def test_empty_arguments_are_malformed_when_the_response_was_truncated(self):
         cut_off = SimpleNamespace(function=SimpleNamespace(name="delete_all", arguments=""))
 
-        valid, malformed = partition_tool_calls_by_json_validity([cut_off], truncated=True)
+        valid, malformed = partition_tool_calls_by_json_validity([cut_off], finish_reason="length")
 
         assert (valid, malformed) == ([], [cut_off])
 
@@ -336,7 +337,7 @@ class TestTruncatedBeforeAnyArguments:
         """A no-argument tool call is legitimate when nothing was cut off."""
         no_args = SimpleNamespace(function=SimpleNamespace(name="now", arguments=""))
 
-        valid, malformed = partition_tool_calls_by_json_validity([no_args], truncated=False)
+        valid, malformed = partition_tool_calls_by_json_validity([no_args], finish_reason="tool_calls")
 
         assert (valid, malformed) == ([no_args], [])
 
@@ -350,7 +351,7 @@ class TestTruncatedBeforeAnyArguments:
         last = SimpleNamespace(function=SimpleNamespace(name="delete_all", arguments=""))
 
         valid, malformed = partition_tool_calls_by_json_validity(
-            [earlier, last], truncated=True,
+            [earlier, last], finish_reason="length",
         )
 
         assert valid == [earlier]
@@ -541,7 +542,9 @@ class TestBraceOnlyDamageIsRepairedNotRejected:
     def test_repair_is_written_back_for_dict_shaped_calls(self):
         sloppy = {"id": "1", "function": {"name": "search", "arguments": '{"q": "hi"'}}
 
-        valid, malformed = partition_tool_calls_by_json_validity([sloppy])
+        valid, malformed = partition_tool_calls_by_json_validity(
+            [sloppy], finish_reason="tool_calls",
+        )
 
         assert (valid, malformed) == ([sloppy], [])
         assert json.loads(sloppy["function"]["arguments"]) == {"q": "hi"}
@@ -558,7 +561,7 @@ class TestBraceOnlyDamageIsRepairedNotRejected:
             name="list_dir", arguments='{"path": "/data", "recursive": true',
         ))
 
-        valid, malformed = partition_tool_calls_by_json_validity([cut_off], truncated=True)
+        valid, malformed = partition_tool_calls_by_json_validity([cut_off], finish_reason="length")
 
         assert (valid, malformed) == ([], [cut_off])
         # And the arguments are left exactly as they arrived, not rewritten.
@@ -570,7 +573,7 @@ class TestBraceOnlyDamageIsRepairedNotRejected:
             name="list_dir", arguments='{"path": "/data", "recursive": true',
         ))
 
-        valid, malformed = partition_tool_calls_by_json_validity([sloppy], truncated=False)
+        valid, malformed = partition_tool_calls_by_json_validity([sloppy], finish_reason="tool_calls")
 
         assert (valid, malformed) == ([sloppy], [])
         assert json.loads(sloppy.function.arguments) == {"path": "/data", "recursive": True}
@@ -922,7 +925,7 @@ class TestWhatCountsAsCutOff:
         ))
 
         valid, malformed = partition_tool_calls_by_json_validity(
-            [cut_off], truncated=response_was_cut_off("content_filter"),
+            [cut_off], finish_reason="content_filter",
         )
 
         assert (valid, malformed) == ([], [cut_off])
@@ -959,3 +962,82 @@ class TestNonStreamingAlsoWarns:
 
         warned = [c.kwargs.get("message", "") for c in publisher.publish_warning.await_args_list]
         assert warned and "read_file" in warned[0]
+
+
+class TestRepairKeysOnShapeNotJustFinishReason:
+    """A missing *closing* brace is the cut-off signature; a missing opening one is not.
+
+    Without this split, an absent `finish_reason` -- which providers routinely
+    omit -- either loses the sloppy-envelope repair entirely or lets a truncated
+    object be completed with keys the model never sent.
+    """
+
+    def test_an_unclosed_object_needs_positive_evidence_of_completeness(self):
+        cut_shape = '{"path": "/data", "recursive": true'
+
+        assert repair_structural_json(cut_shape, allow_closing_brace=False) is None
+        assert repair_structural_json(cut_shape, allow_closing_brace=True) == {
+            "path": "/data", "recursive": True,
+        }
+
+    def test_a_missing_opening_brace_is_repaired_either_way(self):
+        """It cannot be a truncation: the cut would be at the end, not the start."""
+        envelope = '"q": "hi"'
+
+        assert repair_structural_json(envelope, allow_closing_brace=False) == {"q": "hi"}
+        assert repair_structural_json(envelope, allow_closing_brace=True) == {"q": "hi"}
+
+    def test_an_absent_finish_reason_keeps_the_envelope_repair(self):
+        sloppy = SimpleNamespace(function=SimpleNamespace(name="search", arguments='"q": "hi"'))
+
+        valid, malformed = partition_tool_calls_by_json_validity([sloppy], finish_reason=None)
+
+        assert (valid, malformed) == ([sloppy], [])
+
+    def test_an_absent_finish_reason_refuses_to_close_an_open_object(self):
+        cut_off = SimpleNamespace(function=SimpleNamespace(
+            name="list_dir", arguments='{"path": "/data", "recursive": true',
+        ))
+
+        valid, malformed = partition_tool_calls_by_json_validity([cut_off], finish_reason=None)
+
+        assert (valid, malformed) == ([], [cut_off])
+
+    def test_earlier_calls_are_repaired_even_on_a_truncated_response(self):
+        """Only the last call can have been reached by the cut."""
+        earlier = SimpleNamespace(function=SimpleNamespace(
+            name="search", arguments='{"q": "hi"',
+        ))
+        last = SimpleNamespace(function=SimpleNamespace(name="now", arguments="{}"))
+
+        valid, malformed = partition_tool_calls_by_json_validity(
+            [earlier, last], finish_reason="length",
+        )
+
+        assert malformed == []
+        assert json.loads(earlier.function.arguments) == {"q": "hi"}
+
+
+class TestTruncationFlagSurvivesReclassification:
+    """`truncated` decides text that is persisted into history."""
+
+    def test_safe_call_llm_with_tools_forwards_it(self):
+        import asyncio
+
+        from atlas.application.chat.utilities.error_handler import safe_call_llm_with_tools
+
+        class FailingLLM:
+            async def call_with_tools(self, *a, **k):
+                raise LLMMalformedToolCallError(
+                    "The model ran out of room.", tool_names=["read_file"], truncated=True,
+                )
+
+        with pytest.raises(LLMMalformedToolCallError) as info:
+            asyncio.run(safe_call_llm_with_tools(
+                llm_caller=FailingLLM(), model="gemma",
+                messages=[{"role": "user", "content": "hi"}],
+                tools_schema=[{"type": "function"}],
+            ))
+
+        assert info.value.truncated is True
+        assert info.value.tool_names == ["read_file"]

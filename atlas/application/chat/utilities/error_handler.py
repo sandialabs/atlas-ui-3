@@ -194,9 +194,18 @@ async def safe_call_llm_with_tools(
         # Classify the error and raise appropriate error type
         error_class, user_msg, log_msg = classify_llm_error(e)
         logger.error(log_msg, exc_info=True)
-        if error_class in (LLMBadRequestError, LLMMalformedToolCallError):
+        if error_class is LLMMalformedToolCallError:
+            # Rebuilding drops everything the original carried. `truncated`
+            # decides the turn-closing text that gets *persisted into history*,
+            # so losing it here silently reports the wrong cause forever after.
+            raise LLMMalformedToolCallError(
+                user_msg,
+                tool_names=getattr(e, "tool_names", None),
+                truncated=getattr(e, "truncated", False),
+            )
+        if error_class is LLMBadRequestError:
             # Rebuilding the error would drop the attribution it carries.
-            raise error_class(user_msg, tool_names=getattr(e, "tool_names", None))
+            raise LLMBadRequestError(user_msg, tool_names=getattr(e, "tool_names", None))
         raise error_class(user_msg)
 
 
