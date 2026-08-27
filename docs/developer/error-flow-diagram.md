@@ -199,10 +199,105 @@ transient-keyword tests, for the same reason: a 400 is deterministic, and one
 that happens to contain `timeout` would otherwise be retried three times with
 backoff before failing.
 
-`LLMBadRequestError` is also in the passthrough tuples of `call_with_rag()` and
-`call_with_rag_and_tools()`. Those methods fall back to a simpler call when RAG
-breaks; a provider rejection is not a RAG failure, so without the passthrough the
-same rejected request is sent a second time and the logs blame RAG.
+Both `call_with_rag()` and `call_with_rag_and_tools()` fall back to a simpler
+call when RAG breaks, so their passthrough tuples catch `LLMError` — a provider
+rejection is not a RAG failure, and without the passthrough the same rejected
+request is sent a second time, the injected RAG context is discarded, and the
+logs blame RAG. The tuples name the *base* class rather than enumerating its
+subclasses so a newly added error cannot be silently downgraded into that
+fallback. `LLMAuthenticationError` and `DataSourcePermissionError` sit outside
+the `LLMError` hierarchy and stay listed explicitly.
+
+## Malformed tool calls (`malformed_tool_call`)
+
+A model that runs out of output tokens partway through a tool call leaves an
+`arguments` fragment that is not valid JSON. Providers re-parse every tool call
+in the message history on each request, so persisting one poisons the whole
+conversation: every later turn comes back as a 400 (`Unterminated string
+starting at: line 1 column 73`) that no retry can clear, because the fault is in
+the history rather than the request.
+
+`partition_tool_calls_by_json_validity()` therefore drops unparseable calls
+where they are accumulated, on both the streaming and non-streaming paths,
+before they can be executed or written to history. Two rules:
+
+- A call whose arguments do not parse is always dropped.
+- When `finish_reason == "length"`, the **last** call is also dropped if its
+  arguments are empty — truncation before the first argument delta parses fine
+  as "no arguments" and would otherwise execute with `{}`. Earlier calls in the
+  same response completed before the limit, so a genuine no-argument call among
+  them is honoured.
+
+When well-formed calls survive, the turn continues with those and the model can
+reissue the rest. When none do, the turn fails with `LLMMalformedToolCallError`.
+Unlike `LLMBadRequestError` this failure is **retryable** — the same turn
+usually succeeds on a second attempt — and the message says so, naming the token
+limit only when `finish_reason` is evidence of one.
+
+`classify_llm_error()` short-circuits on it for the same reason it does on
+`LLMBadRequestError`: the message is already user-facing.
+
+Both streaming consumers (`ToolsModeRunner.run_streaming` and
+`AgenticLoop._call_llm_streaming`) suppress a mid-stream error once text has
+been streamed, on the reasoning that partial output beats none. This error is
+exempt: the model announced work it could not perform, and reporting the
+narration as a finished answer would hide the gap.
+
+The policy lives in `atlas/modules/llm/tool_call_guard.py`, separate from
+`models.py` (data models) because it is policy: what counts as a usable tool
+call, what may be repaired, and what must be refused.
+
+Before a call is declared malformed it gets one structural repair:
+`repair_structural_json()` balances missing braces and nothing more. Some models
+emit `"q": "hi"` rather than `{"q": "hi"}` — a well-formed intent in a sloppy
+envelope, accepted long before this guard existed — and the repaired string is
+written **back onto the call**, which is what keeps the history copy parseable
+on every later request. Repairing downstream in the executor never did that.
+
+A repair may complete the shape of an object, never the content of a value.
+Closing an open string turned the production fragment into a different,
+valid-looking filename that the tool would have executed against confidently, so
+that branch is gone. `_try_repair_json()` in the executor now delegates to the
+same function, so the two layers cannot drift apart, and when a repair fails the
+executor raises `ToolError` rather than running the tool with `{}` — for a tool
+whose parameters are all optional that fallback succeeded and returned a
+plausible result for a request the user never made.
+
+Which half of the repair applies is decided by *shape*, not by `finish_reason`
+alone. Text that opens with a brace and never closes it is the cut-off
+signature (`{"path": "/data", "recursive": true`): supplying the closing brace
+produces valid JSON whose remaining keys were never sent, so that half requires
+positive evidence the response finished (`finish_reason` in
+`CLEAN_FINISH_REASONS`), and earlier calls in the response get it unconditionally
+since a cut can only have reached the last one. Text missing the *opening* brace
+is a sloppy envelope around a complete intent and is always repaired — a cut
+lands at the end, not the start.
+
+This matters because `finish_reason` has three states, not two. Absent (`None`)
+is the common case on accumulated chunks: it is not evidence of truncation, so
+empty arguments are still honoured as a no-argument call, but it is not evidence
+of completeness either, so the closing-brace repair stays off.
+
+One helper, `LiteLLMStreamingMixin._guard_tool_calls()`, applies all of this for
+both the streaming and non-streaming callers, so the policy and the
+`finish_reason` rule behind the user-facing copy cannot drift between them.
+
+When some calls are dropped but others survive, the turn continues and
+`LLMResponse.dropped_tool_calls` carries the discarded names. Both mode runners
+publish a `{"type": "warning"}` frame built by `dropped_call_warning()` — one
+shared implementation, so the copy cannot drift between modes — and a
+`malformed_tool_call` metric records the drop. The copy says which cause applied
+(truncation vs unparseable JSON), pluralizes, and does not claim the surviving
+calls have already run, since the warning is published before they execute — otherwise a partial drop is invisible, and the user sees an
+answer built on less work than the model intended.
+
+Neither mode saves a failed turn empty. `ToolsModeRunner` persists the narration
+it already streamed (flagged `incomplete`) before returning the error, `AgenticLoop` keeps the step's narration as the same display-only
+`agent_intermediate` row a completed step writes, and `AgentModeRunner` closes
+the turn with `MALFORMED_TOOL_CALL_TURN_CONTENT`, the
+same contract the interrupted-turn path follows: text the user watched stream in
+must not vanish on reload, and the turn must not be saved with no assistant
+reply.
 
 ## Key Points
 

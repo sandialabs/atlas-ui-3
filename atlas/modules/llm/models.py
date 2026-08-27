@@ -13,6 +13,13 @@ class LLMResponse:
     tool_calls: Optional[List[Dict]] = None
     model_used: str = ""
     tokens_used: int = 0
+    # Names of tool calls dropped for unparseable arguments while other calls in
+    # the same response survived. The turn continues, so nothing else would tell
+    # the user or the model that a call was discarded.
+    dropped_tool_calls: Optional[List[str]] = None
+    # Whether that drop was an output-limit truncation rather than unparseable
+    # JSON. The user-facing warning says why, so it must not guess.
+    dropped_tool_calls_truncated: bool = False
 
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""

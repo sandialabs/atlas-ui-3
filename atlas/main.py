@@ -58,6 +58,7 @@ from atlas.domain.errors import (
     DomainError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMMalformedToolCallError,
     LLMTimeoutError,
     RateLimitError,
     ValidationError,
@@ -738,6 +739,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "context_window_exceeded"
+                        })
+                    except LLMMalformedToolCallError as e:
+                        logger.warning(f"Model returned an unusable tool call in chat handler: {e}")
+                        log_metric("error", user_email, error_type="malformed_tool_call")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "malformed_tool_call"
                         })
                     except LLMBadRequestError as e:
                         logger.warning(f"Provider rejected the request in chat handler: {e}")

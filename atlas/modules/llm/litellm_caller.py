@@ -46,6 +46,7 @@ from atlas.domain.errors import (
     DataSourcePermissionError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMError,
     LLMServiceError,
     LLMTimeoutError,
     RateLimitError,
@@ -312,6 +313,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         (RateLimitError, LLMTimeoutError, etc.) instead of a generic Exception,
         which allows it to send meaningful error messages to the frontend.
         """
+        # An error we already classified (e.g. a malformed tool call detected
+        # while accumulating the stream) carries a precise, user-safe message.
+        # Re-running it through the keyword matching below would demote it to a
+        # generic service error and match on its own wording, not the failure.
+        if isinstance(exc, LLMError):
+            raise exc
+
         error_str = str(exc)
         error_type = type(exc).__name__
         lowered = error_str.lower()
@@ -1230,12 +1238,12 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return llm_response
 
         except (
-            RateLimitError,
-            LLMTimeoutError,
+            # ``LLMError`` covers the whole family (rate limit, timeout, service,
+            # bad request, context window, malformed tool call) so a newly added
+            # member is never silently downgraded into the fallback retry below.
+            # The other two sit outside that hierarchy and are listed explicitly.
+            LLMError,
             LLMAuthenticationError,
-            LLMServiceError,
-            LLMBadRequestError,
-            ContextWindowExceededError,
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry
@@ -1289,13 +1297,25 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             message = response.choices[0].message
 
             tool_calls = getattr(message, 'tool_calls', None)
+            # Exactly the same guard as the streaming path, through the same
+            # helper: a tool call whose arguments are not parseable JSON must
+            # not be executed or written into the conversation, or every later
+            # request in that conversation is rejected with a 400.
+            tool_calls, dropped_tool_calls, dropped_were_truncated = self._guard_tool_calls(
+                tool_calls,
+                getattr(response.choices[0], "finish_reason", None),
+                model_name,
+                user_email=user_email,
+            )
             tool_count = len(tool_calls) if tool_calls else 0
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages), tool_count=tool_count)
 
             return LLMResponse(
                 content=getattr(message, 'content', None) or "",
                 tool_calls=tool_calls,
-                model_used=model_name
+                model_used=model_name,
+                dropped_tool_calls=dropped_tool_calls or None,
+                dropped_tool_calls_truncated=dropped_were_truncated,
             )
 
         except HookBlockedError:
@@ -1466,12 +1486,12 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             return llm_response
 
         except (
-            RateLimitError,
-            LLMTimeoutError,
+            # ``LLMError`` covers the whole family (rate limit, timeout, service,
+            # bad request, context window, malformed tool call) so a newly added
+            # member is never silently downgraded into the fallback retry below.
+            # The other two sit outside that hierarchy and are listed explicitly.
+            LLMError,
             LLMAuthenticationError,
-            LLMServiceError,
-            LLMBadRequestError,
-            ContextWindowExceededError,
             DataSourcePermissionError,
         ):
             raise  # Don't mask LLM errors with a fallback retry
