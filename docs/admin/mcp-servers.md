@@ -226,15 +226,16 @@ The official Perplexity MCP server ([`@perplexity-ai/mcp-server`](https://www.np
 
 **Prerequisites** (the server is skipped if any are missing):
 
-- **Node.js + `npx` on `PATH`.** The server is launched with `npx -yq @perplexity-ai/mcp-server`. `-yq` auto-installs the package quietly so `npx` install banners do not corrupt the stdio JSON-RPC stream (the official README recommends this for strict MCP clients).
+- **Node.js + `npx` on `PATH`.** The server is launched with `npx -yq @perplexity-ai/mcp-server@1.2.0`. `-yq` auto-installs the package quietly so `npx` install banners do not corrupt the stdio JSON-RPC stream (the official README recommends this for strict MCP clients). The version is **pinned** so a bundled default resolves a known-good server rather than whatever is currently published; bump the pin deliberately to pick up upstream releases.
 - **`PERPLEXITY_API_KEY`** set in the backend environment (e.g. in `.env`). The config resolves it with `${PERPLEXITY_API_KEY}` substitution; if the variable is unset the server is skipped with a clear log line rather than spawned half-initialized.
+- **`PATH` and `HOME`** set in the backend environment. They are passed to the subprocess via `${PATH}`/`${HOME}` substitution so `npx`/`node` can resolve and use the npm cache. Both are present in virtually all service/unit contexts; if either is unset the server is skipped (logged) rather than spawned with a broken environment.
 
 **Configuration** (shipped in `atlas/config/mcp.json`):
 
 ```json
 {
   "perplexity": {
-    "command": ["npx", "-yq", "@perplexity-ai/mcp-server"],
+    "command": ["npx", "-yq", "@perplexity-ai/mcp-server@1.2.0"],
     "transport": "stdio",
     "env": {
       "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
@@ -251,7 +252,7 @@ The official Perplexity MCP server ([`@perplexity-ai/mcp-server`](https://www.np
 
 **Compliance level:** `Public` (the server returns publicly accessible web data). Because compliance levels use an explicit allowlist, only `Public`-level sessions can combine with it; an `Internal`/`SOC2`/`HIPAA` session will not see the server. Reclassify to `External` in your local override if your policy treats third-party SaaS APIs as `External`.
 
-**Notes for restricted environments:** `npx -yq` fetches the package from the npm registry at first run. Air-gapped or egress-restricted deployments should pre-install the package (`npm i -g @perplexity-ai/mcp-server`) and either keep `npx` on `PATH` or replace the `command` with the resolved binary path in a `config/mcp.json` override.
+**Notes for restricted environments:** `npx -yq` fetches the package from the npm registry at first run. Air-gapped or egress-restricted deployments should pre-install the package (`npm i -g @perplexity-ai/mcp-server@1.2.0`) and either keep `npx` on `PATH` or replace the `command` with the resolved binary path in a `config/mcp.json` override.
 
 ## Advanced MCP Features
 
