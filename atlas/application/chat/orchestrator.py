@@ -218,6 +218,7 @@ class ChatOrchestrator:
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
         rewind_to_user_index: Optional[int] = None,
+        steering: Optional[Any] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -238,6 +239,10 @@ class ChatOrchestrator:
             rewind_to_user_index: When set, rewind history to this user message
                 (0-based ordinal) before adding the new prompt, dropping that
                 prompt and everything after it (overwrite-in-place edit/resubmit)
+            steering: Optional steering channel (issue #824). Forwarded only to
+                agent mode, where the loop drains it at each iteration boundary
+                so a user message sent mid-run reaches the LLM as a normal user
+                turn without stopping the loop. Other modes ignore it.
             **kwargs: Additional parameters
 
         Returns:
@@ -450,6 +455,7 @@ class ChatOrchestrator:
                 max_steps=self._bounded_agent_steps(kwargs.get("agent_max_steps")),
                 temperature=temperature,
                 agent_loop_strategy=kwargs.get("agent_loop_strategy"),
+                steering=steering,
             )
         elif selected_tools and not only_rag:
             # Apply tool authorization

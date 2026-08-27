@@ -295,6 +295,7 @@ class ChatService:
         agent_mode: bool = False,
         temperature: float = 0.7,
         update_callback: Optional[UpdateCallback] = None,
+        steering: Optional[Any] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -589,6 +590,7 @@ class ChatService:
                             agent_mode=agent_mode,
                             temperature=temperature,
                             update_callback=update_callback,
+                            steering=steering,
                             **kwargs
                         )
                     try:
@@ -608,6 +610,7 @@ class ChatService:
                         agent_mode=agent_mode,
                         temperature=temperature,
                         update_callback=update_callback,
+                        steering=steering,
                         **kwargs
                     )
             await self._commit_turn(

@@ -16,6 +16,7 @@ from atlas.interfaces.events import EventPublisher
 
 from ..agent import AgentLoopFactory
 from ..agent.protocols import AgentContext
+from ..agent.steering import SteeringChannel
 from ..events.agent_event_relay import AgentEventRelay
 from ..utilities import event_notifier
 from ..utilities.agent_digest import build_tool_digest
@@ -108,6 +109,7 @@ class AgentModeRunner:
         max_steps: int,
         temperature: float = 0.7,
         agent_loop_strategy: Optional[str] = None,
+        steering: Optional[SteeringChannel] = None,
     ) -> Dict[str, Any]:
         """
         Execute agent mode.
@@ -122,6 +124,11 @@ class AgentModeRunner:
             temperature: LLM temperature parameter
             agent_loop_strategy: Accepted for backward compatibility; the
                 native agentic loop is always used.
+            steering: Optional steering channel (issue #824). When supplied,
+                the loop drains user messages from it at each iteration
+                boundary so the user can steer a running agent. Activated here
+                (not by the transport) so the channel only accepts messages
+                while a loop is genuinely consuming it.
 
         Returns:
             Response dictionary
@@ -167,7 +174,14 @@ class AgentModeRunner:
         # turn; remember where it starts so the tool digest covers only it.
         turn_start_index = len(session.history.messages)
 
-        # Run the loop (always streaming final answer)
+        # Run the loop (always streaming final answer). The steering channel
+        # is activated around the run so the transport only pushes into it while
+        # a loop is actually draining -- a turn that requested agent mode but
+        # fell back to a non-agent turn never reaches here, so its channel
+        # stays inactive and a later steering message starts a fresh turn
+        # instead of being swallowed undrained (issue #824).
+        if steering is not None:
+            steering.activate()
         try:
             result = await agent_loop.run(
                 model=model,
@@ -180,6 +194,7 @@ class AgentModeRunner:
                 event_handler=event_relay.handle_event,
                 streaming=True,
                 event_publisher=self.event_publisher,
+                steering=steering,
             )
         except asyncio.CancelledError:
             # Stop button, client disconnect, or reset_session (issue #755).
@@ -220,6 +235,12 @@ class AgentModeRunner:
             # message arrives via the WebSocket error handler.
             await self._publish_completion(steps=0)
             raise
+        finally:
+            # Always release the steering channel so a later chat on this
+            # connection never routes into a queue whose loop has exited
+            # (issue #824).
+            if steering is not None:
+                steering.deactivate()
 
         # Append final message. Ordering contract with AgenticLoop: the loop
         # is the single owner of narration persistence and has already flushed
