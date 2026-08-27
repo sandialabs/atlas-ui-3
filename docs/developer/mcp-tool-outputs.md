@@ -1,6 +1,6 @@
 # MCP Tool Outputs
 
-Last updated: 2026-01-24
+Last updated: 2026-08-27
 
 This guide covers the different ways MCP tools can return data to Atlas, including text results, artifacts, images, and iframes. MCP servers are independent processes that expose functions (tools) that the LLM can call.
 
@@ -72,6 +72,12 @@ def create_html_report(title: str) -> Dict[str, Any]:
 ```
 
 For more details on how the canvas chooses viewers (including iframe support for external dashboards and embedded HTML), see `docs/developer/canvas-renderers.md`.
+
+### How Atlas normalizes structured results (FastMCP 3.x)
+
+When a tool returns an object (a `dict`), FastMCP 3.x advertises an auto-generated `output_schema` for it and, on the **client side**, validates the `structuredContent` of the response against that schema. The validator rebuilds a pydantic model / dataclass for the object — named `Root` when the schema carries no `title` (FastMCP prunes titles from advertised output schemas) — so `CallToolResult.data` arrives as a *model instance*, not a plain `dict`. `json.dumps` cannot serialize such an instance directly and raises `Object of type Root is not JSON serializable`.
+
+`atlas/modules/mcp_tools/mcp_result_processor.py` coerces `data` (and `structured_content`) to plain JSON-able Python via `pydantic_core.to_jsonable_python` before the dict-shaped result contract is built, and the final `json.dumps` in `execute_tool` carries a `default=str` backstop. Tools that return `str` are unaffected (their scalar result is wrapped with `x-fastmcp-wrap-result` and unwrapped back to a string on the client). The practical takeaway for server authors: returning a `dict` is supported and will not break the agent loop.
 
 ## Returning Images with ImageContent
 
