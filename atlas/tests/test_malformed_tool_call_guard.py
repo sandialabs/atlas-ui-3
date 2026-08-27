@@ -363,8 +363,6 @@ class TestHistoryIsNeverPoisoned:
     """
 
     async def test_assembled_assistant_message_always_reparses(self):
-        import json
-
         from atlas.application.chat.agent.agentic_loop import _to_tool_call_dict
 
         caller = _caller()

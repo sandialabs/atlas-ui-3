@@ -171,8 +171,9 @@ class LiteLLMStreamingMixin:
         Returns the dropped names so the caller can put them on the response and
         the consumers can warn about a partial drop.
         """
-        # The names come from model output, so they reach the log only after
-        # sanitizing: a name carrying a newline could otherwise forge a log line.
+        # Names come from model output and the model id is request-supplied, so
+        # both reach the log only after sanitizing: either carrying a newline
+        # could otherwise forge a log line.
         names = [
             sanitize_for_logging(tool_call_function_field(tc, "name", "")) or "unknown"
             for tc in malformed
@@ -183,7 +184,7 @@ class LiteLLMStreamingMixin:
         logger.error(
             "Dropping %d malformed tool call(s) from %s (finish_reason=%s, names=%s); "
             "%d well-formed call(s) kept",
-            len(malformed), model_name, safe_reason, names, len(kept),
+            len(malformed), sanitize_for_logging(model_name), safe_reason, names, len(kept),
         )
         set_attrs(span, {
             "malformed_tool_calls": len(malformed),
