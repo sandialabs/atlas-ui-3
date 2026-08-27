@@ -8,6 +8,7 @@ import TokenInputModal from './TokenInputModal'
 import WorkspaceSelector from './WorkspaceSelector'
 import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info, Terminal } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
+import { useElementWidth } from '../hooks/useElementWidth'
 import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from './ui/toastContext'
 
@@ -35,6 +36,12 @@ const SAVE_MODE_CONFIG = {
     title: 'Conversations saved to server (click to cycle)',
   },
 }
+
+// Header width (not viewport width) at which the full desktop button cluster
+// fits. Below it the cluster collapses into the hamburger menu. Measured: the
+// cluster stops colliding at a header width of 1289px, so this carries a little
+// headroom for the fonts and locale-dependent labels that shift those widths.
+const DESKTOP_ACTIONS_MIN_WIDTH = 1320
 
 const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
@@ -68,6 +75,11 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   const [llmAuthModalModel, setLlmAuthModalModel] = useState(null)
   const [expandedModelInfo, setExpandedModelInfo] = useState(null)
   const llmAuth = useLLMAuthStatus()
+  // The desktop cluster is gated on the header's own width, not the viewport's:
+  // the header sits beside a 256px sidebar, so a viewport query would reveal the
+  // cluster while the header still lacks room for it. See useElementWidth.
+  const [headerRef, headerWidth] = useElementWidth()
+  const showDesktopActions = headerWidth >= DESKTOP_ACTIONS_MIN_WIDTH
 
   // Fetch LLM auth status on mount
   useEffect(() => {
@@ -83,6 +95,14 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
     setDropdownOpen(false)
     setExpandedModelInfo(null)
   }
+
+  // Close the compact menu once the header is wide enough to show the desktop
+  // cluster. The menu used to be hidden by the same CSS breakpoint that hid the
+  // hamburger; now that both are driven by measured width, an open menu would
+  // otherwise be left on screen with no button to dismiss it.
+  useEffect(() => {
+    if (showDesktopActions) setMobileMenuOpen(false)
+  }, [showDesktopActions])
 
   // Close dropdowns when mobile menu opens
   useEffect(() => {
@@ -146,7 +166,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   }, [agentModeAvailable, agentModeEnabled, setAgentModeEnabled, toast])
 
   return (
-    <header className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
+    <header ref={headerRef} className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
       {/* Left section. Deliberately not min-w-0: these are fixed-size icon
           buttons with nothing to truncate, so letting the section shrink below
           them only makes it paint over the right-hand group. The right section
@@ -174,7 +194,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             title="Toggle Data Sources"
           >
             <Database className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-sm font-medium hidden lg:inline">
+            <span className="text-sm font-medium hidden lg:inline whitespace-nowrap">
               {selectedDataSources?.size > 0 ? `${selectedDataSources.size} sources` : 'Sources'}
             </span>
           </button>
@@ -199,7 +219,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           title="Start New Chat (Ctrl+Alt+N)"
         >
           <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-sm font-medium hidden md:inline">New Chat</span>
+          <span className="text-sm font-medium hidden md:inline whitespace-nowrap">New Chat</span>
         </button>
       </div>
 
@@ -369,15 +389,15 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                   </span>
                 )}
               </span>
-              <span className="hidden sm:inline">{cfg.label}</span>
+              <span className="hidden sm:inline whitespace-nowrap">{cfg.label}</span>
             </button>
           )
         })()}
 
         {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
-        <div className="hidden min-[1280px]:flex items-center gap-2">
+        <div className={`${showDesktopActions ? 'flex' : 'hidden'} items-center gap-2`}>
           {/* User Info */}
-          <div className="text-sm text-gray-300">
+          <div className="text-sm text-gray-300 min-w-0 max-w-[12rem] truncate" title={user}>
             {user}
           </div>
 
@@ -555,7 +575,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         {/* Hamburger Menu Button - Only visible on mobile/tablet */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="min-[1280px]:hidden p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+          className={`${showDesktopActions ? 'hidden' : 'block'} p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors`}
           title="Menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
@@ -570,12 +590,12 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 min-[1280px]:hidden" 
+            className="fixed inset-0 bg-black bg-opacity-50 z-40" 
             onClick={() => setMobileMenuOpen(false)}
           />
           
           {/* Menu Panel */}
-          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 min-[1280px]:hidden max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
+          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
             <div className="p-4 space-y-2">
               {/* User Info */}
               <div className="px-3 py-2 text-sm text-gray-300 bg-gray-700 rounded-lg">
