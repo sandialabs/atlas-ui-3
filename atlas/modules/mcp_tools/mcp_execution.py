@@ -632,7 +632,7 @@ class ExecutionMixin:
                             update_cb=update_cb,
                         )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
-            content_str = json.dumps(normalized_content, ensure_ascii=False)
+            content_str = json.dumps(normalized_content, ensure_ascii=False, default=str)
 
             artifacts, display_config, meta_data = self._extract_v2_components(raw_result, tool_call.name)
 
