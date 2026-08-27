@@ -11,10 +11,11 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
+from atlas.domain.errors import ToolError
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.llm import LLMResponse
-from atlas.modules.llm.models import repair_structural_json
+from atlas.modules.llm.tool_call_guard import repair_structural_json
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -859,11 +860,21 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
                     )
                     parsed_args = repaired
                 else:
+                    # Running with {} is the silent-wrong-answer case this whole
+                    # guard exists to prevent: for a tool whose parameters are
+                    # all optional it succeeds and returns a plausible result for
+                    # a request the user never made. Fail the call instead --
+                    # execute_single_tool turns this into a failed ToolResult, so
+                    # the model is told and can reissue.
+                    name = getattr(tool_call.function, "name", "<unknown>")
                     logger.warning(
-                        "Failed to parse tool arguments as JSON for %s, using empty dict. Raw: %r",
-                        getattr(tool_call.function, "name", "<unknown>"), raw_args
+                        "Failed to parse tool arguments as JSON for %s. Raw: %r",
+                        name, raw_args,
                     )
-                    parsed_args = {}
+                    raise ToolError(
+                        f"The arguments for '{name}' were not valid JSON, so the "
+                        "tool was not run."
+                    )
 
     # Inject _atlas_user and file URL mappings with schema awareness
     return inject_context_into_args(parsed_args, session_context, tool_call.function.name, tool_manager)

@@ -23,6 +23,7 @@ from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.llm.tool_call_guard import dropped_call_warning
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
@@ -32,15 +33,6 @@ from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopPro
 from .streaming_final_answer import stream_final_answer
 
 logger = logging.getLogger(__name__)
-
-
-def _dropped_call_warning(names) -> str:
-    """User-facing note that a tool call was discarded but the turn continued."""
-    listed = ", ".join(f"'{name}'" for name in names)
-    return (
-        f"The model's call to {listed} was cut off and could not be run, so it was "
-        "skipped. The other tool calls in this step ran normally."
-    )
 
 
 def _to_tool_call_dict(tc: Any) -> Dict[str, Any]:
@@ -411,6 +403,20 @@ class AgenticLoop(AgentLoopProtocol):
                 await event_publisher.publish_token_stream(
                     token="", is_first=False, is_last=True,
                 )
+                # Match tools mode: text the user watched stream in is kept, as
+                # the same display-only agent_intermediate row a completed step
+                # writes, so a reload shows what actually happened rather than
+                # a turn that appears to have said nothing.
+                context.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=accumulated_content,
+                    metadata={
+                        "agent_mode": True,
+                        "agent_intermediate": True,
+                        "message_type": "agent_intermediate",
+                        "incomplete": True,
+                    },
+                ))
             raise
         except Exception:
             logger.exception("Error during streaming LLM call in agentic loop")
@@ -435,7 +441,10 @@ class AgenticLoop(AgentLoopProtocol):
         # be said out loud or it is invisible.
         if final_response.dropped_tool_calls:
             await event_publisher.publish_warning(
-                message=_dropped_call_warning(final_response.dropped_tool_calls),
+                message=dropped_call_warning(
+                    final_response.dropped_tool_calls,
+                    truncated=final_response.dropped_tool_calls_truncated,
+                ),
             )
 
         # Close any streamed text, including narration for tool-call turns, so

@@ -18,10 +18,9 @@ from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import LLMMalformedToolCallError
 
-from .models import (
-    LLMResponse,
+from .models import LLMResponse, split_provider
+from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
-    split_provider,
     tool_call_function_field,
 )
 
@@ -287,6 +286,7 @@ class LiteLLMStreamingMixin:
                 chunk_count = 0
                 finish_reason: Optional[str] = None
                 dropped_tool_calls: List[str] = []
+                dropped_were_truncated = False
 
                 async for chunk in response:
                     choice = chunk.choices[0] if chunk.choices else None
@@ -372,6 +372,11 @@ class LiteLLMStreamingMixin:
                             span=span,
                             user_email=user_email,
                         )
+                        dropped_were_truncated = finish_reason == "length"
+                    # A provider can hand back a list that holds nothing usable
+                    # (every entry None). An empty array is a shape providers
+                    # reject on the follow-up request, so normalize it away here
+                    # rather than leaving it for the loop to strip.
                     tool_calls_list = tool_calls_list or None
 
                 log_metric(
@@ -398,6 +403,7 @@ class LiteLLMStreamingMixin:
                     tool_calls=tool_calls_list,
                     model_used=model_name,
                     dropped_tool_calls=dropped_tool_calls or None,
+                    dropped_tool_calls_truncated=dropped_were_truncated,
                 )
 
             except Exception as exc:

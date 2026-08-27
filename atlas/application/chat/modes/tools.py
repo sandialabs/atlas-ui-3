@@ -14,6 +14,7 @@ from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.llm.tool_call_guard import dropped_call_warning
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
@@ -23,15 +24,6 @@ from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
-
-
-def _dropped_call_warning(names) -> str:
-    """User-facing note that a tool call was discarded but the turn continued."""
-    listed = ", ".join(f"'{name}'" for name in names)
-    return (
-        f"The model's call to {listed} was cut off and could not be run, so it was "
-        "skipped. The other tool calls in this step ran normally."
-    )
 
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -334,7 +326,10 @@ class ToolsModeRunner:
         # is told that one was discarded.
         if final_llm_response and final_llm_response.dropped_tool_calls:
             await self.event_publisher.publish_warning(
-                message=_dropped_call_warning(final_llm_response.dropped_tool_calls),
+                message=dropped_call_warning(
+                    final_llm_response.dropped_tool_calls,
+                    truncated=final_llm_response.dropped_tool_calls_truncated,
+                ),
             )
 
         # Has tool calls: signal end of initial stream if we sent tokens

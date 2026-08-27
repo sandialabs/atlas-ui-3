@@ -25,11 +25,15 @@ from atlas.application.chat.utilities.error_handler import (
     classify_llm_error,
     error_type_for,
 )
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.errors import LLMMalformedToolCallError, LLMServiceError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMResponse
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
-from atlas.modules.llm.models import partition_tool_calls_by_json_validity
+from atlas.modules.llm.tool_call_guard import (
+    dropped_call_warning,
+    partition_tool_calls_by_json_validity,
+)
 
 # A real fragment shape: the model stopped mid-string inside the arguments.
 TRUNCATED_ARGS = '{"filename": "1787784579_62f6178a_MC5094_4A1200_3.0.0_0_topic'
@@ -453,17 +457,29 @@ class TestRepairDoesNotInventValues:
 class TestNonStreamingReturnShape:
     """The all-malformed branch of `call_with_tools` and the shape it returns."""
 
-    async def test_tool_calls_is_none_not_empty_when_all_are_dropped(self):
+    async def test_tool_calls_is_none_not_empty(self):
         """An empty list is not the same as no tool calls.
 
         `has_tool_calls()` is false either way, but an empty `tool_calls` array
-        is a shape providers reject on the follow-up request -- the loop strips
-        it defensively for exactly that reason. Normalizing to None at the source
-        means there is nothing to strip.
+        is a shape providers reject on the follow-up request. A provider handing
+        back a list with nothing usable in it is the reachable way to get there:
+        every entry is filtered out, so nothing is dropped and nothing raises.
         """
         caller = _caller()
-        # Content alongside the bad call, so the guard does not raise and the
-        # return shape is observable.
+        message = SimpleNamespace(content="Here you go.", tool_calls=[None])
+        caller._acompletion_with_retry = AsyncMock(return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="stop")],
+        ))
+
+        response = await caller.call_with_tools(
+            "gemma", [{"role": "user", "content": "hi"}], [{"type": "function"}],
+        )
+
+        assert response.tool_calls is None
+        assert response.has_tool_calls() is False
+
+    async def test_all_malformed_fails_the_turn(self):
+        caller = _caller()
         message = SimpleNamespace(
             content="Let me look that up.",
             tool_calls=[SimpleNamespace(
@@ -528,6 +544,35 @@ class TestBraceOnlyDamageIsRepairedNotRejected:
 
         assert (valid, malformed) == ([sloppy], [])
         assert json.loads(sloppy["function"]["arguments"]) == {"q": "hi"}
+
+    def test_a_truncated_last_call_is_not_brace_repaired(self):
+        """Balancing braces on a mid-object truncation invents a complete call.
+
+        `{"path": "/data", "recursive": true` closes into valid JSON whose
+        remaining keys were silently dropped -- it executes, and it is written to
+        history, looking entirely well-formed. Completing the shape is only
+        honest when nothing is known to be missing.
+        """
+        cut_off = SimpleNamespace(function=SimpleNamespace(
+            name="list_dir", arguments='{"path": "/data", "recursive": true',
+        ))
+
+        valid, malformed = partition_tool_calls_by_json_validity([cut_off], truncated=True)
+
+        assert (valid, malformed) == ([], [cut_off])
+        # And the arguments are left exactly as they arrived, not rewritten.
+        assert cut_off.function.arguments == '{"path": "/data", "recursive": true'
+
+    def test_the_same_shape_is_repaired_when_nothing_was_truncated(self):
+        """Without a truncation signal it is just a sloppy envelope."""
+        sloppy = SimpleNamespace(function=SimpleNamespace(
+            name="list_dir", arguments='{"path": "/data", "recursive": true',
+        ))
+
+        valid, malformed = partition_tool_calls_by_json_validity([sloppy], truncated=False)
+
+        assert (valid, malformed) == ([sloppy], [])
+        assert json.loads(sloppy.function.arguments) == {"path": "/data", "recursive": True}
 
     def test_a_cut_off_value_is_still_rejected(self):
         """The repair must not rescue a truncation by inventing the rest."""
@@ -678,3 +723,134 @@ class TestTheTurnIsNeverSavedEmpty:
         assistant = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
         assert assistant, "the turn was saved with no assistant reply at all"
         assert assistant[-1].content == MALFORMED_TOOL_CALL_TURN_CONTENT
+
+
+class TestWarningCopy:
+    """The warning has to say what actually happened, in the right number."""
+
+    def test_truncation_and_bad_json_read_differently(self):
+        truncated = dropped_call_warning(["read_file"], truncated=True)
+        unparseable = dropped_call_warning(["read_file"], truncated=False)
+
+        assert "ran out of room" in truncated
+        assert "valid JSON" not in truncated
+        assert "valid JSON" in unparseable
+        assert "ran out of room" not in unparseable
+
+    def test_it_pluralizes(self):
+        one = dropped_call_warning(["a"], truncated=True)
+        two = dropped_call_warning(["a", "b"], truncated=True)
+
+        assert "call to 'a'" in one and " it " in f" {one} "
+        assert "calls to 'a', 'b'" in two
+        assert "they" in two
+
+    def test_it_does_not_claim_the_other_calls_already_ran(self):
+        """The warning is published before the surviving calls execute."""
+        warning = dropped_call_warning(["read_file"], truncated=True)
+
+        assert "ran normally" not in warning
+        assert "continuing" in warning
+
+
+class TestLogSafety:
+    """Values interpolated into the drop log line are neutralized first."""
+
+    def test_a_newline_bearing_tool_name_cannot_forge_a_log_line(self):
+        forged = "read_file\nERROR:root:granted admin"
+
+        assert "\n" not in sanitize_for_logging(forged)
+        assert "granted admin" in sanitize_for_logging(forged)
+
+    def test_finish_reason_is_allow_listed(self):
+        from atlas.modules.llm.litellm_streaming import KNOWN_FINISH_REASONS
+
+        assert "length" in KNOWN_FINISH_REASONS
+        # Provider text outside the vocabulary is reported as "other" rather
+        # than interpolated, so it cannot carry anything into the log.
+        assert "eos\nINFO:root:spoofed" not in KNOWN_FINISH_REASONS
+
+
+@pytest.mark.asyncio
+class TestExecutorRefusesUnparseableArguments:
+    """The executor must not fall back to running the tool with no arguments."""
+
+    async def test_unparseable_arguments_fail_the_call(self):
+        from atlas.application.chat.utilities.tool_executor import prepare_tool_arguments
+        from atlas.domain.errors import ToolError
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(name="delete_everything", arguments=TRUNCATED_ARGS),
+        )
+
+        with pytest.raises(ToolError):
+            prepare_tool_arguments(tool_call, {"user_email": "u@example.com"}, None)
+
+    async def test_repairable_arguments_still_run(self):
+        from atlas.application.chat.utilities.tool_executor import prepare_tool_arguments
+
+        tool_call = SimpleNamespace(
+            id="call-1", function=SimpleNamespace(name="search", arguments='"q": "hi"'),
+        )
+
+        args = prepare_tool_arguments(tool_call, {"user_email": "u@example.com"}, None)
+
+        assert args["q"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_publishes_the_dropped_call_warning():
+    """Agent mode must announce a partial drop just as tools mode does."""
+    from atlas.application.chat.agent.agentic_loop import AgenticLoop
+
+    class PartialDropLLM:
+        async def stream_with_tools(self, model, messages, tools_schema,
+                                    tool_choice="auto", temperature=0.7, user_email=None):
+            yield LLMResponse(
+                content="", model_used="gemma",
+                tool_calls=[SimpleNamespace(
+                    id="ok", type="function",
+                    function=SimpleNamespace(name="search", arguments='{"q": "hi"}'))],
+                dropped_tool_calls=["read_file"],
+                dropped_tool_calls_truncated=True,
+            )
+
+    loop = AgenticLoop(llm=PartialDropLLM(), tool_manager=None, prompt_provider=None)
+    publisher = AsyncMock()
+    context = MagicMock()
+    context.user_email = "u@example.com"
+
+    await loop._call_llm_streaming(
+        "gemma", [{"role": "user", "content": "find it"}],
+        [{"type": "function"}], None, context, 0.7, publisher,
+    )
+
+    warned = [c.kwargs.get("message", "") for c in publisher.publish_warning.await_args_list]
+    assert warned, "agent mode dropped a call without telling anyone"
+    assert "read_file" in warned[0]
+    assert "ran out of room" in warned[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_keeps_the_narration_it_streamed():
+    """Agent mode kept nothing on failure while tools mode kept its narration."""
+    from atlas.application.chat.agent.agentic_loop import AgenticLoop
+
+    loop = AgenticLoop(llm=_StreamThenFail(), tool_manager=None, prompt_provider=None)
+    publisher = AsyncMock()
+    context = MagicMock()
+    context.user_email = "u@example.com"
+    context.history = MagicMock()
+
+    with pytest.raises(LLMMalformedToolCallError):
+        await loop._call_llm_streaming(
+            "gemma", [{"role": "user", "content": "read it"}],
+            [{"type": "function"}], None, context, 0.7, publisher,
+        )
+
+    saved = [c.args[0] for c in context.history.add_message.call_args_list]
+    assert saved, "narration the user watched stream in was discarded"
+    assert "Let me read that file" in saved[0].content
+    assert saved[0].metadata["incomplete"] is True
+    assert saved[0].metadata["message_type"] == "agent_intermediate"

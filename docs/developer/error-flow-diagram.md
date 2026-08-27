@@ -243,6 +243,10 @@ been streamed, on the reasoning that partial output beats none. This error is
 exempt: the model announced work it could not perform, and reporting the
 narration as a finished answer would hide the gap.
 
+The policy lives in `atlas/modules/llm/tool_call_guard.py`, separate from
+`models.py` (data models) because it is policy: what counts as a usable tool
+call, what may be repaired, and what must be refused.
+
 Before a call is declared malformed it gets one structural repair:
 `repair_structural_json()` balances missing braces and nothing more. Some models
 emit `"q": "hi"` rather than `{"q": "hi"}` — a well-formed intent in a sloppy
@@ -254,17 +258,30 @@ A repair may complete the shape of an object, never the content of a value.
 Closing an open string turned the production fragment into a different,
 valid-looking filename that the tool would have executed against confidently, so
 that branch is gone. `_try_repair_json()` in the executor now delegates to the
-same function, so the two layers cannot drift apart.
+same function, so the two layers cannot drift apart, and when a repair fails the
+executor raises `ToolError` rather than running the tool with `{}` — for a tool
+whose parameters are all optional that fallback succeeded and returned a
+plausible result for a request the user never made.
+
+The repair is also skipped entirely for the last call of a truncated response.
+Brace-balancing a mid-object truncation (`{"path": "/data", "recursive": true`)
+produces valid JSON whose remaining keys were silently dropped: it executes, and
+it is written to history, looking entirely well-formed. Completing the shape is
+only honest when nothing is known to be missing.
 
 When some calls are dropped but others survive, the turn continues and
 `LLMResponse.dropped_tool_calls` carries the discarded names. Both mode runners
-publish a `{"type": "warning"}` frame from it and a `malformed_tool_call` metric
-records the drop — otherwise a partial drop is invisible, and the user sees an
+publish a `{"type": "warning"}` frame built by `dropped_call_warning()` — one
+shared implementation, so the copy cannot drift between modes — and a
+`malformed_tool_call` metric records the drop. The copy says which cause applied
+(truncation vs unparseable JSON), pluralizes, and does not claim the surviving
+calls have already run, since the warning is published before they execute — otherwise a partial drop is invisible, and the user sees an
 answer built on less work than the model intended.
 
 Neither mode saves a failed turn empty. `ToolsModeRunner` persists the narration
-it already streamed (flagged `incomplete`) before returning the error, and
-`AgentModeRunner` closes the turn with `MALFORMED_TOOL_CALL_TURN_CONTENT`, the
+it already streamed (flagged `incomplete`) before returning the error, `AgenticLoop` keeps the step's narration as the same display-only
+`agent_intermediate` row a completed step writes, and `AgentModeRunner` closes
+the turn with `MALFORMED_TOOL_CALL_TURN_CONTENT`, the
 same contract the interrupted-turn path follows: text the user watched stream in
 must not vanish on reload, and the turn must not be saved with no assistant
 reply.

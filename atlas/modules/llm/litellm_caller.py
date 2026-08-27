@@ -54,11 +54,8 @@ from atlas.domain.errors import (
 from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
-from .models import (
-    LLMResponse,
-    partition_tool_calls_by_json_validity,
-    split_provider,
-)
+from .models import LLMResponse, split_provider
+from .tool_call_guard import partition_tool_calls_by_json_validity
 
 logger = logging.getLogger(__name__)
 
@@ -1302,6 +1299,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             tool_calls = getattr(message, 'tool_calls', None)
             dropped_tool_calls: List[str] = []
+            dropped_were_truncated = False
             # Same guard as the streaming path: a tool call whose arguments are
             # not parseable JSON (a model that hit its output limit mid-call)
             # must not be executed or written into the conversation, or every
@@ -1319,6 +1317,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                         model_name=model_name,
                         user_email=user_email,
                     )
+                    dropped_were_truncated = finish_reason == "length"
+                # See the streaming path: an empty array is a shape providers
+                # reject on the follow-up request.
                 tool_calls = tool_calls or None
             tool_count = len(tool_calls) if tool_calls else 0
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages), tool_count=tool_count)
@@ -1328,6 +1329,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 tool_calls=tool_calls,
                 model_used=model_name,
                 dropped_tool_calls=dropped_tool_calls or None,
+                dropped_tool_calls_truncated=dropped_were_truncated,
             )
 
         except HookBlockedError:
