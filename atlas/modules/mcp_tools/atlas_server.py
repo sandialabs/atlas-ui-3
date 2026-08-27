@@ -38,6 +38,13 @@ LEGACY_TOOL_ALIASES = {
     "atlas_rag_query": SEARCH_TOOL_NAME,
 }
 
+# Consolidated name -> the pre-#855 name(s) that resolved to it. Used where a
+# *value* has to be recognized under its old spelling too -- most importantly
+# hook matchers, which are operator-written regexes over the tool name.
+LEGACY_NAMES_BY_TOOL: Dict[str, tuple] = {}
+for _legacy, _current in LEGACY_TOOL_ALIASES.items():
+    LEGACY_NAMES_BY_TOOL[_current] = LEGACY_NAMES_BY_TOOL.get(_current, ()) + (_legacy,)
+
 # Pseudo-servers that the consolidated server replaces. Selections that name
 # one of these still resolve, so a stale localStorage entry does not silently
 # drop a built-in.
@@ -196,3 +203,30 @@ def atlas_tool_schemas(
         if schema is not None:
             schemas.append(schema)
     return schemas
+
+
+def legacy_names_for(tool_name: Any) -> tuple:
+    """The pre-#855 name(s) a consolidated built-in used to be called.
+
+    Hook matchers are operator-written regexes over the tool name, so renaming
+    the tool would silently stop a hook targeting ``canvas_canvas`` from
+    firing -- and that hook may be a deny or approval policy. Callers match
+    against these as well as the current name, which over-fires in the safe
+    direction rather than quietly disabling a policy.
+    """
+    if not isinstance(tool_name, str):
+        return ()
+    return LEGACY_NAMES_BY_TOOL.get(normalize_tool_name(tool_name), ())
+
+
+def matcher_candidates(tool_name: Any) -> tuple:
+    """Every spelling a matcher may reasonably use for ``tool_name``."""
+    if not isinstance(tool_name, str):
+        return ()
+    return (tool_name,) + tuple(n for n in legacy_names_for(tool_name) if n != tool_name)
+
+
+# Server names the built-in server owns. A configured MCP server using one of
+# these would be shadowed by the built-ins at every lookup, so it is rejected at
+# config load rather than half-working.
+RESERVED_SERVER_NAMES = (ATLAS_SERVER_NAME,) + LEGACY_SERVER_NAMES

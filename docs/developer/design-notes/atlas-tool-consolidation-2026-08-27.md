@@ -96,6 +96,21 @@ A disabled built-in is omitted from the schema rather than advertised and then
 refused: agent mode reaches the loop without ACL filtering, so a tool in the
 schema costs a step before execution can reject the call.
 
+### Two things the rename could have broken quietly
+
+* **Hook matchers.** `matcher` in `config/hooks.json` is an operator-written
+  regex over the tool name, and a `PreToolUse`/`PermissionRequest` hook may be
+  a deny or approval policy. `HookConfig.matches` now tests the legacy spelling
+  as well, so a hook targeting `canvas_canvas` keeps firing on `atlas_canvas`.
+  The aliasing runs one way — a matcher on the *new* name does not suddenly
+  match the old one — so it cannot widen a hook's reach.
+* **A configured server named `atlas`.** The built-in names short-circuit the
+  tool index, `/api/config` and execution dispatch, so an `mcp.json` server
+  called `atlas` (or `canvas`/`atlas_agent`/`atlas_rag`) would connect, get
+  discovered, and then be unreachable. Those names are now reserved:
+  `_drop_reserved_servers` removes them at config load and logs an error naming
+  the collision.
+
 ## Open question
 
 The issue text trails off after "The `search` tool should take a single

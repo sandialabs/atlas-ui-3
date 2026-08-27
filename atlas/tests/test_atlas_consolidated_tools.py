@@ -19,7 +19,8 @@ from atlas.modules.mcp_tools.atlas_server import (
     normalize_tool_name,
     normalize_tool_names,
 )
-from atlas.modules.mcp_tools.client import MCPToolManager
+from atlas.modules.mcp_tools.client import MCPToolManager, _drop_reserved_servers
+from atlas.hooks.models import HookConfig
 
 
 def _manager() -> MCPToolManager:
@@ -97,3 +98,47 @@ async def test_canvas_executes_under_both_names():
         )
         assert result.success
         assert "# Report" in result.content
+
+
+def test_a_hook_matcher_written_against_the_old_name_still_fires():
+    """Renaming a tool must never silently retire an operator's deny policy."""
+    hook = HookConfig(
+        name="block-canvas",
+        event="PreToolUse",
+        command=["true"],
+        matcher="^canvas_canvas$",
+    )
+
+    assert hook.matches(CANVAS_TOOL_NAME)
+    assert hook.matches("canvas_canvas")
+    assert not hook.matches("pptx_generator_create")
+
+
+def test_a_hook_matcher_on_the_new_name_does_not_widen():
+    """Alias matching runs one way: the old spelling is not a new wildcard."""
+    hook = HookConfig(
+        name="watch-canvas",
+        event="PreToolUse",
+        command=["true"],
+        matcher=f"^{CANVAS_TOOL_NAME}$",
+    )
+
+    assert hook.matches(CANVAS_TOOL_NAME)
+    assert not hook.matches("canvas_canvas")
+
+
+def test_reserved_server_names_are_dropped_from_mcp_config():
+    """A configured server named ``atlas`` would be shadowed, not merged."""
+    kept = _drop_reserved_servers({
+        "atlas": {"url": "http://example"},
+        "canvas": {"url": "http://example"},
+        "pptx_generator": {"url": "http://example"},
+    })
+
+    assert list(kept) == ["pptx_generator"]
+
+
+def test_drop_reserved_servers_leaves_a_clean_config_untouched():
+    config = {"pptx_generator": {"url": "http://example"}}
+
+    assert _drop_reserved_servers(config) is config
