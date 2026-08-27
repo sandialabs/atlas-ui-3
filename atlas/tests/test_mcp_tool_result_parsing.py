@@ -9,6 +9,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
+from pydantic import BaseModel
 
 from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools.client import MCPToolManager
@@ -57,6 +58,19 @@ class MockMCPResultMalformedJson:
         self.structured_content = None
         self.data = None
         self.is_error = False
+
+
+class MockMCPResultWithRootData:
+    """Mock MCP result whose ``data`` is a validated pydantic/dataclass "Root"
+    instance — the FastMCP 3.x client-side shape for an object output_schema
+    whose title was pruned. ``json.dumps`` cannot serialize this directly, which
+    is the regression this result exercises."""
+    def __init__(self, data_obj):
+        self.content = [MockTextContent(json.dumps(data_obj.model_dump()))]
+        self.structured_content = None
+        self.data = data_obj
+        self.is_error = False
+        self.meta = None
 
 
 class TestMCPToolResultParsing:
@@ -294,6 +308,61 @@ class TestMCPToolResultParsing:
                 assert result.artifacts == []
                 assert result.display_config is None
                 assert result.meta_data is None
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_serializes_root_data_object(self):
+        """execute_tool must serialize a "Root" validated-data object.
+
+        FastMCP 3.x validates object structuredContent client-side into a
+        pydantic model/dataclass named "Root" (title pruned from the output
+        schema). Without coercion this raised
+        "Object of type Root is not JSON serializable" at the json.dumps step
+        and failed the whole tool call. The result content must now be valid
+        JSON carrying the object's fields.
+        """
+        server_config = {
+            "url": "http://localhost:8001/mcp",
+            "transport": "http",
+        }
+
+        class RootDoc(BaseModel):
+            query: str
+            answers: list
+
+        with patch('atlas.modules.mcp_tools.client.config_manager') as mock_config_manager:
+            mock_config_manager.mcp_config.servers = {"test-server": Mock()}
+            mock_config_manager.mcp_config.servers["test-server"].model_dump.return_value = server_config
+            mock_config_manager.app_settings.mcp_call_timeout = 120
+
+            manager = MCPToolManager()
+            manager.servers_config = {"test-server": server_config}
+
+            with patch('atlas.modules.mcp_tools.client.Client') as MockFastMCPClient:
+                mock_client_instance = MockFastMCPClient.return_value
+                mock_client_instance.__aenter__.return_value = mock_client_instance
+
+                root_obj = RootDoc(query="hello", answers=["a1", "a2"])
+                mock_result = MockMCPResultWithRootData(root_obj)
+                mock_client_instance.call_tool = AsyncMock(return_value=mock_result)
+
+                await manager.initialize_clients()
+
+                tool_call = ToolCall(id="call_1", name="test-server_query", arguments={})
+                mock_tool = Mock()
+                mock_tool.name = "query"
+                manager._tool_index = {
+                    "test-server_query": {
+                        'server': 'test-server',
+                        'tool': mock_tool
+                    }
+                }
+
+                result = await manager.execute_tool(tool_call)
+
+                assert result.success is True
+                decoded = json.loads(result.content)
+                assert decoded["results"]["query"] == "hello"
+                assert decoded["results"]["answers"] == ["a1", "a2"]
 
 
 class TestSessionTerminatedEviction:

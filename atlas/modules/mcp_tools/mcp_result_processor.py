@@ -11,6 +11,30 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _to_jsonable(value: Any) -> Any:
+    """Coerce a structured-content value to plain JSON-serializable Python.
+
+    FastMCP 3.x validates a tool result's structuredContent against the tool's
+    auto-generated output_schema on the client side. For object schemas the
+    validator builds a pydantic model / dataclass (named "Root" when the schema
+    has no title), so ``CallToolResult.data`` can be a model instance rather
+    than a plain dict. ``json.dumps`` cannot serialize such instances, so they
+    are normalized here. Primitives and plain containers pass through; any
+    conversion failure falls back to the original value so a caller can still
+    stringify it via ``default=str``.
+    """
+    if value is None:
+        return value
+    try:
+        from pydantic_core import to_jsonable_python
+    except Exception:  # pragma: no cover - pydantic_core is always installed
+        return value
+    try:
+        return to_jsonable_python(value)
+    except Exception:
+        return value
+
+
 class ResultProcessorMixin:
     """Normalize MCP tool results and extract v2 artifact components."""
 
@@ -36,10 +60,14 @@ class ResultProcessorMixin:
         # Attempt extraction in priority order
         try:
             if hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
-                # FastMCP 3.x validated/deserialized structured content (highest fidelity)
-                structured = raw_result.data if isinstance(raw_result.data, dict) else {"results": raw_result.data}  # type: ignore[attr-defined]
+                # FastMCP 3.x validated/deserialized structured content (highest fidelity).
+                # For object output schemas this is a pydantic model/dataclass instance
+                # (named "Root" when the schema has no title), so coerce it to plain
+                # JSON-able Python before the dict checks below.
+                data_value = _to_jsonable(raw_result.data)  # type: ignore[attr-defined]
+                structured = data_value if isinstance(data_value, dict) else {"results": data_value}
             elif hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
-                structured = raw_result.structured_content  # type: ignore[attr-defined]
+                structured = _to_jsonable(raw_result.structured_content)  # type: ignore[attr-defined]
             else:
                 # Fallback: extract text content from content array
                 if hasattr(raw_result, "content"):
@@ -137,11 +165,11 @@ class ResultProcessorMixin:
             else:
                 structured = {}
                 if hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
-                    dt = raw_result.data  # type: ignore[attr-defined]
+                    dt = _to_jsonable(raw_result.data)  # type: ignore[attr-defined]
                     if isinstance(dt, dict):
                         structured = dt
                 elif hasattr(raw_result, "structured_content") and raw_result.structured_content:  # type: ignore[attr-defined]
-                    sc = raw_result.structured_content  # type: ignore[attr-defined]
+                    sc = _to_jsonable(raw_result.structured_content)  # type: ignore[attr-defined]
                     if isinstance(sc, dict):
                         structured = sc
                 else:
