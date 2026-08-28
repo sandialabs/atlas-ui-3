@@ -16,6 +16,7 @@ import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
+import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -568,8 +569,13 @@ export const ChatProvider = ({ children }) => {
 		// RAG is activated when either of these are true:
 		//   1. The RAG toggle is on (ragEnabled)
 		//   2. One or more data sources are selected (hasSelectedSources)
+		//   3. The built-in search tool is selected for this turn (#855). The
+		//      magnifying-glass toggle is gone; selecting `atlas_search` is how a
+		//      user turns search on, and an empty source selection then means
+		//      "everything I can reach" rather than "nothing".
 		const hasSelectedSources = selectedDataSources.size > 0
-		const ragActivated = ragEnabled || hasSelectedSources
+		const searchToolSelected = toolsToSend.some(t => migrateToolName(t) === SEARCH_TOOL)
+		const ragActivated = ragEnabled || hasSelectedSources || searchToolSelected
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []

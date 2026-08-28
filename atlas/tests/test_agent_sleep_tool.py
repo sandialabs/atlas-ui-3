@@ -10,7 +10,6 @@ from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools import client as mcp_client
 from atlas.modules.mcp_tools.client import MCPToolManager
 from atlas.modules.mcp_tools.sleep_tool import (
-    SLEEP_SERVER_NAME,
     SLEEP_TOOL_NAME,
     TURN_BUDGET_KEY,
     execute_sleep_tool,
@@ -43,9 +42,11 @@ def test_get_tools_schema_includes_sleep_tool():
     manager = _manager()
     schemas = manager.get_tools_schema([SLEEP_TOOL_NAME])
 
-    assert [s["function"]["name"] for s in schemas] == [SLEEP_TOOL_NAME]
+    # The legacy name still resolves; it maps onto the consolidated tool (#855).
+    assert [s["function"]["name"] for s in schemas] == ["atlas_sleep"]
     assert "seconds" in schemas[0]["function"]["parameters"]["properties"]
-    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == "atlas_agent"
+    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == "atlas"
+    assert manager.get_server_for_tool("atlas_sleep") == "atlas"
 
 
 @pytest.mark.asyncio
@@ -227,9 +228,9 @@ def test_enabled_tool_is_advertised(monkeypatch):
     _patch_settings(monkeypatch, 7200)
 
     assert [s["function"]["name"] for s in manager.get_tools_schema([SLEEP_TOOL_NAME])] == [
-        SLEEP_TOOL_NAME
+        "atlas_sleep"
     ]
-    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == SLEEP_SERVER_NAME
+    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == "atlas"
 
 
 def test_client_supplied_step_count_is_clamped_to_the_configured_maximum():

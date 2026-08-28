@@ -154,8 +154,17 @@ class HookConfig(BaseModel):
             return True
         if matcher_value is None:
             return False
+        # A built-in tool renamed by #855 is also matched under its old name:
+        # an operator hook whose regex targets ``canvas_canvas`` may be a deny
+        # or approval policy, and silently retiring it with the rename is the
+        # one failure direction that is never safe.
+        # Imported lazily: ``atlas.modules.mcp_tools`` imports the hook manager,
+        # so a module-level import here would close a cycle.
+        from atlas.modules.mcp_tools.atlas_server import matcher_candidates
+
+        candidates = matcher_candidates(matcher_value) or (matcher_value,)
         try:
-            return re.search(pattern, matcher_value) is not None
+            return any(re.search(pattern, value) is not None for value in candidates)
         except re.error:
             # Unreachable via config load (the validator compiles the pattern),
             # but if a hook is constructed directly with a bad pattern, fire it

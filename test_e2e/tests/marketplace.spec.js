@@ -93,8 +93,9 @@ test.describe('MCP Marketplace E2E Tests', () => {
     await expect(page.locator('h3:has-text("prompts")')).toBeVisible();
     await expect(page.locator('text=Specialized system prompts for AI behavior modification')).toBeVisible();
     
-    await expect(page.locator('h3:has-text("canvas")')).toBeVisible();
-    await expect(page.locator('text=Canvas for showing final rendered content')).toBeVisible();
+    // The built-in tools (canvas / sleep / search) live on one `atlas` server (#855)
+    await expect(page.locator('h3:has-text("atlas")')).toBeVisible();
+    await expect(page.locator('text=Built-in ATLAS tools')).toBeVisible();
     
     // Verify enhanced metadata fields are displayed
     await expect(page.locator('text=By: Chat UI Team').first()).toBeVisible();

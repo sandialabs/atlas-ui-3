@@ -22,6 +22,7 @@ from ..utilities.agent_digest import build_tool_digest
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
+from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -497,7 +498,7 @@ class ToolsModeRunner:
         response_tool_calls = llm_response.tool_calls or []
         canvas_calls = [
             tc for tc in response_tool_calls
-            if self._tool_call_signature(tc)[0] == "canvas_canvas"
+            if normalize_tool_name(self._tool_call_signature(tc)[0]) == CANVAS_TOOL_NAME
         ]
         if response_tool_calls and len(canvas_calls) == len(response_tool_calls):
             return llm_response.content or "Content displayed in canvas."

@@ -446,6 +446,67 @@ class TestUnifiedRAGServiceV2Routing:
         assert kwargs["corpora"] == "docs"
         assert kwargs["mode"] == "raw"
         assert kwargs["top_k"] == 7
+        assert kwargs["search_kwargs"] is None
+
+    @pytest.mark.asyncio
+    async def test_v2_search_kwargs_keep_the_configured_top_k_as_a_floor(self):
+        """A caller tuning ``depth`` must not silently drop the source's top_k.
+
+        ``query_v2`` treats an explicit ``search_kwargs`` as the whole block, so
+        a depth-only dict would otherwise replace the configured ``top_k_final``
+        with the backend default.
+        """
+        service = _service()
+        client = AsyncMock()
+        client.query_v2.return_value = RAGResponse(content="v2", metadata=None)
+
+        with patch.object(service, "_get_http_client", return_value=client):
+            await service.query_rag(
+                "alice@corp.com",
+                "v2_rag:docs",
+                [{"role": "user", "content": "ignored"}],
+                query="the real question",
+                search_kwargs={"rerank": False},
+            )
+
+        sent = client.query_v2.call_args[1]["search_kwargs"]
+        assert sent == {"top_k_final": 7, "rerank": False}
+
+    @pytest.mark.asyncio
+    async def test_v2_search_kwargs_top_k_wins_over_the_source_config(self):
+        service = _service()
+        client = AsyncMock()
+        client.query_v2.return_value = RAGResponse(content="v2", metadata=None)
+
+        with patch.object(service, "_get_http_client", return_value=client):
+            await service.query_rag(
+                "alice@corp.com",
+                "v2_rag:docs",
+                [{"role": "user", "content": "ignored"}],
+                query="the real question",
+                search_kwargs={"top_k_final": 3},
+            )
+
+        assert client.query_v2.call_args[1]["search_kwargs"] == {"top_k_final": 3}
+
+    @pytest.mark.asyncio
+    async def test_v1_ignores_search_kwargs(self):
+        """v1 has no ``search_kwargs`` on the wire; asking for more is a no-op."""
+        service = _service()
+        client = AsyncMock()
+        client.query_rag.return_value = RAGResponse(content="v1", metadata=None)
+
+        with patch.object(service, "_get_http_client", return_value=client):
+            result = await service.query_rag(
+                "alice@corp.com",
+                "v1_rag:docs",
+                [{"role": "user", "content": "the question"}],
+                search_kwargs={"top_k_final": 25},
+            )
+
+        assert result.content == "v1"
+        client.query_v2.assert_not_awaited()
+        assert "search_kwargs" not in client.query_rag.call_args[1]
 
     @pytest.mark.asyncio
     async def test_v2_derives_query_from_messages_when_not_given(self):

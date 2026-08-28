@@ -10,13 +10,15 @@ from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 from atlas.routes.files_routes import get_file_upload_limit_config
-from atlas.modules.mcp_tools.mcp_discovery import _ATLAS_RAG_TOOL_SCHEMAS
-from atlas.modules.mcp_tools.sleep_tool import (
-    SLEEP_SERVER_NAME,
-    SLEEP_TOOL_NAME,
-    SLEEP_TOOL_SCHEMA,
-    sleep_tool_enabled,
+from atlas.modules.mcp_tools.atlas_server import (
+    ATLAS_SERVER_DESCRIPTION,
+    ATLAS_SERVER_NAME,
+    ATLAS_TOOL_SCHEMAS,
+    DISCOVER_TOOL_NAME,
+    SEARCH_TOOL_NAME,
+    SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
+from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -44,25 +46,24 @@ def _search_config_paths(config_manager, filename):
             project_root / filename,
         ]
 
-# Canvas tool description constant
-CANVAS_TOOL_DESCRIPTION = (
-    "Display final rendered content in a visual canvas panel. "
-    "Use this for: 1) Complete code (not code discussions), "
-    "2) Final reports/documents (not report discussions), "
-    "3) Data visualizations, 4) Any polished content that should be "
-    "viewed separately from the conversation."
-)
-ATLAS_RAG_SERVER_DESCRIPTION = "Atlas RAG tools for discovering and querying selected retrieval data sources."
 
+def _atlas_tools_info(*, sleep_enabled: bool, search_enabled: bool) -> dict:
+    """Build the consolidated built-in ``atlas`` server entry for the tools panel.
 
-def _atlas_rag_tools_info() -> dict:
-    """Build the Atlas RAG pseudo-server entry for the tools panel."""
+    Canvas, sleep, search and source discovery used to be three separate
+    pseudo-servers (#855).
+    They are one server now; the gated ones simply drop out of the tool list
+    when their feature is off, rather than the whole server disappearing.
+    """
     tool_names = []
     tools_detailed = []
-    for schema in _ATLAS_RAG_TOOL_SCHEMAS.values():
+    for full_name, schema in ATLAS_TOOL_SCHEMAS.items():
+        if full_name == ATLAS_SLEEP_TOOL_NAME and not sleep_enabled:
+            continue
+        if full_name in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
+            continue
         function = schema["function"]
-        full_name = function["name"]
-        tool_name = full_name.removeprefix("atlas_rag_")
+        tool_name = full_name.removeprefix(f"{ATLAS_SERVER_NAME}_")
         tool_names.append(tool_name)
         tools_detailed.append({
             "name": tool_name,
@@ -71,52 +72,19 @@ def _atlas_rag_tools_info() -> dict:
         })
 
     return {
-        "server": "atlas_rag",
+        "server": ATLAS_SERVER_NAME,
         "tools": tool_names,
         "tools_detailed": tools_detailed,
         "tool_count": len(tool_names),
-        "description": ATLAS_RAG_SERVER_DESCRIPTION,
+        "description": ATLAS_SERVER_DESCRIPTION,
         "author": "Atlas",
-        "short_description": "Discover and query RAG sources",
+        "short_description": "Built-in ATLAS tools",
         "help_email": "",
         # The tools-panel compliance filter hides any server with a falsy
         # compliance_level once a compliance level is selected (strict mode).
-        # Mark the pseudo-server "Public" (as canvas does) so the RAG tools stay
-        # selectable under compliance filtering; the individual RAG *sources* are
-        # still compliance-filtered independently in the RAG panel and at query
-        # time, so this does not widen data access.
-        "compliance_level": "Public",
-        "auth_type": "none",
-        "auth_required": False,
-    }
-
-
-ATLAS_AGENT_SERVER_DESCRIPTION = (
-    "Wait a set number of seconds before continuing, for agents polling "
-    "long-running external work. Runs inside ATLAS rather than on an MCP server."
-)
-
-
-def _atlas_agent_tools_info() -> dict:
-    """Build the built-in agent pseudo-server entry for the tools panel."""
-    function = SLEEP_TOOL_SCHEMA["function"]
-    tool_name = SLEEP_TOOL_NAME.removeprefix(f"{SLEEP_SERVER_NAME}_")
-
-    return {
-        "server": SLEEP_SERVER_NAME,
-        "tools": [tool_name],
-        "tools_detailed": [{
-            "name": tool_name,
-            "description": function.get("description", ""),
-            "inputSchema": function.get("parameters", {}),
-        }],
-        "tool_count": 1,
-        "description": ATLAS_AGENT_SERVER_DESCRIPTION,
-        "author": "Atlas",
-        "short_description": "Wait between agent steps",
-        "help_email": "",
-        # Marked Public like the other pseudo-servers so the tools-panel
-        # compliance filter does not hide it; it touches no data.
+        # Mark the built-in server "Public" so it stays selectable; the RAG
+        # *sources* search reads are still compliance-filtered independently in
+        # the RAG panel and at query time, so this does not widen data access.
         "compliance_level": "Public",
         "auth_type": "none",
         "auth_required": False,
@@ -291,48 +259,23 @@ async def get_config(
         # Get authorized servers for the user - this filters out unauthorized servers completely
         authorized_servers = await mcp_manager.get_authorized_servers(current_user, is_user_in_group)
 
-        # Add canvas pseudo-tool to authorized servers (available to all users)
-        authorized_servers.append("canvas")
-        if (
+        # The built-in ATLAS server is available to every user; its individual
+        # tools are gated below.
+        atlas_search_enabled = bool(
             app_settings.feature_rag_enabled
             and app_settings.feature_atlas_rag_tools_enabled
-        ):
-            authorized_servers.append("atlas_rag")
-        if sleep_tool_enabled(app_settings):
-            authorized_servers.append(SLEEP_SERVER_NAME)
+        )
+        atlas_sleep_enabled = sleep_tool_enabled(app_settings)
+        authorized_servers.append(ATLAS_SERVER_NAME)
 
         # Only build tool information for servers the user is authorized to access
         for server_name in authorized_servers:
-            # Handle canvas pseudo-tool
-            if server_name == "canvas":
-                tools_info.append({
-                    'server': 'canvas',
-                    'tools': ['canvas'],
-                    'tools_detailed': [{
-                        'name': 'canvas',
-                        'description': CANVAS_TOOL_DESCRIPTION,
-                        'inputSchema': {
-                            'type': 'object',
-                            'properties': {
-                                'content': {
-                                    'type': 'string',
-                                    'description': 'The content to display in the canvas. Can be markdown, code, or plain text.'
-                                }
-                            },
-                            'required': ['content']
-                        }
-                    }],
-                    'tool_count': 1,
-                    'description': 'Canvas for showing final rendered content: complete code, reports, and polished documents. Use this to finalize your work. Most code and reports will be shown here.',
-                    'author': 'Chat UI Team',
-                    'short_description': 'Visual content display',
-                    'help_email': 'support@chatui.example.com',
-                    'compliance_level': 'Public'
-                })
-            elif server_name == "atlas_rag":
-                tools_info.append(_atlas_rag_tools_info())
-            elif server_name == SLEEP_SERVER_NAME:
-                tools_info.append(_atlas_agent_tools_info())
+            # Handle the built-in ATLAS server (canvas / sleep / search)
+            if server_name == ATLAS_SERVER_NAME:
+                tools_info.append(_atlas_tools_info(
+                    sleep_enabled=atlas_sleep_enabled,
+                    search_enabled=atlas_search_enabled,
+                ))
             elif server_name in mcp_manager.available_tools:
                 server_tools = mcp_manager.available_tools[server_name]['tools']
                 server_config = mcp_manager.available_tools[server_name]['config']

@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from atlas.modules.mcp_tools.client import MCPToolManager
-from atlas.routes.config_routes import _atlas_rag_tools_info
+from atlas.routes.config_routes import _atlas_tools_info
 
 
 class FakeTool:
@@ -109,18 +109,33 @@ def test_canvas_tool_has_detailed_info():
     assert 'content' in canvas_tools_detailed[0]['inputSchema']['properties']
 
 
-def test_atlas_rag_pseudo_server_has_tools_panel_info():
-    """Atlas RAG should appear as a selectable pseudo-server in the tools panel."""
-    tools_info = _atlas_rag_tools_info()
+def test_atlas_pseudo_server_has_tools_panel_info():
+    """The consolidated ATLAS server exposes all four built-ins (#855)."""
+    tools_info = _atlas_tools_info(sleep_enabled=True, search_enabled=True)
 
-    assert tools_info["server"] == "atlas_rag"
-    assert tools_info["tools"] == ["discover_data_sources", "query"]
-    assert tools_info["tool_count"] == 2
+    assert tools_info["server"] == "atlas"
+    assert sorted(tools_info["tools"]) == [
+        "canvas",
+        "discover_sources",
+        "search",
+        "sleep",
+    ]
+    assert tools_info["tool_count"] == 4
 
     detailed = {tool["name"]: tool for tool in tools_info["tools_detailed"]}
-    assert "discover_data_sources" in detailed
-    assert "query" in detailed
-    assert detailed["query"]["inputSchema"]["required"] == ["query"]
+    # ``query`` is the only *required* argument; the other two tune retrieval
+    # and cannot name a source.
+    assert detailed["search"]["inputSchema"]["required"] == ["query"]
+    assert list(detailed["search"]["inputSchema"]["properties"]) == [
+        "query",
+        "max_results",
+        "depth",
+    ]
+    # Discovery takes nothing at all -- the authenticated user decides the
+    # result, and the user is not a model input.
+    assert detailed["discover_sources"]["inputSchema"]["properties"] == {}
+    assert "content" in detailed["canvas"]["inputSchema"]["properties"]
+    assert "seconds" in detailed["sleep"]["inputSchema"]["properties"]
 
     # The pseudo-server must carry a non-falsy compliance level so it is not
     # hidden by the tools-panel strict compliance filter when a level is active.
@@ -129,3 +144,12 @@ def test_atlas_rag_pseudo_server_has_tools_panel_info():
     # User identity must never be advertised as a model-facing parameter.
     for tool in tools_info["tools_detailed"]:
         assert "_atlas_user" not in tool["inputSchema"].get("properties", {})
+
+
+def test_atlas_pseudo_server_drops_disabled_tools():
+    """Gated built-ins drop out of the tool list; the server itself stays."""
+    tools_info = _atlas_tools_info(sleep_enabled=False, search_enabled=False)
+
+    assert tools_info["server"] == "atlas"
+    assert tools_info["tools"] == ["canvas"]
+    assert tools_info["tool_count"] == 1

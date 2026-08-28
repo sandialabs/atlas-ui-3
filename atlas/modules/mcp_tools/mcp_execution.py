@@ -14,9 +14,17 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
+from atlas.modules.mcp_tools.atlas_server import (
+    CANVAS_TOOL_NAME,
+    DISCOVER_TOOL_NAME,
+    SEARCH_TOOL_NAME,
+    SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
+    normalize_tool_name,
+    search_kwargs_for,
+)
 from atlas.modules.mcp_tools.mcp_discovery import (
-    _ATLAS_RAG_DISCOVER_TOOL,
     _ATLAS_RAG_QUERY_TOOL,
+    _build_tool_index,
 )
 from atlas.modules.mcp_tools.mcp_errors import (
     _is_session_terminated_error,
@@ -24,7 +32,6 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_task_forbidden_result,
 )
 from atlas.modules.mcp_tools.sleep_tool import (
-    SLEEP_TOOL_NAME,
     execute_sleep_tool,
     get_max_sleep_seconds,
     get_max_turn_sleep_seconds,
@@ -455,8 +462,12 @@ class ExecutionMixin:
     ) -> ToolResult:
         """Execute a tool call."""
         logger.debug("ToolManager.execute_tool: tool=%s", tool_call.name)
+        # Pre-#855 built-in names still arrive from saved conversations, stored
+        # tool selections and non-UI clients; resolve them to the consolidated
+        # ``atlas`` tools before dispatch.
+        resolved_name = normalize_tool_name(tool_call.name)
         # Handle canvas pseudo-tool
-        if tool_call.name == "canvas_canvas":
+        if resolved_name == CANVAS_TOOL_NAME:
             # Canvas tool just returns the content - it's handled by frontend
             content = tool_call.arguments.get("content", "")
             return ToolResult(
@@ -464,12 +475,31 @@ class ExecutionMixin:
                 content=f"Canvas content displayed: {content[:100]}..." if len(content) > 100 else f"Canvas content displayed: {content}",
                 success=True
             )
-        if tool_call.name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
+        if resolved_name in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME):
+            # Gate at execution, not only in the schema: omitting a disabled
+            # tool from the schema stops the model being offered it, but a
+            # replayed conversation or a non-UI client can still name it. The
+            # sleep tool is gated the same way, one line below.
+            app_settings = _client().config_manager.app_settings
+            if not (
+                getattr(app_settings, "feature_rag_enabled", False)
+                and getattr(app_settings, "feature_atlas_rag_tools_enabled", False)
+            ):
+                error_msg = (
+                    f"Tool '{SEARCH_TOOL_NAME}' is disabled "
+                    "(RAG or the built-in ATLAS RAG tools are turned off)"
+                )
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=error_msg,
+                    success=False,
+                    error=error_msg,
+                )
             return await self._execute_atlas_rag_tool(tool_call, context)
-        if tool_call.name == SLEEP_TOOL_NAME:
+        if resolved_name == ATLAS_SLEEP_TOOL_NAME:
             app_settings = _client().config_manager.app_settings
             if not sleep_tool_enabled(app_settings):
-                error_msg = f"Tool '{SLEEP_TOOL_NAME}' is disabled (AGENT_SLEEP_MAX_SECONDS=0)"
+                error_msg = f"Tool '{ATLAS_SLEEP_TOOL_NAME}' is disabled (AGENT_SLEEP_MAX_SECONDS=0)"
                 return ToolResult(
                     tool_call_id=tool_call.id,
                     content=error_msg,
@@ -485,22 +515,7 @@ class ExecutionMixin:
 
         # Use the tool index to get server and tool name (avoids parsing issues with dashes/underscores)
         if not hasattr(self, "_tool_index") or not getattr(self, "_tool_index"):
-            # Build tool index if not available (same logic as in get_tools_schema)
-            index = {}
-            for server_name, server_data in self.available_tools.items():
-                if server_name == "canvas":
-                    index["canvas_canvas"] = {
-                        'server': 'canvas',
-                        'tool': None  # pseudo tool
-                    }
-                else:
-                    for tool in server_data.get('tools', []):
-                        full_name = f"{server_name}_{tool.name}"
-                        index[full_name] = {
-                            'server': server_name,
-                            'tool': tool
-                        }
-            self._tool_index = index
+            self._tool_index = _build_tool_index(self.available_tools)
 
         # Look up the tool in our index
         tool_entry = self._tool_index.get(tool_call.name)
@@ -763,7 +778,7 @@ class ExecutionMixin:
             # Preserve discovery order while de-duping
             deduped_sources = list(dict.fromkeys(http_sources + mcp_sources))
 
-            if tool_call.name == _ATLAS_RAG_DISCOVER_TOOL:
+            if normalize_tool_name(tool_call.name) == DISCOVER_TOOL_NAME:
                 payload = {
                     "results": {
                         "sources": deduped_sources,
@@ -780,20 +795,37 @@ class ExecutionMixin:
             if not isinstance(query, str) or not query.strip():
                 return ToolResult(
                     tool_call_id=tool_call.id,
-                    content="atlas_rag_query requires a non-empty 'query' string.",
+                    content=f"{SEARCH_TOOL_NAME} requires a non-empty 'query' string.",
                     success=False,
                     error="Missing query",
                 )
+
+            # ``atlas_search`` takes exactly one argument (#855): the sources it
+            # reads are the user's UI selection, never model input. Legacy
+            # ``atlas_rag_query`` calls keep their richer arguments.
+            is_consolidated_search = tool_call.name != _ATLAS_RAG_QUERY_TOOL
 
             # Tool-shaped RAG asks for evidence by default: the model called a
             # tool and should reason over what comes back, not hand the user a
             # backend-written answer. Only v2 sources honour this -- v1 always
             # synthesizes -- and an unrecognized value falls back to "raw"
             # rather than failing the call, since ``mode`` is model-supplied.
-            requested_mode = args.get("mode")
+            requested_mode = None if is_consolidated_search else args.get("mode")
             mode = requested_mode if requested_mode in RAG_MODES else RAG_MODE_RAW
 
-            requested_sources = args.get("data_sources")
+            # ``max_results`` and ``depth`` tune retrieval only -- how many
+            # passages come back and how hard the backend looks for them. They
+            # cannot name or widen a source, so unlike ``data_sources`` they are
+            # safe to take from the model. ``search_kwargs_for`` coerces and
+            # clamps both, so a nonsense value degrades to the source default
+            # instead of reaching the backend. v1 sources have no
+            # ``search_kwargs`` on the wire and ignore them.
+            search_kwargs = search_kwargs_for(
+                depth=args.get("depth"),
+                max_results=args.get("max_results"),
+            )
+
+            requested_sources = None if is_consolidated_search else args.get("data_sources")
             if isinstance(requested_sources, list):
                 sources = [s for s in requested_sources if isinstance(s, str) and ":" in s]
             else:
@@ -822,7 +854,7 @@ class ExecutionMixin:
             ignored_sources = sorted(s for s in sources if s not in authorized)
             if ignored_sources:
                 logger.warning(
-                    "atlas_rag_query: ignoring %d requested source(s) outside the "
+                    "atlas search: ignoring %d requested source(s) outside the "
                     "user's authorized set for user %s",
                     len(ignored_sources),
                     sanitize_for_logging(user_email),
@@ -860,11 +892,23 @@ class ExecutionMixin:
                     raise RuntimeError("Unified RAG service is not configured")
                 if len(group) == 1:
                     resp = await unified_rag.query_rag(
-                        user_email, group[0], messages, query=query, mode=mode, _skip_hooks=True
+                        user_email,
+                        group[0],
+                        messages,
+                        query=query,
+                        mode=mode,
+                        search_kwargs=search_kwargs,
+                        _skip_hooks=True,
                     )
                 else:
                     resp = await unified_rag.query_rag_batch(
-                        user_email, group, messages, query=query, mode=mode, _skip_hooks=True
+                        user_email,
+                        group,
+                        messages,
+                        query=query,
+                        mode=mode,
+                        search_kwargs=search_kwargs,
+                        _skip_hooks=True,
                     )
                 payload: Dict[str, Any] = {
                     "data_sources": group,

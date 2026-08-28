@@ -117,19 +117,25 @@ def _config_tools(monkeypatch, sleep_cap):
         object.__setattr__(cm.app_settings, 'feature_tools_enabled', original_tools)
 
 
-def test_atlas_agent_pseudo_server_exposed_when_sleep_enabled(monkeypatch):
+def test_atlas_server_exposes_sleep_when_enabled(monkeypatch):
     """The sleep tool must be selectable in the tools panel when it is enabled."""
     data = _config_tools(monkeypatch, 7200)
 
-    entry = next((t for t in data["tools"] if t.get("server") == "atlas_agent"), None)
+    entry = next((t for t in data["tools"] if t.get("server") == "atlas"), None)
     assert entry is not None
-    assert entry["tools"] == ["sleep"]
-    assert "atlas_agent" in data["authorized_servers"]
+    assert "sleep" in entry["tools"]
+    assert "canvas" in entry["tools"]
+    assert "atlas" in data["authorized_servers"]
 
 
-def test_atlas_agent_pseudo_server_hidden_when_sleep_disabled(monkeypatch):
-    """AGENT_SLEEP_MAX_SECONDS=0 is the kill switch, including in the panel."""
+def test_atlas_server_hides_sleep_when_disabled(monkeypatch):
+    """AGENT_SLEEP_MAX_SECONDS=0 is the kill switch, including in the panel.
+
+    The built-in server itself stays -- canvas does not depend on the cap.
+    """
     data = _config_tools(monkeypatch, 0)
 
-    assert all(tool.get("server") != "atlas_agent" for tool in data["tools"])
-    assert "atlas_agent" not in data["authorized_servers"]
+    entry = next((t for t in data["tools"] if t.get("server") == "atlas"), None)
+    assert entry is not None
+    assert "sleep" not in entry["tools"]
+    assert "canvas" in entry["tools"]

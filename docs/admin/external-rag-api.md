@@ -390,10 +390,19 @@ things they do on v1.
 - **`raw` evidence carries `[N]` document markers**, the same citation form
   the UI already parses — a v2 raw answer cites like a v1 one. Because the
   v0.8.0 schema has no `document_ref`, references are numbered sequentially.
-- **The `atlas_rag_query` agent tool asks for `raw` by default** and accepts an
-  optional `mode` argument. The model reasons over the evidence alongside other
-  tool results instead of relaying a backend-written answer. On v1 sources the
-  argument has no effect — v1 always synthesizes.
+- **The `atlas_search` agent tool always asks for `raw`** (it was
+  `atlas_rag_query` before #855, which took an optional `mode`). The model
+  reasons over the evidence alongside other tool results instead of relaying a
+  backend-written answer. On v1 sources this makes no difference — v1 always
+  synthesizes.
+- **`atlas_search`'s optional `max_results` and `depth` map onto
+  `search_kwargs`.** `max_results` becomes `top_k_final` (clamped to 50);
+  `depth` is `quick` / `standard` / `deep`, setting `rerank`, `top_k_vector`,
+  `top_k_full_text` and `expanded_window`. **v1 sources ignore both** — the v1
+  request body has no retrieval knobs — so a v1 source returns its configured
+  behaviour rather than an error. When a caller supplies `search_kwargs`, the
+  source's configured `top_k` is folded in as the `top_k_final` default first,
+  so a `depth`-only call does not silently drop it.
 - **Nothing but the query leaves the process.** `messages` is not part of a v2
   request, so conversation history never reaches the RAG backend.
 

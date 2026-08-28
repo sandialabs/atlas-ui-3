@@ -307,7 +307,7 @@ class AgenticLoop(AgentLoopProtocol):
                     "user_email": context.user_email,
                     "files": context.files,
                     # None and [] mean different things downstream: None is "the
-                    # user made no selection" (atlas_rag_query falls back to every
+                    # user made no selection" (atlas_search falls back to every
                     # authorized source), [] is "explicitly no sources" (query
                     # nothing). Collapsing None to [] would break RAG for every
                     # agent turn where the user picked no sources.

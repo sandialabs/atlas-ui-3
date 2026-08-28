@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
+import { SLEEP_TOOL, migrateToolName } from '../constants/atlasTools'
 
 // Live "Xs" / "Xm Ys" ticker shown next to an active tool call. Once the tool
 // has been running past TOOL_SLOW_THRESHOLD_SEC we append a warning message.
 //
-// For atlas_agent_sleep we instead show a progress clock against the requested
+// For the built-in sleep tool we instead show a progress clock against the requested
 // duration (`MM:SS of MM:SS`), because the generic slow-tool warning is
 // meaningless for a tool whose job is to wait minutes or hours (#838). Once the
 // requested wait has elapsed we switch to a "completing..." hint — the backend
@@ -13,7 +14,6 @@ import { useState, useEffect, useRef } from 'react'
 // is a UI ticker, not a polling loop. See AGENTS.md on Message.jsx polling
 // rules.
 const TOOL_SLOW_THRESHOLD_SEC = 30
-const SLEEP_TOOL_NAME = 'atlas_agent_sleep'
 
 // Clock style `MM:SS` (or `HH:MM:SS` for waits of an hour or more) — matches
 // the format the issue asked for and stays compact for the long waits the
@@ -55,7 +55,7 @@ const ToolElapsedTime = ({ timestamp, toolName, arguments: args }) => {
   // nonsense "of NaN:NaN".
   const rawSeconds = (args && args.seconds != null) ? args.seconds : null
   const sleepSeconds = (
-    toolName === SLEEP_TOOL_NAME &&
+    migrateToolName(toolName) === SLEEP_TOOL &&
     rawSeconds != null &&
     Number.isFinite(Number(rawSeconds)) &&
     Number(rawSeconds) > 0

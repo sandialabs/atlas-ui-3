@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { usePersistentState } from './usePersistentState'
+import { CANVAS_TOOL, migrateToolName, migrateToolNames } from '../../constants/atlasTools'
 
 const toSet = arr => new Set(arr)
 const toArray = set => Array.from(set)
@@ -17,7 +18,7 @@ export const userPromptIdFromKey = key => (isUserPromptKey(key) ? key.slice(USER
 
 export function useSelections() {
   // Auto-select canvas tool if empty
-  const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', ['canvas_canvas'])
+  const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', [CANVAS_TOOL])
   const [promptsRaw, setPromptsRaw] = usePersistentState('chatui-selected-prompts', [])
   const [dataSourcesRaw, setDataSourcesRaw] = usePersistentState('chatui-selected-data-sources', [])
   const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState('chatui-compliance-level-filter', null)
@@ -28,7 +29,9 @@ export function useSelections() {
   // New state: activePromptKey stores which prompt is currently active (null = use default)
   const [activePromptKey, setActivePromptKey] = usePersistentState('chatui-active-prompt', null)
 
-  const selectedTools = useMemo(() => toSet(toolsRaw), [toolsRaw])
+  // Browsers still hold pre-#855 built-in names ('canvas_canvas' and friends);
+  // migrate on read so an old selection keeps working without a reset.
+  const selectedTools = useMemo(() => toSet(migrateToolNames(toolsRaw)), [toolsRaw])
   const selectedPrompts = useMemo(() => toSet(promptsRaw), [promptsRaw])
   const selectedDataSources = useMemo(() => toSet(dataSourcesRaw), [dataSourcesRaw])
   
@@ -44,16 +47,19 @@ export function useSelections() {
     setUpdater(toArray(next))
   }
 
-  const toggleTool = useCallback(k => toggleSetItem(selectedTools, setToolsRaw, k), [selectedTools, setToolsRaw])
+  const toggleTool = useCallback(k => toggleSetItem(selectedTools, setToolsRaw, migrateToolName(k)), [selectedTools, setToolsRaw])
   const togglePrompt = useCallback(k => toggleSetItem(selectedPrompts, setPromptsRaw, k), [selectedPrompts, setPromptsRaw])
   const toggleDataSource = useCallback(k => toggleSetItem(selectedDataSources, setDataSourcesRaw, k), [selectedDataSources, setDataSourcesRaw])
 
   // Batch operations (avoid stale snapshot when toggling many items sequentially)
+  // Both operate on the migrated form of what is persisted, so a write also
+  // converges storage onto the post-#855 names instead of leaving a legacy
+  // name sitting beside its replacement forever.
   const addTools = useCallback(keys => {
     if (!Array.isArray(keys) || keys.length === 0) return
     setToolsRaw(prev => {
-      const next = new Set(prev)
-      keys.forEach(k => next.add(k))
+      const next = new Set(migrateToolNames(prev))
+      migrateToolNames(keys).forEach(k => next.add(k))
       return toArray(next)
     })
   }, [setToolsRaw])
@@ -61,8 +67,8 @@ export function useSelections() {
   const removeTools = useCallback(keys => {
     if (!Array.isArray(keys) || keys.length === 0) return
     setToolsRaw(prev => {
-      const next = new Set(prev)
-      keys.forEach(k => next.delete(k))
+      const next = new Set(migrateToolNames(prev))
+      migrateToolNames(keys).forEach(k => next.delete(k))
       return toArray(next)
     })
   }, [setToolsRaw])

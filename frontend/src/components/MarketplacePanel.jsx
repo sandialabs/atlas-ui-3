@@ -3,6 +3,7 @@ import { ArrowLeft, Check, X, Search } from 'lucide-react'
 import { useState } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import { sortAtlasFirst } from '../constants/atlasTools'
 
 const MarketplacePanel = () => {
   const [searchTerm, setSearchTerm] = useState('')
@@ -57,7 +58,7 @@ const MarketplacePanel = () => {
     }
   })
   
-  const serverList = Object.values(allServers)
+  const serverList = sortAtlasFirst(Object.values(allServers))
   
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {

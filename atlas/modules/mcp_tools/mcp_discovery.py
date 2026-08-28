@@ -13,12 +13,16 @@ from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 
-from .sleep_tool import (
-    SLEEP_SERVER_NAME,
-    SLEEP_TOOL_NAME,
-    SLEEP_TOOL_SCHEMA,
-    sleep_tool_enabled,
+from .atlas_server import (
+    ATLAS_SERVER_NAME,
+    ATLAS_TOOL_NAMES,
+    LEGACY_SERVER_NAMES,
+    atlas_tool_schemas,
+    is_atlas_tool,
+    normalize_tool_name,
 )
+from .sleep_tool import sleep_tool_enabled
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +96,47 @@ def _client():
     """
     from atlas.modules.mcp_tools import client
     return client
+
+
+
+def _atlas_tool_flags() -> tuple:
+    """(sleep_enabled, search_enabled) for the built-in ``atlas`` server.
+
+    Read defensively: discovery runs in contexts (tests, CLI) where the config
+    manager may not be wired up, and a missing setting must not take the whole
+    schema build down with it.
+    """
+    try:
+        settings = _client().config_manager.app_settings
+    except Exception:
+        logger.warning("Could not read app settings; omitting gated atlas tools")
+        return False, False
+    try:
+        sleep_enabled = sleep_tool_enabled(settings)
+    except Exception:
+        sleep_enabled = False
+    search_enabled = bool(
+        getattr(settings, "feature_rag_enabled", False)
+        and getattr(settings, "feature_atlas_rag_tools_enabled", False)
+    )
+    return sleep_enabled, search_enabled
+
+
+def _build_tool_index(available_tools) -> Dict[str, Dict[str, Any]]:
+    """Full tool name -> {server, tool} for every discovered and built-in tool.
+
+    The built-in ``atlas`` tools have no MCP tool object behind them, so they
+    map to ``tool: None`` and are dispatched by name at execution time.
+    """
+    index: Dict[str, Dict[str, Any]] = {
+        name: {'server': ATLAS_SERVER_NAME, 'tool': None} for name in ATLAS_TOOL_NAMES
+    }
+    for server_name, server_data in (available_tools or {}).items():
+        if server_name == ATLAS_SERVER_NAME or server_name in LEGACY_SERVER_NAMES:
+            continue
+        for tool in server_data.get('tools', []) or []:
+            index[f"{server_name}_{tool.name}"] = {'server': server_name, 'tool': tool}
+    return index
 
 
 class DiscoveryMixin:
@@ -244,20 +289,7 @@ class DiscoveryMixin:
             logger.debug("Tool discovery summary: %s: %d tools %s", server_name, len(tool_names), tool_names)
 
         # Build tool index for quick lookups
-        self._tool_index = {}
-        for server_name, server_data in self.available_tools.items():
-            if server_name == "canvas":
-                self._tool_index["canvas_canvas"] = {
-                    'server': 'canvas',
-                    'tool': None  # pseudo tool
-                }
-            else:
-                for tool in server_data.get('tools', []):
-                    full_name = f"{server_name}_{tool.name}"
-                    self._tool_index[full_name] = {
-                        'server': server_name,
-                        'tool': tool
-                    }
+        self._tool_index = _build_tool_index(self.available_tools)
 
     async def _discover_prompts_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover prompts for a single server. Returns server prompts data."""
@@ -409,31 +441,25 @@ class DiscoveryMixin:
         tools_schema = []
         server_tool_mapping = {}
 
+        sleep_enabled, search_enabled = _atlas_tool_flags()
+        emitted_atlas = set()
         for server_name in server_names:
-            # Handle canvas pseudo-tool
-            if server_name == "canvas":
-                canvas_tool_schema = {
-                    "type": "function",
-                    "function": {
-                        "name": "canvas_canvas",
-                        "description": "Display final rendered content in a visual canvas panel. Use this for: 1) Complete code (not code discussions), 2) Final reports/documents (not report discussions), 3) Data visualizations, 4) Any polished content that should be viewed separately from the conversation. Put the actual content in the canvas, keep discussions in chat.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "content": {
-                                    "type": "string",
-                                    "description": "The content to display in the canvas. Can be markdown, code, or plain text."
-                                }
-                            },
-                            "required": ["content"]
-                        }
+            # The built-in ``atlas`` server (and the pseudo-servers it replaced)
+            if server_name == ATLAS_SERVER_NAME or server_name in LEGACY_SERVER_NAMES:
+                for schema in atlas_tool_schemas(
+                    list(ATLAS_TOOL_NAMES),
+                    sleep_enabled=sleep_enabled,
+                    search_enabled=search_enabled,
+                ):
+                    full_name = schema["function"]["name"]
+                    if full_name in emitted_atlas:
+                        continue
+                    emitted_atlas.add(full_name)
+                    tools_schema.append(schema)
+                    server_tool_mapping[full_name] = {
+                        'server': ATLAS_SERVER_NAME,
+                        'tool_name': full_name.removeprefix(f"{ATLAS_SERVER_NAME}_"),
                     }
-                }
-                tools_schema.append(canvas_tool_schema)
-                server_tool_mapping["canvas_canvas"] = {
-                    'server': 'canvas',
-                    'tool_name': 'canvas'
-                }
             elif server_name in self.available_tools:
                 server_tools = self.available_tools[server_name]['tools']
                 for tool in server_tools:
@@ -499,12 +525,12 @@ class DiscoveryMixin:
     def get_available_tools(self) -> List[str]:
         """Get list of available tool names."""
         available_tools = []
+        available_tools.extend(ATLAS_TOOL_NAMES)
         for server_name, server_data in self.available_tools.items():
-            if server_name == "canvas":
-                available_tools.append("canvas_canvas")
-            else:
-                for tool in server_data.get('tools', []):
-                    available_tools.append(f"{server_name}_{tool.name}")
+            if server_name == ATLAS_SERVER_NAME or server_name in LEGACY_SERVER_NAMES:
+                continue
+            for tool in server_data.get('tools', []):
+                available_tools.append(f"{server_name}_{tool.name}")
         return available_tools
 
     def get_server_for_tool(self, tool_name: str) -> Optional[str]:
@@ -516,10 +542,8 @@ class DiscoveryMixin:
         fabricated prefix. Server names can contain underscores (e.g.
         ``pptx_generator``), so splitting on ``_`` is unsafe.
         """
-        if tool_name in (_ATLAS_RAG_DISCOVER_TOOL, _ATLAS_RAG_QUERY_TOOL):
-            return "atlas_rag"
-        if tool_name == SLEEP_TOOL_NAME:
-            return SLEEP_SERVER_NAME
+        if is_atlas_tool(tool_name):
+            return ATLAS_SERVER_NAME
         index = getattr(self, "_tool_index", None)
         if not index:
             try:
@@ -530,16 +554,7 @@ class DiscoveryMixin:
             if not index:
                 # Populate the index directly from available_tools without
                 # going through get_tools_schema (which requires tool_names).
-                index = {}
-                for server_name, server_data in (self.available_tools or {}).items():
-                    if server_name == "canvas":
-                        index["canvas_canvas"] = {"server": "canvas", "tool": None}
-                    else:
-                        for tool in server_data.get("tools", []):
-                            index[f"{server_name}_{tool.name}"] = {
-                                "server": server_name,
-                                "tool": tool,
-                            }
+                index = _build_tool_index(self.available_tools)
                 self._tool_index = index
         entry = index.get(tool_name) if index else None
         return entry.get("server") if entry else None
@@ -562,82 +577,42 @@ class DiscoveryMixin:
         # Build (or reuse) an index of full tool name -> (server_name, tool_obj)
         # so we can do O(1) lookups without fragile string parsing.
         if not hasattr(self, "_tool_index") or not getattr(self, "_tool_index"):
-            index = {}
-            for server_name, server_data in self.available_tools.items():
-                if server_name == "canvas":
-                    index["canvas_canvas"] = {
-                        'server': 'canvas',
-                        'tool': None  # pseudo tool
-                    }
-                else:
-                    for tool in server_data.get('tools', []):
-                        full_name = f"{server_name}_{tool.name}"
-                        index[full_name] = {
-                            'server': server_name,
-                            'tool': tool
-                        }
+            index = _build_tool_index(self.available_tools)
             self._tool_index = index
         else:
             index = self._tool_index
 
         matched = []
         missing = []
+        sleep_enabled, search_enabled = _atlas_tool_flags()
+        seen_atlas = set()
         for requested in tool_names:
+            normalized = normalize_tool_name(requested)
+            if is_atlas_tool(normalized):
+                if normalized in seen_atlas:
+                    continue
+                seen_atlas.add(normalized)
+                matched.extend(atlas_tool_schemas(
+                    [normalized],
+                    sleep_enabled=sleep_enabled,
+                    search_enabled=search_enabled,
+                ))
+                continue
             entry = index.get(requested)
             if not entry:
                 missing.append(requested)
                 continue
-            if requested == "canvas_canvas":
-                # Recreate the canvas schema (kept in one place – duplicate logic intentional
-                # to avoid coupling to get_tools_for_servers which returns superset data)
-                matched.append({
-                    "type": "function",
-                    "function": {
-                        "name": "canvas_canvas",
-                        "description": "Display final rendered content in a visual canvas panel. Use this for: 1) Complete code (not code discussions), 2) Final reports/documents (not report discussions), 3) Data visualizations, 4) Any polished content that should be viewed separately from the conversation. Put the actual content in the canvas, keep discussions in chat.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "content": {
-                                    "type": "string",
-                                    "description": "The content to display in the canvas. Can be markdown, code, or plain text."
-                                }
-                            },
-                            "required": ["content"]
-                        }
-                    }
-                })
-            else:
-                tool = entry['tool']
-                matched.append({
-                    "type": "function",
-                    "function": {
-                        "name": requested,
-                        "description": getattr(tool, 'description', '') or '',
-                        "parameters": getattr(tool, 'inputSchema', {}) or {}
-                    }
-                })
-        for requested in tool_names:
-            if requested in _ATLAS_RAG_TOOL_SCHEMAS:
-                matched.append(_ATLAS_RAG_TOOL_SCHEMAS[requested])
-            elif requested == SLEEP_TOOL_NAME:
-                # Agent mode reaches the loop without ACL filtering (the
-                # orchestrator runs filter_authorized_tools only on the
-                # non-agent branch), so this is the gate that decides whether a
-                # disabled sleep tool is advertised to the model at all.
-                # Without it AGENT_SLEEP_MAX_SECONDS=0 would still cost a step
-                # before execution refused the call.
-                try:
-                    enabled = sleep_tool_enabled(_client().config_manager.app_settings)
-                except Exception:
-                    logger.warning(
-                        "Could not read the sleep tool cap; omitting %s from the schema",
-                        SLEEP_TOOL_NAME,
-                    )
-                    enabled = False
-                if enabled:
-                    matched.append(SLEEP_TOOL_SCHEMA)
+            tool = entry['tool']
+            matched.append({
+                "type": "function",
+                "function": {
+                    "name": requested,
+                    "description": getattr(tool, 'description', '') or '',
+                    "parameters": getattr(tool, 'inputSchema', {}) or {}
+                }
+            })
 
-
+        if missing:
+            logger.debug("get_tools_schema: no schema for %d tool(s)", len(missing))
 
         return matched
