@@ -70,6 +70,8 @@ Check "comment-only"     (Resolve-DotEnvValue " # set later")       ""
 Check "leading-hash"     (Resolve-DotEnvValue "#whole thing")       ""
 Check "url-with-equals"  (Resolve-DotEnvValue "postgresql://u:p@h/db?x=1") "postgresql://u:p@h/db?x=1"
 Check "unquoted-trailing" (Resolve-DotEnvValue "abc ")             "abc"
+Check "dq-trailing-space" (Resolve-DotEnvValue '"value "')        "value "
+Check "sq-trailing-space" (Resolve-DotEnvValue "'trailing '")      "trailing "
 Check "sq-with-hash"     (Resolve-DotEnvValue "'a#b'")              "a#b"
 
 # ---------------------------------------------------------------------------

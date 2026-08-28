@@ -217,13 +217,16 @@ function Initialize-ContainerRuntime {
             $script:CONTAINER_CMD = "docker"
             $script:COMPOSE_CMD = "docker-compose"
 
-            # Check if docker compose (v2) is available
-            try {
-                $null = & docker compose version -ErrorAction SilentlyContinue
+            # Check if docker compose (v2) is available. A native command does
+            # not throw on a non-zero exit (and -ErrorAction is passed through
+            # to docker as an argument), so judge by $LASTEXITCODE rather than
+            # a try/catch -- otherwise the docker-compose v1 fallback is
+            # unreachable.
+            & docker compose version 2>$null 1>$null
+            if ($LASTEXITCODE -eq 0) {
                 $script:COMPOSE_CMD = "docker compose"
-            } catch {
-                # Fall back to docker-compose v1
             }
+            # else: leave it as the docker-compose v1 default set above
 
             Write-Host "Using Docker as container runtime"
         } catch {
@@ -447,6 +450,10 @@ function Resolve-DotEnvValue {
     $s = $Raw
     $n = $s.Length
     $result = [System.Text.StringBuilder]::new()
+    # Track whether each appended character was inside quotes, so trailing
+    # whitespace can be trimmed only when it was unquoted -- `KEY="value "`
+    # must keep its protected trailing space, matching bash.
+    $quoted = [System.Collections.Generic.List[bool]]::new()
     $i = 0
     # Skip leading whitespace
     while ($i -lt $n -and ($s[$i] -eq ' ' -or $s[$i] -eq "`t")) { $i++ }
@@ -457,21 +464,28 @@ function Resolve-DotEnvValue {
         $ch = $s[$i]
         if ($ch -eq '"') {
             $i++
-            while ($i -lt $n -and $s[$i] -ne '"') { $null = $result.Append($s[$i]); $i++ }
+            while ($i -lt $n -and $s[$i] -ne '"') { $null = $result.Append($s[$i]); $quoted.Add($true); $i++ }
             if ($i -lt $n) { $i++ }  # skip closing quote
         } elseif ($ch -eq "'") {
             $i++
-            while ($i -lt $n -and $s[$i] -ne "'") { $null = $result.Append($s[$i]); $i++ }
+            while ($i -lt $n -and $s[$i] -ne "'") { $null = $result.Append($s[$i]); $quoted.Add($true); $i++ }
             if ($i -lt $n) { $i++ }  # skip closing quote
         } elseif ($ch -eq '#' -and $i -gt 0 -and ($s[$i - 1] -eq ' ' -or $s[$i - 1] -eq "`t")) {
             # Whitespace-introduced comment -> stop.
             break
         } else {
             $null = $result.Append($ch)
+            $quoted.Add($false)
             $i++
         }
     }
-    return $result.ToString().TrimEnd()
+    $str = $result.ToString()
+    # Trim trailing whitespace that was NOT inside quotes.
+    $end = $str.Length
+    while ($end -gt 0 -and ($str[$end - 1] -eq ' ' -or $str[$end - 1] -eq "`t") -and -not $quoted[$end - 1]) {
+        $end--
+    }
+    return $str.Substring(0, $end)
 }
 
 # =============================================================================

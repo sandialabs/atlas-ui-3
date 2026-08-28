@@ -1,0 +1,8 @@
+# Normalize line endings. Windows batch files require CRLF for reliable
+# multi-line `if ... ( ... ) else ( ... )` parsing under cmd.exe, so force CRLF
+# on checkout regardless of the user's core.autocrlf setting.
+*.bat text eol=crlf
+
+# Shell scripts and PowerShell scripts use LF on all platforms.
+*.sh  text eol=lf
+*.ps1 text eol=lf
