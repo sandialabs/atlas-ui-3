@@ -193,3 +193,91 @@ describe('ToolElapsedTime -- atlas_agent_sleep (#838)', () => {
     expect(container.textContent).not.toContain('of 20:00')
   })
 })
+
+describe('ToolElapsedTime -- heartbeat total from progressRaw', () => {
+  it('uses progressRaw.total as the clock denominator when available', () => {
+    // The backend clamps a 10000s request to 300s; the heartbeat reports
+    // total=300, so the clock should show the clamped duration, not 10000.
+    const { container } = render(
+      <ToolElapsedTime
+        timestamp={isoNow()}
+        toolName="atlas_agent_sleep"
+        arguments={{ seconds: 10000 }}
+        progressRaw={{ progress: 60, total: 300 }}
+      />
+    )
+    tick(60)
+    // 60s elapsed of 300s clamped -> 01:00 of 05:00
+    expect(container.textContent).toBe('01:00 of 05:00')
+    expect(container.textContent).not.toContain('20:00')
+  })
+
+  it('falls back to args.seconds before the first heartbeat arrives', () => {
+    const { container } = render(
+      <ToolElapsedTime
+        timestamp={isoNow()}
+        toolName="atlas_agent_sleep"
+        arguments={{ seconds: 1200 }}
+        progressRaw={undefined}
+      />
+    )
+    tick(60)
+    expect(container.textContent).toBe('01:00 of 20:00')
+  })
+
+  it('uses the consolidated tool name (atlas_sleep) too', () => {
+    const { container } = render(
+      <ToolElapsedTime
+        timestamp={isoNow()}
+        toolName="atlas_sleep"
+        arguments={{ seconds: 1200 }}
+        progressRaw={{ progress: 60, total: 1200 }}
+      />
+    )
+    tick(60)
+    expect(container.textContent).toBe('01:00 of 20:00')
+  })
+})
+
+describe('ToolElapsedTime -- stale hint for stuck sleep', () => {
+  it('shows "connection may be lost" past the overdue threshold', () => {
+    // 900s sleep, 900 + 61 = 961s elapsed -> stale
+    const { container } = render(
+      <ToolElapsedTime
+        timestamp={isoNow()}
+        toolName="atlas_agent_sleep"
+        arguments={{ seconds: 900 }}
+      />
+    )
+    tick(961)
+    expect(container.textContent).toContain('connection may be lost')
+    expect(container.textContent).not.toContain('completing...')
+  })
+
+  it('shows "completing..." before the stale threshold', () => {
+    // 900s sleep, 910s elapsed -> overdue but not yet stale (< 900 + 60)
+    const { container } = render(
+      <ToolElapsedTime
+        timestamp={isoNow()}
+        toolName="atlas_agent_sleep"
+        arguments={{ seconds: 900 }}
+      />
+    )
+    tick(910)
+    expect(container.textContent).toContain('completing...')
+    expect(container.textContent).not.toContain('connection may be lost')
+  })
+
+  it('does not show stale hint for a sleep still in progress', () => {
+    const { container } = render(
+      <ToolElapsedTime
+        timestamp={isoNow()}
+        toolName="atlas_agent_sleep"
+        arguments={{ seconds: 1200 }}
+      />
+    )
+    tick(60)
+    expect(container.textContent).not.toContain('connection may be lost')
+    expect(container.textContent).not.toContain('completing...')
+  })
+})

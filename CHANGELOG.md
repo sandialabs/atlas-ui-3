@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fix - atlas_sleep heartbeat - 2026-08-27
+- **The `atlas_sleep` tool no longer appears to hang on long waits**: a 900-second sleep could show 79 minutes of elapsed time because the tool did a single `asyncio.sleep(seconds)` with zero `tool_progress` events — if the `tool_complete` frame was lost (WebSocket drop, backend error), the frontend row stayed in `calling` status forever with the clock ticking and the generic "taking longer than expected" warning. The wait is now broken into heartbeat intervals (capped at 30s) that emit `tool_progress` frames, so the frontend knows the sleep is alive, transitions to `in_progress`, and shows the actual (clamped) duration. The frontend `ToolElapsedTime` clock uses the heartbeat's `total` field (which reflects per-call/turn clamping) instead of the raw requested `seconds`, and escalates from "completing..." to "connection may be lost" (red) when the clock runs more than 60s past the wait without a `tool_complete` — so a genuinely stuck sleep is visually distinct from one that is wrapping up.
+
 ### Repo cleanup - 2026-08-27
 - **Removed 11 PR-evidence screenshots that no doc or code references** (~1.1 MB): `docs/developer/images/pr500-citations-screenshot.png`, `pr637-tiff-vision-proof.png`, `pr650-chat-export-active-prompt-ui.png`, `pr650-chat-export-prompt-e2e.png`, `pr664-agent-multi-tool-chain-2.png`, `rag-snippets-collapsed.png`, `rag-snippets-expanded.png`, `rag-snippets-live-pipeline.png`, `wormhole-e2e-console-2026-06-09.png`, `wormhole-e2e-dashboard-2026-06-09.png`, and `docs/readme_img/screenshot-10-24-2025.png`. These were review evidence attached to past PRs that landed in the tree rather than staying on the PR thread; every image still referenced by a doc or test is untouched. Same cleanup as #853.
 
