@@ -16,6 +16,7 @@ to manage its own control flow.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,9 +31,16 @@ from ..utilities import error_handler, tool_executor
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
+from .steering import SteeringChannel
 from .streaming_final_answer import stream_final_answer
 
 logger = logging.getLogger(__name__)
+
+# Cap on a single injected steering message. Steering is a short instruction
+# that re-directs a running agent; an unbounded payload could dominate the
+# prompt and the persisted history. Oversized messages are truncated, not
+# dropped, so the user's intent still reaches the model (issue #824 review).
+_STEERING_MAX_CHARS = 8000
 
 
 def _to_tool_call_dict(tc: Any) -> Dict[str, Any]:
@@ -111,6 +119,7 @@ class AgenticLoop(AgentLoopProtocol):
         event_handler: AgentEventHandler,
         streaming: bool = False,
         event_publisher=None,
+        steering: Optional[SteeringChannel] = None,
     ) -> AgentResult:
         await event_handler(AgentEvent(
             type="agent_start",
@@ -145,6 +154,7 @@ class AgenticLoop(AgentLoopProtocol):
                 use_streaming=use_streaming,
                 event_publisher=event_publisher,
                 recorder=recorder,
+                steering=steering,
             )
         except BaseException:
             # A stop, a client disconnect, or a mid-step failure leaves this
@@ -194,6 +204,7 @@ class AgenticLoop(AgentLoopProtocol):
         use_streaming: bool,
         event_publisher,
         recorder: ToolCallRecorder,
+        steering: Optional[SteeringChannel] = None,
     ) -> Tuple[int, Optional[str]]:
         """Run the tool-calling steps, returning ``(steps, final_answer)``.
 
@@ -211,6 +222,13 @@ class AgenticLoop(AgentLoopProtocol):
         while steps < max_steps:
             steps += 1
 
+            # Issue #824: inject any steering messages the user sent while the
+            # loop was running. Drained here at the iteration boundary (not
+            # mid-step) so an in-flight tool call finishes before the new user
+            # turn reaches the model. The loop is neither broken nor stopped;
+            # the steering text becomes a normal user turn in history.
+            _inject_steering(steering, messages, context, steps)
+
             # Sanitize messages: OpenAI rejects empty tool_calls arrays
             for i, msg in enumerate(messages):
                 if isinstance(msg, dict) and "tool_calls" in msg and not msg["tool_calls"]:
@@ -227,6 +245,23 @@ class AgenticLoop(AgentLoopProtocol):
             )
 
             if not llm_response.has_tool_calls():
+                # The model produced a text-only response, which normally ends
+                # the loop. But if the user steered *while this response was
+                # being generated*, that steering is still waiting in the
+                # channel -- folding the response in as intermediate narration
+                # and continuing lets the model address the new instruction
+                # instead of handing the user a final answer that ignores it.
+                # The loop is not stopped; the next iteration's boundary drain
+                # injects the steering and calls the LLM again. The drain is
+                # deliberately NOT done here: at the step-budget boundary the
+                # ``continue`` exits the loop, and injecting here would persist
+                # a USER turn no model ever saw. Leaving it in the channel lets
+                # the runner surface it as a leftover instead (issue #824).
+                if steering is not None and steering.has_pending():
+                    _fold_text_only_as_intermediate(
+                        messages, context, llm_response, steps,
+                    )
+                    continue
                 final_answer = llm_response.content or ""
                 break
 
@@ -453,3 +488,89 @@ class AgenticLoop(AgentLoopProtocol):
             )
 
         return final_response
+
+
+def _inject_steering(
+    steering: Optional[SteeringChannel],
+    messages: List[Dict[str, Any]],
+    context: AgentContext,
+    step: int,
+) -> int:
+    """Drain pending steering messages and append each as a normal user turn.
+
+    Non-blocking: returns immediately when no channel is supplied or the queue
+    is empty. Each drained message is appended both to the live ``messages``
+    list (so the next LLM call sees it) and to ``context.history`` (so the turn
+    persists and reloads show it). The message carries no display-only
+    ``message_type``, so later turns include it via ``get_messages_for_llm`` --
+    it is a genuine user turn, not a steering annotation.
+
+    Oversized payloads are truncated to ``_STEERING_MAX_CHARS`` so a single
+    queued steer cannot dominate the prompt or the history. Returns the count of
+    messages injected so callers can log/observe.
+    """
+    if steering is None:
+        return 0
+    drained = 0
+    while True:
+        try:
+            content = steering.queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if content is None:
+            continue
+        text = content if isinstance(content, str) else str(content)
+        if not text:
+            continue
+        if len(text) > _STEERING_MAX_CHARS:
+            text = text[:_STEERING_MAX_CHARS]
+            logger.warning(
+                "Truncated a steering message from %d to %d chars at step %d",
+                len(text), _STEERING_MAX_CHARS, step,
+            )
+        messages.append({"role": "user", "content": text})
+        context.history.add_message(Message(
+            role=MessageRole.USER,
+            content=text,
+            metadata={"steered": True, "step": step},
+        ))
+        drained += 1
+    if drained:
+        logger.info(
+            "Injected %d steering message(s) into the agent loop at step %d",
+            drained, step,
+        )
+    return drained
+
+
+def _fold_text_only_as_intermediate(
+    messages: List[Dict[str, Any]],
+    context: AgentContext,
+    llm_response: LLMResponse,
+    step: int,
+) -> None:
+    """Keep a would-be final text-only response as intermediate narration.
+
+    Used when steering arrives during a text-only response (issue #824): the
+    response is not the final answer, so it is folded in as the same
+    display-only ``agent_intermediate`` row a tool-call step's narration uses,
+    and appended to the live ``messages`` list so the next LLM call can build
+    on it after addressing the steering. The turn's closing assistant message
+    is still written later by the agent runner, so strict-alternation providers
+    never see back-to-back assistant turns on a later request.
+    """
+    content = llm_response.content or ""
+    if not content:
+        return
+    messages.append({"role": "assistant", "content": content})
+    context.history.add_message(Message(
+        role=MessageRole.ASSISTANT,
+        content=content,
+        metadata={
+            "agent_mode": True,
+            "agent_intermediate": True,
+            "message_type": "agent_intermediate",
+            "steered_over": True,
+            "step": step,
+        },
+    ))
