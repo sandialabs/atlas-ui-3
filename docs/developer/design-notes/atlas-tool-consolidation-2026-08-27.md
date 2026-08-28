@@ -26,16 +26,17 @@ question about which *tool* is on, not a second switch beside the text box.
 
 ## What changed
 
-One built-in server, `atlas`, with three tools:
+One built-in server, `atlas`, with four tools:
 
 | Tool | Arguments |
 | --- | --- |
 | `atlas_canvas` | `content` |
 | `atlas_sleep` | `seconds`, optional `reason` |
-| `atlas_search` | `query` |
+| `atlas_search` | `query`, optional `max_results`, optional `depth` |
+| `atlas_discover_sources` | none |
 
 `atlas/modules/mcp_tools/atlas_server.py` is the single source of truth: the
-server name, the three schemas, the legacy-name alias table and the helpers
+server name, the four schemas, the legacy-name alias table and the helpers
 (`normalize_tool_name`, `is_atlas_tool`, `atlas_tool_schemas`) that the
 discovery, execution, authorization and config layers all call. The frontend
 mirror lives in `frontend/src/constants/atlasTools.js`.
@@ -43,7 +44,12 @@ mirror lives in `frontend/src/constants/atlasTools.js`.
 The magnifying-glass button is gone. The data source panel is still reachable
 from the header ("Sources"), which is where selecting sources belonged.
 
-### `atlas_search` takes only a query
+The `atlas` server is pinned to the top of the tools panel and the marketplace
+(`sortAtlasFirst`). Everything else keeps the order the backend sent; this only
+lifts `atlas` out of it, so the built-ins are in the same place whether a user
+has selected one MCP server or twenty.
+
+### `atlas_search` needs only a query
 
 The old `atlas_rag_query` accepted `data_sources` and `mode` as well. Both are
 now server-side decisions:
@@ -62,9 +68,44 @@ any requested source with the user's discovered set — but a model should not b
 able to reach past the user's selection to another source the user happens to
 be authorized for.
 
-`atlas_rag_discover_data_sources` is no longer advertised: with search reading
-the UI selection there is nothing left for a discover step to feed. It still
-executes, so a saved conversation that replays it does not come back broken.
+### The two optional knobs: `max_results` and `depth`
+
+`query` stays the only *required* argument. Two optional ones tune retrieval:
+
+* **`max_results`** — how many passages to return per source, clamped to 50.
+* **`depth`** — `quick` | `standard` | `deep`. Words rather than numbers: the
+  model says how hard to look, and ATLAS decides what that costs on the
+  backend. `quick` skips reranking and narrows the candidate pool, `standard`
+  changes nothing (leaving the source's own configuration in charge), and
+  `deep` widens the pool and returns more surrounding context.
+
+The line these sit on is worth stating plainly: **they change how much comes
+back, never which sources are reachable.** `data_sources` was removed because
+it was a reach control; these two are not, so they are safe to take from the
+model. Both are coerced and clamped in `search_kwargs_for` before they go
+anywhere, so a nonsense value degrades to the source default rather than
+reaching a backend.
+
+They map onto the ATLAS RAG **v2** `search_kwargs` block (`top_k_final`,
+`rerank`, `top_k_vector`, `expanded_window`). **v1 has no equivalent on the
+wire and ignores both** — its request body is the conversation plus a model
+name, with no retrieval knobs at all. That is a silent degradation by design:
+asking a v1 source for 20 deep results returns that source's configured
+behaviour rather than an error. The v2 client treats an explicit `search_kwargs`
+as the whole block, so `_query_http_client` folds the source's configured
+`top_k` in as a default first — otherwise a `depth`-only call would quietly
+drop it.
+
+### `atlas_discover_sources` is back
+
+It was dropped in the first pass on the grounds that search reads the UI
+selection, so nothing needed to feed it. That was too narrow a reading of what
+it is for. It answers two questions a model genuinely cannot answer otherwise:
+*which corpus did this come from*, and *is what the user is asking about
+indexed anywhere they can reach* — the difference between "I found nothing" and
+"you have no source that would contain this". It takes no arguments (the
+authenticated user decides the result, and the user is never a model input) and
+is gated by the same RAG flags as search.
 
 ### Backwards compatibility
 
@@ -73,9 +114,10 @@ fully-qualified names are still accepted everywhere and normalized to the new
 ones at the edges:
 
 ```
-canvas_canvas      -> atlas_canvas
-atlas_agent_sleep  -> atlas_sleep
-atlas_rag_query    -> atlas_search
+canvas_canvas                     -> atlas_canvas
+atlas_agent_sleep                 -> atlas_sleep
+atlas_rag_query                   -> atlas_search
+atlas_rag_discover_data_sources   -> atlas_discover_sources
 ```
 
 A browser holding `['canvas_canvas', 'math_add']` gets `atlas_canvas` selected
@@ -88,8 +130,8 @@ gated the way they were before — the difference is that a disabled tool now
 drops out of the tool list instead of the whole server disappearing:
 
 * `atlas_sleep` — requires `AGENT_SLEEP_MAX_SECONDS > 0`
-* `atlas_search` — requires `feature_rag_enabled` **and**
-  `feature_atlas_rag_tools_enabled`
+* `atlas_search`, `atlas_discover_sources` — require `feature_rag_enabled`
+  **and** `feature_atlas_rag_tools_enabled`
 * `atlas_canvas` — always available
 
 A disabled built-in is omitted from the schema rather than advertised and then
@@ -109,6 +151,14 @@ switch that turned it off.
   as well, so a hook targeting `canvas_canvas` keeps firing on `atlas_canvas`.
   The aliasing runs one way — a matcher on the *new* name does not suddenly
   match the old one — so it cannot widen a hook's reach.
+* **The "Server:" label under a tool call.** It was derived by splitting the
+  fully-qualified name on its last underscore, so `atlas_discover_sources`
+  displayed as the server `atlas_discover`. The bug predates this change
+  (`pptx_generator_markdown_to_pptx` displayed as
+  `pptx_generator_markdown_to`) — both halves of a `server_toolName` can
+  contain underscores, so the split can never be right in general. The tool
+  manager knows the owner, so `notify_tool_start` asks it and keeps the split
+  as a fallback only.
 * **A configured server named `atlas`.** The built-in names short-circuit the
   tool index, `/api/config` and execution dispatch, so an `mcp.json` server
   called `atlas` (or `canvas`/`atlas_agent`/`atlas_rag`) would connect, get
@@ -126,6 +176,6 @@ second look:
    RAG toggle did when it was on with nothing picked. The alternative reading —
    empty means search nothing — would make a freshly-enabled search tool return
    nothing until the user opens the sources panel.
-2. **`atlas_rag_discover_data_sources` was dropped from the advertised set**
-   rather than kept as a fourth tool. It has no job left once search reads the
-   UI selection.
+2. ~~`atlas_rag_discover_data_sources` was dropped from the advertised set.~~
+   **Resolved:** it is advertised again as `atlas_discover_sources`. See
+   [`atlas_discover_sources` is back](#atlas_discover_sources-is-back).

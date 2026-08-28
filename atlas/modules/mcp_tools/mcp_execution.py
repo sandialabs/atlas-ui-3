@@ -16,12 +16,13 @@ from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
+    DISCOVER_TOOL_NAME,
     SEARCH_TOOL_NAME,
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
     normalize_tool_name,
+    search_kwargs_for,
 )
 from atlas.modules.mcp_tools.mcp_discovery import (
-    _ATLAS_RAG_DISCOVER_TOOL,
     _ATLAS_RAG_QUERY_TOOL,
     _build_tool_index,
 )
@@ -474,7 +475,7 @@ class ExecutionMixin:
                 content=f"Canvas content displayed: {content[:100]}..." if len(content) > 100 else f"Canvas content displayed: {content}",
                 success=True
             )
-        if resolved_name == SEARCH_TOOL_NAME or tool_call.name == _ATLAS_RAG_DISCOVER_TOOL:
+        if resolved_name in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME):
             # Gate at execution, not only in the schema: omitting a disabled
             # tool from the schema stops the model being offered it, but a
             # replayed conversation or a non-UI client can still name it. The
@@ -777,7 +778,7 @@ class ExecutionMixin:
             # Preserve discovery order while de-duping
             deduped_sources = list(dict.fromkeys(http_sources + mcp_sources))
 
-            if tool_call.name == _ATLAS_RAG_DISCOVER_TOOL:
+            if normalize_tool_name(tool_call.name) == DISCOVER_TOOL_NAME:
                 payload = {
                     "results": {
                         "sources": deduped_sources,
@@ -811,6 +812,18 @@ class ExecutionMixin:
             # rather than failing the call, since ``mode`` is model-supplied.
             requested_mode = None if is_consolidated_search else args.get("mode")
             mode = requested_mode if requested_mode in RAG_MODES else RAG_MODE_RAW
+
+            # ``max_results`` and ``depth`` tune retrieval only -- how many
+            # passages come back and how hard the backend looks for them. They
+            # cannot name or widen a source, so unlike ``data_sources`` they are
+            # safe to take from the model. ``search_kwargs_for`` coerces and
+            # clamps both, so a nonsense value degrades to the source default
+            # instead of reaching the backend. v1 sources have no
+            # ``search_kwargs`` on the wire and ignore them.
+            search_kwargs = search_kwargs_for(
+                depth=args.get("depth"),
+                max_results=args.get("max_results"),
+            )
 
             requested_sources = None if is_consolidated_search else args.get("data_sources")
             if isinstance(requested_sources, list):
@@ -879,11 +892,23 @@ class ExecutionMixin:
                     raise RuntimeError("Unified RAG service is not configured")
                 if len(group) == 1:
                     resp = await unified_rag.query_rag(
-                        user_email, group[0], messages, query=query, mode=mode, _skip_hooks=True
+                        user_email,
+                        group[0],
+                        messages,
+                        query=query,
+                        mode=mode,
+                        search_kwargs=search_kwargs,
+                        _skip_hooks=True,
                     )
                 else:
                     resp = await unified_rag.query_rag_batch(
-                        user_email, group, messages, query=query, mode=mode, _skip_hooks=True
+                        user_email,
+                        group,
+                        messages,
+                        query=query,
+                        mode=mode,
+                        search_kwargs=search_kwargs,
+                        _skip_hooks=True,
                     )
                 payload: Dict[str, Any] = {
                     "data_sources": group,

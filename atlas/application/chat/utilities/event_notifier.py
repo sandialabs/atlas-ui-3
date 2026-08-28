@@ -103,7 +103,8 @@ async def safe_notify(callback: UpdateCallback, message: Dict[str, Any]) -> None
 async def notify_tool_start(
     tool_call,
     parsed_args: Dict[str, Any],
-    update_callback: Optional[UpdateCallback]
+    update_callback: Optional[UpdateCallback],
+    tool_manager=None,
 ) -> None:
     """
     Send tool start notification.
@@ -113,9 +114,7 @@ async def notify_tool_start(
     if not update_callback:
         return
 
-    # Derive server name for display context
-    parts = tool_call.function.name.split("_")
-    server_name = "_".join(parts[:-1]) if len(parts) > 1 else "unknown"
+    server_name = _server_name_for_display(tool_call.function.name, tool_manager)
 
     payload = {
         "type": "tool_start",
@@ -125,6 +124,28 @@ async def notify_tool_start(
         "arguments": parsed_args
     }
     await safe_notify(update_callback, payload)
+
+
+def _server_name_for_display(tool_name: str, tool_manager=None) -> str:
+    """Best-effort owning server for the "Server: x" line under a tool call.
+
+    Fully-qualified names are ``server_toolName`` and *both* halves may contain
+    underscores, so splitting on the last one is a guess: it reads
+    ``atlas_discover_sources`` as the server ``atlas_discover`` and
+    ``pptx_generator_markdown_to_pptx`` as ``pptx_generator_markdown_to``. The
+    tool manager knows the real owner, so ask it first and keep the split only
+    as a fallback for when the index has not been built (or the tool is gone).
+    """
+    if tool_manager is not None:
+        try:
+            resolved = tool_manager.get_server_for_tool(tool_name)
+        except Exception:  # display only -- never fail a tool call over a label
+            resolved = None
+        if resolved:
+            return resolved
+
+    parts = (tool_name or "").split("_")
+    return "_".join(parts[:-1]) if len(parts) > 1 else "unknown"
 
 
 async def notify_tool_complete(

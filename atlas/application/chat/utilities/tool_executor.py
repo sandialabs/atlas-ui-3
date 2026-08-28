@@ -627,7 +627,9 @@ async def execute_single_tool(
                     ))
 
             # Send tool start notification with sanitized args
-            await event_notifier.notify_tool_start(tool_call, display_args, update_callback)
+            await event_notifier.notify_tool_start(
+                tool_call, display_args, update_callback, tool_manager=tool_manager
+            )
 
             # Create tool call object and execute with filtered args only
             tool_call_obj = ToolCall(

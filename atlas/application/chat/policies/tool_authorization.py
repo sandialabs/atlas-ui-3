@@ -4,9 +4,9 @@ import logging
 from typing import Any, List, Optional
 
 from atlas.core.auth import is_user_in_group
-from atlas.modules.mcp_tools.mcp_discovery import _ATLAS_RAG_DISCOVER_TOOL
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
+    DISCOVER_TOOL_NAME,
     SEARCH_TOOL_NAME,
     normalize_tool_name,
 )
@@ -85,7 +85,7 @@ class ToolAuthorizationService:
                     if sleep_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue
-                if resolved == SEARCH_TOOL_NAME or tool == _ATLAS_RAG_DISCOVER_TOOL:
+                if resolved in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME):
                     settings = getattr(self.config_manager, "app_settings", None)
                     if (
                         settings is not None

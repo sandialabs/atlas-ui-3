@@ -7,15 +7,24 @@ panel as its own server with one or two tools, which made a short list of
 built-ins look like a crowd of servers.
 
 They are now a single server, ``atlas``, exposing ``atlas_canvas``,
-``atlas_sleep`` and ``atlas_search``. The old fully-qualified names are still
+``atlas_sleep``, ``atlas_search`` and ``atlas_discover_sources``. The old fully-qualified names are still
 accepted -- persisted tool selections, saved conversations and non-UI clients
 all carry them -- and are normalized to the new names at the edges via
 ``normalize_tool_name``.
 
-``atlas_search`` deliberately takes a single ``query`` argument. The data
-sources it reads are the ones selected in the UI (falling back to everything
-the user is authorized for when nothing is selected), so the model cannot pick
-its own sources and there is no separate "discover sources" step to run first.
+``atlas_search`` requires exactly one argument, ``query``. The data sources it
+reads are the ones selected in the UI (falling back to everything the user is
+authorized for when nothing is selected), so the model never picks its own
+sources. Two *optional* knobs tune retrieval rather than reach:
+``max_results`` and ``depth``. Both only affect how much is retrieved and how
+hard the backend works for it -- neither can widen the set of sources, so they
+stay outside the authorization boundary. They are honoured by v2 RAG sources
+(mapped onto the ``search_kwargs`` block of the ATLAS RAG v2 contract) and
+ignored by v1 sources, whose request body has no equivalent fields.
+
+``atlas_discover_sources`` lists the sources the user can actually reach, so a
+model can say which corpus an answer came from -- or tell the user that the
+thing they asked about is not in any source they have access to.
 """
 
 from typing import Any, Dict, List, Optional
@@ -25,17 +34,21 @@ ATLAS_SERVER_NAME = "atlas"
 CANVAS_TOOL_NAME = "atlas_canvas"
 SLEEP_TOOL_NAME = "atlas_sleep"
 SEARCH_TOOL_NAME = "atlas_search"
+DISCOVER_TOOL_NAME = "atlas_discover_sources"
 
-ATLAS_TOOL_NAMES = (CANVAS_TOOL_NAME, SLEEP_TOOL_NAME, SEARCH_TOOL_NAME)
+ATLAS_TOOL_NAMES = (
+    CANVAS_TOOL_NAME,
+    SLEEP_TOOL_NAME,
+    SEARCH_TOOL_NAME,
+    DISCOVER_TOOL_NAME,
+)
 
-# Pre-#855 fully-qualified names -> consolidated names. ``atlas_rag_discover_
-# data_sources`` is intentionally absent: search now uses the UI selection, so
-# there is nothing for a discover step to feed. It keeps executing (old
-# conversations may replay it) but is no longer advertised.
+# Pre-#855 fully-qualified names -> consolidated names.
 LEGACY_TOOL_ALIASES = {
     "canvas_canvas": CANVAS_TOOL_NAME,
     "atlas_agent_sleep": SLEEP_TOOL_NAME,
     "atlas_rag_query": SEARCH_TOOL_NAME,
+    "atlas_rag_discover_data_sources": DISCOVER_TOOL_NAME,
 }
 
 # Consolidated name -> the pre-#855 name(s) that resolved to it. Used where a
@@ -68,10 +81,46 @@ SLEEP_TOOL_DESCRIPTION = (
 
 SEARCH_TOOL_DESCRIPTION = (
     "Search the data sources selected for this conversation and return the "
-    "retrieved passages. Pass the search query only -- ATLAS chooses which "
-    "sources to read from the user's current selection, falling back to every "
-    "source the user can access when nothing is selected."
+    "retrieved passages. ATLAS chooses which sources to read from the user's "
+    "current selection, falling back to every source the user can access when "
+    "nothing is selected -- so pass the query, and optionally tune how much is "
+    "retrieved with 'max_results' and how hard to look with 'depth'."
 )
+
+DISCOVER_TOOL_DESCRIPTION = (
+    "List the data sources this user can search, as server-qualified IDs "
+    "(server:source_id). Use it to report which corpus an answer came from, or "
+    "to tell the user that what they are asking about is not in any source "
+    "they can reach. Takes no arguments; searching does not require calling "
+    "this first."
+)
+
+# Retrieval effort. These are deliberately words, not numbers: the model is
+# asked how hard to look, and ATLAS decides what that costs on the backend.
+SEARCH_DEPTHS = ("quick", "standard", "deep")
+DEFAULT_SEARCH_DEPTH = "standard"
+
+# Upper bound on ``max_results``. A model asking for 500 passages would blow
+# past the context window long before the backend refused, so the request is
+# clamped rather than rejected.
+MAX_SEARCH_RESULTS = 50
+
+# ``depth`` -> extra v2 ``search_kwargs``. ``standard`` adds nothing, leaving
+# every knob at the backend's own default.
+_DEPTH_SEARCH_KWARGS = {
+    "quick": {
+        "rerank": False,
+        "top_k_vector": 3,
+        "top_k_full_text": 3,
+    },
+    "standard": {},
+    "deep": {
+        "rerank": True,
+        "top_k_vector": 20,
+        "top_k_full_text": 20,
+        "expanded_window": [500, 500],
+    },
+}
 
 CANVAS_TOOL_SCHEMA = {
     "type": "function",
@@ -116,8 +165,10 @@ SLEEP_TOOL_SCHEMA = {
     },
 }
 
-# Single argument by design (#855): identity, authorization and source
-# selection are all server-side, so the model has exactly one thing to decide.
+# One *required* argument by design (#855): identity, authorization and source
+# selection are all server-side, so the only thing the model must decide is
+# what to look for. ``max_results`` and ``depth`` are optional retrieval knobs
+# -- they change how much comes back, never which sources are reachable.
 SEARCH_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -130,8 +181,44 @@ SEARCH_TOOL_SCHEMA = {
                     "type": "string",
                     "description": "What to search the selected data sources for.",
                 },
+                "max_results": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_SEARCH_RESULTS,
+                    "description": (
+                        "Optional. How many passages to return per source. "
+                        f"Clamped to {MAX_SEARCH_RESULTS}. Omit to use the "
+                        "source's configured default."
+                    ),
+                },
+                "depth": {
+                    "type": "string",
+                    "enum": list(SEARCH_DEPTHS),
+                    "description": (
+                        "Optional search effort. 'quick' skips reranking for a "
+                        "fast look-up, 'standard' (default) uses the source's "
+                        "configured behaviour, and 'deep' widens the candidate "
+                        "pool and returns more surrounding context for hard or "
+                        "open-ended questions."
+                    ),
+                },
             },
             "required": ["query"],
+        },
+    },
+}
+
+DISCOVER_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": DISCOVER_TOOL_NAME,
+        "description": DISCOVER_TOOL_DESCRIPTION,
+        # No arguments: the authenticated user is supplied by ATLAS and is the
+        # only input that decides what comes back. Nothing here is model input,
+        # so nothing here can widen the result.
+        "parameters": {
+            "type": "object",
+            "properties": {},
         },
     },
 }
@@ -140,11 +227,13 @@ ATLAS_TOOL_SCHEMAS = {
     CANVAS_TOOL_NAME: CANVAS_TOOL_SCHEMA,
     SLEEP_TOOL_NAME: SLEEP_TOOL_SCHEMA,
     SEARCH_TOOL_NAME: SEARCH_TOOL_SCHEMA,
+    DISCOVER_TOOL_NAME: DISCOVER_TOOL_SCHEMA,
 }
 
 ATLAS_SERVER_DESCRIPTION = (
     "Built-in ATLAS tools: render final content in the canvas panel, wait "
-    "between agent steps, and search the selected data sources. These run "
+    "between agent steps, search the selected data sources and list which "
+    "sources are available. These run "
     "inside ATLAS rather than on an MCP server."
 )
 
@@ -197,7 +286,7 @@ def atlas_tool_schemas(
     for requested in normalize_tool_names(tool_names):
         if requested == SLEEP_TOOL_NAME and not sleep_enabled:
             continue
-        if requested == SEARCH_TOOL_NAME and not search_enabled:
+        if requested in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
             continue
         schema = ATLAS_TOOL_SCHEMAS.get(requested)
         if schema is not None:
@@ -224,6 +313,41 @@ def matcher_candidates(tool_name: Any) -> tuple:
     if not isinstance(tool_name, str):
         return ()
     return (tool_name,) + tuple(n for n in legacy_names_for(tool_name) if n != tool_name)
+
+
+def search_kwargs_for(
+    depth: Any = None,
+    max_results: Any = None,
+) -> Optional[Dict[str, Any]]:
+    """Translate the model-facing search knobs into v2 ``search_kwargs``.
+
+    Returns ``None`` when neither knob was usably supplied, which leaves the
+    source's own configuration in charge. Both arguments are model-supplied, so
+    anything unrecognized is dropped rather than forwarded: a bad ``depth``
+    falls back to the default, and ``max_results`` is coerced and clamped. Note
+    that only v2 sources have a ``search_kwargs`` block -- v1 ignores both.
+    """
+    kwargs: Dict[str, Any] = {}
+
+    depth_key = depth if depth in SEARCH_DEPTHS else DEFAULT_SEARCH_DEPTH
+    kwargs.update(_DEPTH_SEARCH_KWARGS.get(depth_key, {}))
+
+    top_k = None
+    if isinstance(max_results, bool):
+        # ``bool`` is an ``int`` subclass; ``max_results=True`` is a mistake,
+        # not a request for one passage.
+        top_k = None
+    elif isinstance(max_results, int):
+        top_k = max_results
+    elif isinstance(max_results, str):
+        try:
+            top_k = int(max_results.strip())
+        except (TypeError, ValueError):
+            top_k = None
+    if top_k is not None:
+        kwargs["top_k_final"] = max(1, min(MAX_SEARCH_RESULTS, top_k))
+
+    return kwargs or None
 
 
 # Server names the built-in server owns. A configured MCP server using one of

@@ -544,8 +544,6 @@ class DiscoveryMixin:
         """
         if is_atlas_tool(tool_name):
             return ATLAS_SERVER_NAME
-        if tool_name == _ATLAS_RAG_DISCOVER_TOOL:
-            return ATLAS_SERVER_NAME
         index = getattr(self, "_tool_index", None)
         if not index:
             try:
@@ -599,12 +597,6 @@ class DiscoveryMixin:
                     sleep_enabled=sleep_enabled,
                     search_enabled=search_enabled,
                 ))
-                continue
-            if requested == _ATLAS_RAG_DISCOVER_TOOL:
-                # No longer advertised (#855), but still resolvable so a saved
-                # conversation that selected it does not come back broken.
-                if search_enabled:
-                    matched.append(_ATLAS_RAG_TOOL_SCHEMAS[requested])
                 continue
             entry = index.get(requested)
             if not entry:

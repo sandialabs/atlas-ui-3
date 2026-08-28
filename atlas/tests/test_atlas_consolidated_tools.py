@@ -1,8 +1,9 @@
 """The consolidated built-in ``atlas`` server (issue #855).
 
-Canvas, sleep and search used to be three pseudo-servers. These tests pin the
-consolidated surface: one server, three tools, single-argument search, and the
-old fully-qualified names still resolving so persisted selections and saved
+Canvas, sleep, search and source discovery used to be spread across three
+pseudo-servers. These tests pin the consolidated surface: one server, four
+tools, a search whose only required argument is the query, and the old
+fully-qualified names still resolving so persisted selections and saved
 conversations keep working.
 """
 
@@ -12,12 +13,15 @@ from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
+    DISCOVER_TOOL_NAME,
+    MAX_SEARCH_RESULTS,
     SEARCH_TOOL_NAME,
     SLEEP_TOOL_NAME,
     atlas_tool_schemas,
     is_atlas_tool,
     normalize_tool_name,
     normalize_tool_names,
+    search_kwargs_for,
 )
 from atlas.modules.mcp_tools.client import MCPToolManager, _drop_reserved_servers
 from atlas.hooks.models import HookConfig
@@ -61,7 +65,7 @@ def test_search_takes_only_a_query():
     (schema,) = atlas_tool_schemas([SEARCH_TOOL_NAME])
     params = schema["function"]["parameters"]
 
-    assert list(params["properties"]) == ["query"]
+    assert list(params["properties"]) == ["query", "max_results", "depth"]
     assert params["required"] == ["query"]
 
 
@@ -142,3 +146,60 @@ def test_drop_reserved_servers_leaves_a_clean_config_untouched():
     config = {"pptx_generator": {"url": "http://example"}}
 
     assert _drop_reserved_servers(config) is config
+
+
+def test_discover_sources_is_advertised_again_under_the_atlas_server():
+    """It answers "which corpus?" and "is this even indexed?" -- both worth a tool."""
+    schemas = atlas_tool_schemas([DISCOVER_TOOL_NAME])
+
+    assert [schema["function"]["name"] for schema in schemas] == [DISCOVER_TOOL_NAME]
+    # No arguments at all: the authenticated user decides the answer, and the
+    # user is never a model input.
+    assert schemas[0]["function"]["parameters"]["properties"] == {}
+
+
+def test_the_legacy_discover_name_resolves_to_the_new_one():
+    assert normalize_tool_name("atlas_rag_discover_data_sources") == DISCOVER_TOOL_NAME
+    assert is_atlas_tool("atlas_rag_discover_data_sources")
+
+
+def test_discovery_is_gated_with_search():
+    """Both read the RAG sources, so one flag governs both."""
+    assert atlas_tool_schemas([DISCOVER_TOOL_NAME], search_enabled=False) == []
+
+
+def test_depth_and_max_results_map_onto_v2_search_kwargs():
+    assert search_kwargs_for(depth="quick")["rerank"] is False
+    assert search_kwargs_for(depth="deep")["top_k_vector"] == 20
+    assert search_kwargs_for(max_results=7)["top_k_final"] == 7
+    # ``standard`` alone changes nothing, leaving the source's own config in
+    # charge rather than pinning it to our idea of a default.
+    assert search_kwargs_for(depth="standard") is None
+    assert search_kwargs_for() is None
+
+
+def test_model_supplied_search_knobs_are_coerced_and_clamped():
+    """Both values come from the model, so nothing unvetted reaches the backend."""
+    # Out of range is clamped, not rejected: the call still returns evidence.
+    assert search_kwargs_for(max_results=9999)["top_k_final"] == MAX_SEARCH_RESULTS
+    assert search_kwargs_for(max_results=0)["top_k_final"] == 1
+    # A number sent as a string is a common model slip and is worth accepting.
+    assert search_kwargs_for(max_results="5")["top_k_final"] == 5
+    # Nonsense degrades to the source default instead of being forwarded.
+    assert search_kwargs_for(max_results="lots") is None
+    assert search_kwargs_for(max_results=True) is None
+    assert search_kwargs_for(depth="exhaustive") is None
+
+
+def test_the_server_label_under_a_tool_call_is_asked_for_not_guessed():
+    """Splitting on the last underscore mislabels any multi-word tool name."""
+    from atlas.application.chat.utilities.event_notifier import _server_name_for_display
+
+    manager = _manager()
+
+    assert _server_name_for_display(DISCOVER_TOOL_NAME, manager) == ATLAS_SERVER_NAME
+    assert _server_name_for_display(SEARCH_TOOL_NAME, manager) == ATLAS_SERVER_NAME
+    # Without a manager the old guess still applies -- it is a display label,
+    # never a lookup, so a wrong fallback must not fail the call.
+    assert _server_name_for_display(DISCOVER_TOOL_NAME) == "atlas_discover"
+    assert _server_name_for_display("noserver") == "unknown"

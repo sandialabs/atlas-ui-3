@@ -110,17 +110,30 @@ def test_canvas_tool_has_detailed_info():
 
 
 def test_atlas_pseudo_server_has_tools_panel_info():
-    """The consolidated ATLAS server exposes canvas, sleep and search (#855)."""
+    """The consolidated ATLAS server exposes all four built-ins (#855)."""
     tools_info = _atlas_tools_info(sleep_enabled=True, search_enabled=True)
 
     assert tools_info["server"] == "atlas"
-    assert sorted(tools_info["tools"]) == ["canvas", "search", "sleep"]
-    assert tools_info["tool_count"] == 3
+    assert sorted(tools_info["tools"]) == [
+        "canvas",
+        "discover_sources",
+        "search",
+        "sleep",
+    ]
+    assert tools_info["tool_count"] == 4
 
     detailed = {tool["name"]: tool for tool in tools_info["tools_detailed"]}
-    # Search takes exactly one model-facing argument: the query.
+    # ``query`` is the only *required* argument; the other two tune retrieval
+    # and cannot name a source.
     assert detailed["search"]["inputSchema"]["required"] == ["query"]
-    assert list(detailed["search"]["inputSchema"]["properties"]) == ["query"]
+    assert list(detailed["search"]["inputSchema"]["properties"]) == [
+        "query",
+        "max_results",
+        "depth",
+    ]
+    # Discovery takes nothing at all -- the authenticated user decides the
+    # result, and the user is not a model input.
+    assert detailed["discover_sources"]["inputSchema"]["properties"] == {}
     assert "content" in detailed["canvas"]["inputSchema"]["properties"]
     assert "seconds" in detailed["sleep"]["inputSchema"]["properties"]
 

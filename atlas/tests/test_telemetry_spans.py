@@ -472,7 +472,7 @@ async def test_rag_query_span_extracts_docs(span_exporter):
         ),
     )
 
-    async def fake_impl(username, qualified, messages, query=None, mode=None):
+    async def fake_impl(username, qualified, messages, query=None, mode=None, search_kwargs=None):
         return fake_response
 
     svc._query_rag_impl = fake_impl
@@ -532,7 +532,7 @@ async def test_rag_doc_ids_are_sanitized_when_falling_back_to_title(span_exporte
         ),
     )
 
-    async def fake_impl(username, qualified, messages, query=None, mode=None):
+    async def fake_impl(username, qualified, messages, query=None, mode=None, search_kwargs=None):
         return fake_response
 
     svc._query_rag_impl = fake_impl

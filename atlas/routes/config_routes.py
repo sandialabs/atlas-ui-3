@@ -14,6 +14,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
     ATLAS_SERVER_NAME,
     ATLAS_TOOL_SCHEMAS,
+    DISCOVER_TOOL_NAME,
     SEARCH_TOOL_NAME,
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
@@ -49,7 +50,8 @@ def _search_config_paths(config_manager, filename):
 def _atlas_tools_info(*, sleep_enabled: bool, search_enabled: bool) -> dict:
     """Build the consolidated built-in ``atlas`` server entry for the tools panel.
 
-    Canvas, sleep and search used to be three separate pseudo-servers (#855).
+    Canvas, sleep, search and source discovery used to be three separate
+    pseudo-servers (#855).
     They are one server now; the gated ones simply drop out of the tool list
     when their feature is off, rather than the whole server disappearing.
     """
@@ -58,7 +60,7 @@ def _atlas_tools_info(*, sleep_enabled: bool, search_enabled: bool) -> dict:
     for full_name, schema in ATLAS_TOOL_SCHEMAS.items():
         if full_name == ATLAS_SLEEP_TOOL_NAME and not sleep_enabled:
             continue
-        if full_name == SEARCH_TOOL_NAME and not search_enabled:
+        if full_name in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
             continue
         function = schema["function"]
         tool_name = full_name.removeprefix(f"{ATLAS_SERVER_NAME}_")

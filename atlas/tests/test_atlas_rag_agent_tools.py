@@ -59,6 +59,7 @@ class FakeUnifiedRAG:
         self.discovered = discovered if discovered is not None else ["technical-docs"]
         self.query_calls = []
         self.batch_calls = []
+        self.search_kwargs_calls = []
 
     async def discover_data_sources(self, username, user_compliance_level=None):
         return [
@@ -68,14 +69,16 @@ class FakeUnifiedRAG:
             }
         ]
 
-    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
         self.query_calls.append(qualified_data_source)
+        self.search_kwargs_calls.append(search_kwargs)
         return SimpleNamespace(
             content=f"Result from {qualified_data_source}", is_completion=False
         )
 
-    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, _skip_hooks=False):
+    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
         self.batch_calls.append(list(qualified_data_sources))
+        self.search_kwargs_calls.append(search_kwargs)
         return SimpleNamespace(
             content=f"Batched {','.join(qualified_data_sources)}", is_completion=True
         )
@@ -101,14 +104,16 @@ def _patch_app_factory(monkeypatch, unified_rag=None, rag_mcp=None):
 
 
 def test_get_tools_schema_exposes_consolidated_search_tool(monkeypatch):
-    """#855: one ``atlas_search`` tool, taking only a query."""
+    """#855: one ``atlas_search`` tool; ``query`` is the only required argument."""
     manager = _manager()
     _enable_search(monkeypatch)
     schemas = manager.get_tools_schema(["atlas_search"])
 
     assert [schema["function"]["name"] for schema in schemas] == ["atlas_search"]
     params = schemas[0]["function"]["parameters"]
-    assert list(params["properties"]) == ["query"]
+    # ``max_results`` and ``depth`` tune retrieval; neither can name a source,
+    # so the model still has exactly one thing it must decide.
+    assert list(params["properties"]) == ["query", "max_results", "depth"]
     assert params["required"] == ["query"]
     assert manager.get_server_for_tool("atlas_search") == "atlas"
 
@@ -307,11 +312,11 @@ class ComplianceAwareRAG:
         ids = self.by_level.get(user_compliance_level, [])
         return [{"server": "atlas_rag", "sources": [{"id": i} for i in ids]}]
 
-    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
         self.query_calls.append(qualified_data_source)
         return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
 
-    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, _skip_hooks=False):
+    async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
         raise AssertionError("batch not expected in this test")
 
 
@@ -435,12 +440,12 @@ async def test_execute_atlas_rag_query_isolates_partial_failures(monkeypatch):
                 {"server": "srvB", "sources": [{"id": "broken"}]},
             ]
 
-        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
+        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
             if qualified_data_source == "srvB:broken":
                 raise RuntimeError("backend down")
             return SimpleNamespace(content=f"ok {qualified_data_source}", is_completion=False)
 
-        async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, _skip_hooks=False):
+        async def query_rag_batch(self, username, qualified_data_sources, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
             raise AssertionError("each server has a single source; batch not expected")
 
     _patch_app_factory(monkeypatch, unified_rag=TwoServerRAG())
@@ -472,7 +477,7 @@ async def test_execute_atlas_rag_query_all_failures_reports_failure(monkeypatch)
     manager = _manager()
 
     class BrokenUnifiedRAG(FakeUnifiedRAG):
-        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, _skip_hooks=False):
+        async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
             raise RuntimeError("total outage")
 
     unified = BrokenUnifiedRAG(discovered=["technical-docs"])
@@ -641,3 +646,105 @@ async def test_atlas_search_refuses_to_execute_when_rag_is_disabled(monkeypatch)
     assert result.success is False
     assert "disabled" in result.content
     assert unified.query_calls == []
+
+
+@pytest.mark.asyncio
+async def test_discover_sources_executes_under_the_consolidated_name(monkeypatch):
+    """#855 follow-up: discovery is a first-class ``atlas`` tool again."""
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs", "hr-policies"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-1", name="atlas_discover_sources", arguments={}),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is True
+    payload = json.loads(result.content)
+    assert payload["results"]["sources"] == [
+        "atlas_rag:technical-docs",
+        "atlas_rag:hr-policies",
+    ]
+    # Discovery lists; it must not query.
+    assert unified.query_calls == []
+
+
+@pytest.mark.asyncio
+async def test_discover_sources_still_executes_under_the_legacy_name(monkeypatch):
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-1", name="atlas_rag_discover_data_sources", arguments={}),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is True
+    assert json.loads(result.content)["results"]["sources"] == [
+        "atlas_rag:technical-docs"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discover_sources_is_refused_when_rag_is_disabled(monkeypatch):
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+    _enable_search(monkeypatch, enabled=False)
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-1", name="atlas_discover_sources", arguments={}),
+        context={"user_email": "test@example.com"},
+    )
+
+    assert result.success is False
+    # Nothing about the user's sources leaks from a refused call.
+    assert unified.query_calls == []
+
+
+@pytest.mark.asyncio
+async def test_atlas_search_passes_depth_and_max_results_to_the_backend(monkeypatch):
+    """The two optional knobs reach retrieval as v2 ``search_kwargs``."""
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-1",
+            name="atlas_search",
+            arguments={"query": "vacation policy", "max_results": 12, "depth": "deep"},
+        ),
+        context={
+            "user_email": "test@example.com",
+            "selected_data_sources": ["atlas_rag:technical-docs"],
+        },
+    )
+
+    assert result.success is True
+    assert unified.search_kwargs_calls[0]["top_k_final"] == 12
+    assert unified.search_kwargs_calls[0]["top_k_vector"] == 20
+
+
+@pytest.mark.asyncio
+async def test_atlas_search_without_knobs_leaves_the_source_config_in_charge(monkeypatch):
+    manager = _manager()
+    unified = FakeUnifiedRAG(discovered=["technical-docs"])
+    _patch_app_factory(monkeypatch, unified_rag=unified)
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-1",
+            name="atlas_search",
+            arguments={"query": "vacation policy"},
+        ),
+        context={
+            "user_email": "test@example.com",
+            "selected_data_sources": ["atlas_rag:technical-docs"],
+        },
+    )
+
+    assert result.success is True
+    assert unified.search_kwargs_calls == [None]
