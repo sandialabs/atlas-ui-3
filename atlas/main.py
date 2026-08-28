@@ -38,6 +38,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
+from atlas.application.chat.agent.steering import SteeringChannel, should_steer
 from atlas.application.chat.service import UNSET
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
@@ -621,7 +622,13 @@ async def websocket_endpoint(websocket: WebSocket):
     )
 
     session_id = uuid4()
-    active_chat_task = {"task": None}
+    # ``active_chat_task`` tracks the in-flight turn for this connection. The
+    # ``steering`` channel (issue #824) lets a second chat message arrive while
+    # an agent loop is still running: instead of starting a second concurrent
+    # turn (which would race on the same session history), its content is
+    # pushed onto the running loop's channel and injected as a normal user turn
+    # at the next iteration boundary.
+    active_chat_task = {"task": None, "steering": None, "conversation_id": None}
 
     # Create connection adapter with authenticated user and chat service
     connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
@@ -642,6 +649,48 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             if message_type == "chat":
+                # Issue #824: if an agent loop is already running for this
+                # connection, steer it instead of starting a second concurrent
+                # turn (which would race on the same session history). The
+                # user's message is injected as a normal user turn at the next
+                # iteration boundary; the loop is not stopped. ``should_steer``
+                # also gates on conversation identity so a message typed after
+                # the user switched conversations starts a fresh turn in the
+                # new conversation rather than being injected into the old
+                # one's context. The channel's ``active`` flag is set by the
+                # agent runner, so this only routes when a loop is genuinely
+                # consuming -- a turn that requested agent mode but fell back
+                # to a non-agent turn never activates the channel.
+                if should_steer(active_chat_task, data.get("conversation_id")):
+                    content = data.get("content", "")
+                    steering = active_chat_task["steering"]
+                    try:
+                        steering.queue.put_nowait(content)
+                    except asyncio.QueueFull:
+                        # Bounded queue (STEERING_QUEUE_MAXSIZE): a flood of
+                        # steers would otherwise stack into history and every
+                        # later prompt. Tell the user instead of blocking the
+                        # receive loop on a full put.
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": (
+                                "The agent steering queue is full. Please wait "
+                                "for the agent to make progress before sending "
+                                "another steering message."
+                            ),
+                            "error_type": "steering_queue_full",
+                        })
+                        continue
+                    logger.info("Steered running agent loop with a new user message")
+                    # Acknowledge the steer so "queued" is distinguishable from
+                    # "dropped" at the client (issue #824 review). The frontend
+                    # can render this; unknown update types are ignored.
+                    await websocket.send_json({
+                        "type": "agent_update",
+                        "update_type": "steering_queued",
+                    })
+                    continue
+
                 # Authoritative server-side gate for custom system prompts. The
                 # frontend already withholds custom_system_prompt when the feature
                 # is disabled, but a stale or hand-crafted client could still send
@@ -676,6 +725,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # Handle chat message in background so we can still receive approval responses
+                # Issue #824: create a steering channel for agent-mode turns so a
+                # chat the user sends while the loop is running is injected as a
+                # steering message rather than starting a concurrent turn. The
+                # conversation_id is recorded so a later steer that arrives for
+                # a different conversation (after a restore/reset) starts a
+                # fresh turn instead of injecting into the old one's context.
+                is_agent_turn = bool(data.get("agent_mode", False))
+                steering_channel = SteeringChannel() if is_agent_turn else None
+                active_chat_task["steering"] = steering_channel
+                active_chat_task["conversation_id"] = data.get("conversation_id")
+
                 async def handle_chat():
                     try:
                         await chat_service.handle_chat_message(
@@ -707,6 +767,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             # conversation's workspace binding for any client
                             # that does not send it.
                             workspace_id=data.get("workspace_id", UNSET),
+                            steering=steering_channel,
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
@@ -833,6 +894,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "restore_conversation":
+                # Issue #824: dropping the steering channel here means a
+                # message typed after switching conversations starts a fresh
+                # turn in the new conversation instead of being injected into
+                # the previous conversation's (possibly still-running) agent.
+                active_chat_task["steering"] = None
+                active_chat_task["conversation_id"] = None
+
                 # Release MCP sessions for the current conversation before restoring
                 session = await chat_service.session_repository.get(session_id)
                 if session:
@@ -893,6 +961,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         await asyncio.wait([task], timeout=5)
                     except Exception as e:  # pragma: no cover - defensive
                         logger.warning("Error waiting for cancelled chat task: %s", e)
+
+                # Issue #824: drop the steering channel so a message typed after
+                # the reset steers the next turn (or starts fresh) rather than a
+                # channel whose loop was just cancelled.
+                active_chat_task["steering"] = None
+                active_chat_task["conversation_id"] = None
 
                 # Handle session reset (use authenticated user from connection).
                 # handle_reset_session itself releases the old conversation's

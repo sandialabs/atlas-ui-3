@@ -132,6 +132,112 @@ async def test_agent_mode_legacy_strategy_resolves_to_agentic():
 
 
 # ---------------------------------------------------------------------------
+# Issue #824: steering a running agent through ChatService. A user message
+# handed to the agent's steering channel mid-run reaches the LLM at the next
+# iteration boundary as a normal user turn, and the channel is deactivated
+# when the turn ends.
+# ---------------------------------------------------------------------------
+
+
+class _SteeringFakeLLM(LLMProtocol):
+    """LLM that calls a tool, then finishes; records user messages it sees.
+
+    On the first streaming call it pushes a steering message onto ``channel``,
+    so the steer is waiting before the second iteration's boundary drain.
+    """
+
+    def __init__(self, channel, steer_text="now also summarize"):
+        self._channel = channel
+        self._steer_text = steer_text
+        self.seen_user: List[str] = []
+        self._step = 0
+
+    async def call_plain(self, model_name, messages, temperature=0.7, **kwargs):
+        return "fallback"
+
+    async def call_with_tools(self, model_name, messages, tools_schema, tool_choice="auto", temperature=0.7, **kwargs):
+        self._step += 1
+        self.seen_user.extend(m.get("content") for m in messages if m.get("role") == "user")
+        if self._step == 1:
+            return LLMResponse(
+                content="Running the tool.",
+                tool_calls=[_tool_call("c1", "noop")],
+            )
+        return LLMResponse(content="Done after steering.")
+
+    async def call_with_rag_and_tools(self, model_name, messages, data_sources, tools_schema, user_email, tool_choice="auto", temperature=0.7, **kwargs):
+        return await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature)
+
+    async def stream_with_tools(self, model_name, messages, tools_schema, tool_choice="auto", temperature=0.7, **kwargs):
+        resp = await self.call_with_tools(model_name, messages, tools_schema, tool_choice, temperature)
+        if self._step == 1:
+            # Queue the steering message while step 1's LLM call runs.
+            self._channel.queue.put_nowait(self._steer_text)
+            yield resp
+        else:
+            for word in (resp.content or "").split(" "):
+                yield word + " "
+            yield resp
+
+    async def stream_with_rag_and_tools(self, model_name, messages, data_sources, tools_schema, user_email, tool_choice="auto", temperature=0.7, **kwargs):
+        async for item in self.stream_with_tools(model_name, messages, tools_schema, tool_choice, temperature):
+            yield item
+
+    async def stream_plain(self, model_name, messages, temperature=0.7, **kwargs):
+        yield "fallback"
+
+
+def _noop_tool_manager():
+    async def fake_execute(tool_call_obj, context=None):
+        return ToolResult(tool_call_id=getattr(tool_call_obj, "id", "x"), content="ok", success=True)
+
+    mgr = MagicMock()
+    mgr.execute_tool = AsyncMock(side_effect=fake_execute)
+    mgr.get_tools_schema = MagicMock(return_value=[
+        {"type": "function", "function": {"name": "noop", "parameters": {}}}
+    ])
+    return mgr
+
+
+@pytest.mark.asyncio
+async def test_agent_steering_through_chat_service():
+    """A steering channel handed to ChatService is forwarded to the loop,
+    drained at the next iteration boundary, and deactivated when the turn ends."""
+    from atlas.application.chat.agent.steering import SteeringChannel
+
+    channel = SteeringChannel()
+    llm = _SteeringFakeLLM(channel)
+    conn = FakeConnection()
+    svc = ChatService(
+        llm=llm, tool_manager=_noop_tool_manager(), connection=conn,
+        config_manager=ConfigManager(),
+    )
+    # The tool actually executes here, so bypass the approval gate (the CLI
+    # does the same via agent_loop_factory.skip_approval = True).
+    svc.agent_mode.agent_loop_factory.skip_approval = True
+
+    resp = await svc.handle_chat_message(
+        session_id=uuid4(),
+        content="Run the tool",
+        model="fake",
+        selected_tools=["noop"],
+        agent_mode=True,
+        agent_max_steps=5,
+        steering=channel,
+    )
+
+    assert resp["type"] == "chat_response"
+    assert "Done after steering." in resp["message"]
+    # The steering text reached the LLM as a user message on the second step.
+    assert "now also summarize" in llm.seen_user
+    # The channel is released once the turn ends, so a later chat never steers
+    # into a finished loop.
+    assert channel.active is False
+    # Nothing is left undrained.
+    assert channel.queue.empty()
+
+
+# ---------------------------------------------------------------------------
 # Multi-tool, multi-step e2e: a task that genuinely needs several tool calls
 # chained one after another (each turn depends on the previous result).
 # ---------------------------------------------------------------------------

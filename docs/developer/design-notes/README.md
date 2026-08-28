@@ -32,3 +32,4 @@ docs that describe how the system works today, see the
 - [Compact Tool / System / Approval Messages](compact-tool-system-messages-2026-06-23.md) - Approval prompts as compact rows with persisted collapse
 - [Opt-in Fine-tune Capture](finetune-capture-2026-06-25.md) - Consent-gated chat capture and rollback preference pairs (issue #622)
 - [Agent Busy Indicator](agent-busy-indicator-2026-08-08.md) - Spinner shown between agent loop steps (issue #748)
+- [Agent Steering](agent-steering-2026-08-27.md) - Mid-run user messages injected as normal user turns without stopping the loop (issue #824)
