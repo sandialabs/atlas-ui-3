@@ -71,6 +71,31 @@ gated on `FEATURE_RAG_ENABLED` and `FEATURE_ATLAS_RAG_TOOLS_ENABLED`, and it
 never duplicates a tool the user already selected under either its current or
 its pre-#855 name.
 
+## Where the selection resolves, and the one configuration that loses retrieval
+
+The implied tool is resolved in `ChatOrchestrator._resolve_search_tool`, which
+runs **before** the agent-mode guard. That ordering is the whole point: agent
+mode falls back to a plain chat turn when no tools are selected, so resolving
+the implied tool inside the loops would have been too late -- the turn would
+already have been downgraded. (The loops still call the helper themselves; it
+is idempotent, and it keeps direct callers and tests honest.)
+
+`FEATURE_RAG_ENABLED=true` with `FEATURE_ATLAS_RAG_TOOLS_ENABLED=false` is a
+supported combination, and it is the one case that genuinely loses something
+here. Such a turn has no `atlas_search` to offer, so:
+
+- with **no tools selected**, it routes to RAG mode, which reads the sources
+  itself -- unchanged;
+- with **tools selected**, it runs in tools mode, where nothing reads them any
+  more. That turn now gets a warning naming the flag, because answering without
+  the user's chosen evidence and saying nothing is the same silence this change
+  set out to remove.
+
+The warning is about a *missing tool*, not a disabled flag: a turn that already
+names the search tool -- including under its pre-#855 spelling
+`atlas_rag_query`, which is what replayed conversations carry -- has a search
+tool and is never warned about.
+
 ## Compatibility
 
 - Legacy tool names still normalize (`atlas_rag_query` -> `atlas_search`,

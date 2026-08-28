@@ -92,9 +92,6 @@ class SteeringLLM:
             return LLMResponse(content="running tool", tool_calls=[tool_call("c1", "noop")])
         return LLMResponse(content="done after steering")
 
-    async def call_with_rag_and_tools(self, *a, **kw):
-        return await self.call_with_tools(a[0], a[1], a[3], "auto")
-
     async def call_plain(self, *a, **kw):
         return "fallback"
 
@@ -111,10 +108,6 @@ class SteeringLLM:
             for w in (resp.content or "").split(" "):
                 yield w + " "
             yield resp
-
-    async def stream_with_rag_and_tools(self, *a, **kw):
-        async for item in self.stream_with_tools(a[0], a[1], a[3], "auto"):
-            yield item
 
 
 async def main():
