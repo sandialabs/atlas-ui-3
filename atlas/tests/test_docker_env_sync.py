@@ -250,10 +250,9 @@ def test_use_new_frontend_flag_is_gone():
     frontend that no longer exists. The flag and its old-frontend code path were
     removed in PR #865; this test keeps them from sneaking back in.
 
-    Some files (Dockerfile-test, agent_start.sh, ps_agent_start.ps1) are not
-    copied into the test container, so absent files are skipped rather than
-    treated as failures — the same pattern used by
-    test_runtime_only_dockerfile_keeps_runtime_surface_small.
+    Dockerfile-test is not copied into the test container (it is the build
+    recipe itself), so it is checked on a best-effort basis — the same pattern
+    used by test_runtime_only_dockerfile_keeps_runtime_surface_small.
     """
     repo_root = Path(__file__).parent.parent.parent
 
@@ -262,12 +261,12 @@ def test_use_new_frontend_flag_is_gone():
     must_be_present = [
         repo_root / '.env.example',
         repo_root / 'docker-compose.yml',
+        repo_root / 'agent_start.sh',
+        repo_root / 'ps_agent_start.ps1',
     ]
     # Present in a full checkout but not copied into the test container.
     best_effort = [
         repo_root / 'Dockerfile-test',
-        repo_root / 'agent_start.sh',
-        repo_root / 'ps_agent_start.ps1',
     ]
 
     for file_path in must_be_present:
