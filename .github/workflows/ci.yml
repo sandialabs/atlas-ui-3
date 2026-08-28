@@ -53,8 +53,8 @@ jobs:
         load: true
         tags: test-image:latest
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=atlas-test
+        cache-to: type=gha,scope=atlas-test,mode=max
     
     - name: Run tests in debug mode
       # DEBUG_MODE is baked into /app/.env at build time (default true). pydantic
@@ -110,8 +110,8 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=atlas-prod
+        cache-to: type=gha,scope=atlas-prod,mode=max
 
     - name: Build runtime-only Docker image
       uses: docker/build-push-action@v7
@@ -128,5 +128,5 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: runtime-only-image:latest
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=atlas-runtime
+        cache-to: type=gha,scope=atlas-runtime,mode=max
