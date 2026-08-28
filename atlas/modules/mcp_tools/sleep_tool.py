@@ -9,12 +9,19 @@ transport timeout to hit.
 Cancellation needs no extra plumbing: a stopped run cancels the asyncio task
 that drives the turn, and ``asyncio.sleep`` raises ``CancelledError``
 immediately, so an in-flight sleep aborts with the rest of the turn.
+
+Progress heartbeats: the wait is broken into heartbeat intervals (capped at
+``HEARTBEAT_MAX_INTERVAL`` seconds) so the frontend receives regular
+``tool_progress`` frames. Without them a long sleep (up to 2h by default)
+sits in ``calling`` status with no signal that it is alive; if the WebSocket
+drops the ``tool_complete`` frame is lost and the row spins forever (the
+"79-minute 900-second sleep" hang).
 """
 
 import asyncio
 import logging
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from atlas.domain.messages.models import ToolCall, ToolResult
 
@@ -27,6 +34,22 @@ SLEEP_TOOL_NAME = "atlas_agent_sleep"
 # is created once per turn and mutated here, which is what makes the cumulative
 # budget below a *turn* budget rather than a per-call one.
 TURN_BUDGET_KEY = "turn_sleep_budget"
+
+# Heartbeat interval for progress events during a long sleep. The wait is
+# broken into chunks of this size (or smaller for short sleeps) so the
+# frontend receives regular ``tool_progress`` frames and knows the sleep is
+# alive. Capped at 30s to match the default WebSocket ping interval; shorter
+# sleeps get proportionally shorter intervals so even a 30s wait gets a few
+# beats. Waits at or below the minimum threshold sleep in a single shot --
+# they are too short for a heartbeat to matter.
+HEARTBEAT_MAX_INTERVAL = 30.0
+HEARTBEAT_MIN_SLEEP = 10.0
+
+# Key for the update callback inside the tool execution context dict. The
+# sleep tool receives the same ``context`` dict that MCP tools do, and the
+# tool executor puts the WebSocket update callback there so MCP tools can
+# emit progress. The sleep tool reads it the same way.
+UPDATE_CALLBACK_KEY = "update_callback"
 
 SLEEP_TOOL_SCHEMA = {
     "type": "function",
@@ -110,6 +133,64 @@ def _turn_budget_remaining(
     return budget, max(max_turn_seconds - spent, 0.0)
 
 
+def _heartbeat_interval(total_seconds: float) -> float:
+    """Seconds between progress heartbeats for a wait of ``total_seconds``.
+
+    Short waits get proportionally short intervals (a 30s sleep beats every
+    3s); long waits are capped at ``HEARTBEAT_MAX_INTERVAL`` so a 2h sleep
+    does not flood the WebSocket. Waits at or below the minimum threshold
+    return the full duration -- the caller sleeps in a single shot.
+    """
+    if total_seconds <= HEARTBEAT_MIN_SLEEP:
+        return total_seconds
+    return min(max(total_seconds / 10.0, HEARTBEAT_MIN_SLEEP / 2.0), HEARTBEAT_MAX_INTERVAL)
+
+
+async def _sleep_with_heartbeats(
+    total_seconds: float,
+    tool_call_id: str,
+    context: Optional[Dict[str, Any]],
+) -> None:
+    """Sleep for ``total_seconds``, emitting ``tool_progress`` heartbeats.
+
+    The wait is broken into chunks so the frontend receives regular progress
+    frames. Without them a long sleep sits in ``calling`` status with no
+    signal that it is alive; if the WebSocket drops the ``tool_complete``
+    frame is lost and the row spins forever.
+
+    Cancellation is preserved: ``asyncio.sleep(chunk)`` raises
+    ``CancelledError`` immediately on cancel, same as a single long sleep.
+    """
+    update_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None
+    if isinstance(context, dict):
+        cb = context.get(UPDATE_CALLBACK_KEY)
+        if callable(cb):
+            update_callback = cb
+
+    if update_callback is None or total_seconds <= HEARTBEAT_MIN_SLEEP:
+        await asyncio.sleep(total_seconds)
+        return
+
+    interval = _heartbeat_interval(total_seconds)
+    elapsed = 0.0
+    while elapsed < total_seconds:
+        chunk = min(interval, total_seconds - elapsed)
+        await asyncio.sleep(chunk)
+        elapsed += chunk
+        try:
+            from atlas.application.chat.utilities.event_notifier import notify_tool_progress
+            await notify_tool_progress(
+                tool_call_id,
+                SLEEP_TOOL_NAME,
+                elapsed,
+                total_seconds,
+                f"waiting {elapsed:g}/{total_seconds:g}s",
+                update_callback,
+            )
+        except Exception:
+            logger.debug("Sleep heartbeat failed (non-fatal)", exc_info=True)
+
+
 async def execute_sleep_tool(
     tool_call: ToolCall,
     max_seconds: float,
@@ -168,7 +249,7 @@ async def execute_sleep_tool(
         "turn budget remaining %.3fs)",
         seconds, requested, max_seconds, remaining,
     )
-    await asyncio.sleep(seconds)
+    await _sleep_with_heartbeats(seconds, tool_call.id, context)
     if budget is not None:
         budget["slept_seconds"] = max_turn_seconds - remaining + seconds
 
