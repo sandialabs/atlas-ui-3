@@ -515,15 +515,6 @@ function Start-McpMock {
 # =============================================================================
 
 function Build-Frontend {
-    $useNewFrontend = $env:USE_NEW_FRONTEND
-    if (-not $useNewFrontend) { $useNewFrontend = "true" }
-
-    if ($useNewFrontend -ne "true") {
-        Write-Host "Skipping frontend build (USE_NEW_FRONTEND=$useNewFrontend)."
-        Set-Location $PROJECT_ROOT
-        return
-    }
-
     Write-Host "Building frontend..."
     Set-Location "$PROJECT_ROOT/frontend"
     npm install

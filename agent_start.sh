@@ -239,14 +239,6 @@ start_mcp_mock() {
 # =============================================================================
 
 build_frontend() {
-    local use_new_frontend="${USE_NEW_FRONTEND:-true}"
-
-    if [ "$use_new_frontend" != "true" ]; then
-        echo "Skipping frontend build (USE_NEW_FRONTEND=$use_new_frontend)."
-        cd "$PROJECT_ROOT"
-        return
-    fi
-
     echo "Building frontend..."
     cd "$PROJECT_ROOT/frontend"
     npm install
