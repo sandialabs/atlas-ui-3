@@ -241,3 +241,28 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # Runtime install must tolerate Python upper-bound constraints in transitive deps.
     assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content
+
+
+def test_use_new_frontend_flag_is_gone():
+    """Guard against quiet reintroduction of the removed USE_NEW_FRONTEND flag.
+
+    The flag was always true and the skip-build branch it guarded referenced a
+    frontend that no longer exists. The flag and its old-frontend code path were
+    removed in PR #865; this test keeps them from sneaking back in.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    files_to_check = [
+        repo_root / '.env.example',
+        repo_root / 'docker-compose.yml',
+        repo_root / 'Dockerfile-test',
+        repo_root / 'agent_start.sh',
+        repo_root / 'ps_agent_start.ps1',
+    ]
+
+    for file_path in files_to_check:
+        assert file_path.exists(), f"Expected file not found: {file_path}"
+        content = file_path.read_text(encoding='utf-8')
+        assert 'USE_NEW_FRONTEND' not in content, (
+            f"'USE_NEW_FRONTEND' was found in {file_path.name} — the flag was "
+            f"removed in PR #865 and should not be reintroduced."
+        )
