@@ -6,7 +6,8 @@
 
 .DESCRIPTION
     This script starts the application services (backend, frontend, and optionally MCP mock)
-    in a Windows environment with PowerShell.
+    in a Windows environment with PowerShell. It is the feature-parity counterpart of
+    agent_start.sh; see that script for the canonical behavior.
 
 .PARAMETER FrontendOnly
     Only rebuild frontend
@@ -16,20 +17,35 @@
 
 .PARAMETER StartMcpMock
     Start MCP mock server
+
+.PARAMETER EnvFile
+    Path to .env file to load (default: $ATLAS_ENV_FILE or <project>/.env)
+
+.EXAMPLE
+    .\ps_agent_start.ps1
+    Start all services using the default .env file.
+
+.EXAMPLE
+    .\ps_agent_start.ps1 -e C:\Users\me\.atlasrc -m
+    Start all services using a custom env file and the MCP mock server.
 #>
 
 param(
     [Alias("f")][switch]$FrontendOnly,
     [Alias("b")][switch]$BackendOnly,
-    [Alias("m")][switch]$StartMcpMock
+    [Alias("m")][switch]$StartMcpMock,
+    [Alias("e")][string]$EnvFile,
+    [Alias("h")][switch]$Help
 )
 
 # Force UTF-8 output encoding for the console and all output streams on Windows
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Store the project root directory
-$PROJECT_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition
+# Store the project root directory (resolved once at script scope so helper
+# functions can reuse it without consulting their own $MyInvocation).
+$SCRIPT_PATH = $MyInvocation.MyCommand.Definition
+$PROJECT_ROOT = Split-Path -Parent $SCRIPT_PATH
 Set-Location $PROJECT_ROOT
 
 # Global variables
@@ -40,6 +56,51 @@ $ONLY_BACKEND = $BackendOnly
 $START_MCP_MOCK = $StartMcpMock
 $CONTAINER_CMD = $null
 $COMPOSE_CMD = $null
+
+# Path to the .env file to load. Defaults to ATLAS_ENV_FILE env var if set,
+# otherwise <project_root>/.env. Can be overridden with -e/--env-file.
+# ENV_FILE_EXPLICIT tracks whether the user pointed us at a specific file so
+# that a missing explicit file fails loudly (matching agent_start.sh).
+if ($PSBoundParameters.ContainsKey('EnvFile') -and $EnvFile) {
+    $script:ENV_FILE = $EnvFile
+    $script:ENV_FILE_EXPLICIT = $true
+} elseif ($env:ATLAS_ENV_FILE) {
+    $script:ENV_FILE = $env:ATLAS_ENV_FILE
+    $script:ENV_FILE_EXPLICIT = $true
+} else {
+    $script:ENV_FILE = "$PROJECT_ROOT/.env"
+    $script:ENV_FILE_EXPLICIT = $false
+}
+
+# Expand ~ in env file path if user provided one (matches bash's tilde expansion)
+if ($script:ENV_FILE.StartsWith("~")) {
+    $userProfile = [System.Environment]::GetFolderPath("UserProfile")
+    $script:ENV_FILE = $userProfile + $script:ENV_FILE.Substring(1)
+}
+
+# =============================================================================
+# HELP
+# =============================================================================
+
+function Show-Help {
+    $scriptName = Split-Path -Leaf $SCRIPT_PATH
+    Write-Host "Usage: .\$scriptName [options]"
+    Write-Host "  -f, --frontend-only        Only rebuild frontend"
+    Write-Host "  -b, --backend-only         Only start backend"
+    Write-Host "  -m, --mcp-mock             Start MCP mock server"
+    Write-Host "  -e, --env-file <path>      Path to .env file to load"
+    Write-Host "                              (default: `$ATLAS_ENV_FILE or <project>\.env)"
+    Write-Host "  -h, --help                 Show this help message"
+    Write-Host ""
+    Write-Host "The env file location can also be set via the ATLAS_ENV_FILE environment"
+    Write-Host "variable, which is useful for shared installs where each user keeps API"
+    Write-Host "keys in a personal file such as ~/.atlasrc."
+}
+
+if ($Help) {
+    Show-Help
+    exit 0
+}
 
 # =============================================================================
 # CLEANUP FUNCTIONS
@@ -145,6 +206,20 @@ function Initialize-ContainerRuntime {
     Write-Warning "Neither Docker nor Podman found. Container operations will be skipped."
 }
 
+# Split a (possibly space-separated) compose command into head + tail arrays so
+# callers can invoke it with `& $head @tail <args>`. Used by MinIO and chat
+# history DB startup.
+function Get-ComposeHeadAndTail {
+    if ($null -eq $script:COMPOSE_CMD) {
+        return $null, $null
+    }
+    if ($script:COMPOSE_CMD -like "* *") {
+        $parts = $script:COMPOSE_CMD -split " "
+        return $parts[0], $parts[1..($parts.Length - 1)]
+    }
+    return $script:COMPOSE_CMD, @()
+}
+
 # =============================================================================
 # INFRASTRUCTURE FUNCTIONS
 # =============================================================================
@@ -155,10 +230,10 @@ function Initialize-MinIO {
         $useMockS3 = "true"
     }
 
-    # Read USE_MOCK_S3 from .env file if it exists
-    if (Test-Path "$PROJECT_ROOT/.env") {
-        $envContent = Get-Content "$PROJECT_ROOT/.env" -Raw
-        $match = [regex]::Match($envContent, "USE_MOCK_S3=([^\r\n]+)")
+    # Read USE_MOCK_S3 from the env file if it exists (mirrors bash grep fallback)
+    if (Test-Path $script:ENV_FILE) {
+        $envContent = Get-Content $script:ENV_FILE -Raw
+        $match = [regex]::Match($envContent, "(?m)^USE_MOCK_S3=(.*)$")
         if ($match.Success) {
             $useMockS3 = $match.Groups[1].Value.Trim()
         }
@@ -167,31 +242,98 @@ function Initialize-MinIO {
     if ($useMockS3 -eq "true") {
         Write-Host "Using Mock S3 (no Docker/Podman required)"
     } else {
-        if ($null -eq $CONTAINER_CMD) {
-            Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in .env"
+        if ($null -eq $script:CONTAINER_CMD) {
+            Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $script:ENV_FILE"
             exit 1
         }
 
         # Check if MinIO container is running
-        $minioRunning = & $CONTAINER_CMD ps | Select-String -Pattern "atlas-minio"
+        $minioRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-minio" -Quiet
 
         if (-not $minioRunning) {
-            Write-Host "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
+            Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
             Set-Location $PROJECT_ROOT
 
-            # Handle both space-separated and single command formats
-            if ($COMPOSE_CMD -like "* *") {
-                $cmdParts = $COMPOSE_CMD -split " "
-                & $cmdParts[0] $cmdParts[1..($cmdParts.Length-1)] up -d minio minio-init
-            } else {
-                & $COMPOSE_CMD up -d minio minio-init
-            }
+            $head, $tail = Get-ComposeHeadAndTail
+            & $head @tail up -d minio minio-init
 
             Write-Host "MinIO started successfully"
             Start-Sleep -Seconds 3
         } else {
             Write-Host "MinIO is already running"
         }
+    }
+    Set-Location $PROJECT_ROOT
+}
+
+function Initialize-ChatHistoryDb {
+    $chatHistoryEnabled = $env:FEATURE_CHAT_HISTORY_ENABLED
+    if (-not $chatHistoryEnabled) { $chatHistoryEnabled = "false" }
+    $dbUrl = $env:CHAT_HISTORY_DB_URL
+    if (-not $dbUrl) { $dbUrl = "" }
+
+    # Read settings from the env file as a fallback (mirrors bash grep)
+    if (Test-Path $script:ENV_FILE) {
+        $envContent = Get-Content $script:ENV_FILE -Raw
+        $m1 = [regex]::Match($envContent, "(?m)^FEATURE_CHAT_HISTORY_ENABLED=(.*)$")
+        if ($m1.Success) { $chatHistoryEnabled = $m1.Groups[1].Value.Trim() }
+        $m2 = [regex]::Match($envContent, "(?m)^CHAT_HISTORY_DB_URL=(.*)$")
+        if ($m2.Success) { $dbUrl = $m2.Groups[1].Value.Trim() }
+    }
+
+    if ($chatHistoryEnabled -ne "true") {
+        Write-Host "Chat history disabled (FEATURE_CHAT_HISTORY_ENABLED != true)"
+        return
+    }
+
+    # Default to DuckDB if no URL specified
+    if (-not $dbUrl) {
+        $dbUrl = "duckdb:///data/chat_history.db"
+    }
+
+    if ($dbUrl -match "^postgresql") {
+        Write-Host "Chat history: PostgreSQL mode"
+        if ($null -eq $script:CONTAINER_CMD) {
+            Write-Error "PostgreSQL requires Docker/Podman. Install one or switch to DuckDB."
+            Write-Host "  DuckDB: CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db"
+            exit 1
+        }
+
+        $pgRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-postgres" -Quiet
+        if (-not $pgRunning) {
+            Write-Host "PostgreSQL is not running. Starting with $script:COMPOSE_CMD..."
+            Set-Location $PROJECT_ROOT
+
+            $head, $tail = Get-ComposeHeadAndTail
+            & $head @tail up -d postgres
+
+            Write-Host "Waiting for PostgreSQL to be ready..."
+            $maxWait = 60
+            $waited = 0
+            $ready = $false
+            while ($waited -lt $maxWait) {
+                & $head @tail exec -T postgres pg_isready 2>$null 1>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $ready = $true
+                    break
+                }
+                Start-Sleep -Seconds 2
+                $waited += 2
+            }
+            if (-not $ready) {
+                Write-Error "PostgreSQL did not become ready within ${maxWait}s."
+                exit 1
+            }
+            Write-Host "PostgreSQL is ready."
+        } else {
+            Write-Host "PostgreSQL is already running"
+        }
+    } elseif ($dbUrl -match "^duckdb") {
+        Write-Host "Chat history: DuckDB mode"
+        # Ensure data directory exists for the DuckDB file
+        New-Item -ItemType Directory -Path "$PROJECT_ROOT/data" -Force | Out-Null
+    } else {
+        Write-Host "Chat history: custom DB URL configured"
     }
     Set-Location $PROJECT_ROOT
 }
@@ -206,7 +348,7 @@ function Initialize-Environment {
         exit 1
     }
 
-    # Check if uvicorn is installed (check Scripts directory on Windows)
+    # Check if uvicorn is installed (Scripts directory on Windows)
     $uvicornPath = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     if (-not (Test-Path $uvicornPath)) {
         Write-Error "uvicorn not found in virtual environment"
@@ -217,19 +359,20 @@ function Initialize-Environment {
     # Activate virtual environment (PowerShell equivalent)
     & "$PROJECT_ROOT/.venv/Scripts/Activate.ps1"
 
-    # Load environment variables from .env if present
-    if (Test-Path "$PROJECT_ROOT/.env") {
-        $envContent = Get-Content "$PROJECT_ROOT/.env" -Raw
-        $envVars = $envContent -split "`n" | Where-Object { $_ -match "^[^#].*=" }
-
-        foreach ($line in $envVars) {
-            $keyValue = $line -split "=", 2
-            if ($keyValue.Length -eq 2) {
-                $key = $keyValue[0].Trim()
-                $value = $keyValue[1].Trim()
-                [Environment]::SetEnvironmentVariable($key, $value, "Process")
-            }
-        }
+    # Load environment variables from the env file if present
+    if (Test-Path $script:ENV_FILE) {
+        Write-Host "Loading environment variables from: $script:ENV_FILE"
+        Import-DotEnv -Path $script:ENV_FILE
+        # Make the resolved env file path available to child processes that
+        # consult ATLAS_ENV_FILE so they load the same file. Only set when the
+        # file actually exists; pointing children at a missing path would make
+        # env-var-aware commands (e.g. atlas-chat) fail to start.
+        $env:ATLAS_ENV_FILE = $script:ENV_FILE
+    } elseif ($script:ENV_FILE_EXPLICIT) {
+        # User explicitly pointed us at a file (via -e/--env-file or ATLAS_ENV_FILE)
+        # that does not exist. Fail loudly so missing API keys are obvious.
+        Write-Error "Error: env file not found: $script:ENV_FILE"
+        exit 1
     }
 
     Write-Host "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
@@ -237,6 +380,55 @@ function Initialize-Environment {
         $env:MCP_EXTERNAL_API_TOKEN = "test-api-key-123"
     }
     Set-Location $PROJECT_ROOT
+}
+
+# Parse a .env file the way bash's `set -a; . "$ENV_FILE"; set +a` does:
+# skip blank/comment lines, strip an optional `export ` prefix, split on the
+# first `=`, remove surrounding single/double quotes, and drop inline comments
+# that fall outside quotes. Variables are set at Process scope so child
+# processes (uvicorn, npm) inherit them.
+function Import-DotEnv {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    foreach ($rawLine in Get-Content $Path) {
+        $line = $rawLine.Trim()
+        if ($line -eq "" -or $line.StartsWith("#")) { continue }
+        # Strip an optional "export " prefix
+        if ($line -match "^export\s+") {
+            $line = $line -replace "^export\s+", ""
+        }
+        $idx = $line.IndexOf("=")
+        if ($idx -lt 0) { continue }
+        $key = $line.Substring(0, $idx).Trim()
+        if ($key -eq "") { continue }
+        $value = Resolve-DotEnvValue -Raw $line.Substring($idx + 1)
+        [Environment]::SetEnvironmentVariable($key, $value, "Process")
+    }
+}
+
+# Resolve a raw .env value: strip surrounding quotes and trailing inline
+# comments. Quote-aware so a `#` inside quotes is preserved.
+function Resolve-DotEnvValue {
+    param([string]$Raw)
+    $s = $Raw.TrimStart()
+    if ($s.Length -eq 0) { return "" }
+    $first = $s[0]
+    if ($first -eq '"' -or $first -eq "'") {
+        $close = $s.IndexOf($first, 1)
+        if ($close -ge 1) {
+            return $s.Substring(1, $close - 1)
+        }
+        # No closing quote; return the remainder without the opening quote
+        return $s.Substring(1)
+    }
+    # Unquoted: strip an inline comment introduced by whitespace + '#'
+    for ($i = 1; $i -lt $s.Length; $i++) {
+        if ($s[$i] -eq '#' -and ($s[$i - 1] -eq ' ' -or $s[$i - 1] -eq "`t")) {
+            $s = $s.Substring(0, $i)
+            break
+        }
+    }
+    return $s.TrimEnd()
 }
 
 # =============================================================================
@@ -247,7 +439,8 @@ function Start-McpMock {
     if ($START_MCP_MOCK) {
         Write-Host "Starting MCP mock server..."
         Set-Location "$PROJECT_ROOT/mocks/mcp-http-mock"
-        $script:MCP_PID = Start-Process -FilePath "cmd.exe" -ArgumentList "/c run.bat" -PassThru -NoNewWindow
+        $runBat = "$PROJECT_ROOT/mocks/mcp-http-mock/run.bat"
+        $script:MCP_PID = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$runBat`"" -PassThru -NoNewWindow
         Write-Host "MCP mock server started with PID: $($MCP_PID.Id)"
         Set-Location $PROJECT_ROOT
     }
@@ -258,6 +451,9 @@ function Start-McpMock {
 # =============================================================================
 
 function Build-Frontend {
+    $useNewFrontend = $env:USE_NEW_FRONTEND
+    if (-not $useNewFrontend) { $useNewFrontend = "true" }
+
     Write-Host "Building frontend..."
     Set-Location "$PROJECT_ROOT/frontend"
     npm install
@@ -317,9 +513,12 @@ function Start-Backend {
 
 function Main {
     # Setup infrastructure
+    # Note: Initialize-Environment must run first to activate the venv so the
+    # venv's podman-compose (if installed there) is found, matching agent_start.sh.
+    Initialize-Environment
     Initialize-ContainerRuntime
     Initialize-MinIO
-    Initialize-Environment
+    Initialize-ChatHistoryDb
 
     # Handle frontend-only mode
     if ($ONLY_FRONTEND) {

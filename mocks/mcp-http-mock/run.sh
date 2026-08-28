@@ -6,7 +6,7 @@
 
 set -e
 
-echo "🚀 Starting MCP HTTP Mock Server..."
+echo "Starting MCP HTTP Mock Server..."
 
 # Set default tokens if not already set
 export MCP_MOCK_TOKEN_1="${MCP_MOCK_TOKEN_1:-test-api-key-123}"
