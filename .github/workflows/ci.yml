@@ -93,13 +93,13 @@ jobs:
         echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
 
     - name: Build and push production Docker image
-      # Single build that loads locally and pushes to the registry. On PRs we
-      # skip the push (no ephemeral pr-NNN tags published) but still build+load
-      # to verify the production image compiles. Branch pushes publish.
+      # Single build. On branch pushes it pushes to the registry; on PRs it
+      # neither pushes nor loads (no ephemeral pr-NNN tags, no wasteful daemon
+      # export) -- the build still runs to validate the Dockerfile and to
+      # populate the GHA cache.
       uses: docker/build-push-action@v7
       with:
         context: .
-        load: true
         push: ${{ github.event_name != 'pull_request' }}
         build-args: |
           VITE_APP_NAME=ATLAS
@@ -114,11 +114,13 @@ jobs:
         cache-to: type=gha,scope=atlas-prod,mode=max
 
     - name: Build runtime-only Docker image
+      # Validation + cache build: no later step consumes this image, so we
+      # neither load nor push -- we only build to catch Dockerfile.runtimeonly
+      # breakages and to populate its GHA cache scope.
       uses: docker/build-push-action@v7
       with:
         context: .
         file: ./Dockerfile.runtimeonly
-        load: true
         build-args: |
           VITE_APP_NAME=ATLAS
           VITE_FEATURE_ANIMATED_LOGO=true
