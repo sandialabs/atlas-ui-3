@@ -26,6 +26,12 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     
+    - name: Set up Docker Buildx
+      # The docker-container driver can export to the GHA cache; the default
+      # docker driver cannot ("Cache export is not supported for the docker
+      # driver"). load: true still works with this driver for docker run.
+      uses: docker/setup-buildx-action@v3
+    
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v6
@@ -39,19 +45,24 @@ jobs:
           type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
     
-    - name: Build test Docker image (debug mode)
+    - name: Build test Docker image
       uses: docker/build-push-action@v7
       with:
         context: .
         file: ./Dockerfile-test
         load: true
-        tags: test-image-debug:latest
+        tags: test-image:latest
         labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha,scope=atlas-test
+        cache-to: type=gha,scope=atlas-test,mode=max
     
     - name: Run tests in debug mode
+      # DEBUG_MODE is baked into /app/.env at build time (default true). pydantic
+      # BaseSettings reads the OS env var with higher priority than .env, so
+      # `docker run -e DEBUG_MODE=...` overrides it without rebuilding.
       run: |
         echo "Running tests in debug mode (DEBUG_MODE=true)"
-        docker run --rm --workdir /app test-image-debug:latest bash /app/test/run_tests.sh all
+        docker run --rm --workdir /app -e DEBUG_MODE=true test-image:latest bash /app/test/run_tests.sh all
     
     - name: Run tests in reverse collection order
       # The suite runs in one process, so a test that leaks state can be
@@ -67,24 +78,13 @@ jobs:
         docker run --rm --workdir /app/atlas \
           -e ATLAS_TEST_ORDER=reverse \
           -e PYTHONPATH=/app:/app/scripts \
-          test-image-debug:latest \
+          test-image:latest \
           python -m pytest tests -q --tb=short -p pytest_test_order
-
-    - name: Build test Docker image (production mode)
-      uses: docker/build-push-action@v7
-      with:
-        context: .
-        file: ./Dockerfile-test
-        build-args: |
-          DEBUG_MODE=false
-        load: true
-        tags: test-image-prod:latest
-        labels: ${{ steps.meta.outputs.labels }}
     
     - name: Run tests in production mode
       run: |
         echo "Running tests in production mode (DEBUG_MODE=false)"
-        docker run --rm --workdir /app test-image-prod:latest bash /app/test/run_tests.sh all
+        docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh all
 
     - name: Get build metadata
       id: build_meta
@@ -92,11 +92,15 @@ jobs:
         echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
         echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
 
-    - name: Build production Docker image
+    - name: Build and push production Docker image
+      # Single build. On branch pushes it pushes to the registry; on PRs it
+      # neither pushes nor loads (no ephemeral pr-NNN tags, no wasteful daemon
+      # export) -- the build still runs to validate the Dockerfile and to
+      # populate the GHA cache.
       uses: docker/build-push-action@v7
       with:
         context: .
-        load: true
+        push: ${{ github.event_name != 'pull_request' }}
         build-args: |
           VITE_APP_NAME=ATLAS
           VITE_FEATURE_ANIMATED_LOGO=true
@@ -106,13 +110,17 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha,scope=atlas-prod
+        cache-to: type=gha,scope=atlas-prod,mode=max
 
     - name: Build runtime-only Docker image
+      # Validation + cache build: no later step consumes this image, so we
+      # neither load nor push -- we only build to catch Dockerfile.runtimeonly
+      # breakages and to populate its GHA cache scope.
       uses: docker/build-push-action@v7
       with:
         context: .
         file: ./Dockerfile.runtimeonly
-        load: true
         build-args: |
           VITE_APP_NAME=ATLAS
           VITE_FEATURE_ANIMATED_LOGO=true
@@ -122,18 +130,5 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: runtime-only-image:latest
         labels: ${{ steps.meta.outputs.labels }}
-
-    - name: Push production Docker image
-      uses: docker/build-push-action@v7
-      with:
-        context: .
-        push: true
-        build-args: |
-          VITE_APP_NAME=ATLAS
-          VITE_FEATURE_ANIMATED_LOGO=true
-          VITE_FEATURE_POWERED_BY_ATLAS=false
-          VITE_FEATURE_RAG_CITATIONS=false
-          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
-          APP_VERSION=${{ steps.build_meta.outputs.version }}
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha,scope=atlas-runtime
+        cache-to: type=gha,scope=atlas-runtime,mode=max
