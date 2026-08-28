@@ -157,7 +157,6 @@ async def safe_call_llm_with_tools(
     model: str,
     messages: List[Dict[str, str]],
     tools_schema: List[Dict[str, Any]],
-    data_sources: Optional[List[str]] = None,
     user_email: Optional[str] = None,
     tool_choice: str = "auto",
     temperature: float = 0.7,
@@ -166,29 +165,25 @@ async def safe_call_llm_with_tools(
     Safely call LLM with tools and error handling.
 
     Pure function that handles LLM calling errors with proper classification.
+    Retrieval is not injected here: sources are read only when the model calls
+    ``atlas_search``, which runs through the ordinary tool path.
     """
     try:
-        if data_sources and user_email:
-            llm_response = await llm_caller.call_with_rag_and_tools(
-                model, messages, data_sources, tools_schema, user_email, tool_choice, temperature=temperature
-            )
-            logger.info(f"LLM response received with RAG and tools for user {user_email}, has_tool_calls: {llm_response.has_tool_calls()}")
+        llm_response = await llm_caller.call_with_tools(
+            model, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
+        )
+        # Log metadata at INFO level, content only at DEBUG
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("LLM response received with tools only, llm_response: %s", llm_response)
         else:
-            llm_response = await llm_caller.call_with_tools(
-                model, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
+            # Check if llm_response has the expected attributes before logging
+            has_tool_calls = llm_response.has_tool_calls() if hasattr(llm_response, 'has_tool_calls') else False
+            content_length = len(llm_response.content) if hasattr(llm_response, 'content') else 0
+            model_used = getattr(llm_response, 'model_used', 'unknown')
+            logger.info(
+                f"LLM response received with tools only, has_tool_calls: {has_tool_calls}, "
+                f"content_length: {content_length}, model: {model_used}"
             )
-            # Log metadata at INFO level, content only at DEBUG
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("LLM response received with tools only, llm_response: %s", llm_response)
-            else:
-                # Check if llm_response has the expected attributes before logging
-                has_tool_calls = llm_response.has_tool_calls() if hasattr(llm_response, 'has_tool_calls') else False
-                content_length = len(llm_response.content) if hasattr(llm_response, 'content') else 0
-                model_used = getattr(llm_response, 'model_used', 'unknown')
-                logger.info(
-                    f"LLM response received with tools only, has_tool_calls: {has_tool_calls}, "
-                    f"content_length: {content_length}, model: {model_used}"
-                )
         return llm_response
     except Exception as e:
         # Classify the error and raise appropriate error type

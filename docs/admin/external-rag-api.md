@@ -467,8 +467,10 @@ The `is_completion` flag is set by `AtlasRAGClient`: `True` for v1 `query_rag`
 (always synthesized) and for v2 `query_v2` with `mode: "synthesized"`; `False`
 for v2 `query_v2` with `mode: "raw"`.
 
-This behavior applies to both `call_with_rag` (RAG-only mode) and
-`call_with_rag_and_tools` (RAG + tools mode) in the LLM caller.
+This behavior applies to `call_with_rag` (RAG mode) in the LLM caller. In
+tools and agent mode there is no pre-injection at all: the model calls the
+`atlas_search` tool, and whatever the source returns -- synthesized answer or
+raw passages -- comes back as that call's tool result.
 
 ## UI Behavior (2026-03-18)
 

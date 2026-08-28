@@ -29,6 +29,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
 from ..utilities.dropped_calls import publish_dropped_call_warning
+from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .steering import SteeringChannel
@@ -126,10 +127,17 @@ class AgenticLoop(AgentLoopProtocol):
             payload={"max_steps": max_steps, "strategy": "agentic"},
         ))
 
+        # Selecting data sources makes ``atlas_search`` available; it never
+        # runs retrieval on its own. The model decides whether to call it, and
+        # the call shows up in the UI like any other tool.
+        effective_tools = with_search_tool(
+            selected_tools, data_sources, self.config_manager,
+        )
+
         tools_schema: List[Dict[str, Any]] = []
-        if selected_tools and self.tool_manager:
+        if effective_tools and self.tool_manager:
             tools_schema = await error_handler.safe_get_tools_schema(
-                self.tool_manager, selected_tools,
+                self.tool_manager, effective_tools,
             )
 
         use_streaming = streaming and event_publisher
@@ -240,7 +248,7 @@ class AgenticLoop(AgentLoopProtocol):
             ))
 
             llm_response = await self._call_llm(
-                model, messages, tools_schema, data_sources,
+                model, messages, tools_schema,
                 context, temperature, use_streaming, event_publisher,
             )
 
@@ -361,7 +369,6 @@ class AgenticLoop(AgentLoopProtocol):
         model: str,
         messages: List[Dict[str, Any]],
         tools_schema: List[Dict[str, Any]],
-        data_sources: Optional[List[str]],
         context: AgentContext,
         temperature: float,
         use_streaming: bool,
@@ -376,20 +383,16 @@ class AgenticLoop(AgentLoopProtocol):
         """
         if use_streaming:
             return await self._call_llm_streaming(
-                model, messages, tools_schema, data_sources,
+                model, messages, tools_schema,
                 context, temperature, event_publisher,
             )
 
-        if data_sources and context.user_email:
-            response = await self.llm.call_with_rag_and_tools(
-                model, messages, data_sources, tools_schema,
-                context.user_email, "auto", temperature=temperature,
-            )
-        else:
-            response = await self.llm.call_with_tools(
-                model, messages, tools_schema, "auto",
-                temperature=temperature, user_email=context.user_email,
-            )
+        # No RAG pre-injection: retrieval only happens if the model calls
+        # ``atlas_search``, which runs through the normal tool path.
+        response = await self.llm.call_with_tools(
+            model, messages, tools_schema, "auto",
+            temperature=temperature, user_email=context.user_email,
+        )
         # Streaming off must not make a dropped call silent.
         await publish_dropped_call_warning(event_publisher, response)
         return response
@@ -399,22 +402,15 @@ class AgenticLoop(AgentLoopProtocol):
         model: str,
         messages: List[Dict[str, Any]],
         tools_schema: List[Dict[str, Any]],
-        data_sources: Optional[List[str]],
         context: AgentContext,
         temperature: float,
         event_publisher,
     ) -> LLMResponse:
         """Stream an LLM call, publishing tokens and returning the final response."""
-        if data_sources and context.user_email:
-            stream = self.llm.stream_with_rag_and_tools(
-                model, messages, data_sources, tools_schema,
-                context.user_email, "auto", temperature=temperature,
-            )
-        else:
-            stream = self.llm.stream_with_tools(
-                model, messages, tools_schema, "auto",
-                temperature=temperature, user_email=context.user_email,
-            )
+        stream = self.llm.stream_with_tools(
+            model, messages, tools_schema, "auto",
+            temperature=temperature, user_email=context.user_email,
+        )
 
         accumulated_content = ""
         final_response: Optional[LLMResponse] = None
