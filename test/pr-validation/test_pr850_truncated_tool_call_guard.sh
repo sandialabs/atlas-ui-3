@@ -259,11 +259,6 @@ class StreamThenFail:
         yield 'Let me read that file for you.'
         raise LLMMalformedToolCallError('The model ran out of room.', tool_names=['read_file'])
 
-    async def stream_with_rag_and_tools(self, model, messages, data_sources, tools_schema,
-                                        user_email, tool_choice='auto', temperature=0.7):
-        async for item in self.stream_with_tools(model, messages, tools_schema, tool_choice):
-            yield item
-
     async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
         yield 'unused'
 
@@ -276,7 +271,7 @@ async def main():
     ctx.user_email = 'u@example.com'
     try:
         await loop._call_llm_streaming('gemma', [{'role': 'user', 'content': 'read it'}],
-                                       [{'type': 'function'}], None, ctx, 0.7, pub)
+                                       [{'type': 'function'}], ctx, 0.7, pub)
         raise AssertionError('agentic loop swallowed the malformed tool call')
     except LLMMalformedToolCallError:
         pass
@@ -309,48 +304,14 @@ asyncio.run(main())
 print_result $? "both streaming consumers surface the failure despite partial text"
 
 # ==========================================
-# Check 7: the RAG+tools wrapper re-raises instead of retrying without context
+# Check 7: RETIRED BY PR #862
+#
+# This pinned that ``call_with_rag_and_tools`` re-raised a malformed tool call
+# instead of retrying without the RAG context. #862 deleted that wrapper and its
+# fallback along with it: tools and agent mode call ``call_with_tools``
+# directly, so there is no longer a retry that could discard retrieved context.
+# Checks 1-6 cover the propagation guarantee on the paths that remain.
 # ==========================================
-print_header "Check 7: RAG+tools wrapper does not swallow the error into a fallback"
-
-python3 -c "
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
-$HARNESS
-from atlas.domain.errors import LLMMalformedToolCallError
-from atlas.modules.rag.client import RAGResponse
-
-async def main():
-    c = caller()
-    c._rag_service = MagicMock()
-    # One source answered; the RAG context is already built into the messages by
-    # the time the tool call fails.
-    c._query_all_rag_sources = AsyncMock(
-        return_value=([('corpus', RAGResponse(content='retrieved context'))], [], []))
-
-    calls = []
-    async def failing_call_with_tools(*a, **k):
-        calls.append(a[1])
-        raise LLMMalformedToolCallError('The model ran out of room.', tool_names=['read_file'])
-    c.call_with_tools = failing_call_with_tools
-
-    try:
-        await c.call_with_rag_and_tools(
-            'gemma', [{'role': 'user', 'content': 'hi'}], ['corpus'],
-            [{'type': 'function'}], 'u@example.com',
-        )
-    except LLMMalformedToolCallError as exc:
-        # Exactly one attempt: a second would be the fallback retry, which
-        # re-sends the original messages and throws away the RAG context.
-        assert len(calls) == 1, f'fallback retry fired: {len(calls)} calls'
-        assert any('retrieved context' in str(m) for m in calls[0]), 'RAG context missing'
-        print('propagated after', len(calls), 'attempt; RAG context preserved')
-        return
-    raise AssertionError('the error did not reach the caller')
-
-asyncio.run(main())
-"
-print_result $? "LLMMalformedToolCallError propagates through call_with_rag_and_tools"
 
 # ==========================================
 # Check 8: error classification reaches the client as its own type

@@ -199,14 +199,16 @@ transient-keyword tests, for the same reason: a 400 is deterministic, and one
 that happens to contain `timeout` would otherwise be retried three times with
 backoff before failing.
 
-Both `call_with_rag()` and `call_with_rag_and_tools()` fall back to a simpler
-call when RAG breaks, so their passthrough tuples catch `LLMError` — a provider
-rejection is not a RAG failure, and without the passthrough the same rejected
-request is sent a second time, the injected RAG context is discarded, and the
-logs blame RAG. The tuples name the *base* class rather than enumerating its
-subclasses so a newly added error cannot be silently downgraded into that
-fallback. `LLMAuthenticationError` and `DataSourcePermissionError` sit outside
-the `LLMError` hierarchy and stay listed explicitly.
+`call_with_rag()` falls back to a simpler call when RAG breaks, so its
+passthrough tuple catches `LLMError` — a provider rejection is not a RAG
+failure, and without the passthrough the same rejected request is sent a second
+time, the injected RAG context is discarded, and the logs blame RAG. The tuple
+names the *base* class rather than enumerating its subclasses so a newly added
+error cannot be silently downgraded into that fallback.
+`LLMAuthenticationError` and `DataSourcePermissionError` sit outside the
+`LLMError` hierarchy and stay listed explicitly. Tools and agent mode have no
+such fallback to protect: they make a plain tools call, and a failing search is
+one failing tool result.
 
 ## Malformed tool calls (`malformed_tool_call`)
 

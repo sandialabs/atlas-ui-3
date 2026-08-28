@@ -559,7 +559,13 @@ export const ChatProvider = ({ children }) => {
 		// via selectedToolsOverride, so honor that list for the agent-mode guard and
 		// the outgoing payload instead of the persisted selection.
 		const toolsToSend = selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools]
-		if (agent.agentModeAvailable && agent.agentModeEnabled && toolsToSend.length === 0) {
+		// Selected data sources imply `atlas_search` (#862): the backend adds it to
+		// the schema, so such a turn does have a tool to act on and must not be
+		// blocked here -- the guard exists for turns with nothing to call at all.
+		if (
+			agent.agentModeAvailable && agent.agentModeEnabled &&
+			toolsToSend.length === 0 && selectedDataSources.size === 0
+		) {
 			toast.error('Agent mode needs at least one tool selected. Choose a tool or turn off Agent mode.')
 			return false
 		}
