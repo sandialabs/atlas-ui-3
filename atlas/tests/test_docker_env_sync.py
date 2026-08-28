@@ -249,18 +249,38 @@ def test_use_new_frontend_flag_is_gone():
     The flag was always true and the skip-build branch it guarded referenced a
     frontend that no longer exists. The flag and its old-frontend code path were
     removed in PR #865; this test keeps them from sneaking back in.
+
+    Some files (Dockerfile-test, agent_start.sh, ps_agent_start.ps1) are not
+    copied into the test container, so absent files are skipped rather than
+    treated as failures — the same pattern used by
+    test_runtime_only_dockerfile_keeps_runtime_surface_small.
     """
     repo_root = Path(__file__).parent.parent.parent
-    files_to_check = [
+
+    # Always-present in the test container (Dockerfile-test COPYs these for
+    # env-sync tests) and in any full checkout.
+    must_be_present = [
         repo_root / '.env.example',
         repo_root / 'docker-compose.yml',
+    ]
+    # Present in a full checkout but not copied into the test container.
+    best_effort = [
         repo_root / 'Dockerfile-test',
         repo_root / 'agent_start.sh',
         repo_root / 'ps_agent_start.ps1',
     ]
 
-    for file_path in files_to_check:
+    for file_path in must_be_present:
         assert file_path.exists(), f"Expected file not found: {file_path}"
+        content = file_path.read_text(encoding='utf-8')
+        assert 'USE_NEW_FRONTEND' not in content, (
+            f"'USE_NEW_FRONTEND' was found in {file_path.name} — the flag was "
+            f"removed in PR #865 and should not be reintroduced."
+        )
+
+    for file_path in best_effort:
+        if not file_path.exists():
+            continue
         content = file_path.read_text(encoding='utf-8')
         assert 'USE_NEW_FRONTEND' not in content, (
             f"'USE_NEW_FRONTEND' was found in {file_path.name} — the flag was "
