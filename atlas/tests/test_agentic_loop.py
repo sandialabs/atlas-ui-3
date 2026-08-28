@@ -708,27 +708,33 @@ class TestAgenticLoopFactory:
         assert loop1 is loop2
 
 
-# -- Tests: RAG integration ---------------------------------------------
+# -- Tests: search is an explicit tool call ------------------------------
 
-class TestAgenticLoopRAG:
+class TestAgenticLoopSearchIsATool:
+    """Data sources scope ``atlas_search``; they never run retrieval on their own.
+
+    Retrieval used to happen before the model was asked anything: any turn with
+    ``data_sources`` went through ``call_with_rag_and_tools``, which queried
+    every source and injected the passages as a system message. The user saw no
+    search, and the model never chose one. Now the loop makes the same normal
+    tools call it makes without sources, and the model has to call
+    ``atlas_search`` for anything to be retrieved.
+    """
 
     @pytest.mark.asyncio
-    async def test_rag_path_used_when_data_sources_present(self):
-        """When data_sources and user_email are provided, the loop should
-        use call_with_rag_and_tools instead of call_with_tools."""
-        rag_called = []
+    async def test_data_sources_do_not_trigger_retrieval(self):
+        calls = []
 
-        class RAGLLM(FakeLLM):
-            async def call_with_rag_and_tools(self, model, messages, data_sources, *a, **kw):
-                rag_called.append(data_sources)
-                return LLMResponse(content="RAG answer")
+        class RecordingLLM(FakeLLM):
+            async def call_with_tools(self, model, messages, tools_schema, *a, **kw):
+                calls.append(messages)
+                return LLMResponse(content="answered without searching")
 
-        llm = RAGLLM()
+        llm = RecordingLLM()
         tool_mgr = _make_tool_manager({"tool1": "r"})
         events, handler = _collect_events()
 
-        loop = _make_loop(llm, tool_mgr)
-        await loop.run(
+        result = await _make_loop(llm, tool_mgr).run(
             model="test-model",
             messages=[{"role": "user", "content": "Search with RAG"}],
             context=_make_context(),
@@ -739,8 +745,54 @@ class TestAgenticLoopRAG:
             event_handler=handler,
         )
 
-        assert len(rag_called) == 1
-        assert rag_called[0] == ["source1"]
+        assert result.final_answer == "answered without searching"
+        assert len(calls) == 1
+        # Nothing was injected: the model saw exactly the turn it was given.
+        assert calls[0] == [{"role": "user", "content": "Search with RAG"}]
+
+    @pytest.mark.asyncio
+    async def test_selected_sources_offer_the_search_tool(self):
+        """A user who picks a source but not the tool still gets to search."""
+        tool_mgr = _make_tool_manager({"tool1": "r"})
+        events, handler = _collect_events()
+        config = SimpleNamespace(app_settings=SimpleNamespace(
+            feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True,
+        ))
+
+        await _make_loop(FakeLLM(), tool_mgr, config_manager=config).run(
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            context=_make_context(),
+            selected_tools=["tool1"],
+            data_sources=["source1"],
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        requested = tool_mgr.get_tools_schema.call_args[0][0]
+        assert requested == ["tool1", "atlas_search"]
+
+    @pytest.mark.asyncio
+    async def test_no_sources_means_no_implicit_search_tool(self):
+        tool_mgr = _make_tool_manager({"tool1": "r"})
+        events, handler = _collect_events()
+        config = SimpleNamespace(app_settings=SimpleNamespace(
+            feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True,
+        ))
+
+        await _make_loop(FakeLLM(), tool_mgr, config_manager=config).run(
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            context=_make_context(),
+            selected_tools=["tool1"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        assert tool_mgr.get_tools_schema.call_args[0][0] == ["tool1"]
 
 
 # -- Tests: persistent MCP session scope --------------------------------

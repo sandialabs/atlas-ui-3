@@ -277,7 +277,7 @@ class TestNarrationDoesNotHideTheFailure:
         with pytest.raises(LLMMalformedToolCallError):
             await loop._call_llm_streaming(
                 "gemma", [{"role": "user", "content": "read it"}],
-                [{"type": "function"}], None, context, 0.7, publisher,
+                [{"type": "function"}], context, 0.7, publisher,
             )
 
         # The open bubble is closed before the error, so the UI does not leave a
@@ -868,7 +868,7 @@ async def test_agent_mode_publishes_the_dropped_call_warning():
 
     await loop._call_llm_streaming(
         "gemma", [{"role": "user", "content": "find it"}],
-        [{"type": "function"}], None, context, 0.7, publisher,
+        [{"type": "function"}], context, 0.7, publisher,
     )
 
     warned = [c.kwargs.get("message", "") for c in publisher.publish_warning.await_args_list]
@@ -891,7 +891,7 @@ async def test_agent_mode_keeps_the_narration_it_streamed():
     with pytest.raises(LLMMalformedToolCallError):
         await loop._call_llm_streaming(
             "gemma", [{"role": "user", "content": "read it"}],
-            [{"type": "function"}], None, context, 0.7, publisher,
+            [{"type": "function"}], context, 0.7, publisher,
         )
 
     saved = [c.args[0] for c in context.history.add_message.call_args_list]
@@ -957,7 +957,7 @@ class TestNonStreamingAlsoWarns:
 
         await loop._call_llm(
             "gemma", [{"role": "user", "content": "find it"}], [{"type": "function"}],
-            None, context, 0.7, False, publisher,
+            context, 0.7, False, publisher,
         )
 
         warned = [c.kwargs.get("message", "") for c in publisher.publish_warning.await_args_list]

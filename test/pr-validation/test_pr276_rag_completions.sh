@@ -6,7 +6,6 @@
 # - Verify AtlasRAGClient detects chat completions from response object field
 # - Verify LiteLLMCaller._build_rag_completion_response helper builds correct output
 # - Verify call_with_rag returns RAG completion directly when is_completion=True
-# - Verify call_with_rag_and_tools returns RAG completion directly when is_completion=True
 # - E2E: Start mock RAG API returning chat.completion, verify backend returns it directly
 # - Run backend unit tests
 
@@ -263,57 +262,6 @@ print('call_with_rag correctly returns RAG completion directly')
 print_result $? "call_with_rag returns RAG completion directly without calling LLM"
 
 # ==========================================
-# Check 5: call_with_rag_and_tools returns completion directly
-# ==========================================
-print_header "Check 5: call_with_rag_and_tools returns RAG completion directly"
-
-cd "$ATLAS_DIR"
-python3 -c "
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
-from modules.llm.litellm_caller import LiteLLMCaller
-from modules.rag.client import RAGResponse
-from interfaces.llm import LLMResponse
-
-async def test_call_with_rag_and_tools_completion():
-    class FakeLLMConfig:
-        models = {}
-
-    caller = LiteLLMCaller.__new__(LiteLLMCaller)
-    caller.llm_config = FakeLLMConfig()
-
-    mock_rag = AsyncMock()
-    mock_rag.query_rag = AsyncMock(return_value=RAGResponse(
-        content='Direct completion from RAG with tools',
-        is_completion=True
-    ))
-    caller._rag_service = mock_rag
-
-    caller.call_with_tools = AsyncMock(return_value='This should not be called')
-
-    result = await caller.call_with_rag_and_tools(
-        model_name='test-model',
-        messages=[{'role': 'user', 'content': 'test query'}],
-        data_sources=['atlas_rag:test-source'],
-        tools_schema=[{'type': 'function', 'function': {'name': 'test_tool'}}],
-        user_email='user@test.com',
-        rag_service=mock_rag,
-    )
-
-    caller.call_with_tools.assert_not_called()
-
-    # Result is LLMResponse since call_with_rag_and_tools wraps it
-    assert isinstance(result, LLMResponse), f'Expected LLMResponse, got {type(result)}'
-    assert 'Direct completion from RAG with tools' in result.content
-    print(f'call_with_rag_and_tools returned LLMResponse directly (length={len(result.content)})')
-    print('call_with_tools was NOT called - completion bypassed LLM')
-
-asyncio.run(test_call_with_rag_and_tools_completion())
-print('call_with_rag_and_tools correctly returns RAG completion directly')
-"
-print_result $? "call_with_rag_and_tools returns RAG completion directly without calling LLM"
-
-# ==========================================
 # Check 5b: call_with_rag multi-source combines all as raw context
 # ==========================================
 print_header "Check 5b: call_with_rag multi-source combines all as raw context"
@@ -380,56 +328,14 @@ print('call_with_rag multi-source works correctly')
 print_result $? "call_with_rag multi-source combines all sources as raw context"
 
 # ==========================================
-# Check 5c: call_with_rag_and_tools multi-source combines all as raw context
+# Checks 5 / 5c: RETIRED BY PR #862
+#
+# These exercised ``call_with_rag_and_tools``, which #862 deleted: retrieval in
+# tools and agent mode is now an explicit ``atlas_search`` tool call, so an
+# is_completion answer comes back as that call's tool result rather than being
+# injected ahead of the model. The RAG-mode equivalents (Checks 5 and 5b above,
+# on ``call_with_rag``) still cover the completion handling this PR was about.
 # ==========================================
-print_header "Check 5c: call_with_rag_and_tools multi-source combines all as raw context"
-
-cd "$ATLAS_DIR"
-python3 -c "
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
-from modules.llm.litellm_caller import LiteLLMCaller
-from modules.rag.client import RAGResponse
-from interfaces.llm import LLMResponse
-
-async def test_multi_source_rag_tools():
-    class FakeLLMConfig:
-        models = {}
-
-    caller = LiteLLMCaller.__new__(LiteLLMCaller)
-    caller.llm_config = FakeLLMConfig()
-
-    mock_rag = AsyncMock()
-
-    async def mock_query(user, source, msgs):
-        if 'source-a' in source:
-            return RAGResponse(content='Completion from A', is_completion=True)
-        return RAGResponse(content='Raw context from B', is_completion=False)
-
-    mock_rag.query_rag = AsyncMock(side_effect=mock_query)
-    caller._rag_service = mock_rag
-
-    # call_with_tools SHOULD be called for multi-source
-    caller.call_with_tools = AsyncMock(return_value=LLMResponse(content='LLM combined answer'))
-
-    result = await caller.call_with_rag_and_tools(
-        model_name='test-model',
-        messages=[{'role': 'user', 'content': 'test'}],
-        data_sources=['rag:source-a', 'rag:source-b'],
-        tools_schema=[{'type': 'function', 'function': {'name': 'test_tool'}}],
-        user_email='user@test.com',
-        rag_service=mock_rag,
-    )
-
-    assert mock_rag.query_rag.call_count == 2, f'Expected 2 RAG calls, got {mock_rag.query_rag.call_count}'
-    caller.call_with_tools.assert_called_once()
-    assert isinstance(result, LLMResponse), f'Expected LLMResponse, got {type(result)}'
-    print(f'Multi-source RAG+Tools: both sources queried, combined context sent to LLM')
-
-asyncio.run(test_multi_source_rag_tools())
-print('call_with_rag_and_tools multi-source works correctly')
-"
-print_result $? "call_with_rag_and_tools multi-source combines all sources as raw context"
 
 # ==========================================
 # Check 6: E2E - Mock RAG API returning chat.completion

@@ -13,8 +13,7 @@
 #   the user; empty input -> "".
 # - call_with_rag, with every source failing, injects a system message that
 #   tells the LLM the retrieval failed (no silent plain-LLM fallback).
-# - Same guarantee on call_with_rag_and_tools, stream_with_rag, and
-#   stream_with_rag_and_tools.
+# - Same guarantee on stream_with_rag.
 # - A partial failure (some sources ok, some broken) rides the failure notice
 #   into the RAG context block alongside the retrieved context.
 # - LLM domain errors (e.g. RateLimitError) from the inner call are still
@@ -163,49 +162,14 @@ asyncio.run(main())
 print_result $? "call_with_rag informs the LLM on total failure"
 
 # ==========================================
-# Check 4: call_with_rag_and_tools total failure informs the LLM
+# Check 4: RETIRED BY PR #862
+#
+# This exercised ``call_with_rag_and_tools``, which #862 deleted. In tools and
+# agent mode retrieval is now an explicit ``atlas_search`` call, so a total RAG
+# failure surfaces as that tool call's failed result -- visible to both the
+# model and the user -- rather than as an injected system message. Checks 3, 5
+# and 6 still cover the guarantee on the RAG-mode paths that remain.
 # ==========================================
-print_header "Check 4: call_with_rag_and_tools tells the LLM when all sources fail"
-
-python3 -c "
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
-from atlas.modules.llm.litellm_caller import LiteLLMCaller
-from atlas.modules.llm.models import LLMResponse
-from atlas.modules.rag.client import RAGResponse
-
-caller = LiteLLMCaller.__new__(LiteLLMCaller)
-caller._rag_service = MagicMock()
-caller._llm_config = MagicMock()
-caller._model_configs = {}
-
-service = MagicMock()
-async def query_rag(user_email, source, messages):
-    raise RuntimeError('500: RAG service error')
-service.query_rag = AsyncMock(side_effect=query_rag)
-
-captured = {}
-async def fake_call_with_tools(model_name, messages, tools_schema, tool_choice='auto',
-                               temperature=0.7, user_email=None):
-    captured['messages'] = messages
-    return LLMResponse(content='unable to reach your data sources')
-caller.call_with_tools = AsyncMock(side_effect=fake_call_with_tools)
-
-async def main():
-    await caller.call_with_rag_and_tools(
-        'test-model',
-        [{'role': 'user', 'content': 'q'}],
-        ['broken:techdocs'],
-        [{'type': 'function', 'function': {'name': 't'}}],
-        'user@test.com', rag_service=service,
-    )
-    sys_blocks = [m['content'] for m in captured['messages'] if m['role'] == 'system']
-    assert sys_blocks and any('every query failed' in b for b in sys_blocks), sys_blocks
-    print('RAG+tools total failure injects a tell-the-LLM system message')
-
-asyncio.run(main())
-"
-print_result $? "call_with_rag_and_tools informs the LLM on total failure"
 
 # ==========================================
 # Check 5: stream_with_rag total failure informs the LLM
