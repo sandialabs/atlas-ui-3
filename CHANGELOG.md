@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Fix - ps_agent_start.ps1 parity with agent_start.sh - 2026-08-28
+### PR #863 - 2026-08-28
 - **`ps_agent_start.ps1` now has feature parity with `agent_start.sh`**: the Windows startup script was missing several behaviors present in the bash script. Added: an `Initialize-ChatHistoryDb` function (handles DuckDB and PostgreSQL modes, reads `FEATURE_CHAT_HISTORY_ENABLED` / `CHAT_HISTORY_DB_URL`, starts the `postgres` container and waits on `pg_isready`, creates the `data/` dir for DuckDB); `-e`/`--env-file` and `-h`/`--help` CLI flags plus `ATLAS_ENV_FILE` env-var support with `~` expansion; a `USE_NEW_FRONTEND` check in `Build-Frontend` (defaults to true); exporting `ATLAS_ENV_FILE` to child processes so `atlas-chat` and uvicorn load the same env file; and a loud failure when an explicitly-requested env file is missing (the default `.env` being absent is still silently skipped). The infrastructure init order now matches bash exactly — `Initialize-Environment` first (so the venv's `podman-compose` is found), then container runtime, then MinIO, then chat-history DB. The fragile line-by-line `.env` parser was replaced with a quote- and comment-aware loader (`Import-DotEnv`/`Resolve-DotEnvValue`) that strips surrounding single/double quotes, drops inline comments outside quotes, and handles the `export ` prefix. `Start-McpMock` now invokes `mocks/mcp-http-mock/run.bat` by full path (the file is added in this PR, mirroring `run.sh`).
 
 ### Fix - atlas_sleep heartbeat - 2026-08-27
