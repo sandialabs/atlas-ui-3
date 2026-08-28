@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Remove USE_NEW_FRONTEND flag (closes #864) - 2026-08-28
+### PR #865 - 2026-08-28
 - **`USE_NEW_FRONTEND` is removed and the old-frontend code path behind it is deleted**: the flag was always `true` and the backward-compatibility branch it guarded (skip the frontend build in `agent_start.sh` / `ps_agent_start.ps1`) referenced a frontend that no longer exists. The env var is dropped from `.env.example`, `docker-compose.yml`, and `Dockerfile-test`, and the skip-build `if` block is removed from both startup scripts so the frontend is always built. The historical CHANGELOG entry for PR #863 (which documented adding the flag to the PowerShell script) is left intact as a record.
 
 ### PR #862 - 2026-08-28
