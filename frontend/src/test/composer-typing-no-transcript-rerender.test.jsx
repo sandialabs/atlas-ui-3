@@ -13,9 +13,14 @@ import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
+import { buildCorrectionContext } from '../utils/captureCorrection'
 
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/WSContext')
+vi.mock('../utils/captureCorrection', async (importOriginal) => ({
+  ...(await importOriginal()),
+  buildCorrectionContext: vi.fn(() => null),
+}))
 
 // Corrections on: this is the path that used to allocate a fresh onCorrect
 // closure per render. With the feature off the prop is a constant null and the
@@ -28,15 +33,26 @@ vi.mock('../hooks/useCaptureConsent', () => ({
 const messageRenders = { count: 0 }
 vi.mock('../components/Message', async () => {
   const { memo } = await import('react')
-  const Impl = ({ message }) => {
+  const Impl = ({ message, onCorrect }) => {
     messageRenders.count += 1
-    return <div data-testid="message">{message.content}</div>
+    return (
+      <div data-testid="message">
+        {message.content}
+        {onCorrect && (
+          <button data-testid={`correct-${message.content}`} onClick={() => onCorrect(message)}>
+            correct
+          </button>
+        )}
+      </div>
+    )
   }
   return { default: memo(Impl) }
 })
 
 const messages = [
   { role: 'user', content: 'first question' },
+  { role: 'assistant', content: 'first answer' },
+  { role: 'user', content: 'second question' },
   { role: 'assistant', content: 'a previous response worth reading' },
 ]
 
@@ -90,5 +106,26 @@ describe('ChatArea - typing does not re-render the transcript', () => {
 
     expect(textarea.value).toBe(typed)
     expect(messageRenders.count).toBe(rendersAfterMount)
+  })
+
+  it('memoized onCorrect handlers still target their own message', () => {
+    // The handlers are built by index in a useMemo; an off-by-one there would
+    // silently open the correction modal against the wrong turn.
+    const captured = []
+    buildCorrectionContext.mockImplementation((_msgs, messageIndex) => {
+      captured.push(messageIndex)
+      return null
+    })
+
+    render(
+      <BrowserRouter>
+        <ChatArea />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByTestId('correct-first answer'))
+    fireEvent.click(screen.getByTestId('correct-a previous response worth reading'))
+
+    expect(captured).toEqual([1, 3])
   })
 })

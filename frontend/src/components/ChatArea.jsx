@@ -5,7 +5,7 @@ import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench,
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
-import { autoResizeComposer } from '../utils/composerAutoResize'
+import { autoResizeComposer, resetComposerHeight, COMPOSER_MAX_HEIGHT } from '../utils/composerAutoResize'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
@@ -148,7 +148,7 @@ const ChatArea = () => {
   // Auto-resize textarea. Delegated so the measurement cannot displace the
   // transcript's scroll position while the user types (#866).
   const autoResizeTextarea = () => {
-    autoResizeComposer(textareaRef.current, messagesRef.current, 128)
+    autoResizeComposer(textareaRef.current, messagesRef.current, COMPOSER_MAX_HEIGHT)
   }
 
   // Check for mobile screen size
@@ -269,20 +269,18 @@ const ChatArea = () => {
       if (!sendChatMessage(message, allFiles)) return
       setInputValue('')
 
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
+      // Reset textarea height through the shared helper so the send path
+      // cannot displace the transcript either (#866).
+      resetComposerHeight(textareaRef.current, messagesRef.current)
     } catch (error) {
       console.error('Error in handleSubmit:', error)
       // Still try to send the message without file processing
       if (!sendChatMessage(message, uploadedFiles)) return
       setInputValue('')
 
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
+      // Reset textarea height through the shared helper so the send path
+      // cannot displace the transcript either (#866).
+      resetComposerHeight(textareaRef.current, messagesRef.current)
     }
   }
   
@@ -1134,7 +1132,7 @@ const ChatArea = () => {
                     ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
                     : 'border border-gray-600 focus:ring-blue-500'
                 }`}
-                style={{ minHeight: '48px', maxHeight: '128px' }}
+                style={{ minHeight: '48px', maxHeight: `${COMPOSER_MAX_HEIGHT}px` }}
               />
               
               {/* Tool Autocomplete Dropdown */}

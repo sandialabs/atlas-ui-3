@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { autoResizeComposer } from '../utils/composerAutoResize'
+import {
+  autoResizeComposer,
+  resetComposerHeight,
+  COMPOSER_MAX_HEIGHT,
+} from '../utils/composerAutoResize'
 
 const SHELL_HEIGHT = 600
 const CONTENT_HEIGHT = 2000
@@ -123,5 +127,48 @@ describe('autoResizeComposer', () => {
 
   it('is a no-op without a textarea', () => {
     expect(autoResizeComposer(null, null, 128)).toBe('')
+  })
+
+  it('exposes the height cap it defaults to', () => {
+    expect(COMPOSER_MAX_HEIGHT).toBe(128)
+    const { container, textarea } = makeHarness({ lines: 40 })
+    expect(autoResizeComposer(textarea, container)).toBe(COMPOSER_MAX_HEIGHT + 'px')
+  })
+})
+
+describe('resetComposerHeight', () => {
+  it('drops the inline height so the stylesheet takes over', () => {
+    const { container, textarea } = makeHarness({ lines: 3 })
+    autoResizeComposer(textarea, container)
+    expect(textarea.style.height).toBe('60px')
+
+    resetComposerHeight(textarea, container)
+    expect(textarea.style.height).toBe('')
+  })
+
+  it('does not re-measure the not-yet-cleared value', () => {
+    // Called right after setInputValue(''), before React writes the empty value
+    // to the DOM: measuring here would keep the composer at the sent text's
+    // height. _contentLines still reports the sent message.
+    const { container, textarea } = makeHarness({ lines: 5 })
+    resetComposerHeight(textarea, container)
+    expect(textarea._renderedHeight).toBe(48)
+  })
+
+  it('keeps a mid-transcript scroll position, as far as the new range allows', () => {
+    const { container, textarea } = makeHarness({ lines: 3 })
+    autoResizeComposer(textarea, container)
+    container.scrollTop = container.maxScrollTop - 5
+    const before = container.scrollTop
+    resetComposerHeight(textarea, container)
+    // Collapsing the composer genuinely grows the transcript's viewport, so the
+    // old offset can fall outside the new range -- that clamp is the composer
+    // legitimately shrinking on send, not the #866 displacement. What matters
+    // is that nothing moves beyond it.
+    expect(container.scrollTop).toBe(Math.min(before, container.maxScrollTop))
+  })
+
+  it('is a no-op without a textarea', () => {
+    expect(resetComposerHeight(null, null)).toBe('')
   })
 })
