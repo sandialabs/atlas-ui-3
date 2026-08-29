@@ -404,7 +404,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
   }
 
   return (
-    <div className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto ${
+    <div role="dialog" aria-modal="true" className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto ${
       data.content?.type === 'logs' ? 'p-0' : 'p-4'
     }`}>
       <div className={`bg-gray-800 rounded-lg w-full overflow-y-auto my-8 ${

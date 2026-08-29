@@ -36,8 +36,15 @@ const AdminQuickPanel = ({ isOpen, onNavigate }) => {
     if (isOpen) loadSystemStatus()
   }, [isOpen, loadSystemStatus])
 
+  // Navigation unmounts the panel, so it waits until the host has actually
+  // closed -- otherwise staged tool selections are dropped without the
+  // save/discard prompt the X and backdrop raise. With no host to ask (the
+  // full dashboard renders these cards too), navigate straight away.
   const goToDashboard = () => {
-    onNavigate?.()
+    if (onNavigate) {
+      onNavigate(() => navigate('/admin'))
+      return
+    }
     navigate('/admin')
   }
 

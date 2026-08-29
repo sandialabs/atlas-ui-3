@@ -12,6 +12,17 @@ import { isUserPromptKey } from '../hooks/chat/useSelections'
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
 
+// Set equality by contents. The chat context can republish a fresh Set on every
+// render, so the re-seed effect below must not key off Set identity.
+const sameKeys = (a, b) => {
+  if (a === b) return true
+  if (!a || !b || a.size !== b.size) return false
+  for (const key of a) {
+    if (!b.has(key)) return false
+  }
+  return true
+}
+
 // Truncation message constant for better maintainability
 const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start and end of content.'
 
@@ -53,6 +64,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [pendingSelectedPrompts, setPendingSelectedPrompts] = useState(new Set())
   const [hasChanges, setHasChanges] = useState(false)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
+  // Transient "Saved" confirmation for the embedded (tab) save, which no longer
+  // dismisses anything.
+  const [justSaved, setJustSaved] = useState(false)
 
   // Auth status state
   const [tokenModalServer, setTokenModalServer] = useState(null)
@@ -67,17 +81,26 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // panel now stays mounted across tab switches (issue #836), so a save made
   // elsewhere -- the Admin tab's "Reload MCP" prunes keys for servers that no
   // longer exist -- would otherwise be undone by a later Save Changes here.
+  //
+  // This runs in the steady state, and the context may hand back a fresh Set on
+  // every render, so it compares contents rather than Set identity: setting
+  // state on identity alone would re-render forever.
   useEffect(() => {
     if (!isOpen) {
       prevOpenRef.current = false
       return
     }
-    if (!prevOpenRef.current || !hasChanges) {
-      setPendingSelectedTools(new Set(savedSelectedTools))
-      setPendingSelectedPrompts(new Set(savedSelectedPrompts))
-      setHasChanges(false)
-    }
+    const opening = !prevOpenRef.current
     prevOpenRef.current = true
+    if (!opening && hasChanges) return
+
+    setPendingSelectedTools(prev => (opening || !sameKeys(prev, savedSelectedTools)
+      ? new Set(savedSelectedTools)
+      : prev))
+    setPendingSelectedPrompts(prev => (opening || !sameKeys(prev, savedSelectedPrompts)
+      ? new Set(savedSelectedPrompts)
+      : prev))
+    if (opening) setHasChanges(false)
   }, [isOpen, hasChanges, savedSelectedTools, savedSelectedPrompts])
 
   // Fetch auth status when panel opens
@@ -204,7 +227,13 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // from here would also exit Prompts, General, User Info and Admin.
   const handleSave = () => {
     commitChanges()
-    if (!embedded) onClose()
+    if (!embedded) {
+      onClose()
+      return
+    }
+    // Embedded the panel stays put, so the only feedback would be the button
+    // greying out. Say it saved instead.
+    setJustSaved(true)
   }
 
   // Cancel handler - reverts pending changes
@@ -220,9 +249,15 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     setHasChanges(true)
   }
 
+  // Set while the unsaved-changes dialog is up, so a parent that deferred an
+  // action behind the close (navigating to the full admin page) learns that the
+  // user backed out and the action must not run.
+  const closeCancelledRef = useRef(null)
+
   // Handle close attempts - check for unsaved changes
-  const handleCloseAttempt = () => {
+  const handleCloseAttempt = (onCancelled = null) => {
     if (hasChanges) {
+      closeCancelledRef.current = typeof onCancelled === 'function' ? onCancelled : null
       setShowUnsavedDialog(true)
     } else {
       onClose()
@@ -234,19 +269,35 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // close attempt -- so they always dismiss, embedded or not.
   const handleSaveAndClose = () => {
     commitChanges()
+    closeCancelledRef.current = null
     setShowUnsavedDialog(false)
     onClose()
   }
 
   const handleDiscardAndClose = () => {
     revertChanges()
+    closeCancelledRef.current = null
     setShowUnsavedDialog(false)
     onClose()
   }
 
   const handleCancelDialog = () => {
     setShowUnsavedDialog(false)
+    const onCancelled = closeCancelledRef.current
+    closeCancelledRef.current = null
+    onCancelled?.()
   }
+
+  useEffect(() => {
+    if (!justSaved) return undefined
+    const timer = setTimeout(() => setJustSaved(false), 2500)
+    return () => clearTimeout(timer)
+  }, [justSaved])
+
+  // Any further edit clears the confirmation.
+  useEffect(() => {
+    if (hasChanges) setJustSaved(false)
+  }, [hasChanges])
 
   // Let an embedding parent know whether there are unsaved selections.
   useEffect(() => {
@@ -911,6 +962,12 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
         
         {/* Footer with Save/Cancel buttons */}
         <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-gray-700 flex-shrink-0">
+          {justSaved && (
+            <span role="status" className="flex items-center gap-1.5 text-sm text-green-400 mr-auto">
+              <ShieldCheck className="w-4 h-4" />
+              Tool selections saved
+            </span>
+          )}
           <button
             onClick={handleCancel}
             className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
@@ -959,6 +1016,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       {/* Disconnect Confirmation Modal */}
       {disconnectServer && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Disconnect server"
           className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]"
           onClick={() => { setDisconnectServer(null); setDisconnectError(null) }}
         >
@@ -1015,7 +1075,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   return (
     <div
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={handleCloseAttempt}
+      onClick={() => handleCloseAttempt()}
     >
       <div
         className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] mx-4 flex flex-col"
@@ -1025,7 +1085,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
           <h2 className="text-lg font-semibold text-gray-100">Tools & Integrations</h2>
           <button
-            onClick={handleCloseAttempt}
+            onClick={() => handleCloseAttempt()}
             className="p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
           >
             <X className="w-5 h-5" />

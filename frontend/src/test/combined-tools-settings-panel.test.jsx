@@ -213,7 +213,7 @@ describe('SettingsPanel review follow-ups', () => {
   it('closes on Escape', () => {
     const onClose = vi.fn()
     renderPanel({ onClose })
-    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     expect(onClose).toHaveBeenCalled()
   })
 

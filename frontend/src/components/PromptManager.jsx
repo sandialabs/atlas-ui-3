@@ -15,11 +15,12 @@ import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/ch
  * Shape: `{ type: 'create' }` or `{ type: 'edit', id }`. `onIntentConsumed`
  * fires once the intent has opened its editor, so the caller can drop it --
  * otherwise leaving and re-entering this tab would yank the editor back to the
- * originally-clicked prompt.
+ * originally-clicked prompt. `onDirtyChange` reports an in-progress draft so
+ * the host panel can guard its close the way it does for tool selections.
  */
 const emptyDraft = { title: '', content: '' }
 
-const PromptManager = ({ intent = null, onIntentConsumed = null }) => {
+const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange = null }) => {
   const {
     userPrompts = [],
     userPromptsLoading,
@@ -58,6 +59,22 @@ const PromptManager = ({ intent = null, onIntentConsumed = null }) => {
       onIntentConsumed?.()
     }
   }, [intent, userPrompts, onIntentConsumed])
+
+  // Let a host panel guard its close: an editor open on text that differs from
+  // what is stored (or anything at all, when creating) is unsaved work.
+  const original = editingId && editingId !== 'new'
+    ? userPrompts.find(p => p.id === editingId)
+    : null
+  const isDirty = editingId !== null && (
+    editingId === 'new'
+      ? draft.title.trim().length > 0 || draft.content.trim().length > 0
+      : !original || draft.title !== original.title || draft.content !== original.content
+  )
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
+  // Stop reporting dirty once this unmounts, so a stale flag cannot block a close.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
   const activeId = isUserPromptKey(activePromptKey) ? userPromptIdFromKey(activePromptKey) : null
   const canSave = draft.title.trim().length > 0 && draft.content.trim().length > 0

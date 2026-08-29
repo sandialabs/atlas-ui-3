@@ -1,10 +1,20 @@
 import { AlertTriangle, Save, X } from 'lucide-react'
 
-const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
+const UnsavedChangesDialog = ({
+  isOpen,
+  onSave,
+  onDiscard,
+  onCancel,
+  title = 'Unsaved Changes',
+  message = 'You have unsaved changes to your tools and integrations. What would you like to do?',
+}) => {
   if (!isOpen) return null
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
       className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[60]"
       onClick={(e) => {
         e.stopPropagation()
@@ -20,14 +30,12 @@ const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
           <div className="p-2 bg-orange-600 rounded-full">
             <AlertTriangle className="w-5 h-5 text-white" />
           </div>
-          <h3 className="text-lg font-semibold text-gray-50">Unsaved Changes</h3>
+          <h3 className="text-lg font-semibold text-gray-50">{title}</h3>
         </div>
 
         {/* Content */}
         <div className="px-6 py-4">
-          <p className="text-gray-300 mb-4">
-            You have unsaved changes to your tools and integrations. What would you like to do?
-          </p>
+          <p className="text-gray-300 mb-4">{message}</p>
         </div>
 
         {/* Actions */}
@@ -45,13 +53,15 @@ const UnsavedChangesDialog = ({ isOpen, onSave, onDiscard, onCancel }) => {
             <X className="w-4 h-4" />
             Discard Changes
           </button>
-          <button
-            onClick={onSave}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors font-medium"
-          >
-            <Save className="w-4 h-4" />
-            Save Changes
-          </button>
+          {onSave && (
+            <button
+              onClick={onSave}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors font-medium"
+            >
+              <Save className="w-4 h-4" />
+              Save Changes
+            </button>
+          )}
         </div>
       </div>
     </div>

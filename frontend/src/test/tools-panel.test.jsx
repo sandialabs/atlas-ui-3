@@ -1159,6 +1159,41 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('settles when the context republishes an equal but fresh selection Set', () => {
+    // The re-seed effect depends on the saved Sets. Keyed on Set identity it
+    // would set state on every render and never settle; this render would hang.
+    setup({ selectedTools: new Set(['test_server_fetch']) })
+    const { rerender } = render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    setup({ selectedTools: new Set(['test_server_fetch']) })
+    rerender(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('button', { name: 'fetch' })).toBeInTheDocument()
+  })
+
+  it('confirms the save in place, since it no longer dismisses anything', () => {
+    setup()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(screen.getByRole('status')).toHaveTextContent(/saved/i)
+  })
+
   it('does not write back a selection for a tool that no longer exists', () => {
     // A key for a server that an MCP reload has since removed. The pending set
     // is seeded from saved selections, so without pruning Save Changes would

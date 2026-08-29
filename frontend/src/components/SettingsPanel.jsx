@@ -7,6 +7,7 @@ import PromptManager from './PromptManager'
 import ToolsPanel from './ToolsPanel'
 import AdminQuickPanel from './admin/AdminQuickPanel'
 import CaptureConsentSection from './CaptureConsentSection'
+import UnsavedChangesDialog from './UnsavedChangesDialog'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -31,6 +32,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // The effect below falls back to the first visible tab when it is not.
   const [activeTab, setActiveTab] = useState('tools')
   const [toolsDirty, setToolsDirty] = useState(false)
+  const [promptDirty, setPromptDirty] = useState(false)
+  const [showPromptDiscard, setShowPromptDiscard] = useState(false)
   const toolsCloseGuardRef = useRef(null)
   // A tab requested by a caller before the feature flags that make it visible
   // have arrived. Held until it becomes visible, then applied once; cleared as
@@ -65,17 +68,58 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     return true
   }), [customPromptsEnabled, toolsEnabled, isInAdminGroup])
 
+  // An action to run once the panel has actually been dismissed -- "Full Admin
+  // Page" navigates, and navigating before the unsaved-selection dialog is
+  // answered would drop staged selections without ever showing the prompt.
+  const afterCloseRef = useRef(null)
+
+  const finishClose = useCallback(() => {
+    const afterClose = afterCloseRef.current
+    afterCloseRef.current = null
+    onClose()
+    afterClose?.()
+  }, [onClose])
+
   // Close attempts route through the tools tab first so unsaved tool
-  // selections still raise the confirmation dialog.
-  const requestClose = useCallback(() => {
+  // selections still raise the confirmation dialog. `afterClose` is deferred
+  // until the panel really closes, and dropped if the user cancels out of the
+  // dialog. Also used directly as an onClick handler, hence the typeof check.
+  const requestClose = useCallback((afterClose = null) => {
+    afterCloseRef.current = typeof afterClose === 'function' ? afterClose : null
+    // An in-progress prompt draft is asked about first: it is free text, so it
+    // is the work most easily lost.
+    if (promptDirty) {
+      setActiveTab('prompts')
+      setShowPromptDiscard(true)
+      return
+    }
     const guard = toolsCloseGuardRef.current
     if (guard && toolsDirty) {
       setActiveTab('tools')
-      guard()
+      guard(() => { afterCloseRef.current = null })
       return
     }
-    onClose()
-  }, [onClose, toolsDirty])
+    finishClose()
+  }, [finishClose, toolsDirty, promptDirty])
+
+  // "Discard" on the prompt draft falls through to the tools guard, so a close
+  // with both kinds of unsaved work still asks about each.
+  const discardPromptAndClose = useCallback(() => {
+    setShowPromptDiscard(false)
+    setPromptDirty(false)
+    const guard = toolsCloseGuardRef.current
+    if (guard && toolsDirty) {
+      setActiveTab('tools')
+      guard(() => { afterCloseRef.current = null })
+      return
+    }
+    finishClose()
+  }, [finishClose, toolsDirty])
+
+  const keepEditingPrompt = useCallback(() => {
+    setShowPromptDiscard(false)
+    afterCloseRef.current = null
+  }, [])
 
   // Globus auth state
   const {
@@ -238,23 +282,49 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   }
 
   // This panel is now the only route to tools, theme and admin controls, so it
-  // carries proper dialog semantics: Escape closes (through the same unsaved
-  // guard as the X), focus moves in on open and is trapped inside.
+  // carries proper dialog semantics: focus moves in on open, Escape closes
+  // (through the same unsaved guard as the X), and Tab is trapped inside.
+  //
+  // Nested modals (the unsaved-changes prompt, token input, the admin config
+  // editor) render inside this one and mark themselves `role="dialog"`. While
+  // one is up it owns both Escape and the trap -- closing the whole panel out
+  // from under a half-entered token, or letting Tab wander behind a prompt the
+  // user has to answer, would destroy their input.
+  const innermostDialog = useCallback(() => {
+    const node = dialogRef.current
+    if (!node) return null
+    const nested = node.querySelectorAll('[role="dialog"]')
+    return nested.length > 0 ? nested[nested.length - 1] : node
+  }, [])
+
+  // Keyed on isOpen alone: requestClose changes whenever the tools tab goes
+  // dirty, and re-running this would yank focus to Close mid-edit.
+  useEffect(() => {
+    if (!isOpen) return
+    closeButtonRef.current?.focus()
+  }, [isOpen])
+
   useEffect(() => {
     if (!isOpen) return undefined
     const node = dialogRef.current
-    closeButtonRef.current?.focus()
+    if (!node) return undefined
 
     const onKeyDown = (event) => {
+      const scope = innermostDialog()
+      // A nested modal is up: it owns Escape and the trap.
+      if (scope !== node) return
+
       if (event.key === 'Escape') {
         event.stopPropagation()
         requestClose()
         return
       }
-      if (event.key !== 'Tab' || !node) return
+      if (event.key !== 'Tab') return
       const focusable = Array.from(
-        node.querySelectorAll('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])')
-      ).filter(el => el.offsetParent !== null)
+        scope.querySelectorAll('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])')
+      // getClientRects() rather than offsetParent: offsetParent is null inside a
+      // `position: fixed` ancestor, which is exactly how the nested modals render.
+      ).filter(el => el.getClientRects().length > 0)
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
@@ -266,9 +336,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
         first.focus()
       }
     }
-    document.addEventListener('keydown', onKeyDown, true)
-    return () => document.removeEventListener('keydown', onKeyDown, true)
-  }, [isOpen, requestClose])
+    // Bubble phase on the dialog node, so a nested modal that stops propagation
+    // is respected and keystrokes outside the panel are none of our business.
+    node.addEventListener('keydown', onKeyDown)
+    return () => node.removeEventListener('keydown', onKeyDown)
+  }, [isOpen, requestClose, innermostDialog])
 
   if (!isOpen) return null
 
@@ -311,13 +383,19 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           {visibleTabs.map((tab) => {
             const Icon = tab.icon
             const isActive = activeTab === tab.id
+            // Tools, Prompts, and a visited Admin stay mounted; the others only
+            // exist while selected, and aria-controls must not dangle.
+            const panelMounted = isActive
+              || tab.id === 'tools'
+              || tab.id === 'prompts'
+              || (tab.id === 'admin' && adminTabVisited)
             return (
               <button
                 key={tab.id}
                 role="tab"
                 id={`settings-tab-${tab.id}`}
                 aria-selected={isActive}
-                aria-controls={`settings-tabpanel-${tab.id}`}
+                aria-controls={panelMounted ? `settings-tabpanel-${tab.id}` : undefined}
                 tabIndex={isActive ? 0 : -1}
                 onClick={() => selectTab(tab.id)}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
@@ -333,6 +411,14 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           })}
         </div>
 
+        <UnsavedChangesDialog
+          isOpen={showPromptDiscard}
+          title="Unsaved Prompt"
+          message="You have an unfinished prompt in the editor. Closing now discards it."
+          onDiscard={discardPromptAndClose}
+          onCancel={keepEditingPrompt}
+        />
+
         {/* Tools & Integrations tab. Kept mounted for the life of the panel so
             pending tool selections survive switching tabs. */}
         {toolsEnabled && (
@@ -340,7 +426,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             embedded
             isOpen={isOpen}
             active={activeTab === 'tools'}
-            onClose={onClose}
+            onClose={finishClose}
             closeGuardRef={toolsCloseGuardRef}
             onDirtyChange={setToolsDirty}
           />
@@ -373,6 +459,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             <PromptManager
               intent={promptIntent}
               onIntentConsumed={onPromptIntentConsumed}
+              onDirtyChange={setPromptDirty}
             />
           </div>
         )}

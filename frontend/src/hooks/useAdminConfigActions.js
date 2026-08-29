@@ -51,6 +51,9 @@ export function useAdminConfigActions() {
   const loadSystemStatus = useCallback(async () => {
     try {
       const response = await fetch('/admin/system-status')
+      if (!response.ok) {
+        throw new Error(`system status request failed: ${response.status}`)
+      }
       const data = await response.json()
       setSystemStatus(data)
     } catch (err) {
