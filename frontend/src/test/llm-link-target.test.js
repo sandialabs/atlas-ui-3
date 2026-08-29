@@ -101,6 +101,19 @@ describe('DOMPurify target allowlist is constrained to safe anchors', () => {
     expect(a.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
+  it('opens a raw external anchor with no target in a new tab', () => {
+    const a = anchors(renderAssistant('<a href="https://example.com">x</a>'))[0]
+    expect(a.getAttribute('href')).toBe('https://example.com')
+    expect(a.getAttribute('target')).toBe('_blank')
+    expect(a.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('strips an injected target from a raw in-app anchor', () => {
+    const a = anchors(renderAssistant('<a href="/settings" target="_blank">x</a>'))[0]
+    expect(a.getAttribute('href')).toBe('/settings')
+    expect(a.getAttribute('target')).toBeNull()
+  })
+
   it('strips target from non-anchor elements', () => {
     const html = renderAssistant('<div target="_blank">nope</div>')
     const container = document.createElement('div')

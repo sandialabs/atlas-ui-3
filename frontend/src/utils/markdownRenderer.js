@@ -220,20 +220,26 @@ marked.setOptions({
   gfm: true
 })
 
-// Defense-in-depth on the `target` allowlist. ADD_ATTR is element-agnostic, so
-// without this hook a `target` could survive on a non-anchor element, or on an
-// anchor with a value other than _blank (e.g. _top/_parent, which a frame or
-// clickjacking context could exploit), or on a raw `<a target="_blank">` the
-// model emitted directly without a `rel` (a tabnabbing vector). Registered once
-// at module load; applies to every DOMPurify.sanitize in the app. Anchors keep
-// only target=_blank paired with rel="noopener noreferrer"; any other element
-// loses its target.
+// Enforce the link-target policy on every anchor that survives sanitization,
+// whether it came from the renderer (markdown) or from raw HTML the model
+// emitted directly. ADD_ATTR is element-agnostic, so without this hook a
+// `target` could survive on a non-anchor element, or on an anchor with a value
+// other than _blank (e.g. _top/_parent, which a frame or clickjacking context
+// could exploit), or on a raw `<a target="_blank">` missing a `rel` (a
+// tabnabbing vector). Registered once at module load; applies to every
+// DOMPurify.sanitize in the app. External anchors get target=_blank +
+// rel="noopener noreferrer" (even when the model omitted target, so raw-HTML
+// external links cannot bypass the new-tab behavior); in-app anchors and any
+// non-anchor element lose target entirely.
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (!node || node.nodeType !== 1) return
   if (node.tagName === 'A') {
-    if (node.hasAttribute('target')) {
+    const href = node.getAttribute('href') || ''
+    if (isExternalHref(href)) {
       node.setAttribute('target', '_blank')
       node.setAttribute('rel', 'noopener noreferrer')
+    } else {
+      node.removeAttribute('target')
     }
   } else if (node.hasAttribute('target')) {
     node.removeAttribute('target')
