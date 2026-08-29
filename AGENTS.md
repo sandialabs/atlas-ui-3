@@ -226,12 +226,17 @@ Models can set `api_key_source: "globus"` with a `globus_scope` field. The Globu
 - Tool servers in `mcp.json`, RAG sources in `rag-sources.json`
 - Fields: `groups`, `transport|type`, `url|command/cwd`, `compliance_level`
 - Transport detection: explicit transport -> command (stdio) -> URL protocol (http/sse) -> type fallback
-- Tool names exposed to LLM: `server_toolName`. `canvas_canvas` is always available
+- Tool names exposed to LLM: `server_toolName`. The built-in `atlas` server (`atlas_canvas`,
+  `atlas_sleep`, `atlas_search`, `atlas_discover_sources`) has no MCP server behind it;
+  `atlas_canvas` is always available, and the server is pinned to the top of the tools panel.
+  Defined in `atlas/modules/mcp_tools/atlas_server.py` / `frontend/src/constants/atlasTools.js`;
+  pre-#855 names (`canvas_canvas`, `atlas_agent_sleep`, `atlas_rag_query`,
+  `atlas_rag_discover_data_sources`) still resolve
 
 ### RAG Over MCP
 - Expected tools: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
 - Resources and servers may include `complianceLevel`
-- HTTP RAG discovery (ATLAS RAG API v2) returns `{data_sources: [{id, label, compliance_level, description}]}`
+- HTTP RAG discovery (ATLAS RAG API v2) returns a bare list `[{id, label, compliance_level, description}]` (the client also accepts a `{data_sources: [...]}` envelope)
 
 ### Testing MCP
 Example configs in `atlas/config/mcp-example-configs/`.

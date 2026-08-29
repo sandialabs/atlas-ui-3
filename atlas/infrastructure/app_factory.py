@@ -7,7 +7,7 @@ from atlas.application.chat.service import ChatService
 from atlas.core.auth import is_user_in_group
 from atlas.domain.rag_mcp_service import RAGMCPService
 from atlas.domain.unified_rag_service import UnifiedRAGService
-from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+from atlas.infrastructure.sessions.factory import create_session_repository
 from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.modules.config import ConfigManager
 from atlas.modules.file_storage import FileManager, S3StorageClient
@@ -72,8 +72,14 @@ class AppFactory:
             self.file_storage = S3StorageClient()
         self.file_manager = FileManager(self.file_storage)
 
-        # Shared session repository for all ChatService instances
-        self.session_repository = InMemorySessionRepository()
+        # Shared session repository for all ChatService instances. The
+        # implementation is selected by SESSION_REPOSITORY_TYPE (issue #760);
+        # the default "memory" store is process-local, so a multi-replica
+        # deployment plugs in a distributed store through that setting to
+        # remove the undocumented sticky-session requirement.
+        self.session_repository = create_session_repository(
+            self.config_manager.app_settings.session_repository_type
+        )
 
         # Chat history persistence (feature-flagged)
         self.conversation_repository = None

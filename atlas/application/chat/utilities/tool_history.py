@@ -31,6 +31,7 @@ from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
+from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class ToolCallRecorder:
             return
         # The canvas tool renders into the canvas panel, not the transcript; the
         # UI suppresses it as a chat row, so it must not be persisted as one.
-        if payload.get("tool_name") == "canvas_canvas":
+        if normalize_tool_name(payload.get("tool_name")) == CANVAS_TOOL_NAME:
             return
 
         entry = self._calls.setdefault(tool_call_id, {"tool_call_id": tool_call_id})

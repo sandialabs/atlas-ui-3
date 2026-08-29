@@ -7,18 +7,30 @@ These methods are mixed into LiteLLMCaller via LiteLLMStreamingMixin.
 import asyncio
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 from litellm import acompletion
 from litellm.types.utils import ChatCompletionMessageToolCall, Function
 
 from atlas.application.chat.capture.capture_context import record_llm_call
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
+from atlas.domain.errors import LLMMalformedToolCallError
 
 from .models import LLMResponse, split_provider
+from .tool_call_guard import (
+    partition_tool_calls_by_json_validity,
+    tool_call_function_field,
+)
 
 logger = logging.getLogger(__name__)
+
+# The OpenAI-compatible finish_reason vocabulary. Anything else is provider text
+# and is reported as "other" rather than interpolated into a log line or a span.
+KNOWN_FINISH_REASONS = frozenset(
+    {"stop", "length", "tool_calls", "function_call", "content_filter"}
+)
 
 
 class LiteLLMStreamingMixin:
@@ -28,8 +40,10 @@ class LiteLLMStreamingMixin:
       - _get_litellm_model_name(model_name) -> str
       - _get_model_kwargs(model_name, temperature, user_email) -> dict
       - _prepare_messages(model_name, messages) -> list
-      - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> list
+      - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> (successful, exclusions, failures)
       - _build_rag_completion_response(rag_response, display_source) -> str
+      - _build_rag_exclusion_notice(exclusions) -> str
+      - _build_rag_failure_notice(failures) -> str
       - _combine_rag_contexts(source_responses) -> tuple
       - _rag_insert_index(messages) -> int
       - _rag_service attribute
@@ -135,6 +149,113 @@ class LiteLLMStreamingMixin:
                 logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
                 self._raise_llm_domain_error(exc)
 
+    def _handle_malformed_tool_calls(
+        self,
+        malformed: List[Any],
+        kept: List[Any],
+        finish_reason: Optional[str],
+        model_name: str,
+        span: Any = None,
+        user_email: Optional[str] = None,
+    ) -> List[str]:
+        """Log dropped tool calls and fail the turn when none are left.
+
+        Dropping is always right -- unparseable arguments cannot be executed
+        faithfully, and re-sending them breaks every later request. What differs
+        is whether the turn can still make progress: if at least one well-formed
+        call survives, the model gets those results and can reissue the rest.
+        If nothing survives, raise, so the user is told the turn failed instead
+        of silently receiving a reply that skipped the work it announced.
+
+        Returns the dropped names so the caller can put them on the response and
+        the consumers can warn about a partial drop.
+        """
+        # Names come from model output and the model id is request-supplied, so
+        # both reach the log only after sanitizing: either carrying a newline
+        # could otherwise forge a log line. Each value is sanitized directly at
+        # the point it is interpolated -- .github/codeql/extensions.yml models
+        # sanitize_for_logging's return value as safe, and that model tracks a
+        # direct call, not taint laundered through a list first.
+        names = [
+            sanitize_for_logging(tool_call_function_field(tc, "name", "")) or "unknown"
+            for tc in malformed
+        ]
+        # The copy is keyed on the output limit specifically: a content filter
+        # also cuts a response off, but "ran out of room" would be a false
+        # explanation. The *repair policy* uses the broader check, because any
+        # unclean finish means the last call may be incomplete.
+        truncated = finish_reason == "length"
+        # Allow-listed rather than interpolated: finish_reason is provider text.
+        safe_reason = finish_reason if finish_reason in KNOWN_FINISH_REASONS else "other"
+        logger.error(
+            "Dropping %d malformed tool call(s) from %s (finish_reason=%s, names=%s); "
+            "%d well-formed call(s) kept",
+            len(malformed),
+            sanitize_for_logging(model_name),
+            safe_reason,
+            sanitize_for_logging(", ".join(names)),
+            len(kept),
+        )
+        set_attrs(span, {
+            "malformed_tool_calls": len(malformed),
+            "finish_reason": safe_reason,
+        })
+        log_metric(
+            "malformed_tool_call", user_email, model=model_name,
+            dropped=len(malformed), kept=len(kept), finish_reason=safe_reason,
+        )
+        if kept:
+            return names
+        if truncated:
+            message = (
+                "The model ran out of room while writing its tool call, so the "
+                "request was cut off mid-argument. Please try again -- asking for "
+                "one thing at a time usually clears it. (Starting a new "
+                "conversation shortens the input, which does not help here: the "
+                "limit was reached on the way out, not on the way in.)"
+            )
+        else:
+            message = (
+                "The model produced a tool call that was not valid JSON, so it "
+                "could not be run. Please try again."
+            )
+        raise LLMMalformedToolCallError(message, tool_names=names, truncated=truncated)
+
+    def _guard_tool_calls(
+        self,
+        tool_calls: Optional[List[Any]],
+        finish_reason: Optional[str],
+        model_name: str,
+        user_email: Optional[str] = None,
+        span: Any = None,
+    ) -> Tuple[Optional[List[Any]], List[str], bool]:
+        """Apply the malformed-tool-call guard to one response.
+
+        Shared by the streaming and non-streaming callers so the policy -- and
+        the ``finish_reason`` rule behind the user-facing copy -- lives in one
+        place and cannot drift between them. Returns
+        ``(kept_calls, dropped_names, dropped_were_truncated)``; raises
+        ``LLMMalformedToolCallError`` when nothing usable survives.
+        """
+        if not tool_calls:
+            return tool_calls or None, [], False
+        kept, malformed = partition_tool_calls_by_json_validity(
+            tool_calls, finish_reason=finish_reason,
+        )
+        dropped: List[str] = []
+        if malformed:
+            dropped = self._handle_malformed_tool_calls(
+                malformed,
+                kept=kept,
+                finish_reason=finish_reason,
+                model_name=model_name,
+                span=span,
+                user_email=user_email,
+            )
+        # An empty array is a shape providers reject on the follow-up request,
+        # so normalize it away rather than leaving it for the loop to strip.
+        return kept or None, dropped, finish_reason == "length"
+
     async def stream_with_tools(
         self,
         model_name: str,
@@ -202,9 +323,16 @@ class LiteLLMStreamingMixin:
                 accumulated_content = ""
                 accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
                 chunk_count = 0
+                finish_reason: Optional[str] = None
 
                 async for chunk in response:
-                    delta = chunk.choices[0].delta if chunk.choices else None
+                    choice = chunk.choices[0] if chunk.choices else None
+                    if choice is not None:
+                        # Providers send the reason on the final chunk; keep the
+                        # last non-empty one so a truncated turn ("length") can
+                        # be told apart from a model that simply emitted bad JSON.
+                        finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                    delta = choice.delta if choice is not None else None
                     if not delta:
                         continue
 
@@ -261,6 +389,20 @@ class LiteLLMStreamingMixin:
                             ),
                         ))
 
+                # Reject tool calls whose arguments are not parseable JSON
+                # before they can be executed or appended to the conversation.
+                # A model that runs out of output tokens mid-tool-call leaves a
+                # fragment like ``{"filename": "long-name.c``; the provider
+                # re-parses every tool call on the next request, so persisting
+                # one poisons the conversation permanently -- every later turn
+                # comes back as a 400 that no retry can clear.
+                tool_calls_list, dropped_tool_calls, dropped_were_truncated = (
+                    self._guard_tool_calls(
+                        tool_calls_list, finish_reason, model_name,
+                        user_email=user_email, span=span,
+                    )
+                )
+
                 log_metric(
                     "llm_call", user_email, model=model_name,
                     message_count=len(messages),
@@ -284,6 +426,8 @@ class LiteLLMStreamingMixin:
                     content=accumulated_content,
                     tool_calls=tool_calls_list,
                     model_used=model_name,
+                    dropped_tool_calls=dropped_tool_calls or None,
+                    dropped_tool_calls_truncated=dropped_were_truncated,
                 )
 
             except Exception as exc:
@@ -318,11 +462,37 @@ class LiteLLMStreamingMixin:
             raise ValueError("RAG service not configured")
 
         # Query RAG sources (non-streaming)
-        source_responses, rag_exclusions = await self._query_all_rag_sources(
+        source_responses, rag_exclusions, rag_failures = await self._query_all_rag_sources(
             data_sources, rag_service, user_email, messages,
         )
 
         if not source_responses:
+            if rag_failures:
+                # Every RAG query failed: tell the LLM (and thus the user)
+                # instead of silently answering as if nothing happened (GH #844).
+                logger.warning(
+                    "[stream+RAG] All RAG sources failed (%d); informing LLM and user",
+                    len(rag_failures),
+                )
+                messages_with_rag = messages.copy()
+                messages_with_rag.insert(
+                    self._rag_insert_index(messages_with_rag),
+                    {
+                        "role": "system",
+                        "content": (
+                            "The user selected data sources for RAG retrieval, but "
+                            "every query failed and no context was retrieved.\n"
+                            f"{self._build_rag_failure_notice(rag_failures).strip()}\n\n"
+                            "Answer the user's question, but begin by telling them you "
+                            "were unable to retrieve any context from their selected "
+                            "data sources and that they may need to retry or contact "
+                            "an administrator."
+                        ),
+                    },
+                )
+                async for chunk in self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email):
+                    yield chunk
+                return
             async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
                 yield chunk
             return
@@ -352,6 +522,7 @@ class LiteLLMStreamingMixin:
             "content": (
                 f"{context_label}:\n\n{rag_content}"
                 f"{self._build_rag_exclusion_notice(rag_exclusions)}"
+                f"{self._build_rag_failure_notice(rag_failures)}"
                 f"{citation_block}\n\n"
                 "Use this context to inform your response. "
                 "Cite sources inline using [1], [2], etc. where applicable."
@@ -362,88 +533,6 @@ class LiteLLMStreamingMixin:
             yield chunk
 
         # Yield the references section as a final chunk
-        if rag_metadata:
-            references_section = self._format_rag_references(rag_metadata)
-            if references_section:
-                yield f"\n\n---\n{references_section}"
-
-    async def stream_with_rag_and_tools(
-        self,
-        model_name: str,
-        messages: List[Dict[str, str]],
-        data_sources: List[str],
-        tools_schema: List[Dict],
-        user_email: str,
-        tool_choice: str = "auto",
-        rag_service=None,
-        temperature: float = 0.7,
-    ) -> AsyncGenerator[Union[str, LLMResponse], None]:
-        """Stream LLM response with both RAG and tool support.
-
-        Runs RAG query (non-streaming), then streams the LLM call with tools.
-        """
-        if not data_sources:
-            async for item in self.stream_with_tools(
-                model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
-            ):
-                yield item
-            return
-
-        if rag_service is None:
-            rag_service = self._rag_service
-        if rag_service is None:
-            raise ValueError("RAG service not configured")
-
-        source_responses, rag_exclusions = await self._query_all_rag_sources(
-            data_sources, rag_service, user_email, messages,
-        )
-
-        if not source_responses:
-            async for item in self.stream_with_tools(
-                model_name, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
-            ):
-                yield item
-            return
-
-        rag_metadata = None
-        if len(data_sources) == 1:
-            display_source, rag_response = source_responses[0]
-            if rag_response.is_completion:
-                rag_content = self._build_rag_completion_response(rag_response, display_source)
-                context_label = f"Pre-synthesized answer from {display_source}"
-            else:
-                rag_content = rag_response.content
-                context_label = f"Retrieved context from {display_source}"
-            rag_metadata = rag_response.metadata
-        else:
-            rag_content, rag_metadata = self._combine_rag_contexts(source_responses)
-            context_label = f"Retrieved context from {len(source_responses)} RAG sources"
-
-        # Build citation instructions from metadata
-        citation_block = ""
-        if rag_metadata:
-            citation_block = self._build_citation_instructions(rag_metadata)
-
-        messages_with_rag = messages.copy()
-        messages_with_rag.insert(self._rag_insert_index(messages_with_rag), {
-            "role": "system",
-            "content": (
-                f"{context_label}:\n\n{rag_content}"
-                f"{self._build_rag_exclusion_notice(rag_exclusions)}"
-                f"{citation_block}\n\n"
-                "Use this context to inform your response. "
-                "Cite sources inline using [1], [2], etc. where applicable."
-            ),
-        })
-
-        async for item in self.stream_with_tools(
-            model_name, messages_with_rag, tools_schema, tool_choice, temperature=temperature, user_email=user_email
-        ):
-            yield item
-
-        # Always yield the references section after RAG+tools responses,
-        # even when tool calls were present — the references are relevant
-        # to the RAG context that informed the LLM's decisions.
         if rag_metadata:
             references_section = self._format_rag_references(rag_metadata)
             if references_section:

@@ -1,15 +1,15 @@
 #!/bin/bash
-# Validation script for issue #791: RAG API v2 tool-oriented query interface
+# Validation script for issue #791: RAG API v2 query-oriented interface
 #
 # Test plan:
 # - Config: api_version selects the v2 endpoint paths; v1 stays the default
-# - Client: query_v2 posts {query, corpora, mode, top_k} and never `messages`
-# - Client: raw mode returns evidence (is_completion=False); synthesized
-#   returns an answer (is_completion=True)
+# - Client: query_v2 posts {query, corpora, search_kwargs} and never `messages`
+# - Client: raw mode builds evidence from references (is_completion=False);
+#   synthesized uses the response verbatim (is_completion=True)
 # - Client: an empty query is rejected before any request is made
-# - Mock E2E: /api/v2/discover/datasources advertises api_version, and
-#   /api/v2/rag/query serves both modes, 400s an empty query and 403s an
-#   unauthorized corpus
+# - Mock E2E: /api/v2/discover/datasources returns DataSource list, and
+#   /api/v2/rag/query serves {response, metadata} with references,
+#   400s an empty query and 403s an unauthorized corpus
 # - Unit tests: atlas/tests/test_atlas_rag_v2.py
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,18 +103,21 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 
-RAW = {
-    'query': 'q', 'mode': 'raw',
-    'results': {'hits': [{'document_ref': 1, 'filename': 'a.pdf', 'title': 'A',
-                          'sections': [{'section_ref': 1, 'text': 'evidence', 'relevance': 0.9}]}],
-                'stats': {'total_found': 1, 'top_k': 4}},
-    'metadata': {'response_time_ms': 12, 'corpora_searched': ['docs']},
+RESP = {
+    'response': 'The answer. [1]',
+    'metadata': {
+        'response_time': 1,
+        'references': [
+            {'filename': 'a.pdf', 'sections': [{'text': 'evidence', 'relevance': 0.9}],
+             'reference': 'Doc A, a.pdf'}
+        ],
+    },
 }
 
 async def main():
     client = AtlasRAGClient(base_url='http://x', bearer_token='t', api_version='v2', top_k=4)
     resp = MagicMock()
-    resp.json.return_value = RAW
+    resp.json.return_value = RESP
     resp.status_code = 200
     resp.raise_for_status = MagicMock()
     with patch('httpx.AsyncClient') as cls:
@@ -130,15 +133,16 @@ async def main():
     assert url.endswith('/api/v2/rag/query'), url
     assert payload['query'] == 'what is X', payload
     assert 'messages' not in payload, payload
-    assert payload['mode'] == 'raw' and payload['top_k'] == 4, payload
+    assert 'mode' not in payload, payload  # mode is client-side only
+    assert payload['search_kwargs']['top_k_final'] == 4, payload
     assert result.is_completion is False, result.is_completion
     assert 'evidence' in result.content, result.content
-    assert result.metadata.documents_found[0].document_ref == 1
+    assert result.metadata.documents_found[0].title == 'Doc A, a.pdf'
     print('query_v2 posts an explicit query and returns raw evidence')
 
 asyncio.run(main())
 "
-print_result $? "query_v2 sends {query, corpora, mode, top_k} and no messages"
+print_result $? "query_v2 sends {query, corpora, search_kwargs} and no messages"
 
 # ==========================================
 # Check 3: synthesized mode is a completion; empty query is refused
@@ -151,10 +155,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
 
 SYNTH = {
-    'query': 'q', 'mode': 'synthesized',
-    'results': {'answer': 'The answer. [1]',
-                'citations': [{'document_ref': 1, 'filename': 'a.pdf'}]},
-    'metadata': {'response_time_ms': 30, 'corpora_searched': ['docs']},
+    'response': 'The answer. [1]',
+    'metadata': {
+        'response_time': 1,
+        'references': [
+            {'filename': 'a.pdf', 'sections': [], 'reference': 'Doc A, a.pdf'}
+        ],
+    },
 }
 
 async def main():
@@ -260,20 +267,14 @@ else
     else
         DISCOVER=$(curl -s -H "Authorization: Bearer $MOCK_TOKEN" \
             "$MOCK_URL/api/v2/discover/datasources?role=read&as_user=alice@example.com")
-        echo "$DISCOVER" | grep -q '"api_version":"v2"' || echo "$DISCOVER" | grep -q '"api_version": "v2"'
-        print_result $? "v2 discovery advertises api_version per source"
+        echo "$DISCOVER" | grep -q '"id":"company-policies"' && echo "$DISCOVER" | grep -q '"label"'
+        print_result $? "v2 discovery returns DataSource list"
 
-        RAW=$(curl -s -H "Authorization: Bearer $MOCK_TOKEN" -H "Content-Type: application/json" \
-            -d '{"query":"vacation policy","corpora":"company-policies","mode":"raw","top_k":2}' \
+        QUERY=$(curl -s -H "Authorization: Bearer $MOCK_TOKEN" -H "Content-Type: application/json" \
+            -d '{"query":"vacation policy","corpora":"company-policies","search_kwargs":{"top_k_final":2}}' \
             "$MOCK_URL/api/v2/rag/query?as_user=alice@example.com")
-        echo "$RAW" | grep -q '"hits"' && echo "$RAW" | grep -q '"sections"'
-        print_result $? "v2 raw mode returns hits with sections"
-
-        SYNTH=$(curl -s -H "Authorization: Bearer $MOCK_TOKEN" -H "Content-Type: application/json" \
-            -d '{"query":"vacation policy","corpora":["company-policies"],"mode":"synthesized"}' \
-            "$MOCK_URL/api/v2/rag/query?as_user=alice@example.com")
-        echo "$SYNTH" | grep -q '"answer"' && echo "$SYNTH" | grep -q '"citations"'
-        print_result $? "v2 synthesized mode returns an answer with citations"
+        echo "$QUERY" | grep -q '"response"' && echo "$QUERY" | grep -q '"references"' && echo "$QUERY" | grep -q '"sections"'
+        print_result $? "v2 query returns response with references and sections"
 
         EMPTY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $MOCK_TOKEN" -H "Content-Type: application/json" \

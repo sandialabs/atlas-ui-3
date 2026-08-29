@@ -59,12 +59,6 @@ class ScriptedToolsLLM:
             yield text
         yield LLMResponse(content=text or "", tool_calls=tool_calls)
 
-    async def stream_with_rag_and_tools(self, model, messages, data_sources, tools_schema,
-                                        user_email, tool_choice="auto", temperature=0.7):
-        async for item in self.stream_with_tools(model, messages, tools_schema, tool_choice,
-                                                  temperature=temperature, user_email=user_email):
-            yield item
-
     async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
         if self.synthesis_error:
             raise self.synthesis_error
@@ -305,3 +299,39 @@ async def test_continuation_provider_error_falls_back_to_synthesis():
 
     assert executed == ["calc"]
     assert resp["message"] == "The calculation returned 4."
+
+
+@pytest.mark.asyncio
+async def test_data_sources_do_not_inject_context_and_offer_the_search_tool():
+    """Selected sources make ``atlas_search`` available; they retrieve nothing.
+
+    Tools mode used to route every turn with data sources through
+    ``stream_with_rag_and_tools``, which queried the sources and prepended the
+    passages as a system message before the model spoke. Now the ordinary
+    streaming call is made and the model has to ask for a search.
+    """
+    llm = ScriptedToolsLLM(turns=[("No search needed.", None)])
+    runner = _runner(llm, _config())
+    runner.config_manager = SimpleNamespace(app_settings=SimpleNamespace(
+        tools_mode_max_extra_rounds=3,
+        feature_agent_mode_available=False,
+        feature_rag_enabled=True,
+        feature_atlas_rag_tools_enabled=True,
+    ))
+    assert not hasattr(llm, "stream_with_rag_and_tools")
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=_session(),
+            model="test-model",
+            messages=[{"role": "user", "content": "what is in the docs?"}],
+            selected_tools=["calc"],
+            selected_data_sources=["srv:docs"],
+            user_email="u@example.com",
+        )
+
+    # The model saw the conversation as-is -- no retrieved-context system turn.
+    assert llm.seen_messages[0] == [{"role": "user", "content": "what is in the docs?"}]
+    requested = runner.tool_manager.get_tools_schema.call_args[0][0]
+    assert requested == ["calc", "atlas_search"]

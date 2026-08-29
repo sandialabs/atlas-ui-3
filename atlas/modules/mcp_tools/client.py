@@ -26,6 +26,7 @@ from fastmcp.client.transports import StreamableHttpTransport  # noqa: F401
 
 from atlas.modules.config import config_manager
 from atlas.modules.mcp_tools.mcp_connection import ConnectionMixin
+from atlas.modules.mcp_tools.atlas_server import RESERVED_SERVER_NAMES
 from atlas.modules.mcp_tools.mcp_discovery import DiscoveryMixin
 from atlas.modules.mcp_tools.mcp_errors import _is_session_terminated_error
 from atlas.modules.mcp_tools.mcp_execution import ExecutionMixin
@@ -48,6 +49,27 @@ from atlas.modules.mcp_tools.mcp_user_client_cache import (
 from atlas.modules.mcp_tools.mcp_user_clients import UserClientMixin
 
 logger = logging.getLogger(__name__)
+
+
+def _drop_reserved_servers(servers_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove configured servers whose name the built-in ``atlas`` server owns.
+
+    ``atlas`` (and the pseudo-server names it replaced) resolve to the built-in
+    tools at every lookup -- the tool index, ``/api/config`` and execution
+    dispatch all short-circuit on them -- so a configured MCP server with one of
+    these names would be silently shadowed: connected, discovered, and then
+    unreachable. Dropping it loudly at load time is the honest failure.
+    """
+    reserved = {name for name in servers_config if name in RESERVED_SERVER_NAMES}
+    if not reserved:
+        return servers_config
+    logger.error(
+        "mcp.json: server name(s) %s are reserved by the built-in ATLAS tools "
+        "(canvas/sleep/search) and have been ignored. Rename the server(s) to "
+        "make their tools reachable.",
+        ", ".join(sorted(reserved)),
+    )
+    return {name: cfg for name, cfg in servers_config.items() if name not in reserved}
 
 # Backwards-compatibility: these names were defined in client.py before the
 # split. Re-exported (and imported above) so existing imports/patches such as
@@ -100,7 +122,9 @@ class MCPToolManager(
             self.config_path = str(candidate)
             # Use default config manager when no path specified
             mcp_config = config_manager.mcp_config
-            self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
+            self.servers_config = _drop_reserved_servers(
+                {name: server.model_dump() for name, server in mcp_config.servers.items()}
+            )
         else:
             # Load config from the specified path
             self.config_path = config_path
@@ -111,7 +135,9 @@ class MCPToolManager(
                 # Convert flat structure to nested structure for Pydantic
                 servers_data = {"servers": data}
                 mcp_config = MCPConfig(**servers_data)
-                self.servers_config = {name: server.model_dump() for name, server in mcp_config.servers.items()}
+                self.servers_config = _drop_reserved_servers(
+                    {name: server.model_dump() for name, server in mcp_config.servers.items()}
+                )
             else:
                 logger.warning(f"Custom config path specified but file not found: {config_path}")
                 self.servers_config = {}
@@ -262,10 +288,10 @@ class MCPToolManager(
 
         # Reload from config manager (which reads from disk)
         new_mcp_config = config_manager.reload_mcp_config()
-        self.servers_config = {
+        self.servers_config = _drop_reserved_servers({
             name: server.model_dump()
             for name, server in new_mcp_config.servers.items()
-        }
+        })
 
         new_servers = set(self.servers_config.keys())
 

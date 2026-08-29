@@ -16,12 +16,15 @@ blocking download in the first place.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from main import cleanup_disconnected_session, websocket_update_callback
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from atlas.domain.messages.models import Message, MessageRole
+from atlas.domain.sessions.models import Session
 from atlas.infrastructure.transport.websocket_connection_adapter import (
     WebSocketConnectionAdapter,
 )
@@ -240,7 +243,141 @@ async def test_disconnect_cleanup_leaves_finished_turn_alone():
     service.end_session.assert_awaited_once_with("session-1")
 
 
-# --- LiteLLM must not reach out to huggingface.co -----------------------------
+# --- disconnect persists the in-flight turn (issue #760) ----------------------
+#
+# PR #776 (issue #755) added the ``except asyncio.CancelledError`` handler in
+# ``ChatService.handle_chat_message`` that commits completed work before
+# re-raising. The same cancel path runs on a client disconnect through
+# ``cleanup_disconnected_session``. This test closes the gap between the
+# persistence unit tests (which call ``handle_chat_message`` directly) and
+# the disconnect tests (which used a plain ``never_ending`` coroutine): it
+# drives the real disconnect entry point against a real ``ChatService`` and
+# verifies the turn is saved.
+
+
+class _RecordingConversationRepo:
+    """Minimal conversation repository that records save_conversation calls."""
+
+    def __init__(self):
+        self.saved = []
+
+    def get_conversation_owner(self, conversation_id):
+        return None
+
+    def save_conversation(self, **kwargs):
+        self.saved.append(kwargs)
+        return MagicMock()
+
+
+def _make_real_chat_service(sessions, conversation_repo):
+    """Build a real ChatService wired to a fake session repository."""
+    from atlas.application.chat.service import ChatService
+
+    async def _get(session_id):
+        return sessions.get(session_id)
+
+    async def _create(s):
+        sessions[s.id] = s
+        return s
+
+    async def _update(s):
+        sessions[s.id] = s
+        return s
+
+    mock_session_repo = MagicMock()
+    mock_session_repo.get = AsyncMock(side_effect=_get)
+    mock_session_repo.create = AsyncMock(side_effect=_create)
+    mock_session_repo.update = AsyncMock(side_effect=_update)
+
+    service = ChatService(
+        llm=MagicMock(),
+        tool_manager=MagicMock(),
+        connection=MagicMock(),
+        config_manager=MagicMock(),
+        session_repository=mock_session_repo,
+    )
+    service.conversation_repository = conversation_repo
+    return service
+
+
+@pytest.mark.asyncio
+async def test_disconnect_persists_in_flight_turn():
+    """A client disconnect mid-turn must persist completed work, not discard it.
+
+    This is the data-loss half of issue #760: ``cleanup_disconnected_session``
+    cancels the chat task, and the ``CancelledError`` handler in
+    ``handle_chat_message`` (added by PR #776 for #755) commits the turn
+    before unwinding. Without that handler the entire interrupted turn --
+    user message, narration, every completed tool call -- is lost on reload.
+    """
+    session_id = uuid4()
+    session = Session(id=session_id, user_email="alice@example.com")
+    session.context["conversation_id"] = "conv-test-760"
+    sessions = {session_id: session}
+    repo = _RecordingConversationRepo()
+    service = _make_real_chat_service(sessions, repo)
+
+    started = asyncio.Event()
+    block_forever = asyncio.Event()
+
+    async def fake_execute(**kwargs):
+        # Simulate work completed before the disconnect lands.
+        session.history.add_message(
+            Message(
+                role=MessageRole.TOOL,
+                content="Tool call: calc_add",
+                metadata={
+                    "message_type": "tool_call",
+                    "tool_call_id": "tc-1",
+                    "tool_name": "calc_add",
+                    "arguments": {"a": 1, "b": 2},
+                    "result": "3",
+                    "status": "completed",
+                },
+            )
+        )
+        started.set()
+        # Block until cancelled. An Event that never fires is immediately
+        # cancellable and fails fast if the cancel never arrives (the await
+        # does not hold a 30s timeout hostage).
+        await asyncio.wait_for(block_forever.wait(), timeout=30)
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+
+    with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+        chat_task = asyncio.create_task(
+            service.handle_chat_message(
+                session_id=session_id,
+                content="add 1 and 2",
+                model="test-model",
+                user_email="alice@example.com",
+            )
+        )
+        await started.wait()
+
+        # Mock MCP release so cleanup_disconnected_session can run end-to-end.
+        with patch("atlas.modules.mcp_tools.mcp_tool_manager.release_sessions",
+                   new=AsyncMock()):
+            await cleanup_disconnected_session(
+                service, session_id, "alice@example.com",
+                {"task": chat_task},
+            )
+
+    # cleanup_disconnected_session does not await the cancelled task, so let
+    # the CancelledError handler finish committing.
+    with pytest.raises(asyncio.CancelledError):
+        await chat_task
+
+    assert repo.saved, (
+        "a turn interrupted by a client disconnect must be persisted, "
+        "not discarded (issue #760)"
+    )
+    saved_messages = repo.saved[-1]["messages"]
+    saved_types = [m.get("message_type") for m in saved_messages]
+    assert "tool_call" in saved_types, (
+        "the completed tool call must survive the disconnect"
+    )
 
 
 def test_hf_tokenizer_download_disabled():

@@ -16,6 +16,7 @@ import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
+import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -558,7 +559,13 @@ export const ChatProvider = ({ children }) => {
 		// via selectedToolsOverride, so honor that list for the agent-mode guard and
 		// the outgoing payload instead of the persisted selection.
 		const toolsToSend = selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools]
-		if (agent.agentModeAvailable && agent.agentModeEnabled && toolsToSend.length === 0) {
+		// Selected data sources imply `atlas_search` (#862): the backend adds it to
+		// the schema, so such a turn does have a tool to act on and must not be
+		// blocked here -- the guard exists for turns with nothing to call at all.
+		if (
+			agent.agentModeAvailable && agent.agentModeEnabled &&
+			toolsToSend.length === 0 && selectedDataSources.size === 0
+		) {
 			toast.error('Agent mode needs at least one tool selected. Choose a tool or turn off Agent mode.')
 			return false
 		}
@@ -568,8 +575,13 @@ export const ChatProvider = ({ children }) => {
 		// RAG is activated when either of these are true:
 		//   1. The RAG toggle is on (ragEnabled)
 		//   2. One or more data sources are selected (hasSelectedSources)
+		//   3. The built-in search tool is selected for this turn (#855). The
+		//      magnifying-glass toggle is gone; selecting `atlas_search` is how a
+		//      user turns search on, and an empty source selection then means
+		//      "everything I can reach" rather than "nothing".
 		const hasSelectedSources = selectedDataSources.size > 0
-		const ragActivated = ragEnabled || hasSelectedSources
+		const searchToolSelected = toolsToSend.some(t => migrateToolName(t) === SEARCH_TOOL)
+		const ragActivated = ragEnabled || hasSelectedSources || searchToolSelected
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []

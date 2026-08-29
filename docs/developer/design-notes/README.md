@@ -13,6 +13,8 @@ docs that describe how the system works today, see the
 - [Agentic Loop](agentic-loop-2026-02-23.md) - The single native agent loop (PR #664)
 - [Multi-Tool Calling](multi-tool-calling-2026-02-22.md) - Parallel execution of tool calls
 - [Built-in Agent Sleep Tool](agent-sleep-tool-2026-08-18.md) - In-process wait for long-running external work (issue #779)
+- [Built-in ATLAS Tool Consolidation](atlas-tool-consolidation-2026-08-27.md) - canvas, sleep and search merged into one `atlas` server (issue #855)
+- [Search Is an Explicit Tool Call](search-as-an-explicit-tool-2026-08-28.md) - RAG stops injecting itself; the model calls `atlas_search`
 - [LLM Token Streaming](llm-token-streaming-2026-02-22.md) - Token streaming architecture
 - [Follow-up Question Suggestions](follow-up-suggestions-2026-03-18.md) - Suggested follow-up prompts
 - [Config Loading Strategy](config-loading-strategy-2026-03-12.md) - localStorage cache + split config endpoint
@@ -26,7 +28,9 @@ docs that describe how the system works today, see the
 - [Atlas CLI and Python API](cli-usage-2026-01-27.md) - CLI/Python client design and usage
 - [Metrics Logging](metrics-logging.md) - Metrics logging feature
 - [Animated Logo](animated-logo-2026-02-27.md) - Animated logo feature flag and effects
+- [Header Container-Width Breakpoint](header-container-width-breakpoint-2026-08-26.md) - Desktop button cluster gated on measured header width, not viewport
 - [Theme Default and Warning Contrast](theme-default-and-warning-contrast-2026-06-14.md) - Dark default + light-mode warning contrast (PR #654)
 - [Compact Tool / System / Approval Messages](compact-tool-system-messages-2026-06-23.md) - Approval prompts as compact rows with persisted collapse
 - [Opt-in Fine-tune Capture](finetune-capture-2026-06-25.md) - Consent-gated chat capture and rollback preference pairs (issue #622)
 - [Agent Busy Indicator](agent-busy-indicator-2026-08-08.md) - Spinner shown between agent loop steps (issue #748)
+- [Agent Steering](agent-steering-2026-08-27.md) - Mid-run user messages injected as normal user turns without stopping the loop (issue #824)

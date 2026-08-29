@@ -26,63 +26,21 @@ fi
 export PYTHONPATH="$PROJECT_ROOT"
 
 # --------------------------------------------------------------------------
-# Check 1: litellm_caller.py call_with_rag_and_tools no longer returns early
-# on is_completion when tools are present
+# Checks 1-3: SUPERSEDED BY PR #862
+#
+# #389 made the RAG+tools path inject an is_completion answer as context so
+# tools stayed available. #862 deleted that path entirely: retrieval in
+# tools/agent mode is now an explicit ``atlas_search`` tool call, and a
+# pre-synthesized answer comes back as that call's tool result. What is left to
+# guard is that the silent path did not come back.
 # --------------------------------------------------------------------------
-echo "--- Check 1: litellm_caller.py does not return early on is_completion in call_with_rag_and_tools ---"
+echo "--- Checks 1-3 (superseded by #862): the RAG+tools injection path stays deleted ---"
 
-# The old code had: return LLMResponse(content=final_response) after is_completion check
-# in call_with_rag_and_tools. The new code should NOT have that pattern.
-if grep -A5 "LLM+RAG+Tools.*RAG returned" "$PROJECT_ROOT/atlas/modules/llm/litellm_caller.py" | grep -q "return LLMResponse"; then
-    fail "litellm_caller.py still returns LLMResponse directly on is_completion in RAG+Tools path"
+if grep -q "call_with_rag_and_tools" "$PROJECT_ROOT/atlas/modules/llm/litellm_caller.py" || \
+   grep -q "stream_with_rag_and_tools" "$PROJECT_ROOT/atlas/modules/llm/litellm_streaming.py"; then
+    fail "the RAG+tools pre-injection path is back (see PR #862)"
 else
-    pass "litellm_caller.py injects is_completion as context instead of returning early"
-fi
-
-# --------------------------------------------------------------------------
-# Check 2: litellm_streaming.py stream_with_rag_and_tools no longer yields
-# and returns early on is_completion when tools are present
-# --------------------------------------------------------------------------
-echo "--- Check 2: litellm_streaming.py does not return early on is_completion in stream_with_rag_and_tools ---"
-
-# Find the stream_with_rag_and_tools method and check for early return on is_completion
-# The old code had: yield LLMResponse(...) then return after is_completion in the tools path
-STREAMING_FILE="$PROJECT_ROOT/atlas/modules/llm/litellm_streaming.py"
-
-# In stream_with_rag_and_tools, the is_completion block should assign rag_content,
-# not yield LLMResponse and return. Use grep to verify no "yield LLMResponse" appears
-# near "stream_with_rag_and_tools" is_completion handling.
-# Extract the method and check for yield+return pattern:
-if python3 -c "
-import re, sys
-with open(sys.argv[1]) as f:
-    content = f.read()
-m = re.search(r'async def stream_with_rag_and_tools.*?(?=\n    async def |\nclass |\Z)', content, re.DOTALL)
-if not m:
-    print('METHOD_NOT_FOUND'); sys.exit(1)
-method = m.group()
-if 'is_completion' not in method:
-    print('NO_IS_COMPLETION'); sys.exit(1)
-after = method.split('is_completion')[1].split('else:')[0]
-if 'yield LLMResponse' in after and 'return' in after:
-    print('EARLY_RETURN'); sys.exit(1)
-print('OK')
-" "$STREAMING_FILE"; then
-    pass "litellm_streaming.py stream_with_rag_and_tools injects is_completion as context"
-else
-    fail "litellm_streaming.py stream_with_rag_and_tools still returns early on is_completion"
-fi
-
-# --------------------------------------------------------------------------
-# Check 3: Pre-synthesized context label is used
-# --------------------------------------------------------------------------
-echo "--- Check 3: Pre-synthesized context label used for is_completion ---"
-
-if grep -q "Pre-synthesized answer from" "$PROJECT_ROOT/atlas/modules/llm/litellm_caller.py" && \
-   grep -q "Pre-synthesized answer from" "$STREAMING_FILE"; then
-    pass "Both files use 'Pre-synthesized answer from' label for is_completion content"
-else
-    fail "Missing 'Pre-synthesized answer from' context label"
+    pass "no RAG+tools pre-injection path in the LLM callers"
 fi
 
 # --------------------------------------------------------------------------

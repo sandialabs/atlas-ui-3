@@ -13,6 +13,7 @@ from atlas.domain.errors import (
     ContextWindowExceededError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMMalformedToolCallError,
     LLMServiceError,
     LLMTimeoutError,
     RateLimitError,
@@ -80,6 +81,7 @@ _ERROR_TYPE_BY_CLASS = (
     (ContextWindowExceededError, "context_window_exceeded"),
     (ValidationError, "validation"),
     (LLMBadRequestError, "bad_request"),
+    (LLMMalformedToolCallError, "malformed_tool_call"),
     (LLMServiceError, "domain"),
 )
 
@@ -108,6 +110,12 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     # below would classify the message rather than the original failure.
     if isinstance(error, LLMBadRequestError):
         return (LLMBadRequestError, error.message, f"LLM rejected the request: {error.message}")
+    if isinstance(error, LLMMalformedToolCallError):
+        return (
+            LLMMalformedToolCallError,
+            error.message,
+            f"Model returned an unusable tool call: {error.message}",
+        )
 
     error_str = str(error)
     error_type_name = type(error).__name__
@@ -149,7 +157,6 @@ async def safe_call_llm_with_tools(
     model: str,
     messages: List[Dict[str, str]],
     tools_schema: List[Dict[str, Any]],
-    data_sources: Optional[List[str]] = None,
     user_email: Optional[str] = None,
     tool_choice: str = "auto",
     temperature: float = 0.7,
@@ -158,34 +165,39 @@ async def safe_call_llm_with_tools(
     Safely call LLM with tools and error handling.
 
     Pure function that handles LLM calling errors with proper classification.
+    Retrieval is not injected here: sources are read only when the model calls
+    ``atlas_search``, which runs through the ordinary tool path.
     """
     try:
-        if data_sources and user_email:
-            llm_response = await llm_caller.call_with_rag_and_tools(
-                model, messages, data_sources, tools_schema, user_email, tool_choice, temperature=temperature
-            )
-            logger.info(f"LLM response received with RAG and tools for user {user_email}, has_tool_calls: {llm_response.has_tool_calls()}")
+        llm_response = await llm_caller.call_with_tools(
+            model, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
+        )
+        # Log metadata at INFO level, content only at DEBUG
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("LLM response received with tools only, llm_response: %s", llm_response)
         else:
-            llm_response = await llm_caller.call_with_tools(
-                model, messages, tools_schema, tool_choice, temperature=temperature, user_email=user_email
+            # Check if llm_response has the expected attributes before logging
+            has_tool_calls = llm_response.has_tool_calls() if hasattr(llm_response, 'has_tool_calls') else False
+            content_length = len(llm_response.content) if hasattr(llm_response, 'content') else 0
+            model_used = getattr(llm_response, 'model_used', 'unknown')
+            logger.info(
+                f"LLM response received with tools only, has_tool_calls: {has_tool_calls}, "
+                f"content_length: {content_length}, model: {model_used}"
             )
-            # Log metadata at INFO level, content only at DEBUG
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("LLM response received with tools only, llm_response: %s", llm_response)
-            else:
-                # Check if llm_response has the expected attributes before logging
-                has_tool_calls = llm_response.has_tool_calls() if hasattr(llm_response, 'has_tool_calls') else False
-                content_length = len(llm_response.content) if hasattr(llm_response, 'content') else 0
-                model_used = getattr(llm_response, 'model_used', 'unknown')
-                logger.info(
-                    f"LLM response received with tools only, has_tool_calls: {has_tool_calls}, "
-                    f"content_length: {content_length}, model: {model_used}"
-                )
         return llm_response
     except Exception as e:
         # Classify the error and raise appropriate error type
         error_class, user_msg, log_msg = classify_llm_error(e)
         logger.error(log_msg, exc_info=True)
+        if error_class is LLMMalformedToolCallError:
+            # Rebuilding drops everything the original carried. `truncated`
+            # decides the turn-closing text that gets *persisted into history*,
+            # so losing it here silently reports the wrong cause forever after.
+            raise LLMMalformedToolCallError(
+                user_msg,
+                tool_names=getattr(e, "tool_names", None),
+                truncated=getattr(e, "truncated", False),
+            )
         if error_class is LLMBadRequestError:
             # Rebuilding the error would drop the attribution it carries.
             raise LLMBadRequestError(user_msg, tool_names=getattr(e, "tool_names", None))

@@ -59,9 +59,9 @@ function findStaleServers(configTools, configPrompts, selectedServers) {
 describe('stale tool detection', () => {
   it('detects tools from removed servers', () => {
     const configTools = [
-      { server: 'canvas', tools: ['canvas'] },
+      { server: 'atlas', tools: ['canvas', 'sleep', 'search'] },
     ]
-    const selected = new Set(['canvas_canvas', 'calculator_add', 'calculator_multiply'])
+    const selected = new Set(['atlas_canvas', 'calculator_add', 'calculator_multiply'])
 
     const stale = findStaleTools(configTools, selected)
     expect(stale).toEqual(['calculator_add', 'calculator_multiply'])
@@ -79,10 +79,10 @@ describe('stale tool detection', () => {
 
   it('returns empty array when all selected tools are valid', () => {
     const configTools = [
-      { server: 'canvas', tools: ['canvas'] },
+      { server: 'atlas', tools: ['canvas', 'sleep', 'search'] },
       { server: 'math', tools: ['add', 'multiply'] },
     ]
-    const selected = new Set(['canvas_canvas', 'math_add'])
+    const selected = new Set(['atlas_canvas', 'math_add'])
 
     const stale = findStaleTools(configTools, selected)
     expect(stale).toEqual([])
@@ -90,7 +90,7 @@ describe('stale tool detection', () => {
 
   it('returns empty array when no tools are selected', () => {
     const configTools = [
-      { server: 'canvas', tools: ['canvas'] },
+      { server: 'atlas', tools: ['canvas', 'sleep', 'search'] },
     ]
     const selected = new Set()
 
@@ -100,12 +100,12 @@ describe('stale tool detection', () => {
 
   it('detects all tools as stale when config has no tool servers', () => {
     const configTools = []
-    const selected = new Set(['math_add', 'canvas_canvas'])
+    const selected = new Set(['math_add', 'atlas_canvas'])
 
     // Note: in ChatContext, the early return prevents this case,
     // but the logic itself would correctly flag them as stale
     const stale = findStaleTools(configTools, selected)
-    expect(stale).toEqual(['math_add', 'canvas_canvas'])
+    expect(stale).toEqual(['math_add', 'atlas_canvas'])
   })
 
   it('handles tool names with underscores correctly', () => {
@@ -192,7 +192,7 @@ describe('useSelections removeTools/removePrompts', () => {
     const { result } = renderHook(() => useSelections())
 
     act(() => {
-      result.current.addTools(['canvas_canvas', 'math_add', 'math_multiply'])
+      result.current.addTools(['atlas_canvas', 'math_add', 'math_multiply'])
     })
 
     expect(result.current.selectedTools.has('math_add')).toBe(true)
@@ -202,7 +202,7 @@ describe('useSelections removeTools/removePrompts', () => {
       result.current.removeTools(['math_add', 'math_multiply'])
     })
 
-    expect(result.current.selectedTools.has('canvas_canvas')).toBe(true)
+    expect(result.current.selectedTools.has('atlas_canvas')).toBe(true)
     expect(result.current.selectedTools.has('math_add')).toBe(false)
     expect(result.current.selectedTools.has('math_multiply')).toBe(false)
   })
@@ -241,13 +241,13 @@ describe('useSelections removeTools/removePrompts', () => {
     const { result } = renderHook(() => useSelections())
 
     act(() => {
-      result.current.addTools(['canvas_canvas'])
+      result.current.addTools(['atlas_canvas'])
     })
 
     act(() => {
       result.current.removeTools([])
     })
 
-    expect(result.current.selectedTools.has('canvas_canvas')).toBe(true)
+    expect(result.current.selectedTools.has('atlas_canvas')).toBe(true)
   })
 })

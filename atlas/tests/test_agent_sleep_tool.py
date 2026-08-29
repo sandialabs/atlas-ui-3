@@ -10,9 +10,11 @@ from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools import client as mcp_client
 from atlas.modules.mcp_tools.client import MCPToolManager
 from atlas.modules.mcp_tools.sleep_tool import (
-    SLEEP_SERVER_NAME,
+    HEARTBEAT_MAX_INTERVAL,
+    HEARTBEAT_MIN_SLEEP,
     SLEEP_TOOL_NAME,
     TURN_BUDGET_KEY,
+    _heartbeat_interval,
     execute_sleep_tool,
 )
 
@@ -43,9 +45,11 @@ def test_get_tools_schema_includes_sleep_tool():
     manager = _manager()
     schemas = manager.get_tools_schema([SLEEP_TOOL_NAME])
 
-    assert [s["function"]["name"] for s in schemas] == [SLEEP_TOOL_NAME]
+    # The legacy name still resolves; it maps onto the consolidated tool (#855).
+    assert [s["function"]["name"] for s in schemas] == ["atlas_sleep"]
     assert "seconds" in schemas[0]["function"]["parameters"]["properties"]
-    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == "atlas_agent"
+    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == "atlas"
+    assert manager.get_server_for_tool("atlas_sleep") == "atlas"
 
 
 @pytest.mark.asyncio
@@ -227,9 +231,9 @@ def test_enabled_tool_is_advertised(monkeypatch):
     _patch_settings(monkeypatch, 7200)
 
     assert [s["function"]["name"] for s in manager.get_tools_schema([SLEEP_TOOL_NAME])] == [
-        SLEEP_TOOL_NAME
+        "atlas_sleep"
     ]
-    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == SLEEP_SERVER_NAME
+    assert manager.get_server_for_tool(SLEEP_TOOL_NAME) == "atlas"
 
 
 def test_client_supplied_step_count_is_clamped_to_the_configured_maximum():
@@ -258,3 +262,161 @@ def test_step_clamp_falls_back_when_no_config_manager():
 
     assert orchestrator._bounded_agent_steps(10_000) == 10
     assert orchestrator._bounded_agent_steps(3) == 3
+
+
+# --- Heartbeat progress tests ------------------------------------------------
+
+def test_heartbeat_interval_short_sleep_returns_full_duration():
+    """Waits at or below the threshold sleep in a single shot."""
+    assert _heartbeat_interval(5) == 5
+    assert _heartbeat_interval(HEARTBEAT_MIN_SLEEP) == HEARTBEAT_MIN_SLEEP
+
+
+def test_heartbeat_interval_long_sleep_is_capped():
+    """Long waits are capped so a 2h sleep does not flood the WebSocket."""
+    assert _heartbeat_interval(7200) == HEARTBEAT_MAX_INTERVAL
+    assert _heartbeat_interval(900) == HEARTBEAT_MAX_INTERVAL
+
+
+def test_heartbeat_interval_medium_sleep_scales_proportionally():
+    """A 60s wait gets ~6s intervals; a 120s wait gets ~12s."""
+    assert _heartbeat_interval(60) == 6.0
+    assert _heartbeat_interval(120) == 12.0
+
+
+@pytest.mark.asyncio
+async def test_sleep_emits_progress_heartbeats(monkeypatch):
+    """A long sleep with an update callback emits tool_progress frames."""
+    progress_calls = []
+
+    async def fake_callback(payload):
+        progress_calls.append(payload)
+
+    chunks = []
+
+    async def fake_sleep(seconds):
+        chunks.append(seconds)
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+
+    result = await execute_sleep_tool(
+        _call(seconds=60),
+        max_seconds=7200,
+        context={"update_callback": fake_callback},
+    )
+
+    assert result.success is True
+    # Multiple heartbeat chunks were slept.
+    assert len(chunks) > 1
+    # The total sleep time equals the requested duration.
+    assert abs(sum(chunks) - 60.0) < 0.01
+    # Progress events were emitted.
+    assert len(progress_calls) >= 2
+    # Each progress event carries the tool_call_id, elapsed, and total.
+    for p in progress_calls:
+        assert p["type"] == "tool_progress"
+        assert p["tool_call_id"] == "sleep-1"
+        assert p["total"] == 60.0
+    # The last progress event reports full elapsed.
+    assert abs(progress_calls[-1]["progress"] - 60.0) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_short_sleep_does_not_emit_heartbeats(monkeypatch):
+    """A short sleep (<= HEARTBEAT_MIN_SLEEP) sleeps in one shot, no beats."""
+    progress_calls = []
+
+    async def fake_callback(payload):
+        progress_calls.append(payload)
+
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+
+    result = await execute_sleep_tool(
+        _call(seconds=5),
+        max_seconds=7200,
+        context={"update_callback": fake_callback},
+    )
+
+    assert result.success is True
+    assert slept == [5.0]
+    assert progress_calls == []
+
+
+@pytest.mark.asyncio
+async def test_sleep_without_callback_does_not_emit_heartbeats(monkeypatch):
+    """No update callback in context means a single sleep, no progress frames."""
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+
+    result = await execute_sleep_tool(
+        _call(seconds=900),
+        max_seconds=7200,
+    )
+
+    assert result.success is True
+    assert slept == [900.0]
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_is_cancellable(monkeypatch):
+    """A cancelled heartbeat loop raises CancelledError, same as a single sleep."""
+    progress_calls = []
+
+    async def fake_callback(payload):
+        progress_calls.append(payload)
+
+    call_count = 0
+
+    async def fake_sleep(seconds):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise asyncio.CancelledError()
+        # First chunk: let it pass
+        return
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await execute_sleep_tool(
+            _call(seconds=900),
+            max_seconds=7200,
+            context={"update_callback": fake_callback},
+        )
+
+    # At least one heartbeat was emitted before cancellation.
+    assert len(progress_calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_total_reflects_clamped_duration(monkeypatch):
+    """The progress total is the *clamped* duration, not the requested one."""
+    progress_calls = []
+
+    async def fake_callback(payload):
+        progress_calls.append(payload)
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr("atlas.modules.mcp_tools.sleep_tool.asyncio.sleep", fake_sleep)
+
+    result = await execute_sleep_tool(
+        _call(seconds=10000),
+        max_seconds=300,
+        context={"update_callback": fake_callback},
+    )
+
+    assert result.success is True
+    # All heartbeats should report the clamped total (300), not 10000.
+    for p in progress_calls:
+        assert p["total"] == 300.0

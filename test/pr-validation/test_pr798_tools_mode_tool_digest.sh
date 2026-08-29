@@ -96,10 +96,6 @@ class _ScriptedToolsLLM:
             yield text
         yield LLMResponse(content=text or "", tool_calls=tool_calls)
 
-    async def stream_with_rag_and_tools(self, *a, **k):
-        async for item in self.stream_with_tools(*a, **k):
-            yield item
-
     async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
         yield self.synthesis
 

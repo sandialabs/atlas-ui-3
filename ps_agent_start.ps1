@@ -6,7 +6,8 @@
 
 .DESCRIPTION
     This script starts the application services (backend, frontend, and optionally MCP mock)
-    in a Windows environment with PowerShell.
+    in a Windows environment with PowerShell. It is the feature-parity counterpart of
+    agent_start.sh; see that script for the canonical behavior.
 
 .PARAMETER FrontendOnly
     Only rebuild frontend
@@ -16,30 +17,123 @@
 
 .PARAMETER StartMcpMock
     Start MCP mock server
+
+.PARAMETER EnvFile
+    Path to .env file to load (default: $ATLAS_ENV_FILE or <project>/.env)
+
+.EXAMPLE
+    .\ps_agent_start.ps1
+    Start all services using the default .env file.
+
+.EXAMPLE
+    .\ps_agent_start.ps1 -e C:\Users\me\.atlasrc -m
+    Start all services using a custom env file and the MCP mock server.
 #>
 
-param(
-    [Alias("f")][switch]$FrontendOnly,
-    [Alias("b")][switch]$BackendOnly,
-    [Alias("m")][switch]$StartMcpMock
-)
+param()
 
 # Force UTF-8 output encoding for the console and all output streams on Windows
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Store the project root directory
-$PROJECT_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition
+# Store the project root directory (resolved once at script scope so helper
+# functions can reuse it without consulting their own $MyInvocation).
+$SCRIPT_PATH = $MyInvocation.MyCommand.Definition
+$PROJECT_ROOT = Split-Path -Parent $SCRIPT_PATH
 Set-Location $PROJECT_ROOT
 
 # Global variables
 $MCP_PID = $null
 $UVICORN_PID = $null
-$ONLY_FRONTEND = $FrontendOnly
-$ONLY_BACKEND = $BackendOnly
-$START_MCP_MOCK = $StartMcpMock
+$ONLY_FRONTEND = $false
+$ONLY_BACKEND = $false
+$START_MCP_MOCK = $false
 $CONTAINER_CMD = $null
 $COMPOSE_CMD = $null
+
+# =============================================================================
+# ARGUMENT PARSING
+# =============================================================================
+# Hand-parse arguments so both the short (-f) and GNU-style long (--frontend-only)
+# spellings work, including --env-file=<path>. PowerShell's param() binder only
+# recognizes single-dash parameter names, so --help/--env-file would otherwise
+# abort with a binding error before this script runs. This mirrors the
+# parse_arguments case statement in agent_start.sh.
+$HelpRequested = $false
+$EnvFileArg = $null
+
+$i = 0
+while ($i -lt $args.Count) {
+    $a = [string]$args[$i]
+    if ($a -in @("-f", "--frontend-only")) {
+        $ONLY_FRONTEND = $true; $i += 1
+    } elseif ($a -in @("-b", "--backend-only")) {
+        $ONLY_BACKEND = $true; $i += 1
+    } elseif ($a -in @("-m", "--mcp-mock")) {
+        $START_MCP_MOCK = $true; $i += 1
+    } elseif ($a -in @("-h", "--help")) {
+        $HelpRequested = $true; $i += 1
+    } elseif ($a -in @("-e", "--env-file")) {
+        if ($i + 1 -ge $args.Count) {
+            Write-Host "Error: --env-file requires an argument"
+            exit 1
+        }
+        $EnvFileArg = [string]$args[$i + 1]; $i += 2
+    } elseif ($a -match '^--env-file=(.*)$') {
+        $EnvFileArg = $Matches[1]; $i += 1
+    } elseif ($a -match '^-e=(.*)$') {
+        $EnvFileArg = $Matches[1]; $i += 1
+    } else {
+        Write-Host "Unknown argument: $a"
+        Write-Host "Run with --help for usage."
+        exit 1
+    }
+}
+
+# Path to the .env file to load. Defaults to ATLAS_ENV_FILE env var if set,
+# otherwise <project_root>/.env. Can be overridden with -e/--env-file.
+# ENV_FILE_EXPLICIT tracks whether the user pointed us at a specific file so
+# that a missing explicit file fails loudly (matching agent_start.sh).
+if ($EnvFileArg) {
+    $script:ENV_FILE = $EnvFileArg
+    $script:ENV_FILE_EXPLICIT = $true
+} elseif ($env:ATLAS_ENV_FILE) {
+    $script:ENV_FILE = $env:ATLAS_ENV_FILE
+    $script:ENV_FILE_EXPLICIT = $true
+} else {
+    $script:ENV_FILE = "$PROJECT_ROOT/.env"
+    $script:ENV_FILE_EXPLICIT = $false
+}
+
+# Expand ~ in env file path if user provided one (matches bash's tilde expansion)
+if ($script:ENV_FILE.StartsWith("~")) {
+    $userProfile = [System.Environment]::GetFolderPath("UserProfile")
+    $script:ENV_FILE = $userProfile + $script:ENV_FILE.Substring(1)
+}
+
+# =============================================================================
+# HELP
+# =============================================================================
+
+function Show-Help {
+    $scriptName = Split-Path -Leaf $SCRIPT_PATH
+    Write-Host "Usage: .\$scriptName [options]"
+    Write-Host "  -f, --frontend-only        Only rebuild frontend"
+    Write-Host "  -b, --backend-only         Only start backend"
+    Write-Host "  -m, --mcp-mock             Start MCP mock server"
+    Write-Host "  -e, --env-file <path>      Path to .env file to load"
+    Write-Host "                              (default: `$ATLAS_ENV_FILE or <project>\.env)"
+    Write-Host "  -h, --help                 Show this help message"
+    Write-Host ""
+    Write-Host "The env file location can also be set via the ATLAS_ENV_FILE environment"
+    Write-Host "variable, which is useful for shared installs where each user keeps API"
+    Write-Host "keys in a personal file such as ~/.atlasrc."
+}
+
+if ($HelpRequested) {
+    Show-Help
+    exit 0
+}
 
 # =============================================================================
 # CLEANUP FUNCTIONS
@@ -116,33 +210,48 @@ function Initialize-ContainerRuntime {
         }
 
         Write-Host "Using Podman as container runtime"
-        return
     } catch {
         # Podman not found, try docker
-    }
-
-    # Check for docker
-    try {
-        $null = Get-Command docker -ErrorAction Stop
-        $script:CONTAINER_CMD = "docker"
-        $script:COMPOSE_CMD = "docker-compose"
-
-        # Check if docker compose (v2) is available
         try {
-            $null = & docker compose version -ErrorAction SilentlyContinue
-            $script:COMPOSE_CMD = "docker compose"
-        } catch {
-            # Fall back to docker-compose v1
-        }
+            $null = Get-Command docker -ErrorAction Stop
+            $script:CONTAINER_CMD = "docker"
+            $script:COMPOSE_CMD = "docker-compose"
 
-        Write-Host "Using Docker as container runtime"
-        return
-    } catch {
-        # Docker not found
+            # Check if docker compose (v2) is available. A native command does
+            # not throw on a non-zero exit (and -ErrorAction is passed through
+            # to docker as an argument), so judge by $LASTEXITCODE rather than
+            # a try/catch -- otherwise the docker-compose v1 fallback is
+            # unreachable.
+            & docker compose version 2>$null 1>$null
+            if ($LASTEXITCODE -eq 0) {
+                $script:COMPOSE_CMD = "docker compose"
+            }
+            # else: leave it as the docker-compose v1 default set above
+
+            Write-Host "Using Docker as container runtime"
+        } catch {
+            # Docker not found
+            Write-Warning "Neither Docker nor Podman found. Container operations will be skipped."
+        }
     }
 
-    # Neither found
-    Write-Warning "Neither Docker nor Podman found. Container operations will be skipped."
+    # Pre-split the (possibly space-separated) compose command into a head
+    # scalar and a tail string array so callers can invoke it uniformly with
+    # `& $script:COMPOSE_HEAD @script:COMPOSE_TAIL <args>`. Doing this once
+    # here avoids the multi-assignment unpacking ambiguity that bites when a
+    # function returns a variable number of elements.
+    if ($script:COMPOSE_CMD) {
+        $parts = $script:COMPOSE_CMD -split " "
+        $script:COMPOSE_HEAD = $parts[0]
+        if ($parts.Length -gt 1) {
+            $script:COMPOSE_TAIL = [string[]]@($parts[1..($parts.Length - 1)])
+        } else {
+            $script:COMPOSE_TAIL = [string[]]@()
+        }
+    } else {
+        $script:COMPOSE_HEAD = $null
+        $script:COMPOSE_TAIL = $null
+    }
 }
 
 # =============================================================================
@@ -150,48 +259,104 @@ function Initialize-ContainerRuntime {
 # =============================================================================
 
 function Initialize-MinIO {
+    # Initialize-Environment runs first and loads the env file (quote-aware) into
+    # the process environment, so read the already-parsed value here rather than
+    # re-scraping the file (a raw regex match would keep surrounding quotes and
+    # misclassify USE_MOCK_S3="false").
     $useMockS3 = $env:USE_MOCK_S3
     if (-not $useMockS3) {
         $useMockS3 = "true"
     }
 
-    # Read USE_MOCK_S3 from .env file if it exists
-    if (Test-Path "$PROJECT_ROOT/.env") {
-        $envContent = Get-Content "$PROJECT_ROOT/.env" -Raw
-        $match = [regex]::Match($envContent, "USE_MOCK_S3=([^\r\n]+)")
-        if ($match.Success) {
-            $useMockS3 = $match.Groups[1].Value.Trim()
-        }
-    }
-
     if ($useMockS3 -eq "true") {
         Write-Host "Using Mock S3 (no Docker/Podman required)"
     } else {
-        if ($null -eq $CONTAINER_CMD) {
-            Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in .env"
+        if ($null -eq $script:CONTAINER_CMD) {
+            Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $script:ENV_FILE"
             exit 1
         }
 
         # Check if MinIO container is running
-        $minioRunning = & $CONTAINER_CMD ps | Select-String -Pattern "atlas-minio"
+        $minioRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-minio" -Quiet
 
         if (-not $minioRunning) {
-            Write-Host "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
+            Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
             Set-Location $PROJECT_ROOT
 
-            # Handle both space-separated and single command formats
-            if ($COMPOSE_CMD -like "* *") {
-                $cmdParts = $COMPOSE_CMD -split " "
-                & $cmdParts[0] $cmdParts[1..($cmdParts.Length-1)] up -d minio minio-init
-            } else {
-                & $COMPOSE_CMD up -d minio minio-init
-            }
+            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL up -d minio minio-init
 
             Write-Host "MinIO started successfully"
             Start-Sleep -Seconds 3
         } else {
             Write-Host "MinIO is already running"
         }
+    }
+    Set-Location $PROJECT_ROOT
+}
+
+function Initialize-ChatHistoryDb {
+    # Initialize-Environment runs first and loads the env file (quote-aware) into
+    # the process environment, so read the already-parsed values here. A raw
+    # file re-scrape would keep surrounding quotes, so
+    # FEATURE_CHAT_HISTORY_ENABLED="true" would fail the -ne "true" test and
+    # silently skip chat-history setup.
+    $chatHistoryEnabled = $env:FEATURE_CHAT_HISTORY_ENABLED
+    if (-not $chatHistoryEnabled) { $chatHistoryEnabled = "false" }
+    $dbUrl = $env:CHAT_HISTORY_DB_URL
+    if (-not $dbUrl) { $dbUrl = "" }
+
+    if ($chatHistoryEnabled -ne "true") {
+        Write-Host "Chat history disabled (FEATURE_CHAT_HISTORY_ENABLED != true)"
+        return
+    }
+
+    # Default to DuckDB if no URL specified
+    if (-not $dbUrl) {
+        $dbUrl = "duckdb:///data/chat_history.db"
+    }
+
+    if ($dbUrl -match "^postgresql") {
+        Write-Host "Chat history: PostgreSQL mode"
+        if ($null -eq $script:CONTAINER_CMD) {
+            Write-Error "PostgreSQL requires Docker/Podman. Install one or switch to DuckDB."
+            Write-Host "  DuckDB: CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db"
+            exit 1
+        }
+
+        $pgRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-postgres" -Quiet
+        if (-not $pgRunning) {
+            Write-Host "PostgreSQL is not running. Starting with $script:COMPOSE_CMD..."
+            Set-Location $PROJECT_ROOT
+
+            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL up -d postgres
+
+            Write-Host "Waiting for PostgreSQL to be ready..."
+            $maxWait = 60
+            $waited = 0
+            $ready = $false
+            while ($waited -lt $maxWait) {
+                & $script:COMPOSE_HEAD @script:COMPOSE_TAIL exec -T postgres pg_isready 2>$null 1>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $ready = $true
+                    break
+                }
+                Start-Sleep -Seconds 2
+                $waited += 2
+            }
+            if (-not $ready) {
+                Write-Error "PostgreSQL did not become ready within ${maxWait}s."
+                exit 1
+            }
+            Write-Host "PostgreSQL is ready."
+        } else {
+            Write-Host "PostgreSQL is already running"
+        }
+    } elseif ($dbUrl -match "^duckdb") {
+        Write-Host "Chat history: DuckDB mode"
+        # Ensure data directory exists for the DuckDB file
+        New-Item -ItemType Directory -Path "$PROJECT_ROOT/data" -Force | Out-Null
+    } else {
+        Write-Host "Chat history: custom DB URL configured"
     }
     Set-Location $PROJECT_ROOT
 }
@@ -206,7 +371,7 @@ function Initialize-Environment {
         exit 1
     }
 
-    # Check if uvicorn is installed (check Scripts directory on Windows)
+    # Check if uvicorn is installed (Scripts directory on Windows)
     $uvicornPath = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     if (-not (Test-Path $uvicornPath)) {
         Write-Error "uvicorn not found in virtual environment"
@@ -217,19 +382,20 @@ function Initialize-Environment {
     # Activate virtual environment (PowerShell equivalent)
     & "$PROJECT_ROOT/.venv/Scripts/Activate.ps1"
 
-    # Load environment variables from .env if present
-    if (Test-Path "$PROJECT_ROOT/.env") {
-        $envContent = Get-Content "$PROJECT_ROOT/.env" -Raw
-        $envVars = $envContent -split "`n" | Where-Object { $_ -match "^[^#].*=" }
-
-        foreach ($line in $envVars) {
-            $keyValue = $line -split "=", 2
-            if ($keyValue.Length -eq 2) {
-                $key = $keyValue[0].Trim()
-                $value = $keyValue[1].Trim()
-                [Environment]::SetEnvironmentVariable($key, $value, "Process")
-            }
-        }
+    # Load environment variables from the env file if present
+    if (Test-Path $script:ENV_FILE) {
+        Write-Host "Loading environment variables from: $script:ENV_FILE"
+        Import-DotEnv -Path $script:ENV_FILE
+        # Make the resolved env file path available to child processes that
+        # consult ATLAS_ENV_FILE so they load the same file. Only set when the
+        # file actually exists; pointing children at a missing path would make
+        # env-var-aware commands (e.g. atlas-chat) fail to start.
+        $env:ATLAS_ENV_FILE = $script:ENV_FILE
+    } elseif ($script:ENV_FILE_EXPLICIT) {
+        # User explicitly pointed us at a file (via -e/--env-file or ATLAS_ENV_FILE)
+        # that does not exist. Fail loudly so missing API keys are obvious.
+        Write-Error "Error: env file not found: $script:ENV_FILE"
+        exit 1
     }
 
     Write-Host "Setting MCP_EXTERNAL_API_TOKEN for testing purposes."
@@ -237,6 +403,89 @@ function Initialize-Environment {
         $env:MCP_EXTERNAL_API_TOKEN = "test-api-key-123"
     }
     Set-Location $PROJECT_ROOT
+}
+
+# Parse a .env file the way bash's `set -a; . "$ENV_FILE"; set +a` does:
+# skip blank/comment lines, strip an optional `export ` prefix, split on the
+# first `=`, and resolve the value with Resolve-DotEnvValue. Variables are set
+# at Process scope so child processes (uvicorn, npm) inherit them.
+#
+# Like pydantic-settings' own dotenv loader (and unlike a real shell source),
+# this does NOT expand $VAR references -- `API_URL="${BASE}/api"` loads
+# literally. That is intentional: the app's pydantic-settings parser also reads
+# the same file without expansion, so matching it here keeps the two paths
+# consistent. Shell-style ${VAR} expansion would silently diverge.
+function Import-DotEnv {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    foreach ($rawLine in Get-Content $Path) {
+        $line = $rawLine.Trim()
+        if ($line -eq "" -or $line.StartsWith("#")) { continue }
+        # Strip an optional "export " prefix
+        if ($line -match "^export\s+") {
+            $line = $line -replace "^export\s+", ""
+        }
+        $idx = $line.IndexOf("=")
+        if ($idx -lt 0) { continue }
+        $key = $line.Substring(0, $idx).Trim()
+        if ($key -eq "") { continue }
+        $value = Resolve-DotEnvValue -Raw $line.Substring($idx + 1)
+        [Environment]::SetEnvironmentVariable($key, $value, "Process")
+    }
+}
+
+# Resolve a raw .env value by scanning it the way bash parses a word after `=`:
+# quoted segments ("..." / '...') are taken literally and concatenated with
+# adjacent unquoted text, and a `#` starts a comment only when it begins a word
+# (i.e. is preceded by whitespace or is the first non-whitespace character).
+# This handles the common cases faithfully, including:
+#   KEY= # set later           -> ""   (whole value is a comment)
+#   KEY="bar"#baz              -> bar#baz  (# abuts the closing quote, no comment)
+#   KEY="bar" # comment        -> bar  (whitespace before # starts a comment)
+#   KEY="a=b=c"                -> a=b=c
+# Escaped quotes inside double quotes (\"...) are not supported -- they are not
+# used in any in-repo .env file and pydantic-settings handles them differently.
+function Resolve-DotEnvValue {
+    param([string]$Raw)
+    $s = $Raw
+    $n = $s.Length
+    $result = [System.Text.StringBuilder]::new()
+    # Track whether each appended character was inside quotes, so trailing
+    # whitespace can be trimmed only when it was unquoted -- `KEY="value "`
+    # must keep its protected trailing space, matching bash.
+    $quoted = [System.Collections.Generic.List[bool]]::new()
+    $i = 0
+    # Skip leading whitespace
+    while ($i -lt $n -and ($s[$i] -eq ' ' -or $s[$i] -eq "`t")) { $i++ }
+    # A leading '#' (possibly after the whitespace skipped above) means the
+    # entire value is a comment -> empty.
+    if ($i -lt $n -and $s[$i] -eq '#') { return "" }
+    while ($i -lt $n) {
+        $ch = $s[$i]
+        if ($ch -eq '"') {
+            $i++
+            while ($i -lt $n -and $s[$i] -ne '"') { $null = $result.Append($s[$i]); $quoted.Add($true); $i++ }
+            if ($i -lt $n) { $i++ }  # skip closing quote
+        } elseif ($ch -eq "'") {
+            $i++
+            while ($i -lt $n -and $s[$i] -ne "'") { $null = $result.Append($s[$i]); $quoted.Add($true); $i++ }
+            if ($i -lt $n) { $i++ }  # skip closing quote
+        } elseif ($ch -eq '#' -and $i -gt 0 -and ($s[$i - 1] -eq ' ' -or $s[$i - 1] -eq "`t")) {
+            # Whitespace-introduced comment -> stop.
+            break
+        } else {
+            $null = $result.Append($ch)
+            $quoted.Add($false)
+            $i++
+        }
+    }
+    $str = $result.ToString()
+    # Trim trailing whitespace that was NOT inside quotes.
+    $end = $str.Length
+    while ($end -gt 0 -and ($str[$end - 1] -eq ' ' -or $str[$end - 1] -eq "`t") -and -not $quoted[$end - 1]) {
+        $end--
+    }
+    return $str.Substring(0, $end)
 }
 
 # =============================================================================
@@ -247,7 +496,15 @@ function Start-McpMock {
     if ($START_MCP_MOCK) {
         Write-Host "Starting MCP mock server..."
         Set-Location "$PROJECT_ROOT/mocks/mcp-http-mock"
-        $script:MCP_PID = Start-Process -FilePath "cmd.exe" -ArgumentList "/c run.bat" -PassThru -NoNewWindow
+        # Set the default tokens in the process environment (mirrors run.bat /
+        # run.sh) so the server sees them, then launch python directly. Going
+        # through `cmd /c run.bat` would return the cmd.exe wrapper PID, and on
+        # Windows killing that wrapper does not terminate the child python
+        # process -- the mock would keep listening on its port after cleanup.
+        # Starting python directly gives Stop-Mcp the real server process.
+        if (-not $env:MCP_MOCK_TOKEN_1) { $env:MCP_MOCK_TOKEN_1 = "test-api-key-123" }
+        if (-not $env:MCP_MOCK_TOKEN_2) { $env:MCP_MOCK_TOKEN_2 = "another-test-key-456" }
+        $script:MCP_PID = Start-Process -FilePath "python" -ArgumentList "main.py" -PassThru -NoNewWindow -WorkingDirectory "$PROJECT_ROOT/mocks/mcp-http-mock"
         Write-Host "MCP mock server started with PID: $($MCP_PID.Id)"
         Set-Location $PROJECT_ROOT
     }
@@ -261,6 +518,10 @@ function Build-Frontend {
     Write-Host "Building frontend..."
     Set-Location "$PROJECT_ROOT/frontend"
     npm install
+    if ($LASTEXITCODE -ne 0) {
+        Set-Location $PROJECT_ROOT
+        throw "npm install failed (exit code $LASTEXITCODE)."
+    }
 
     # Use VITE_* values from the environment / .env instead of hardcoding.
     # If VITE_APP_NAME is not already set, fall back to the example default.
@@ -274,10 +535,21 @@ function Build-Frontend {
     }
 
     npm run build
+    $buildStatus = $LASTEXITCODE
     Set-Location $PROJECT_ROOT
+
+    if ($buildStatus -ne 0) {
+        Write-Host "ERROR: Frontend build failed (npm run build exit code $buildStatus)."
+        Write-Host "Keeping existing atlas/static/ assets; aborting build copy."
+        throw "Frontend build failed (exit code $buildStatus)."
+    }
 
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.
+    if (-not (Test-Path "$PROJECT_ROOT/frontend/dist")) {
+        Write-Host "ERROR: frontend/dist not found after build — keeping existing atlas/static/ assets."
+        throw "frontend/dist not found after build."
+    }
     if (Test-Path "$PROJECT_ROOT/atlas/static") {
         Remove-Item -Recurse -Force "$PROJECT_ROOT/atlas/static"
     }
@@ -317,13 +589,21 @@ function Start-Backend {
 
 function Main {
     # Setup infrastructure
+    # Note: Initialize-Environment must run first to activate the venv so the
+    # venv's podman-compose (if installed there) is found, matching agent_start.sh.
+    Initialize-Environment
     Initialize-ContainerRuntime
     Initialize-MinIO
-    Initialize-Environment
+    Initialize-ChatHistoryDb
 
     # Handle frontend-only mode
     if ($ONLY_FRONTEND) {
-        Build-Frontend
+        try {
+            Build-Frontend
+        } catch {
+            Write-Host "ERROR: Frontend build failed. Aborting."
+            exit 1
+        }
         Write-Host "Frontend rebuilt successfully. Exiting as requested."
         exit 0
     }
@@ -355,7 +635,12 @@ function Main {
     # Full startup mode (default)
     Stop-Processes
     Clear-Logs
-    Build-Frontend
+    try {
+        Build-Frontend
+    } catch {
+        Write-Host "ERROR: Frontend build failed. Aborting startup."
+        exit 1
+    }
     Start-McpMock
     $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
     $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }

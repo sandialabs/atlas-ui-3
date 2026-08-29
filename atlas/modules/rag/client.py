@@ -33,13 +33,14 @@ logger = logging.getLogger(__name__)
 class Section(BaseModel):
     """A relevant section/snippet from a source document.
 
-    Mirrors the ATLAS-RAG OpenAPI ``Section`` shape (v0.3.0.dev1+).
-    Each Section is a snippet of the source document the RAG pipeline
-    surfaced for the user query, with its own relevance score.
+    Mirrors the ATLAS-RAG OpenAPI ``Section`` shape. The v0.8.0 schema
+    defines only ``text`` and ``relevance``; ``section_ref`` is kept
+    optional so the older v1 mock shape (which numbered sections) still
+    parses during the transition.
     """
-    section_ref: int
     text: str
     relevance: float
+    section_ref: Optional[int] = None
 
     @field_validator("relevance")
     @classmethod

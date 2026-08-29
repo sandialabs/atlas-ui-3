@@ -6,6 +6,7 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
+import { sortAtlasFirst } from '../constants/atlasTools'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
@@ -323,7 +324,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     }
   })
   
-  const serverList = Object.values(allServers)
+  const serverList = sortAtlasFirst(Object.values(allServers))
 
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {

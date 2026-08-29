@@ -241,3 +241,68 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # Runtime install must tolerate Python upper-bound constraints in transitive deps.
     assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content
+
+
+def test_use_new_frontend_flag_is_gone():
+    """Guard against quiet reintroduction of the removed USE_NEW_FRONTEND flag.
+
+    The flag was always true and the skip-build branch it guarded referenced a
+    frontend that no longer exists. The flag and its old-frontend code path were
+    removed in PR #865; this test keeps them from sneaking back in.
+
+    Two layers are checked: (1) the literal env-var name must not reappear in
+    any config or startup file, and (2) the startup scripts must not contain a
+    skip-build early-return path (the "Skipping frontend build" message was the
+    old code path's signature). All files checked here are COPY'd into the test
+    container by Dockerfile-test, so this guard runs in both local and CI runs.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+
+    must_be_present = [
+        repo_root / '.env.example',
+        repo_root / 'docker-compose.yml',
+        repo_root / 'agent_start.sh',
+        repo_root / 'ps_agent_start.ps1',
+    ]
+
+    for file_path in must_be_present:
+        assert file_path.exists(), f"Expected file not found: {file_path}"
+        content = file_path.read_text(encoding='utf-8')
+        assert 'USE_NEW_FRONTEND' not in content, (
+            f"'USE_NEW_FRONTEND' was found in {file_path.name} — the flag was "
+            f"removed in PR #865 and should not be reintroduced."
+        )
+
+    # The startup scripts must not contain a skip-build early-return path —
+    # "Skipping frontend build" was the old code path's signature message and
+    # catching it prevents the removed behavior from returning under any name.
+    for script_path in (repo_root / 'agent_start.sh', repo_root / 'ps_agent_start.ps1'):
+        assert script_path.exists(), f"Expected startup script not found: {script_path}"
+        script_content = script_path.read_text(encoding='utf-8')
+        assert 'Skipping frontend build' not in script_content, (
+            f"A skip-build path was found in {script_path.name} — the frontend "
+            f"should always be built (PR #865 removed the skip branch)."
+        )
+
+
+def test_use_new_frontend_flag_is_gone_in_dockerfile_test():
+    """Guard against the flag reappearing in Dockerfile-test.
+
+    Dockerfile-test is COPY'd into the test container by this PR, so this guard
+    runs in both local and CI runs. The pytest.skip is retained as a fallback
+    for environments that strip top-level Dockerfiles before testing.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    dockerfile_path = repo_root / 'Dockerfile-test'
+
+    if not dockerfile_path.exists():
+        pytest.skip(
+            "Dockerfile-test not present in this checkout (expected when "
+            "running inside a container image that does not COPY it)."
+        )
+
+    content = dockerfile_path.read_text(encoding='utf-8')
+    assert 'USE_NEW_FRONTEND' not in content, (
+        "'USE_NEW_FRONTEND' was found in Dockerfile-test — the flag was "
+        "removed in PR #865 and should not be reintroduced."
+    )

@@ -12,6 +12,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.mcp_tools.atlas_server import SEARCH_TOOL_NAME, normalize_tool_name
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from .modes.agent import AgentModeRunner
@@ -22,6 +23,7 @@ from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.message_builder import MessageBuilder
 from .preprocessors.prompt_override_service import PromptOverrideService
 from .utilities import event_notifier, file_processor
+from .utilities.search_tool_selection import with_search_tool
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +206,56 @@ class ChatOrchestrator:
             code="MODEL_ACCESS_DENIED",
         )
 
+    async def _resolve_search_tool(
+        self,
+        selected_tools: Optional[List[str]],
+        selected_data_sources: Optional[List[str]],
+    ) -> Optional[List[str]]:
+        """Add the implied ``atlas_search`` tool, or say why it is not there.
+
+        A data source selection scopes search and makes the tool available
+        (#862). When the built-in search tool is turned off but general RAG is
+        not -- ``FEATURE_RAG_ENABLED=true`` with
+        ``FEATURE_ATLAS_RAG_TOOLS_ENABLED=false``, a supported combination -- a
+        turn that also has tools selected runs in tools mode, where nothing can
+        read those sources any more. Answering anyway without the user's chosen
+        evidence is exactly the silence this change set out to remove, so the
+        user is told. Returns the tool list to use.
+        """
+        if not selected_data_sources:
+            return selected_tools
+
+        resolved = with_search_tool(
+            selected_tools, selected_data_sources, self.config_manager,
+        )
+        if any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in resolved):
+            # Either the user selected search themselves (possibly under its
+            # pre-#855 name) or the sources implied it. Nothing to warn about.
+            return resolved
+
+        # No search tool in the turn. That only strands the sources when the
+        # turn is going to run in tools/agent mode; with no tools at all it
+        # routes to RAG mode, which reads them itself. ``config_manager`` is
+        # None for programmatic callers that never had feature flags to consult,
+        # so there is nothing to report to them either.
+        if resolved and self.config_manager is not None:
+            logger.warning(
+                "Data sources selected but the built-in search tool is disabled; "
+                "this turn will not search them",
+            )
+            await self.event_publisher.publish_warning(
+                message=(
+                    "**Your data sources were not searched.** The built-in "
+                    "`atlas_search` tool is turned off "
+                    "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), and searching is now "
+                    "something the model asks for rather than something that "
+                    "happens automatically. Deselect your tools to use plain RAG "
+                    "for this turn, or ask an administrator to enable the "
+                    "built-in search tool."
+                ),
+            )
+        return selected_tools
+
     async def execute(
         self,
         session_id: UUID,
@@ -218,6 +270,7 @@ class ChatOrchestrator:
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
         rewind_to_user_index: Optional[int] = None,
+        steering: Optional[Any] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -238,6 +291,10 @@ class ChatOrchestrator:
             rewind_to_user_index: When set, rewind history to this user message
                 (0-based ordinal) before adding the new prompt, dropping that
                 prompt and everything after it (overwrite-in-place edit/resubmit)
+            steering: Optional steering channel (issue #824). Forwarded only to
+                agent mode, where the loop drains it at each iteration boundary
+                so a user message sent mid-run reaches the LLM as a normal user
+                turn without stopping the loop. Other modes ignore it.
             **kwargs: Additional parameters
 
         Returns:
@@ -422,6 +479,14 @@ class ChatOrchestrator:
                     ),
                 )
 
+        # #862: retrieval is an explicit ``atlas_search`` call, and a data source
+        # selection implies that tool. Resolved HERE, before the agent-mode guard
+        # below -- otherwise "sources selected, no other tool" is downgraded to a
+        # plain chat turn before the tool it implies exists.
+        selected_tools = await self._resolve_search_tool(
+            selected_tools, selected_data_sources,
+        )
+
         # Agent mode needs at least one tool to act on. With no tools selected
         # the agentic loop has nothing to call, and tool-seeking prompts can
         # drive the model to emit a tool call the provider then rejects
@@ -450,6 +515,7 @@ class ChatOrchestrator:
                 max_steps=self._bounded_agent_steps(kwargs.get("agent_max_steps")),
                 temperature=temperature,
                 agent_loop_strategy=kwargs.get("agent_loop_strategy"),
+                steering=steering,
             )
         elif selected_tools and not only_rag:
             # Apply tool authorization

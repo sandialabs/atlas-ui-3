@@ -239,11 +239,9 @@ start_mcp_mock() {
 # =============================================================================
 
 build_frontend() {
-    local use_new_frontend="${USE_NEW_FRONTEND:-true}"
-
     echo "Building frontend..."
     cd "$PROJECT_ROOT/frontend"
-    npm install
+    npm install || { echo "ERROR: npm install failed."; cd "$PROJECT_ROOT"; return 1; }
     # Use VITE_* values from the environment / .env instead of hardcoding.
     # If VITE_APP_NAME is not already set, fall back to the example default.
     if [ -z "$VITE_APP_NAME" ]; then
@@ -254,12 +252,23 @@ build_frontend() {
         export VITE_FEATURE_RAG_CITATIONS="false"
     fi
     npm run build
+    local build_status=$?
     cd "$PROJECT_ROOT"
+
+    if [ "$build_status" -ne 0 ]; then
+        echo "ERROR: Frontend build failed (npm run build exit code $build_status)."
+        echo "Keeping existing atlas/static/ assets; aborting build copy."
+        return 1
+    fi
 
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.
+    if [ ! -d "$PROJECT_ROOT/frontend/dist" ]; then
+        echo "ERROR: frontend/dist not found after build — keeping existing atlas/static/ assets."
+        return 1
+    fi
     rm -rf "$PROJECT_ROOT/atlas/static"
-    cp -r "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
+    cp -r "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static" || { echo "ERROR: Failed to copy frontend/dist to atlas/static/."; return 1; }
 }
 
 # =============================================================================
@@ -360,7 +369,7 @@ main() {
 
     # Handle frontend-only mode
     if [ "$ONLY_FRONTEND" = true ]; then
-        build_frontend
+        build_frontend || { echo "ERROR: Frontend build failed. Aborting."; exit 1; }
         echo "Frontend rebuilt successfully. Exiting as requested."
         exit 0
     fi
@@ -381,7 +390,7 @@ main() {
     # Full startup mode (default)
     cleanup_processes
     cleanup_logs
-    build_frontend
+    build_frontend || { echo "ERROR: Frontend build failed. Aborting startup."; exit 1; }
     start_mcp_mock
     start_backend "${PORT:-8000}" "${ATLAS_HOST:-127.0.0.1}"
     

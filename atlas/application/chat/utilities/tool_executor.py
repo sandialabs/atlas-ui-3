@@ -11,9 +11,17 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
+from atlas.domain.errors import ToolError
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.llm import LLMResponse
+from atlas.modules.llm.tool_call_guard import repair_structural_json
+from atlas.modules.mcp_tools.atlas_server import (
+    ATLAS_SERVER_NAME,
+    CANVAS_TOOL_NAME,
+    LEGACY_SERVER_NAMES,
+    normalize_tool_name,
+)
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -24,33 +32,16 @@ logger = logging.getLogger(__name__)
 
 
 def _try_repair_json(raw: str) -> Optional[Dict[str, Any]]:
-    """Attempt to repair truncated JSON from LLM tool arguments.
+    """Repair structurally incomplete tool arguments (missing braces only).
 
-    Common cases: missing opening/closing braces, trailing quote.
-    Returns parsed dict on success, None on failure.
+    Delegates to ``repair_structural_json``, which is the single definition of
+    what a repair may do: complete the shape of an object, never the content of
+    a value. The LLM layer applies the same repair while accumulating a
+    response, so a call reaching the executor has normally been repaired
+    already; this remains for arguments that arrive from elsewhere (an
+    approval-time edit, a replayed history row).
     """
-    s = raw.strip()
-    # Add missing braces
-    if not s.startswith("{"):
-        s = "{" + s
-    if not s.endswith("}"):
-        s = s + "}"
-    try:
-        result = json.loads(s)
-        if isinstance(result, dict):
-            return result
-    except Exception:
-        pass
-    # Try closing an open string value: e.g. {"expression": "355/113
-    if s.count('"') % 2 != 0:
-        s = s.rstrip("}") + '"}'
-        try:
-            result = json.loads(s)
-            if isinstance(result, dict):
-                return result
-        except Exception:
-            pass
-    return None
+    return repair_structural_json(raw)
 
 
 # Type hint for update callback
@@ -275,7 +266,7 @@ def build_mcp_data(tool_manager) -> Dict[str, Any]:
         return {"available_servers": available_servers}
 
     for server_name, server_data in tool_manager.available_tools.items():
-        if server_name == "canvas":
+        if server_name == ATLAS_SERVER_NAME or server_name in LEGACY_SERVER_NAMES:
             continue
 
         tools_list = server_data.get("tools", []) or []
@@ -620,6 +611,7 @@ async def execute_single_tool(
                                 tool_call.function.name,
                                 tool_manager
                             )
+                            display_args = _sanitize_args_for_ui(dict(filtered_args))
                         else:
                             # No actual changes, but response included arguments - keep original filtered_args
                             logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
@@ -635,7 +627,9 @@ async def execute_single_tool(
                     ))
 
             # Send tool start notification with sanitized args
-            await event_notifier.notify_tool_start(tool_call, display_args, update_callback)
+            await event_notifier.notify_tool_start(
+                tool_call, display_args, update_callback, tool_manager=tool_manager
+            )
 
             # Create tool call object and execute with filtered args only
             tool_call_obj = ToolCall(
@@ -874,11 +868,21 @@ def prepare_tool_arguments(tool_call, session_context: Dict[str, Any], tool_mana
                     )
                     parsed_args = repaired
                 else:
+                    # Running with {} is the silent-wrong-answer case this whole
+                    # guard exists to prevent: for a tool whose parameters are
+                    # all optional it succeeds and returns a plausible result for
+                    # a request the user never made. Fail the call instead --
+                    # execute_single_tool turns this into a failed ToolResult, so
+                    # the model is told and can reissue.
+                    name = getattr(tool_call.function, "name", "<unknown>")
                     logger.warning(
-                        "Failed to parse tool arguments as JSON for %s, using empty dict. Raw: %r",
-                        getattr(tool_call.function, "name", "<unknown>"), raw_args
+                        "Failed to parse tool arguments as JSON for %s. Raw: %r",
+                        name, raw_args,
                     )
-                    parsed_args = {}
+                    raise ToolError(
+                        f"The arguments for '{name}' were not valid JSON, so the "
+                        "tool was not run."
+                    )
 
     # Inject _atlas_user and file URL mappings with schema awareness
     return inject_context_into_args(parsed_args, session_context, tool_call.function.name, tool_manager)
@@ -971,7 +975,10 @@ async def handle_synthesis_decision(
     # calls at all (None or []): that is not "canvas-only" and must fall through
     # to synthesis instead of claiming content was displayed in the canvas.
     response_tool_calls = llm_response.tool_calls or []
-    canvas_tool_calls = [tc for tc in response_tool_calls if tc.function.name == "canvas_canvas"]
+    canvas_tool_calls = [
+        tc for tc in response_tool_calls
+        if normalize_tool_name(tc.function.name) == CANVAS_TOOL_NAME
+    ]
     has_only_canvas_tools = bool(response_tool_calls) and len(canvas_tool_calls) == len(response_tool_calls)
 
     if has_only_canvas_tools:

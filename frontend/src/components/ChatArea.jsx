@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Search, Image, Wrench, WifiOff } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench, WifiOff } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
@@ -29,7 +29,7 @@ const formatFileSize = (bytes) => {
   return `${bytes} bytes`
 }
 
-const ChatArea = ({ onOpenRagPanel }) => {
+const ChatArea = () => {
   const [inputValue, setInputValue] = useState('')
   const [isMobile, setIsMobile] = useState(false)
   // uploadedFiles: { filename: { content: base64, extractMode: "full"|"preview"|"none" } }
@@ -74,10 +74,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
     isStreaming,
     answerAgentQuestion,
     fileExtraction,
-    ragEnabled,
-    toggleRagEnabled,
     selectedDataSources,
-    clearDataSources,
     features,
     fileUpload,
     appName,
@@ -816,7 +813,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
           <div>User: {user}</div>
           <div>Model: {currentModel}</div>
           <div>Selected Tools: {[...selectedTools].join(', ') || 'None'}</div>
-          {ragEnabled && <div>RAG Sources: {[...selectedDataSources].join(', ') || 'None selected'}</div>}
+          {selectedDataSources?.size > 0 && <div>RAG Sources: {[...selectedDataSources].join(', ')}</div>}
           {agentModeEnabled && <div>Agent Mode: Enabled</div>}
           <div>Messages: {messages.length}</div>
         </div>
@@ -824,7 +821,7 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       <main
         ref={messagesRef}
-        className={`chat-messages overflow-y-auto overflow-x-hidden custom-scrollbar p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
+        className={`chat-messages overflow-y-auto overflow-x-hidden custom-scrollbar p-2 sm:p-4 space-y-4 min-h-0 ${isWelcomeVisible ? 'hidden' : 'flex-1'}`}
       >
         {/* withUserOrdinals assigns each rewindable user message its 0-based
             ordinal (null for non-rewindable rows -- assistant/tool/system and
@@ -841,11 +838,11 @@ const ChatArea = ({ onOpenRagPanel }) => {
           />
         ))}
         {agentModeEnabled && agentPendingQuestion && (
-          <div className="flex items-start gap-3 w-full">
-            <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+          <div className="flex items-start gap-0 sm:gap-3 w-full">
+            <div className="w-8 h-8 rounded-full bg-purple-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
               A
             </div>
-            <div className="w-full bg-gray-800 rounded-lg p-4 border border-purple-700">
+            <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4 border border-purple-700">
               <div className="text-sm font-medium text-purple-300 mb-2">Agent needs your input</div>
               <div className="text-gray-200 mb-3">{agentPendingQuestion}</div>
               <div className="flex gap-2">
@@ -866,11 +863,11 @@ const ChatArea = ({ onOpenRagPanel }) => {
           </div>
         )}
         {isThinking && (
-          <div className="flex items-start gap-3 w-full">
-            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+          <div className="flex items-start gap-0 sm:gap-3 w-full">
+            <div className="w-8 h-8 rounded-full bg-blue-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
               A
             </div>
-            <div className="w-full bg-gray-800 rounded-lg p-4">
+            <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4">
               <div className="text-sm font-medium text-gray-300 mb-2">{appName}</div>
               <div className="flex items-center gap-2 text-gray-400">
                 <svg className="w-4 h-4 spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -907,8 +904,8 @@ const ChatArea = ({ onOpenRagPanel }) => {
 
       {/* Follow-up suggestion buttons */}
       {followUpSuggestions.length > 0 && !isThinking && !isStreaming && (
-        <div className="px-4 py-1 flex-shrink-0">
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide ml-11">
+        <div className="px-2 sm:px-4 py-1 flex-shrink-0">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide ml-0 sm:ml-11">
             {followUpSuggestions.map((question, idx) => (
               <button
                 key={`${idx}-${question.substring(0, 20)}`}
@@ -1095,30 +1092,6 @@ const ChatArea = ({ onOpenRagPanel }) => {
               >
                 <Paperclip className="w-5 h-5" />
               </button>
-              {/* RAG Toggle Button - only show if RAG feature is enabled */}
-              {features?.rag && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (ragEnabled || selectedDataSources?.size > 0) {
-                      // Turn off RAG: clear data sources and disable
-                      clearDataSources()
-                      if (ragEnabled) toggleRagEnabled()
-                    } else {
-                      // Turn on RAG: open the panel so user can select data sources
-                      onOpenRagPanel?.()
-                    }
-                  }}
-                  className={`px-3 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
-                    ragEnabled || selectedDataSources?.size > 0
-                      ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                  }`}
-                  title={ragEnabled || selectedDataSources?.size > 0 ? 'Click to disable RAG and clear data sources' : 'Click to select data sources'}
-                >
-                  <Search className="w-5 h-5" />
-                </button>
-              )}
               {/* Gate on the run-in-flight signals, NOT the live agentModeEnabled
                   toggle: agent mode can be flipped off mid-run (Ctrl+Alt+A / the
                   toggle button), and the user must still be able to stop a

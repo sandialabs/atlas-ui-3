@@ -299,7 +299,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 </span>
               )}
               <span className="font-medium text-sm min-w-0 break-words">{message.tool_name}</span>
-              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} progressRaw={message.progressRaw} />}
             </button>
           ) : (
             <button
@@ -332,7 +332,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               </span>
               <span className="font-medium min-w-0 break-words">{message.tool_name}</span>
               <span className="text-gray-400 text-sm min-w-0 break-words">({message.server_name})</span>
-              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} />}
+              {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} progressRaw={message.progressRaw} />}
             </button>
           )}
 
@@ -697,22 +697,22 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // padding aligns their content under the assistant column (avatar w-8 + gap-3).
   if (isCompact) {
     return (
-      <div ref={containerRef} className="w-full min-w-0 pl-11 pr-2 text-sm">
+      <div ref={containerRef} className="w-full min-w-0 pl-0 sm:pl-11 pr-2 text-sm">
         {renderContent()}
       </div>
     )
   }
 
   return (
-    <div className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse' : 'w-full'} group`}>
-      <div className={`w-8 h-8 rounded-full ${avatarBg} flex items-center justify-center text-white text-sm font-medium flex-shrink-0`}>
+    <div className={`flex items-start gap-0 sm:gap-3 ${isUser ? 'flex-row-reverse' : 'w-full'} group`}>
+      <div className={`w-8 h-8 rounded-full ${avatarBg} items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex`}>
         {avatarText}
       </div>
 
       {/* The bubble is a flex sibling of the avatar, so it must be allowed to
           shrink (min-w-0): with the default min-width:auto a single unbroken
           token inside would push the row past the viewport. */}
-      <div ref={containerRef} className={`min-w-0 ${isUser ? 'max-w-[70%] user-message-bubble' : 'flex-1 bg-gray-800'} rounded-lg p-4`}>
+      <div ref={containerRef} className={`min-w-0 ${isUser ? 'max-w-[85%] sm:max-w-[70%] user-message-bubble' : 'flex-1 bg-gray-800'} rounded-lg p-3 sm:p-4`}>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium text-gray-300">

@@ -16,9 +16,11 @@ to manage its own control flow.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
@@ -26,11 +28,20 @@ from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
+from ..utilities.dropped_calls import publish_dropped_call_warning
+from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
+from .steering import SteeringChannel
 from .streaming_final_answer import stream_final_answer
 
 logger = logging.getLogger(__name__)
+
+# Cap on a single injected steering message. Steering is a short instruction
+# that re-directs a running agent; an unbounded payload could dominate the
+# prompt and the persisted history. Oversized messages are truncated, not
+# dropped, so the user's intent still reaches the model (issue #824 review).
+_STEERING_MAX_CHARS = 8000
 
 
 def _to_tool_call_dict(tc: Any) -> Dict[str, Any]:
@@ -109,16 +120,24 @@ class AgenticLoop(AgentLoopProtocol):
         event_handler: AgentEventHandler,
         streaming: bool = False,
         event_publisher=None,
+        steering: Optional[SteeringChannel] = None,
     ) -> AgentResult:
         await event_handler(AgentEvent(
             type="agent_start",
             payload={"max_steps": max_steps, "strategy": "agentic"},
         ))
 
+        # Selecting data sources makes ``atlas_search`` available; it never
+        # runs retrieval on its own. The model decides whether to call it, and
+        # the call shows up in the UI like any other tool.
+        effective_tools = with_search_tool(
+            selected_tools, data_sources, self.config_manager,
+        )
+
         tools_schema: List[Dict[str, Any]] = []
-        if selected_tools and self.tool_manager:
+        if effective_tools and self.tool_manager:
             tools_schema = await error_handler.safe_get_tools_schema(
-                self.tool_manager, selected_tools,
+                self.tool_manager, effective_tools,
             )
 
         use_streaming = streaming and event_publisher
@@ -143,6 +162,7 @@ class AgenticLoop(AgentLoopProtocol):
                 use_streaming=use_streaming,
                 event_publisher=event_publisher,
                 recorder=recorder,
+                steering=steering,
             )
         except BaseException:
             # A stop, a client disconnect, or a mid-step failure leaves this
@@ -192,6 +212,7 @@ class AgenticLoop(AgentLoopProtocol):
         use_streaming: bool,
         event_publisher,
         recorder: ToolCallRecorder,
+        steering: Optional[SteeringChannel] = None,
     ) -> Tuple[int, Optional[str]]:
         """Run the tool-calling steps, returning ``(steps, final_answer)``.
 
@@ -209,6 +230,13 @@ class AgenticLoop(AgentLoopProtocol):
         while steps < max_steps:
             steps += 1
 
+            # Issue #824: inject any steering messages the user sent while the
+            # loop was running. Drained here at the iteration boundary (not
+            # mid-step) so an in-flight tool call finishes before the new user
+            # turn reaches the model. The loop is neither broken nor stopped;
+            # the steering text becomes a normal user turn in history.
+            _inject_steering(steering, messages, context, steps)
+
             # Sanitize messages: OpenAI rejects empty tool_calls arrays
             for i, msg in enumerate(messages):
                 if isinstance(msg, dict) and "tool_calls" in msg and not msg["tool_calls"]:
@@ -220,11 +248,28 @@ class AgenticLoop(AgentLoopProtocol):
             ))
 
             llm_response = await self._call_llm(
-                model, messages, tools_schema, data_sources,
+                model, messages, tools_schema,
                 context, temperature, use_streaming, event_publisher,
             )
 
             if not llm_response.has_tool_calls():
+                # The model produced a text-only response, which normally ends
+                # the loop. But if the user steered *while this response was
+                # being generated*, that steering is still waiting in the
+                # channel -- folding the response in as intermediate narration
+                # and continuing lets the model address the new instruction
+                # instead of handing the user a final answer that ignores it.
+                # The loop is not stopped; the next iteration's boundary drain
+                # injects the steering and calls the LLM again. The drain is
+                # deliberately NOT done here: at the step-budget boundary the
+                # ``continue`` exits the loop, and injecting here would persist
+                # a USER turn no model ever saw. Leaving it in the channel lets
+                # the runner surface it as a leftover instead (issue #824).
+                if steering is not None and steering.has_pending():
+                    _fold_text_only_as_intermediate(
+                        messages, context, llm_response, steps,
+                    )
+                    continue
                 final_answer = llm_response.content or ""
                 break
 
@@ -270,7 +315,7 @@ class AgenticLoop(AgentLoopProtocol):
                     "user_email": context.user_email,
                     "files": context.files,
                     # None and [] mean different things downstream: None is "the
-                    # user made no selection" (atlas_rag_query falls back to every
+                    # user made no selection" (atlas_search falls back to every
                     # authorized source), [] is "explicitly no sources" (query
                     # nothing). Collapsing None to [] would break RAG for every
                     # agent turn where the user picked no sources.
@@ -324,7 +369,6 @@ class AgenticLoop(AgentLoopProtocol):
         model: str,
         messages: List[Dict[str, Any]],
         tools_schema: List[Dict[str, Any]],
-        data_sources: Optional[List[str]],
         context: AgentContext,
         temperature: float,
         use_streaming: bool,
@@ -339,41 +383,34 @@ class AgenticLoop(AgentLoopProtocol):
         """
         if use_streaming:
             return await self._call_llm_streaming(
-                model, messages, tools_schema, data_sources,
+                model, messages, tools_schema,
                 context, temperature, event_publisher,
             )
 
-        if data_sources and context.user_email:
-            return await self.llm.call_with_rag_and_tools(
-                model, messages, data_sources, tools_schema,
-                context.user_email, "auto", temperature=temperature,
-            )
-        return await self.llm.call_with_tools(
+        # No RAG pre-injection: retrieval only happens if the model calls
+        # ``atlas_search``, which runs through the normal tool path.
+        response = await self.llm.call_with_tools(
             model, messages, tools_schema, "auto",
             temperature=temperature, user_email=context.user_email,
         )
+        # Streaming off must not make a dropped call silent.
+        await publish_dropped_call_warning(event_publisher, response)
+        return response
 
     async def _call_llm_streaming(
         self,
         model: str,
         messages: List[Dict[str, Any]],
         tools_schema: List[Dict[str, Any]],
-        data_sources: Optional[List[str]],
         context: AgentContext,
         temperature: float,
         event_publisher,
     ) -> LLMResponse:
         """Stream an LLM call, publishing tokens and returning the final response."""
-        if data_sources and context.user_email:
-            stream = self.llm.stream_with_rag_and_tools(
-                model, messages, data_sources, tools_schema,
-                context.user_email, "auto", temperature=temperature,
-            )
-        else:
-            stream = self.llm.stream_with_tools(
-                model, messages, tools_schema, "auto",
-                temperature=temperature, user_email=context.user_email,
-            )
+        stream = self.llm.stream_with_tools(
+            model, messages, tools_schema, "auto",
+            temperature=temperature, user_email=context.user_email,
+        )
 
         accumulated_content = ""
         final_response: Optional[LLMResponse] = None
@@ -389,6 +426,33 @@ class AgenticLoop(AgentLoopProtocol):
                     is_first = False
                 elif isinstance(item, LLMResponse):
                     final_response = item
+        except LLMMalformedToolCallError:
+            # The model announced tool calls that could not be run, and none
+            # survived the JSON check. Treating the narration as a finished
+            # answer would hand the user a reply that silently skipped the work
+            # it just promised, so this failure propagates even when text was
+            # already streamed. Close the open bubble first so the UI does not
+            # keep a live cursor behind the error.
+            logger.warning("Malformed tool call ended the streaming agent turn")
+            if accumulated_content:
+                await event_publisher.publish_token_stream(
+                    token="", is_first=False, is_last=True,
+                )
+                # Match tools mode: text the user watched stream in is kept, as
+                # the same display-only agent_intermediate row a completed step
+                # writes, so a reload shows what actually happened rather than
+                # a turn that appears to have said nothing.
+                context.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=accumulated_content,
+                    metadata={
+                        "agent_mode": True,
+                        "agent_intermediate": True,
+                        "message_type": "agent_intermediate",
+                        "incomplete": True,
+                    },
+                ))
+            raise
         except Exception:
             logger.exception("Error during streaming LLM call in agentic loop")
             if not accumulated_content:
@@ -408,6 +472,10 @@ class AgenticLoop(AgentLoopProtocol):
         elif accumulated_content and not final_response.content:
             final_response.content = accumulated_content
 
+        # A partial drop keeps the turn alive, so it has to be said out loud or
+        # it is invisible.
+        await publish_dropped_call_warning(event_publisher, final_response)
+
         # Close any streamed text, including narration for tool-call turns, so
         # each iteration finalizes as its own UI bubble before tool rows render.
         if accumulated_content:
@@ -416,3 +484,89 @@ class AgenticLoop(AgentLoopProtocol):
             )
 
         return final_response
+
+
+def _inject_steering(
+    steering: Optional[SteeringChannel],
+    messages: List[Dict[str, Any]],
+    context: AgentContext,
+    step: int,
+) -> int:
+    """Drain pending steering messages and append each as a normal user turn.
+
+    Non-blocking: returns immediately when no channel is supplied or the queue
+    is empty. Each drained message is appended both to the live ``messages``
+    list (so the next LLM call sees it) and to ``context.history`` (so the turn
+    persists and reloads show it). The message carries no display-only
+    ``message_type``, so later turns include it via ``get_messages_for_llm`` --
+    it is a genuine user turn, not a steering annotation.
+
+    Oversized payloads are truncated to ``_STEERING_MAX_CHARS`` so a single
+    queued steer cannot dominate the prompt or the history. Returns the count of
+    messages injected so callers can log/observe.
+    """
+    if steering is None:
+        return 0
+    drained = 0
+    while True:
+        try:
+            content = steering.queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if content is None:
+            continue
+        text = content if isinstance(content, str) else str(content)
+        if not text:
+            continue
+        if len(text) > _STEERING_MAX_CHARS:
+            text = text[:_STEERING_MAX_CHARS]
+            logger.warning(
+                "Truncated a steering message from %d to %d chars at step %d",
+                len(text), _STEERING_MAX_CHARS, step,
+            )
+        messages.append({"role": "user", "content": text})
+        context.history.add_message(Message(
+            role=MessageRole.USER,
+            content=text,
+            metadata={"steered": True, "step": step},
+        ))
+        drained += 1
+    if drained:
+        logger.info(
+            "Injected %d steering message(s) into the agent loop at step %d",
+            drained, step,
+        )
+    return drained
+
+
+def _fold_text_only_as_intermediate(
+    messages: List[Dict[str, Any]],
+    context: AgentContext,
+    llm_response: LLMResponse,
+    step: int,
+) -> None:
+    """Keep a would-be final text-only response as intermediate narration.
+
+    Used when steering arrives during a text-only response (issue #824): the
+    response is not the final answer, so it is folded in as the same
+    display-only ``agent_intermediate`` row a tool-call step's narration uses,
+    and appended to the live ``messages`` list so the next LLM call can build
+    on it after addressing the steering. The turn's closing assistant message
+    is still written later by the agent runner, so strict-alternation providers
+    never see back-to-back assistant turns on a later request.
+    """
+    content = llm_response.content or ""
+    if not content:
+        return
+    messages.append({"role": "assistant", "content": content})
+    context.history.add_message(Message(
+        role=MessageRole.ASSISTANT,
+        content=content,
+        metadata={
+            "agent_mode": True,
+            "agent_intermediate": True,
+            "message_type": "agent_intermediate",
+            "steered_over": True,
+            "step": step,
+        },
+    ))

@@ -43,4 +43,21 @@ describe('AgentBusyIndicator', () => {
     render(<AgentBusyIndicator isAgentRunning isThinking={false} isStreaming={false} appName="Atlas" />)
     expect(screen.getByText('Atlas')).toBeTruthy()
   })
+
+  it('hides the avatar on mobile and uses flex-1 for the bubble (not w-full)', () => {
+    const { container } = render(
+      <AgentBusyIndicator isAgentRunning isThinking={false} isStreaming={false} currentAgentStep={0} />
+    )
+    const avatar = container.querySelector('.rounded-full')
+    const cls = new Set(avatar.className.split(/\s+/))
+    expect(cls.has('hidden')).toBe(true)
+    expect(cls.has('sm:flex')).toBe(true)
+    expect(cls.has('flex')).toBe(false)
+
+    const bubble = container.querySelector('.bg-gray-800.rounded-lg')
+    const bubbleCls = new Set(bubble.className.split(/\s+/))
+    expect(bubbleCls.has('flex-1')).toBe(true)
+    expect(bubbleCls.has('min-w-0')).toBe(true)
+    expect(bubbleCls.has('w-full')).toBe(false)
+  })
 })

@@ -522,7 +522,7 @@ class TestRagHooks:
 
     async def test_no_config_passes_through(self, tmp_path, monkeypatch):
         svc = self._service(tmp_path)
-        async def fake_impl(self_, username, qds, messages, query=None, mode=None):
+        async def fake_impl(self_, username, qds, messages, query=None, mode=None, search_kwargs=None):
             return SimpleNamespace(content="rag answer", metadata=None, is_completion=False)
         monkeypatch.setattr(UnifiedRAGService, "_query_rag_impl", fake_impl)
         resp = await svc.query_rag("u@example.gov", "atlas_rag:docs", [{"role": "user", "content": "q"}])
@@ -533,7 +533,7 @@ class TestRagHooks:
         _install_hooks(tmp_path, {"RagCall": [HookConfig(name="d", command=[deny])]})
         svc = self._service(tmp_path)
         called = {"v": False}
-        async def fake_impl(self_, username, qds, messages, query=None, mode=None):
+        async def fake_impl(self_, username, qds, messages, query=None, mode=None, search_kwargs=None):
             called["v"] = True
             return SimpleNamespace(content="should not see", metadata=None, is_completion=False)
         monkeypatch.setattr(UnifiedRAGService, "_query_rag_impl", fake_impl)
@@ -552,7 +552,7 @@ class TestRagHooks:
         _install_hooks(tmp_path, {"RagCall": [HookConfig(name="r", command=[h])]})
         svc = self._service(tmp_path)
         seen = {}
-        async def fake_impl(self_, username, qds, messages, query=None, mode=None):
+        async def fake_impl(self_, username, qds, messages, query=None, mode=None, search_kwargs=None):
             seen["messages"] = messages
             return SimpleNamespace(content="a", metadata=None, is_completion=False)
         monkeypatch.setattr(UnifiedRAGService, "_query_rag_impl", fake_impl)
@@ -571,7 +571,7 @@ class TestRagHooks:
         h = _write_hook(tmp_path, "rr", body)
         _install_hooks(tmp_path, {"RagResponse": [HookConfig(name="r", command=[h])]})
         svc = self._service(tmp_path)
-        async def fake_impl(self_, username, qds, messages, query=None, mode=None):
+        async def fake_impl(self_, username, qds, messages, query=None, mode=None, search_kwargs=None):
             return SimpleNamespace(content="secret context", metadata=None, is_completion=False)
         monkeypatch.setattr(UnifiedRAGService, "_query_rag_impl", fake_impl)
         resp = await svc.query_rag("u@example.gov", "atlas_rag:docs", [{"role": "user", "content": "q"}])
@@ -590,7 +590,7 @@ class TestRagHooks:
         _install_hooks(tmp_path, {"RagCall": [HookConfig(name="n", command=[h])]})
         svc = self._service(tmp_path)
         seen = {}
-        async def fake_impl(self_, username, qds, messages, query=None, mode=None):
+        async def fake_impl(self_, username, qds, messages, query=None, mode=None, search_kwargs=None):
             seen["qds"] = list(qds)
             return SimpleNamespace(content="a", metadata=None, is_completion=False)
         monkeypatch.setattr(UnifiedRAGService, "_query_rag_batch_impl", fake_impl)
@@ -665,7 +665,7 @@ class TestNoConfigInvariant:
         cm = ConfigManager(atlas_root=Path(__file__).resolve().parents[1])
         from atlas.domain.unified_rag_service import UnifiedRAGService
         svc = UnifiedRAGService(cm)
-        async def fake_impl(self_, username, qds, messages, query=None, mode=None):
+        async def fake_impl(self_, username, qds, messages, query=None, mode=None, search_kwargs=None):
             return SimpleNamespace(content="a", metadata=None, is_completion=False)
         monkeypatch.setattr(UnifiedRAGService, "_query_rag_impl", fake_impl)
         await svc.query_rag("u", "atlas_rag:docs", [{"role": "user", "content": "q"}])

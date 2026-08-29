@@ -1,5 +1,7 @@
 // Handlers extracted from original ChatContext to keep provider lean
 
+import { isCanvasTool } from '../../constants/atlasTools'
+
 // Default sandbox permissions for iframes (restrictive by default)
 const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
 
@@ -369,7 +371,7 @@ export function createWebSocketHandler(deps) {
   switch (data.type) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {
-          if (data.tool_name === 'canvas_canvas') break; // Suppress any chat message for canvas
+          if (isCanvasTool(data.tool_name)) break; // Suppress any chat message for canvas
           addMessage({
             role: 'system',
             content: `**Tool Call: ${data.tool_name}**`,
@@ -397,7 +399,7 @@ export function createWebSocketHandler(deps) {
           break
         }
         case 'tool_complete': {
-          if (data.tool_name === 'canvas_canvas') {
+          if (isCanvasTool(data.tool_name)) {
             // No update needed; canvas_content event handles display
             break
           }
@@ -422,7 +424,7 @@ export function createWebSocketHandler(deps) {
           break
         }
         case 'tool_error': {
-          if (data.tool_name === 'canvas_canvas') {
+          if (isCanvasTool(data.tool_name)) {
             addMessage({
               role: 'system',
               content: `Canvas render failed: ${data.error || 'Unknown error'}`,

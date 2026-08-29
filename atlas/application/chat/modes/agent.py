@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -15,10 +16,23 @@ from atlas.interfaces.events import EventPublisher
 
 from ..agent import AgentLoopFactory
 from ..agent.protocols import AgentContext
+from ..agent.steering import SteeringChannel
 from ..events.agent_event_relay import AgentEventRelay
 from ..utilities import event_notifier
 from ..utilities.agent_digest import build_tool_digest
 from ..utilities.interrupted_turn import INTERRUPTED_TURN_CONTENT
+
+# Closing text for a turn that ended because the model's tool call could not be
+# parsed. Mirrors INTERRUPTED_TURN_CONTENT: the turn must not be saved without an
+# assistant reply, and the next turn should see why it stopped.
+MALFORMED_TOOL_CALL_TURN_CONTENT = (
+    "(This turn ended early: the model's tool call was cut off before it "
+    "finished and could not be run.)"
+)
+MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON = (
+    "(This turn ended early: the model's tool call could not be read as valid "
+    "JSON and could not be run.)"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +109,7 @@ class AgentModeRunner:
         max_steps: int,
         temperature: float = 0.7,
         agent_loop_strategy: Optional[str] = None,
+        steering: Optional[SteeringChannel] = None,
     ) -> Dict[str, Any]:
         """
         Execute agent mode.
@@ -109,6 +124,11 @@ class AgentModeRunner:
             temperature: LLM temperature parameter
             agent_loop_strategy: Accepted for backward compatibility; the
                 native agentic loop is always used.
+            steering: Optional steering channel (issue #824). When supplied,
+                the loop drains user messages from it at each iteration
+                boundary so the user can steer a running agent. Activated here
+                (not by the transport) so the channel only accepts messages
+                while a loop is genuinely consuming it.
 
         Returns:
             Response dictionary
@@ -154,7 +174,14 @@ class AgentModeRunner:
         # turn; remember where it starts so the tool digest covers only it.
         turn_start_index = len(session.history.messages)
 
-        # Run the loop (always streaming final answer)
+        # Run the loop (always streaming final answer). The steering channel
+        # is activated around the run so the transport only pushes into it while
+        # a loop is actually draining -- a turn that requested agent mode but
+        # fell back to a non-agent turn never reaches here, so its channel
+        # stays inactive and a later steering message starts a fresh turn
+        # instead of being swallowed undrained (issue #824).
+        if steering is not None:
+            steering.activate()
         try:
             result = await agent_loop.run(
                 model=model,
@@ -167,6 +194,7 @@ class AgentModeRunner:
                 event_handler=event_relay.handle_event,
                 streaming=True,
                 event_publisher=self.event_publisher,
+                steering=steering,
             )
         except asyncio.CancelledError:
             # Stop button, client disconnect, or reset_session (issue #755).
@@ -184,12 +212,35 @@ class AgentModeRunner:
             )
             await self._publish_completion(steps=0)
             raise
+        except LLMMalformedToolCallError as malformed:
+            # Same contract as the interrupted-turn path above: the loop raised
+            # before it could append anything for this step, so without a
+            # closing message the turn is saved with no assistant reply and the
+            # next turn sees no trace of it.
+            self._close_turn(
+                session,
+                turn_start_index,
+                content=(
+                    MALFORMED_TOOL_CALL_TURN_CONTENT
+                    if getattr(malformed, "truncated", False)
+                    else MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON
+                ),
+                metadata={"agent_mode": True, "incomplete": True},
+            )
+            await self._publish_completion(steps=0)
+            raise
         except Exception:
             # Send agent completion event so the frontend clears agent UI state
             # (currentAgentStep, thinking indicator, etc.) before the error
             # message arrives via the WebSocket error handler.
             await self._publish_completion(steps=0)
             raise
+        finally:
+            # Always release the steering channel so a later chat on this
+            # connection never routes into a queue whose loop has exited
+            # (issue #824).
+            if steering is not None:
+                steering.deactivate()
 
         # Append final message. Ordering contract with AgenticLoop: the loop
         # is the single owner of narration persistence and has already flushed
@@ -210,6 +261,29 @@ class AgentModeRunner:
             update_type="agent_completion",
             steps=result.steps
         )
+
+        # Issue #824: any steering message still queued when the loop stopped
+        # draining arrived too late to be injected (the loop had already
+        # exited -- e.g. a steer typed during the final-answer tail or after
+        # the step budget ran out). The frontend has already shown the user's
+        # message, so surface it explicitly rather than silently dropping it.
+        if steering is not None:
+            leftovers = steering.drain_leftovers()
+            if leftovers:
+                logger.warning(
+                    "Agent turn ended with %d undrained steering message(s); "
+                    "notifying the user to resend", len(leftovers),
+                )
+                try:
+                    await self.event_publisher.publish_warning(
+                        message=(
+                            "Your message arrived as the agent was finishing "
+                            "its turn and was not applied to this run. Please "
+                            "send it again to start a new turn."
+                        ),
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug("Failed to publish steering-leftover warning: %s", exc)
 
         return event_notifier.create_chat_response(result.final_answer)
 

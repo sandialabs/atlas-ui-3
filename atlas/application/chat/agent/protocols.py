@@ -57,4 +57,10 @@ class AgentLoopProtocol(Protocol):
         event_handler: AgentEventHandler,
         streaming: bool = False,
         event_publisher: Optional[EventPublisher] = None,
+        # Optional steering channel (issue #824). When supplied, the loop
+        # drains pending user messages from it at each iteration boundary and
+        # injects them as normal user turns so the user can steer a running
+        # agent without stopping it. ``Any`` avoids importing asyncio at the
+        # protocol layer; the concrete type is SteeringChannel.
+        steering: Optional[Any] = None,
     ) -> AgentResult: ...

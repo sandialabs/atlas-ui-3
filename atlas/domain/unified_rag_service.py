@@ -506,6 +506,7 @@ class UnifiedRAGService:
         messages: List[Dict],
         query: Optional[str],
         mode: Optional[str],
+        search_kwargs: Optional[Dict[str, Any]] = None,
     ) -> RAGResponse:
         """Send one query to an HTTP RAG backend over its configured contract.
 
@@ -513,6 +514,11 @@ class UnifiedRAGService:
         resolved query string plus a mode. The corpora, authorization and
         impersonation are identical either way -- the contract decides the
         request shape, not who may ask.
+
+        ``search_kwargs`` is a v2-only retrieval-tuning block (``top_k_final``,
+        ``rerank`` and friends). It is dropped on v1, whose request body has no
+        equivalent -- so a caller asking for more results from a v1 source gets
+        that source's configured behaviour rather than an error.
         """
         if source_config.api_version != "v2":
             return await client.query_rag(
@@ -523,12 +529,22 @@ class UnifiedRAGService:
             )
 
         query_text = self._resolve_query(messages, query)
+        # An explicit ``search_kwargs`` replaces the whole block in the v2
+        # client, so fold the source's configured ``top_k`` in as the default
+        # rather than letting a caller-supplied ``depth`` silently drop it.
+        effective_search_kwargs = search_kwargs
+        if effective_search_kwargs is not None:
+            effective_search_kwargs = {
+                "top_k_final": source_config.top_k,
+                **effective_search_kwargs,
+            }
         return await client.query_v2(
             user_name=username,
             query=query_text,
             corpora=source_ids if len(source_ids) > 1 else source_ids[0],
             mode=mode or source_config.default_mode,
             top_k=source_config.top_k,
+            search_kwargs=effective_search_kwargs,
         )
 
     async def query_rag(
@@ -539,6 +555,7 @@ class UnifiedRAGService:
         enforced_compliance_level: Optional[str] = None,
         query: Optional[str] = None,
         mode: Optional[str] = None,
+        search_kwargs: Optional[Dict[str, Any]] = None,
         _skip_hooks: bool = False,
     ) -> RAGResponse:
         """Query a RAG source.
@@ -556,6 +573,10 @@ class UnifiedRAGService:
                 (an answer from the backend). v2 only; defaults to the
                 source's ``default_mode``. Ignored by v1 backends, which
                 always synthesize.
+            search_kwargs: v2-only retrieval knobs (``top_k_final``, ``rerank``,
+                ...). Tunes how much is retrieved, never which sources are
+                reachable, so it is safe to derive from tool arguments. Ignored
+                by v1 backends.
             enforced_compliance_level: Overrides the ambient compliance context
                 for this call. This must be a **trusted, server-derived** level
                 (the selected model's configured level) -- never a client-supplied
@@ -607,7 +628,12 @@ class UnifiedRAGService:
                         query_text = new_q
 
                 response = await self._query_rag_impl(
-                    username, qualified_data_source, messages, query=query_text, mode=mode
+                    username,
+                    qualified_data_source,
+                    messages,
+                    query=query_text,
+                    mode=mode,
+                    search_kwargs=search_kwargs,
                 )
 
                 # RagResponse hook (GH #713): redact/filter before injection.
@@ -628,6 +654,7 @@ class UnifiedRAGService:
         messages: List[Dict],
         query: Optional[str] = None,
         mode: Optional[str] = None,
+        search_kwargs: Optional[Dict[str, Any]] = None,
     ) -> RAGResponse:
         """Internal RAG query implementation (span-free)."""
         logger.debug(
@@ -683,6 +710,7 @@ class UnifiedRAGService:
                 messages,
                 query=query,
                 mode=mode,
+                search_kwargs=search_kwargs,
             )
             logger.debug(
                 "[RAG] HTTP RAG response received: content_length=%d, has_metadata=%s",
@@ -771,6 +799,7 @@ class UnifiedRAGService:
         enforced_compliance_level: Optional[str] = None,
         query: Optional[str] = None,
         mode: Optional[str] = None,
+        search_kwargs: Optional[Dict[str, Any]] = None,
         _skip_hooks: bool = False,
     ) -> RAGResponse:
         """Query multiple RAG sources on the same server in a single request.
@@ -790,6 +819,7 @@ class UnifiedRAGService:
                 a client-supplied filter. See :meth:`query_rag`.
             query: Explicit query text; see :meth:`query_rag`.
             mode: v2 response shape; see :meth:`query_rag`.
+            search_kwargs: v2 retrieval knobs; see :meth:`query_rag`.
             _skip_hooks: When True, skip the RagCall/RagResponse hooks (agentic
                 path fires its own; see :meth:`query_rag`).
 
@@ -843,7 +873,12 @@ class UnifiedRAGService:
                         qualified_data_sources = narrowed
 
                 response = await self._query_rag_batch_impl(
-                    username, qualified_data_sources, messages, query=query_text, mode=mode
+                    username,
+                    qualified_data_sources,
+                    messages,
+                    query=query_text,
+                    mode=mode,
+                    search_kwargs=search_kwargs,
                 )
 
                 # RagResponse hook (GH #713)
@@ -864,6 +899,7 @@ class UnifiedRAGService:
         messages: List[Dict],
         query: Optional[str] = None,
         mode: Optional[str] = None,
+        search_kwargs: Optional[Dict[str, Any]] = None,
     ) -> RAGResponse:
         """Internal batched RAG query (span-free)."""
         if not qualified_data_sources:
@@ -917,6 +953,7 @@ class UnifiedRAGService:
                 messages,
                 query=query,
                 mode=mode,
+                search_kwargs=search_kwargs,
             )
             logger.debug(
                 "[RAG] Batch HTTP response: content_length=%d, has_metadata=%s",

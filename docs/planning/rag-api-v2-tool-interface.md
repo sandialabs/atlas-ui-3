@@ -1,9 +1,11 @@
-# RAG API v2: Tool-Oriented Query Interface
+# RAG API v2: Query-Oriented Interface
 
-Last updated: 2026-08-13
+Last updated: 2026-08-26
 
-Status: **Phase 1 implemented** -- the v2 client, config routing and mock
-endpoints are in `main`; Phases 2-4 are still proposals. See
+Status: **Phase 1 implemented; v0.8.0 schema adopted** -- the v2 client, mock
+and config routing are in `main`; the wire contract now matches the v0.8.0
+OpenAPI schema (`{query, corpora, search_kwargs}` → `{response, metadata}`).
+Phases 2-4 are still proposals. See
 [Implementation status](#implementation-status).
 
 A plan to replace the v1 "dump the current message" RAG contract with a
@@ -22,22 +24,31 @@ instead of short-circuiting the LLM.
 
 ## Implementation status
 
-Phase 1 landed with issue #791. What exists today:
+Phase 1 landed with issue #791 and was later aligned to the v0.8.0 OpenAPI
+schema. What exists today:
 
-- `AtlasRAGClient.query_v2()` — posts `{query, corpora, mode, top_k, ...}` to
-  `POST /api/v2/rag/query` and parses both response shapes. The conversation
-  is never sent.
+- `AtlasRAGClient.query_v2()` — posts `{query, corpora, search_kwargs}` to
+  `POST /api/v2/rag/query` and parses the `{response, metadata}` shape. The
+  conversation is never sent. `mode` is a client-side knob (not on the wire)
+  that decides whether Atlas uses the `response` verbatim (`synthesized`) or
+  rebuilds an evidence block from `metadata.references` (`raw`).
 - `RAGSourceConfig.api_version` (`"v1"` default / `"v2"`) picks the contract
-  per configured source, and `default_mode` picks the response shape for
-  callers that do not ask for one. Endpoint paths default per version.
+  per configured source, and `default_mode` picks the client-side
+  interpretation for callers that do not ask for one. Endpoint paths default
+  per version.
 - `UnifiedRAGService.query_rag` / `query_rag_batch` take optional `query` and
   `mode`; an omitted `query` still falls back to the last user message, so
-  every existing caller behaves as before.
+  every existing caller behaves as before. `top_k` is mapped to
+  `search_kwargs.top_k_final`.
 - The `atlas_rag_query` tool passes its explicit `query` through and defaults
   to `mode: "raw"`, so on a v2 source the agent gets evidence to reason over
   rather than a backend-written answer.
-- The mock serves `GET /api/v2/discover/datasources` (each source declaring
-  `api_version`) and `POST /api/v2/rag/query`.
+- The mock serves `GET /api/v2/discover/datasources` (plain `DataSource` list)
+  and `POST /api/v2/rag/query` (returns `{response, metadata}` with
+  `references` carrying `filename`, `sections` (text + relevance), and
+  `reference`).
+- `Section.section_ref` is now optional so both the v1 mock shape (which
+  numbers sections) and the v0.8.0 shape (which does not) parse.
 
 Not yet done: discovery-driven negotiation (config declares the version today,
 `api_version` in the discovery response is parsed but not acted on), removing
@@ -415,7 +426,7 @@ goes away, `mode` is added as a span attribute).
 
 ## Related
 
-- [External RAG API (v1 contract)](../admin/external-rag-api.md)
+- [External RAG API](../admin/external-rag-api.md)
 - [RAG Completions vs Raw Results](../admin/external-rag-api.md#rag-completions-vs-raw-results)
 - `atlas/modules/rag/atlas_rag_client.py` — v1 HTTP client
 - `atlas/domain/unified_rag_service.py` — v1 orchestrator (`query_rag`, `_extract_query_text`)

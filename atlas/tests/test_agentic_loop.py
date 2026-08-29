@@ -708,27 +708,33 @@ class TestAgenticLoopFactory:
         assert loop1 is loop2
 
 
-# -- Tests: RAG integration ---------------------------------------------
+# -- Tests: search is an explicit tool call ------------------------------
 
-class TestAgenticLoopRAG:
+class TestAgenticLoopSearchIsATool:
+    """Data sources scope ``atlas_search``; they never run retrieval on their own.
+
+    Retrieval used to happen before the model was asked anything: any turn with
+    ``data_sources`` went through ``call_with_rag_and_tools``, which queried
+    every source and injected the passages as a system message. The user saw no
+    search, and the model never chose one. Now the loop makes the same normal
+    tools call it makes without sources, and the model has to call
+    ``atlas_search`` for anything to be retrieved.
+    """
 
     @pytest.mark.asyncio
-    async def test_rag_path_used_when_data_sources_present(self):
-        """When data_sources and user_email are provided, the loop should
-        use call_with_rag_and_tools instead of call_with_tools."""
-        rag_called = []
+    async def test_data_sources_do_not_trigger_retrieval(self):
+        calls = []
 
-        class RAGLLM(FakeLLM):
-            async def call_with_rag_and_tools(self, model, messages, data_sources, *a, **kw):
-                rag_called.append(data_sources)
-                return LLMResponse(content="RAG answer")
+        class RecordingLLM(FakeLLM):
+            async def call_with_tools(self, model, messages, tools_schema, *a, **kw):
+                calls.append(messages)
+                return LLMResponse(content="answered without searching")
 
-        llm = RAGLLM()
+        llm = RecordingLLM()
         tool_mgr = _make_tool_manager({"tool1": "r"})
         events, handler = _collect_events()
 
-        loop = _make_loop(llm, tool_mgr)
-        await loop.run(
+        result = await _make_loop(llm, tool_mgr).run(
             model="test-model",
             messages=[{"role": "user", "content": "Search with RAG"}],
             context=_make_context(),
@@ -739,8 +745,54 @@ class TestAgenticLoopRAG:
             event_handler=handler,
         )
 
-        assert len(rag_called) == 1
-        assert rag_called[0] == ["source1"]
+        assert result.final_answer == "answered without searching"
+        assert len(calls) == 1
+        # Nothing was injected: the model saw exactly the turn it was given.
+        assert calls[0] == [{"role": "user", "content": "Search with RAG"}]
+
+    @pytest.mark.asyncio
+    async def test_selected_sources_offer_the_search_tool(self):
+        """A user who picks a source but not the tool still gets to search."""
+        tool_mgr = _make_tool_manager({"tool1": "r"})
+        events, handler = _collect_events()
+        config = SimpleNamespace(app_settings=SimpleNamespace(
+            feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True,
+        ))
+
+        await _make_loop(FakeLLM(), tool_mgr, config_manager=config).run(
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            context=_make_context(),
+            selected_tools=["tool1"],
+            data_sources=["source1"],
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        requested = tool_mgr.get_tools_schema.call_args[0][0]
+        assert requested == ["tool1", "atlas_search"]
+
+    @pytest.mark.asyncio
+    async def test_no_sources_means_no_implicit_search_tool(self):
+        tool_mgr = _make_tool_manager({"tool1": "r"})
+        events, handler = _collect_events()
+        config = SimpleNamespace(app_settings=SimpleNamespace(
+            feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True,
+        ))
+
+        await _make_loop(FakeLLM(), tool_mgr, config_manager=config).run(
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            context=_make_context(),
+            selected_tools=["tool1"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        assert tool_mgr.get_tools_schema.call_args[0][0] == ["tool1"]
 
 
 # -- Tests: persistent MCP session scope --------------------------------
@@ -861,3 +913,273 @@ class TestAgenticLoopConversationScope:
         assert seen_contexts, "tool manager was never invoked"
         for ctx in seen_contexts:
             assert ctx.get("conversation_id") == str(context.session_id)
+
+
+# -- Tests: agent steering (issue #824) ---------------------------------
+
+class _RecordingLLM:
+    """Fake LLM that records the message roles it sees per call.
+
+    ``push_on_call`` (1-based) queues a steering message into ``channel`` when
+    that call is made, simulating a user who sends a message mid-run. This
+    lets a test place the steering message after a step's LLM call but before
+    the next iteration's drain.
+    """
+
+    def __init__(self, responses, channel=None, push_on_call=None, push_text="steer!"):
+        self._responses = list(responses)
+        self.call_count = 0
+        self.seen_roles: List[List[str]] = []
+        self.seen_user_contents: List[List[str]] = []
+        self._channel = channel
+        self._push_on_call = push_on_call
+        self._push_text = push_text
+
+    async def call_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                              temperature=0.7, user_email=None) -> LLMResponse:
+        self.call_count += 1
+        self.seen_roles.append([m.get("role") for m in messages])
+        self.seen_user_contents.append([
+            m.get("content") for m in messages if m.get("role") == "user"
+        ])
+        if (
+            self._channel is not None
+            and self._push_on_call is not None
+            and self.call_count == self._push_on_call
+        ):
+            self._channel.queue.put_nowait(self._push_text)
+        if self._responses:
+            return self._responses.pop(0)
+        return LLMResponse(content="Default response")
+
+    async def call_with_rag_and_tools(self, model, messages, data_sources, tools_schema,
+                                      user_email, tool_choice="auto", temperature=0.7):
+        return await self.call_with_tools(
+            model, messages, tools_schema, tool_choice,
+            temperature=temperature, user_email=user_email,
+        )
+
+    async def call_plain(self, model, messages, temperature=0.7, user_email=None) -> str:
+        self.call_count += 1
+        return "Fallback answer"
+
+    async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+        yield "fallback"
+
+    async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                temperature=0.7, user_email=None):
+        resp = await self.call_with_tools(
+            model, messages, tools_schema, tool_choice, temperature, user_email,
+        )
+        if resp.has_tool_calls():
+            yield resp
+        else:
+            for word in (resp.content or "").split(" "):
+                yield word + " "
+            yield resp
+
+    async def stream_with_rag_and_tools(self, model, messages, data_sources, tools_schema,
+                                        user_email, tool_choice="auto", temperature=0.7):
+        async for item in self.stream_with_tools(
+            model, messages, tools_schema, tool_choice, temperature, user_email,
+        ):
+            yield item
+
+
+class TestAgenticLoopSteering:
+    """Issue #824: a user message sent mid-run reaches the LLM at the next
+    iteration boundary as a normal user turn, without stopping the loop."""
+
+    @pytest.mark.asyncio
+    async def test_steering_injected_between_steps(self):
+        """A steering message queued during step 1's LLM call is present in
+        the messages seen by step 2's LLM call, and the loop continues."""
+        from atlas.application.chat.agent.steering import SteeringChannel
+
+        channel = SteeringChannel()
+        # Step 1: tool call. Step 2: final text answer.
+        llm = _RecordingLLM(
+            [
+                LLMResponse(content="Searching.", tool_calls=[_make_tool_call("c1", "search")]),
+                LLMResponse(content="Done with your steer."),
+            ],
+            channel=channel,
+            # Queue the steering message while step 1's LLM call runs, so it
+            # is waiting before step 2's iteration-boundary drain.
+            push_on_call=1,
+        )
+        tool_mgr = _make_tool_manager({"search": "found"})
+        events, handler = _collect_events()
+        context = _make_context()
+
+        loop = _make_loop(llm, tool_mgr)
+        result = await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "Run search"}],
+            context=context,
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+            steering=channel,
+        )
+
+        assert result.steps == 2
+        assert llm.call_count == 2
+        # Step 2 saw the steering text as a user message.
+        assert "steer!" in llm.seen_user_contents[1]
+        # The loop was not stopped: it produced a final answer after steering.
+        assert result.final_answer == "Done with your steer."
+
+    @pytest.mark.asyncio
+    async def test_steering_persisted_as_normal_user_turn(self):
+        """The injected steering message lands in history as a USER message
+        (so it counts as a normal user turn, per the issue), not display-only."""
+        from atlas.application.chat.agent.steering import SteeringChannel
+
+        channel = SteeringChannel()
+        llm = _RecordingLLM(
+            [
+                LLMResponse(content="Searching.", tool_calls=[_make_tool_call("c1", "search")]),
+                LLMResponse(content="Done."),
+            ],
+            channel=channel,
+            push_on_call=1,
+            push_text="also check the logs",
+        )
+        tool_mgr = _make_tool_manager({"search": "found"})
+        events, handler = _collect_events()
+        context = _make_context()
+
+        loop = _make_loop(llm, tool_mgr)
+        await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "Run search"}],
+            context=context,
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+            steering=channel,
+        )
+
+        user_msgs = [m for m in context.history.messages if m.role.value == "user"]
+        contents = [m.content for m in user_msgs]
+        assert "also check the logs" in contents
+        # The steering user message must NOT be display-only: later turns must
+        # include it via get_messages_for_llm (issue: land as a normal user turn).
+        steered = next(m for m in user_msgs if m.content == "also check the logs")
+        assert steered.metadata.get("message_type") is None
+        assert steered.metadata.get("steered") is True
+        # And it is visible to a later turn's LLM context.
+        llm_msgs = context.history.get_messages_for_llm()
+        assert any(m["role"] == "user" and m["content"] == "also check the logs"
+                   for m in llm_msgs)
+
+    @pytest.mark.asyncio
+    async def test_steering_during_final_answer_continues_loop(self):
+        """If the model produces a text-only (would-be final) response while a
+        steering message is pending, the loop folds that response in as
+        intermediate narration and continues rather than ignoring the steer."""
+        from atlas.application.chat.agent.steering import SteeringChannel
+
+        channel = SteeringChannel()
+        llm = _RecordingLLM(
+            [
+                # Step 1: text-only "final" answer, but a steer is pending.
+                LLMResponse(content="Here is the answer."),
+                # Step 2: final answer after addressing the steer.
+                LLMResponse(content="And here is more after steering."),
+            ],
+            channel=channel,
+            # Queue the steer during the first LLM call so it is pending when
+            # the text-only response is returned.
+            push_on_call=1,
+        )
+        tool_mgr = _make_tool_manager({"search": "found"})
+        events, handler = _collect_events()
+        context = _make_context()
+
+        loop = _make_loop(llm, tool_mgr)
+        result = await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "Summarize"}],
+            context=context,
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+            steering=channel,
+        )
+
+        # The loop continued past the first text-only response.
+        assert llm.call_count == 2
+        assert result.steps == 2
+        assert result.final_answer == "And here is more after steering."
+        # The would-be final answer was kept as a display-only intermediate row.
+        intermediate = [
+            m for m in context.history.messages
+            if m.metadata.get("message_type") == "agent_intermediate"
+        ]
+        assert any(m.content == "Here is the answer." for m in intermediate)
+
+    @pytest.mark.asyncio
+    async def test_no_steering_channel_is_unchanged(self):
+        """Omitting the steering channel preserves the existing loop behavior."""
+        llm = _RecordingLLM([
+            LLMResponse(content="Searching.", tool_calls=[_make_tool_call("c1", "search")]),
+            LLMResponse(content="Done."),
+        ])
+        tool_mgr = _make_tool_manager({"search": "found"})
+        events, handler = _collect_events()
+
+        loop = _make_loop(llm, tool_mgr)
+        result = await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "Run search"}],
+            context=_make_context(),
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+            # No steering channel: behaves exactly as before.
+        )
+
+        assert result.steps == 2
+        assert result.final_answer == "Done."
+
+    @pytest.mark.asyncio
+    async def test_empty_and_none_steering_messages_are_skipped(self):
+        """Empty/None payloads do not create empty user turns."""
+        from atlas.application.chat.agent.steering import SteeringChannel
+
+        channel = SteeringChannel()
+        channel.queue.put_nowait("")
+        channel.queue.put_nowait(None)
+        llm = _RecordingLLM([LLMResponse(content="Done.")])
+        events, handler = _collect_events()
+        context = _make_context()
+
+        loop = _make_loop(llm)
+        result = await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "Hi"}],
+            context=context,
+            selected_tools=None,
+            data_sources=None,
+            max_steps=3,
+            temperature=0.7,
+            event_handler=handler,
+            steering=channel,
+        )
+
+        # No user messages were injected into history (the original "Hi" lives
+        # in the messages list, not history -- the orchestrator adds it; the
+        # loop only adds steering turns it injects, and those were all empty).
+        user_msgs = [m for m in context.history.messages if m.role.value == "user"]
+        assert len(user_msgs) == 0
+        assert result.final_answer == "Done."

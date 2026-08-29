@@ -1,23 +1,28 @@
-"""ATLAS RAG Client for the ATLAS RAG API (OpenAPI v0.3.0.dev1+).
+"""ATLAS RAG Client for the ATLAS RAG API (OpenAPI v0.8.0).
 
-Implements the newest ATLAS RAG spec:
-
-  - GET  /api/v1/discover/datasources?role=read|write&as_user={user}
-  - POST /api/v1/rag/completions?as_user={user}
-
-and the v2 tool-oriented interface (``api_version="v2"``):
+Implements the ATLAS RAG v2 contract:
 
   - GET  /api/v2/discover/datasources?role=read|write&as_user={user}
   - POST /api/v2/rag/query?as_user={user}
 
-v2 sends an explicit ``query`` string instead of the conversation and picks
-the shape of the answer with ``mode`` (see :meth:`AtlasRAGClient.query_v2`).
+v2 sends an explicit ``query`` string and a ``search_kwargs`` block instead
+of the conversation. The backend always returns a synthesized ``response``
+string plus the ``references`` it was built from (see
+:meth:`AtlasRAGClient.query_v2`). ``mode`` is a client-side knob that decides
+whether ATLAS uses the response verbatim (``synthesized``) or rebuilds an
+evidence block from the reference snippets (``raw``); it is never sent on
+the wire.
 
-Request body (RagRequest):
+The v1 contract is kept for backward compatibility:
+
+  - GET  /api/v1/discover/datasources?role=read|write&as_user={user}
+  - POST /api/v1/rag/completions?as_user={user}
+
+v1 request body (RagRequest):
 
     {"messages": [...], "stream": false, "corpora": "<id>" | ["<id>", ...]}
 
-Response body (RagResponse):
+v1 response body (RagResponse):
 
     {
       "message":  {"role": "assistant", "content": "..."},
@@ -372,26 +377,39 @@ class AtlasRAGClient:
         top_k: Optional[int] = None,
         filters: Optional[Dict[str, Any]] = None,
         synthesis_params: Optional[Dict[str, Any]] = None,
+        search_kwargs: Optional[Dict[str, Any]] = None,
     ) -> RAGResponse:
         """Query the v2 endpoint with an explicit query string.
 
-        Calls ``POST {query_path}?as_user={user_name}`` with a v2 request body.
-        The conversation is never sent -- only ``query`` -- so a v2 backend
-        receives the question and nothing else.
+        Calls ``POST {query_path}?as_user={user_name}`` with a v0.8.0 request
+        body: ``{query, corpora, search_kwargs}``. The conversation is never
+        sent -- only ``query`` -- so a v2 backend receives the question and
+        nothing else.
+
+        ``mode`` is a **client-side** interpretation knob, not a wire field:
+        the v0.8.0 schema has no ``mode``. The backend always returns a
+        synthesized ``response`` string plus the ``references`` behind it.
+        The caller decides how ATLAS consumes that:
+
+        * ``"raw"`` -- build an evidence block from the reference snippets so
+          ATLAS's own LLM can reason over it (``is_completion=False``).
+        * ``"synthesized"`` -- use the backend's ``response`` verbatim
+          (``is_completion=True``).
 
         Args:
             user_name: The username making the query.
             query: The specific question to ask. Must be non-empty.
             corpora: Corpus id or list of corpus ids to search.
-            mode: ``"raw"`` returns retrieved evidence for the caller's LLM to
-                reason over (``is_completion=False``); ``"synthesized"``
-                returns an answer the backend's LLM composed
-                (``is_completion=True``, i.e. usable verbatim).
-            top_k: Max results per corpus. Falls back to the client's
-                configured ``top_k`` when omitted.
-            filters: Server-defined metadata filters, passed through as-is.
-            synthesis_params: Mode-specific knobs for ``synthesized``, passed
-                through as-is. Ignored by the server in ``raw`` mode.
+            mode: ``"raw"`` (evidence for our LLM) or ``"synthesized"`` (an
+                answer from the backend). Client-side only; never sent.
+            top_k: Max results per corpus. Mapped to
+                ``search_kwargs.top_k_final`` when ``search_kwargs`` is not
+                supplied. Falls back to the client's configured ``top_k``.
+            filters: Accepted for backwards compatibility; the v0.8.0 schema
+                has no filters field, so this is not sent.
+            synthesis_params: Accepted for backwards compatibility; not sent.
+            search_kwargs: Raw ``search_kwargs`` dict forwarded as-is. When
+                provided, takes precedence over ``top_k``.
 
         Returns:
             RAGResponse whose ``content`` is the evidence block (``raw``) or
@@ -417,16 +435,27 @@ class AtlasRAGClient:
 
         user_name = self._resolve_username(user_name)
 
+        # Build search_kwargs: an explicit dict wins; otherwise map top_k.
+        if search_kwargs is not None:
+            kwargs_out: Dict[str, Any] = dict(search_kwargs)
+        else:
+            kwargs_out = {}
+            effective_top_k = self.top_k if top_k is None else top_k
+            if effective_top_k is not None:
+                kwargs_out["top_k_final"] = effective_top_k
+
         payload: Dict[str, Any] = {
             "query": query,
             "corpora": corpora if isinstance(corpora, str) else corpora_list,
-            "mode": mode,
-            "top_k": self.top_k if top_k is None else top_k,
         }
-        if filters:
-            payload["filters"] = filters
-        if synthesis_params and mode == RAG_MODE_SYNTHESIZED:
-            payload["synthesis_params"] = synthesis_params
+        if kwargs_out:
+            payload["search_kwargs"] = kwargs_out
+
+        if filters or synthesis_params:
+            logger.debug(
+                "[HTTP-RAG-v2] Ignoring filters/synthesis_params "
+                "(not in v0.8.0 schema)"
+            )
 
         # The query text itself is never logged -- v2 exists partly to keep
         # user text away from places it does not need to be.
@@ -462,12 +491,8 @@ class AtlasRAGClient:
                     )
                     raise HTTPException(status_code=500, detail="RAG service error")
 
-                # Trust the mode the caller asked for: a server that echoes
-                # nothing still gets parsed correctly, and a server echoing a
-                # different mode cannot silently change the response shape the
-                # caller is about to consume.
                 content, documents = self._parse_v2_results(
-                    data.get("results") or {}, mode, data_source_label
+                    data, mode, data_source_label
                 )
                 metadata = self._build_v2_metadata(
                     data.get("metadata") or {}, documents, data_source_label, mode
@@ -540,25 +565,27 @@ class AtlasRAGClient:
     @classmethod
     def _parse_v2_results(
         cls,
-        results: Dict[str, Any],
+        data: Dict[str, Any],
         mode: str,
         data_source: str,
     ) -> tuple[str, List[DocumentMetadata]]:
-        """Turn a v2 ``results`` block into content plus document metadata."""
-        if not isinstance(results, dict):
-            return ("No response from RAG system.", [])
+        """Turn a v0.8.0 response into content plus document metadata.
+
+        The backend always returns ``response`` (a synthesized answer) and
+        ``metadata.references`` (the evidence). ``mode`` decides which ATLAS
+        uses: ``synthesized`` takes the response verbatim; ``raw`` builds an
+        evidence block from the reference snippets.
+        """
+        references_raw = (data.get("metadata") or {}).get("references") or []
+        documents = cls._parse_v2_documents(references_raw, data_source)
 
         if mode == RAG_MODE_SYNTHESIZED:
-            answer = results.get("answer")
+            answer = data.get("response")
             content = answer if isinstance(answer, str) and answer else (
                 "No response from RAG system."
             )
-            documents = cls._parse_v2_documents(
-                results.get("citations") or [], data_source
-            )
             return content, documents
 
-        documents = cls._parse_v2_documents(results.get("hits") or [], data_source)
         return cls._format_raw_evidence(documents), documents
 
     @staticmethod
@@ -566,11 +593,11 @@ class AtlasRAGClient:
         entries: Any,
         data_source: str,
     ) -> List[DocumentMetadata]:
-        """Map v2 ``hits``/``citations`` entries to ``DocumentMetadata``.
+        """Map v0.8.0 ``references`` entries to ``DocumentMetadata``.
 
-        Both shapes share the reference fields (``document_ref``,
-        ``filename``, ``title``, ``citation``); only ``hits`` carry
-        ``sections``, so citations simply parse with none.
+        Each reference carries ``filename``, ``sections`` (text + relevance),
+        and ``reference`` (a human-readable label). The label becomes the
+        document title so the UI renders something meaningful.
         """
         documents: List[DocumentMetadata] = []
         if not isinstance(entries, list):
@@ -590,11 +617,10 @@ class AtlasRAGClient:
                     logger.warning("Skipping malformed v2 section: %s", exc)
 
             filename = entry.get("filename") or ""
-            relevance = entry.get("relevance")
-            if isinstance(relevance, (int, float)):
-                confidence = float(relevance)
-            else:
-                confidence = max((s.relevance for s in sections), default=0.0)
+            reference_label = entry.get("reference")
+            if not isinstance(reference_label, str) or not reference_label.strip():
+                reference_label = None
+            confidence = max((s.relevance for s in sections), default=0.0)
 
             try:
                 documents.append(
@@ -604,7 +630,7 @@ class AtlasRAGClient:
                         confidence_score=confidence,
                         chunk_id=None,
                         last_modified=None,
-                        title=entry.get("title") or filename or None,
+                        title=reference_label or filename or None,
                         url=entry.get("url"),
                         citation=entry.get("citation"),
                         document_ref=entry.get("document_ref"),
@@ -628,6 +654,9 @@ class AtlasRAGClient:
         block the caller injects as context. Snippets keep their ``[N]``
         document markers, which is what the existing citation pipeline in the
         UI matches on -- so a v2 raw answer cites exactly like a v1 one.
+        When the backend does not supply ``document_ref`` (the v0.8.0 schema
+        does not), references are numbered sequentially so the markers stay
+        stable and unique.
         """
         if not documents:
             return "No relevant documents were retrieved."
@@ -636,9 +665,9 @@ class AtlasRAGClient:
             f"Retrieved {len(documents)} document(s):",
             "",
         ]
-        for doc in documents:
+        for idx, doc in enumerate(documents, start=1):
             ref = doc.document_ref
-            marker = f"[{ref}] " if ref is not None else ""
+            marker = f"[{ref}] " if ref is not None else f"[{idx}] "
             heading = doc.title or doc.source or "document"
             parts.append(f"{marker}{heading}")
             for section in doc.sections:
@@ -655,33 +684,28 @@ class AtlasRAGClient:
         data_source: str,
         mode: str,
     ) -> Optional[RAGMetadata]:
-        """Build ``RAGMetadata`` from the v2 ``metadata`` block.
+        """Build ``RAGMetadata`` from the v0.8.0 ``metadata`` block.
 
-        v2 reports ``response_time_ms`` directly, unlike v1's whole seconds.
+        v0.8.0 reports ``response_time`` in whole seconds (not ms).
+        ``corpora_searched`` is no longer part of the schema, so the data
+        source label passed by the caller is used directly.
         """
         if not documents and not metadata:
             return None
 
-        raw_ms = metadata.get("response_time_ms") if isinstance(metadata, dict) else None
+        raw_seconds = metadata.get("response_time") if isinstance(metadata, dict) else None
         try:
-            processing_ms = int(raw_ms) if raw_ms is not None else 0
+            seconds = int(raw_seconds) if raw_seconds is not None else 0
         except (TypeError, ValueError):
-            logger.warning("Ignoring non-numeric v2 response_time_ms: %r", raw_ms)
-            processing_ms = 0
-
-        corpora_searched = (
-            metadata.get("corpora_searched") if isinstance(metadata, dict) else None
-        )
-        if isinstance(corpora_searched, list) and corpora_searched:
-            data_source_name = ", ".join(str(c) for c in corpora_searched)
-        else:
-            data_source_name = data_source or ""
+            logger.warning("Ignoring non-numeric v2 response_time: %r", raw_seconds)
+            seconds = 0
+        processing_ms = max(0, seconds * 1000)
 
         return RAGMetadata(
-            query_processing_time_ms=max(0, processing_ms),
+            query_processing_time_ms=processing_ms,
             total_documents_searched=len(documents),
             documents_found=documents,
-            data_source_name=data_source_name,
+            data_source_name=data_source or "",
             retrieval_method=f"v2_{mode}",
         )
 

@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -18,8 +19,11 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 from ..preprocessors.message_builder import build_session_context
 from ..utilities import error_handler, event_notifier, tool_executor
 from ..utilities.agent_digest import build_tool_digest
+from ..utilities.dropped_calls import publish_dropped_call_warning
+from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
+from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +92,8 @@ class ToolsModeRunner:
             model: LLM model to use
             messages: Message history
             selected_tools: List of tools to make available
-            selected_data_sources: Optional list of data sources (for RAG+tools)
+            selected_data_sources: Optional list of data sources. Scopes what
+                ``atlas_search`` may read; it does not trigger retrieval.
             user_email: Optional user email for authorization
             update_callback: Optional callback for streaming updates
             temperature: LLM temperature parameter
@@ -101,20 +106,25 @@ class ToolsModeRunner:
         # it starts so the tool digest (issue #798) covers only this turn.
         turn_start_index = len(session.history.messages)
 
-        # Resolve tool schemas
-        tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
+        # Resolve tool schemas. Selected data sources make ``atlas_search``
+        # available rather than running retrieval up front -- the model has to
+        # call the tool, and the user sees the call.
+        tools_schema = await error_handler.safe_get_tools_schema(
+            self.tool_manager,
+            with_search_tool(selected_tools, selected_data_sources, self.config_manager),
+        )
 
-        # Call LLM with tools (and RAG if provided)
         llm_response = await error_handler.safe_call_llm_with_tools(
             llm_caller=self.llm,
             model=model,
             messages=messages,
             tools_schema=tools_schema,
-            data_sources=selected_data_sources,
             user_email=user_email,
             tool_choice="auto",
             temperature=temperature,
         )
+        # Streaming off must not make a dropped call silent.
+        await publish_dropped_call_warning(self.event_publisher, llm_response)
 
         # No tool calls -> treat as plain content
         if not llm_response or not llm_response.has_tool_calls():
@@ -233,7 +243,10 @@ class ToolsModeRunner:
         # it starts so the tool digest (issue #798) covers only this turn.
         turn_start_index = len(session.history.messages)
 
-        tools_schema = await error_handler.safe_get_tools_schema(self.tool_manager, selected_tools)
+        tools_schema = await error_handler.safe_get_tools_schema(
+            self.tool_manager,
+            with_search_tool(selected_tools, selected_data_sources, self.config_manager),
+        )
 
         tool_choice = "auto"
 
@@ -244,16 +257,10 @@ class ToolsModeRunner:
         streaming_error: Optional[Exception] = None
 
         try:
-            if selected_data_sources and user_email:
-                stream = self.llm.stream_with_rag_and_tools(
-                    model, messages, selected_data_sources, tools_schema,
-                    user_email, tool_choice, temperature=temperature,
-                )
-            else:
-                stream = self.llm.stream_with_tools(
-                    model, messages, tools_schema, tool_choice,
-                    temperature=temperature, user_email=user_email,
-                )
+            stream = self.llm.stream_with_tools(
+                model, messages, tools_schema, tool_choice,
+                temperature=temperature, user_email=user_email,
+            )
 
             async for item in stream:
                 if isinstance(item, str):
@@ -272,12 +279,28 @@ class ToolsModeRunner:
                 token="", is_first=False, is_last=True,
             )
 
-        # If streaming failed and we got no content, send the error to the frontend
-        if streaming_error and not accumulated_content:
+        # If streaming failed and we got no content, send the error to the
+        # frontend. A malformed tool call is reported even when narration was
+        # already streamed: the model announced work it could not perform, and
+        # presenting that narration as a finished answer would hide the gap.
+        if streaming_error and (
+            not accumulated_content
+            or isinstance(streaming_error, LLMMalformedToolCallError)
+        ):
             error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
             )
             logger.error("Streaming tools classified error: %s", log_msg)
+            if accumulated_content:
+                # The user watched this text stream in. Returning without
+                # persisting it saves the turn with no assistant reply at all,
+                # so the narration vanishes on reload while the error frame --
+                # which is transient UI -- is all that was ever shown.
+                session.history.add_message(Message(
+                    role=MessageRole.ASSISTANT,
+                    content=accumulated_content,
+                    metadata={"incomplete": True, "error_type": error_handler.error_type_for(error_class)},
+                ))
             await self.event_publisher.send_json({
                 "type": "error",
                 "message": user_msg,
@@ -302,6 +325,11 @@ class ToolsModeRunner:
             session.history.add_message(assistant_message)
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(content)
+
+        # A dropped-but-not-fatal call is otherwise invisible: the turn keeps
+        # going with the calls that parsed, and neither the user nor the model
+        # is told that one was discarded.
+        await publish_dropped_call_warning(self.event_publisher, final_llm_response)
 
         # Has tool calls: signal end of initial stream if we sent tokens
         if accumulated_content:
@@ -405,7 +433,7 @@ class ToolsModeRunner:
 
                 # Continue WITH tools so the model can chain another dependent call.
                 next_text, current_response, err = await self._stream_tools_round(
-                    model, messages, tools_schema, selected_data_sources,
+                    model, messages, tools_schema,
                     user_email, temperature,
                 )
                 if err is not None:
@@ -472,7 +500,7 @@ class ToolsModeRunner:
         response_tool_calls = llm_response.tool_calls or []
         canvas_calls = [
             tc for tc in response_tool_calls
-            if self._tool_call_signature(tc)[0] == "canvas_canvas"
+            if normalize_tool_name(self._tool_call_signature(tc)[0]) == CANVAS_TOOL_NAME
         ]
         if response_tool_calls and len(canvas_calls) == len(response_tool_calls):
             return llm_response.content or "Content displayed in canvas."
@@ -625,7 +653,6 @@ class ToolsModeRunner:
         model: str,
         messages: List[Dict[str, Any]],
         tools_schema: List[Dict[str, Any]],
-        selected_data_sources: Optional[List[str]],
         user_email: Optional[str],
         temperature: float,
     ):
@@ -640,16 +667,10 @@ class ToolsModeRunner:
         response: Optional[LLMResponse] = None
         is_first = True
         try:
-            if selected_data_sources and user_email:
-                stream = self.llm.stream_with_rag_and_tools(
-                    model, messages, selected_data_sources, tools_schema,
-                    user_email, "auto", temperature=temperature,
-                )
-            else:
-                stream = self.llm.stream_with_tools(
-                    model, messages, tools_schema, "auto",
-                    temperature=temperature, user_email=user_email,
-                )
+            stream = self.llm.stream_with_tools(
+                model, messages, tools_schema, "auto",
+                temperature=temperature, user_email=user_email,
+            )
             async for item in stream:
                 if isinstance(item, str):
                     await self.event_publisher.publish_token_stream(
