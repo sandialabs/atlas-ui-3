@@ -51,9 +51,12 @@ hljs.registerLanguage('sh', bash)
 // DOMPurify configuration that permits KaTeX-generated HTML.
 // KaTeX renders almost exclusively with <span> (allowed by default) but also
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
+// `target` is explicitly allowlisted because DOMPurify 3.x drops it by
+// default, which would strip the target="_blank" the link renderer adds and
+// cause chat-response links to navigate the tab away from ATLAS (#859).
 export const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext', 'details', 'summary'],
-  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'data-section-ref', 'role', 'tabindex', 'aria-label'],
+  ADD_ATTR: ['target', 'encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'data-section-ref', 'role', 'tabindex', 'aria-label'],
 }
 
 const renderer = new marked.Renderer()
