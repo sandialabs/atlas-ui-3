@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ExternalLink } from 'lucide-react'
 import AdminModal from '../AdminModal'
+import { createPortal } from 'react-dom'
 import Notifications from '../Notifications'
 import BannerMessagesCard from './BannerMessagesCard'
 import MCPConfigurationCard from './MCPConfigurationCard'
@@ -101,7 +102,12 @@ const AdminQuickPanel = ({ isOpen, onNavigate }) => {
         />
       )}
 
-      <Notifications notifications={notifications} removeNotification={removeNotification} />
+      {/* Portalled to the body: this panel can be inside a `hidden` tabpanel
+          (display: none), which would swallow every save result. */}
+      {createPortal(
+        <Notifications notifications={notifications} removeNotification={removeNotification} />,
+        document.body
+      )}
     </div>
   )
 }

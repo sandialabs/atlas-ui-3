@@ -1194,14 +1194,31 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/saved/i)
   })
 
-  it('does not write back a selection for a tool that no longer exists', () => {
-    // A key for a server that an MCP reload has since removed. The pending set
-    // is seeded from saved selections, so without pruning Save Changes would
-    // re-add it.
+  it('does not add back a selection for a tool that is not in the live list', () => {
+    // Pruning applies to additions only: a key that is not in the current tool
+    // list is never newly written.
+    const addTools = vi.fn()
+    setup({ selectedTools: new Set(), addTools })
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(addTools).toHaveBeenCalledWith(['test_server_search'])
+  })
+
+  it('keeps a saved selection for a server missing from the live list', () => {
+    // An MCP reload that has republished some servers but not others must not
+    // cost the user their selection for the absent one on the next unrelated
+    // save. Removals are computed against the unpruned pending set.
     const removeTools = vi.fn()
     const addTools = vi.fn()
     setup({
-      selectedTools: new Set(['gone_server_vanished', 'test_server_fetch']),
+      selectedTools: new Set(['absent_server_thing', 'test_server_fetch']),
       addTools,
       removeTools,
     })
@@ -1215,6 +1232,6 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
 
     expect(addTools).toHaveBeenCalledWith(['test_server_search'])
-    expect(removeTools).toHaveBeenCalledWith(['gone_server_vanished'])
+    expect(removeTools).not.toHaveBeenCalled()
   })
 })

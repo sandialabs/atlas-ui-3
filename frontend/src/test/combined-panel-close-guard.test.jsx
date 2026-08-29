@@ -192,6 +192,28 @@ describe('prompt draft close guard', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('asks again after a discard whose close was then aborted', () => {
+    const onClose = vi.fn()
+    renderPanel({ onClose, initialTab: 'prompts' })
+
+    // Both a prompt draft and a staged tool selection are outstanding.
+    fireEvent.click(screen.getByRole('button', { name: 'start draft' }))
+    fireEvent.click(screen.getByRole('tab', { name: /Tools & Integrations/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Close tools and settings/ }))
+    // Discard the draft, then back out of the tools guard: the close is aborted.
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Unsaved Prompt/ }))
+      .getByRole('button', { name: /Discard Changes/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Unsaved Changes/ }))
+      .getByRole('button', { name: /^Cancel$/ }))
+    expect(onClose).not.toHaveBeenCalled()
+
+    // The draft is still there, so the next close must ask about it again.
+    fireEvent.click(screen.getByRole('button', { name: /Close tools and settings/ }))
+    expect(screen.getByRole('dialog', { name: /Unsaved Prompt/ })).toBeInTheDocument()
+  })
+
   it('keeps the panel open when the user chooses to keep editing', () => {
     const onClose = vi.fn()
     renderPanel({ onClose, initialTab: 'prompts' })

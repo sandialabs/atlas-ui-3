@@ -105,8 +105,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // "Discard" on the prompt draft falls through to the tools guard, so a close
   // with both kinds of unsaved work still asks about each.
   const discardPromptAndClose = useCallback(() => {
+    // Deliberately does NOT clear promptDirty: the draft is only really gone
+    // once the panel unmounts, and a later guard can still abort this close. If
+    // it does, the next close must ask about the draft again.
     setShowPromptDiscard(false)
-    setPromptDirty(false)
     const guard = toolsCloseGuardRef.current
     if (guard && toolsDirty) {
       setActiveTab('tools')
@@ -264,8 +266,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     saveSettings(defaultSettings)
   }
 
-  const handleCancel = () => {
-    // Reload settings from localStorage to discard changes
+  // Reverting General is deferred behind the close: a later guard can abort the
+  // dismissal, and the panel staying open with the user's in-progress General
+  // settings silently thrown away is worse than not reverting at all.
+  const revertGeneralSettings = () => {
     const savedSettings = localStorage.getItem('chatui-settings')
     if (savedSettings) {
       try {
@@ -278,7 +282,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       setSettings(defaultSettings)
     }
     setHasChanges(false)
-    requestClose()
+  }
+
+  const handleCancel = () => {
+    requestClose(revertGeneralSettings)
   }
 
   // This panel is now the only route to tools, theme and admin controls, so it
@@ -306,13 +313,20 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
   useEffect(() => {
     if (!isOpen) return undefined
-    const node = dialogRef.current
-    if (!node) return undefined
 
     const onKeyDown = (event) => {
+      const node = dialogRef.current
+      if (!node) return
       const scope = innermostDialog()
-      // A nested modal is up: it owns Escape and the trap.
+      // A nested modal is up: it owns Escape and the trap, whatever the target.
       if (scope !== node) return
+      // Clicking non-focusable text drops focus to document.body, so the
+      // listener has to live on the document; scope by target instead, and
+      // treat "focus fell out of the panel entirely" as still ours.
+      if (event.target instanceof Node && node.contains(event.target) === false
+          && event.target !== document.body && event.target !== document.documentElement) {
+        return
+      }
 
       if (event.key === 'Escape') {
         event.stopPropagation()
@@ -328,6 +342,13 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
+      // Focus is outside the panel (body, after a click on plain text): pull it
+      // back in rather than letting Tab walk the page behind the modal.
+      if (!node.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+        return
+      }
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault()
         last.focus()
@@ -336,10 +357,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
         first.focus()
       }
     }
-    // Bubble phase on the dialog node, so a nested modal that stops propagation
-    // is respected and keystrokes outside the panel are none of our business.
-    node.addEventListener('keydown', onKeyDown)
-    return () => node.removeEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
   }, [isOpen, requestClose, innermostDialog])
 
   if (!isOpen) return null

@@ -189,25 +189,24 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     allPrompts.forEach(server => {
       server?.prompts?.forEach(prompt => livePromptKeys.add(`${server.server}_${prompt.name}`))
     })
-    // An empty live set means the tool list has not loaded (or the user has no
-    // servers selected); pruning against it would wipe the selection, so skip.
-    const toolsToSave = liveToolKeys.size === 0
-      ? Array.from(pendingSelectedTools)
-      : Array.from(pendingSelectedTools).filter(t => liveToolKeys.has(t))
-    const promptsToSave = livePromptKeys.size === 0
-      ? Array.from(pendingSelectedPrompts)
-      : Array.from(pendingSelectedPrompts).filter(p => livePromptKeys.has(p) || isUserPromptKey(p))
+    // The live-key intersection filters *additions* only. Removals are computed
+    // against the unpruned pending set, so a server that is simply absent from
+    // the current list -- an MCP reload that has republished some servers but
+    // not others, a marketplace filter -- keeps the user's saved selection
+    // instead of having it wiped by the next unrelated save.
+    const canAddTool = key => liveToolKeys.size === 0 || liveToolKeys.has(key)
+    const canAddPrompt = key => livePromptKeys.size === 0 || livePromptKeys.has(key) || isUserPromptKey(key)
 
     // Determine what tools to add or remove
-    const toolsToAdd = toolsToSave.filter(t => !savedSelectedTools.has(t))
-    const toolsToRemove = Array.from(savedSelectedTools).filter(t => !toolsToSave.includes(t))
+    const toolsToAdd = Array.from(pendingSelectedTools).filter(t => !savedSelectedTools.has(t) && canAddTool(t))
+    const toolsToRemove = Array.from(savedSelectedTools).filter(t => !pendingSelectedTools.has(t))
 
     if (toolsToAdd.length > 0) saveAddTools(toolsToAdd)
     if (toolsToRemove.length > 0) saveRemoveTools(toolsToRemove)
 
     // Determine what prompts to add or remove
-    const promptsToAdd = promptsToSave.filter(p => !savedSelectedPrompts.has(p))
-    const promptsToRemove = Array.from(savedSelectedPrompts).filter(p => !promptsToSave.includes(p))
+    const promptsToAdd = Array.from(pendingSelectedPrompts).filter(p => !savedSelectedPrompts.has(p) && canAddPrompt(p))
+    const promptsToRemove = Array.from(savedSelectedPrompts).filter(p => !pendingSelectedPrompts.has(p))
 
     if (promptsToAdd.length > 0) saveAddPrompts(promptsToAdd)
     if (promptsToRemove.length > 0) saveRemovePrompts(promptsToRemove)

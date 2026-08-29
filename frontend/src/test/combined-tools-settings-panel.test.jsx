@@ -217,6 +217,22 @@ describe('SettingsPanel review follow-ups', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('still closes on Escape after focus has fallen to the body', () => {
+    const onClose = vi.fn()
+    renderPanel({ onClose })
+    // Clicking non-focusable text in the panel drops focus to document.body.
+    document.body.focus()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('pulls focus back into the panel when Tab is pressed from the body', () => {
+    renderPanel()
+    document.body.focus()
+    fireEvent.keyDown(document.body, { key: 'Tab' })
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true)
+  })
+
   it('moves focus into the panel when it opens', () => {
     renderPanel()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: /Close tools and settings/ }))
