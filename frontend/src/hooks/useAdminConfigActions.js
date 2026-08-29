@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
  * Shared admin plumbing: toast notifications, system status, and the
@@ -15,19 +15,37 @@ export function useAdminConfigActions() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalData, setModalData] = useState({})
   const currentEndpointRef = useRef(null)
+  // Pending auto-dismiss timers, cleared on unmount so they never fire against
+  // a hook that is gone (the admin surfaces mount and unmount freely).
+  const dismissTimersRef = useRef(new Map())
+
+  useEffect(() => {
+    const timers = dismissTimersRef.current
+    return () => {
+      timers.forEach(timer => clearTimeout(timer))
+      timers.clear()
+    }
+  }, [])
+
+  const removeNotification = useCallback((id) => {
+    const timer = dismissTimersRef.current.get(id)
+    if (timer) {
+      clearTimeout(timer)
+      dismissTimersRef.current.delete(id)
+    }
+    setNotifications(prev => prev.filter(n => n.id !== id))
+  }, [])
 
   const addNotification = useCallback((message, type = 'info') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     setNotifications(prev => [...prev, { id, message, type }])
 
     // Auto-remove after 5 seconds for success/info, 8 seconds for errors
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      dismissTimersRef.current.delete(id)
       setNotifications(prev => prev.filter(n => n.id !== id))
     }, type === 'error' ? 8000 : 5000)
-  }, [])
-
-  const removeNotification = useCallback((id) => {
-    setNotifications(prev => prev.filter(n => n.id !== id))
+    dismissTimersRef.current.set(id, timer)
   }, [])
 
   const loadSystemStatus = useCallback(async () => {

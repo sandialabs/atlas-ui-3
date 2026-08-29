@@ -26,12 +26,23 @@ const TABS = [
  * to sit in the top bar), and the most-used admin controls are tabs here
  * instead of separate top-bar entry points.
  */
-const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null }) => {
+const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null, onPromptIntentConsumed = null }) => {
   // Tools open first when available -- it is what the wrench button reads as.
   // The effect below falls back to the first visible tab when it is not.
   const [activeTab, setActiveTab] = useState('tools')
   const [toolsDirty, setToolsDirty] = useState(false)
   const toolsCloseGuardRef = useRef(null)
+  // A tab requested by a caller before the feature flags that make it visible
+  // have arrived. Held until it becomes visible, then applied once; cleared as
+  // soon as the user picks a tab themselves.
+  const pendingTabRef = useRef(null)
+  const dialogRef = useRef(null)
+  const closeButtonRef = useRef(null)
+  // The admin tab is mounted on first visit and kept mounted after that: it
+  // fetches on mount (so mounting it eagerly would cost every admin an admin
+  // config fetch), but unmounting it on a tab switch throws away the save-result
+  // notifications its cards raise.
+  const [adminTabVisited, setAdminTabVisited] = useState(false)
   const { theme, toggleTheme } = useTheme()
   // Default settings
   const defaultSettings = {
@@ -88,19 +99,70 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     fetchGlobusIfEnabled()
   }, [fetchGlobusIfEnabled])
 
-  // Keep the active tab valid as feature flags/admin membership resolve.
+  useEffect(() => {
+    if (isOpen && activeTab === 'admin') setAdminTabVisited(true)
+  }, [isOpen, activeTab])
+
+  // Forget the visit once the panel closes, so the next open starts fresh.
+  useEffect(() => {
+    if (!isOpen) setAdminTabVisited(false)
+  }, [isOpen])
+
+  // Callers can open the panel straight onto a tab (header wrench, the
+  // marketplace return trip, the prompt selector's edit buttons). The request
+  // is recorded rather than applied directly: `/api/config` may not have
+  // resolved yet, so the requested tab can still be invisible.
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      pendingTabRef.current = initialTab
+      setActiveTab(initialTab)
+    }
+  }, [isOpen, initialTab])
+
+  // Keep the active tab valid as feature flags/admin membership resolve, and
+  // honour a still-pending request the moment its tab becomes visible.
   useEffect(() => {
     if (visibleTabs.length === 0) return
+    const pending = pendingTabRef.current
+    if (pending && visibleTabs.some(tab => tab.id === pending)) {
+      pendingTabRef.current = null
+      setActiveTab(pending)
+      return
+    }
     if (!visibleTabs.some(tab => tab.id === activeTab)) {
       setActiveTab(visibleTabs[0].id)
     }
   }, [activeTab, visibleTabs])
 
-  // Callers can open the panel straight onto a tab (header wrench, the
-  // marketplace return trip, the prompt selector's edit buttons).
+  // A tab the user picks themselves supersedes any pending request.
+  const selectTab = useCallback((tabId) => {
+    pendingTabRef.current = null
+    setActiveTab(tabId)
+  }, [])
+
+  // Roving tabindex: the tab strip is one stop in the tab order, and Left/Right
+  // (plus Home/End) move between tabs, per the ARIA tabs pattern.
+  const handleTabKeyDown = useCallback((event) => {
+    const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End']
+    if (!keys.includes(event.key)) return
+    event.preventDefault()
+    const index = visibleTabs.findIndex(tab => tab.id === activeTab)
+    if (index === -1) return
+    let next = index
+    if (event.key === 'ArrowRight') next = (index + 1) % visibleTabs.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + visibleTabs.length) % visibleTabs.length
+    else if (event.key === 'Home') next = 0
+    else next = visibleTabs.length - 1
+    const target = visibleTabs[next]
+    selectTab(target.id)
+    document.getElementById(`settings-tab-${target.id}`)?.focus()
+  }, [activeTab, visibleTabs, selectTab])
+
+  // Forget a pending request once the panel closes, so reopening it does not
+  // jump back to a tab asked for in a previous session of the panel.
   useEffect(() => {
-    if (isOpen && initialTab) setActiveTab(initialTab)
-  }, [isOpen, initialTab])
+    if (!isOpen) pendingTabRef.current = null
+  }, [isOpen])
 
   // Check for Globus auth callback params in URL
   useEffect(() => {
@@ -175,6 +237,39 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     requestClose()
   }
 
+  // This panel is now the only route to tools, theme and admin controls, so it
+  // carries proper dialog semantics: Escape closes (through the same unsaved
+  // guard as the X), focus moves in on open and is trapped inside.
+  useEffect(() => {
+    if (!isOpen) return undefined
+    const node = dialogRef.current
+    closeButtonRef.current?.focus()
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        requestClose()
+        return
+      }
+      if (event.key !== 'Tab' || !node) return
+      const focusable = Array.from(
+        node.querySelectorAll('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])')
+      ).filter(el => el.offsetParent !== null)
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [isOpen, requestClose])
+
   if (!isOpen) return null
 
   return (
@@ -183,6 +278,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       onClick={requestClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Tools and Settings"
         className="bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full h-[85vh] mx-4 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -193,6 +292,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             Tools and Settings
           </h2>
           <button
+            ref={closeButtonRef}
             onClick={requestClose}
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
             aria-label="Close tools and settings"
@@ -202,15 +302,26 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
         </div>
 
         {/* Tab navigation */}
-        <div className="flex items-center gap-1 px-4 border-b border-gray-700 flex-shrink-0 overflow-x-auto">
+        <div
+          role="tablist"
+          aria-label="Tools and settings sections"
+          onKeyDown={handleTabKeyDown}
+          className="flex items-center gap-1 px-4 border-b border-gray-700 flex-shrink-0 overflow-x-auto"
+        >
           {visibleTabs.map((tab) => {
             const Icon = tab.icon
+            const isActive = activeTab === tab.id
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                role="tab"
+                id={`settings-tab-${tab.id}`}
+                aria-selected={isActive}
+                aria-controls={`settings-tabpanel-${tab.id}`}
+                tabIndex={isActive ? 0 : -1}
+                onClick={() => selectTab(tab.id)}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab.id
+                  isActive
                     ? 'border-blue-500 text-gray-50'
                     : 'border-transparent text-gray-400 hover:text-gray-200'
                 }`}
@@ -235,23 +346,45 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           />
         )}
 
-        {/* Admin quick controls tab (issue #836) */}
-        {isInAdminGroup && activeTab === 'admin' && (
-          <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
-            <AdminQuickPanel isOpen={isOpen} onNavigate={onClose} />
+        {/* Admin quick controls tab (issue #836). "Full Admin Page" navigates
+            away, so it goes through the same unsaved-selection guard as the X. */}
+        {isInAdminGroup && adminTabVisited && (
+          <div
+            role="tabpanel"
+            id="settings-tabpanel-admin"
+            aria-labelledby="settings-tab-admin"
+            hidden={activeTab !== 'admin'}
+            className={`${activeTab === 'admin' ? 'flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6' : ''}`}
+          >
+            <AdminQuickPanel isOpen={isOpen} onNavigate={requestClose} />
           </div>
         )}
 
-        {/* Prompts tab (issue #153) */}
-        {customPromptsEnabled && activeTab === 'prompts' && (
-          <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
-            <PromptManager intent={activeTab === 'prompts' ? promptIntent : null} />
+        {/* Prompts tab (issue #153). Kept mounted for the life of the panel,
+            like the tools tab, so a half-written prompt survives a tab switch. */}
+        {customPromptsEnabled && (
+          <div
+            role="tabpanel"
+            id="settings-tabpanel-prompts"
+            aria-labelledby="settings-tab-prompts"
+            hidden={activeTab !== 'prompts'}
+            className={`${activeTab === 'prompts' ? 'flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6' : ''}`}
+          >
+            <PromptManager
+              intent={promptIntent}
+              onIntentConsumed={onPromptIntentConsumed}
+            />
           </div>
         )}
 
         {/* User Info tab (placeholder for issue #595) */}
         {activeTab === 'userInfo' && (
-          <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6">
+          <div
+            role="tabpanel"
+            id="settings-tabpanel-userInfo"
+            aria-labelledby="settings-tab-userInfo"
+            className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6"
+          >
             <div className="p-6 bg-gray-700 rounded-lg text-center">
               <UserCircle className="w-10 h-10 text-gray-500 mx-auto mb-3" />
               <h3 className="text-gray-200 font-medium">User Info — Coming Soon</h3>
@@ -265,7 +398,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
         {/* General settings tab */}
         {activeTab === 'general' && (
-        <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6 space-y-6">
+        <div
+          role="tabpanel"
+          id="settings-tabpanel-general"
+          aria-labelledby="settings-tab-general"
+          className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6 space-y-6"
+        >
           {/* Appearance -- moved off the top bar in issue #836 */}
           <div className="bg-gray-700 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">

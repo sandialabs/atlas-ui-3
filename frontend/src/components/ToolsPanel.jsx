@@ -7,6 +7,7 @@ import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
+import { isUserPromptKey } from '../hooks/chat/useSelections'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
@@ -61,15 +62,23 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [disconnectError, setDisconnectError] = useState(null)
   const { fetchAuthStatus, uploadToken, removeToken, getServerAuth } = useServerAuthStatus()
   
-  // Initialize pending state from saved state only when panel transitions from closed to open
+  // Seed pending state from saved state when the panel opens, and re-seed it
+  // whenever the saved selections change underneath an un-edited panel. The
+  // panel now stays mounted across tab switches (issue #836), so a save made
+  // elsewhere -- the Admin tab's "Reload MCP" prunes keys for servers that no
+  // longer exist -- would otherwise be undone by a later Save Changes here.
   useEffect(() => {
-    if (isOpen && !prevOpenRef.current) {
+    if (!isOpen) {
+      prevOpenRef.current = false
+      return
+    }
+    if (!prevOpenRef.current || !hasChanges) {
       setPendingSelectedTools(new Set(savedSelectedTools))
       setPendingSelectedPrompts(new Set(savedSelectedPrompts))
       setHasChanges(false)
     }
-    prevOpenRef.current = isOpen
-  }, [isOpen, savedSelectedTools, savedSelectedPrompts])
+    prevOpenRef.current = true
+  }, [isOpen, hasChanges, savedSelectedTools, savedSelectedPrompts])
 
   // Fetch auth status when panel opens
   useEffect(() => {
@@ -145,32 +154,63 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     })
   }
   
-  // Save handler - commits pending changes to context
-  const handleSave = () => {
+  // Commit pending changes to context, without dismissing anything.
+  const commitChanges = () => {
+    // A pending key for a tool that no longer exists (a server dropped by an
+    // MCP reload while the panel was open) is not written back.
+    const liveToolKeys = new Set()
+    const livePromptKeys = new Set()
+    allTools.forEach(server => {
+      server?.tools?.forEach(name => liveToolKeys.add(`${server.server}_${name}`))
+    })
+    allPrompts.forEach(server => {
+      server?.prompts?.forEach(prompt => livePromptKeys.add(`${server.server}_${prompt.name}`))
+    })
+    // An empty live set means the tool list has not loaded (or the user has no
+    // servers selected); pruning against it would wipe the selection, so skip.
+    const toolsToSave = liveToolKeys.size === 0
+      ? Array.from(pendingSelectedTools)
+      : Array.from(pendingSelectedTools).filter(t => liveToolKeys.has(t))
+    const promptsToSave = livePromptKeys.size === 0
+      ? Array.from(pendingSelectedPrompts)
+      : Array.from(pendingSelectedPrompts).filter(p => livePromptKeys.has(p) || isUserPromptKey(p))
+
     // Determine what tools to add or remove
-    const toolsToAdd = Array.from(pendingSelectedTools).filter(t => !savedSelectedTools.has(t))
-    const toolsToRemove = Array.from(savedSelectedTools).filter(t => !pendingSelectedTools.has(t))
-    
+    const toolsToAdd = toolsToSave.filter(t => !savedSelectedTools.has(t))
+    const toolsToRemove = Array.from(savedSelectedTools).filter(t => !toolsToSave.includes(t))
+
     if (toolsToAdd.length > 0) saveAddTools(toolsToAdd)
     if (toolsToRemove.length > 0) saveRemoveTools(toolsToRemove)
-    
+
     // Determine what prompts to add or remove
-    const promptsToAdd = Array.from(pendingSelectedPrompts).filter(p => !savedSelectedPrompts.has(p))
-    const promptsToRemove = Array.from(savedSelectedPrompts).filter(p => !pendingSelectedPrompts.has(p))
-    
+    const promptsToAdd = promptsToSave.filter(p => !savedSelectedPrompts.has(p))
+    const promptsToRemove = Array.from(savedSelectedPrompts).filter(p => !promptsToSave.includes(p))
+
     if (promptsToAdd.length > 0) saveAddPrompts(promptsToAdd)
     if (promptsToRemove.length > 0) saveRemovePrompts(promptsToRemove)
 
     setHasChanges(false)
-    onClose()
   }
-  
-  // Cancel handler - reverts pending changes
-  const handleCancel = () => {
+
+  // Revert pending changes back to what is saved, without dismissing anything.
+  const revertChanges = () => {
     setPendingSelectedTools(new Set(savedSelectedTools))
     setPendingSelectedPrompts(new Set(savedSelectedPrompts))
     setHasChanges(false)
-    onClose()
+  }
+
+  // Save handler. Standalone this is the modal's "save and close"; embedded it
+  // is one tab's save, so it commits and stays -- dismissing the combined panel
+  // from here would also exit Prompts, General, User Info and Admin.
+  const handleSave = () => {
+    commitChanges()
+    if (!embedded) onClose()
+  }
+
+  // Cancel handler - reverts pending changes
+  const handleCancel = () => {
+    revertChanges()
+    if (!embedded) onClose()
   }
   
   // Clear all tools and prompts in pending state
@@ -190,14 +230,18 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   }
 
   // Handle confirmation dialog actions
+  // These two come from the unsaved-changes dialog, which is only raised by a
+  // close attempt -- so they always dismiss, embedded or not.
   const handleSaveAndClose = () => {
-    handleSave() // This already calls onClose()
+    commitChanges()
     setShowUnsavedDialog(false)
+    onClose()
   }
 
   const handleDiscardAndClose = () => {
-    handleCancel() // This already calls onClose()
+    revertChanges()
     setShowUnsavedDialog(false)
+    onClose()
   }
 
   const handleCancelDialog = () => {
@@ -955,7 +999,13 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
 
   if (embedded) {
     return (
-      <div className={`flex-1 min-h-0 flex-col ${active ? 'flex' : 'hidden'}`}>
+      <div
+        role="tabpanel"
+        id="settings-tabpanel-tools"
+        aria-labelledby="settings-tab-tools"
+        hidden={!active}
+        className={`flex-1 min-h-0 flex-col ${active ? 'flex' : 'hidden'}`}
+      >
         {panelBody}
         {panelModals}
       </div>

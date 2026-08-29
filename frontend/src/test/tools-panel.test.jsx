@@ -1065,3 +1065,121 @@ describe('ToolsPanel - Custom Information Display', () => {
     expect(screen.queryByText('Test description for collapse functionality')).not.toBeInTheDocument()
   })
 })
+
+/**
+ * Embedded mode (issue #839 review follow-ups): the panel is one tab of the
+ * combined Tools and Settings panel, so a per-tab save must not dismiss the
+ * whole panel, and the still-mounted pending set must not write back keys that
+ * have since disappeared.
+ */
+describe('ToolsPanel - embedded in the combined panel', () => {
+  const testTools = [{
+    server: 'test_server',
+    description: 'Test server description',
+    tools: ['fetch', 'search'],
+    tools_detailed: [],
+    tool_count: 2,
+    prompts: [],
+    prompt_count: 0
+  }]
+
+  const setup = (chatOverrides = {}) => {
+    const context = {
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: testTools,
+      prompts: [],
+      features: {},
+      ...chatOverrides,
+    }
+    useChat.mockReturnValue(context)
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => testTools),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => []),
+    })
+    return context
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('does not close the panel when Save Changes is used on the tools tab', () => {
+    setup()
+    const onClose = vi.fn()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={onClose} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('does not close the panel when Cancel is used on the tools tab', () => {
+    setup()
+    const onClose = vi.fn()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={onClose} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }))
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('still closes the standalone modal on save', () => {
+    setup()
+    const onClose = vi.fn()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen onClose={onClose} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not write back a selection for a tool that no longer exists', () => {
+    // A key for a server that an MCP reload has since removed. The pending set
+    // is seeded from saved selections, so without pruning Save Changes would
+    // re-add it.
+    const removeTools = vi.fn()
+    const addTools = vi.fn()
+    setup({
+      selectedTools: new Set(['gone_server_vanished', 'test_server_fetch']),
+      addTools,
+      removeTools,
+    })
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(addTools).toHaveBeenCalledWith(['test_server_search'])
+    expect(removeTools).toHaveBeenCalledWith(['gone_server_vanished'])
+  })
+})

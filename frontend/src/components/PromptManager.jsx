@@ -12,11 +12,14 @@ import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/ch
  *
  * `intent` lets a caller open straight into an editor -- the prompt selector's
  * per-prompt "edit" and "new system prompt" buttons use it (issue #836).
- * Shape: `{ type: 'create' }` or `{ type: 'edit', id }`.
+ * Shape: `{ type: 'create' }` or `{ type: 'edit', id }`. `onIntentConsumed`
+ * fires once the intent has opened its editor, so the caller can drop it --
+ * otherwise leaving and re-entering this tab would yank the editor back to the
+ * originally-clicked prompt.
  */
 const emptyDraft = { title: '', content: '' }
 
-const PromptManager = ({ intent = null }) => {
+const PromptManager = ({ intent = null, onIntentConsumed = null }) => {
   const {
     userPrompts = [],
     userPromptsLoading,
@@ -43,6 +46,7 @@ const PromptManager = ({ intent = null }) => {
       appliedIntentRef.current = intent
       setEditingId('new')
       setDraft(emptyDraft)
+      onIntentConsumed?.()
       return
     }
     if (intent.type === 'edit') {
@@ -51,8 +55,9 @@ const PromptManager = ({ intent = null }) => {
       appliedIntentRef.current = intent
       setEditingId(target.id)
       setDraft({ title: target.title, content: target.content })
+      onIntentConsumed?.()
     }
-  }, [intent, userPrompts])
+  }, [intent, userPrompts, onIntentConsumed])
 
   const activeId = isUserPromptKey(activePromptKey) ? userPromptIdFromKey(activePromptKey) : null
   const canSave = draft.title.trim().length > 0 && draft.content.trim().length > 0

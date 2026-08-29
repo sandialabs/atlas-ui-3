@@ -58,6 +58,10 @@ function ChatInterface() {
     setPromptIntent(null)
   }, [])
 
+  // The prompts tab reports back once an intent has opened its editor; holding
+  // it any longer would re-apply it every time that tab is re-entered.
+  const clearPromptIntent = useCallback(() => setPromptIntent(null), [])
+
   // Auto-open the tools tab when returning from the marketplace
   useEffect(() => {
     const shouldOpenToolsPanel = sessionStorage.getItem('openToolsPanel')
@@ -182,6 +186,7 @@ function ChatInterface() {
           onClose={closeSettings}
           initialTab={settingsPanelTab}
           promptIntent={promptIntent}
+          onPromptIntentConsumed={clearPromptIntent}
         />
 
         {/* Right Side Panels Container */}
