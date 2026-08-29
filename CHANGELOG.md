@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #869 - 2026-08-28
+- **In-app links in LLM chat responses stay in the current tab and the `target` allowlist is hardened** (review follow-up to #867): #867 only exempted `#`-prefixed hrefs from `target="_blank"`, so `[settings](/settings)` opened a second copy of ATLAS; a new `isExternalHref` helper in `frontend/src/utils/markdownRenderer.js` now keeps server-relative, relative, query, and same-origin links same-tab while only protocol-relative and cross-origin URLs open new. A DOMPurify `afterSanitizeAttributes` hook enforces `target="_blank" + rel="noopener noreferrer"` on every external anchor -- including raw model HTML with no `target` -- and strips `target` from in-app anchors and non-anchor elements, closing a `target="_top"`/clickjacking and a tabnabbing path. Vitest suite grows 5 -> 13 with per-anchor DOM assertions.
+
 ### PR #867 - 2026-08-28
 - **Links in LLM chat responses now open in a new tab instead of navigating away from ATLAS** (closes #859): the marked link renderer already emitted `target="_blank" rel="noopener noreferrer"` on external links, but the rendered HTML is sanitized with `DOMPurify.sanitize(html, DOMPURIFY_CONFIG)` before being injected into assistant messages, and DOMPurify 3.x strips the `target` attribute by default (it is no longer in the built-in allowlist). Only `rel="noopener noreferrer"` survived, so every link opened in the same tab. `target` is now explicitly added to `DOMPURIFY_CONFIG.ADD_ATTR` in `frontend/src/utils/markdownRenderer.js`, so the sanitizer preserves the `target="_blank"` the renderer emits. External links and bare/autolinked URLs open in a new tab; in-app fragment links (`#section`, used by citation-badge / references scrolling) are unchanged because the renderer already omits `target` for those, keeping them same-tab.
 
