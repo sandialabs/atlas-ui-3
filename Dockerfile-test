@@ -37,12 +37,13 @@ ENV PATH="/root/.local/bin:$PATH"
 # Copy pyproject.toml for dependency installation
 COPY pyproject.toml .
 
-# Files needed by env-sync tests (including startup scripts checked by the
-# removed-flag regression guard)
+# Files needed by env-sync tests (including startup scripts and the Dockerfile
+# itself, checked by the removed-flag regression guard)
 COPY .env.example .
 COPY docker-compose.yml .
 COPY agent_start.sh .
 COPY ps_agent_start.ps1 .
+COPY Dockerfile-test .
 
 # Copy and install frontend dependencies (keep all dependencies for testing)
 COPY frontend/package*.json ./frontend/

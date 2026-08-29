@@ -537,11 +537,15 @@ function Build-Frontend {
     if ($buildStatus -ne 0) {
         Write-Host "ERROR: Frontend build failed (npm run build exit code $buildStatus)."
         Write-Host "Keeping existing atlas/static/ assets; aborting build copy."
-        return
+        throw "Frontend build failed (exit code $buildStatus)."
     }
 
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.
+    if (-not (Test-Path "$PROJECT_ROOT/frontend/dist")) {
+        Write-Host "ERROR: frontend/dist not found after build — keeping existing atlas/static/ assets."
+        throw "frontend/dist not found after build."
+    }
     if (Test-Path "$PROJECT_ROOT/atlas/static") {
         Remove-Item -Recurse -Force "$PROJECT_ROOT/atlas/static"
     }

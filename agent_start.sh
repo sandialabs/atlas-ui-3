@@ -263,6 +263,10 @@ build_frontend() {
 
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.
+    if [ ! -d "$PROJECT_ROOT/frontend/dist" ]; then
+        echo "ERROR: frontend/dist not found after build — keeping existing atlas/static/ assets."
+        return 1
+    fi
     rm -rf "$PROJECT_ROOT/atlas/static"
     cp -r "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
 }
@@ -365,7 +369,7 @@ main() {
 
     # Handle frontend-only mode
     if [ "$ONLY_FRONTEND" = true ]; then
-        build_frontend
+        build_frontend || { echo "ERROR: Frontend build failed. Aborting."; exit 1; }
         echo "Frontend rebuilt successfully. Exiting as requested."
         exit 0
     fi
@@ -386,7 +390,7 @@ main() {
     # Full startup mode (default)
     cleanup_processes
     cleanup_logs
-    build_frontend
+    build_frontend || { echo "ERROR: Frontend build failed. Aborting startup."; exit 1; }
     start_mcp_mock
     start_backend "${PORT:-8000}" "${ATLAS_HOST:-127.0.0.1}"
     
