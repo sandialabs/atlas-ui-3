@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useEscapeKey } from '../hooks/useEscapeKey'
 import { X, Upload, RefreshCw, Eye, EyeOff } from 'lucide-react'
 
 /**
@@ -77,6 +78,8 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
     setShowToken(false)
     onClose()
   }
+
+  useEscapeKey(isOpen, handleClose)
 
   if (!isOpen) return null
 

@@ -110,7 +110,8 @@ describe('combined panel close guard, against the real ToolsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
     fireEvent.click(screen.getByRole('button', { name: /Close tools and settings/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Discard Changes/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Unsaved Changes/ }))
+      .getByRole('button', { name: /Discard Changes/ }))
 
     expect(onClose).toHaveBeenCalled()
   })
@@ -128,6 +129,21 @@ describe('combined panel close guard, against the real ToolsPanel', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  it('lets Escape dismiss the nested dialog without closing the panel', () => {
+    const onClose = vi.fn()
+    renderPanel({ onClose })
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Close tools and settings/ }))
+    expect(screen.getByRole('dialog', { name: /Unsaved Changes/ })).toBeInTheDocument()
+
+    // The overlay handles its own Escape now, so it closes and the panel stays.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: /Unsaved Changes/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Tools and Settings' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('does not navigate to the full admin page until the guard is answered', () => {
     const onClose = vi.fn()
     renderPanel({ onClose }, { isInAdminGroup: true })
@@ -139,7 +155,8 @@ describe('combined panel close guard, against the real ToolsPanel', () => {
     // The guard is up; navigating now would drop the staged selection.
     expect(mockNavigate).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: /Discard Changes/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Unsaved Changes/ }))
+      .getByRole('button', { name: /Discard Changes/ }))
     expect(mockNavigate).toHaveBeenCalledWith('/admin')
   })
 
@@ -156,7 +173,8 @@ describe('combined panel close guard, against the real ToolsPanel', () => {
 
     // And a later, clean close must not resurrect the navigation.
     fireEvent.click(screen.getByRole('button', { name: /Close tools and settings/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Discard Changes/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Unsaved Changes/ }))
+      .getByRole('button', { name: /Discard Changes/ }))
     expect(mockNavigate).not.toHaveBeenCalled()
   })
 })

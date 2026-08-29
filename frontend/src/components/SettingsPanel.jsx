@@ -318,8 +318,6 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       const node = dialogRef.current
       if (!node) return
       const scope = innermostDialog()
-      // A nested modal is up: it owns Escape and the trap, whatever the target.
-      if (scope !== node) return
       // Clicking non-focusable text drops focus to document.body, so the
       // listener has to live on the document; scope by target instead, and
       // treat "focus fell out of the panel entirely" as still ours.
@@ -329,10 +327,16 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       }
 
       if (event.key === 'Escape') {
+        // A nested overlay owns its own Escape (see useEscapeKey, which listens
+        // in the capture phase and stops propagation), so reaching here means
+        // none did -- this one is ours.
+        if (scope !== node) return
         event.stopPropagation()
         requestClose()
         return
       }
+      // Tab is trapped inside the innermost open dialog rather than switched
+      // off: standing down would let focus walk out of the overlay entirely.
       if (event.key !== 'Tab') return
       const focusable = Array.from(
         scope.querySelectorAll('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])')
@@ -342,9 +346,9 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
-      // Focus is outside the panel (body, after a click on plain text): pull it
-      // back in rather than letting Tab walk the page behind the modal.
-      if (!node.contains(document.activeElement)) {
+      // Focus is outside the trapped scope (the body, after a click on plain
+      // text): pull it back in rather than letting Tab walk the page behind.
+      if (!scope.contains(document.activeElement)) {
         event.preventDefault()
         ;(event.shiftKey ? last : first).focus()
         return

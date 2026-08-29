@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
 import { useChat } from '../contexts/ChatContext'
@@ -1129,7 +1129,7 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it('does not close the panel when Cancel is used on the tools tab', () => {
+  it('asks before discarding, and does not close, on the tools tab', () => {
     setup()
     const onClose = vi.fn()
     render(
@@ -1139,9 +1139,17 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
-    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }))
+    // Embedded the footer button discards rather than cancelling a close, and
+    // every other exit path asks first, so this one does too.
+    fireEvent.click(screen.getByRole('button', { name: /^Discard Changes$/ }))
 
+    const confirm = screen.getByRole('dialog', { name: /Discard Changes/ })
+    expect(confirm).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
+
+    fireEvent.click(within(confirm).getByRole('button', { name: /Discard Changes/ }))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: /Discard Changes/ })).not.toBeInTheDocument()
   })
 
   it('still closes the standalone modal on save', () => {

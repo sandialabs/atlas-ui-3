@@ -1,12 +1,13 @@
 import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
+import { useEscapeKey } from '../hooks/useEscapeKey'
 import { isUserPromptKey } from '../hooks/chat/useSelections'
 
 // Default type for schema properties without explicit type
@@ -64,6 +65,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [pendingSelectedPrompts, setPendingSelectedPrompts] = useState(new Set())
   const [hasChanges, setHasChanges] = useState(false)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
+  // The dialog is raised by two different things: a close attempt (save /
+  // discard / cancel) and the embedded Cancel button, which only discards.
+  const [discardOnly, setDiscardOnly] = useState(false)
   // Transient "Saved" confirmation for the embedded (tab) save, which no longer
   // dismisses anything.
   const [justSaved, setJustSaved] = useState(false)
@@ -235,10 +239,19 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     setJustSaved(true)
   }
 
-  // Cancel handler - reverts pending changes
+  // Cancel handler - reverts pending changes. Standalone it is the modal's
+  // "cancel and close"; embedded it discards staged selections without closing,
+  // so it asks first, like every other exit path.
   const handleCancel = () => {
+    if (embedded) {
+      if (hasChanges) {
+        setDiscardOnly(true)
+        setShowUnsavedDialog(true)
+      }
+      return
+    }
     revertChanges()
-    if (!embedded) onClose()
+    onClose()
   }
   
   // Clear all tools and prompts in pending state
@@ -257,6 +270,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const handleCloseAttempt = (onCancelled = null) => {
     if (hasChanges) {
       closeCancelledRef.current = typeof onCancelled === 'function' ? onCancelled : null
+      setDiscardOnly(false)
       setShowUnsavedDialog(true)
     } else {
       onClose()
@@ -268,6 +282,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // close attempt -- so they always dismiss, embedded or not.
   const handleSaveAndClose = () => {
     commitChanges()
+    setDiscardOnly(false)
     closeCancelledRef.current = null
     setShowUnsavedDialog(false)
     onClose()
@@ -275,13 +290,22 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
 
   const handleDiscardAndClose = () => {
     revertChanges()
+    setDiscardOnly(false)
     closeCancelledRef.current = null
     setShowUnsavedDialog(false)
     onClose()
   }
 
+  // Discard without closing -- the embedded Cancel button's answer.
+  const handleDiscardOnly = () => {
+    revertChanges()
+    setShowUnsavedDialog(false)
+    setDiscardOnly(false)
+  }
+
   const handleCancelDialog = () => {
     setShowUnsavedDialog(false)
+    setDiscardOnly(false)
     const onCancelled = closeCancelledRef.current
     closeCancelledRef.current = null
     onCancelled?.()
@@ -335,6 +359,12 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     setTokenModalServer(serverName)
   }
 
+  const closeDisconnectConfirm = useCallback(() => {
+    setDisconnectServer(null)
+    setDisconnectError(null)
+  }, [])
+  useEscapeKey(!!disconnectServer, closeDisconnectConfirm)
+
   // Handle disconnect confirmation
   const handleDisconnect = async () => {
     if (!disconnectServer) return
@@ -368,57 +398,62 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   }
 
   // Combine tools and prompts into a unified server list
-  const allServers = {}
+  // The panel stays mounted for the life of the combined "Tools and Settings"
+  // panel, so this merge/sort would otherwise redo itself on every unrelated
+  // state change in the host -- each General-tab slider step, for instance.
+  const serverList = useMemo(() => {
+    const allServers = {}
   
-  // Add tools to the unified list
-  tools.forEach(toolServer => {
-    if (!allServers[toolServer.server]) {
-      allServers[toolServer.server] = {
-        server: toolServer.server,
-        description: toolServer.description,
-        short_description: toolServer.short_description,
-        author: toolServer.author,
-        help_email: toolServer.help_email,
-        is_exclusive: toolServer.is_exclusive,
-        compliance_level: toolServer.compliance_level,
-        auth_type: toolServer.auth_type,
-        tools: toolServer.tools || [],
-        tools_detailed: toolServer.tools_detailed || [],
-        tool_count: toolServer.tool_count || 0,
-        prompts: [],
-        prompt_count: 0
+    // Add tools to the unified list
+    tools.forEach(toolServer => {
+      if (!allServers[toolServer.server]) {
+        allServers[toolServer.server] = {
+          server: toolServer.server,
+          description: toolServer.description,
+          short_description: toolServer.short_description,
+          author: toolServer.author,
+          help_email: toolServer.help_email,
+          is_exclusive: toolServer.is_exclusive,
+          compliance_level: toolServer.compliance_level,
+          auth_type: toolServer.auth_type,
+          tools: toolServer.tools || [],
+          tools_detailed: toolServer.tools_detailed || [],
+          tool_count: toolServer.tool_count || 0,
+          prompts: [],
+          prompt_count: 0
+        }
       }
-    }
-  })
+    })
   
-  // Add prompts to the unified list
-  prompts.forEach(promptServer => {
-    if (!allServers[promptServer.server]) {
-      allServers[promptServer.server] = {
-        server: promptServer.server,
-        description: promptServer.description,
-        short_description: promptServer.short_description,
-        author: promptServer.author,
-        help_email: promptServer.help_email,
-        is_exclusive: false,
-        auth_type: promptServer.auth_type,
-        tools: [],
-        tools_detailed: [],
-        tool_count: 0,
-        prompts: promptServer.prompts || [],
-        prompt_count: promptServer.prompt_count || 0
+    // Add prompts to the unified list
+    prompts.forEach(promptServer => {
+      if (!allServers[promptServer.server]) {
+        allServers[promptServer.server] = {
+          server: promptServer.server,
+          description: promptServer.description,
+          short_description: promptServer.short_description,
+          author: promptServer.author,
+          help_email: promptServer.help_email,
+          is_exclusive: false,
+          auth_type: promptServer.auth_type,
+          tools: [],
+          tools_detailed: [],
+          tool_count: 0,
+          prompts: promptServer.prompts || [],
+          prompt_count: promptServer.prompt_count || 0
+        }
+      } else {
+        allServers[promptServer.server].prompts = promptServer.prompts || []
+        allServers[promptServer.server].prompt_count = promptServer.prompt_count || 0
+        // Also update auth_type if not already set
+        if (!allServers[promptServer.server].auth_type && promptServer.auth_type) {
+          allServers[promptServer.server].auth_type = promptServer.auth_type
+        }
       }
-    } else {
-      allServers[promptServer.server].prompts = promptServer.prompts || []
-      allServers[promptServer.server].prompt_count = promptServer.prompt_count || 0
-      // Also update auth_type if not already set
-      if (!allServers[promptServer.server].auth_type && promptServer.auth_type) {
-        allServers[promptServer.server].auth_type = promptServer.auth_type
-      }
-    }
-  })
+    })
   
-  const serverList = sortAtlasFirst(Object.values(allServers))
+    return sortAtlasFirst(Object.values(allServers))
+  }, [tools, prompts])
 
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {
@@ -969,9 +1004,14 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           )}
           <button
             onClick={handleCancel}
-            className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+            disabled={embedded && !hasChanges}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              embedded && !hasChanges
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
+            }`}
           >
-            Cancel
+            {embedded ? 'Discard Changes' : 'Cancel'}
           </button>
           <button
             onClick={handleSave}
@@ -994,8 +1034,12 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       {/* Unsaved Changes Confirmation Dialog */}
       <UnsavedChangesDialog
         isOpen={showUnsavedDialog}
-        onSave={handleSaveAndClose}
-        onDiscard={handleDiscardAndClose}
+        title={discardOnly ? 'Discard Changes' : 'Unsaved Changes'}
+        message={discardOnly
+          ? 'This discards the tool and integration selections you have staged. Continue?'
+          : 'You have unsaved changes to your tools and integrations. What would you like to do?'}
+        onSave={discardOnly ? undefined : handleSaveAndClose}
+        onDiscard={discardOnly ? handleDiscardOnly : handleDiscardAndClose}
         onCancel={handleCancelDialog}
       />
 
@@ -1019,7 +1063,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           aria-modal="true"
           aria-label="Disconnect server"
           className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]"
-          onClick={() => { setDisconnectServer(null); setDisconnectError(null) }}
+          onClick={closeDisconnectConfirm}
         >
           <div
             className="bg-gray-800 rounded-lg shadow-xl max-w-sm w-full mx-4 p-6"
@@ -1038,7 +1082,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
             )}
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => { setDisconnectServer(null); setDisconnectError(null) }}
+                onClick={closeDisconnectConfirm}
                 className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
               >
                 Cancel
@@ -1099,4 +1143,4 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   )
 }
 
-export default ToolsPanel
+export default memo(ToolsPanel)

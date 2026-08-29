@@ -1,4 +1,5 @@
 import { AlertTriangle, Save, X } from 'lucide-react'
+import { useEscapeKey } from '../hooks/useEscapeKey'
 
 const UnsavedChangesDialog = ({
   isOpen,
@@ -8,6 +9,8 @@ const UnsavedChangesDialog = ({
   title = 'Unsaved Changes',
   message = 'You have unsaved changes to your tools and integrations. What would you like to do?',
 }) => {
+  useEscapeKey(isOpen, onCancel)
+
   if (!isOpen) return null
 
   return (
