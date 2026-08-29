@@ -87,8 +87,6 @@ services:
       # Suppress LiteLLM verbose logging
       - FEATURE_SUPPRESS_LITELLM_LOGGING=true
 
-      - USE_NEW_FRONTEND=true
-      
       # Feature Flags
       - FEATURE_WORKSPACES_ENABLED=false
       - FEATURE_RAG_ENABLED=false

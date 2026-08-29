@@ -515,18 +515,13 @@ function Start-McpMock {
 # =============================================================================
 
 function Build-Frontend {
-    $useNewFrontend = $env:USE_NEW_FRONTEND
-    if (-not $useNewFrontend) { $useNewFrontend = "true" }
-
-    if ($useNewFrontend -ne "true") {
-        Write-Host "Skipping frontend build (USE_NEW_FRONTEND=$useNewFrontend)."
-        Set-Location $PROJECT_ROOT
-        return
-    }
-
     Write-Host "Building frontend..."
     Set-Location "$PROJECT_ROOT/frontend"
     npm install
+    if ($LASTEXITCODE -ne 0) {
+        Set-Location $PROJECT_ROOT
+        throw "npm install failed (exit code $LASTEXITCODE)."
+    }
 
     # Use VITE_* values from the environment / .env instead of hardcoding.
     # If VITE_APP_NAME is not already set, fall back to the example default.
@@ -540,10 +535,21 @@ function Build-Frontend {
     }
 
     npm run build
+    $buildStatus = $LASTEXITCODE
     Set-Location $PROJECT_ROOT
+
+    if ($buildStatus -ne 0) {
+        Write-Host "ERROR: Frontend build failed (npm run build exit code $buildStatus)."
+        Write-Host "Keeping existing atlas/static/ assets; aborting build copy."
+        throw "Frontend build failed (exit code $buildStatus)."
+    }
 
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.
+    if (-not (Test-Path "$PROJECT_ROOT/frontend/dist")) {
+        Write-Host "ERROR: frontend/dist not found after build — keeping existing atlas/static/ assets."
+        throw "frontend/dist not found after build."
+    }
     if (Test-Path "$PROJECT_ROOT/atlas/static") {
         Remove-Item -Recurse -Force "$PROJECT_ROOT/atlas/static"
     }
@@ -592,7 +598,12 @@ function Main {
 
     # Handle frontend-only mode
     if ($ONLY_FRONTEND) {
-        Build-Frontend
+        try {
+            Build-Frontend
+        } catch {
+            Write-Host "ERROR: Frontend build failed. Aborting."
+            exit 1
+        }
         Write-Host "Frontend rebuilt successfully. Exiting as requested."
         exit 0
     }
@@ -624,7 +635,12 @@ function Main {
     # Full startup mode (default)
     Stop-Processes
     Clear-Logs
-    Build-Frontend
+    try {
+        Build-Frontend
+    } catch {
+        Write-Host "ERROR: Frontend build failed. Aborting startup."
+        exit 1
+    }
     Start-McpMock
     $backendPort = if ($env:PORT) { [int]$env:PORT } else { 8000 }
     $backendHost = if ($env:ATLAS_HOST) { $env:ATLAS_HOST } else { "127.0.0.1" }
