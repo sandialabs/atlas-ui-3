@@ -253,24 +253,16 @@ def test_use_new_frontend_flag_is_gone():
     Two layers are checked: (1) the literal env-var name must not reappear in
     any config or startup file, and (2) the startup scripts must not contain a
     skip-build early-return path (the "Skipping frontend build" message was the
-    old code path's signature). Dockerfile-test is not copied into the test
-    container (it is the build recipe itself), so it is checked on a best-effort
-    basis — the same pattern used by
-    test_runtime_only_dockerfile_keeps_runtime_surface_small.
+    old code path's signature). All files checked here are COPY'd into the test
+    container by Dockerfile-test, so this guard runs in both local and CI runs.
     """
     repo_root = Path(__file__).parent.parent.parent
 
-    # Always-present in the test container (Dockerfile-test COPYs these for
-    # env-sync tests) and in any full checkout.
     must_be_present = [
         repo_root / '.env.example',
         repo_root / 'docker-compose.yml',
         repo_root / 'agent_start.sh',
         repo_root / 'ps_agent_start.ps1',
-    ]
-    # Present in a full checkout but not copied into the test container.
-    best_effort = [
-        repo_root / 'Dockerfile-test',
     ]
 
     for file_path in must_be_present:
@@ -292,14 +284,25 @@ def test_use_new_frontend_flag_is_gone():
             f"should always be built (PR #865 removed the skip branch)."
         )
 
-    for file_path in best_effort:
-        if not file_path.exists():
-            pytest.skip(
-                f"{file_path.name} not present in this checkout (expected when "
-                f"running inside a container image that does not COPY it)."
-            )
-        content = file_path.read_text(encoding='utf-8')
-        assert 'USE_NEW_FRONTEND' not in content, (
-            f"'USE_NEW_FRONTEND' was found in {file_path.name} — the flag was "
-            f"removed in PR #865 and should not be reintroduced."
+
+def test_use_new_frontend_flag_is_gone_in_dockerfile_test():
+    """Guard against the flag reappearing in Dockerfile-test.
+
+    Dockerfile-test is the build recipe itself and is not COPY'd into the test
+    container, so this test skips in CI but runs in any full checkout — the same
+    pattern used by test_runtime_only_dockerfile_keeps_runtime_surface_small.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    dockerfile_path = repo_root / 'Dockerfile-test'
+
+    if not dockerfile_path.exists():
+        pytest.skip(
+            "Dockerfile-test not present in this checkout (expected when "
+            "running inside a container image that does not COPY it)."
         )
+
+    content = dockerfile_path.read_text(encoding='utf-8')
+    assert 'USE_NEW_FRONTEND' not in content, (
+        "'USE_NEW_FRONTEND' was found in Dockerfile-test — the flag was "
+        "removed in PR #865 and should not be reintroduced."
+    )

@@ -531,7 +531,14 @@ function Build-Frontend {
     }
 
     npm run build
+    $buildStatus = $LASTEXITCODE
     Set-Location $PROJECT_ROOT
+
+    if ($buildStatus -ne 0) {
+        Write-Host "ERROR: Frontend build failed (npm run build exit code $buildStatus)."
+        Write-Host "Keeping existing atlas/static/ assets; aborting build copy."
+        return
+    }
 
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.

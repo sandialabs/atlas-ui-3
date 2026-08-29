@@ -252,7 +252,14 @@ build_frontend() {
         export VITE_FEATURE_RAG_CITATIONS="false"
     fi
     npm run build
+    local build_status=$?
     cd "$PROJECT_ROOT"
+
+    if [ "$build_status" -ne 0 ]; then
+        echo "ERROR: Frontend build failed (npm run build exit code $build_status)."
+        echo "Keeping existing atlas/static/ assets; aborting build copy."
+        return 1
+    fi
 
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.
