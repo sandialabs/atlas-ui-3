@@ -288,9 +288,9 @@ def test_use_new_frontend_flag_is_gone():
 def test_use_new_frontend_flag_is_gone_in_dockerfile_test():
     """Guard against the flag reappearing in Dockerfile-test.
 
-    Dockerfile-test is the build recipe itself and is not COPY'd into the test
-    container, so this test skips in CI but runs in any full checkout — the same
-    pattern used by test_runtime_only_dockerfile_keeps_runtime_surface_small.
+    Dockerfile-test is COPY'd into the test container by this PR, so this guard
+    runs in both local and CI runs. The pytest.skip is retained as a fallback
+    for environments that strip top-level Dockerfiles before testing.
     """
     repo_root = Path(__file__).parent.parent.parent
     dockerfile_path = repo_root / 'Dockerfile-test'

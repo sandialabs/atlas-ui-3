@@ -241,7 +241,7 @@ start_mcp_mock() {
 build_frontend() {
     echo "Building frontend..."
     cd "$PROJECT_ROOT/frontend"
-    npm install
+    npm install || { echo "ERROR: npm install failed."; cd "$PROJECT_ROOT"; return 1; }
     # Use VITE_* values from the environment / .env instead of hardcoding.
     # If VITE_APP_NAME is not already set, fall back to the example default.
     if [ -z "$VITE_APP_NAME" ]; then
@@ -268,7 +268,7 @@ build_frontend() {
         return 1
     fi
     rm -rf "$PROJECT_ROOT/atlas/static"
-    cp -r "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static"
+    cp -r "$PROJECT_ROOT/frontend/dist" "$PROJECT_ROOT/atlas/static" || { echo "ERROR: Failed to copy frontend/dist to atlas/static/."; return 1; }
 }
 
 # =============================================================================
