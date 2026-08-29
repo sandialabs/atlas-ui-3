@@ -5,6 +5,7 @@ import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench,
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
+import { autoResizeComposer, resetComposerHeight, COMPOSER_MAX_HEIGHT } from '../utils/composerAutoResize'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
@@ -110,6 +111,18 @@ const ChatArea = () => {
     if (!ctx) return
     setPendingCorrection(ctx)
   }, [messages])
+  // `Message` is memoized, but a fresh `() => handleOpenCorrection(index)` arrow
+  // per render made every message's props change on every render -- so each
+  // keystroke in the composer re-rendered and re-reconciled the whole transcript,
+  // which is how typing ends up shifting previously rendered messages (#866).
+  // Rebuild these closures only when the message list or the feature gate moves.
+  const correctionHandlers = useMemo(
+    () =>
+      correctionsEnabled
+        ? messagesWithOrdinals.map((_, index) => () => handleOpenCorrection(index))
+        : [],
+    [correctionsEnabled, messagesWithOrdinals, handleOpenCorrection]
+  )
 
   const handleSubmitCorrection = useCallback((chosenTool, note) => {
     if (!pendingCorrection) return
@@ -132,13 +145,10 @@ const ChatArea = () => {
     m => m.name === currentModel && m.supports_tools !== false
   ) ?? true
 
-  // Auto-resize textarea
+  // Auto-resize textarea. Delegated so the measurement cannot displace the
+  // transcript's scroll position while the user types (#866).
   const autoResizeTextarea = () => {
-    const textarea = textareaRef.current
-    if (textarea) {
-      textarea.style.height = 'auto'
-      textarea.style.height = Math.min(textarea.scrollHeight, 128) + 'px'
-    }
+    autoResizeComposer(textareaRef.current, messagesRef.current, COMPOSER_MAX_HEIGHT)
   }
 
   // Check for mobile screen size
@@ -259,20 +269,18 @@ const ChatArea = () => {
       if (!sendChatMessage(message, allFiles)) return
       setInputValue('')
 
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
+      // Reset textarea height through the shared helper so the send path
+      // cannot displace the transcript either (#866).
+      resetComposerHeight(textareaRef.current, messagesRef.current)
     } catch (error) {
       console.error('Error in handleSubmit:', error)
       // Still try to send the message without file processing
       if (!sendChatMessage(message, uploadedFiles)) return
       setInputValue('')
 
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
+      // Reset textarea height through the shared helper so the send path
+      // cannot displace the transcript either (#866).
+      resetComposerHeight(textareaRef.current, messagesRef.current)
     }
   }
   
@@ -834,7 +842,7 @@ const ChatArea = () => {
             message={message}
             userIndex={userIndex}
             onRewind={userIndex !== null ? rewindAndResubmit : null}
-            onCorrect={correctionsEnabled ? () => handleOpenCorrection(index) : null}
+            onCorrect={correctionHandlers[index] || null}
           />
         ))}
         {agentModeEnabled && agentPendingQuestion && (
@@ -1124,7 +1132,7 @@ const ChatArea = () => {
                     ? 'border-2 border-green-500 focus:ring-green-500 bg-green-900/10'
                     : 'border border-gray-600 focus:ring-blue-500'
                 }`}
-                style={{ minHeight: '48px', maxHeight: '128px' }}
+                style={{ minHeight: '48px', maxHeight: `${COMPOSER_MAX_HEIGHT}px` }}
               />
               
               {/* Tool Autocomplete Dropdown */}
