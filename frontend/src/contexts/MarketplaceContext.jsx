@@ -229,6 +229,17 @@ export const MarketplaceProvider = ({ children }) => {
   )
 }
 
+/**
+ * Marketplace context if a provider is mounted, otherwise null.
+ *
+ * The model picker moved into the chat bar (issue #839), and ChatArea is
+ * rendered in tests -- and could be rendered in future surfaces -- without the
+ * marketplace provider. Compliance filtering is an enhancement there, not a
+ * requirement, so it degrades to "no filtering" instead of throwing.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export const useOptionalMarketplace = () => useContext(MarketplaceContext) || null
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const useMarketplace = () => {
   const context = useContext(MarketplaceContext)

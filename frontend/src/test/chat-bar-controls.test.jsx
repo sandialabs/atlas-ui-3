@@ -1,0 +1,132 @@
+/**
+ * Chat-bar controls and the sources/tools consolidation (PR #839 UX review).
+ *
+ * cmlanca asked for the day-to-day controls to move to where the work happens:
+ * tools toggled from the chat bar with descriptions rather than a flat list of
+ * names, enabled datasets visible as pills, and data sources shown in the same
+ * view as the search tool that consumes them.
+ */
+import { render, screen, fireEvent } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import ToolSelector from '../components/ToolSelector'
+import EnabledDataSourcesIndicator from '../components/EnabledDataSourcesIndicator'
+import { useChat } from '../contexts/ChatContext'
+import { OPEN_SETTINGS_EVENT } from '../utils/settingsPanelEvents'
+
+vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
+
+const tools = [{
+  server: 'files',
+  tools: ['read_file', 'write_file'],
+  tools_detailed: [
+    { name: 'read_file', description: 'Read a file from the session workspace' },
+    { name: 'write_file', description: 'Write a file into the session workspace' },
+  ],
+}]
+
+const ragSources = [
+  { serverName: 'corp', id: 'west', label: 'West Region Fleet' },
+  { serverName: 'corp', id: 'east', label: 'East Region Fleet' },
+  { serverName: 'corp', id: 'central', label: 'Central Region Fleet' },
+  { serverName: 'corp', id: 'exec', label: 'Executive Fleet' },
+]
+
+describe('ToolSelector in the chat bar', () => {
+  let toggleTool
+
+  beforeEach(() => {
+    toggleTool = vi.fn()
+    useChat.mockReturnValue({
+      tools,
+      selectedTools: new Set(['files_read_file']),
+      toggleTool,
+      features: { tools: true },
+    })
+  })
+
+  it('summarises the selection on the closed control', () => {
+    render(<ToolSelector />)
+    expect(screen.getByText('1 tool')).toBeInTheDocument()
+  })
+
+  it('lists each tool with a description and an on/off state', () => {
+    render(<ToolSelector />)
+    fireEvent.click(screen.getByRole('button', { name: /1 tool/ }))
+
+    expect(screen.getByText('read_file')).toBeInTheDocument()
+    expect(screen.getByText('Read a file from the session workspace')).toBeInTheDocument()
+
+    const on = screen.getByRole('button', { name: /read_file/ })
+    const off = screen.getByRole('button', { name: /write_file/ })
+    expect(on).toHaveAttribute('aria-pressed', 'true')
+    expect(off).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('toggles a tool without leaving the chat bar', () => {
+    render(<ToolSelector />)
+    fireEvent.click(screen.getByRole('button', { name: /1 tool/ }))
+    fireEvent.click(screen.getByRole('button', { name: /write_file/ }))
+    expect(toggleTool).toHaveBeenCalledWith('files_write_file')
+  })
+
+  it('opens the full panel from the footer link', () => {
+    const listener = vi.fn()
+    window.addEventListener(OPEN_SETTINGS_EVENT, listener)
+    render(<ToolSelector />)
+    fireEvent.click(screen.getByRole('button', { name: /1 tool/ }))
+    fireEvent.click(screen.getByText(/Open Tools and Settings/))
+    expect(listener).toHaveBeenCalled()
+    expect(listener.mock.calls[0][0].detail).toEqual({ tab: 'tools' })
+    window.removeEventListener(OPEN_SETTINGS_EVENT, listener)
+  })
+
+  it('renders nothing when the tools feature is off', () => {
+    useChat.mockReturnValue({ tools, selectedTools: new Set(), toggleTool, features: {} })
+    const { container } = render(<ToolSelector />)
+    expect(container).toBeEmptyDOMElement()
+  })
+})
+
+describe('EnabledDataSourcesIndicator', () => {
+  const renderWith = (keys, overrides = {}) => {
+    useChat.mockReturnValue({
+      ragSources,
+      selectedDataSources: new Set(keys),
+      toggleDataSource: vi.fn(),
+      features: { rag: true },
+      ...overrides,
+    })
+    return render(<EnabledDataSourcesIndicator />)
+  }
+
+  it('stays out of the way when nothing is enabled', () => {
+    const { container } = renderWith([])
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('names each enabled dataset as a pill', () => {
+    renderWith(['corp:west', 'corp:east'])
+    expect(screen.getByText('West Region Fleet')).toBeInTheDocument()
+    expect(screen.getByText('East Region Fleet')).toBeInTheDocument()
+  })
+
+  it('collapses a long list into an expandable summary', () => {
+    renderWith(['corp:west', 'corp:east', 'corp:central', 'corp:exec'])
+    expect(screen.queryByText('Executive Fleet')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('+1 more'))
+    expect(screen.getByText('Executive Fleet')).toBeInTheDocument()
+  })
+
+  it('removes a dataset from its pill', () => {
+    const toggleDataSource = vi.fn()
+    renderWith(['corp:west'], { toggleDataSource })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove West Region Fleet' }))
+    expect(toggleDataSource).toHaveBeenCalledWith('corp:west')
+  })
+
+  it('is hidden when RAG is disabled', () => {
+    const { container } = renderWith(['corp:west'], { features: {} })
+    expect(container).toBeEmptyDOMElement()
+  })
+})

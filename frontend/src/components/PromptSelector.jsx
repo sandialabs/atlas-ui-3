@@ -105,13 +105,17 @@ const PromptSelector = () => {
 
       {isOpen && (
         <div className="absolute bottom-full left-0 mb-1 w-80 bg-gray-800 border border-gray-600 rounded-lg shadow-lg max-h-96 overflow-y-auto z-50">
-          <div className="p-2 border-b border-gray-700 bg-gray-750">
-            <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+          {/* Section heading, not an option. It used to read "Custom Prompts"
+              in the same weight as the rows below it and looked selectable
+              (issue #839 review); it is now an uppercase, muted, non-interactive
+              label that says what the section is for. */}
+          <div className="p-2 border-b border-gray-700 bg-gray-750 cursor-default select-none">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-2">
               <Sparkles className="w-3 h-3 text-purple-400" />
-              Custom Prompts
+              Add Custom Prompts
             </div>
             <div className="text-xs text-gray-400 mt-1">
-              Select prompts to customize AI behavior
+              Pick one below to customize AI behavior
             </div>
           </div>
 
@@ -196,7 +200,7 @@ const PromptSelector = () => {
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-2">
                     <User className="w-3 h-3 text-emerald-400" />
                     My Prompts
                   </div>

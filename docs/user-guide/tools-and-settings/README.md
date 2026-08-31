@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-08-24
+Last updated: 2026-08-31
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -57,6 +57,82 @@ editor already open on that prompt.
 
 ![Prompt editor opened from the picker](screenshots/836-06-prompt-editor.png)
 
+## Chat-bar controls (UX review follow-up)
+
+A UX review on PR #839 asked for the day-to-day controls to sit where the work
+happens instead of in the top bar. The strip under the message box now carries
+the model, the tools, and the prompts, in that order.
+
+![Chat bar with the model, tool, and prompt controls](screenshots/839-06-chat-bar-dataset-pills.png)
+
+### Model
+
+The model picker moved out of the top bar. It behaves exactly as it did there
+-- vision/tools capability icons, the expandable model card, and the per-model
+API key button -- but the menu opens upward.
+
+### Tools
+
+**Tools** opens a searchable menu of every available tool, grouped by server,
+each row an icon, the tool name, a one-line description, and an on/off toggle.
+Small changes never need a trip into the full panel; the footer link opens
+Tools and Settings for everything else.
+
+![Chat-bar tool toggles with descriptions](screenshots/839-03-chat-bar-tool-toggles.png)
+
+### Prompts
+
+The picker's section heading used to read "Custom Prompts" in the same weight
+as the selectable rows below it. It now reads **ADD CUSTOM PROMPTS** as a
+muted, uppercase, non-interactive label.
+
+![Prompt picker with the Add Custom Prompts heading](screenshots/839-04-add-custom-prompts-header.png)
+
+### Enabled data sources
+
+Enabled datasets show as pills above the message box. Each pill removes its
+dataset; past three, the rest collapse into a `+N more` summary that expands in
+place. The **Data Sources:** label opens the picker.
+
+## Data sources live with the search tool
+
+Data sources are only ever consumed by search, so the picker is now part of the
+**Tools & Integrations** tab rather than only behind its own top-bar drawer.
+
+![Data sources inside the tools tab](screenshots/839-02-tools-tab-with-data-sources.png)
+
+![Sources enabled from the tools tab](screenshots/839-05-sources-enabled-in-tools-view.png)
+
+The left-hand **Sources** drawer is unchanged and still available; both render
+the same `DataSourcesSelector` component. Dataset names wrap instead of being
+clipped, so a long name (or one with a suffix appended) stays readable.
+
+![Data sources drawer](screenshots/839-09-sources-drawer-wrapping.png)
+
+## Top bar sizing
+
+The admin shield is gone -- admin controls are the Admin tab, and the full
+dashboard is one click on from there -- and Help and Portal are icons rather
+than icon-plus-word.
+
+![Top bar with no shield and an icon-only help button](screenshots/839-01-top-bar-no-shield.png)
+
+The left-hand button labels are now driven by the header's own measured width
+rather than a viewport media query. The header sits beside the sidebar and the
+canvas panel, so a viewport query kept labels at widths where they no longer
+fit and dropped them at widths where they did; "New Chat" was the worst case.
+
+| Header width | Result |
+| ------------ | ------ |
+| >= 1080px | Full desktop button cluster |
+| >= 760px | Buttons keep their text labels |
+| < 760px | Icon-only buttons, cluster collapses into the menu |
+
+![Top bar at a medium width](screenshots/839-08-top-bar-medium.png)
+
+![Top bar at a narrow width](screenshots/839-07-top-bar-narrow.png)
+
+
 ## How it works
 
 | Layer | Component | Responsibility |
@@ -66,3 +142,5 @@ editor already open on that prompt.
 | Tools | `ToolsPanel` (`embedded` prop) | Same component as before; renders bodyless-of-chrome inside the panel and stays mounted across tab switches |
 | Admin | `admin/AdminQuickPanel` + `useAdminConfigActions` | The three cards, sharing notification/modal plumbing with `AdminDashboard` |
 | Prompts | `PromptSelector` -> `utils/settingsPanelEvents` -> `PromptManager` | The picker asks for a tab and an edit/create intent via an `atlas:open-settings` window event |
+| Chat bar | `ModelSelector`, `ToolSelector`, `EnabledDataSourcesIndicator` | Model, tool toggles, and dataset pills under the message box, rendered by `ChatArea` |
+| Data sources | `DataSourcesSelector` | One picker rendered by both `RagPanel` (drawer) and `ToolsPanel` (inline, `dense`) |
