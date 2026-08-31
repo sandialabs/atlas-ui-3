@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #871 - 2026-08-30
+- **The Active Tools strip above the chat input stays a single row on mobile** (#870): the pill row no longer wraps into up to three rows on narrow viewports — it scrolls horizontally (`overflow-x-auto scrollbar-hide`), and the "+N more" and auto-approve toggles are pinned outside the scroll region so they stay reachable.
+
 ### PR #868 - 2026-08-29
 - **Typing in the composer no longer shifts previously rendered messages** (#866): two separate per-keystroke problems made the previous response jump down and snap back, most visibly once the composer had grown to 2-3 lines. First, `Message` is wrapped in `memo`, but `ChatArea` handed it a freshly allocated `onCorrect` arrow on every render, so the memo never hit and every keystroke re-rendered and re-reconciled the entire transcript -- markdown, KaTeX and highlight subtrees included -- which the `MutationObserver` then answered with a *smooth* (animated) scroll-to-bottom. The per-index handlers are now memoized on the message list, taking a 3-line message from 58 `Message` renders to 2. Second, auto-sizing the composer collapsed the textarea to `height: auto` to read `scrollHeight`; because the composer is a flex sibling of the scrollable message list, that collapse momentarily grew the list's viewport, shrinking its scrollable range so the browser clamped `scrollTop` — and the clamp survived the re-expansion. Composer sizing now lives in `utils/composerAutoResize`, which snapshots the transcript's offset (or its pinned-to-bottom state) and restores it around every height mutation, including the reset on send.
 
