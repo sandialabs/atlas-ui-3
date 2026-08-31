@@ -526,7 +526,7 @@ function Build-Frontend {
     # Use VITE_* values from the environment / .env instead of hardcoding.
     # If VITE_APP_NAME is not already set, fall back to the example default.
     if (-not $env:VITE_APP_NAME) {
-        $env:VITE_APP_NAME = "Chat UI 13"
+        $env:VITE_APP_NAME = "ATLAS"
     }
 
     # RAG citations UI is opt-in at build time; default to off if unset.
@@ -547,7 +547,7 @@ function Build-Frontend {
     # Copy build output to atlas/static/ so the backend always serves from one
     # location, matching the PyPI package layout.
     if (-not (Test-Path "$PROJECT_ROOT/frontend/dist")) {
-        Write-Host "ERROR: frontend/dist not found after build — keeping existing atlas/static/ assets."
+        Write-Host "ERROR: frontend/dist not found after build; keeping existing atlas/static/ assets."
         throw "frontend/dist not found after build."
     }
     if (Test-Path "$PROJECT_ROOT/atlas/static") {
@@ -572,6 +572,15 @@ function Start-Backend {
     # Set APP_CONFIG_DIR so user overrides in <project_root>/config/ take
     # precedence over package defaults in atlas/config/ (CWD is atlas/).
     if (-not $env:APP_CONFIG_DIR) {
+        $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
+    } elseif (-not (Test-Path -LiteralPath $env:APP_CONFIG_DIR -PathType Container)) {
+        # A stale APP_CONFIG_DIR (commonly a POSIX-style path such as
+        # /home/<user>/... left in .env from a WSL/Linux setup) is drive-less
+        # under Windows path semantics, so the backend would search a bogus
+        # "C:\home\..." location, find no mcp.json, and start with 0 MCP
+        # servers even though <project_root>\config\mcp.json exists. Fall
+        # back to the project config dir and say why.
+        Write-Warning "APP_CONFIG_DIR points at '$($env:APP_CONFIG_DIR)', which does not exist on this machine. Falling back to '$PROJECT_ROOT/config' (a stale POSIX-style path from WSL/Linux in .env is a common cause)."
         $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
     }
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"

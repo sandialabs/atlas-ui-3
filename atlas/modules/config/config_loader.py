@@ -50,6 +50,17 @@ class ConfigManager:
         Two-layer lookup:
         1. User config dir (APP_CONFIG_DIR, default "config/") - user customizations
         2. Package defaults (atlas/config/) - always available as fallback
+
+        The conventional repo-root ``config/`` directory is also searched in
+        between whenever APP_CONFIG_DIR does not already resolve to it. This
+        keeps a checkout working when APP_CONFIG_DIR names a directory that
+        does not exist on the current machine -- most commonly a POSIX-style
+        absolute path (e.g. ``/home/<user>/git/atlas-ui-3/config``) carried
+        over from WSL/Linux into a Windows ``.env``. On Windows such a value
+        has no drive letter, ``Path.is_absolute()`` is False, and the join
+        below produces a bogus drive-rooted path like ``C:\\home\\...``, so
+        without this fallback every config file would be reported missing and
+        MCP would start with 0 servers even though ``config/mcp.json`` exists.
         """
         project_root = self._atlas_root.parent
 
@@ -64,6 +75,7 @@ class ConfigManager:
         candidates: List[Path] = [
             config_dir / file_name,
             config_dir_project / file_name,
+            project_root / "config" / file_name,
             package_defaults,
         ]
 
@@ -114,6 +126,19 @@ class ConfigManager:
                 continue
 
         logger.warning(f"{file_type} config not found in any of these locations: {[str(p) for p in file_paths]}")
+        # Help operators self-diagnose the most common cause: APP_CONFIG_DIR
+        # pointing at a directory that does not exist on this machine (e.g. a
+        # POSIX-style path in a Windows .env). Never let the hint itself fail.
+        try:
+            configured_dir = self.app_settings.app_config_dir
+            if not Path(configured_dir).exists():
+                logger.warning(
+                    "APP_CONFIG_DIR '%s' does not exist on this machine; unset it or "
+                    "point it at an existing directory so the user config can be found",
+                    configured_dir,
+                )
+        except Exception:
+            pass
         return None
 
     @property
