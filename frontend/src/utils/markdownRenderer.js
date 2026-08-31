@@ -7,6 +7,7 @@
 // singleton — import it once from the component that renders messages.
 
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
@@ -51,12 +52,49 @@ hljs.registerLanguage('sh', bash)
 // DOMPurify configuration that permits KaTeX-generated HTML.
 // KaTeX renders almost exclusively with <span> (allowed by default) but also
 // uses <svg>, <path>, and a handful of MathML elements for some symbols.
+// `target` is explicitly allowlisted because DOMPurify 3.x drops it by
+// default, which would strip the target="_blank" the link renderer adds and
+// cause chat-response links to navigate the tab away from ATLAS (#859). An
+// `afterSanitizeAttributes` hook below constrains the widened allowlist to
+// anchors-only and normalizes target to _blank + rel="noopener noreferrer".
 export const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mspace', 'mtext', 'details', 'summary'],
-  ADD_ATTR: ['encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'data-section-ref', 'role', 'tabindex', 'aria-label'],
+  ADD_ATTR: ['target', 'encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'data-ref', 'data-citation-target', 'data-section-ref', 'role', 'tabindex', 'aria-label'],
 }
 
 const renderer = new marked.Renderer()
+
+// Origin of the running app, used to recognize same-origin URLs the model may
+// emit as fully-qualified links (e.g. http://host:port/settings). Read lazily
+// inside isExternalHref so tests/jsdom and SSR without a window degrade
+// gracefully (treated as no known origin -> relative-path rules still apply).
+function appOrigin() {
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    return window.location.origin
+  }
+  return null
+}
+
+// Decide whether a link should open in a new tab. In-app navigation -- fragments,
+// server-relative and relative paths, query strings, and absolute URLs that
+// resolve to the app's own origin -- stays in the current tab so the user is
+// not bounced into a second copy of ATLAS. Protocol-relative (`//host`) and
+// any other cross-origin URL open new.
+function isExternalHref(href) {
+  if (!href || typeof href !== 'string') return false
+  if (href === '' || href.startsWith('#') || href.startsWith('?')) return false
+  if (href.startsWith('//')) return true
+  if (href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) return false
+  const origin = appOrigin()
+  if (origin) {
+    try {
+      if (new URL(href, origin).origin === origin) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
 
 renderer.link = function(href, title, text) {
   if (typeof href === 'object' && href !== null) {
@@ -66,7 +104,7 @@ renderer.link = function(href, title, text) {
   }
   const escTitle = title ? title.replace(/&/g, '&amp;').replace(/"/g, '&quot;') : ''
   const titleAttr = escTitle ? ` title="${escTitle}"` : ''
-  if (href && href.startsWith('#')) {
+  if (!isExternalHref(href)) {
     return `<a href="${href}"${titleAttr}>${text}</a>`
   }
   return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`
@@ -180,6 +218,32 @@ marked.setOptions({
   },
   breaks: true,
   gfm: true
+})
+
+// Enforce the link-target policy on every anchor that survives sanitization,
+// whether it came from the renderer (markdown) or from raw HTML the model
+// emitted directly. ADD_ATTR is element-agnostic, so without this hook a
+// `target` could survive on a non-anchor element, or on an anchor with a value
+// other than _blank (e.g. _top/_parent, which a frame or clickjacking context
+// could exploit), or on a raw `<a target="_blank">` missing a `rel` (a
+// tabnabbing vector). Registered once at module load; applies to every
+// DOMPurify.sanitize in the app. External anchors get target=_blank +
+// rel="noopener noreferrer" (even when the model omitted target, so raw-HTML
+// external links cannot bypass the new-tab behavior); in-app anchors and any
+// non-anchor element lose target entirely.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (!node || node.nodeType !== 1) return
+  if (node.tagName === 'A') {
+    const href = node.getAttribute('href') || ''
+    if (isExternalHref(href)) {
+      node.setAttribute('target', '_blank')
+      node.setAttribute('rel', 'noopener noreferrer')
+    } else {
+      node.removeAttribute('target')
+    }
+  } else if (node.hasAttribute('target')) {
+    node.removeAttribute('target')
+  }
 })
 
 export { marked }

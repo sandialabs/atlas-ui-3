@@ -28,6 +28,21 @@ For production, you must connect to a real S3-compatible object store like AWS S
     S3_REGION=us-east-1
     ```
 
+#### Credentials
+
+`S3_ACCESS_KEY` and `S3_SECRET_KEY` are optional. Supply them for MinIO or any
+provider that issues static keys.
+
+Omit both (or leave them empty) to use AWS-native credentials instead: boto3
+then resolves them through its standard chain -- environment variables, shared
+credential/config files, container credentials (ECS task roles, EKS Pod Identity
+and IRSA), and finally the EC2 instance metadata service. This is the
+recommended setup when running on AWS, since no long-lived secret has to be
+stored in the environment.
+
+Both values must be set together. If only one is provided it is ignored, a
+warning is logged, and the default credential chain is used.
+
 ## How MCP Tools Access Files
 
 The application uses a secure workflow that prevents MCP tools from needing direct access to S3 credentials. Instead, the backend acts as a proxy.
