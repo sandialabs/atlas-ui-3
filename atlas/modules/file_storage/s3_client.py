@@ -76,12 +76,29 @@ class S3StorageClient:
         self.region = s3_region
         self.timeout = s3_timeout
 
+        # Only pass explicit credentials when BOTH are configured. boto3 does not
+        # fall back to its default credential chain (env vars, shared config,
+        # container credentials, EC2/EKS instance roles) once either kwarg is
+        # supplied, and a half-configured pair would fail signing in a confusing
+        # way -- so an incomplete pair is treated as "not configured".
+        if s3_access_key and s3_secret_key:
+            credentials = {
+                "aws_access_key_id": s3_access_key,
+                "aws_secret_access_key": s3_secret_key,
+            }
+        else:
+            if s3_access_key or s3_secret_key:
+                logger.warning(
+                    "Only one of S3_ACCESS_KEY/S3_SECRET_KEY is set; ignoring it and "
+                    "falling back to the default AWS credential chain."
+                )
+            credentials = {}
+
         # Create boto3 S3 client
         self.s3_client = boto3.client(
             's3',
             endpoint_url=self.endpoint_url,
-            aws_access_key_id=s3_access_key or None,
-            aws_secret_access_key=s3_secret_key or None,
+            **credentials,
             region_name=self.region,
             use_ssl=s3_use_ssl,
             config=Config(

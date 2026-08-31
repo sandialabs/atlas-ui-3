@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #873 - 2026-08-31
-- **S3 storage can now authenticate with IAM roles, EKS Pod Identity, IRSA or EC2 instance profiles**: `s3_access_key`/`s3_secret_key` defaulted to `minioadmin` and were passed straight to `boto3.client(...)`, which disables boto3's credential chain whenever explicit credentials (even empty strings) are given; they now default to `None` and falsy values are passed as `None`, while deployments setting `S3_ACCESS_KEY`/`S3_SECRET_KEY` are unchanged.
+- **S3 storage can now authenticate with IAM roles, EKS Pod Identity, IRSA or EC2 instance profiles**: `s3_access_key`/`s3_secret_key` defaulted to `minioadmin` and were passed straight to `boto3.client(...)`, which disables boto3's credential chain whenever explicit credentials (even empty strings) are given; they now default to `None` and falsy values are passed as `None`, while deployments setting `S3_ACCESS_KEY`/`S3_SECRET_KEY` are unchanged. An incomplete key pair is ignored (with a warning) rather than passed on to fail signing, and `docs/admin/file-storage.md` documents the credential-chain path.
 
 ### PR #871 - 2026-08-30
 - **The Active Tools strip above the chat input stays a single row on mobile** (#870): the pill row no longer wraps into up to three rows on narrow viewports — it scrolls horizontally (`overflow-x-auto scrollbar-hide`), and the "+N more" and auto-approve toggles are pinned outside the scroll region so they stay reachable.
