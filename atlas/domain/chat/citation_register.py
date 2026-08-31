@@ -219,41 +219,6 @@ class CitationRegister:
         self._entries[number] = {"n": number, **identifying}
         return number
 
-    def register_documents(
-        self, data_source: Optional[str], documents: Sequence[Any]
-    ) -> List[Dict[str, Any]]:
-        """Register ``DocumentMetadata``-shaped objects, newest numbering last.
-
-        Returns the compact, numbered reference list to echo back to the model
-        as part of the tool result -- the model can only cite a number it has
-        been shown.
-        """
-        references: List[Dict[str, Any]] = []
-        for doc in documents:
-            entry = {
-                "document_ref": getattr(doc, "document_ref", None),
-                "filename": getattr(doc, "title", None) or getattr(doc, "source", None),
-                "citation": getattr(doc, "citation", None),
-                "url": getattr(doc, "url", None),
-                "snippets": [
-                    getattr(section, "text", None)
-                    for section in (getattr(doc, "sections", None) or [])
-                ],
-            }
-            number = self.register(data_source, entry)
-            if number is None:
-                continue
-            # Echo only what identifies the document. The snippets are already
-            # in the tool result's passage text; repeating them here would
-            # double the payload for no extra grounding.
-            reference = {"n": number}
-            for field in ("filename", "url", "citation"):
-                value = self._entries[number].get(field)
-                if value:
-                    reference[field] = value
-            references.append(reference)
-        return references
-
     def entry(self, number: int) -> Optional[Dict[str, Any]]:
         """The registered entry for a number, or ``None`` if unknown."""
         return self._entries.get(number)

@@ -21,18 +21,6 @@ from atlas.domain.chat.citation_register import (
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
 
 
-class _Doc:
-    """Minimal ``DocumentMetadata`` stand-in."""
-
-    def __init__(self, title=None, url=None, citation=None, document_ref=None, sections=()):
-        self.title = title
-        self.source = None
-        self.url = url
-        self.citation = citation
-        self.document_ref = document_ref
-        self.sections = list(sections)
-
-
 class TestNumberingIsStable:
     def test_same_document_twice_in_one_turn_keeps_its_number(self):
         register = CitationRegister()
@@ -43,10 +31,11 @@ class TestNumberingIsStable:
 
     def test_a_second_search_continues_rather_than_restarting(self):
         register = CitationRegister()
-        register.register_documents("srv:docs", [_Doc(title="a.pdf"), _Doc(title="b.pdf")])
+        for doc in ("a.pdf", "b.pdf"):
+            register.register("srv:docs", {"filename": doc})
         # A later atlas_search in the same turn returns one old and one new hit.
-        refs = register.register_documents("srv:docs", [_Doc(title="b.pdf"), _Doc(title="c.pdf")])
-        assert [r["n"] for r in refs] == [2, 3]
+        seen = [register.register("srv:docs", {"filename": d}) for d in ("b.pdf", "c.pdf")]
+        assert seen == [2, 3]
         assert [e["n"] for e in register.entries()] == [1, 2, 3]
 
     def test_a_repeated_hit_is_one_number_even_as_document_ref_shifts(self):

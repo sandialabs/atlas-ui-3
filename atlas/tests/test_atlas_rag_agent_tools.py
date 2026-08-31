@@ -930,3 +930,82 @@ async def test_mcp_citations_are_labelled_from_whatever_field_the_server_filled(
     assert answer["references"] == [{"n": 1, "filename": "vin-1HGCM"}]
     # The snippet rides along as evidence for the references panel.
     assert register.entries()[0]["snippets"] == ["Parked in Albuquerque."]
+
+
+class RawEvidenceRAG(FakeUnifiedRAG):
+    """Unified RAG fake returning ``raw`` evidence the way AtlasRAGClient does:
+    the passage block carries the backend's own response-local ``[N]`` markers.
+    """
+
+    def __init__(self, docs, discovered=None):
+        super().__init__(discovered=discovered)
+        self.docs = docs
+
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
+        self.query_calls.append(qualified_data_source)
+        documents = [
+            SimpleNamespace(
+                title=title, source=qualified_data_source, url=None, citation=None,
+                document_ref=ref, sections=[],
+            )
+            for title, ref in self.docs
+        ]
+        # Mirrors AtlasRAGClient._format_raw_evidence.
+        lines = [f"Retrieved {len(documents)} document(s):", ""]
+        for idx, (title, ref) in enumerate(self.docs, start=1):
+            lines.append(f"[{ref if ref is not None else idx}] {title}")
+            lines.append("  - Some passage text.")
+            lines.append("")
+        return SimpleNamespace(
+            content="\n".join(lines).rstrip(),
+            is_completion=False,
+            metadata=SimpleNamespace(documents_found=documents),
+        )
+
+
+@pytest.mark.asyncio
+async def test_raw_passage_markers_are_rewritten_to_the_stable_numbers(monkeypatch):
+    """A raw result arrives already numbered by the backend, response-locally.
+    Left alone beside the register's numbers, one tool result would assert both
+    '[2] Deployment Pipeline' and '[1] Deployment Pipeline', and a model picking
+    the wrong one cites a source it never read."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, unified_rag=RawEvidenceRAG([("Deployment Pipeline", 1)]))
+    # An earlier search this turn already used [1].
+    register = CitationRegister()
+    register.register("other:src", {"filename": "Earlier doc"})
+
+    result = await _search(manager, register)
+
+    content = json.loads(result.content)["results"]["answers"][0]["content"]
+    assert "[2] Deployment Pipeline" in content
+    # The backend's own marker for this document is gone, so it cannot be cited
+    # as [1] -- which now belongs to a document from the earlier search.
+    assert "[1] Deployment Pipeline" not in content
+
+
+@pytest.mark.asyncio
+async def test_renumbering_leaves_bracketed_numbers_in_passage_prose_alone(monkeypatch):
+    """The rewrite is anchored on the whole '[old] heading' line the formatter
+    emits, so a citation the passage text merely mentions is not rewritten."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+
+    class ProseRAG(RawEvidenceRAG):
+        async def query_rag(self, *a, **kw):
+            resp = await super().query_rag(*a, **kw)
+            resp.content += "\n[1] is cited by the paper as prior work."
+            return resp
+
+    _patch_app_factory(monkeypatch, unified_rag=ProseRAG([("Architecture", 1)]))
+    register = CitationRegister()
+    register.register("other:src", {"filename": "Earlier doc"})
+
+    result = await _search(manager, register)
+
+    content = json.loads(result.content)["results"]["answers"][0]["content"]
+    assert "[2] Architecture" in content
+    assert "[1] is cited by the paper as prior work." in content

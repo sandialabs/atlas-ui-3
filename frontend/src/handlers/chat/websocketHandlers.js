@@ -180,6 +180,13 @@ export function createWebSocketHandler(deps) {
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
+          // Agent mode ends here and never emits `response_complete`, so this
+          // is the turn boundary that has to settle citations (issue #874).
+          // Without it the list stays pending and the *next* turn's
+          // `response_complete` attaches this turn's sources to a different
+          // answer.
+          attachPendingCitations()
+          _pendingCitations = null
           // Note: Do NOT add a chat message here — the final answer already
           // arrives via token_stream / chat_response and contains step info.
           // Adding a message here caused the "agent complete appears twice" bug (#62).

@@ -8,6 +8,7 @@ referenced via the client module to preserve test patch targets.
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.core.log_sanitizer import sanitize_for_logging
@@ -54,18 +55,82 @@ logger = logging.getLogger(__name__)
 _MAX_TOOL_REFERENCES = 20
 
 
+def _raw_evidence_marker(doc: Any, index: int) -> str:
+    """The marker ``AtlasRAGClient._format_raw_evidence`` gave this document.
+
+    It writes ``[document_ref] heading`` at the start of a line, falling back to
+    a 1-based index when the backend supplied no ``document_ref`` (the v0.8.0
+    schema does not). Both are **response-local**, which is exactly why they
+    cannot be left in place beside the register's conversation-stable numbers.
+    """
+    ref = getattr(doc, "document_ref", None)
+    return f"[{ref if ref is not None else index}] "
+
+
+def _register_documents(
+    register: Optional[CitationRegister],
+    data_source: Optional[str],
+    documents: Any,
+    batched: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[Tuple[str, str, str]]]:
+    """Number a response's documents, and say how to renumber its passages.
+
+    Returns the compact reference list to echo to the model -- it can only cite
+    a number it has been shown -- and the ``(heading, old_marker, new_marker)``
+    triples needed to rewrite the raw evidence block, which carries the
+    backend's own numbering.
+    """
+    references: List[Dict[str, Any]] = []
+    renumbering: List[Tuple[str, str, str]] = []
+    if register is None:
+        return references, renumbering
+
+    for index, doc in enumerate(documents, start=1):
+        title = getattr(doc, "title", None)
+        source = getattr(doc, "source", None)
+        # A batched query returns several corpora in one response, so the group
+        # name is only the *server*. Scoping every document to the group's first
+        # source would attribute the later corpora to the wrong one, and would
+        # merge same-named files across them into a single number. The
+        # document's own ``source`` is the only per-document corpus label
+        # available, so prefer it when the response actually spans a batch.
+        scope = (source if batched and isinstance(source, str) and source else data_source)
+        number = register.register(scope, {
+            "document_ref": getattr(doc, "document_ref", None),
+            "filename": title or source,
+            "citation": getattr(doc, "citation", None),
+            "url": getattr(doc, "url", None),
+            "snippets": [
+                getattr(section, "text", None)
+                for section in (getattr(doc, "sections", None) or [])
+            ],
+        })
+        if number is None:
+            continue
+        entry = register.entry(number) or {}
+        reference = {"n": number}
+        for field in ("filename", "url", "citation"):
+            if entry.get(field):
+                reference[field] = entry[field]
+        references.append(reference)
+        renumbering.append(
+            (title or source or "document", _raw_evidence_marker(doc, index), f"[{number}] ")
+        )
+    return references, renumbering
+
+
 def _tool_references(
     response: Any,
     register: Optional[CitationRegister] = None,
     data_source: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    batched: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[Tuple[str, str, str]]]:
     """Compact, numbered citation list for a RAG tool result.
 
     ``ToolResult.content`` is all the agent loop forwards, so document identity
     that lives only on ``RAGResponse.metadata`` -- which is where a synthesized
     answer's citations live -- would otherwise never reach the model or the
-    references UI. This surfaces the same identity for either mode without
-    repeating the snippet text.
+    references UI.
 
     With a ``register``, each document also gets its turn-stable ``n`` (issue
     #874), so the model is shown the number it is expected to cite and the same
@@ -78,7 +143,7 @@ def _tool_references(
     documents = documents[:_MAX_TOOL_REFERENCES]
 
     if register is not None:
-        return register.register_documents(data_source, documents)
+        return _register_documents(register, data_source, documents, batched)
 
     references: List[Dict[str, Any]] = []
     for doc in documents:
@@ -94,20 +159,43 @@ def _tool_references(
         }
         if entry:
             references.append(entry)
-    return references
+    return references, []
 
 
-def _number_passages(content: Any, references: List[Dict[str, Any]]) -> Any:
-    """Prefix a raw-evidence tool result with the numbers it may be cited by.
+def _number_passages(
+    content: Any,
+    references: List[Dict[str, Any]],
+    renumbering: Optional[List[Tuple[str, str, str]]] = None,
+) -> Any:
+    """Give a tool result one numbering scheme instead of two.
 
-    The model can only cite a number it has been shown. A header naming each
-    document and its ``[n]`` is enough for that, and is far cheaper than trying
-    to interleave markers into passage text whose document boundaries the
-    backend does not mark. Returns ``content`` untouched when there is nothing
-    to number.
+    ``raw`` mode -- the default for a tool-shaped search -- comes back from
+    ``AtlasRAGClient._format_raw_evidence`` with the backend's own ``[N]``
+    markers already embedded. Those are response-local: the second search of a
+    turn restarts at ``[1]``. Prefixing the register's stable numbers without
+    touching them leaves one tool result asserting both ``[4] document.pdf`` and
+    ``[1] document.pdf``, and a model that picks the wrong one cites a source it
+    never read. So the passage markers are rewritten to the register's numbers,
+    anchored on the whole ``[old] heading`` line the formatter emits rather than
+    on a bare ``[N]``, so a bracketed number inside passage prose is left alone.
+
+    Returns ``content`` untouched when there is nothing to number.
     """
     if not references or not isinstance(content, str):
         return content
+
+    for heading, old_marker, new_marker in renumbering or []:
+        if old_marker == new_marker:
+            continue
+        # Line-anchored and heading-qualified: the formatter writes the marker
+        # and heading together at the start of a line, so this cannot match a
+        # citation the passage text merely mentions.
+        content = re.sub(
+            rf"(?m)^{re.escape(old_marker)}(?={re.escape(heading)})",
+            new_marker,
+            content,
+        )
+
     lines = []
     for reference in references:
         number = reference.get("n")
@@ -964,13 +1052,18 @@ class ExecutionMixin:
                         search_kwargs=search_kwargs,
                         _skip_hooks=True,
                     )
-                # One group is one server's sources; scope the citation
-                # identity to it so a filename that appears in two corpora is
-                # not merged into a single number.
-                references = _tool_references(resp, citation_register, group[0] if group else None)
+                # A single-source group is scoped to that source. A batch spans
+                # several corpora on one server, so each document is scoped to
+                # its own ``source`` instead -- see _register_documents.
+                references, renumbering = _tool_references(
+                    resp,
+                    citation_register,
+                    group[0] if group else None,
+                    batched=len(group) > 1,
+                )
                 payload: Dict[str, Any] = {
                     "data_sources": group,
-                    "content": _number_passages(resp.content, references),
+                    "content": _number_passages(resp.content, references, renumbering),
                     "is_completion": bool(resp.is_completion),
                 }
                 if references:

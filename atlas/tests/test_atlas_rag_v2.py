@@ -607,7 +607,10 @@ class TestToolResultReferences:
             ),
         )
 
-        assert _tool_references(response) == [
+        # Unregistered (no turn, so no register): the identity list comes back
+        # as it always did, and there is nothing to renumber.
+        references, renumbering = _tool_references(response)
+        assert references == [
             {
                 "document_ref": 1,
                 "filename": "PTO Policy",
@@ -615,12 +618,13 @@ class TestToolResultReferences:
                 "url": "https://example.com/pto",
             }
         ]
+        assert renumbering == []
 
     def test_no_metadata_yields_no_references(self):
         from atlas.modules.mcp_tools.mcp_execution import _tool_references
 
-        assert _tool_references(RAGResponse(content="answer", metadata=None)) == []
-        assert _tool_references(object()) == []
+        assert _tool_references(RAGResponse(content="answer", metadata=None)) == ([], [])
+        assert _tool_references(object()) == ([], [])
 
     def test_reference_count_is_capped(self):
         from atlas.modules.mcp_tools.mcp_execution import (
@@ -650,4 +654,4 @@ class TestToolResultReferences:
             ),
         )
 
-        assert len(_tool_references(response)) == _MAX_TOOL_REFERENCES
+        assert len(_tool_references(response)[0]) == _MAX_TOOL_REFERENCES

@@ -118,6 +118,27 @@ describe('citations websocket event', () => {
     expect(deps.mapMessages).not.toHaveBeenCalled()
   })
 
+  it('settles citations on agent_completion, which agent mode ends with', () => {
+    // Agent mode never emits response_complete, so without this the list stays
+    // pending and leaks onto whatever answer completes next.
+    const handler = createWebSocketHandler(deps)
+    send(handler, { type: 'citations', citations: [{ n: 1, filename: 'a.pdf' }] })
+    send(handler, { type: 'agent_update', update_type: 'agent_completion', steps: 3 })
+    deps.mapMessages.mockClear()
+    send(handler, { type: 'response_complete' })
+    expect(deps.mapMessages).not.toHaveBeenCalled()
+  })
+
+  it('does not leak an agent turn\'s sources onto the next turn\'s answer', () => {
+    const handler = createWebSocketHandler(deps)
+    send(handler, { type: 'citations', citations: [{ n: 1, filename: 'a.pdf' }] })
+    send(handler, { type: 'agent_update', update_type: 'agent_completion', steps: 2 })
+    mapped.length = 0
+    // A later turn that searched nothing at all.
+    send(handler, { type: 'response_complete' })
+    expect(mapped).toHaveLength(0)
+  })
+
   it('ignores an empty citation list', () => {
     const handler = createWebSocketHandler(deps)
     send(handler, { type: 'citations', citations: [] })
