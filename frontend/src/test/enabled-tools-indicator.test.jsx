@@ -60,6 +60,16 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     expect(pillRow.className).toContain('scrollbar-hide')
     expect(pillRow.className).not.toContain('flex-wrap')
 
+    // flex-1 + min-w-0 is what lets the nowrap row shrink to the space left
+    // by the pinned controls instead of pushing them off screen (review).
+    expect(pillRow.className).toContain('flex-1')
+    expect(pillRow.className).toContain('min-w-0')
+
+    // The scroll region is keyboard-focusable — scrollbar-hide leaves no
+    // scrollbar, so keyboard users need another way to reach the overflow.
+    expect(pillRow.getAttribute('tabindex')).toBe('0')
+    expect(pillRow.getAttribute('aria-label')).toMatch(/scroll/i)
+
     // Pills cannot shrink below their content — they overflow into the scroll.
     const pill = screen.getByText('readtool').closest('.rounded')
     expect(pill.className).toContain('flex-shrink-0')
@@ -80,6 +90,18 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     expect(toggle.closest('.overflow-x-auto')).toBeNull()
     expect(toggle.className).toContain('flex-shrink-0')
     expect(toggle.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('keeps the +N more toggle pinned next to auto-approve, outside the scroll region (review)', () => {
+    const keys = ['s_a', 's_b', 's_c', 's_d', 's_e', 's_f', 's_g']
+    setChat({ selectedTools: new Set(keys) })
+    render(<EnabledToolsIndicator />)
+
+    const more = screen.getByRole('button', { name: /2 more/i })
+    // The +N more button is the only control that reveals hidden tools, so it
+    // must be visible even when the pill row has scrolled its overflow.
+    expect(more.closest('.overflow-x-auto')).toBeNull()
+    expect(more.className).toContain('flex-shrink-0')
   })
 
   it('caps visible pills at the compact threshold and expands on demand', () => {

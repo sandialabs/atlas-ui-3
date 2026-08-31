@@ -23,12 +23,17 @@ const EnabledToolsIndicator = () => {
     : allTools
 
   // Single row on every viewport (#870): the pill row never wraps — it
-  // scrolls horizontally instead, like the follow-up suggestions — and the
-  // auto-approve toggle sits outside the scroll region so it stays reachable.
+  // scrolls horizontally instead, like the follow-up suggestions. The
+  // "+N more" toggle and the auto-approve toggle sit outside the scroll
+  // region so they stay reachable even when the pills overflow (review).
   return (
     <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
       <span className="flex-shrink-0">Active Tools:</span>
-      <div className="flex-1 min-w-0 flex flex-nowrap items-center gap-1 overflow-x-auto scrollbar-hide">
+      <div
+        className="flex-1 min-w-0 flex flex-nowrap items-center gap-1 overflow-x-auto scrollbar-hide"
+        tabIndex={0}
+        aria-label="Selected tools; scroll horizontally to see more"
+      >
         {displayTools.map((item, idx) => (
           <div
             key={idx}
@@ -44,26 +49,27 @@ const EnabledToolsIndicator = () => {
             </button>
           </div>
         ))}
-        {shouldShowCompact && (
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
-            title={isExpanded ? 'Show less' : `Show ${allTools.length - COMPACT_THRESHOLD} more`}
-          >
-            {isExpanded ? (
-              <>
-                <ChevronUp className="w-3 h-3" />
-                <span>Show less</span>
-              </>
-            ) : (
-              <>
-                <span>+{allTools.length - COMPACT_THRESHOLD} more</span>
-                <ChevronDown className="w-3 h-3" />
-              </>
-            )}
-          </button>
-        )}
       </div>
+      {shouldShowCompact && (
+        <button
+          type="button"
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
+          title={isExpanded ? 'Show less' : `Show ${allTools.length - COMPACT_THRESHOLD} more`}
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp className="w-3 h-3" />
+              <span>Show less</span>
+            </>
+          ) : (
+            <>
+              <span>+{allTools.length - COMPACT_THRESHOLD} more</span>
+              <ChevronDown className="w-3 h-3" />
+            </>
+          )}
+        </button>
+      )}
       {/* Auto-approve lives here rather than on every approval row (#762).
           This strip is the persistent per-conversation status bar, so one
           indicator replaces one pill per tool call — and it stays on screen
