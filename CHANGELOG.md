@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #875 - 2026-08-31
+### PR #874 - 2026-08-31
 - Restore citations for `atlas_search`, which stopped appearing when #862 made search an explicit tool call: sources are now structured data on the assistant message (a `citations` event plus persisted metadata) rather than a `**References**` markdown block scraped back out of the rendered answer.
 - Numbers are stable within a search, across searches in a turn, and across turns, so `[3]` names one document for the whole conversation; `VITE_FEATURE_RAG_CITATIONS` now defaults to on.
 
