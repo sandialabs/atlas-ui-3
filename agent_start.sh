@@ -245,7 +245,7 @@ build_frontend() {
     # Use VITE_* values from the environment / .env instead of hardcoding.
     # If VITE_APP_NAME is not already set, fall back to the example default.
     if [ -z "$VITE_APP_NAME" ]; then
-        export VITE_APP_NAME="Chat UI 13"
+        export VITE_APP_NAME="ATLAS"
     fi
     # RAG citations UI is a build-time flag; default to on if unset.
     if [ -z "$VITE_FEATURE_RAG_CITATIONS" ]; then

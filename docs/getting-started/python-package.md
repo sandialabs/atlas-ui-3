@@ -1,6 +1,6 @@
 # Using Atlas as a Python Package
 
-Last updated: 2026-02-04
+Last updated: 2026-08-31
 
 Atlas can be installed as a Python package, allowing you to use it programmatically in your scripts or integrate it into your applications.
 
@@ -454,6 +454,8 @@ atlas-server --env /path/to/.env --config-folder /path/to/config
 ```
 
 > **Auto-detection**: If a `config/` directory exists next to the loaded `.env` file, `atlas-server` automatically uses it as the config directory. You do not need to pass `--config-folder` or set `APP_CONFIG_DIR` unless you want to override this default.
+
+> **Stale `APP_CONFIG_DIR` values**: `APP_CONFIG_DIR` must point at a directory that exists on the machine running Atlas. A POSIX-style absolute path (for example `/home/<user>/.../config`) left in a Windows `.env` from a WSL or Linux setup does not resolve on Windows -- Windows pathlib sees it as drive-less and joins it onto the current drive (producing a nonexistent `C:\home\...` location), which makes every config file look missing and starts MCP with 0 servers. If the configured directory does not exist, Atlas logs a warning naming `APP_CONFIG_DIR` and still searches the conventional `config/` directory next to the project as a fallback, then the packaged defaults in `atlas/config/`.
 
 ## Development Installation (Editable Mode)
 
