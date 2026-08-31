@@ -129,4 +129,27 @@ describe('EnabledDataSourcesIndicator', () => {
     const { container } = renderWith(['corp:west'], { features: {} })
     expect(container).toBeEmptyDOMElement()
   })
+
+  // Mirrors the Active Tools strip directly above it (#870/#871). Without this
+  // the dataset pills wrap into a second and third row on a narrow viewport --
+  // the exact bug #870 fixed, reintroduced one row down.
+  it('keeps the pills to a single scrolling row rather than wrapping', () => {
+    renderWith(['corp:west', 'corp:east'])
+    const pillRow = screen.getByText('West Region Fleet').closest('.overflow-x-auto')
+    expect(pillRow).not.toBeNull()
+    expect(pillRow.className).toContain('flex-nowrap')
+    expect(pillRow.className).not.toContain('flex-wrap')
+  })
+
+  it('does not wrap at the strip root either', () => {
+    renderWith(['corp:west'])
+    const strip = screen.getByTestId('active-data-sources')
+    expect(strip.className).not.toContain('flex-wrap')
+  })
+
+  it('keeps the "+N more" toggle outside the scroll region', () => {
+    renderWith(['corp:west', 'corp:east', 'corp:central', 'corp:exec'])
+    const more = screen.getByText('+1 more')
+    expect(more.closest('.overflow-x-auto')).toBeNull()
+  })
 })
