@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #875 - 2026-08-31
+- **A stale POSIX-style `APP_CONFIG_DIR` no longer blanks the MCP config lookup on Windows**: a value like `/home/<user>/git/atlas-ui-3/config` (left in a Windows `.env` from a WSL/Linux setup) has no drive letter under Windows pathlib, so it is treated as relative and joined onto the current drive -- the backend searched a nonexistent `C:\home\...` location, logged "JSON config not found in any of these locations", and started with 0 MCP servers even though `config/mcp.json` existed next to the checkout. `ConfigManager._search_paths` now also searches the conventional repo-root `config/` directory (between the configured dir and the packaged `atlas/config/` defaults), the not-found warning names `APP_CONFIG_DIR` when it does not exist on the host, and `ps_agent_start.ps1` `Start-Backend` falls back to `<project_root>\config` with a loud warning. **Operators:** remove or fix any `APP_CONFIG_DIR=/home/...` line in your Windows `.env`; the app now tolerates it, but the clean setup is an unset value or a Windows path.
+- **`Build-Frontend` in `ps_agent_start.ps1` matches the intended body**: the `VITE_APP_NAME` fallback is the documented example default `"ATLAS"` (was `"Chat UI 13"`; `agent_start.sh` aligned so the parity pair stays consistent), and the `frontend/dist not found` error message uses `;` instead of an em dash to avoid mojibake on non-UTF8 Windows consoles.
+
 ### PR #873 - 2026-08-31
 - **S3 storage can now authenticate with IAM roles, EKS Pod Identity, IRSA or EC2 instance profiles**: `s3_access_key`/`s3_secret_key` defaulted to `minioadmin` and were passed straight to `boto3.client(...)`, which disables boto3's credential chain whenever explicit credentials (even empty strings) are given; they now default to `None` and falsy values are passed as `None`, while deployments setting `S3_ACCESS_KEY`/`S3_SECRET_KEY` are unchanged. An incomplete key pair is ignored (with a warning) rather than passed on to fail signing, and `docs/admin/file-storage.md` documents the credential-chain path.
 
