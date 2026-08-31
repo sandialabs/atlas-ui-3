@@ -80,8 +80,8 @@ class S3StorageClient:
         self.s3_client = boto3.client(
             's3',
             endpoint_url=self.endpoint_url,
-            aws_access_key_id=s3_access_key,
-            aws_secret_access_key=s3_secret_key,
+            aws_access_key_id=s3_access_key or None,
+            aws_secret_access_key=s3_secret_key or None,
             region_name=self.region,
             use_ssl=s3_use_ssl,
             config=Config(

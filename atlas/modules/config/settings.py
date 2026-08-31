@@ -388,8 +388,10 @@ class AppSettings(BaseSettings):
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket_name: str = "atlas-files"
-    s3_access_key: str = "minioadmin"
-    s3_secret_key: str = "minioadmin"
+    # Leave unset to let boto3 use its standard credential chain (env vars,
+    # shared config, container credentials, EC2/EKS instance roles).
+    s3_access_key: Optional[str] = None
+    s3_secret_key: Optional[str] = None
     s3_region: str = "us-east-1"
     s3_timeout: int = 30
     s3_use_ssl: bool = False
