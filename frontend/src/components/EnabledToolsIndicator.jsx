@@ -22,14 +22,17 @@ const EnabledToolsIndicator = () => {
     ? allTools.slice(0, COMPACT_THRESHOLD) 
     : allTools
 
+  // Single row on every viewport (#870): the pill row never wraps — it
+  // scrolls horizontally instead, like the follow-up suggestions — and the
+  // auto-approve toggle sits outside the scroll region so it stays reachable.
   return (
-    <div className="flex items-start gap-2 text-xs text-gray-400 mb-2">
-      <span className="mt-1 flex-shrink-0">Active Tools:</span>
-      <div className="flex-1 min-w-0 flex flex-wrap gap-1 items-center">
+    <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
+      <span className="flex-shrink-0">Active Tools:</span>
+      <div className="flex-1 min-w-0 flex flex-nowrap items-center gap-1 overflow-x-auto scrollbar-hide">
         {displayTools.map((item, idx) => (
           <div
             key={idx}
-            className="px-2 py-1 rounded flex items-center gap-1 bg-gray-700 text-gray-300 max-w-full min-w-0"
+            className="flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-700 text-gray-300 max-w-full min-w-0"
           >
             <span className="min-w-0 truncate" title={item.name}>{item.name}</span>
             <button
@@ -44,7 +47,7 @@ const EnabledToolsIndicator = () => {
         {shouldShowCompact && (
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
+            className="flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
             title={isExpanded ? 'Show less' : `Show ${allTools.length - COMPACT_THRESHOLD} more`}
           >
             {isExpanded ? (
@@ -60,30 +63,30 @@ const EnabledToolsIndicator = () => {
             )}
           </button>
         )}
-        {/* Auto-approve lives here rather than on every approval row (#762).
-            This strip is the persistent per-conversation status bar, so one
-            indicator replaces one pill per tool call — and it stays on screen
-            instead of scrolling away with the transcript. */}
-        <button
-          type="button"
-          onClick={() => {
-            try {
-              updateSettings?.({ autoApproveTools: !autoApproveOn })
-            } catch (e) {
-              console.error('Failed to toggle auto-approve from the Active Tools strip', e)
-            }
-          }}
-          aria-pressed={autoApproveOn}
-          className={`px-2 py-1 rounded border transition-colors cursor-pointer ${
-            autoApproveOn
-              ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
-              : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
-          }`}
-          title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
-        >
-          {autoApproveOn ? 'Auto-approve ON' : 'Auto-approve OFF'}
-        </button>
       </div>
+      {/* Auto-approve lives here rather than on every approval row (#762).
+          This strip is the persistent per-conversation status bar, so one
+          indicator replaces one pill per tool call — and it stays on screen
+          instead of scrolling away with the transcript. */}
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            updateSettings?.({ autoApproveTools: !autoApproveOn })
+          } catch (e) {
+            console.error('Failed to toggle auto-approve from the Active Tools strip', e)
+          }
+        }}
+        aria-pressed={autoApproveOn}
+        className={`flex-shrink-0 px-2 py-1 rounded border transition-colors cursor-pointer ${
+          autoApproveOn
+            ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
+            : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
+        }`}
+        title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
+      >
+        {autoApproveOn ? 'Auto-approve ON' : 'Auto-approve OFF'}
+      </button>
     </div>
   )
 }
