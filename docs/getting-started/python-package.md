@@ -1,6 +1,6 @@
 # Using Atlas as a Python Package
 
-Last updated: 2026-02-04
+Last updated: 2026-08-31
 
 Atlas can be installed as a Python package, allowing you to use it programmatically in your scripts or integrate it into your applications.
 

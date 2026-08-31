@@ -10,6 +10,7 @@ Dependency direction: ``config_loader`` -> ``settings`` -> ``models``.
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -51,16 +52,20 @@ class ConfigManager:
         1. User config dir (APP_CONFIG_DIR, default "config/") - user customizations
         2. Package defaults (atlas/config/) - always available as fallback
 
-        The conventional repo-root ``config/`` directory is also searched in
-        between whenever APP_CONFIG_DIR does not already resolve to it. This
-        keeps a checkout working when APP_CONFIG_DIR names a directory that
-        does not exist on the current machine -- most commonly a POSIX-style
-        absolute path (e.g. ``/home/<user>/git/atlas-ui-3/config``) carried
-        over from WSL/Linux into a Windows ``.env``. On Windows such a value
-        has no drive letter, ``Path.is_absolute()`` is False, and the join
-        below produces a bogus drive-rooted path like ``C:\\home\\...``, so
-        without this fallback every config file would be reported missing and
-        MCP would start with 0 servers even though ``config/mcp.json`` exists.
+        When the configured user config dir (resolved against the project root
+        when relative) does not exist on the current machine, the conventional
+        repo-root ``config/`` directory is also searched in between. This keeps
+        a checkout working when APP_CONFIG_DIR names a directory that does not
+        exist here -- most commonly a POSIX-style absolute path (e.g.
+        ``/home/<user>/git/atlas-ui-3/config``) carried over from WSL/Linux
+        into a Windows ``.env``. On Windows such a value has no drive letter,
+        ``Path.is_absolute()`` is False, and the join below produces a bogus
+        drive-rooted path like ``C:\\home\\...``, so without this rescue every
+        config file would be reported missing and MCP would start with 0
+        servers even though ``config/mcp.json`` exists. When the configured
+        directory DOES exist, it stays authoritative (only it and the package
+        defaults are searched), so a deliberately partial custom dir is never
+        silently padded from the repo checkout.
         """
         project_root = self._atlas_root.parent
 
@@ -75,9 +80,16 @@ class ConfigManager:
         candidates: List[Path] = [
             config_dir / file_name,
             config_dir_project / file_name,
-            project_root / "config" / file_name,
-            package_defaults,
         ]
+
+        # Rescue for a stale/missing configured directory: without this the
+        # paths above simply do not exist anywhere on disk and every config
+        # file is reported missing. os.path.isdir takes the rendered path and
+        # never raises, keeping the lookup itself fail-safe.
+        if not os.path.isdir(str(config_dir_project)):
+            candidates.append(project_root / "config" / file_name)
+
+        candidates.append(package_defaults)
 
         seen = set()
         search_paths: List[Path] = []
@@ -126,19 +138,27 @@ class ConfigManager:
                 continue
 
         logger.warning(f"{file_type} config not found in any of these locations: {[str(p) for p in file_paths]}")
-        # Help operators self-diagnose the most common cause: APP_CONFIG_DIR
-        # pointing at a directory that does not exist on this machine (e.g. a
-        # POSIX-style path in a Windows .env). Never let the hint itself fail.
+        # Help operators self-diagnose the most common cause: an explicitly set
+        # APP_CONFIG_DIR pointing at a directory that does not exist on this
+        # machine (e.g. a POSIX-style path in a Windows .env). Skip when the
+        # setting is just the pydantic default, and resolve relative values
+        # against the project root (matching _search_paths), not the CWD.
+        # Never let the hint itself fail the load.
         try:
-            configured_dir = self.app_settings.app_config_dir
-            if not Path(configured_dir).exists():
-                logger.warning(
-                    "APP_CONFIG_DIR '%s' does not exist on this machine; unset it or "
-                    "point it at an existing directory so the user config can be found",
-                    configured_dir,
-                )
+            fields_set = getattr(self.app_settings, "model_fields_set", None)
+            if fields_set is None or "app_config_dir" in fields_set:
+                configured_dir = self.app_settings.app_config_dir
+                configured_path = Path(configured_dir)
+                if not configured_path.is_absolute():
+                    configured_path = self._atlas_root.parent / configured_path
+                if not os.path.isdir(str(configured_path)):
+                    logger.warning(
+                        "APP_CONFIG_DIR '%s' does not exist on this machine; unset it or "
+                        "point it at an existing directory so the user config can be found",
+                        configured_dir,
+                    )
         except Exception:
-            pass
+            pass  # diagnostic only; a failure here must never mask the real error
         return None
 
     @property

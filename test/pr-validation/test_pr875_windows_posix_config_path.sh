@@ -125,6 +125,17 @@ cm = make_cm(str(custom))
 data = cm._load_file_with_error_handling(cm._search_paths("mcp.json"), "JSON")
 check("valid APP_CONFIG_DIR keeps priority", data == {"from_custom": {}}, f"data={data}")
 
+# --- 4b. Existing custom dir is never padded from the repo checkout ---
+partial = workdir / "partial"
+partial.mkdir()  # exists but has no mcp.json
+cm = make_cm(str(partial))
+paths = [str(p) for p in cm._search_paths("mcp.json")]
+check(
+    "existing custom APP_CONFIG_DIR excludes repo-root config from candidates",
+    str(workdir / "config" / "mcp.json") not in paths,
+    f"paths={paths}",
+)
+
 # --- 5. Self-diagnosing warning fires when nothing is found ---
 records = []
 handler = logging.Handler()

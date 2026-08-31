@@ -573,15 +573,24 @@ function Start-Backend {
     # precedence over package defaults in atlas/config/ (CWD is atlas/).
     if (-not $env:APP_CONFIG_DIR) {
         $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
-    } elseif (-not (Test-Path -LiteralPath $env:APP_CONFIG_DIR -PathType Container)) {
-        # A stale APP_CONFIG_DIR (commonly a POSIX-style path such as
-        # /home/<user>/... left in .env from a WSL/Linux setup) is drive-less
-        # under Windows path semantics, so the backend would search a bogus
-        # "C:\home\..." location, find no mcp.json, and start with 0 MCP
-        # servers even though <project_root>\config\mcp.json exists. Fall
-        # back to the project config dir and say why.
-        Write-Warning "APP_CONFIG_DIR points at '$($env:APP_CONFIG_DIR)', which does not exist on this machine. Falling back to '$PROJECT_ROOT/config' (a stale POSIX-style path from WSL/Linux in .env is a common cause)."
-        $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
+    } else {
+        # Resolve a relative value against the project root, NOT the current
+        # location (which is atlas/ here), matching how the backend resolves
+        # relative APP_CONFIG_DIR values in _search_paths.
+        $configuredDir = $env:APP_CONFIG_DIR
+        if (-not [System.IO.Path]::IsPathRooted($configuredDir)) {
+            $configuredDir = Join-Path $PROJECT_ROOT $configuredDir
+        }
+        if (-not (Test-Path -LiteralPath $configuredDir -PathType Container)) {
+            # A stale APP_CONFIG_DIR (commonly a POSIX-style path such as
+            # /home/<user>/... left in .env from a WSL/Linux setup) is drive-less
+            # under Windows path semantics, so the backend would search a bogus
+            # "C:\home\..." location, find no mcp.json, and start with 0 MCP
+            # servers even though <project_root>\config\mcp.json exists. Fall
+            # back to the project config dir and say why.
+            Write-Warning "APP_CONFIG_DIR points at '$($env:APP_CONFIG_DIR)' (resolved: '$configuredDir'), which does not exist on this machine. Falling back to '$PROJECT_ROOT/config' (a stale POSIX-style path from WSL/Linux in .env is a common cause)."
+            $env:APP_CONFIG_DIR = "$PROJECT_ROOT/config"
+        }
     }
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
     $arguments = "main:app --host $HostName --port $Port"
