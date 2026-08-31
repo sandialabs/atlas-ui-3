@@ -1,6 +1,6 @@
 """Event publisher interface for transport-agnostic UI updates."""
 
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, List, Protocol
 
 
 class EventPublisher(Protocol):
@@ -129,6 +129,26 @@ class EventPublisher(Protocol):
             token: Text chunk from LLM
             is_first: Whether this is the first token in the stream
             is_last: Whether this is the last token (stream complete)
+        """
+        pass
+
+    async def publish_citations(
+        self,
+        citations: List[Dict[str, Any]],
+    ) -> None:
+        """
+        Publish the turn's citation list.
+
+        Emitted once, as the turn closes, so the UI can attach the sources to
+        the assistant message it is about to complete. One event per turn
+        rather than one per search (issue #874): a turn may search three times
+        and cite two documents, and a per-call event would leave the UI showing
+        sources for a call whose results the model went on to discard.
+
+        Args:
+            citations: Ordered ``{n, filename, url?, citation?, data_source?}``
+                entries -- the turn's register, including numbers carried over
+                from earlier turns in the conversation
         """
         pass
 

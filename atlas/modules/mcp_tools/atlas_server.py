@@ -84,7 +84,14 @@ SEARCH_TOOL_DESCRIPTION = (
     "retrieved passages. ATLAS chooses which sources to read from the user's "
     "current selection, falling back to every source the user can access when "
     "nothing is selected -- so pass the query, and optionally tune how much is "
-    "retrieved with 'max_results' and how hard to look with 'depth'."
+    "retrieved with 'max_results' and how hard to look with 'depth'. "
+    # The instruction lives on the tool, not in the system prompt, because that
+    # is what survives agent mode: it travels with the schema whenever the tool
+    # is offered, and costs nothing on a turn that is not offered it (#874).
+    "Each result is numbered. Cite them inline as [1], [2] immediately after "
+    "the claim each supports, and never cite a number you were not given -- "
+    "the numbers are stable for the whole conversation, so a source keeps its "
+    "number across repeated searches and later turns."
 )
 
 DISCOVER_TOOL_DESCRIPTION = (

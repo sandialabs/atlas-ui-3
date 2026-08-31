@@ -748,3 +748,122 @@ async def test_atlas_search_without_knobs_leaves_the_source_config_in_charge(mon
 
     assert result.success is True
     assert unified.search_kwargs_calls == [None]
+
+
+# ---------------------------------------------------------------------------
+# Citations (issue #874)
+# ---------------------------------------------------------------------------
+
+
+class CitingRAG(FakeUnifiedRAG):
+    """Unified RAG fake whose answers carry document metadata."""
+
+    def __init__(self, docs_by_source, discovered=None):
+        super().__init__(discovered=discovered)
+        self.docs_by_source = docs_by_source
+
+    def _response(self, source):
+        docs = [
+            SimpleNamespace(
+                title=title, source=source, url=url, citation=None,
+                document_ref=ref, sections=[],
+            )
+            for title, url, ref in self.docs_by_source.get(source, [])
+        ]
+        return SimpleNamespace(
+            content=f"Result from {source}",
+            is_completion=False,
+            metadata=SimpleNamespace(documents_found=docs),
+        )
+
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
+        self.query_calls.append(qualified_data_source)
+        return self._response(qualified_data_source)
+
+
+async def _search(manager, register, query="q", tool_id="c1"):
+    from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
+
+    return await manager.execute_tool(
+        ToolCall(id=tool_id, name="atlas_search", arguments={"query": query}),
+        context={
+            "user_email": "u@example.com",
+            CITATION_REGISTER_KEY: register,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_numbers_its_references_and_shows_the_model_the_numbers(monkeypatch):
+    """The model can only cite a number it has been shown, so the tool result
+    carries both the numbered reference list and a header naming them."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, unified_rag=CitingRAG(
+        {"atlas_rag:technical-docs": [("Runbook.md", "https://x/runbook", 11)]},
+    ))
+    register = CitationRegister()
+
+    result = await _search(manager, register)
+
+    assert result.success is True
+    payload = json.loads(result.content)
+    answer = payload["results"]["answers"][0]
+    assert answer["references"] == [
+        {"n": 1, "filename": "Runbook.md", "url": "https://x/runbook"}
+    ]
+    # The header the model reads before the passages.
+    assert "[1] Runbook.md" in answer["content"]
+    assert "Result from atlas_rag:technical-docs" in answer["content"]
+
+
+@pytest.mark.asyncio
+async def test_two_searches_in_one_turn_share_one_numbering(monkeypatch):
+    """The multi-call case: a document found twice keeps its number, and a new
+    one continues the count rather than restarting at [1]."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    rag = CitingRAG(
+        {"atlas_rag:technical-docs": [("Runbook.md", "https://x/runbook", 11)]},
+    )
+    _patch_app_factory(monkeypatch, unified_rag=rag)
+    register = CitationRegister()
+
+    first = await _search(manager, register, query="one", tool_id="c1")
+    # The second search finds the same document plus a new one.
+    rag.docs_by_source["atlas_rag:technical-docs"] = [
+        ("Runbook.md", "https://x/runbook", 11),
+        ("Policy.pdf", "https://x/policy", 12),
+    ]
+    second = await _search(manager, register, query="two", tool_id="c2")
+
+    first_refs = json.loads(first.content)["results"]["answers"][0]["references"]
+    second_refs = json.loads(second.content)["results"]["answers"][0]["references"]
+    assert [r["n"] for r in first_refs] == [1]
+    assert [r["n"] for r in second_refs] == [1, 2]
+    assert [e["n"] for e in register.entries()] == [1, 2]
+    assert register.entries()[1]["filename"] == "Policy.pdf"
+
+
+@pytest.mark.asyncio
+async def test_search_without_a_register_still_returns_unnumbered_references(monkeypatch):
+    """A direct call (no turn, so no register) must not lose the identity list
+    it returned before #874."""
+    manager = _manager()
+    _patch_app_factory(monkeypatch, unified_rag=CitingRAG(
+        {"atlas_rag:technical-docs": [("Runbook.md", "https://x/runbook", 11)]},
+    ))
+
+    result = await manager.execute_tool(
+        ToolCall(id="c-plain", name="atlas_search", arguments={"query": "q"}),
+        context={"user_email": "u@example.com"},
+    )
+
+    answer = json.loads(result.content)["results"]["answers"][0]
+    assert answer["references"] == [
+        {"document_ref": 11, "filename": "Runbook.md", "url": "https://x/runbook"}
+    ]
+    # Nothing was numbered, so nothing claims a number.
+    assert "[1]" not in answer["content"]

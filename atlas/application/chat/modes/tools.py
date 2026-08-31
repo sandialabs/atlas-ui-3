@@ -3,6 +3,11 @@
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.domain.chat.citation_register import (
+    CITATION_REGISTER_KEY,
+    CitationRegister,
+    new_register,
+)
 from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
@@ -14,16 +19,17 @@ from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
 from ..utilities import error_handler, event_notifier, tool_executor
 from ..utilities.agent_digest import build_tool_digest
+from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
 from .streaming_helpers import stream_and_accumulate
-from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +159,11 @@ class ToolsModeRunner:
         # query back to every source the user is authorized for.
         if selected_data_sources is not None:
             session_context["selected_data_sources"] = selected_data_sources
+        # One register per turn, seeded from the numbers this conversation has
+        # already used, so ``[3]`` names one document for the whole transcript
+        # and a document found by two searches keeps a single number (#874).
+        citation_register = new_register(session.history.messages)
+        session_context[CITATION_REGISTER_KEY] = citation_register
 
         # Ensure update_callback is never None (critical for elicitation)
         effective_callback = update_callback
@@ -215,6 +226,7 @@ class ToolsModeRunner:
                 "tools": selected_tools,
                 **({"data_sources": selected_data_sources} if selected_data_sources else {}),
             },
+            citation_register=citation_register,
         )
 
         # Emit final chat response
@@ -222,6 +234,9 @@ class ToolsModeRunner:
             message=final_response,
             has_pending_tools=False,
         )
+        # Sources this turn's searches read, published once the answer is
+        # complete (issue #874).
+        await publish_citations(self.event_publisher, citation_register)
         await self.event_publisher.publish_response_complete()
 
         return event_notifier.create_chat_response(final_response)
@@ -343,6 +358,10 @@ class ToolsModeRunner:
         # preserving an explicit empty selection.
         if selected_data_sources is not None:
             session_context["selected_data_sources"] = selected_data_sources
+        # See note in run(): per-turn citation numbering, continued across the
+        # conversation (#874).
+        citation_register = new_register(session.history.messages)
+        session_context[CITATION_REGISTER_KEY] = citation_register
         effective_callback = update_callback
         if effective_callback is None:
             effective_callback = self._get_send_json()
@@ -449,6 +468,7 @@ class ToolsModeRunner:
                         session, final_text, bool(next_text),
                         selected_tools, selected_data_sources, recorder,
                         turn_start_index=turn_start_index,
+                        citation_register=citation_register,
                     )
                 # else: loop to execute the newly requested tools.
 
@@ -474,7 +494,9 @@ class ToolsModeRunner:
                     "tools": selected_tools,
                     **({"data_sources": selected_data_sources} if selected_data_sources else {}),
                 },
+                citation_register=citation_register,
             )
+            await publish_citations(self.event_publisher, citation_register)
             await self.event_publisher.publish_response_complete()
             return event_notifier.create_chat_response(synthesis_content)
         except BaseException:
@@ -704,6 +726,7 @@ class ToolsModeRunner:
         recorder: Optional[ToolCallRecorder] = None,
         *,
         turn_start_index: int,
+        citation_register: Optional[CitationRegister] = None,
     ) -> Dict[str, Any]:
         """Persist and emit a plain-text final answer produced mid-loop."""
         if not already_streamed:
@@ -724,7 +747,9 @@ class ToolsModeRunner:
                 "tools": selected_tools,
                 **({"data_sources": selected_data_sources} if selected_data_sources else {}),
             },
+            citation_register=citation_register,
         )
+        await publish_citations(self.event_publisher, citation_register)
         await self.event_publisher.publish_response_complete()
         return event_notifier.create_chat_response(content)
 
@@ -734,6 +759,7 @@ class ToolsModeRunner:
         turn_start_index: int,
         content: str,
         metadata: Dict[str, Any],
+        citation_register: Optional[CitationRegister] = None,
     ) -> Message:
         """Append the turn's closing assistant message, carrying a tool digest.
 
@@ -755,6 +781,7 @@ class ToolsModeRunner:
             digest = None
         if digest:
             metadata = {**metadata, AGENT_TOOL_DIGEST_KEY: digest}
+        metadata = attach_citations(metadata, citation_register)
         message = Message(
             role=MessageRole.ASSISTANT,
             content=content,

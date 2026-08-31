@@ -12,15 +12,21 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.domain.chat.citation_register import (
+    CITATION_REGISTER_KEY,
+    CitationRegister,
+)
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
     SEARCH_TOOL_NAME,
-    SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
     normalize_tool_name,
     search_kwargs_for,
+)
+from atlas.modules.mcp_tools.atlas_server import (
+    SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
 from atlas.modules.mcp_tools.mcp_discovery import (
     _ATLAS_RAG_QUERY_TOOL,
@@ -48,21 +54,34 @@ logger = logging.getLogger(__name__)
 _MAX_TOOL_REFERENCES = 20
 
 
-def _tool_references(response: Any) -> List[Dict[str, Any]]:
-    """Compact citation list for a RAG tool result.
+def _tool_references(
+    response: Any,
+    register: Optional[CitationRegister] = None,
+    data_source: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Compact, numbered citation list for a RAG tool result.
 
     ``ToolResult.content`` is all the agent loop forwards, so document identity
     that lives only on ``RAGResponse.metadata`` -- which is where a synthesized
     answer's citations live -- would otherwise never reach the model or the
-    references UI. Raw evidence already carries its ``[N]`` markers inline;
-    this surfaces the same identity for either mode without repeating the
-    snippet text.
+    references UI. This surfaces the same identity for either mode without
+    repeating the snippet text.
+
+    With a ``register``, each document also gets its turn-stable ``n`` (issue
+    #874), so the model is shown the number it is expected to cite and the same
+    document keeps that number across every search in the turn. Without one --
+    a direct call, or a test -- the identity list is still returned, unnumbered,
+    exactly as before.
     """
     metadata = getattr(response, "metadata", None)
     documents = getattr(metadata, "documents_found", None) or []
+    documents = documents[:_MAX_TOOL_REFERENCES]
+
+    if register is not None:
+        return register.register_documents(data_source, documents)
 
     references: List[Dict[str, Any]] = []
-    for doc in documents[:_MAX_TOOL_REFERENCES]:
+    for doc in documents:
         entry = {
             key: value
             for key, value in (
@@ -76,6 +95,34 @@ def _tool_references(response: Any) -> List[Dict[str, Any]]:
         if entry:
             references.append(entry)
     return references
+
+
+def _number_passages(content: Any, references: List[Dict[str, Any]]) -> Any:
+    """Prefix a raw-evidence tool result with the numbers it may be cited by.
+
+    The model can only cite a number it has been shown. A header naming each
+    document and its ``[n]`` is enough for that, and is far cheaper than trying
+    to interleave markers into passage text whose document boundaries the
+    backend does not mark. Returns ``content`` untouched when there is nothing
+    to number.
+    """
+    if not references or not isinstance(content, str):
+        return content
+    lines = []
+    for reference in references:
+        number = reference.get("n")
+        label = reference.get("filename") or reference.get("citation") or reference.get("url")
+        if number is None or not label:
+            continue
+        lines.append(f"[{number}] {label}")
+    if not lines:
+        return content
+    return (
+        "Cite these sources inline as [n] immediately after the claim each supports:\n"
+        + "\n".join(lines)
+        + "\n\n"
+        + content
+    )
 
 
 def _client():
@@ -713,11 +760,18 @@ class ExecutionMixin:
         # fall through to the every-authorized-source default below.
         selected_data_sources: Optional[List[str]] = None
         compliance_level = None
+        citation_register: Optional[CitationRegister] = None
         if isinstance(context, dict):
             user_email = context.get("user_email")
             _ctx_sources = context.get("selected_data_sources")
             selected_data_sources = list(_ctx_sources) if isinstance(_ctx_sources, list) else None
             compliance_level = context.get("compliance_level")
+            # Mutable, one per turn (issue #874), forwarded by tool_executor the
+            # same way as the sleep tool's budget. Absent for a direct call or a
+            # test, in which case references come back unnumbered.
+            _register = context.get(CITATION_REGISTER_KEY)
+            if isinstance(_register, CitationRegister):
+                citation_register = _register
 
         if not user_email:
             return ToolResult(
@@ -910,12 +964,15 @@ class ExecutionMixin:
                         search_kwargs=search_kwargs,
                         _skip_hooks=True,
                     )
+                # One group is one server's sources; scope the citation
+                # identity to it so a filename that appears in two corpora is
+                # not merged into a single number.
+                references = _tool_references(resp, citation_register, group[0] if group else None)
                 payload: Dict[str, Any] = {
                     "data_sources": group,
-                    "content": resp.content,
+                    "content": _number_passages(resp.content, references),
                     "is_completion": bool(resp.is_completion),
                 }
-                references = _tool_references(resp)
                 if references:
                     payload["references"] = references
                 return payload
@@ -927,11 +984,41 @@ class ExecutionMixin:
                     username=user_email, query=query, sources=group
                 )
                 results = mcp_response.get("results", {}) if isinstance(mcp_response, dict) else {}
-                return {
+                # MCP-backed sources returned no document identity at all until
+                # #874, which made every answer drawn from them uncitable. They
+                # do not speak the ``DocumentMetadata`` shape, so register the
+                # dicts they do return, accepting the field names the aggregator
+                # already uses.
+                references: List[Dict[str, Any]] = []
+                if citation_register is not None:
+                    for doc in (results.get("documents") or results.get("sources") or [])[:_MAX_TOOL_REFERENCES]:
+                        if not isinstance(doc, dict):
+                            continue
+                        number = citation_register.register(
+                            group[0] if group else None,
+                            {
+                                "document_ref": doc.get("document_ref"),
+                                "filename": doc.get("title") or doc.get("filename") or doc.get("source"),
+                                "citation": doc.get("citation"),
+                                "url": doc.get("url"),
+                            },
+                        )
+                        if number is None:
+                            continue
+                        reference = {"n": number}
+                        for field in ("filename", "url", "citation"):
+                            value = doc.get(field)
+                            if value:
+                                reference[field] = value
+                        references.append(reference)
+                payload: Dict[str, Any] = {
                     "data_sources": group,
-                    "content": results.get("answer", ""),
+                    "content": _number_passages(results.get("answer", ""), references),
                     "is_completion": False,
                 }
+                if references:
+                    payload["references"] = references
+                return payload
 
             # RagCall hook (GH #713): fires once for the whole agentic atlas_rag_query
             # call (covering both HTTP and MCP sources). HTTP sources skip the

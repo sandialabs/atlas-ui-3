@@ -16,6 +16,7 @@ class CLICollectedResult:
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     files: Dict[str, Any] = field(default_factory=dict)
     canvas_content: Optional[str] = None
+    citations: List[Dict[str, Any]] = field(default_factory=list)
     raw_events: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -110,6 +111,20 @@ class CLIEventPublisher:
         **kwargs: Any,
     ) -> None:
         self._collected.canvas_content = content
+
+    async def publish_citations(
+        self,
+        citations: List[Dict[str, Any]],
+    ) -> None:
+        """Collect the turn's citations (issue #874).
+
+        A headless caller has no references panel, but it does have a result
+        object -- and an answer whose sources cannot be recovered is exactly the
+        silence #862 set out to remove, CLI included.
+        """
+        self._collected.citations = list(citations or [])
+        if self.streaming and not self.quiet and citations:
+            _print_status(f"[citations] {len(citations)} source(s)")
 
     async def publish_token_stream(
         self,

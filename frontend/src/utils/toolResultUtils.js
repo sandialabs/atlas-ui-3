@@ -56,6 +56,18 @@ export const processToolResult = (result) => {
       processed._file_download_available = true
     }
 
+    // atlas_search echoes the citation numbers it assigned so the model can
+    // cite them (issue #874). They are rendered as chips under the answer, so
+    // repeating the whole array in the expanded tool row is noise -- keep a
+    // one-line summary naming the numbers this call contributed.
+    if (Array.isArray(processed.references) && processed.references.length > 0) {
+      processed.references = processed.references
+        .map(ref => {
+          const label = ref?.filename || ref?.citation || ref?.url || 'source'
+          return typeof ref?.n === 'number' ? `[${ref.n}] ${label}` : String(label)
+        })
+    }
+
     if (processed.returned_file_contents && Array.isArray(processed.returned_file_contents)) {
       processed.returned_file_contents = processed.returned_file_contents.map(content =>
         `[File data: ${content.length} characters - hidden for display]`

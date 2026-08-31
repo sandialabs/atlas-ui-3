@@ -1,7 +1,7 @@
 """WebSocket-based event publisher implementation."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from atlas.application.chat.utilities import event_notifier
 from atlas.interfaces.transport import ChatConnectionProtocol
@@ -140,6 +140,17 @@ class WebSocketEventPublisher:
                 is_last=is_last,
                 update_callback=self.connection.send_json,
             )
+
+    async def publish_citations(
+        self,
+        citations: List[Dict[str, Any]],
+    ) -> None:
+        """Publish the turn's citation list (issue #874)."""
+        if self.connection and citations:
+            await self.connection.send_json({
+                "type": "citations",
+                "citations": citations,
+            })
 
     async def send_json(self, data: Dict[str, Any]) -> None:
         """Send raw JSON message."""

@@ -531,7 +531,7 @@ function Build-Frontend {
 
     # RAG citations UI is opt-in at build time; default to off if unset.
     if (-not $env:VITE_FEATURE_RAG_CITATIONS) {
-        $env:VITE_FEATURE_RAG_CITATIONS = "false"
+        $env:VITE_FEATURE_RAG_CITATIONS = "true"
     }
 
     npm run build

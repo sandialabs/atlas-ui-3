@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #875 - 2026-08-31
+- Restore citations for `atlas_search`, which stopped appearing when #862 made search an explicit tool call: sources are now structured data on the assistant message (a `citations` event plus persisted metadata) rather than a `**References**` markdown block scraped back out of the rendered answer.
+- Numbers are stable within a search, across searches in a turn, and across turns, so `[3]` names one document for the whole conversation; `VITE_FEATURE_RAG_CITATIONS` now defaults to on.
+
 ### PR #873 - 2026-08-31
 - **S3 storage can now authenticate with IAM roles, EKS Pod Identity, IRSA or EC2 instance profiles**: `s3_access_key`/`s3_secret_key` defaulted to `minioadmin` and were passed straight to `boto3.client(...)`, which disables boto3's credential chain whenever explicit credentials (even empty strings) are given; they now default to `None` and falsy values are passed as `None`, while deployments setting `S3_ACCESS_KEY`/`S3_SECRET_KEY` are unchanged. An incomplete key pair is ignored (with a warning) rather than passed on to fail signing, and `docs/admin/file-storage.md` documents the credential-chain path.
 
