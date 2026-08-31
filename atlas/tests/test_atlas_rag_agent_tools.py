@@ -867,3 +867,66 @@ async def test_search_without_a_register_still_returns_unnumbered_references(mon
     ]
     # Nothing was numbered, so nothing claims a number.
     assert "[1]" not in answer["content"]
+
+
+class CitingMCPRag:
+    """rag_mcp fake shaped like ``RagMCPService.synthesize``.
+
+    Citations come back under ``results.citations`` -- not ``documents`` or
+    ``sources`` -- and each entry's shape is whatever the MCP server chose to
+    return, stamped with ``server`` by the aggregator.
+    """
+
+    def __init__(self, citations):
+        self.citations = citations
+
+    async def discover_servers(self, username, user_compliance_level=None):
+        return [{"server": "cars", "sources": [{"id": "fleet"}]}]
+
+    async def synthesize(self, username=None, query=None, sources=None):
+        return {
+            "results": {"answer": "Two vehicles matched.", "citations": self.citations},
+            "meta_data": {},
+        }
+
+
+@pytest.mark.asyncio
+async def test_mcp_sources_are_citable(monkeypatch):
+    """Before #874 an MCP-backed answer carried no document identity at all,
+    so nothing drawn from one could be cited."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, rag_mcp=CitingMCPRag([
+        {"title": "Fleet Register", "url": "https://fleet/reg", "server": "cars"},
+    ]))
+    register = CitationRegister()
+
+    result = await _search(manager, register)
+
+    answer = json.loads(result.content)["results"]["answers"][0]
+    assert answer["references"] == [
+        {"n": 1, "filename": "Fleet Register", "url": "https://fleet/reg"}
+    ]
+    assert "[1] Fleet Register" in answer["content"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_citations_are_labelled_from_whatever_field_the_server_filled(monkeypatch):
+    """The MCP citation shape is server-defined -- the bundled corporate_cars
+    server returns ``resourceId``/``snippet`` and no filename at all. Reading
+    only ``filename`` would leave every such entry unlabelled and unnumbered."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, rag_mcp=CitingMCPRag([
+        {"resourceId": "vin-1HGCM", "snippet": "Parked in Albuquerque.", "server": "cars"},
+    ]))
+    register = CitationRegister()
+
+    result = await _search(manager, register)
+
+    answer = json.loads(result.content)["results"]["answers"][0]
+    assert answer["references"] == [{"n": 1, "filename": "vin-1HGCM"}]
+    # The snippet rides along as evidence for the references panel.
+    assert register.entries()[0]["snippets"] == ["Parked in Albuquerque."]

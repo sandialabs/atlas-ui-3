@@ -254,6 +254,10 @@ class CitationRegister:
             references.append(reference)
         return references
 
+    def entry(self, number: int) -> Optional[Dict[str, Any]]:
+        """The registered entry for a number, or ``None`` if unknown."""
+        return self._entries.get(number)
+
     def entries(self) -> List[Dict[str, Any]]:
         """This turn's citations plus any seeded from earlier turns, in order."""
         return [self._entries[n] for n in sorted(self._entries)]

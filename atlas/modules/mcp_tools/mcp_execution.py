@@ -985,31 +985,49 @@ class ExecutionMixin:
                 )
                 results = mcp_response.get("results", {}) if isinstance(mcp_response, dict) else {}
                 # MCP-backed sources returned no document identity at all until
-                # #874, which made every answer drawn from them uncitable. They
-                # do not speak the ``DocumentMetadata`` shape, so register the
-                # dicts they do return, accepting the field names the aggregator
-                # already uses.
+                # #874, which made every answer drawn from them uncitable.
+                # ``synthesize`` collects each server's ``results.citations``
+                # (see rag_mcp_service), whose shape is server-defined -- the
+                # bundled corporate_cars server returns ``resourceId``/``snippet``
+                # and nothing resembling a filename. So the label is taken from
+                # whichever field the server did fill, rather than assuming the
+                # ``DocumentMetadata`` names that only HTTP sources speak.
                 references: List[Dict[str, Any]] = []
                 if citation_register is not None:
-                    for doc in (results.get("documents") or results.get("sources") or [])[:_MAX_TOOL_REFERENCES]:
-                        if not isinstance(doc, dict):
+                    for cit in (results.get("citations") or [])[:_MAX_TOOL_REFERENCES]:
+                        if not isinstance(cit, dict):
                             continue
+                        label = next(
+                            (
+                                cit[field]
+                                for field in ("title", "filename", "name", "label", "source", "resourceId")
+                                if cit.get(field) and isinstance(cit[field], str)
+                            ),
+                            None,
+                        )
                         number = citation_register.register(
-                            group[0] if group else None,
+                            # ``synthesize`` stamps each citation with the server
+                            # it came from; fall back to the group when it did not.
+                            cit.get("server") or (group[0] if group else None),
                             {
-                                "document_ref": doc.get("document_ref"),
-                                "filename": doc.get("title") or doc.get("filename") or doc.get("source"),
-                                "citation": doc.get("citation"),
-                                "url": doc.get("url"),
+                                "document_ref": cit.get("document_ref"),
+                                "filename": label,
+                                "citation": cit.get("citation"),
+                                "url": cit.get("url"),
+                                "snippets": [cit["snippet"]] if isinstance(cit.get("snippet"), str) else [],
                             },
                         )
                         if number is None:
                             continue
+                        # Echo the *registered* entry, not the raw citation: the
+                        # label was resolved across several possible fields above
+                        # and re-reading ``filename`` off the server's dict would
+                        # usually find nothing.
+                        entry = citation_register.entry(number) or {}
                         reference = {"n": number}
                         for field in ("filename", "url", "citation"):
-                            value = doc.get(field)
-                            if value:
-                                reference[field] = value
+                            if entry.get(field):
+                                reference[field] = entry[field]
                         references.append(reference)
                 payload: Dict[str, Any] = {
                     "data_sources": group,
