@@ -74,6 +74,14 @@ forwarded by `tool_executor` to every call and read back by the turn's owner.
   per turn makes a scrollback actively misleading, since the same marker
   resolves differently further up.
 
+Numbering stops at `MAX_CITATION_NUMBER = 99`, and that bound is set by the
+renderer rather than by taste: `processCitationBadges` matches `[\d{1,2}]`, so a
+`[100]` in an answer would stay plain text instead of becoming a chip. Widening
+that regex would make it match three-digit array indices in prose, so the ceiling
+gives way instead. The check is conversation-wide -- it tests the next number to
+issue, not the current turn's entry count, which a fresh register always starts
+at zero.
+
 The numbers are echoed into the tool result, because the model can only cite a
 number it has been shown, and `SEARCH_TOOL_DESCRIPTION` now carries the
 instruction to use them. That instruction lives on the tool rather than in the

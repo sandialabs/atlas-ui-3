@@ -13,8 +13,9 @@ from atlas.application.chat.utilities.citation_publishing import (
 )
 from atlas.domain.chat.citation_register import (
     CITATIONS_METADATA_KEY,
-    MAX_CITATIONS,
+    MAX_CITATION_NUMBER,
     CitationRegister,
+    _identity,
     highest_citation_number,
     new_register,
 )
@@ -98,9 +99,33 @@ class TestUntrustedBackendValues:
 
     def test_registration_stops_at_the_cap_without_raising(self):
         register = CitationRegister()
-        for index in range(MAX_CITATIONS + 10):
+        for index in range(MAX_CITATION_NUMBER + 10):
             register.register("s:d", {"filename": f"doc-{index}.pdf"})
-        assert len(register) == MAX_CITATIONS
+        assert len(register) == MAX_CITATION_NUMBER
+
+    def test_no_number_exceeds_what_the_renderer_can_match(self):
+        r"""processCitationBadges matches [\d{1,2}], so a three-digit marker
+        would render as plain text rather than a chip."""
+        register = CitationRegister()
+        for index in range(MAX_CITATION_NUMBER + 10):
+            register.register("s:d", {"filename": f"doc-{index}.pdf"})
+        assert max(e["n"] for e in register.entries()) <= 99
+
+    def test_the_ceiling_is_conversation_wide_not_per_turn(self):
+        """A turn's register starts with no entries of its own. Counting those
+        instead of the numbers already issued would let a conversation that has
+        reached the ceiling start over and carry on past it."""
+        exhausted = CitationRegister(start_index=MAX_CITATION_NUMBER)
+        assert exhausted.register("s:d", {"filename": "one-too-many.pdf"}) is None
+
+    def test_a_seeded_document_is_still_recognized_at_the_ceiling(self):
+        """Reaching the cap must not start renumbering documents that already
+        have numbers -- that would be worse than dropping the new ones."""
+        register = CitationRegister(
+            start_index=MAX_CITATION_NUMBER,
+            known={_identity("s:d", {"filename": "known.pdf"}): 7},
+        )
+        assert register.register("s:d", {"filename": "known.pdf"}) == 7
 
 
 class TestTurnClosing:

@@ -45,11 +45,18 @@ CITATION_REGISTER_KEY = "citation_register"
 # so the next turn can continue the numbering.
 CITATIONS_METADATA_KEY = "citations"
 
-# Ceiling on how many distinct documents one conversation numbers. A citation
-# list is a reading aid, not a corpus dump; past this the numbers stop being
-# something a reader can hold. Registration past the cap is dropped rather than
-# raising -- losing a citation must never fail the search that produced it.
-MAX_CITATIONS = 100
+# Highest citation number a conversation will ever issue. A citation list is a
+# reading aid, not a corpus dump, and past this the numbers stop being something
+# a reader can hold.
+#
+# The exact value is set by the renderer, not by taste: ``processCitationBadges``
+# matches ``[\d{1,2}]``, so a ``[100]`` in an answer stays plain text instead of
+# becoming a chip that scrolls to its source. Widening that regex would make it
+# match three-digit array indices in prose, so the ceiling gives way instead.
+#
+# Registration past the cap is dropped rather than raising -- losing a citation
+# must never fail the search that produced it.
+MAX_CITATION_NUMBER = 99
 
 # Per-field caps. Every value here originates in a RAG backend response, so it
 # is untrusted and bounded before it reaches the transcript. ``DocumentMetadata``
@@ -209,8 +216,14 @@ class CitationRegister:
                 self._entries[existing].setdefault(field, value)
             return existing
 
-        if len(self._entries) >= MAX_CITATIONS:
-            logger.debug("Citation register full (%d); dropping entry", MAX_CITATIONS)
+        # Conversation-wide, not per turn: ``_next`` is seeded from the numbers
+        # already issued, so counting this turn's entries instead would let a
+        # conversation that has reached the ceiling start a fresh register at
+        # zero and carry on past it.
+        if self._next > MAX_CITATION_NUMBER:
+            logger.debug(
+                "Citation numbering exhausted at %d; dropping entry", MAX_CITATION_NUMBER
+            )
             return None
 
         number = self._next

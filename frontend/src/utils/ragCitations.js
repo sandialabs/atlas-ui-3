@@ -16,10 +16,12 @@
 // Citations now arrive as data on `message.citations` (issue #874) and are
 // rendered here. Nothing parses the answer text for them.
 
-// Cap on rendered references. The backend already bounds the list; this is the
-// render-side guard so a replayed conversation carrying a hand-edited metadata
-// blob cannot produce an unbounded DOM.
-const MAX_RENDERED_REFERENCES = 100
+// Cap on rendered references. The backend stops numbering at 99 (see
+// MAX_CITATION_NUMBER -- processCitationBadges below matches [\d{1,2}], so a
+// three-digit marker would never become a chip). This is the render-side guard,
+// so a replayed conversation carrying hand-edited metadata cannot produce an
+// unbounded DOM.
+const MAX_RENDERED_REFERENCES = 99
 
 const escapeHtml = (value) =>
   String(value ?? '')
