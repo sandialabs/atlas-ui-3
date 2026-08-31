@@ -1,5 +1,5 @@
 import { useChat } from '../contexts/ChatContext'
-import { X, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, ChevronDown, ChevronUp, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
 
@@ -28,7 +28,10 @@ const EnabledToolsIndicator = () => {
   // region so they stay reachable even when the pills overflow (review).
   return (
     <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
-      <span className="flex-shrink-0">Active Tools:</span>
+      <span className="flex-shrink-0 flex items-center" aria-label="Active Tools">
+        <Wrench className="w-3.5 h-3.5 sm:hidden" aria-hidden="true" />
+        <span className="hidden sm:inline">Active Tools:</span>
+      </span>
       <div
         className="flex-1 min-w-0 flex flex-nowrap items-center gap-1 overflow-x-auto scrollbar-hide"
         tabIndex={0}
@@ -37,9 +40,9 @@ const EnabledToolsIndicator = () => {
         {displayTools.map((item, idx) => (
           <div
             key={idx}
-            className="flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-700 text-gray-300 max-w-full min-w-0"
+            className="flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-700 text-gray-300"
           >
-            <span className="min-w-0 truncate" title={item.name}>{item.name}</span>
+            <span className="max-w-40 truncate" title={item.name}>{item.name}</span>
             <button
               onClick={() => toggleTool(item.key)}
               className="hover:bg-red-600 hover:bg-opacity-50 rounded p-0.5 transition-colors flex-shrink-0"
