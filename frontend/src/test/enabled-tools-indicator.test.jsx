@@ -6,7 +6,8 @@
  *  - the strip is a single row on every viewport: the pill row never wraps
  *    (flex-nowrap + horizontal scroll) and the auto-approve toggle sits
  *    outside that scroll region so it is always reachable
- *  - compact mode still caps the visible pills and the +N more toggle expands
+ *  - compact mode still caps the visible pills and the +N more toggle expands,
+ *    and expanding visibly reveals them by wrapping the row (#876)
  *  - toggling auto-approve flips the persisted setting
  *  - renders nothing when no tools are selected
  */
@@ -119,6 +120,44 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     expect(screen.getByText('f')).toBeTruthy()
     expect(screen.getByText('g')).toBeTruthy()
     expect(screen.getByRole('button', { name: /show less/i })).toBeTruthy()
+  })
+
+  it('wraps the pill row when expanded so the extra tools are actually visible (#876)', () => {
+    const keys = ['s_a', 's_b', 's_c', 's_d', 's_e', 's_f', 's_g']
+    setChat({ selectedTools: new Set(keys) })
+    render(<EnabledToolsIndicator />)
+
+    const more = screen.getByRole('button', { name: /2 more/i })
+    expect(more.getAttribute('aria-expanded')).toBe('false')
+
+    // Collapsed the row is a single horizontally scrolling line (#870).
+    let pillRow = screen.getByText('a').closest('div[tabindex="0"]')
+    expect(pillRow.className).toContain('flex-nowrap')
+    expect(pillRow.className).toContain('overflow-x-auto')
+
+    fireEvent.click(more)
+
+    // Expanded it must wrap: with flex-nowrap the newly rendered pills only
+    // extended a row that already scrolled horizontally, so clicking
+    // "+N more" changed nothing the user could see (#876).
+    pillRow = screen.getByText('a').closest('div[tabindex="0"]')
+    expect(pillRow.className).toContain('flex-wrap')
+    expect(pillRow.className).not.toContain('flex-nowrap')
+    expect(pillRow.className).not.toContain('overflow-x-auto')
+
+    // The expanded block is height-capped and scrolls vertically instead of
+    // pushing the composer down when many tools are selected.
+    expect(pillRow.className).toContain('max-h-24')
+    expect(pillRow.className).toContain('overflow-y-auto')
+    expect(pillRow.getAttribute('aria-label')).toMatch(/vertically/i)
+
+    expect(screen.getByRole('button', { name: /show less/i }).getAttribute('aria-expanded')).toBe('true')
+
+    // And collapsing restores the single-row behaviour.
+    fireEvent.click(screen.getByRole('button', { name: /show less/i }))
+    pillRow = screen.getByText('a').closest('div[tabindex="0"]')
+    expect(pillRow.className).toContain('flex-nowrap')
+    expect(screen.queryByText('f')).toBeNull()
   })
 
   it('removes a tool when its pill X is clicked', () => {
