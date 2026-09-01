@@ -247,9 +247,9 @@ build_frontend() {
     if [ -z "$VITE_APP_NAME" ]; then
         export VITE_APP_NAME="ATLAS"
     fi
-    # RAG citations UI is opt-in at build time; default to off if unset.
+    # RAG citations UI is a build-time flag; default to on if unset.
     if [ -z "$VITE_FEATURE_RAG_CITATIONS" ]; then
-        export VITE_FEATURE_RAG_CITATIONS="false"
+        export VITE_FEATURE_RAG_CITATIONS="true"
     fi
     npm run build
     local build_status=$?

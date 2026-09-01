@@ -509,6 +509,61 @@
   margin: -0.125rem -0.25rem;
 }
 
+/* Structured references (issue #874). The markdown path renders its entries
+   as an ordinary <ol> that `prose` already styles; these come from
+   renderReferencesSection() and carry their own number, so the list marker is
+   suppressed to avoid "1. 1." on every row. */
+.rag-references-list {
+  list-style: none;
+  margin: 0.25rem 0 0 0;
+  padding-left: 0;
+  font-size: 0.8125rem;
+}
+
+.rag-references-list .rag-ref-entry {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.rag-ref-num {
+  color: rgb(129, 140, 248);
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.25rem;
+}
+
+.rag-ref-detail {
+  color: rgb(156, 163, 175);
+}
+
+.rag-references-list .rag-ref-snippet {
+  color: rgb(209, 213, 219);
+  border-left: 2px solid rgba(99, 102, 241, 0.4);
+  padding-left: 0.5rem;
+  margin: 0.25rem 0 0 1.25rem;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+}
+
+[data-theme="light"] .rag-references-list .rag-ref-snippet {
+  color: rgb(55, 65, 81);
+}
+
+.rag-ref-citation {
+  color: rgb(156, 163, 175);
+  font-style: italic;
+  margin-left: 1.25rem;
+  margin-top: 0.125rem;
+}
+
+[data-theme="light"] .rag-ref-num {
+  color: rgb(79, 70, 229);
+}
+
+[data-theme="light"] .rag-ref-detail,
+[data-theme="light"] .rag-ref-citation {
+  color: rgb(107, 114, 128);
+}
+
 .rag-ref-highlight {
   background-color: rgba(99, 102, 241, 0.2) !important;
 }

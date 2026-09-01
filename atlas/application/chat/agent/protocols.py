@@ -25,6 +25,12 @@ class AgentContext:
     # value the model cannot influence. None when the feature is disabled or no
     # level is active (meaning no compliance restriction).
     compliance_level: Optional[str] = None
+    # Per-turn citation numbering (issue #874). Owned by the caller rather than
+    # by the loop: an interrupted or malformed-tool-call turn unwinds out of
+    # ``run()``, and the sources the agent already read must still reach the
+    # transcript. Typed loosely to keep the domain register out of the loop's
+    # import graph.
+    citation_register: Optional[Any] = None
 
 
 @dataclass

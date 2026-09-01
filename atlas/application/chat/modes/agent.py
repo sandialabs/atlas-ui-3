@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.domain.chat.citation_register import CitationRegister, new_register
 from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
@@ -20,6 +21,7 @@ from ..agent.steering import SteeringChannel
 from ..events.agent_event_relay import AgentEventRelay
 from ..utilities import event_notifier
 from ..utilities.agent_digest import build_tool_digest
+from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.interrupted_turn import INTERRUPTED_TURN_CONTENT
 
 # Closing text for a turn that ended because the model's tool call could not be
@@ -150,6 +152,12 @@ class AgentModeRunner:
             conversation_id=session.context.get("conversation_id", str(session.id)),
             # Trusted compliance level stashed on the session by ChatService.
             compliance_level=session.context.get("compliance_level"),
+            # One register per turn, seeded from the numbers this conversation
+            # has already used so ``[3]`` means one document for the whole
+            # transcript (issue #874). Owned here, not by the loop: an
+            # interrupted turn unwinds out of ``run()`` and the sources the
+            # agent already read still have to reach the closing message.
+            citation_register=new_register(session.history.messages),
         )
 
         # Artifact processor wrapper for handling tool results.
@@ -209,7 +217,9 @@ class AgentModeRunner:
                 turn_start_index,
                 content=INTERRUPTED_TURN_CONTENT,
                 metadata={"agent_mode": True, "interrupted": True},
+                citation_register=agent_context.citation_register,
             )
+            await publish_citations(self.event_publisher, agent_context.citation_register)
             await self._publish_completion(steps=0)
             raise
         except LLMMalformedToolCallError as malformed:
@@ -226,7 +236,9 @@ class AgentModeRunner:
                     else MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON
                 ),
                 metadata={"agent_mode": True, "incomplete": True},
+                citation_register=agent_context.citation_register,
             )
+            await publish_citations(self.event_publisher, agent_context.citation_register)
             await self._publish_completion(steps=0)
             raise
         except Exception:
@@ -254,7 +266,13 @@ class AgentModeRunner:
             turn_start_index,
             content=result.final_answer,
             metadata={"agent_mode": True, "steps": result.steps},
+            citation_register=agent_context.citation_register,
         )
+
+        # Sources the agent actually read this turn, published once the answer
+        # is complete (issue #874). One event per turn, not per search: the
+        # agent may search three times and cite two documents.
+        await publish_citations(self.event_publisher, agent_context.citation_register)
 
         # Completion update
         await self.event_publisher.publish_agent_update(
@@ -293,6 +311,7 @@ class AgentModeRunner:
         turn_start_index: int,
         content: str,
         metadata: Dict[str, Any],
+        citation_register: Optional[CitationRegister] = None,
     ) -> Message:
         """Append the turn's closing assistant message, carrying a tool digest.
 
@@ -309,6 +328,7 @@ class AgentModeRunner:
             digest = None
         if digest:
             metadata = {**metadata, AGENT_TOOL_DIGEST_KEY: digest}
+        metadata = attach_citations(metadata, citation_register)
 
         message = Message(
             role=MessageRole.ASSISTANT,

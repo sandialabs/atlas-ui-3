@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID, uuid4
 
+from atlas.domain.chat.citation_register import CITATIONS_METADATA_KEY
 
 # Message types that exist only so the UI can re-render a reloaded
 # conversation. They are persisted (issue #684) but must never be replayed
@@ -23,6 +24,14 @@ AGENT_TOOL_DIGEST_KEY = "agent_tool_digest"
 # walks newest-first and stops at these limits.
 MAX_FOLDED_DIGESTS = 3
 MAX_FOLDED_DIGEST_CHARS = 12000
+
+# How many of a conversation's cited sources are replayed to the model, newest
+# first (issue #874). The digest truncates every tool result to a few hundred
+# characters, which is right for passage text and wrong for citation numbers: a
+# follow-up turn that cannot see which document was ``[3]`` either renumbers it
+# or stops citing altogether. Identity only -- no snippet text -- so 40 entries
+# cost roughly what one truncated tool result does.
+MAX_FOLDED_CITATIONS = 40
 
 
 class MessageRole(Enum):
@@ -221,6 +230,12 @@ class ConversationHistory:
             budget -= len(digest)
             kept += 1
 
+        # The conversation's citation numbers, newest turn first, deduped by
+        # number and folded into the newest message that carries any. They are
+        # replayed as identity alone so the model can keep citing ``[3]`` as the
+        # same document many turns later.
+        citation_line, citation_index = self._fold_citations()
+
         out: List[Dict[str, str]] = []
         for index, msg in enumerate(self.messages):
             if msg.metadata.get("message_type") in DISPLAY_ONLY_MESSAGE_TYPES:
@@ -229,8 +244,49 @@ class ConversationHistory:
             digest = folded.get(index)
             if digest:
                 content = f"{content}\n\n{digest}" if content else digest
+            if citation_line and index == citation_index:
+                content = f"{content}\n\n{citation_line}" if content else citation_line
             out.append({"role": msg.role.value, "content": content})
         return out
+
+    def _fold_citations(self) -> tuple[Optional[str], Optional[int]]:
+        """Build the replayed citation line and say which message carries it.
+
+        Returns ``(None, None)`` for a conversation that has never cited
+        anything, which is the overwhelmingly common case and must add nothing
+        to the prompt.
+        """
+        seen: Dict[int, str] = {}
+        target: Optional[int] = None
+        for index in range(len(self.messages) - 1, -1, -1):
+            msg = self.messages[index]
+            if msg.metadata.get("message_type") in DISPLAY_ONLY_MESSAGE_TYPES:
+                continue
+            entries = msg.metadata.get(CITATIONS_METADATA_KEY)
+            if not entries:
+                continue
+            if target is None:
+                target = index
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                number = entry.get("n")
+                label = entry.get("filename") or entry.get("citation") or entry.get("url")
+                # Newest wins: an earlier turn cannot rewrite what a number
+                # already means, so a number seen higher up is skipped.
+                if isinstance(number, int) and label and number not in seen:
+                    seen[number] = str(label)
+            if len(seen) >= MAX_FOLDED_CITATIONS:
+                break
+        if not seen or target is None:
+            return None, None
+        listed = sorted(seen.items())[:MAX_FOLDED_CITATIONS]
+        rendered = "; ".join(f"[{number}] {label}" for number, label in listed)
+        return (
+            "[Sources already cited in this conversation, by the number that "
+            f"refers to each. Keep citing them by these numbers: {rendered}]",
+            target,
+        )
 
     def to_dict(self) -> List[Dict[str, Any]]:
         """Convert to dictionary list."""

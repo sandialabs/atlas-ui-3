@@ -529,9 +529,9 @@ function Build-Frontend {
         $env:VITE_APP_NAME = "ATLAS"
     }
 
-    # RAG citations UI is opt-in at build time; default to off if unset.
+    # RAG citations UI is a build-time flag; default to on if unset.
     if (-not $env:VITE_FEATURE_RAG_CITATIONS) {
-        $env:VITE_FEATURE_RAG_CITATIONS = "false"
+        $env:VITE_FEATURE_RAG_CITATIONS = "true"
     }
 
     npm run build
