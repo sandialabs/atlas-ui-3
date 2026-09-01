@@ -18,6 +18,12 @@ const EnabledToolsIndicator = () => {
   // Threshold for showing compact view
   const COMPACT_THRESHOLD = 5
   const shouldShowCompact = allTools.length > COMPACT_THRESHOLD
+  // Removing tools can drop the count back under the threshold while
+  // isExpanded is still true, which takes the "Show less" button away with it
+  // (review on #876). Derive the layout from both, so the strip falls back to
+  // the collapsed single row rather than getting stuck wrapped with no control
+  // that can collapse it.
+  const isExpandedLayout = shouldShowCompact && isExpanded
   const displayTools = shouldShowCompact && !isExpanded 
     ? allTools.slice(0, COMPACT_THRESHOLD) 
     : allTools
@@ -30,20 +36,20 @@ const EnabledToolsIndicator = () => {
   // and the auto-approve toggle sit outside the scroll region so they stay
   // reachable even when the pills overflow (review).
   return (
-    <div className={`flex gap-2 text-xs text-gray-400 mb-2 ${isExpanded ? 'items-start' : 'items-center'}`}>
-      <span className={`flex-shrink-0 flex items-center ${isExpanded ? 'mt-1' : ''}`} aria-label="Active Tools">
+    <div className={`flex gap-2 text-xs text-gray-400 mb-2 ${isExpandedLayout ? 'items-start' : 'items-center'}`}>
+      <span className={`flex-shrink-0 flex items-center ${isExpandedLayout ? 'mt-1' : ''}`} aria-label="Active Tools">
         <Wrench className="w-3.5 h-3.5 sm:hidden" aria-hidden="true" />
         <span className="hidden sm:inline">Active Tools:</span>
       </span>
       <div
         className={`flex-1 min-w-0 flex items-center gap-1 scrollbar-hide ${
-          isExpanded
+          isExpandedLayout
             ? 'flex-wrap max-h-24 overflow-y-auto'
             : 'flex-nowrap overflow-x-auto'
         }`}
         tabIndex={0}
         aria-label={
-          isExpanded
+          isExpandedLayout
             ? 'Selected tools; scroll vertically to see more'
             : 'Selected tools; scroll horizontally to see more'
         }
@@ -70,7 +76,7 @@ const EnabledToolsIndicator = () => {
           onClick={() => setIsExpanded(!isExpanded)}
           aria-expanded={isExpanded}
           className={`flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${
-            isExpanded ? 'mt-0.5' : ''
+            isExpandedLayout ? 'mt-0.5' : ''
           }`}
           title={isExpanded ? 'Show less' : `Show ${allTools.length - COMPACT_THRESHOLD} more`}
         >
@@ -102,8 +108,8 @@ const EnabledToolsIndicator = () => {
         }}
         aria-pressed={autoApproveOn}
         className={`flex-shrink-0 px-2 py-1 rounded border transition-colors cursor-pointer ${
-          isExpanded ? 'mt-0.5 ' : ''
-        }${
+          isExpandedLayout ? 'mt-0.5' : ''
+        } ${
           autoApproveOn
             ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
             : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'

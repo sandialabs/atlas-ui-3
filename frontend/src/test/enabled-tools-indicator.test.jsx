@@ -160,6 +160,30 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     expect(screen.queryByText('f')).toBeNull()
   })
 
+  it('falls back to the collapsed layout when the count drops below the threshold while expanded (review)', () => {
+    // Expanding and then removing tools until <= COMPACT_THRESHOLD remain takes
+    // the "Show less" button away with the compact mode; if the wrapped layout
+    // were keyed off isExpanded alone the strip would be stuck wrapped and
+    // height-capped with no control able to collapse it.
+    const keys = ['s_a', 's_b', 's_c', 's_d', 's_e', 's_f', 's_g']
+    setChat({ selectedTools: new Set(keys) })
+    const { rerender } = render(<EnabledToolsIndicator />)
+
+    fireEvent.click(screen.getByRole('button', { name: /2 more/i }))
+    expect(screen.getByText('a').closest('div[tabindex="0"]').className).toContain('flex-wrap')
+
+    // Now only five tools remain — compact mode is off, so is the toggle.
+    setChat({ selectedTools: new Set(['s_a', 's_b', 's_c', 's_d', 's_e']) })
+    rerender(<EnabledToolsIndicator />)
+
+    expect(screen.queryByRole('button', { name: /show less/i })).toBeNull()
+    const pillRow = screen.getByText('a').closest('div[tabindex="0"]')
+    expect(pillRow.className).toContain('flex-nowrap')
+    expect(pillRow.className).not.toContain('flex-wrap')
+    expect(pillRow.className).not.toContain('max-h-24')
+    expect(pillRow.getAttribute('aria-label')).toMatch(/horizontally/i)
+  })
+
   it('removes a tool when its pill X is clicked', () => {
     const { toggleTool } = setChat({ selectedTools: new Set(['readtool']) })
     render(<EnabledToolsIndicator />)
