@@ -1,4 +1,4 @@
-import { X, ChevronLeft, ChevronRight, Download, FileText, Image, File, Code } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Download, FileText, Image, File, Code, Maximize2, Minimize2, PanelRight, PanelTop } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -50,7 +50,16 @@ const processCanvasContent = (content) => {
 const MIN_WIDTH = 300;
 const MAX_WIDTH = window.innerWidth * 0.9;
 
-const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
+const CanvasPanel = ({
+  isOpen,
+  onClose,
+  onWidthChange,
+  size = 'half',
+  orientation = 'right',
+  orientationLocked = false,
+  onToggleSize,
+  onToggleOrientation,
+}) => {
   const { 
     canvasContent, 
     customUIContent, 
@@ -408,18 +417,37 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
     )
   }
 
+  const isStacked = orientation === 'top';
+  const isFullSize = size === 'full';
+  // The drag handle only makes sense for a side-by-side canvas that isn't already full screen
+  const showResizeHandle = !isMobile && !isStacked && !isFullSize;
+
+  const panelStyle = isStacked
+    ? {
+        width: '100%',
+        minWidth: 0,
+        maxWidth: '100%',
+        height: isFullSize ? '100%' : '50%',
+        flexShrink: 0,
+        boxSizing: 'border-box',
+      }
+    : {
+        width: isFullSize ? '100%' : `${width}px`,
+        minWidth: isFullSize ? '100%' : `${MIN_WIDTH}px`,
+        maxWidth: isFullSize ? '100%' : `${window.innerWidth * 0.9}px`,
+        boxSizing: 'border-box',
+      };
+
   return (
     <aside
-      className={`bg-gray-800 border-l border-gray-700 transform transition-all duration-300 ease-in-out ${isOpen ? 'flex flex-col' : 'hidden'}`}
-      style={{
-        width: isMobile ? '100vw' : `${width}px`,
-        minWidth: isMobile ? '100vw' : `${MIN_WIDTH}px`,
-        maxWidth: isMobile ? '100vw' : `${window.innerWidth * 0.9}px`,
-        boxSizing: 'border-box',
-      }}
+      className={`bg-gray-800 ${isStacked ? 'border-b' : 'border-l'} border-gray-700 transform transition-all duration-300 ease-in-out ${isOpen ? 'flex flex-col' : 'hidden'}`}
+      style={panelStyle}
+      data-testid="canvas-panel"
+      data-canvas-size={size}
+      data-canvas-orientation={orientation}
     >
       {/* Draggable Divider */}
-      {!isMobile && (
+      {showResizeHandle && (
         <div
           style={{
             position: 'absolute',
@@ -449,12 +477,36 @@ const CanvasPanel = ({ isOpen, onClose, onWidthChange }) => {
       <div className="border-b border-gray-700 bg-gray-900">
         <div className="flex items-center justify-between p-4">
           <h2 className="text-lg font-semibold text-gray-100">Canvas</h2>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {!orientationLocked && (
+            <button
+              onClick={onToggleOrientation}
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              title={isStacked ? 'Move canvas beside the chat' : 'Move canvas above the chat'}
+              aria-label={isStacked ? 'Move canvas beside the chat' : 'Move canvas above the chat'}
+              data-testid="canvas-orientation-toggle"
+            >
+              {isStacked ? <PanelRight className="w-5 h-5" /> : <PanelTop className="w-5 h-5" />}
+            </button>
+            )}
+            <button
+              onClick={onToggleSize}
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              title={isFullSize ? 'Shrink canvas to half the screen' : 'Expand canvas to the full screen'}
+              aria-label={isFullSize ? 'Shrink canvas to half the screen' : 'Expand canvas to the full screen'}
+              data-testid="canvas-size-toggle"
+            >
+              {isFullSize ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              title="Hide canvas"
+              aria-label="Hide canvas"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
         
         {/* File navigation */}

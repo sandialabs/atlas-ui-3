@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-09-02
+- **The canvas can now take the full window or stack above the chat** (#754): the canvas header gains an expand/shrink control (half <-> full width, with the chat hidden at full) and a move control (beside the chat <-> above the chat), alongside the existing close button. Below 768px the layout is forced to stacked -- a side-by-side split is unreadable on a phone -- and the move control is hidden without overwriting the stored preference, so widening the window restores it. Both choices persist per browser in local storage.
+
 ### PR #876 - 2026-09-01
 - **The Active Tools strip's "+N more" / "Show less" toggle expands visibly again**: making the strip a single row (#870) turned the pill row into `flex-nowrap` + `overflow-x-auto`, so expanding it only lengthened a row that already scrolled horizontally -- the extra pills rendered off-screen and clicking "+25 more" looked like it did nothing. Expanded, the row now wraps into a height-capped (`max-h-24`), vertically scrolling block; collapsed, it stays the single horizontally scrolling row from #870. The toggle also exposes `aria-expanded`.
 
