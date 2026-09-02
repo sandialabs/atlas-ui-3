@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-09-02
+### PR #883 - 2026-09-02
 - **The canvas can now take the full window or stack above the chat** (#754): the canvas header gains an expand/shrink control (half <-> full width, with the chat hidden at full) and a move control (beside the chat <-> above the chat), alongside the existing close button. Below 768px the layout is forced to stacked -- a side-by-side split is unreadable on a phone -- and the move control is hidden without overwriting the stored preference, so widening the window restores it. Both choices persist per browser in local storage.
 
 ### PR #876 - 2026-09-01
