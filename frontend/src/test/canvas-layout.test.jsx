@@ -5,8 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
-import { renderHook } from '@testing-library/react'
+import { render, screen, act, renderHook } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import CanvasPanel from '../components/CanvasPanel'
 import { useCanvasLayout } from '../hooks/useCanvasLayout'

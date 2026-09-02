@@ -48,7 +48,6 @@ const processCanvasContent = (content) => {
 
 
 const MIN_WIDTH = 300;
-const MAX_WIDTH = window.innerWidth * 0.9;
 
 const CanvasPanel = ({
   isOpen,
