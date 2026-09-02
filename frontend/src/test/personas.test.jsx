@@ -144,3 +144,21 @@ describe('usePersonas loaded flag', () => {
     expect(result.current.personas).toEqual([])
   })
 })
+
+describe('persona description fallback', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('truncates a long prompt used as the fallback description', () => {
+    const long = 'x'.repeat(5000)
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [{ id: 'long', name: 'Long', description: '', content: long }],
+    })
+
+    render(<PromptSelector />)
+    fireEvent.click(screen.getAllByRole('button')[0])
+
+    const rendered = screen.getByText(/^x+\.\.\.$/)
+    expect(rendered.textContent.length).toBeLessThan(200)
+  })
+})

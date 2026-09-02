@@ -4,6 +4,15 @@ import { useState, useRef, useEffect } from 'react'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey, personaKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
 
+// A persona with no description falls back to its prompt text, which the admin
+// can make arbitrarily long. Only two clamped lines are ever visible, so trim
+// before it reaches the DOM rather than rendering 100k characters per entry.
+const PERSONA_PREVIEW_CHARS = 160
+const personaPreview = (content = '') =>
+  content.length > PERSONA_PREVIEW_CHARS
+    ? `${content.slice(0, PERSONA_PREVIEW_CHARS)}...`
+    : content
+
 const PromptSelector = () => {
   const {
     prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts,
@@ -215,7 +224,7 @@ const PromptSelector = () => {
                           {isActive && <span className="text-xs text-blue-400">(active)</span>}
                         </div>
                         <div className="text-xs text-gray-400 mt-1 line-clamp-2">
-                          {p.description || p.content}
+                          {p.description || personaPreview(p.content)}
                         </div>
                       </div>
                     </div>

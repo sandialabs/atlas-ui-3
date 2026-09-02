@@ -7,15 +7,11 @@ the selected prompt text as ``custom_system_prompt`` on the next chat turn,
 exactly like a user-authored prompt.
 """
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException
 
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user
 from atlas.modules.prompts.persona_library import get_persona_library
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
 
