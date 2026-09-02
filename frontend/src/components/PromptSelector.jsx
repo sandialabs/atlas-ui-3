@@ -1,13 +1,14 @@
 import { useChat } from '../contexts/ChatContext'
-import { ChevronDown, Sparkles, User } from 'lucide-react'
+import { ChevronDown, Sparkles, User, Users } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
-import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { userPromptKey, isUserPromptKey, userPromptIdFromKey, personaKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
 
 const PromptSelector = () => {
   const {
     prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts,
     userPrompts = [],
+    personas = [],
     features = {},
   } = useChat()
   const customPromptsEnabled = !!features.custom_prompts
@@ -71,6 +72,11 @@ const PromptSelector = () => {
       const id = userPromptIdFromKey(activePromptKey)
       const match = userPrompts.find(p => p.id === id)
       return match ? match.title : 'Custom Prompt'
+    }
+    if (isPersonaKey(activePromptKey)) {
+      const id = personaIdFromKey(activePromptKey)
+      const match = personas.find(p => p.id === id)
+      return match ? match.name : 'Persona'
     }
     return getMcpNameFromKey(activePromptKey, prompts)
   }
@@ -177,6 +183,47 @@ const PromptSelector = () => {
               </button>
             )
           })}
+
+          {/* Admin-preconfigured personas (issue #880) */}
+          {personas.length > 0 && (
+            <>
+              <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
+                <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                  <Users className="w-3 h-3 text-amber-400" />
+                  Personas
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Preconfigured prompts provided by your administrator
+                </div>
+              </div>
+              {personas.map((p) => {
+                const key = personaKey(p.id)
+                const isActive = key === activePromptKey
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handlePromptSelect(key)}
+                    className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0 ${
+                      isActive ? 'bg-blue-900/30' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-200 flex items-center gap-2">
+                          {isActive && <span className="text-blue-400">✓</span>}
+                          <span className="truncate">{p.name}</span>
+                          {isActive && <span className="text-xs text-blue-400">(active)</span>}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                          {p.description || p.content}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </>
+          )}
 
           {/* User-authored custom prompts (issue #153) */}
           {customPromptsEnabled && userPrompts.length > 0 && (

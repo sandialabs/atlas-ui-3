@@ -17,7 +17,8 @@ vi.mock('../contexts/ChatContext', () => ({
 vi.mock('lucide-react', () => ({
   ChevronDown: () => <span data-testid="chevron-down">v</span>,
   Sparkles: () => <span data-testid="sparkles">*</span>,
-  User: () => <span data-testid="user">u</span>
+  User: () => <span data-testid="user">u</span>,
+  Users: () => <span data-testid="users">U</span>
 }))
 
 describe('PromptSelector', () => {

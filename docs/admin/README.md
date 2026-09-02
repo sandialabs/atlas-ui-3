@@ -43,3 +43,4 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 
 - [Help Page](help-config.md) - Customizing the Help/About content
 - [Splash Screen](splash-config.md) - Configuring the startup splash screen
+- [Personas](personas.md) - Preconfigured system prompts loaded from markdown files

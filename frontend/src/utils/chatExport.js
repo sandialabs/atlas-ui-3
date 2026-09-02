@@ -5,7 +5,7 @@
 // server. For user-authored prompts (issue #153) the body lives client-side,
 // so we also include the first few lines as a preview in the export.
 
-import { USER_PROMPT_PREFIX } from '../hooks/chat/useSelections'
+import { USER_PROMPT_PREFIX, PERSONA_PREFIX } from '../hooks/chat/useSelections'
 import { filterArgumentsForDisplay, processToolResult } from './toolResultUtils'
 
 // Number of leading lines of the prompt body to include in the export preview.
@@ -111,7 +111,7 @@ export function formatToolCallForText(m) {
   return lines.join('\n')
 }
 
-export function buildPromptInfoByKey(promptsConfig, userPrompts) {
+export function buildPromptInfoByKey(promptsConfig, userPrompts, personas) {
   const out = {}
   ;(promptsConfig || []).forEach(server => {
     (server.prompts || []).forEach(p => {
@@ -133,6 +133,17 @@ export function buildPromptInfoByKey(promptsConfig, userPrompts) {
       name: p.title || `user-prompt-${p.id}`,
       description: 'User-authored custom prompt',
       server: 'user library',
+      preview: buildPromptPreview(p.content),
+    }
+  })
+  ;(personas || []).forEach(p => {
+    if (!p || p.id == null) return
+    const key = `${PERSONA_PREFIX}${p.id}`
+    out[key] = {
+      key,
+      name: p.name || `persona-${p.id}`,
+      description: p.description || 'Preconfigured persona',
+      server: 'personas',
       preview: buildPromptPreview(p.content),
     }
   })

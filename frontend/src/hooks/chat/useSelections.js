@@ -16,6 +16,16 @@ export const isUserPromptKey = key => typeof key === 'string' && key.startsWith(
 export const userPromptKey = id => `${USER_PROMPT_PREFIX}${id}`
 export const userPromptIdFromKey = key => (isUserPromptKey(key) ? key.slice(USER_PROMPT_PREFIX.length) : null)
 
+// Prefix that marks an active-prompt key as an admin-preconfigured persona
+// (issue #880) loaded from the server's persona markdown folder. Like user
+// prompts these replace the system prompt client-side (sent as
+// custom_system_prompt) and are never sent as MCP selected_prompts.
+export const PERSONA_PREFIX = 'persona:'
+
+export const isPersonaKey = key => typeof key === 'string' && key.startsWith(PERSONA_PREFIX)
+export const personaKey = id => `${PERSONA_PREFIX}${id}`
+export const personaIdFromKey = key => (isPersonaKey(key) ? key.slice(PERSONA_PREFIX.length) : null)
+
 export function useSelections() {
   // Auto-select canvas tool if empty
   const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', [CANVAS_TOOL])

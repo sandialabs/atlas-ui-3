@@ -3,8 +3,9 @@ import { createContext, useContext, useEffect, useState, useCallback, useMemo, u
 import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
-import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
 import { useUserPrompts } from '../hooks/useUserPrompts'
+import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
@@ -54,6 +55,9 @@ export const ChatProvider = ({ children }) => {
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
+	// Admin-preconfigured personas loaded from markdown files (issue #880).
+	// Always available: they need no chat history and no per-user storage.
+	const personas = usePersonas()
 	// Workspaces: saved bundles of prompt + RAG source + tool selections
 	const workspacesEnabled = !!config.features?.workspaces
 	const workspaces = useWorkspaces(workspacesEnabled)
@@ -498,6 +502,7 @@ export const ChatProvider = ({ children }) => {
 		if (
 			selections.activePromptKey &&
 			!isUserPromptKey(selections.activePromptKey) &&
+			!isPersonaKey(selections.activePromptKey) &&
 			!validPromptKeys.has(selections.activePromptKey)
 		) {
 			// Clear stale active prompt that no longer exists in config
@@ -601,13 +606,21 @@ export const ChatProvider = ({ children }) => {
 			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
 			: null
 
+		// A preconfigured persona (issue #880) behaves like a user prompt on the
+		// wire: its text replaces the system prompt and it is never an MCP prompt.
+		const activeKeyIsPersona = isPersonaKey(activeKey)
+		const activePersona = activeKeyIsPersona
+			? personas.personas.find(p => p.id === personaIdFromKey(activeKey))
+			: null
+		const customSystemPrompt = activeUserPrompt?.content ?? activePersona?.content
+
 		const sent = sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
-			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
-			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
+			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : activePrompts,
+			custom_system_prompt: customSystemPrompt,
 			selected_data_sources: dataSourcesToSend,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
@@ -686,7 +699,7 @@ export const ChatProvider = ({ children }) => {
 		// it (websocketHandlers).
 		setIsAgentRunning(agent.agentModeEnabled)
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, personas.personas, activeWorkspaceId, cancelPendingWorkspaceRestore])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -893,7 +906,7 @@ export const ChatProvider = ({ children }) => {
 			? ([...selectedDataSources].join(', ') || 'None selected')
 			: 'None (RAG disabled)'
 
-		const promptInfoByKey = buildPromptInfoByKey(config.prompts, userPrompts.prompts)
+		const promptInfoByKey = buildPromptInfoByKey(config.prompts, userPrompts.prompts, personas.personas)
 		const activePromptInfo = resolvePromptInfo(selections.activePromptKey, promptInfoByKey)
 		const exportConversation = buildExportConversation(messages, promptInfoByKey)
 
@@ -951,7 +964,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
+	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.activePromptKey, files.canvasContent, userPrompts.prompts, personas.personas])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
@@ -1096,6 +1109,11 @@ export const ChatProvider = ({ children }) => {
 		makePromptActive: guarded.makePromptActive,
 		clearActivePrompt: guarded.clearActivePrompt,
 		activePromptKey: selections.activePromptKey,
+		// Admin-preconfigured personas (issue #880)
+		personas: personas.personas,
+		personasLoading: personas.loading,
+		personasError: personas.error,
+		fetchPersonas: personas.fetchPersonas,
 		// User-authored custom prompt library (issue #153)
 		userPrompts: userPrompts.prompts,
 		userPromptsLoading: userPrompts.loading,
