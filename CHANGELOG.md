@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #PRNUM - 2026-09-02
+### PR #882 - 2026-09-02
 - **Preconfigured personas (default system prompts) from a folder of markdown files** (closes #880): admins can drop `.md` files with YAML frontmatter (`name`, `description`, optional `access_group`, `order`) into a personas folder and Atlas offers each one as a selectable system prompt in a new **Personas** section of the prompt picker -- no code changes, no MCP prompt server, and no per-user prompt authoring. Personas with no `access_group` are visible to everyone; gated ones are filtered through the same authorization service as tools and models (and hidden if that check errors). Search order: `PERSONAS_DIR`, `<PROMPT_BASE_PATH>/personas/`, `prompts/personas/`, then the packaged samples in `atlas/config/prompts/personas/`. New endpoints `GET /api/personas` and `GET /api/personas/{id}`; see `docs/admin/personas.md`.
 
 ### PR #876 - 2026-09-01
