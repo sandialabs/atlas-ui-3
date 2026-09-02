@@ -11,6 +11,11 @@ import { useState, useCallback, useEffect } from 'react'
 export function usePersonas() {
   const [personas, setPersonas] = useState([])
   const [loading, setLoading] = useState(false)
+  // Whether a fetch has ever come back successfully. Callers use this to tell
+  // "no personas are configured" apart from "we have not asked yet", which
+  // matters before acting on an empty list (see the stale-key effect in
+  // ChatContext -- an initial empty list must not clear a selected persona).
+  const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(null)
 
   const fetchPersonas = useCallback(async () => {
@@ -21,6 +26,7 @@ export function usePersonas() {
       if (!res.ok) throw new Error(`Failed to load personas (${res.status})`)
       const data = await res.json()
       setPersonas(Array.isArray(data.personas) ? data.personas : [])
+      setLoaded(true)
     } catch (e) {
       setError(e.message)
       setPersonas([])
@@ -33,7 +39,7 @@ export function usePersonas() {
     fetchPersonas()
   }, [fetchPersonas])
 
-  return { personas, loading, error, fetchPersonas }
+  return { personas, loading, loaded, error, fetchPersonas }
 }
 
 export default usePersonas

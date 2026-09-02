@@ -132,6 +132,18 @@ export const ChatProvider = ({ children }) => {
 		}
 	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
 
+	// A persisted persona key can outlive the persona itself: the admin deleted or
+	// renamed the file, or the user lost access to its group. Only clear it once a
+	// successful load has actually told us the persona is gone -- clearing while
+	// the fetch is in flight (or after it failed) would drop the selection on
+	// every refresh and silently fall back to the default prompt.
+	useEffect(() => {
+		if (!personas.loaded || personas.loading || personas.error) return
+		if (!isPersonaKey(activePromptKey)) return
+		if (personas.personas.some(p => p.id === personaIdFromKey(activePromptKey))) return
+		clearActivePrompt()
+	}, [personas.loaded, personas.loading, personas.error, personas.personas, activePromptKey, clearActivePrompt])
+
 	// Which workspace the current selections came from. Persisted so a refresh
 	// keeps showing the workspace whose selections are still loaded.
 	const [activeWorkspaceId, setActiveWorkspaceId] = usePersistentState('chatui-active-workspace', null)

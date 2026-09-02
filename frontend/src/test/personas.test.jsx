@@ -124,3 +124,23 @@ describe('chat export labelling', () => {
     expect(resolved.server).toBe('personas')
   })
 })
+
+describe('usePersonas loaded flag', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('stays false until a fetch succeeds', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 })))
+    const { result } = renderHook(() => usePersonas())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.loaded).toBe(false)
+  })
+
+  it('is true after a successful empty response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ personas: [] }) })))
+    const { result } = renderHook(() => usePersonas())
+
+    await waitFor(() => expect(result.current.loaded).toBe(true))
+    expect(result.current.personas).toEqual([])
+  })
+})
