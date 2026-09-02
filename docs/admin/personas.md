@@ -55,6 +55,12 @@ Notes:
 - The persona id comes from the filename, so renaming a file changes its id and
   users who had it selected fall back to the default prompt.
 
+Personas are independent of the custom-prompt library (`FEATURE_CUSTOM_PROMPTS_ENABLED`)
+and of chat history: they need no per-user storage, so they work with those
+features off. The client sends only the persona **id**; the server resolves the
+text from its own folder and re-checks the access group, so a hand-crafted
+client cannot select a persona it was never offered, nor substitute its own text.
+
 ## How users pick one
 
 The prompt selector under the chat input gains a **Personas** section. Selecting

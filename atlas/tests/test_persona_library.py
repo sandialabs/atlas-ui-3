@@ -137,3 +137,47 @@ def test_packaged_personas_parse():
     assert len(personas) >= 3
     assert all(p.content.strip() for p in personas)
     assert "readme" not in [p.id for p in personas]
+
+
+@pytest.mark.asyncio
+async def test_resolve_persona_prompt_authorizes_by_group(tmp_path, monkeypatch):
+    """The chat path resolves persona text server-side, re-checking the group."""
+    from atlas.modules.prompts import persona_library
+
+    write(tmp_path, "open.md", "Everyone prompt")
+    write(tmp_path, "gated.md", "---\naccess_group: secret-team\n---\nGated prompt")
+
+    library = PersonaLibrary([tmp_path])
+    monkeypatch.setattr(persona_library, "get_persona_library", lambda: library)
+
+    async def in_no_groups(user, group):
+        return False
+
+    resolve = persona_library.resolve_persona_prompt
+
+    assert await resolve("open", "a@b.com", in_no_groups) == "Everyone prompt"
+    # Unauthorized, unknown and absent ids all fall back to the default prompt.
+    assert await resolve("gated", "a@b.com", in_no_groups) is None
+    assert await resolve("nope", "a@b.com", in_no_groups) is None
+    assert await resolve(None, "a@b.com", in_no_groups) is None
+
+    async def in_secret_team(user, group):
+        return group == "secret-team"
+
+    assert await resolve("gated", "a@b.com", in_secret_team) == "Gated prompt"
+
+
+@pytest.mark.asyncio
+async def test_resolve_persona_prompt_survives_a_broken_library(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    class Boom:
+        async def personas_for_user(self, *args, **kwargs):
+            raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(persona_library, "get_persona_library", lambda: Boom())
+
+    async def group_check(user, group):
+        return True
+
+    assert await persona_library.resolve_persona_prompt("x", "a@b.com", group_check) is None

@@ -715,6 +715,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     else None
                 )
 
+                # A preconfigured persona (issue #880) is admin-authored content on
+                # the server, not user-supplied text, so it is deliberately outside
+                # the custom-prompt/chat-history flags: the client sends only an id
+                # and the text is resolved here, after re-checking the persona's
+                # access group for this user. That also means a hand-crafted client
+                # cannot use persona_id to smuggle in a prompt of its own.
+                persona_id = data.get("persona_id")
+                if custom_system_prompt is None and persona_id:
+                    from atlas.modules.prompts.persona_library import (
+                        resolve_persona_prompt,
+                    )
+
+                    custom_system_prompt = await resolve_persona_prompt(
+                        persona_id, user_email
+                    )
+
                 try:
                     oversized_file = find_oversized_inline_file(data.get("files"))
                 except HTTPException as e:

@@ -288,6 +288,41 @@ def get_persona_library() -> PersonaLibrary:
     return _library
 
 
+async def resolve_persona_prompt(
+    persona_id: Optional[str],
+    user_email: str,
+    group_check: Optional[Callable[[str, str], Awaitable[bool]]] = None,
+) -> Optional[str]:
+    """Return the prompt text for ``persona_id``, if this user may use it.
+
+    Personas are admin-authored server-side content, so the chat path sends only
+    an id and resolves the text here -- re-checking the access group so a
+    hand-crafted client cannot select a persona it was never offered. Returns
+    None (i.e. "use the default system prompt") for an unknown, unauthorized, or
+    unreadable persona rather than failing the turn.
+    """
+    if not persona_id:
+        return None
+
+    if group_check is None:
+        from atlas.core.auth import is_user_in_group
+
+        group_check = is_user_in_group
+
+    try:
+        allowed = await get_persona_library().personas_for_user(user_email, group_check)
+    except Exception as e:
+        logger.error("Failed to load personas: %s", e, exc_info=True)
+        return None
+
+    for persona in allowed:
+        if persona.id == persona_id:
+            return persona.content
+
+    logger.warning("Ignoring unknown or unauthorized persona id for this user")
+    return None
+
+
 def reset_persona_library() -> None:
     """Drop the cached library (tests / config reloads)."""
     global _library

@@ -618,13 +618,15 @@ export const ChatProvider = ({ children }) => {
 			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
 			: null
 
-		// A preconfigured persona (issue #880) behaves like a user prompt on the
-		// wire: its text replaces the system prompt and it is never an MCP prompt.
+		// A preconfigured persona (issue #880) also replaces the system prompt and
+		// is never an MCP prompt, but only its *id* goes on the wire: the server
+		// resolves the text from its own persona folder after re-checking the
+		// access group, so personas work regardless of the custom-prompt flag and
+		// a client can never substitute its own text for one.
 		const activeKeyIsPersona = isPersonaKey(activeKey)
 		const activePersona = activeKeyIsPersona
 			? personas.personas.find(p => p.id === personaIdFromKey(activeKey))
 			: null
-		const customSystemPrompt = activeUserPrompt?.content ?? activePersona?.content
 
 		const sent = sendMessage({
 			type: 'chat',
@@ -632,7 +634,8 @@ export const ChatProvider = ({ children }) => {
 			model: currentModel,
 			selected_tools: toolsToSend,
 			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : activePrompts,
-			custom_system_prompt: customSystemPrompt,
+			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
+			persona_id: activePersona ? activePersona.id : undefined,
 			selected_data_sources: dataSourcesToSend,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
