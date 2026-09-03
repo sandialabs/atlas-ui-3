@@ -1,11 +1,13 @@
 """Tests for the preconfigured persona library (issue #880)."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from atlas.modules.prompts.persona_library import (
     PersonaLibrary,
+    default_search_paths,
     parse_persona_file,
 )
 
@@ -96,6 +98,41 @@ def test_missing_directories_are_ignored(tmp_path):
     personas = PersonaLibrary([tmp_path / "nope", real]).all_personas()
 
     assert [p.id for p in personas] == ["x"]
+
+
+def fake_config_manager(atlas_root: Path, personas_dir: str = "", app_config_dir: str = "config"):
+    settings = SimpleNamespace(personas_dir=personas_dir, app_config_dir=app_config_dir)
+    return SimpleNamespace(_atlas_root=atlas_root, app_settings=settings)
+
+
+def test_default_search_paths_prefer_the_config_dir(tmp_path):
+    atlas_root = tmp_path / "atlas"
+    paths = default_search_paths(fake_config_manager(atlas_root))
+
+    assert paths == [
+        tmp_path / "config" / "personas",
+        atlas_root / "config" / "prompts" / "personas",
+    ]
+
+
+def test_default_search_paths_personas_dir_setting_wins(tmp_path):
+    atlas_root = tmp_path / "atlas"
+    paths = default_search_paths(
+        fake_config_manager(atlas_root, personas_dir="my/personas")
+    )
+
+    assert paths[0] == tmp_path / "my" / "personas"
+    assert tmp_path / "config" / "personas" in paths
+
+
+def test_default_search_paths_absolute_app_config_dir(tmp_path):
+    atlas_root = tmp_path / "atlas"
+    elsewhere = tmp_path / "elsewhere"
+    paths = default_search_paths(
+        fake_config_manager(atlas_root, app_config_dir=str(elsewhere))
+    )
+
+    assert paths[0] == elsewhere / "personas"
 
 
 @pytest.mark.asyncio

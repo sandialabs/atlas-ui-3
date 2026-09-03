@@ -10,9 +10,9 @@ every allowed user's prompt picker after the next server restart.
 The first directory that contains any persona `.md` files wins:
 
 1. `PERSONAS_DIR` (env var), if set — absolute, or relative to the project root.
-2. `<PROMPT_BASE_PATH>/personas/` (by default `config/prompts/personas/`).
-3. `prompts/personas/` in the project root.
-4. `atlas/config/prompts/personas/` — the packaged samples.
+2. `<APP_CONFIG_DIR>/personas/` — by default `config/personas/` in the project
+   root, alongside `mcp.json` and the other admin-authored config.
+3. `atlas/config/prompts/personas/` — the packaged samples.
 
 Because the first populated directory is authoritative, your own folder fully
 replaces the packaged samples rather than being merged with them.

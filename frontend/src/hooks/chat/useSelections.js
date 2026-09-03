@@ -17,9 +17,10 @@ export const userPromptKey = id => `${USER_PROMPT_PREFIX}${id}`
 export const userPromptIdFromKey = key => (isUserPromptKey(key) ? key.slice(USER_PROMPT_PREFIX.length) : null)
 
 // Prefix that marks an active-prompt key as an admin-preconfigured persona
-// (issue #880) loaded from the server's persona markdown folder. Like user
-// prompts these replace the system prompt client-side (sent as
-// custom_system_prompt) and are never sent as MCP selected_prompts.
+// (issue #880) loaded from the server's persona markdown folder. Only the id
+// crosses the wire (as persona_id); the server resolves the prompt text after
+// re-checking the access group. Personas are never sent as MCP
+// selected_prompts either.
 export const PERSONA_PREFIX = 'persona:'
 
 export const isPersonaKey = key => typeof key === 'string' && key.startsWith(PERSONA_PREFIX)
@@ -128,9 +129,10 @@ export function useSelections() {
     // Set the active prompt key (null for default)
     setActivePromptKey(promptKey)
     // Ensure MCP prompts are in the selectedPrompts set so they get loaded.
-    // User-authored prompts (issue #153) are resolved client-side and must NOT
-    // be added here, or they'd leak into the MCP selected_prompts payload.
-    if (promptKey && !isUserPromptKey(promptKey) && !promptsRaw.includes(promptKey)) {
+    // User-authored prompts (issue #153) and personas (issue #880) are not MCP
+    // prompts and must NOT be added here, or they'd leak into the MCP
+    // selected_prompts payload.
+    if (promptKey && !isUserPromptKey(promptKey) && !isPersonaKey(promptKey) && !promptsRaw.includes(promptKey)) {
       setPromptsRaw(prev => [...prev, promptKey])
     }
   }, [setActivePromptKey, promptsRaw, setPromptsRaw])
@@ -172,7 +174,9 @@ export function useSelections() {
       : null
     setActivePromptKey(promptKey)
     // An MCP active prompt must also be loaded, mirroring makePromptActive.
-    if (promptKey && !isUserPromptKey(promptKey)) {
+    // User prompts and personas are not MCP prompts, so they stay out of the
+    // selected_prompts set.
+    if (promptKey && !isUserPromptKey(promptKey) && !isPersonaKey(promptKey)) {
       setPromptsRaw(prev => (prev.includes(promptKey) ? prev : [...prev, promptKey]))
     }
   }, [setToolsRaw, setPromptsRaw, setDataSourcesRaw, setRagEnabled, setActivePromptKey])

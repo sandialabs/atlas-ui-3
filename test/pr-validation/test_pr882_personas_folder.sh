@@ -2,6 +2,8 @@
 # Test script for PR #882: preconfigured personas from a folder of markdown files (#880)
 # Covers the PR test plan end to end against a REAL running backend:
 #   1. GET /api/personas lists the packaged sample personas.
+#   1b. <APP_CONFIG_DIR>/personas/ (config/personas/) is the default admin
+#       location and fully replaces the packaged samples.
 #   2. An override folder (PERSONAS_DIR) fully replaces the packaged samples.
 #   3. A persona with no access_group is visible to everyone.
 #   4. A persona gated on a group the user IS in is listed; GET by id is 200.
@@ -43,11 +45,18 @@ cleanup() {
 trap cleanup EXIT
 
 start_server() {
-    # $1 = value for PERSONAS_DIR (may be empty for the packaged defaults)
+    # $1 = value for PERSONAS_DIR (may be empty for the conventional locations)
+    # $2 = value for APP_CONFIG_DIR (may be empty to inherit the environment)
     [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null && sleep 2
-    PERSONAS_DIR="$1" PYTHONPATH="$PROJECT_ROOT" \
-        python -m uvicorn atlas.main:app --host 127.0.0.1 --port "$PORT" \
-        > "$WORKDIR/server.log" 2>&1 &
+    if [ -n "$2" ]; then
+        PERSONAS_DIR="$1" APP_CONFIG_DIR="$2" PYTHONPATH="$PROJECT_ROOT" \
+            python -m uvicorn atlas.main:app --host 127.0.0.1 --port "$PORT" \
+            > "$WORKDIR/server.log" 2>&1 &
+    else
+        PERSONAS_DIR="$1" PYTHONPATH="$PROJECT_ROOT" \
+            python -m uvicorn atlas.main:app --host 127.0.0.1 --port "$PORT" \
+            > "$WORKDIR/server.log" 2>&1 &
+    fi
     SERVER_PID=$!
     for _ in $(seq 1 40); do
         if curl -sf "$BASE/api/health" > /dev/null 2>&1; then return 0; fi
@@ -75,6 +84,25 @@ print_result $? "packaged sample personas are listed (got: $DEFAULT_IDS)"
 
 echo "$DEFAULT_IDS" | grep -qv "readme"
 print_result $? "README.md in the personas folder is not a persona"
+
+# ------------------------------------------- 1b. <APP_CONFIG_DIR>/personas
+APPCONFIG="$WORKDIR/appconfig"
+mkdir -p "$APPCONFIG/personas"
+cat > "$APPCONFIG/personas/config-dir-persona.md" <<'EOF'
+---
+name: Config Dir Persona
+---
+You came from the user config dir.
+EOF
+
+start_server "" "$APPCONFIG"
+CONFIG_IDS="$(ids)"
+
+echo "$CONFIG_IDS" | grep -q "config-dir-persona"
+print_result $? "persona from <APP_CONFIG_DIR>/personas is listed (got: $CONFIG_IDS)"
+
+echo "$CONFIG_IDS" | grep -qv "research-assistant"
+print_result $? "config-dir personas replace the packaged samples"
 
 # ------------------------------------------------------- 2-7. override folder
 PERSONAS="$WORKDIR/personas"

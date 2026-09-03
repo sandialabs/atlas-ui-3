@@ -257,13 +257,15 @@ def default_search_paths(config_manager) -> List[Path]:
         else:
             candidates.append(project_root / configured_path)
 
-    prompt_base = Path(settings.prompt_base_path)
-    if prompt_base.is_absolute():
-        candidates.append(prompt_base / PERSONA_DIR_NAME)
-    else:
-        candidates.append(project_root / prompt_base / PERSONA_DIR_NAME)
+    # The conventional home is the user config dir (APP_CONFIG_DIR, default
+    # "config/") alongside mcp.json and the other admin-authored files,
+    # mirroring the two-layer config lookup: config/personas/ overrides the
+    # packaged samples below.
+    config_dir = Path(settings.app_config_dir)
+    if not config_dir.is_absolute():
+        config_dir = project_root / config_dir
+    candidates.append(config_dir / PERSONA_DIR_NAME)
 
-    candidates.append(project_root / "prompts" / PERSONA_DIR_NAME)
     candidates.append(atlas_root / "config" / "prompts" / PERSONA_DIR_NAME)
 
     seen = set()

@@ -22,6 +22,6 @@ Everything below the closing `---` is the prompt text.
 - The persona `id` comes from the filename, so renaming a file changes its id.
 
 Files are read at server startup. To override or extend this packaged set, point
-`PERSONAS_DIR` at your own folder, or create `prompts/personas/` (or
-`<PROMPT_BASE_PATH>/personas/`) in the project root — the first folder that
+`PERSONAS_DIR` at your own folder, or create `config/personas/` (more precisely
+`<APP_CONFIG_DIR>/personas/`) in the project root — the first folder that
 contains any `.md` files wins, so your folder fully replaces these samples.

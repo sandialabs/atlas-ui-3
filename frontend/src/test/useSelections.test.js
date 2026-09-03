@@ -158,4 +158,45 @@ describe('useSelections', () => {
     expect(result.current.activePrompts).toEqual(['server_added_later'])
     expect(result.current.selectedPrompts.has('server_added_later')).toBe(true)
   })
+
+  it('makePromptActive keeps a persona out of the MCP selected prompts', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.makePromptActive('persona:code-reviewer')
+    })
+
+    expect(result.current.activePromptKey).toBe('persona:code-reviewer')
+    // A persona is resolved server-side from its id; it is not an MCP prompt.
+    expect(result.current.selectedPrompts.has('persona:code-reviewer')).toBe(false)
+  })
+
+  it('snapshotSelections captures a persona as the workspace active prompt', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.makePromptActive('persona:code-reviewer')
+    })
+
+    const snapshot = result.current.snapshotSelections()
+    expect(snapshot.active_prompt_key).toBe('persona:code-reviewer')
+    expect(snapshot.selected_prompts).not.toContain('persona:code-reviewer')
+  })
+
+  it('applyWorkspace restores a persona without loading it as an MCP prompt', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.applyWorkspace({
+        active_prompt_key: 'persona:code-reviewer',
+        selected_tools: [],
+        selected_prompts: [],
+        selected_data_sources: [],
+        rag_enabled: false,
+      })
+    })
+
+    expect(result.current.activePromptKey).toBe('persona:code-reviewer')
+    expect(result.current.selectedPrompts.has('persona:code-reviewer')).toBe(false)
+  })
 })
