@@ -85,6 +85,16 @@ print_result $? "packaged sample personas are listed (got: $DEFAULT_IDS)"
 echo "$DEFAULT_IDS" | grep -qv "readme"
 print_result $? "README.md in the personas folder is not a persona"
 
+curl -s "$BASE/api/personas" | python -c "
+import json, sys
+personas = {p['id']: p for p in json.load(sys.stdin)['personas']}
+assert personas['research-assistant'].get('compliance_level') == 'Public', \
+    'packaged research-assistant should carry compliance_level Public'
+assert 'compliance_level' in personas['code-reviewer'], \
+    'every persona dict should include the compliance_level key'
+"
+print_result $? "persona compliance_level is parsed and exposed by the API"
+
 # ------------------------------------------- 1b. <APP_CONFIG_DIR>/personas
 APPCONFIG="$WORKDIR/appconfig"
 mkdir -p "$APPCONFIG/personas"

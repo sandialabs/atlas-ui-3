@@ -26,6 +26,7 @@ YAML frontmatter for the metadata, everything below it for the prompt text:
 name: Research Assistant          # optional; defaults to the filename
 description: Careful, source-first answers
 access_group: research-team       # optional; one group or a list of them
+compliance_level: Internal        # optional; a level from compliance-levels.json
 order: 10                         # optional sort hint (default 1000)
 ---
 You are a meticulous research assistant.
@@ -39,6 +40,7 @@ You are a meticulous research assistant.
 | `name` | no | Label in the picker. Defaults to a title-cased filename. |
 | `description` | no | One-line subtitle under the name. |
 | `access_group` | no | Group name, or list of names. Omit to show to everyone. |
+| `compliance_level` | no | Compliance level name (aliases canonicalize). Omit for no level. |
 | `order` | no | Sort hint; lower sorts first, ties break on name. |
 | `id` | no | Stable identifier. Defaults to a slug of the filename. |
 
@@ -56,6 +58,16 @@ Notes:
   `access_group` and publish a gated persona to everyone.
 - The persona id comes from the filename, so renaming a file changes its id and
   users who had it selected fall back to the default prompt.
+- With `FEATURE_COMPLIANCE_LEVELS_ENABLED` on, personas are filtered by the
+  current compliance context exactly like MCP tools and prompts: when a user
+  selects a compliance level, the picker shows only personas whose
+  `compliance_level` the selected level's `allowed_with` permits — a persona
+  with **no** level is hidden while a filter is active. The server re-checks
+  the same rule when resolving the turn's `persona_id`, so a stale selection or
+  hand-crafted client falls back to the default prompt. Changing the filter
+  clears an active persona the new context excludes. Level names are validated
+  on load (aliases canonicalize; an unknown level is dropped with a warning).
+  With the feature off, `compliance_level` is inert metadata.
 
 Personas are independent of the custom-prompt library (`FEATURE_CUSTOM_PROMPTS_ENABLED`)
 and of chat history: they need no per-user storage, so they work with those

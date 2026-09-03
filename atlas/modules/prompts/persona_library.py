@@ -32,6 +32,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import yaml
 
+from atlas.core.compliance import get_compliance_manager
+
 logger = logging.getLogger(__name__)
 
 # Directory name looked up under the prompt/config search paths.
@@ -83,6 +85,7 @@ class Persona:
         access_groups: Optional[List[str]] = None,
         order: int = 1000,
         source: str = "",
+        compliance_level: Optional[str] = None,
     ):
         self.id = persona_id
         self.name = name
@@ -91,6 +94,7 @@ class Persona:
         self.access_groups = access_groups or []
         self.order = order
         self.source = source
+        self.compliance_level = compliance_level
 
     def to_dict(self, include_content: bool = True) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -98,6 +102,7 @@ class Persona:
             "name": self.name,
             "description": self.description,
             "access_groups": list(self.access_groups),
+            "compliance_level": self.compliance_level,
         }
         if include_content:
             data["content"] = self.content
@@ -163,6 +168,15 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
     except (TypeError, ValueError):
         order = 1000
 
+    # Validated on load like the compliance level of a model or MCP server:
+    # aliases canonicalize and an unknown level becomes None with a warning.
+    compliance_level = None
+    compliance_raw = metadata.get("compliance_level")
+    if compliance_raw:
+        compliance_level = get_compliance_manager().validate_compliance_level(
+            str(compliance_raw), context=f"persona file {path.name}"
+        )
+
     return Persona(
         persona_id=persona_id,
         name=name,
@@ -173,6 +187,7 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
         ),
         order=order,
         source=path.name,
+        compliance_level=compliance_level,
     )
 
 
@@ -344,18 +359,51 @@ def get_persona_library() -> PersonaLibrary:
     return _library
 
 
+def _compliance_feature_enabled() -> bool:
+    """Whether compliance-level enforcement is on; unreadable means off."""
+    try:
+        from atlas.modules.config.config_manager import config_manager
+
+        return bool(
+            getattr(
+                config_manager.app_settings,
+                "feature_compliance_levels_enabled",
+                False,
+            )
+        )
+    except Exception:  # pragma: no cover - defensive; a broken flag must not break chat
+        return False
+
+
+def _compliance_allows(user_level: Optional[str], persona_level: Optional[str]) -> bool:
+    """Strict mirror of the client picker's filtering for tools and prompts:
+    with a compliance filter active a persona needs a level the filter allows
+    (a level-less persona is hidden); with no filter, every persona goes.
+    """
+    if not user_level:
+        return True
+    if not persona_level:
+        return False
+    return get_compliance_manager().is_accessible(user_level, persona_level)
+
+
 async def resolve_persona_prompt(
     persona_id: Optional[str],
     user_email: str,
     group_check: Optional[Callable[[str, str], Awaitable[bool]]] = None,
+    compliance_level_filter: Optional[str] = None,
 ) -> Optional[str]:
     """Return the prompt text for ``persona_id``, if this user may use it.
 
     Personas are admin-authored server-side content, so the chat path sends only
     an id and resolves the text here -- re-checking the access group so a
-    hand-crafted client cannot select a persona it was never offered. Returns
-    None (i.e. "use the default system prompt") for an unknown, unauthorized, or
-    unreadable persona rather than failing the turn.
+    hand-crafted client cannot select a persona it was never offered. When the
+    compliance-levels feature is on, the turn's compliance filter is enforced
+    the same strict way the picker filters: a persona whose level the filter
+    does not allow (including a level-less persona under an active filter)
+    resolves to None. Returns None (i.e. "use the default system prompt") for an
+    unknown, unauthorized, compliance-blocked, or unreadable persona rather
+    than failing the turn.
     """
     if not persona_id:
         return None
@@ -373,11 +421,21 @@ async def resolve_persona_prompt(
         logger.error("Failed to load personas: %s", e, exc_info=True)
         return None
 
-    if persona is not None:
-        return persona.content
+    if persona is None:
+        logger.warning("Ignoring unknown or unauthorized persona id for this user")
+        return None
 
-    logger.warning("Ignoring unknown or unauthorized persona id for this user")
-    return None
+    if compliance_level_filter and _compliance_feature_enabled():
+        validated = get_compliance_manager().validate_compliance_level(
+            compliance_level_filter, context="chat request"
+        )
+        if validated and not _compliance_allows(validated, persona.compliance_level):
+            logger.warning(
+                "Ignoring persona id blocked by the active compliance filter"
+            )
+            return None
+
+    return persona.content
 
 
 async def resolve_chat_system_prompt(
@@ -386,6 +444,7 @@ async def resolve_chat_system_prompt(
     user_email: str,
     custom_prompts_effective: bool,
     group_check: Optional[Callable[[str, str], Awaitable[bool]]] = None,
+    compliance_level_filter: Optional[str] = None,
 ) -> Optional[str]:
     """Decide the system-prompt override for one chat turn (the /ws branch).
 
@@ -394,11 +453,14 @@ async def resolve_chat_system_prompt(
     stale or hand-crafted client cannot smuggle one in. A persona id (issue
     #880) is feature-independent admin-authored content and applies whenever no
     inline prompt took effect; the text is resolved server-side after
-    re-checking the access group. Returns None for "use the default prompt".
+    re-checking the access group and the turn's compliance filter. Returns None
+    for "use the default prompt".
     """
     prompt = inline_prompt if custom_prompts_effective else None
     if prompt is None and persona_id:
-        prompt = await resolve_persona_prompt(persona_id, user_email, group_check)
+        prompt = await resolve_persona_prompt(
+            persona_id, user_email, group_check, compliance_level_filter
+        )
     return prompt
 
 

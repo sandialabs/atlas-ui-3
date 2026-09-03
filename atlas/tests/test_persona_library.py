@@ -1,10 +1,12 @@
 """Tests for the preconfigured persona library (issue #880)."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from atlas.core.compliance import ComplianceLevelManager
 from atlas.modules.prompts.persona_library import (
     PersonaLibrary,
     default_search_paths,
@@ -69,6 +71,50 @@ def test_non_mapping_frontmatter_skips_the_file(tmp_path):
 def test_empty_body_is_skipped(tmp_path):
     path = write(tmp_path, "c.md", "---\nname: Nothing\n---\n\n   \n")
     assert parse_persona_file(path) is None
+
+
+def configured_compliance_manager(tmp_path):
+    """A ComplianceLevelManager backed by a real config file."""
+    cfg = tmp_path / "compliance-levels.json"
+    cfg.write_text(json.dumps({
+        "levels": [
+            {"name": "Public", "allowed_with": ["Public"]},
+            {"name": "Internal", "allowed_with": ["Internal"]},
+            {"name": "SOC2", "aliases": ["SOC 2"], "allowed_with": ["SOC2"]},
+            {"name": "HIPAA", "allowed_with": ["HIPAA", "SOC2"]},
+        ]
+    }), encoding="utf-8")
+    return ComplianceLevelManager(config_path=cfg)
+
+
+def test_parse_compliance_level_canonicalizes_aliases(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "soc.md", "---\ncompliance_level: SOC 2\n---\nBody")
+    assert parse_persona_file(path).compliance_level == "SOC2"
+
+
+def test_parse_invalid_compliance_level_becomes_none(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "bad.md", "---\ncompliance_level: NotARealLevel\n---\nBody")
+    persona = parse_persona_file(path)
+
+    # The persona still loads (fail open on metadata typos here, unlike the
+    # access_group) but carries no level, so strict filtering hides it.
+    assert persona is not None
+    assert persona.compliance_level is None
+
+
+def test_parse_without_compliance_level_defaults_to_none(tmp_path):
+    path = write(tmp_path, "plain.md", "Just a prompt.")
+    assert parse_persona_file(path).compliance_level is None
 
 
 def test_library_loads_sorted_and_skips_readme(tmp_path):
@@ -295,7 +341,7 @@ async def test_chat_system_prompt_inline_wins_over_persona(monkeypatch):
 async def test_chat_system_prompt_persona_resolves_with_feature_flag_off(monkeypatch):
     from atlas.modules.prompts import persona_library
 
-    async def fake_resolve(persona_id, user_email, group_check=None):
+    async def fake_resolve(persona_id, user_email, group_check=None, compliance_level_filter=None):
         return "Persona prompt" if persona_id == "ok" else None
 
     monkeypatch.setattr(persona_library, "resolve_persona_prompt", fake_resolve)
@@ -314,7 +360,7 @@ async def test_chat_system_prompt_persona_resolves_with_feature_flag_off(monkeyp
 async def test_chat_system_prompt_unauthorized_persona_leaves_none(monkeypatch):
     from atlas.modules.prompts import persona_library
 
-    async def fake_resolve(persona_id, user_email, group_check=None):
+    async def fake_resolve(persona_id, user_email, group_check=None, compliance_level_filter=None):
         return None  # unknown or gated away from this user
 
     monkeypatch.setattr(persona_library, "resolve_persona_prompt", fake_resolve)
@@ -325,4 +371,97 @@ async def test_chat_system_prompt_unauthorized_persona_leaves_none(monkeypatch):
     # Flag off with no persona: an inline prompt is dropped, never applied.
     assert await persona_library.resolve_chat_system_prompt(
         "Smuggled inline", None, "a@b.com", custom_prompts_effective=False
+    ) is None
+
+
+# -- compliance-level enforcement on the persona chat path --------------------
+
+
+@pytest.fixture
+def compliance_setup(tmp_path, monkeypatch):
+    """A library with leveled personas plus a configured compliance manager."""
+    from atlas.modules.prompts import persona_library
+
+    write(tmp_path, "open.md", "Open prompt")
+    write(tmp_path, "internal.md", "---\ncompliance_level: Internal\n---\nInternal prompt")
+    write(tmp_path, "soc2.md", "---\ncompliance_level: SOC2\n---\nSOC2 prompt")
+
+    library = PersonaLibrary([tmp_path])
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_persona_library", lambda: library)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+    monkeypatch.setattr(persona_library, "_compliance_feature_enabled", lambda: True)
+
+    async def in_any_group(user, group):
+        return True
+
+    return persona_library, in_any_group
+
+
+@pytest.mark.asyncio
+async def test_compliance_filter_hides_level_less_persona(compliance_setup):
+    persona_library, group_check = compliance_setup
+
+    assert await persona_library.resolve_persona_prompt(
+        "open", "a@b.com", group_check, compliance_level_filter="Internal"
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_compliance_filter_allows_matching_persona(compliance_setup):
+    persona_library, group_check = compliance_setup
+
+    assert await persona_library.resolve_persona_prompt(
+        "internal", "a@b.com", group_check, compliance_level_filter="Internal"
+    ) == "Internal prompt"
+
+
+@pytest.mark.asyncio
+async def test_compliance_filter_uses_the_allowlist(compliance_setup):
+    persona_library, group_check = compliance_setup
+
+    # HIPAA's allowed_with includes SOC2.
+    assert await persona_library.resolve_persona_prompt(
+        "soc2", "a@b.com", group_check, compliance_level_filter="HIPAA"
+    ) == "SOC2 prompt"
+    # ...but Internal's does not include SOC2.
+    assert await persona_library.resolve_persona_prompt(
+        "soc2", "a@b.com", group_check, compliance_level_filter="Internal"
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_no_compliance_filter_allows_everything(compliance_setup):
+    persona_library, group_check = compliance_setup
+
+    assert await persona_library.resolve_persona_prompt(
+        "open", "a@b.com", group_check, compliance_level_filter=None
+    ) == "Open prompt"
+
+
+@pytest.mark.asyncio
+async def test_compliance_not_enforced_when_feature_off(compliance_setup, monkeypatch):
+    persona_library, group_check = compliance_setup
+    monkeypatch.setattr(persona_library, "_compliance_feature_enabled", lambda: False)
+
+    assert await persona_library.resolve_persona_prompt(
+        "open", "a@b.com", group_check, compliance_level_filter="Internal"
+    ) == "Open prompt"
+
+
+@pytest.mark.asyncio
+async def test_compliance_filter_flows_through_chat_system_prompt(compliance_setup):
+    persona_library, group_check = compliance_setup
+
+    assert await persona_library.resolve_chat_system_prompt(
+        None, "internal", "a@b.com",
+        custom_prompts_effective=False,
+        group_check=group_check,
+        compliance_level_filter="Internal",
+    ) == "Internal prompt"
+    assert await persona_library.resolve_chat_system_prompt(
+        None, "open", "a@b.com",
+        custom_prompts_effective=False,
+        group_check=group_check,
+        compliance_level_filter="Internal",
     ) is None

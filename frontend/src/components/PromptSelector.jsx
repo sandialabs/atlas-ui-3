@@ -1,4 +1,5 @@
 import { useChat } from '../contexts/ChatContext'
+import { useMarketplace } from '../contexts/MarketplaceContext'
 import { ChevronDown, Sparkles, User, Users } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey, personaKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
@@ -20,11 +21,22 @@ const PromptSelector = () => {
     personas = [],
     personasError = null,
     fetchPersonas,
+    complianceLevelFilter = null,
     features = {},
   } = useChat()
+  const { isComplianceAccessible } = useMarketplace()
   const customPromptsEnabled = !!features.custom_prompts
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
+
+  // Personas are filtered by the current compliance context exactly like MCP
+  // tools and prompts: with a filter active, a persona needs a compliance
+  // level the filter allows (a level-less persona is hidden). The server
+  // re-checks the same rule when resolving the turn's persona_id.
+  const complianceEnabled = !!features.compliance_levels
+  const visiblePersonas = (complianceEnabled && complianceLevelFilter)
+    ? personas.filter(p => isComplianceAccessible(complianceLevelFilter, p.compliance_level))
+    : personas
 
   // Get all selected prompt keys as an array (these are the "loaded" prompts)
   const selectedPromptKeys = selectedPrompts && selectedPrompts.size > 0
@@ -217,7 +229,7 @@ const PromptSelector = () => {
               )}
             </div>
           )}
-          {personas.length > 0 && (
+          {visiblePersonas.length > 0 && (
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
                 <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
@@ -228,7 +240,7 @@ const PromptSelector = () => {
                   Preconfigured prompts provided by your administrator
                 </div>
               </div>
-              {personas.map((p) => {
+              {visiblePersonas.map((p) => {
                 const key = personaKey(p.id)
                 const isActive = key === activePromptKey
                 return (

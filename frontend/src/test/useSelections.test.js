@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useSelections } from '../hooks/chat/useSelections'
+import { useSelections, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
 
 // Simple in-memory localStorage mock (per-test isolated)
 const createLocalStorageMock = () => {
@@ -198,5 +198,28 @@ describe('useSelections', () => {
 
     expect(result.current.activePromptKey).toBe('persona:code-reviewer')
     expect(result.current.selectedPrompts.has('persona:code-reviewer')).toBe(false)
+  })
+})
+
+describe('personaSurvivesComplianceFilter', () => {
+  it('keeps everything when the filter is cleared', () => {
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Internal' }, null)).toBe(true)
+    expect(personaSurvivesComplianceFilter({}, null)).toBe(true)
+  })
+
+  it('keeps a persona whose level matches the new filter', () => {
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Internal' }, 'Internal')).toBe(true)
+  })
+
+  it('drops a persona whose level the new filter excludes', () => {
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Public' }, 'Internal')).toBe(false)
+  })
+
+  it('drops a level-less persona once a filter is active', () => {
+    expect(personaSurvivesComplianceFilter({}, 'Internal')).toBe(false)
+  })
+
+  it('leaves a missing persona to the stale-key effect', () => {
+    expect(personaSurvivesComplianceFilter(undefined, 'Internal')).toBe(true)
   })
 })

@@ -27,6 +27,17 @@ export const isPersonaKey = key => typeof key === 'string' && key.startsWith(PER
 export const personaKey = id => `${PERSONA_PREFIX}${id}`
 export const personaIdFromKey = key => (isPersonaKey(key) ? key.slice(PERSONA_PREFIX.length) : null)
 
+// Whether an active persona survives a switch of the compliance filter. The
+// picker hides a persona whose level the filter does not allow and the server
+// refuses to resolve it, so keeping such a persona selected would silently
+// run the default prompt on the next turn. A missing persona is left alone
+// here -- the stale-key effect owns that case.
+export const personaSurvivesComplianceFilter = (persona, newLevel) => {
+  if (!newLevel) return true
+  if (!persona) return true
+  return persona.compliance_level === newLevel
+}
+
 export function useSelections() {
   // Auto-select canvas tool if empty
   const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', [CANVAS_TOOL])

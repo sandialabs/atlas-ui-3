@@ -713,9 +713,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # on the server, not user-supplied text, so it is deliberately
                 # outside the custom-prompt/chat-history flags: the client sends
                 # only an id and the text is resolved after re-checking the
-                # persona's access group for this user, which also means a
-                # hand-crafted client cannot use persona_id to smuggle in a
-                # prompt of its own.
+                # persona's access group for this user and the turn's compliance
+                # filter, which also means a hand-crafted client cannot use
+                # persona_id to smuggle in a prompt of its own.
                 from atlas.modules.prompts.persona_library import (
                     resolve_chat_system_prompt,
                 )
@@ -725,6 +725,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     data.get("persona_id"),
                     user_email,
                     config_manager.app_settings.custom_prompts_effective,
+                    compliance_level_filter=data.get("compliance_level_filter"),
                 )
 
                 try:

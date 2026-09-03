@@ -10,11 +10,18 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { renderHook } from '@testing-library/react'
 import PromptSelector from '../components/PromptSelector'
 import { useChat } from '../contexts/ChatContext'
+import { useMarketplace } from '../contexts/MarketplaceContext'
 import { usePersonas } from '../hooks/usePersonas'
 import { personaKey, isPersonaKey, personaIdFromKey, isUserPromptKey } from '../hooks/chat/useSelections'
 import { buildPromptInfoByKey, resolvePromptInfo } from '../utils/chatExport'
 
 vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
+vi.mock('../contexts/MarketplaceContext', () => ({ useMarketplace: vi.fn() }))
+
+// Default: everything accessible (compliance filtering is a no-op). Individual
+// tests override with a strict implementation. Set at module scope because
+// clearAllMocks clears call history, not mockReturnValue implementations.
+useMarketplace.mockReturnValue({ isComplianceAccessible: () => true })
 
 vi.mock('lucide-react', () => ({
   ChevronDown: () => <span>v</span>,
@@ -174,6 +181,77 @@ describe('persona description fallback', () => {
 
     expect(screen.getByText('Server preview')).toBeInTheDocument()
     expect(screen.queryByText('Full body')).not.toBeInTheDocument()
+  })
+})
+
+describe('PromptSelector compliance filtering', () => {
+  const LEVELED = [
+    { id: 'int', name: 'Internal One', description: '', compliance_level: 'Internal' },
+    { id: 'pub', name: 'Public One', description: '', compliance_level: 'Public' },
+    { id: 'free', name: 'No Level', description: '' },
+  ]
+
+  // Mirrors MarketplaceContext.isComplianceAccessible (strict mode).
+  const strictAccessible = (userLevel, resourceLevel) => {
+    if (!userLevel) return true
+    if (!resourceLevel) return false
+    const levels = { Internal: ['Internal'], Public: ['Public'] }
+    return (levels[userLevel] || []).includes(resourceLevel)
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useMarketplace.mockReturnValue({ isComplianceAccessible: strictAccessible })
+  })
+
+  const openPicker = () => {
+    render(<PromptSelector />)
+    fireEvent.click(screen.getAllByRole('button')[0])
+  }
+
+  it('shows only personas the active compliance level allows', () => {
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: LEVELED,
+      complianceLevelFilter: 'Internal',
+      features: { compliance_levels: true },
+    })
+
+    openPicker()
+
+    expect(screen.getByText('Internal One')).toBeInTheDocument()
+    expect(screen.queryByText('Public One')).not.toBeInTheDocument()
+    // A level-less persona is hidden while a filter is active (strict mode).
+    expect(screen.queryByText('No Level')).not.toBeInTheDocument()
+  })
+
+  it('shows every persona when no compliance filter is set', () => {
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: LEVELED,
+      complianceLevelFilter: null,
+      features: { compliance_levels: true },
+    })
+
+    openPicker()
+
+    expect(screen.getByText('Internal One')).toBeInTheDocument()
+    expect(screen.getByText('Public One')).toBeInTheDocument()
+    expect(screen.getByText('No Level')).toBeInTheDocument()
+  })
+
+  it('ignores the filter when the compliance feature is off', () => {
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: LEVELED,
+      complianceLevelFilter: 'Internal',
+      features: {},
+    })
+
+    openPicker()
+
+    expect(screen.getByText('Public One')).toBeInTheDocument()
+    expect(screen.getByText('No Level')).toBeInTheDocument()
   })
 })
 

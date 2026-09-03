@@ -14,6 +14,9 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock('../contexts/ChatContext')
+vi.mock('../contexts/MarketplaceContext', () => ({
+  useMarketplace: () => ({ isComplianceAccessible: () => true }),
+}))
 vi.mock('../contexts/WSContext')
 vi.mock('../components/ui/toastContext', () => ({
   useToast: () => ({ error: h.toastError, success: vi.fn(), info: vi.fn(), dismiss: vi.fn() })

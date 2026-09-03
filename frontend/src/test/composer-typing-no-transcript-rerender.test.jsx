@@ -16,6 +16,9 @@ import { useWS } from '../contexts/WSContext'
 import { buildCorrectionContext } from '../utils/captureCorrection'
 
 vi.mock('../contexts/ChatContext')
+vi.mock('../contexts/MarketplaceContext', () => ({
+  useMarketplace: () => ({ isComplianceAccessible: () => true }),
+}))
 vi.mock('../contexts/WSContext')
 vi.mock('../utils/captureCorrection', async (importOriginal) => ({
   ...(await importOriginal()),

@@ -12,6 +12,9 @@ import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 
 vi.mock('../contexts/ChatContext')
+vi.mock('../contexts/MarketplaceContext', () => ({
+  useMarketplace: () => ({ isComplianceAccessible: () => true }),
+}))
 vi.mock('../contexts/WSContext')
 
 describe('ChatArea - Paste text vs image handling', () => {

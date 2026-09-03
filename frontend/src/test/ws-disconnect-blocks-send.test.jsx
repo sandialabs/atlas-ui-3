@@ -17,6 +17,9 @@ import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 
 vi.mock('../contexts/ChatContext')
+vi.mock('../contexts/MarketplaceContext', () => ({
+  useMarketplace: () => ({ isComplianceAccessible: () => true }),
+}))
 vi.mock('../contexts/WSContext')
 
 describe('ChatArea - blocks sending while WebSocket is disconnected (#448)', () => {

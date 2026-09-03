@@ -12,6 +12,9 @@ import { useChat } from '../contexts/ChatContext'
 vi.mock('../contexts/ChatContext', () => ({
   useChat: vi.fn()
 }))
+vi.mock('../contexts/MarketplaceContext', () => ({
+  useMarketplace: () => ({ isComplianceAccessible: () => true }),
+}))
 
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({

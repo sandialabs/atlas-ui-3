@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useMemo, u
 import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
-import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
+import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
 import { useUserPrompts } from '../hooks/useUserPrompts'
 import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
@@ -1014,11 +1014,24 @@ export const ChatProvider = ({ children }) => {
 			if (promptsToRemove.length > 0) {
 				selections.removePrompts(promptsToRemove)
 			}
+
+			// Clear the active persona if the new context excludes it: the picker
+			// hides compliance-incompatible personas and the server refuses to
+			// resolve them, so keeping one selected would silently run the
+			// default prompt on the next turn.
+			if (isPersonaKey(selections.activePromptKey)) {
+				const persona = personas.personas.find(
+					p => p.id === personaIdFromKey(selections.activePromptKey)
+				)
+				if (!personaSurvivesComplianceFilter(persona, newLevel)) {
+					clearActivePrompt()
+				}
+			}
 		}
-		
+
 		// Set the new compliance level
 		selections.setComplianceLevelFilter(newLevel)
-	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
+	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts, personas.personas, clearActivePrompt])
 
 	// Flatten ragServers into a single list of data source objects for easier consumption
 	const ragSources = config.ragServers.flatMap(server =>
