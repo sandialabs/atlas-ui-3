@@ -622,11 +622,14 @@ export const ChatProvider = ({ children }) => {
 		// is never an MCP prompt, but only its *id* goes on the wire: the server
 		// resolves the text from its own persona folder after re-checking the
 		// access group, so personas work regardless of the custom-prompt flag and
-		// a client can never substitute its own text for one.
+		// a client can never substitute its own text for one. The id comes from
+		// the active key, not the fetched list: after a reload (or a failed
+		// /api/personas fetch) the list can be empty while the persisted key is
+		// still valid, and sending no id would silently run the default prompt.
+		// If the persona is genuinely gone or gated away, the server resolves it
+		// to None and the default prompt applies -- fail closed on the side that
+		// owns the folder.
 		const activeKeyIsPersona = isPersonaKey(activeKey)
-		const activePersona = activeKeyIsPersona
-			? personas.personas.find(p => p.id === personaIdFromKey(activeKey))
-			: null
 
 		const sent = sendMessage({
 			type: 'chat',
@@ -635,7 +638,7 @@ export const ChatProvider = ({ children }) => {
 			selected_tools: toolsToSend,
 			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : activePrompts,
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
-			persona_id: activePersona ? activePersona.id : undefined,
+			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
@@ -714,7 +717,7 @@ export const ChatProvider = ({ children }) => {
 		// it (websocketHandlers).
 		setIsAgentRunning(agent.agentModeEnabled)
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, personas.personas, activeWorkspaceId, cancelPendingWorkspaceRestore])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped

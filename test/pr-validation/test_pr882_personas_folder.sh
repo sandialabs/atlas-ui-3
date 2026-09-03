@@ -143,6 +143,14 @@ OVERRIDE_IDS="$(ids)"
 echo "$OVERRIDE_IDS" | grep -q "open-persona"
 print_result $? "ungated persona from PERSONAS_DIR is listed (got: $OVERRIDE_IDS)"
 
+curl -s "$BASE/api/personas" | python -c "
+import json, sys
+personas = json.load(sys.stdin)['personas']
+assert all('content' not in p for p in personas), 'list endpoint must not ship full content'
+assert all(p.get('preview') for p in personas), 'list endpoint must ship a preview'
+"
+print_result $? "list endpoint ships previews, not full prompt bodies"
+
 echo "$OVERRIDE_IDS" | grep -q "allowed-persona"
 print_result $? "persona gated on a group the user IS in is listed"
 

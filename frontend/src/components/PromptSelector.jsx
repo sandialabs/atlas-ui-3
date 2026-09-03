@@ -18,6 +18,8 @@ const PromptSelector = () => {
     prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts,
     userPrompts = [],
     personas = [],
+    personasError = null,
+    fetchPersonas,
     features = {},
   } = useChat()
   const customPromptsEnabled = !!features.custom_prompts
@@ -194,6 +196,27 @@ const PromptSelector = () => {
           })}
 
           {/* Admin-preconfigured personas (issue #880) */}
+          {/* A failed load must not look like "no personas configured": say so
+              and offer a retry instead of rendering nothing at all. */}
+          {personasError && personas.length === 0 && (
+            <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
+              <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                <Users className="w-3 h-3 text-amber-400" />
+                Personas
+              </div>
+              <div className="text-xs text-red-400 mt-1">
+                Could not load personas ({personasError})
+              </div>
+              {fetchPersonas && (
+                <button
+                  onClick={fetchPersonas}
+                  className="mt-1 text-xs text-blue-400 hover:text-blue-300 underline"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
           {personas.length > 0 && (
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
@@ -224,7 +247,7 @@ const PromptSelector = () => {
                           {isActive && <span className="text-xs text-blue-400">(active)</span>}
                         </div>
                         <div className="text-xs text-gray-400 mt-1 line-clamp-2">
-                          {p.description || personaPreview(p.content)}
+                          {p.description || p.preview || personaPreview(p.content)}
                         </div>
                       </div>
                     </div>

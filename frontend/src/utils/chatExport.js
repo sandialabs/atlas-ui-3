@@ -144,7 +144,8 @@ export function buildPromptInfoByKey(promptsConfig, userPrompts, personas) {
       name: p.name || `persona-${p.id}`,
       description: p.description || 'Preconfigured persona',
       server: 'personas',
-      preview: buildPromptPreview(p.content),
+      // The list endpoint ships a server-computed preview, not the full body.
+      preview: buildPromptPreview(p.content || p.preview),
     }
   })
   return out

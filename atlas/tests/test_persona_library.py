@@ -53,13 +53,17 @@ def test_access_group_accepts_a_list(tmp_path):
     assert parse_persona_file(path).access_groups == ["alpha", "beta"]
 
 
-def test_broken_frontmatter_keeps_the_prompt(tmp_path):
-    path = write(tmp_path, "b.md", "---\nname: [unclosed\n---\nStill a prompt.")
-    persona = parse_persona_file(path)
+def test_broken_frontmatter_skips_the_file(tmp_path):
+    # Fail closed: a typo in the metadata must not drop the access_group and
+    # publish a gated persona to everyone.
+    path = write(tmp_path, "b.md", "---\naccess_group: [unclosed\n---\nStill a prompt.")
+    assert parse_persona_file(path) is None
 
-    assert persona is not None
-    assert persona.content == "Still a prompt."
-    assert persona.name == "B"
+
+def test_non_mapping_frontmatter_skips_the_file(tmp_path):
+    # Same failure mode as broken YAML: the access_group is unreadable.
+    path = write(tmp_path, "b.md", "---\n- just\n- a\n- list\n---\nBody")
+    assert parse_persona_file(path) is None
 
 
 def test_empty_body_is_skipped(tmp_path):
@@ -167,6 +171,54 @@ async def test_group_check_failure_hides_the_persona(tmp_path):
     assert personas == []
 
 
+@pytest.mark.asyncio
+async def test_each_distinct_group_is_checked_once(tmp_path):
+    # Three personas naming two groups between them must cost two authorization
+    # calls, not three (and none for the ungated persona).
+    write(tmp_path, "open.md", "Everyone")
+    write(tmp_path, "a.md", "---\naccess_group: alpha\n---\nA")
+    write(tmp_path, "b.md", "---\naccess_group: [alpha, beta]\n---\nB")
+
+    calls = []
+
+    async def counting_check(user, group):
+        calls.append(group)
+        return True
+
+    personas = await PersonaLibrary([tmp_path]).personas_for_user("a@b.com", counting_check)
+
+    assert sorted(calls) == ["alpha", "beta"]
+    assert sorted(p.id for p in personas) == ["a", "b", "open"]
+
+
+@pytest.mark.asyncio
+async def test_persona_for_user_authorizes_only_that_persona(tmp_path):
+    write(tmp_path, "open.md", "Everyone")
+    write(tmp_path, "gated.md", "---\naccess_group: secret-team\n---\nMembers only")
+    library = PersonaLibrary([tmp_path])
+
+    calls = []
+
+    async def counting_check(user, group):
+        calls.append(group)
+        return group == "secret-team"
+
+    # An ungated persona costs no authorization calls at all.
+    assert await library.persona_for_user("open", "a@b.com", counting_check) is not None
+    assert calls == []
+
+    assert await library.persona_for_user("gated", "a@b.com", counting_check) is not None
+    assert calls == ["secret-team"]
+
+    # Missing and unauthorized are indistinguishable.
+    assert await library.persona_for_user("nope", "a@b.com", counting_check) is None
+
+    async def in_no_groups(user, group):
+        return False
+
+    assert await library.persona_for_user("gated", "a@b.com", in_no_groups) is None
+
+
 def test_packaged_personas_parse():
     packaged = Path(__file__).parent.parent / "config" / "prompts" / "personas"
     personas = PersonaLibrary([packaged]).all_personas()
@@ -209,7 +261,7 @@ async def test_resolve_persona_prompt_survives_a_broken_library(tmp_path, monkey
     from atlas.modules.prompts import persona_library
 
     class Boom:
-        async def personas_for_user(self, *args, **kwargs):
+        async def persona_for_user(self, *args, **kwargs):
             raise RuntimeError("disk on fire")
 
     monkeypatch.setattr(persona_library, "get_persona_library", lambda: Boom())
@@ -218,3 +270,59 @@ async def test_resolve_persona_prompt_survives_a_broken_library(tmp_path, monkey
         return True
 
     assert await persona_library.resolve_persona_prompt("x", "a@b.com", group_check) is None
+
+
+# -- resolve_chat_system_prompt (the /ws chat-turn branch in atlas/main.py) ---
+
+
+@pytest.mark.asyncio
+async def test_chat_system_prompt_inline_wins_over_persona(monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    async def resolve_should_not_run(*args, **kwargs):
+        raise AssertionError("persona resolution must not run when inline wins")
+
+    monkeypatch.setattr(persona_library, "resolve_persona_prompt", resolve_should_not_run)
+
+    result = await persona_library.resolve_chat_system_prompt(
+        "Inline prompt", "some-persona", "a@b.com", custom_prompts_effective=True
+    )
+
+    assert result == "Inline prompt"
+
+
+@pytest.mark.asyncio
+async def test_chat_system_prompt_persona_resolves_with_feature_flag_off(monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    async def fake_resolve(persona_id, user_email, group_check=None):
+        return "Persona prompt" if persona_id == "ok" else None
+
+    monkeypatch.setattr(persona_library, "resolve_persona_prompt", fake_resolve)
+
+    # Personas are admin-authored: they work with the custom-prompt flag off,
+    # and an inline prompt sent while the flag is off is ignored.
+    assert await persona_library.resolve_chat_system_prompt(
+        None, "ok", "a@b.com", custom_prompts_effective=False
+    ) == "Persona prompt"
+    assert await persona_library.resolve_chat_system_prompt(
+        "Smuggled inline", "ok", "a@b.com", custom_prompts_effective=False
+    ) == "Persona prompt"
+
+
+@pytest.mark.asyncio
+async def test_chat_system_prompt_unauthorized_persona_leaves_none(monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    async def fake_resolve(persona_id, user_email, group_check=None):
+        return None  # unknown or gated away from this user
+
+    monkeypatch.setattr(persona_library, "resolve_persona_prompt", fake_resolve)
+
+    assert await persona_library.resolve_chat_system_prompt(
+        None, "gated", "a@b.com", custom_prompts_effective=False
+    ) is None
+    # Flag off with no persona: an inline prompt is dropped, never applied.
+    assert await persona_library.resolve_chat_system_prompt(
+        "Smuggled inline", None, "a@b.com", custom_prompts_effective=False
+    ) is None

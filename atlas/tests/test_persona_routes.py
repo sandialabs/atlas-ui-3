@@ -38,8 +38,25 @@ def test_list_returns_only_ungated_personas(client):
     assert [p["name"] for p in body["personas"]] == ["Open"]
     persona = body["personas"][0]
     assert persona["id"] == "open"
-    assert persona["content"] == "Open prompt"
     assert persona["description"] == "For everyone"
+    # The list endpoint ships a short preview, not the full prompt body.
+    assert "content" not in persona
+    assert persona["preview"] == "Open prompt"
+
+
+def test_list_preview_is_truncated(tmp_path, monkeypatch):
+    (tmp_path / "long.md").write_text("x" * 5000, encoding="utf-8")
+    library = PersonaLibrary([tmp_path])
+    monkeypatch.setattr(persona_routes, "get_persona_library", lambda: library)
+
+    app = FastAPI()
+    app.include_router(persona_routes.router)
+    app.dependency_overrides[get_current_user] = lambda: "alice@test.com"
+    client = TestClient(app)
+
+    preview = client.get("/api/personas").json()["personas"][0]["preview"]
+    assert len(preview) == 163  # 160 chars + ellipsis
+    assert preview.endswith("...")
 
 
 def test_get_single_persona(client):

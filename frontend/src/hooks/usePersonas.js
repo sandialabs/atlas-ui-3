@@ -4,9 +4,10 @@ import { useState, useCallback, useEffect } from 'react'
  * Loads the admin-preconfigured personas (issue #880).
  *
  * Personas are markdown files in a server-side folder; /api/personas returns
- * only the ones the caller's groups allow. They are read-only here: selecting
- * one sends its text as the turn's custom_system_prompt, exactly like a
- * user-authored prompt.
+ * only the ones the caller's groups allow, with a short preview instead of the
+ * full prompt body. They are read-only here: selecting one sends only its id
+ * as the turn's persona_id, and the server resolves the text after re-checking
+ * the access group.
  */
 export function usePersonas() {
   const [personas, setPersonas] = useState([])

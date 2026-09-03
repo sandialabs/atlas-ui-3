@@ -161,4 +161,51 @@ describe('persona description fallback', () => {
     const rendered = screen.getByText(/^x+\.\.\.$/)
     expect(rendered.textContent.length).toBeLessThan(200)
   })
+
+  it('prefers the server-computed preview over the prompt body', () => {
+    // The list endpoint ships a 160-char preview instead of the full content.
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [{ id: 'p', name: 'Previewed', description: '', preview: 'Server preview', content: 'Full body' }],
+    })
+
+    render(<PromptSelector />)
+    fireEvent.click(screen.getAllByRole('button')[0])
+
+    expect(screen.getByText('Server preview')).toBeInTheDocument()
+    expect(screen.queryByText('Full body')).not.toBeInTheDocument()
+  })
+})
+
+describe('PromptSelector personas load failure', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('shows an inline error with a retry instead of rendering nothing', () => {
+    const fetchPersonas = vi.fn()
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [],
+      personasError: 'Failed to load personas (500)',
+      fetchPersonas,
+    })
+
+    render(<PromptSelector />)
+    fireEvent.click(screen.getAllByRole('button')[0])
+
+    // A failed load must be distinguishable from "no personas configured".
+    expect(screen.getByText('Personas')).toBeInTheDocument()
+    expect(screen.getByText(/Could not load personas/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Retry'))
+    expect(fetchPersonas).toHaveBeenCalled()
+  })
+
+  it('renders no error block when the load succeeded', () => {
+    useChat.mockReturnValue({ ...baseContext, personas: PERSONAS })
+
+    render(<PromptSelector />)
+    fireEvent.click(screen.getAllByRole('button')[0])
+
+    expect(screen.queryByText(/Could not load personas/)).not.toBeInTheDocument()
+  })
 })

@@ -24,6 +24,7 @@ Files are read once at startup and cached; ``reload()`` re-reads them.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -39,6 +40,10 @@ PERSONA_DIR_NAME = "personas"
 # Prompt bodies are authored by admins, not users, but a runaway file would be
 # sent with every chat turn -- keep it in "system prompt" territory.
 MAX_PERSONA_CHARS = 100_000
+
+# Length of the server-computed preview the list endpoint sends in place of the
+# full prompt body (the picker only ever shows two clamped lines).
+PREVIEW_CHARS = 160
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
@@ -96,6 +101,12 @@ class Persona:
         }
         if include_content:
             data["content"] = self.content
+        else:
+            # The picker shows at most two clamped lines; shipping the full
+            # body (up to MAX_PERSONA_CHARS) per persona per page load is waste.
+            data["preview"] = self.content[:PREVIEW_CHARS] + (
+                "..." if len(self.content) > PREVIEW_CHARS else ""
+            )
         return data
 
 
@@ -113,16 +124,24 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
     if match:
         try:
             parsed = yaml.safe_load(match.group(1))
-            if isinstance(parsed, dict):
-                metadata = parsed
-            elif parsed is not None:
-                logger.warning(
-                    "Persona %s: frontmatter is not a mapping, ignoring it", path.name
-                )
         except yaml.YAMLError as e:
-            # Keep the body: a typo in the metadata should not delete the persona,
-            # it should fall back to filename-derived defaults.
-            logger.error("Persona %s: invalid YAML frontmatter: %s", path.name, e)
+            # Fail closed: keeping the body with empty metadata would drop the
+            # access_group and publish a gated persona to everyone.
+            logger.error(
+                "Persona %s: invalid YAML frontmatter, skipping the file: %s",
+                path.name, e,
+            )
+            return None
+        if parsed is not None and not isinstance(parsed, dict):
+            # Same failure mode as broken YAML: the access_group is unreadable,
+            # so the only safe default is "visible to no one".
+            logger.error(
+                "Persona %s: frontmatter is not a mapping, skipping the file",
+                path.name,
+            )
+            return None
+        if isinstance(parsed, dict):
+            metadata = parsed
         body = match.group(2)
 
     content = body.strip()
@@ -222,23 +241,58 @@ class PersonaLibrary:
         user_email: str,
         group_check: Callable[[str, str], Awaitable[bool]],
     ) -> List[Persona]:
-        """Return the personas ``user_email`` is allowed to see."""
-        allowed: List[Persona] = []
-        for persona in self.all_personas():
-            if not persona.access_groups:
-                allowed.append(persona)
-                continue
-            for group in persona.access_groups:
-                try:
-                    if await group_check(user_email, group):
-                        allowed.append(persona)
-                        break
-                except Exception as e:  # fail closed on authorization errors
-                    logger.error(
-                        "Group check failed for persona '%s' group '%s': %s",
-                        persona.id, group, e,
-                    )
-        return allowed
+        """Return the personas ``user_email`` is allowed to see.
+
+        Group membership is resolved once per request: each distinct group
+        named by any persona is checked exactly once, concurrently, and the
+        results are reused across personas. A group whose check raises is
+        treated as "not a member" (fail closed).
+        """
+        personas = self.all_personas()
+        groups = {group for p in personas for group in p.access_groups}
+
+        async def check(group: str) -> tuple:
+            try:
+                return group, await group_check(user_email, group)
+            except Exception as e:  # fail closed on authorization errors
+                logger.error("Group check failed for group '%s': %s", group, e)
+                return group, False
+
+        results = await asyncio.gather(*(check(g) for g in groups)) if groups else []
+        membership = dict(results)
+        return [
+            p for p in personas
+            if not p.access_groups or any(membership.get(g) for g in p.access_groups)
+        ]
+
+    async def persona_for_user(
+        self,
+        persona_id: str,
+        user_email: str,
+        group_check: Callable[[str, str], Awaitable[bool]],
+    ) -> Optional[Persona]:
+        """Return the persona ``persona_id`` if ``user_email`` may see it.
+
+        Looks the persona up by id *before* authorizing, so fetching one
+        persona costs at most its own access-group checks rather than a
+        round-trip per gated persona in the folder. Returns None for both
+        "missing" and "not allowed" so callers cannot tell them apart.
+        """
+        persona = self.get(persona_id)
+        if persona is None:
+            return None
+        if not persona.access_groups:
+            return persona
+        for group in persona.access_groups:
+            try:
+                if await group_check(user_email, group):
+                    return persona
+            except Exception as e:  # fail closed on authorization errors
+                logger.error(
+                    "Group check failed for persona '%s' group '%s': %s",
+                    persona.id, group, e,
+                )
+        return None
 
 
 def default_search_paths(config_manager) -> List[Path]:
@@ -312,17 +366,40 @@ async def resolve_persona_prompt(
         group_check = is_user_in_group
 
     try:
-        allowed = await get_persona_library().personas_for_user(user_email, group_check)
+        persona = await get_persona_library().persona_for_user(
+            persona_id, user_email, group_check
+        )
     except Exception as e:
         logger.error("Failed to load personas: %s", e, exc_info=True)
         return None
 
-    for persona in allowed:
-        if persona.id == persona_id:
-            return persona.content
+    if persona is not None:
+        return persona.content
 
     logger.warning("Ignoring unknown or unauthorized persona id for this user")
     return None
+
+
+async def resolve_chat_system_prompt(
+    inline_prompt: Optional[str],
+    persona_id: Optional[str],
+    user_email: str,
+    custom_prompts_effective: bool,
+    group_check: Optional[Callable[[str, str], Awaitable[bool]]] = None,
+) -> Optional[str]:
+    """Decide the system-prompt override for one chat turn (the /ws branch).
+
+    An inline ``custom_system_prompt`` (issue #153) is honored only when the
+    custom-prompt feature is on -- the flag is the single source of truth, so a
+    stale or hand-crafted client cannot smuggle one in. A persona id (issue
+    #880) is feature-independent admin-authored content and applies whenever no
+    inline prompt took effect; the text is resolved server-side after
+    re-checking the access group. Returns None for "use the default prompt".
+    """
+    prompt = inline_prompt if custom_prompts_effective else None
+    if prompt is None and persona_id:
+        prompt = await resolve_persona_prompt(persona_id, user_email, group_check)
+    return prompt
 
 
 def reset_persona_library() -> None:

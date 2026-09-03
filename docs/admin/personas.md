@@ -51,7 +51,9 @@ Notes:
 - `README.md` / `index.md`, dotfiles, and files starting with `_` are ignored,
   so you can document a folder in place.
 - A file with frontmatter but no prompt text is skipped, with a log warning.
-  Invalid YAML frontmatter is logged and the body is still used.
+  Invalid YAML frontmatter — or frontmatter that is not a mapping — is logged
+  and the **file is skipped** (fail closed): a typo must not silently drop an
+  `access_group` and publish a gated persona to everyone.
 - The persona id comes from the filename, so renaming a file changes its id and
   users who had it selected fall back to the default prompt.
 
@@ -69,9 +71,11 @@ switches back. Personas are read-only for users — to change one, edit the file
 
 ## API
 
-`GET /api/personas` returns the personas the caller may see, and
-`GET /api/personas/{id}` returns one (404 if it does not exist *or* is gated
-behind a group the caller is not in). Both include the prompt `content`.
+`GET /api/personas` returns the personas the caller may see — metadata plus a
+short server-computed `preview`, not the full prompt body (personas can be up
+to 100k chars each, and the picker only shows two lines).
+`GET /api/personas/{id}` returns one persona with its full `content` (404 if it
+does not exist *or* is gated behind a group the caller is not in).
 
 ## Operating notes
 

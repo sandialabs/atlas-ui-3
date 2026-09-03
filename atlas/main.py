@@ -704,32 +704,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                # Authoritative server-side gate for custom system prompts. The
-                # frontend already withholds custom_system_prompt when the feature
-                # is disabled, but a stale or hand-crafted client could still send
-                # one inline -- ignore it here so the flag is the single source of
+                # Authoritative server-side gate for system-prompt overrides.
+                # The frontend already withholds custom_system_prompt when the
+                # feature is disabled, but a stale or hand-crafted client could
+                # still send one inline -- the flag is the single source of
                 # truth for whether a user-supplied prompt replaces the default.
-                custom_system_prompt = (
-                    data.get("custom_system_prompt")
-                    if config_manager.app_settings.custom_prompts_effective
-                    else None
+                # A preconfigured persona (issue #880) is admin-authored content
+                # on the server, not user-supplied text, so it is deliberately
+                # outside the custom-prompt/chat-history flags: the client sends
+                # only an id and the text is resolved after re-checking the
+                # persona's access group for this user, which also means a
+                # hand-crafted client cannot use persona_id to smuggle in a
+                # prompt of its own.
+                from atlas.modules.prompts.persona_library import (
+                    resolve_chat_system_prompt,
                 )
 
-                # A preconfigured persona (issue #880) is admin-authored content on
-                # the server, not user-supplied text, so it is deliberately outside
-                # the custom-prompt/chat-history flags: the client sends only an id
-                # and the text is resolved here, after re-checking the persona's
-                # access group for this user. That also means a hand-crafted client
-                # cannot use persona_id to smuggle in a prompt of its own.
-                persona_id = data.get("persona_id")
-                if custom_system_prompt is None and persona_id:
-                    from atlas.modules.prompts.persona_library import (
-                        resolve_persona_prompt,
-                    )
-
-                    custom_system_prompt = await resolve_persona_prompt(
-                        persona_id, user_email
-                    )
+                custom_system_prompt = await resolve_chat_system_prompt(
+                    data.get("custom_system_prompt"),
+                    data.get("persona_id"),
+                    user_email,
+                    config_manager.app_settings.custom_prompts_effective,
+                )
 
                 try:
                     oversized_file = find_oversized_inline_file(data.get("files"))
