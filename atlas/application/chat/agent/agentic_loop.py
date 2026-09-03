@@ -20,6 +20,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
 from atlas.domain.errors import LLMMalformedToolCallError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
@@ -335,6 +336,11 @@ class AgenticLoop(AgentLoopProtocol):
                     # seconds it has slept here so the turn's total wait is
                     # bounded, not just each individual call.
                     TURN_BUDGET_KEY: turn_sleep_budget,
+                    # Mutable, one per turn, owned by the caller: atlas_search
+                    # numbers every document it returns here so the same
+                    # document keeps one number across the turn's searches
+                    # (issue #874).
+                    CITATION_REGISTER_KEY: context.citation_register,
                 },
                 tool_manager=self.tool_manager,
                 update_callback=recorder,

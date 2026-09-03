@@ -26,6 +26,7 @@ import AgentPortal from './components/AgentPortal'
 import { ToastProvider, DialogProvider } from './components/ui/ToastProvider'
 import { watchAppViewportHeight } from './utils/visualViewportHeight'
 import { OPEN_SETTINGS_EVENT } from './utils/settingsPanelEvents'
+import { useCanvasLayout } from './hooks/useCanvasLayout'
 
 // Log build info to browser console on startup
 console.info(
@@ -44,6 +45,16 @@ function ChatInterface() {
   const [filesPanelOpen, setFilesPanelOpen] = useState(false)
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false)
   const { canvasContent, customUIContent, canvasFiles, features, pendingElicitation } = useChat()
+  const {
+    size: canvasSize,
+    effectiveOrientation: canvasOrientation,
+    isNarrow: canvasIsNarrow,
+    toggleSize: toggleCanvasSize,
+    toggleOrientation: toggleCanvasOrientation,
+  } = useCanvasLayout()
+
+  // The canvas hides the chat only while it is actually open and set to full size
+  const canvasIsFullscreen = canvasPanelOpen && canvasSize === 'full'
 
   useEffect(() => watchAppViewportHeight(), [])
 
@@ -166,16 +177,27 @@ function ChatInterface() {
             onCloseCanvas={() => setCanvasPanelOpen(false)}
           />
 
-          {/* Content Area - Chat and Canvas side by side */}
-          <div className="flex flex-1 overflow-hidden min-h-0">
-            {/* Chat Area */}
-            <ChatArea />
+          {/* Content Area - chat and canvas, side by side or stacked */}
+          <div
+            className={`flex flex-1 overflow-hidden min-h-0 ${canvasOrientation === 'top' ? 'flex-col-reverse' : ''}`}
+          >
+            {/* Chat Area - kept mounted (never unmounted) so drafts survive a full-size canvas */}
+            <div
+              className={`flex flex-1 min-h-0 min-w-0 overflow-hidden ${canvasIsFullscreen ? 'hidden' : ''}`}
+            >
+              <ChatArea />
+            </div>
 
             {/* Canvas Panel */}
             <CanvasPanel
               isOpen={canvasPanelOpen}
               onClose={() => setCanvasPanelOpen(false)}
               onWidthChange={setCanvasPanelWidth}
+              size={canvasSize}
+              orientation={canvasOrientation}
+              orientationLocked={canvasIsNarrow}
+              onToggleSize={toggleCanvasSize}
+              onToggleOrientation={toggleCanvasOrientation}
             />
           </div>
         </div>

@@ -9,6 +9,7 @@ import {
   extractSourceLabels,
   processCitationBadges,
   processReferencesSection,
+  renderReferencesSection,
 } from '../utils/ragCitations'
 import { processMessageContent } from '../utils/messageContent'
 import { copyCodeBlock, copyMessageContent } from '../utils/clipboard'
@@ -637,12 +638,30 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       const { result: latexProcessed, placeholders } = preProcessLatex(content)
       const markdownHtml = marked.parse(latexProcessed)
       const latexRestoredHtml = restoreLatexPlaceholders(markdownHtml, placeholders)
-      // Skip citation pipeline for non-RAG messages (no References section)
-      // or when the RAG citations feature flag is disabled.
-      const hasReferences = ragCitationsEnabled && latexRestoredHtml.includes('References')
-      const sourceLabels = hasReferences ? extractSourceLabels(latexRestoredHtml) : new Map()
-      const citationHtml = hasReferences ? processCitationBadges(latexRestoredHtml, messageScope) : latexRestoredHtml
-      const referencesHtml = hasReferences ? processReferencesSection(citationHtml, messageScope, sourceLabels) : citationHtml
+      // Two citation sources, because there are two retrieval flows.
+      //
+      // Tools and agent mode call `atlas_search`, and the sources come back as
+      // structured data on the message (issue #874). RAG mode -- sources
+      // selected with no tools -- has no model turn to spend on a tool call, so
+      // it still pre-injects and still appends a `**References**` markdown
+      // block, which the legacy extractor scrapes back out. Structured wins
+      // when both are somehow present: it is the one that knows the numbers.
+      const structuredCitations = Array.isArray(message.citations) ? message.citations : null
+      const hasStructured = ragCitationsEnabled && structuredCitations?.length > 0
+      const hasMarkdownReferences =
+        ragCitationsEnabled && !hasStructured && latexRestoredHtml.includes('References')
+      const hasReferences = hasStructured || hasMarkdownReferences
+
+      const citationHtml = hasReferences
+        ? processCitationBadges(latexRestoredHtml, messageScope)
+        : latexRestoredHtml
+      let referencesHtml = citationHtml
+      if (hasStructured) {
+        referencesHtml = citationHtml + renderReferencesSection(structuredCitations, messageScope)
+      } else if (hasMarkdownReferences) {
+        const sourceLabels = extractSourceLabels(latexRestoredHtml)
+        referencesHtml = processReferencesSection(citationHtml, messageScope, sourceLabels)
+      }
       const sanitizedHtml = DOMPurify.sanitize(referencesHtml, DOMPURIFY_CONFIG)
 
       return (

@@ -15,6 +15,7 @@ docs that describe how the system works today, see the
 - [Built-in Agent Sleep Tool](agent-sleep-tool-2026-08-18.md) - In-process wait for long-running external work (issue #779)
 - [Built-in ATLAS Tool Consolidation](atlas-tool-consolidation-2026-08-27.md) - canvas, sleep and search merged into one `atlas` server (issue #855)
 - [Search Is an Explicit Tool Call](search-as-an-explicit-tool-2026-08-28.md) - RAG stops injecting itself; the model calls `atlas_search`
+- [Citations for Tool-Based Search](citations-for-tool-based-search-2026-08-31.md) - citations become data on the message instead of markdown scraped out of the answer
 - [LLM Token Streaming](llm-token-streaming-2026-02-22.md) - Token streaming architecture
 - [Follow-up Question Suggestions](follow-up-suggestions-2026-03-18.md) - Suggested follow-up prompts
 - [Config Loading Strategy](config-loading-strategy-2026-03-12.md) - localStorage cache + split config endpoint

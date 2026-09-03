@@ -11,6 +11,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
+from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
 from atlas.domain.errors import ToolError
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
@@ -660,6 +661,11 @@ async def execute_single_tool(
                     # Per-turn scratchpad (agent mode only) that the built-in
                     # sleep tool uses to bound a turn's cumulative wait.
                     TURN_BUDGET_KEY: session_context.get(TURN_BUDGET_KEY),
+                    # Per-turn citation numbering (issue #874). atlas_search
+                    # registers every document it returns so the same document
+                    # keeps one number across every search in the turn, and the
+                    # turn's owner can publish the list when the turn closes.
+                    CITATION_REGISTER_KEY: session_context.get(CITATION_REGISTER_KEY),
                 }
             )
 

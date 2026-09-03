@@ -8,19 +8,26 @@ referenced via the client module to preserve test patch targets.
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.domain.chat.citation_register import (
+    CITATION_REGISTER_KEY,
+    CitationRegister,
+)
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
     SEARCH_TOOL_NAME,
-    SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
     normalize_tool_name,
     search_kwargs_for,
+)
+from atlas.modules.mcp_tools.atlas_server import (
+    SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
 from atlas.modules.mcp_tools.mcp_discovery import (
     _ATLAS_RAG_QUERY_TOOL,
@@ -48,21 +55,98 @@ logger = logging.getLogger(__name__)
 _MAX_TOOL_REFERENCES = 20
 
 
-def _tool_references(response: Any) -> List[Dict[str, Any]]:
-    """Compact citation list for a RAG tool result.
+def _raw_evidence_marker(doc: Any, index: int) -> str:
+    """The marker ``AtlasRAGClient._format_raw_evidence`` gave this document.
+
+    It writes ``[document_ref] heading`` at the start of a line, falling back to
+    a 1-based index when the backend supplied no ``document_ref`` (the v0.8.0
+    schema does not). Both are **response-local**, which is exactly why they
+    cannot be left in place beside the register's conversation-stable numbers.
+    """
+    ref = getattr(doc, "document_ref", None)
+    return f"[{ref if ref is not None else index}] "
+
+
+def _register_documents(
+    register: Optional[CitationRegister],
+    data_source: Optional[str],
+    documents: Any,
+    batched: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[Tuple[str, str, str]]]:
+    """Number a response's documents, and say how to renumber its passages.
+
+    Returns the compact reference list to echo to the model -- it can only cite
+    a number it has been shown -- and the ``(heading, old_marker, new_marker)``
+    triples needed to rewrite the raw evidence block, which carries the
+    backend's own numbering.
+    """
+    references: List[Dict[str, Any]] = []
+    renumbering: List[Tuple[str, str, str]] = []
+    if register is None:
+        return references, renumbering
+
+    for index, doc in enumerate(documents, start=1):
+        title = getattr(doc, "title", None)
+        source = getattr(doc, "source", None)
+        # A batched query returns several corpora in one response, so the group
+        # name is only the *server*. Scoping every document to the group's first
+        # source would attribute the later corpora to the wrong one, and would
+        # merge same-named files across them into a single number. The
+        # document's own ``source`` is the only per-document corpus label
+        # available, so prefer it when the response actually spans a batch.
+        scope = (source if batched and isinstance(source, str) and source else data_source)
+        number = register.register(scope, {
+            "document_ref": getattr(doc, "document_ref", None),
+            "filename": title or source,
+            "citation": getattr(doc, "citation", None),
+            "url": getattr(doc, "url", None),
+            "snippets": [
+                getattr(section, "text", None)
+                for section in (getattr(doc, "sections", None) or [])
+            ],
+        })
+        if number is None:
+            continue
+        entry = register.entry(number) or {}
+        reference = {"n": number}
+        for field in ("filename", "url", "citation"):
+            if entry.get(field):
+                reference[field] = entry[field]
+        references.append(reference)
+        renumbering.append(
+            (title or source or "document", _raw_evidence_marker(doc, index), f"[{number}] ")
+        )
+    return references, renumbering
+
+
+def _tool_references(
+    response: Any,
+    register: Optional[CitationRegister] = None,
+    data_source: Optional[str] = None,
+    batched: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[Tuple[str, str, str]]]:
+    """Compact, numbered citation list for a RAG tool result.
 
     ``ToolResult.content`` is all the agent loop forwards, so document identity
     that lives only on ``RAGResponse.metadata`` -- which is where a synthesized
     answer's citations live -- would otherwise never reach the model or the
-    references UI. Raw evidence already carries its ``[N]`` markers inline;
-    this surfaces the same identity for either mode without repeating the
-    snippet text.
+    references UI.
+
+    With a ``register``, each document also gets its turn-stable ``n`` (issue
+    #874), so the model is shown the number it is expected to cite and the same
+    document keeps that number across every search in the turn. Without one --
+    a direct call, or a test -- the identity list is still returned, unnumbered,
+    exactly as before.
     """
     metadata = getattr(response, "metadata", None)
     documents = getattr(metadata, "documents_found", None) or []
+    documents = documents[:_MAX_TOOL_REFERENCES]
+
+    if register is not None:
+        return _register_documents(register, data_source, documents, batched)
 
     references: List[Dict[str, Any]] = []
-    for doc in documents[:_MAX_TOOL_REFERENCES]:
+    for doc in documents:
         entry = {
             key: value
             for key, value in (
@@ -75,7 +159,58 @@ def _tool_references(response: Any) -> List[Dict[str, Any]]:
         }
         if entry:
             references.append(entry)
-    return references
+    return references, []
+
+
+def _number_passages(
+    content: Any,
+    references: List[Dict[str, Any]],
+    renumbering: Optional[List[Tuple[str, str, str]]] = None,
+) -> Any:
+    """Give a tool result one numbering scheme instead of two.
+
+    ``raw`` mode -- the default for a tool-shaped search -- comes back from
+    ``AtlasRAGClient._format_raw_evidence`` with the backend's own ``[N]``
+    markers already embedded. Those are response-local: the second search of a
+    turn restarts at ``[1]``. Prefixing the register's stable numbers without
+    touching them leaves one tool result asserting both ``[4] document.pdf`` and
+    ``[1] document.pdf``, and a model that picks the wrong one cites a source it
+    never read. So the passage markers are rewritten to the register's numbers,
+    anchored on the whole ``[old] heading`` line the formatter emits rather than
+    on a bare ``[N]``, so a bracketed number inside passage prose is left alone.
+
+    Returns ``content`` untouched when there is nothing to number.
+    """
+    if not references or not isinstance(content, str):
+        return content
+
+    for heading, old_marker, new_marker in renumbering or []:
+        if old_marker == new_marker:
+            continue
+        # Line-anchored and heading-qualified: the formatter writes the marker
+        # and heading together at the start of a line, so this cannot match a
+        # citation the passage text merely mentions.
+        content = re.sub(
+            rf"(?m)^{re.escape(old_marker)}(?={re.escape(heading)})",
+            new_marker,
+            content,
+        )
+
+    lines = []
+    for reference in references:
+        number = reference.get("n")
+        label = reference.get("filename") or reference.get("citation") or reference.get("url")
+        if number is None or not label:
+            continue
+        lines.append(f"[{number}] {label}")
+    if not lines:
+        return content
+    return (
+        "Cite these sources inline as [n] immediately after the claim each supports:\n"
+        + "\n".join(lines)
+        + "\n\n"
+        + content
+    )
 
 
 def _client():
@@ -713,11 +848,18 @@ class ExecutionMixin:
         # fall through to the every-authorized-source default below.
         selected_data_sources: Optional[List[str]] = None
         compliance_level = None
+        citation_register: Optional[CitationRegister] = None
         if isinstance(context, dict):
             user_email = context.get("user_email")
             _ctx_sources = context.get("selected_data_sources")
             selected_data_sources = list(_ctx_sources) if isinstance(_ctx_sources, list) else None
             compliance_level = context.get("compliance_level")
+            # Mutable, one per turn (issue #874), forwarded by tool_executor the
+            # same way as the sleep tool's budget. Absent for a direct call or a
+            # test, in which case references come back unnumbered.
+            _register = context.get(CITATION_REGISTER_KEY)
+            if isinstance(_register, CitationRegister):
+                citation_register = _register
 
         if not user_email:
             return ToolResult(
@@ -910,12 +1052,20 @@ class ExecutionMixin:
                         search_kwargs=search_kwargs,
                         _skip_hooks=True,
                     )
+                # A single-source group is scoped to that source. A batch spans
+                # several corpora on one server, so each document is scoped to
+                # its own ``source`` instead -- see _register_documents.
+                references, renumbering = _tool_references(
+                    resp,
+                    citation_register,
+                    group[0] if group else None,
+                    batched=len(group) > 1,
+                )
                 payload: Dict[str, Any] = {
                     "data_sources": group,
-                    "content": resp.content,
+                    "content": _number_passages(resp.content, references, renumbering),
                     "is_completion": bool(resp.is_completion),
                 }
-                references = _tool_references(resp)
                 if references:
                     payload["references"] = references
                 return payload
@@ -927,11 +1077,59 @@ class ExecutionMixin:
                     username=user_email, query=query, sources=group
                 )
                 results = mcp_response.get("results", {}) if isinstance(mcp_response, dict) else {}
-                return {
+                # MCP-backed sources returned no document identity at all until
+                # #874, which made every answer drawn from them uncitable.
+                # ``synthesize`` collects each server's ``results.citations``
+                # (see rag_mcp_service), whose shape is server-defined -- the
+                # bundled corporate_cars server returns ``resourceId``/``snippet``
+                # and nothing resembling a filename. So the label is taken from
+                # whichever field the server did fill, rather than assuming the
+                # ``DocumentMetadata`` names that only HTTP sources speak.
+                references: List[Dict[str, Any]] = []
+                if citation_register is not None:
+                    for cit in (results.get("citations") or [])[:_MAX_TOOL_REFERENCES]:
+                        if not isinstance(cit, dict):
+                            continue
+                        label = next(
+                            (
+                                cit[field]
+                                for field in ("title", "filename", "name", "label", "source", "resourceId")
+                                if cit.get(field) and isinstance(cit[field], str)
+                            ),
+                            None,
+                        )
+                        number = citation_register.register(
+                            # ``synthesize`` stamps each citation with the server
+                            # it came from; fall back to the group when it did not.
+                            cit.get("server") or (group[0] if group else None),
+                            {
+                                "document_ref": cit.get("document_ref"),
+                                "filename": label,
+                                "citation": cit.get("citation"),
+                                "url": cit.get("url"),
+                                "snippets": [cit["snippet"]] if isinstance(cit.get("snippet"), str) else [],
+                            },
+                        )
+                        if number is None:
+                            continue
+                        # Echo the *registered* entry, not the raw citation: the
+                        # label was resolved across several possible fields above
+                        # and re-reading ``filename`` off the server's dict would
+                        # usually find nothing.
+                        entry = citation_register.entry(number) or {}
+                        reference = {"n": number}
+                        for field in ("filename", "url", "citation"):
+                            if entry.get(field):
+                                reference[field] = entry[field]
+                        references.append(reference)
+                payload: Dict[str, Any] = {
                     "data_sources": group,
-                    "content": results.get("answer", ""),
+                    "content": _number_passages(results.get("answer", ""), references),
                     "is_completion": False,
                 }
+                if references:
+                    payload["references"] = references
+                return payload
 
             # RagCall hook (GH #713): fires once for the whole agentic atlas_rag_query
             # call (covering both HTTP and MCP sources). HTTP sources skip the

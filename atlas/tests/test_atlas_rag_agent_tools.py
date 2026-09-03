@@ -748,3 +748,264 @@ async def test_atlas_search_without_knobs_leaves_the_source_config_in_charge(mon
 
     assert result.success is True
     assert unified.search_kwargs_calls == [None]
+
+
+# ---------------------------------------------------------------------------
+# Citations (issue #874)
+# ---------------------------------------------------------------------------
+
+
+class CitingRAG(FakeUnifiedRAG):
+    """Unified RAG fake whose answers carry document metadata."""
+
+    def __init__(self, docs_by_source, discovered=None):
+        super().__init__(discovered=discovered)
+        self.docs_by_source = docs_by_source
+
+    def _response(self, source):
+        docs = [
+            SimpleNamespace(
+                title=title, source=source, url=url, citation=None,
+                document_ref=ref, sections=[],
+            )
+            for title, url, ref in self.docs_by_source.get(source, [])
+        ]
+        return SimpleNamespace(
+            content=f"Result from {source}",
+            is_completion=False,
+            metadata=SimpleNamespace(documents_found=docs),
+        )
+
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
+        self.query_calls.append(qualified_data_source)
+        return self._response(qualified_data_source)
+
+
+async def _search(manager, register, query="q", tool_id="c1"):
+    from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
+
+    return await manager.execute_tool(
+        ToolCall(id=tool_id, name="atlas_search", arguments={"query": query}),
+        context={
+            "user_email": "u@example.com",
+            CITATION_REGISTER_KEY: register,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_numbers_its_references_and_shows_the_model_the_numbers(monkeypatch):
+    """The model can only cite a number it has been shown, so the tool result
+    carries both the numbered reference list and a header naming them."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, unified_rag=CitingRAG(
+        {"atlas_rag:technical-docs": [("Runbook.md", "https://x/runbook", 11)]},
+    ))
+    register = CitationRegister()
+
+    result = await _search(manager, register)
+
+    assert result.success is True
+    payload = json.loads(result.content)
+    answer = payload["results"]["answers"][0]
+    assert answer["references"] == [
+        {"n": 1, "filename": "Runbook.md", "url": "https://x/runbook"}
+    ]
+    # The header the model reads before the passages.
+    assert "[1] Runbook.md" in answer["content"]
+    assert "Result from atlas_rag:technical-docs" in answer["content"]
+
+
+@pytest.mark.asyncio
+async def test_two_searches_in_one_turn_share_one_numbering(monkeypatch):
+    """The multi-call case: a document found twice keeps its number, and a new
+    one continues the count rather than restarting at [1]."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    rag = CitingRAG(
+        {"atlas_rag:technical-docs": [("Runbook.md", "https://x/runbook", 11)]},
+    )
+    _patch_app_factory(monkeypatch, unified_rag=rag)
+    register = CitationRegister()
+
+    first = await _search(manager, register, query="one", tool_id="c1")
+    # The second search finds the same document plus a new one.
+    rag.docs_by_source["atlas_rag:technical-docs"] = [
+        ("Runbook.md", "https://x/runbook", 11),
+        ("Policy.pdf", "https://x/policy", 12),
+    ]
+    second = await _search(manager, register, query="two", tool_id="c2")
+
+    first_refs = json.loads(first.content)["results"]["answers"][0]["references"]
+    second_refs = json.loads(second.content)["results"]["answers"][0]["references"]
+    assert [r["n"] for r in first_refs] == [1]
+    assert [r["n"] for r in second_refs] == [1, 2]
+    assert [e["n"] for e in register.entries()] == [1, 2]
+    assert register.entries()[1]["filename"] == "Policy.pdf"
+
+
+@pytest.mark.asyncio
+async def test_search_without_a_register_still_returns_unnumbered_references(monkeypatch):
+    """A direct call (no turn, so no register) must not lose the identity list
+    it returned before #874."""
+    manager = _manager()
+    _patch_app_factory(monkeypatch, unified_rag=CitingRAG(
+        {"atlas_rag:technical-docs": [("Runbook.md", "https://x/runbook", 11)]},
+    ))
+
+    result = await manager.execute_tool(
+        ToolCall(id="c-plain", name="atlas_search", arguments={"query": "q"}),
+        context={"user_email": "u@example.com"},
+    )
+
+    answer = json.loads(result.content)["results"]["answers"][0]
+    assert answer["references"] == [
+        {"document_ref": 11, "filename": "Runbook.md", "url": "https://x/runbook"}
+    ]
+    # Nothing was numbered, so nothing claims a number.
+    assert "[1]" not in answer["content"]
+
+
+class CitingMCPRag:
+    """rag_mcp fake shaped like ``RagMCPService.synthesize``.
+
+    Citations come back under ``results.citations`` -- not ``documents`` or
+    ``sources`` -- and each entry's shape is whatever the MCP server chose to
+    return, stamped with ``server`` by the aggregator.
+    """
+
+    def __init__(self, citations):
+        self.citations = citations
+
+    async def discover_servers(self, username, user_compliance_level=None):
+        return [{"server": "cars", "sources": [{"id": "fleet"}]}]
+
+    async def synthesize(self, username=None, query=None, sources=None):
+        return {
+            "results": {"answer": "Two vehicles matched.", "citations": self.citations},
+            "meta_data": {},
+        }
+
+
+@pytest.mark.asyncio
+async def test_mcp_sources_are_citable(monkeypatch):
+    """Before #874 an MCP-backed answer carried no document identity at all,
+    so nothing drawn from one could be cited."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, rag_mcp=CitingMCPRag([
+        {"title": "Fleet Register", "url": "https://fleet/reg", "server": "cars"},
+    ]))
+    register = CitationRegister()
+
+    result = await _search(manager, register)
+
+    answer = json.loads(result.content)["results"]["answers"][0]
+    assert answer["references"] == [
+        {"n": 1, "filename": "Fleet Register", "url": "https://fleet/reg"}
+    ]
+    assert "[1] Fleet Register" in answer["content"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_citations_are_labelled_from_whatever_field_the_server_filled(monkeypatch):
+    """The MCP citation shape is server-defined -- the bundled corporate_cars
+    server returns ``resourceId``/``snippet`` and no filename at all. Reading
+    only ``filename`` would leave every such entry unlabelled and unnumbered."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, rag_mcp=CitingMCPRag([
+        {"resourceId": "vin-1HGCM", "snippet": "Parked in Albuquerque.", "server": "cars"},
+    ]))
+    register = CitationRegister()
+
+    result = await _search(manager, register)
+
+    answer = json.loads(result.content)["results"]["answers"][0]
+    assert answer["references"] == [{"n": 1, "filename": "vin-1HGCM"}]
+    # The snippet rides along as evidence for the references panel.
+    assert register.entries()[0]["snippets"] == ["Parked in Albuquerque."]
+
+
+class RawEvidenceRAG(FakeUnifiedRAG):
+    """Unified RAG fake returning ``raw`` evidence the way AtlasRAGClient does:
+    the passage block carries the backend's own response-local ``[N]`` markers.
+    """
+
+    def __init__(self, docs, discovered=None):
+        super().__init__(discovered=discovered)
+        self.docs = docs
+
+    async def query_rag(self, username, qualified_data_source, messages, query=None, mode=None, search_kwargs=None, _skip_hooks=False):
+        self.query_calls.append(qualified_data_source)
+        documents = [
+            SimpleNamespace(
+                title=title, source=qualified_data_source, url=None, citation=None,
+                document_ref=ref, sections=[],
+            )
+            for title, ref in self.docs
+        ]
+        # Mirrors AtlasRAGClient._format_raw_evidence.
+        lines = [f"Retrieved {len(documents)} document(s):", ""]
+        for idx, (title, ref) in enumerate(self.docs, start=1):
+            lines.append(f"[{ref if ref is not None else idx}] {title}")
+            lines.append("  - Some passage text.")
+            lines.append("")
+        return SimpleNamespace(
+            content="\n".join(lines).rstrip(),
+            is_completion=False,
+            metadata=SimpleNamespace(documents_found=documents),
+        )
+
+
+@pytest.mark.asyncio
+async def test_raw_passage_markers_are_rewritten_to_the_stable_numbers(monkeypatch):
+    """A raw result arrives already numbered by the backend, response-locally.
+    Left alone beside the register's numbers, one tool result would assert both
+    '[2] Deployment Pipeline' and '[1] Deployment Pipeline', and a model picking
+    the wrong one cites a source it never read."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+    _patch_app_factory(monkeypatch, unified_rag=RawEvidenceRAG([("Deployment Pipeline", 1)]))
+    # An earlier search this turn already used [1].
+    register = CitationRegister()
+    register.register("other:src", {"filename": "Earlier doc"})
+
+    result = await _search(manager, register)
+
+    content = json.loads(result.content)["results"]["answers"][0]["content"]
+    assert "[2] Deployment Pipeline" in content
+    # The backend's own marker for this document is gone, so it cannot be cited
+    # as [1] -- which now belongs to a document from the earlier search.
+    assert "[1] Deployment Pipeline" not in content
+
+
+@pytest.mark.asyncio
+async def test_renumbering_leaves_bracketed_numbers_in_passage_prose_alone(monkeypatch):
+    """The rewrite is anchored on the whole '[old] heading' line the formatter
+    emits, so a citation the passage text merely mentions is not rewritten."""
+    from atlas.domain.chat.citation_register import CitationRegister
+
+    manager = _manager()
+
+    class ProseRAG(RawEvidenceRAG):
+        async def query_rag(self, *a, **kw):
+            resp = await super().query_rag(*a, **kw)
+            resp.content += "\n[1] is cited by the paper as prior work."
+            return resp
+
+    _patch_app_factory(monkeypatch, unified_rag=ProseRAG([("Architecture", 1)]))
+    register = CitationRegister()
+    register.register("other:src", {"filename": "Earlier doc"})
+
+    result = await _search(manager, register)
+
+    content = json.loads(result.content)["results"]["answers"][0]["content"]
+    assert "[2] Architecture" in content
+    assert "[1] is cited by the paper as prior work." in content

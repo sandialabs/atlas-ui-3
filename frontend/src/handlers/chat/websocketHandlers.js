@@ -14,6 +14,12 @@ let _tokenFlushTimer = null
 let _streamActive = false
 const FLUSH_INTERVAL_MS = 30
 
+// Citations for the turn currently closing, held only until they can be
+// attached to an assistant message. The backend emits them after the answer
+// (issue #874), but a turn whose final text is still buffered mid-flush has no
+// assistant message to hang them on yet, so `response_complete` retries.
+let _pendingCitations = null
+
 /**
  * Clean up module-level streaming state. Call this when the WebSocket handler
  * is torn down (e.g. on component unmount) to prevent leaked timers.
@@ -21,6 +27,7 @@ const FLUSH_INTERVAL_MS = 30
 export function cleanupStreamState() {
   _streamActive = false
   _tokenBuffer = ''
+  _pendingCitations = null
   if (_tokenFlushTimer) {
     clearTimeout(_tokenFlushTimer)
     _tokenFlushTimer = null
@@ -94,6 +101,24 @@ export function createWebSocketHandler(deps) {
     _tokenFlushTimer = null
   }
 
+  // Attach the held citations to the newest assistant message.
+  function attachPendingCitations() {
+    if (!_pendingCitations || typeof mapMessages !== 'function') return
+    const citations = _pendingCitations
+    mapMessages(messages => {
+      const idx = messages.findLastIndex(m => m.role === 'assistant' && !m.type)
+      if (idx < 0) return messages
+      const updated = [...messages]
+      updated[idx] = { ...messages[idx], citations }
+      return updated
+    })
+    // Deliberately not cleared here. The mapper is dispatched, not applied
+    // synchronously, so there is no way to see whether it found a message --
+    // and if it did not, `response_complete` must still be able to retry.
+    // Re-attaching the same list is a no-op, so running twice is harmless.
+    // `response_complete` owns the clear.
+  }
+
   function endTokenStream() {
     _streamActive = false
     if (_tokenFlushTimer) {
@@ -155,6 +180,13 @@ export function createWebSocketHandler(deps) {
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
+          // Agent mode ends here and never emits `response_complete`, so this
+          // is the turn boundary that has to settle citations (issue #874).
+          // Without it the list stays pending and the *next* turn's
+          // `response_complete` attaches this turn's sources to a different
+          // answer.
+          attachPendingCitations()
+          _pendingCitations = null
           // Note: Do NOT add a chat message here — the final answer already
           // arrives via token_stream / chat_response and contains step info.
           // Adding a message here caused the "agent complete appears twice" bug (#62).
@@ -451,11 +483,27 @@ export function createWebSocketHandler(deps) {
           }
           break
         }
+        case 'citations': {
+          // The turn's sources, numbered and deduped server-side. Attached to
+          // the assistant message rather than parsed out of its markdown: the
+          // model may have searched several times, and after #862 there is no
+          // single "the RAG response" to scrape (issue #874).
+          if (Array.isArray(data.citations) && data.citations.length > 0) {
+            _pendingCitations = data.citations
+            attachPendingCitations()
+          }
+          break
+        }
         case 'response_complete': {
           setIsThinking(false)
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           endTokenStream()
+          // Second chance: `citations` can land while the final answer is still
+          // in the token buffer, so there was no assistant message to attach to
+          // yet. endTokenStream() has just committed it.
+          attachPendingCitations()
+          _pendingCitations = null
           break
         }
         case 'conversation_saved': {

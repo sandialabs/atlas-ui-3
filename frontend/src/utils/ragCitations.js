@@ -1,11 +1,108 @@
 // RAG citation rendering helpers.
 //
-// These transform an HTML string produced by `marked` into one where:
-//   - `[N]` markers become clickable source chips (except inside <code>/<pre>)
-//   - the "References" section becomes a collapsible <details> with anchor IDs
-//   - source labels (from the References section) power a compact summary
+// `processCitationBadges` turns `[N]` markers in an answer into clickable
+// source chips (except inside <code>/<pre>). `renderReferencesSection` builds
+// the collapsible references block those chips scroll to.
 //
-// Extracted from Message.jsx. Behavior is unchanged from the inline versions.
+// The references used to be *scraped back out* of the rendered answer: the
+// backend appended a `**References**` markdown block to the assistant's own
+// message and `extractSourceLabels` re-read it with regexes over the HTML.
+// That stopped working when search became a tool call (#862) -- nothing writes
+// that block any more, and with the model free to search several times per turn
+// there is no single RAG response to append it to. It was also why passage text
+// had to be sanitized against masquerading as a reference entry: attacker- or
+// data-controlled text sat in the same string the extractor parsed.
+//
+// Citations now arrive as data on `message.citations` (issue #874) and are
+// rendered here. Nothing parses the answer text for them.
+
+// Cap on rendered references. The backend stops numbering at 99 (see
+// MAX_CITATION_NUMBER -- processCitationBadges below matches [\d{1,2}], so a
+// three-digit marker would never become a chip). This is the render-side guard,
+// so a replayed conversation carrying hand-edited metadata cannot produce an
+// unbounded DOM.
+const MAX_RENDERED_REFERENCES = 99
+
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+// Only http(s) becomes an href. The backend drops other schemes too, but a
+// reference can also arrive from persisted metadata, so the render path does
+// not rely on that having happened.
+const safeHref = (url) => {
+  if (typeof url !== 'string') return null
+  const trimmed = url.trim()
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null
+}
+
+/**
+ * Build the collapsible references block for a message's citations.
+ *
+ * @param {Array<{n:number,filename?:string,url?:string,citation?:string,data_source?:string}>} citations
+ * @param {string} scope - Per-message suffix keeping anchor IDs unique when
+ *   several answers in one transcript cite overlapping numbers.
+ * @returns {string} HTML, or '' when there is nothing to render.
+ */
+export const renderReferencesSection = (citations, scope = '') => {
+  if (!Array.isArray(citations) || citations.length === 0) return ''
+  const prefix = scope ? `rag-ref-${scope}` : 'rag-ref'
+
+  const entries = citations
+    .filter(c => c && typeof c.n === 'number')
+    .slice(0, MAX_RENDERED_REFERENCES)
+    .sort((a, b) => a.n - b.n)
+  if (entries.length === 0) return ''
+
+  const rows = entries.map(entry => {
+    const label = escapeHtml(entry.filename || entry.citation || entry.url || `Source ${entry.n}`)
+    const href = safeHref(entry.url)
+    const linked = href
+      ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+      : label
+    const details = []
+    if (entry.data_source) details.push(escapeHtml(entry.data_source))
+    // The citation string is the backend's own formatted reference (an APA-ish
+    // line, typically). Shown under the label rather than as it, so the label
+    // stays a filename a reader can scan a list by.
+    const detailHtml = details.length > 0
+      ? `<span class="rag-ref-detail"> — ${details.join(', ')}</span>`
+      : ''
+    const citationHtml = entry.citation && entry.citation !== entry.filename
+      ? `<div class="rag-ref-citation">${escapeHtml(entry.citation)}</div>`
+      : ''
+    // The passage text the backend matched. The markdown path showed this too
+    // (as `rag-ref-snippet` blockquotes); dropping it would take the evidence
+    // out of the expanded area and leave only a list of filenames.
+    const snippets = Array.isArray(entry.snippets) ? entry.snippets.slice(0, 3) : []
+    const snippetHtml = snippets
+      .map(text => `<div class="rag-ref-snippet">${escapeHtml(text)}</div>`)
+      .join('')
+    return (
+      `<li id="${prefix}-${entry.n}" class="rag-ref-entry">` +
+      `<span class="rag-ref-num">${entry.n}.</span> ${linked}${detailHtml}${citationHtml}${snippetHtml}` +
+      '</li>'
+    )
+  }).join('')
+
+  const summary = entries
+    .map(entry => {
+      const label = escapeHtml(entry.filename || entry.citation || entry.url || `Source ${entry.n}`)
+      return `<span class="rag-summary-ref">[${entry.n}]</span> ${label}`
+    })
+    .join('<span class="rag-summary-sep">,</span> ')
+
+  return (
+    '<details class="rag-references-collapse">' +
+    `<summary class="rag-references-summary" aria-label="References: ${entries.length} sources">${summary}</summary>` +
+    `<ol class="rag-references-list">${rows}</ol>` +
+    '</details>'
+  )
+}
 
 export const extractSourceLabels = (html) => {
   const labels = new Map()
