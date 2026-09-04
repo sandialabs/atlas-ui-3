@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #890 - 2026-09-04
+- **Follow-ups to the Data Sources tab** (#889): the source rows are real toggle buttons (`aria-pressed`) instead of click-only `<div>`s, so the picker is operable from the keyboard -- promoting it into a focus-trapped modal tab had left every source unreachable by Tab, with "Enable All"/"Clear All" the only way in. Out-of-boundary rows stay focusable via `aria-disabled` so their explanation is still discoverable. The tab strip also scrolls the selected tab into view when the panel opens straight onto one; adding a sixth tab in second position had pushed General, User Info and Admin past the right edge on a narrow window, so those opened with the strip parked at the far left and no tab visibly selected.
+
 ### PR #888 - 2026-09-04
 - Move data source selection into its own second tab in Tools and Settings instead of combining it with MCP tool selection.
 

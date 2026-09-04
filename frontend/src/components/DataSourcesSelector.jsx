@@ -190,15 +190,26 @@ const DataSourcesSelector = () => {
               const clickable = !outOfBoundary || isSelected
 
               return (
-                <div
+                // A real <button> with aria-pressed, not a click-only <div>:
+                // the picker is now a tab of the Tools and Settings modal,
+                // whose every other tab is fully keyboard-operable, and a
+                // plain div left the source rows unreachable by keyboard
+                // altogether -- Enable All / Clear All were the only way in.
+                // Out-of-boundary rows stay focusable via aria-disabled rather
+                // than the `disabled` attribute, so their explanatory title is
+                // still discoverable.
+                <button
+                  type="button"
                   key={selectionKey}
+                  aria-pressed={isSelected}
+                  aria-disabled={clickable ? undefined : true}
                   onClick={clickable ? () => toggleDataSource(selectionKey) : undefined}
                   title={outOfBoundary
                     ? (isSelected
                       ? 'Outside the selected model\'s compliance boundary; the server will not query it. Click to deselect.'
                       : 'Outside the selected model\'s compliance boundary; the server will not query it')
                     : undefined}
-                  className={`px-3 py-2 rounded-lg border transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
                     outOfBoundary
                       ? `bg-gray-800 border-gray-700 text-gray-500 opacity-60 ${isSelected ? 'cursor-pointer' : 'cursor-not-allowed'}`
                       : isSelected
@@ -234,7 +245,7 @@ const DataSourcesSelector = () => {
                       {isSelected && ' — selected but will not be searched; click to deselect'}
                     </div>
                   )}
-                </div>
+                </button>
               )
             })}
           </div>

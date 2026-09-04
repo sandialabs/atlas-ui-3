@@ -184,6 +184,21 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     }
   }, [activeTab, visibleTabs])
 
+  // The strip scrolls horizontally once the tabs outgrow the panel, and
+  // opening straight onto a tab only moves `activeTab` -- nothing scrolls. A
+  // request for a later tab (Admin, and since the Data Sources tab was added,
+  // General and User Info too on a narrow window) therefore rendered its panel
+  // under a strip still parked at the far left, with no tab visibly selected.
+  // Arrow-key navigation is unaffected: focus() scrolls on its own.
+  useEffect(() => {
+    if (!isOpen) return
+    const el = document.getElementById(`settings-tab-${activeTab}`)
+    // jsdom (and some older browsers) do not implement scrollIntoView.
+    if (typeof el?.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
+  }, [isOpen, activeTab])
+
   // A tab the user picks themselves supersedes any pending request.
   const selectTab = useCallback((tabId) => {
     pendingTabRef.current = null
