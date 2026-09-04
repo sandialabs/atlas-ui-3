@@ -33,6 +33,10 @@ vi.mock('../components/ToolsPanel', () => ({
   default: ({ active }) => <div>{active ? 'tools tab body' : 'tools tab hidden'}</div>
 }))
 
+vi.mock('../components/DataSourcesSelector', () => ({
+  default: () => <div>data sources tab body</div>
+}))
+
 vi.mock('../components/admin/AdminQuickPanel', () => ({
   default: () => <div>admin quick controls</div>
 }))
@@ -77,6 +81,23 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     renderPanel({ initialTab: 'tools' })
     expect(screen.getByRole('tab', { name: /Tools & Integrations/ })).toBeInTheDocument()
     expect(screen.getByText('tools tab body')).toBeInTheDocument()
+  })
+
+  it('shows Data Sources as the second tab when RAG is enabled', () => {
+    renderPanel({}, { features: { rag: true } })
+    const tabs = screen.getAllByRole('tab')
+
+    expect(tabs[1]).toHaveTextContent('Data Sources')
+    expect(screen.queryByText('data sources tab body')).not.toBeInTheDocument()
+
+    fireEvent.click(tabs[1])
+    expect(screen.getByText('data sources tab body')).toBeInTheDocument()
+    expect(screen.getByText('tools tab hidden')).toBeInTheDocument()
+  })
+
+  it('hides the Data Sources tab when RAG is off', () => {
+    renderPanel()
+    expect(screen.queryByRole('tab', { name: /Data Sources/ })).not.toBeInTheDocument()
   })
 
   it('hides the tools tab when the tools feature is off', () => {

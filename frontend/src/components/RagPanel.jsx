@@ -4,9 +4,9 @@ import DataSourcesSelector from './DataSourcesSelector'
 /**
  * Left-hand Data Sources drawer.
  *
- * The picker itself lives in DataSourcesSelector so the Tools and Integrations
- * tab can show the same controls beside the search tool that uses them
- * (issue #839 review); this component is only the drawer chrome.
+ * The picker itself lives in DataSourcesSelector so it can be reused by the
+ * Data Sources tab in the Tools and Settings panel (issue #839 review); this
+ * component is only the drawer chrome.
  */
 const RagPanel = ({ isOpen, onClose }) => {
   return (

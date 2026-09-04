@@ -6,12 +6,12 @@
  * prompt selector under the chat box, for one), so a window event keeps that
  * one-off from being threaded through every layer as props.
  *
- * detail: { tab?: 'tools' | 'prompts' | 'general' | 'userInfo' | 'admin',
+ * detail: { tab?: 'tools' | 'dataSources' | 'prompts' | 'general' | 'userInfo' | 'admin',
  *           promptIntent?: { type: 'create' } | { type: 'edit', id } }
  */
 export const OPEN_SETTINGS_EVENT = 'atlas:open-settings'
 
-export const SETTINGS_TAB_IDS = ['tools', 'prompts', 'general', 'userInfo', 'admin']
+export const SETTINGS_TAB_IDS = ['tools', 'dataSources', 'prompts', 'general', 'userInfo', 'admin']
 
 /**
  * Narrow an event's `detail` to the shape above. Any window listener can be

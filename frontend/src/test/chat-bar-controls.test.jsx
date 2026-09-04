@@ -3,8 +3,8 @@
  *
  * cmlanca asked for the day-to-day controls to move to where the work happens:
  * tools toggled from the chat bar with descriptions rather than a flat list of
- * names, enabled datasets visible as pills, and data sources shown in the same
- * view as the search tool that consumes them.
+ * names, enabled datasets visible as pills, and quick access to data source
+ * selection.
  */
 import { render, screen, fireEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +12,7 @@ import ToolSelector from '../components/ToolSelector'
 import EnabledDataSourcesIndicator from '../components/EnabledDataSourcesIndicator'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
-import { OPEN_SETTINGS_EVENT } from '../utils/settingsPanelEvents'
+import { OPEN_SETTINGS_EVENT, parseOpenSettingsDetail } from '../utils/settingsPanelEvents'
 
 vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
 vi.mock('../contexts/MarketplaceContext', () => ({ useOptionalMarketplace: vi.fn() }))
@@ -183,6 +183,19 @@ describe('EnabledDataSourcesIndicator', () => {
     renderWith(['corp:west'], { toggleDataSource })
     fireEvent.click(screen.getByRole('button', { name: 'Remove West Region Fleet' }))
     expect(toggleDataSource).toHaveBeenCalledWith('corp:west')
+  })
+
+  it('opens the Data Sources tab from its label', () => {
+    const listener = vi.fn()
+    window.addEventListener(OPEN_SETTINGS_EVENT, listener)
+    renderWith(['corp:west'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data Sources' }))
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener.mock.calls[0][0].detail).toEqual({ tab: 'dataSources' })
+    expect(parseOpenSettingsDetail(listener.mock.calls[0][0].detail).tab).toBe('dataSources')
+    window.removeEventListener(OPEN_SETTINGS_EVENT, listener)
   })
 
   it('is hidden when RAG is disabled', () => {

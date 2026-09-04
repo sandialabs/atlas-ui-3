@@ -39,7 +39,7 @@ const EnabledDataSourcesIndicator = () => {
           so it stays reachable when they overflow. */}
       <button
         type="button"
-        onClick={() => openSettingsPanel({ tab: 'tools' })}
+        onClick={() => openSettingsPanel({ tab: 'dataSources' })}
         className="flex-shrink-0 flex items-center gap-1 hover:text-blue-400 transition-colors"
         title="Open the data sources picker in Tools and Settings"
         aria-label="Data Sources"
