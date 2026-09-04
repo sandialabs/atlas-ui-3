@@ -107,6 +107,13 @@ class ToolApprovalManager:
         Returns:
             ToolApprovalRequest object
         """
+        if display_arguments is None:
+            # Keep the audit baseline identical to the executor/UI sanitizer
+            # without making callers duplicate that representation.
+            from .utilities.tool_executor import _sanitize_args_for_ui
+
+            display_arguments = _sanitize_args_for_ui(dict(arguments))
+
         request = ToolApprovalRequest(
             tool_call_id,
             tool_name,
