@@ -236,13 +236,28 @@ def _release(value) -> None:
         if isinstance(value, Engine):
             value.dispose()
         elif isinstance(value, asyncio.Task) and not value.done():
+            # Only effective while the task's loop is still open. Once the loop
+            # is closed -- the common case here, since asyncio.run() closes it
+            # on the way out -- ``cancel()`` raises "Event loop is closed" and
+            # the task stays PENDING; the swallowed error is the honest outcome,
+            # and dropping our reference is all that is left to do. Cancelling
+            # such a task properly means doing it before the loop closes, which
+            # is the owning fixture's job, not teardown's.
             value.cancel()
     except Exception:  # pragma: no cover - teardown must not raise
         pass
 
 
 def snapshot_singletons():
-    """Capture the current value of every global in ``_SINGLETON_GLOBALS``."""
+    """Capture the current value of every global in ``_SINGLETON_GLOBALS``.
+
+    A module that is not imported yet is captured as ``None``: if the test
+    imports it, the global it leaves behind was created by that test, and the
+    pristine value to restore is the module's declared default -- ``None`` for
+    every entry here, since they are all lazily-populated caches. Without that
+    branch a subset run leaks any singleton whose module is first imported
+    inside a test.
+    """
     saved = []
     for module_name, attr in _SINGLETON_GLOBALS:
         module = sys.modules.get(module_name)
@@ -258,6 +273,9 @@ def restore_singletons(saved):
     for module_name, attr, value in saved:
         module = sys.modules.get(module_name)
         if module is None or not hasattr(module, attr):
+            # A module that never defined the global gets nothing invented on
+            # it; every real entry declares its default at import time, and
+            # ``test_env_isolation`` asserts that.
             continue
         current = getattr(module, attr)
         if current is not value:
@@ -275,12 +293,29 @@ def _isolate_module_singletons():
         restore_singletons(saved)
 
 
+# Groups the debug-only mock table in ``core.auth`` grants to the *non-admin*
+# baseline identity ``user@example.com`` (plus ``users``, which is granted to
+# literally everyone before the table is even consulted).
 _NON_ADMIN_BASELINE_GROUPS = frozenset({"users", "mcp_basic"})
 
 
 @pytest.fixture
 def distinct_admin_group():
-    """Return the configured admin group, skipping if it is not actually exclusive."""
+    """Return the configured admin group, skipping if it is not actually exclusive.
+
+    Allow/deny pairs that tag a resource with ``ADMIN_GROUP`` and then assert a
+    non-admin identity is refused only mean something when the configured admin
+    group is one the denial identity lacks. Point ``ADMIN_GROUP`` at ``users``
+    (which ``core.auth`` grants to everyone unconditionally) or ``mcp_basic``,
+    and the resource becomes reachable by the very identity the test expects to
+    be turned away -- the assertion inverts and the suite reports a failure that
+    says nothing about the code under test.
+
+    Such a deployment has no working admin gate at all, so this is a broken
+    configuration rather than a case worth supporting. Skip with the reason
+    stated plainly instead of failing (a spurious red) or silently passing
+    (a test that no longer tests anything).
+    """
     admin_group = _config_manager.app_settings.admin_group
     if admin_group in _NON_ADMIN_BASELINE_GROUPS:
         pytest.skip(
@@ -292,9 +327,23 @@ def distinct_admin_group():
 
 @pytest.fixture
 def mock_admin_authorization(monkeypatch):
-    """Enable the debug-only mock group table so admin routes are reachable."""
+    """Enable the debug-only mock group table so admin routes are reachable.
+
+    ``core.auth.is_user_in_group`` consults its mock group table (which is what
+    makes the configured ``admin_test_user`` / ``test_user`` an admin) only when
+    ``debug_mode`` is on; with DEBUG_MODE=false no user can be an admin unless an
+    external auth endpoint is configured. Admin-route tests assert real 200
+    responses, so they need debug mode declared explicitly rather than inherited
+    by accident from leaked global state -- see ``_isolate_config_cache``.
+
+    Non-admin identities such as ``user@example.com`` remain non-admin under the
+    mock table, so tests asserting 302/403 denial stay meaningful.
+    """
     monkeypatch.setenv("DEBUG_MODE", "true")
     _config_manager.reload_configs()
+    # Materialize the settings *now*, while DEBUG_MODE is still patched.
+    # reload_configs() only clears the cache, so leaving it empty would defer the
+    # rebuild until after monkeypatch has restored the real environment.
     settings = _config_manager.app_settings
     assert settings.debug_mode is True
     return settings
@@ -330,12 +379,41 @@ def admin_test_user_headers(admin_test_user):
     return {"X-User-Email": admin_test_user}
 
 
+# Env vars that the dev-only authorization bypass touches. Tests that need the
+# bypass must use ``skip_auth_checks_env`` rather than hand-rolling
+# ``monkeypatch.setenv`` + ``reload_configs()``, so that *every* env var the test
+# mutates is saved and restored -- not just one -- and the ConfigManager cache
+# is reset on the way out. The earlier manual approach only cleared
+# ``SKIP_AUTHORIZATION_CHECKS`` in its ``finally`` block, leaving
+# ``DEBUG_MODE=true`` patched into ``os.environ`` when ``reload_configs()`` ran,
+# which leaked the bypass into later tests (Copilot review on PR #758).
+#
+# ``ENVIRONMENT`` is included because the validator refuses the flag when
+# ``ENVIRONMENT=production``; the fixture pins it to ``development`` so the
+# bypass can actually take effect, then restores the prior value on teardown.
 _SKIP_AUTH_ENV_VARS = ("DEBUG_MODE", "SKIP_AUTHORIZATION_CHECKS", "ENVIRONMENT")
 
 
 @pytest.fixture
 def skip_auth_checks_env():
-    """Enable DEBUG_MODE + SKIP_AUTHORIZATION_CHECKS, then fully restore env."""
+    """Enable DEBUG_MODE + SKIP_AUTHORIZATION_CHECKS, then fully restore both
+    env vars and clear the ConfigManager cache on exit.
+
+    Saves the prior values of *all* bypass-relevant env vars, sets them to
+    dev-mode values (``DEBUG_MODE=true``, ``SKIP_AUTHORIZATION_CHECKS=true``,
+    ``ENVIRONMENT=development``), reloads the config singleton, and materializes
+    ``app_settings`` while the env is still patched (``reload_configs()`` only
+    clears the cache; it does not rebuild). On teardown every env var is
+    restored to its saved value *before* ``reload_configs()`` runs, so the
+    cleared cache can never be rebuilt with the test's values by a later test.
+    The autouse ``_isolate_config_cache`` fixture is a second layer of defense
+    that snapshots/restores the cache attributes themselves.
+
+    All setup work -- env mutation, reload, and the materialization asserts --
+    lives inside the ``try`` block so a failure during setup still triggers the
+    ``finally`` teardown, never leaving the bypass half-armed for the rest of
+    the session (AGENT-REVIEW-BOT-3 review on PR #758).
+    """
     saved = {key: os.environ.get(key) for key in _SKIP_AUTH_ENV_VARS}
     try:
         os.environ["DEBUG_MODE"] = "true"
@@ -356,6 +434,13 @@ def skip_auth_checks_env():
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Remove the session's temp directories."""
+    """Remove the session's temp directories.
+
+    ``mkdtemp`` has to run at import time -- the redirects above must be in
+    place before any test module imports app code -- so pytest's own
+    ``tmp_path_factory`` is not available yet, and the cleanup pytest would
+    normally do for us is not either. Without this every run orphans two
+    directories under the system temp dir.
+    """
     for path in (_STATE_TMPDIR, _TELEMETRY_TMPDIR):
         shutil.rmtree(path, ignore_errors=True)
