@@ -2,17 +2,12 @@
 
 import json
 
-from atlas.modules.mcp_tools.tool_audit_log import (
-    hash_arguments,
-    record_tool_decision,
-    reset_path_cache_for_tests,
-)
+from atlas.modules.mcp_tools.tool_audit_log import hash_arguments, record_tool_decision
 
 
 def test_record_tool_decision_is_append_only_and_redacts_payload(tmp_path, monkeypatch):
     path = tmp_path / "tool-audit.jsonl"
     monkeypatch.setenv("TOOL_CALL_AUDIT_PATH", str(path))
-    reset_path_cache_for_tests()
 
     args = {"token": "secret-value", "nested": {"count": 2}}
     record_tool_decision(
@@ -44,4 +39,30 @@ def test_record_tool_decision_is_append_only_and_redacts_payload(tmp_path, monke
     assert "secret-value" not in raw
     assert "different-secret" not in raw
 
-    reset_path_cache_for_tests()
+
+def test_record_tool_decision_never_raises_for_bad_payload_or_write_path(tmp_path, monkeypatch):
+    circular = {}
+    circular["self"] = circular
+    path = tmp_path / "tool-audit.jsonl"
+    monkeypatch.setenv("TOOL_CALL_AUDIT_PATH", str(path))
+
+    assert record_tool_decision(
+        user_email="alice@example.com",
+        tool_call_id="call-bad-payload",
+        tool_name="example_tool",
+        arguments=circular,
+        decision="approved",
+    ) == {}
+    assert not path.exists()
+
+    # A directory cannot be opened as the append-only JSONL file. The audit
+    # failure is still contained and the fully constructed evidence is returned.
+    monkeypatch.setenv("TOOL_CALL_AUDIT_PATH", str(tmp_path))
+    record = record_tool_decision(
+        user_email="alice@example.com",
+        tool_call_id="call-bad-path",
+        tool_name="example_tool",
+        arguments={"value": 1},
+        decision="approved",
+    )
+    assert record["decision_args_sha256"] == hash_arguments({"value": 1})
