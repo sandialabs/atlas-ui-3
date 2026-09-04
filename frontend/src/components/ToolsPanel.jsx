@@ -25,6 +25,27 @@ const sameKeys = (a, b) => {
   return true
 }
 
+// Replay a change made to the saved selections onto a dirty pending set.
+// `snapshotRef` holds what the saved set looked like the last time this ran, so
+// the additions and removals made elsewhere can be told apart from the edits
+// staged here and merged in without discarding either.
+const applySavedDelta = (setPending, snapshotRef, saved) => {
+  const previous = snapshotRef.current
+  if (sameKeys(previous, saved)) return
+  const added = []
+  const removed = []
+  saved.forEach(key => { if (!previous?.has(key)) added.push(key) })
+  previous?.forEach(key => { if (!saved.has(key)) removed.push(key) })
+  snapshotRef.current = new Set(saved)
+  if (added.length === 0 && removed.length === 0) return
+  setPending(prev => {
+    const next = new Set(prev)
+    added.forEach(key => next.add(key))
+    removed.forEach(key => next.delete(key))
+    return sameKeys(next, prev) ? prev : next
+  })
+}
+
 // Truncation message constant for better maintainability
 const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start and end of content.'
 
@@ -38,7 +59,7 @@ const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start a
  * selections survive), and routes its own close attempts through
  * `closeGuardRef` so unsaved tool changes still prompt.
  */
-const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null }) => {
+const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null, onNavigate = null }) => {
   const [searchTerm, setSearchTerm] = useState('')
   // Data sources open by default when any are selected: the reviewer's point is
   // that sources belong with the search tool, not one more click away.
@@ -49,6 +70,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [expandedDescriptions, setExpandedDescriptions] = useState(new Set())
   const navigate = useNavigate()
   const prevOpenRef = useRef(false)
+  // What the saved selections looked like the last time the re-seed effect ran,
+  // so changes made outside this tab can be merged into staged edits.
+  const prevSavedToolsRef = useRef(null)
+  const prevSavedPromptsRef = useRef(null)
   const {
     selectedTools: savedSelectedTools,
     selectedPrompts: savedSelectedPrompts,
@@ -101,15 +126,31 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     }
     const opening = !prevOpenRef.current
     prevOpenRef.current = true
-    if (!opening && hasChanges) return
 
-    setPendingSelectedTools(prev => (opening || !sameKeys(prev, savedSelectedTools)
-      ? new Set(savedSelectedTools)
-      : prev))
-    setPendingSelectedPrompts(prev => (opening || !sameKeys(prev, savedSelectedPrompts)
-      ? new Set(savedSelectedPrompts)
-      : prev))
-    if (opening) setHasChanges(false)
+    if (opening) {
+      prevSavedToolsRef.current = new Set(savedSelectedTools)
+      prevSavedPromptsRef.current = new Set(savedSelectedPrompts)
+      setPendingSelectedTools(new Set(savedSelectedTools))
+      setPendingSelectedPrompts(new Set(savedSelectedPrompts))
+      setHasChanges(false)
+      return
+    }
+
+    // Staged edits are in flight, so the pending set cannot simply be replaced.
+    // Replay the *delta* in the saved selections onto it instead: a tool turned
+    // on from the chat-bar menu while this tab holds unsaved edits would
+    // otherwise be missing from the pending set, and the next Save would read
+    // that absence as a removal and switch the tool straight back off.
+    if (hasChanges) {
+      applySavedDelta(setPendingSelectedTools, prevSavedToolsRef, savedSelectedTools)
+      applySavedDelta(setPendingSelectedPrompts, prevSavedPromptsRef, savedSelectedPrompts)
+      return
+    }
+
+    prevSavedToolsRef.current = new Set(savedSelectedTools)
+    prevSavedPromptsRef.current = new Set(savedSelectedPrompts)
+    setPendingSelectedTools(prev => (sameKeys(prev, savedSelectedTools) ? prev : new Set(savedSelectedTools)))
+    setPendingSelectedPrompts(prev => (sameKeys(prev, savedSelectedPrompts) ? prev : new Set(savedSelectedPrompts)))
   }, [isOpen, hasChanges, savedSelectedTools, savedSelectedPrompts])
 
   // Fetch auth status when panel opens
@@ -256,7 +297,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       return
     }
     revertChanges()
-    onClose()
+    finishClose()
   }
   
   // Clear all tools and prompts in pending state
@@ -271,14 +312,28 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // user backed out and the action must not run.
   const closeCancelledRef = useRef(null)
 
+  // An action deferred until this panel has really been dismissed -- navigating
+  // to the marketplace, which also clears the saved selections. Running it
+  // before the dialog is answered would wipe those selections even if the user
+  // then backs out.
+  const afterCloseRef = useRef(null)
+
+  const finishClose = () => {
+    const afterClose = afterCloseRef.current
+    afterCloseRef.current = null
+    onClose()
+    afterClose?.()
+  }
+
   // Handle close attempts - check for unsaved changes
-  const handleCloseAttempt = (onCancelled = null) => {
+  const handleCloseAttempt = (onCancelled = null, afterClose = null) => {
+    afterCloseRef.current = typeof afterClose === 'function' ? afterClose : null
     if (hasChanges) {
       closeCancelledRef.current = typeof onCancelled === 'function' ? onCancelled : null
       setDiscardOnly(false)
       setShowUnsavedDialog(true)
     } else {
-      onClose()
+      finishClose()
     }
   }
 
@@ -290,7 +345,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     setDiscardOnly(false)
     closeCancelledRef.current = null
     setShowUnsavedDialog(false)
-    onClose()
+    finishClose()
   }
 
   const handleDiscardAndClose = () => {
@@ -298,7 +353,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     setDiscardOnly(false)
     closeCancelledRef.current = null
     setShowUnsavedDialog(false)
-    onClose()
+    finishClose()
   }
 
   // Discard without closing -- the embedded Cancel button's answer.
@@ -311,6 +366,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const handleCancelDialog = () => {
     setShowUnsavedDialog(false)
     setDiscardOnly(false)
+    afterCloseRef.current = null
     const onCancelled = closeCancelledRef.current
     closeCancelledRef.current = null
     onCancelled?.()
@@ -397,9 +453,23 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     if (prompt.compliance_level) availableComplianceLevels.add(prompt.compliance_level)
   })
 
+  // "Add from Marketplace" leaves this surface and resets the selection, so it
+  // is a close, not a side trip: it routes through the same unsaved-changes
+  // guard as the X, and both the clear and the navigation are deferred until
+  // the close actually goes through. Backing out of the dialog must leave the
+  // saved selections exactly as they were.
   const navigateToMarketplace = () => {
-    clearToolsAndPrompts()
-    navigate('/marketplace')
+    const go = () => {
+      clearToolsAndPrompts()
+      navigate('/marketplace')
+    }
+    // Embedded, the whole panel has to close -- the guard here only covers this
+    // one tab, and an unsaved prompt draft elsewhere deserves its own prompt.
+    if (embedded && onNavigate) {
+      onNavigate(go)
+      return
+    }
+    handleCloseAttempt(null, go)
   }
 
   // Combine tools and prompts into a unified server list
@@ -681,6 +751,16 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
               </button>
               {!sourcesCollapsed && (
                 <div className="px-3">
+                  {/* DataSourcesSelector writes straight through to the chat
+                      context -- it is shared with the RAG panel, where there is
+                      no staging at all -- while the tool and prompt checkboxes
+                      below are staged until Save. Say so, rather than let
+                      "Discard Changes" look like it covers this section too
+                      (PR #839 review). */}
+                  <p className="pt-1 pb-2 text-xs text-gray-400">
+                    Data source changes apply immediately &mdash; Save and Discard Changes below cover
+                    tool and prompt selections only.
+                  </p>
                   <DataSourcesSelector dense />
                 </div>
               )}

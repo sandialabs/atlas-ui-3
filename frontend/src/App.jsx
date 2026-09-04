@@ -25,7 +25,7 @@ import ElicitationDialog from './components/ElicitationDialog'
 import AgentPortal from './components/AgentPortal'
 import { ToastProvider, DialogProvider } from './components/ui/ToastProvider'
 import { watchAppViewportHeight } from './utils/visualViewportHeight'
-import { OPEN_SETTINGS_EVENT } from './utils/settingsPanelEvents'
+import { OPEN_SETTINGS_EVENT, parseOpenSettingsDetail } from './utils/settingsPanelEvents'
 import { useCanvasLayout } from './hooks/useCanvasLayout'
 
 // Log build info to browser console on startup
@@ -86,7 +86,7 @@ function ChatInterface() {
   // box) ask for a specific tab via a window event.
   useEffect(() => {
     const handleOpenRequest = (event) => {
-      const { tab = null, promptIntent: intent = null } = event.detail || {}
+      const { tab, promptIntent: intent } = parseOpenSettingsDetail(event.detail)
       openSettings(tab, intent)
     }
     window.addEventListener(OPEN_SETTINGS_EVENT, handleOpenRequest)

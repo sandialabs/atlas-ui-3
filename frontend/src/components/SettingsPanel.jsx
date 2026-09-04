@@ -450,6 +450,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             isOpen={isOpen}
             active={activeTab === 'tools'}
             onClose={finishClose}
+            onNavigate={requestClose}
             closeGuardRef={toolsCloseGuardRef}
             onDirtyChange={setToolsDirty}
           />

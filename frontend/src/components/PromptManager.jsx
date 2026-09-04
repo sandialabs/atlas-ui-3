@@ -52,13 +52,32 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
     }
     if (intent.type === 'edit') {
       const target = userPrompts.find(p => p.id === intent.id)
-      if (!target) return  // list may still be loading
+      if (!target) {
+        // Still loading: wait for the list. Resolved without the target -- the
+        // prompt was deleted between the click and the panel opening -- means
+        // the intent can never apply, so retire it rather than leaving it live
+        // to fire at the next unrelated list refresh.
+        if (!userPromptsLoading) {
+          appliedIntentRef.current = intent
+          onIntentConsumed?.()
+        }
+        return
+      }
       appliedIntentRef.current = intent
       setEditingId(target.id)
       setDraft({ title: target.title, content: target.content })
       onIntentConsumed?.()
     }
-  }, [intent, userPrompts, onIntentConsumed])
+  }, [intent, userPrompts, userPromptsLoading, onIntentConsumed])
+
+  // Once the user has opened an editor themselves, a still-pending intent has
+  // been overtaken: applying it later would replace whatever they are typing.
+  const claimIntent = () => {
+    if (intent && appliedIntentRef.current !== intent) {
+      appliedIntentRef.current = intent
+      onIntentConsumed?.()
+    }
+  }
 
   // Let a host panel guard its close: an editor open on text that differs from
   // what is stored (or anything at all, when creating) is unsaved work.
@@ -80,11 +99,13 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
   const canSave = draft.title.trim().length > 0 && draft.content.trim().length > 0
 
   const startCreate = () => {
+    claimIntent()
     setEditingId('new')
     setDraft(emptyDraft)
   }
 
   const startEdit = (prompt) => {
+    claimIntent()
     setEditingId(prompt.id)
     setDraft({ title: prompt.title, content: prompt.content })
   }

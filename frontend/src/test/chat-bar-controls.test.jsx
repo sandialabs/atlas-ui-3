@@ -11,9 +11,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ToolSelector from '../components/ToolSelector'
 import EnabledDataSourcesIndicator from '../components/EnabledDataSourcesIndicator'
 import { useChat } from '../contexts/ChatContext'
+import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { OPEN_SETTINGS_EVENT } from '../utils/settingsPanelEvents'
 
 vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
+vi.mock('../contexts/MarketplaceContext', () => ({ useOptionalMarketplace: vi.fn() }))
 
 const tools = [{
   server: 'files',
@@ -31,17 +33,26 @@ const ragSources = [
   { serverName: 'corp', id: 'exec', label: 'Executive Fleet' },
 ]
 
+// The chat-bar menu lists what the Tools and Settings panel lists, so its rows
+// come from the marketplace filters rather than the raw tool list.
+const mockMarketplace = ({ filtered = tools, complianceFiltered = tools } = {}) => {
+  useOptionalMarketplace.mockReturnValue({
+    getFilteredTools: () => filtered,
+    getComplianceFilteredTools: () => complianceFiltered,
+  })
+}
+
 describe('ToolSelector in the chat bar', () => {
   let toggleTool
 
   beforeEach(() => {
     toggleTool = vi.fn()
     useChat.mockReturnValue({
-      tools,
       selectedTools: new Set(['files_read_file']),
       toggleTool,
       features: { tools: true },
     })
+    mockMarketplace()
   })
 
   it('summarises the selection on the closed control', () => {
@@ -81,9 +92,44 @@ describe('ToolSelector in the chat bar', () => {
   })
 
   it('renders nothing when the tools feature is off', () => {
-    useChat.mockReturnValue({ tools, selectedTools: new Set(), toggleTool, features: {} })
+    useChat.mockReturnValue({ selectedTools: new Set(), toggleTool, features: {} })
     const { container } = render(<ToolSelector />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  // Parity with ToolsPanel (PR #839 review). The menu used to read the raw
+  // `tools` list off the chat context, so a tool the panel hid -- its server
+  // unselected in the marketplace -- was still listed and toggleable here.
+  it('hides tools whose server is not selected in the marketplace', () => {
+    mockMarketplace({
+      filtered: [{ ...tools[0], tools: ['read_file'] }],
+      complianceFiltered: [{ ...tools[0], tools: ['read_file'] }],
+    })
+    render(<ToolSelector />)
+    fireEvent.click(screen.getByRole('button', { name: /1 tool/ }))
+
+    expect(screen.getByText('read_file')).toBeInTheDocument()
+    expect(screen.queryByText('write_file')).not.toBeInTheDocument()
+  })
+
+  // With compliance levels on, the panel switches filters; the chat bar must
+  // switch with it rather than keep showing the unrestricted list.
+  it('uses the compliance-filtered list when compliance levels are enabled', () => {
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      toggleTool,
+      features: { tools: true, compliance_levels: true },
+      complianceLevelFilter: 'low',
+    })
+    mockMarketplace({
+      filtered: tools,
+      complianceFiltered: [{ ...tools[0], tools: ['write_file'] }],
+    })
+    render(<ToolSelector />)
+    fireEvent.click(screen.getByRole('button', { name: /Tools/ }))
+
+    expect(screen.getByText('write_file')).toBeInTheDocument()
+    expect(screen.queryByText('read_file')).not.toBeInTheDocument()
   })
 })
 

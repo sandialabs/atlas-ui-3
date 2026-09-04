@@ -39,7 +39,7 @@ const SAVE_MODE_CONFIG = {
 // smaller since issue #839 -- the model picker moved to the chat bar and the
 // admin shield, Help label, and Portal label are gone -- so the threshold came
 // down with it, and still carries headroom for locale-dependent label widths.
-const DESKTOP_ACTIONS_MIN_WIDTH = 1080
+export const DESKTOP_ACTIONS_MIN_WIDTH = 1080
 
 // Below this the left-hand buttons drop their text labels and show icons only.
 // This is the header's own width rather than a Tailwind viewport breakpoint
@@ -47,7 +47,7 @@ const DESKTOP_ACTIONS_MIN_WIDTH = 1080
 // a viewport query kept labels at widths where they no longer fit and dropped
 // them at widths where they did (issue #839 review -- "New chat has this
 // problem in particular").
-const ACTION_LABELS_MIN_WIDTH = 760
+export const ACTION_LABELS_MIN_WIDTH = 760
 
 const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()

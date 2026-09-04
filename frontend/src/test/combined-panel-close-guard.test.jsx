@@ -177,6 +177,122 @@ describe('combined panel close guard, against the real ToolsPanel', () => {
       .getByRole('button', { name: /Discard Changes/ }))
     expect(mockNavigate).not.toHaveBeenCalled()
   })
+
+  // "Add from Marketplace" both navigates away and clears the *saved* tool and
+  // prompt selections, so it is a close and must go through the same guard
+  // (PR #839 review). It used to do both unconditionally, silently wiping saved
+  // selections with no dialog at all.
+  it('does not clear or navigate for the marketplace until the guard is answered', () => {
+    const clearToolsAndPrompts = vi.fn()
+    renderPanel({}, { clearToolsAndPrompts })
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Add from Marketplace/ }))
+
+    expect(clearToolsAndPrompts).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
+
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Unsaved Changes/ }))
+      .getByRole('button', { name: /Discard Changes/ }))
+    expect(clearToolsAndPrompts).toHaveBeenCalled()
+    expect(mockNavigate).toHaveBeenCalledWith('/marketplace')
+  })
+
+  it('leaves saved selections intact when the marketplace guard is cancelled', () => {
+    const clearToolsAndPrompts = vi.fn()
+    renderPanel({}, { clearToolsAndPrompts })
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Add from Marketplace/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Unsaved Changes/ }))
+      .getByRole('button', { name: /^Cancel$/ }))
+
+    expect(clearToolsAndPrompts).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Tools and Settings' })).toBeInTheDocument()
+  })
+
+  it('goes straight to the marketplace when nothing is staged', () => {
+    const clearToolsAndPrompts = vi.fn()
+    renderPanel({}, { clearToolsAndPrompts })
+
+    fireEvent.click(screen.getByRole('button', { name: /Add from Marketplace/ }))
+
+    expect(screen.queryByRole('dialog', { name: /Unsaved Changes/ })).not.toBeInTheDocument()
+    expect(clearToolsAndPrompts).toHaveBeenCalled()
+    expect(mockNavigate).toHaveBeenCalledWith('/marketplace')
+  })
+})
+
+/**
+ * A selection made outside this tab -- the chat-bar tool menu -- while the tab
+ * holds staged edits (PR #839 review). The re-seed effect used to bail out
+ * entirely while dirty, so the external addition never reached the pending set
+ * and the next Save read its absence as a removal and turned the tool back off.
+ */
+describe('selections changed outside a dirty tools tab', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+  })
+
+  it('keeps an externally added tool through Save instead of removing it', () => {
+    const addTools = vi.fn()
+    const removeTools = vi.fn()
+    const { rerender } = renderPanel({}, { addTools, removeTools })
+
+    // Stage an edit here: 'search' on, so the tab is dirty.
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+
+    // Meanwhile the chat-bar menu turns 'fetch' on, which lands in the saved
+    // set the panel reads from the chat context.
+    useChat.mockReturnValue({
+      ...useChat(),
+      selectedTools: new Set(['test_server_fetch']),
+    })
+    rerender(
+      <MemoryRouter>
+        <ThemeProvider>
+          <SettingsPanel isOpen onClose={vi.fn()} initialTab="tools" />
+        </ThemeProvider>
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    // 'search' is the staged addition. 'fetch' arrived from outside and is
+    // already saved, so it is neither re-added nor -- the bug -- removed.
+    expect(addTools).toHaveBeenCalledWith(['test_server_search'])
+    expect(removeTools).not.toHaveBeenCalled()
+  })
+
+  it('drops an externally removed tool from the pending set', () => {
+    const addTools = vi.fn()
+    const removeTools = vi.fn()
+    const { rerender } = renderPanel({}, {
+      addTools,
+      removeTools,
+      selectedTools: new Set(['test_server_fetch']),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+
+    // 'fetch' turned off elsewhere: the pending set must follow, so Save does
+    // not resurrect it as an addition.
+    useChat.mockReturnValue({ ...useChat(), selectedTools: new Set() })
+    rerender(
+      <MemoryRouter>
+        <ThemeProvider>
+          <SettingsPanel isOpen onClose={vi.fn()} initialTab="tools" />
+        </ThemeProvider>
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    expect(addTools).toHaveBeenCalledWith(['test_server_search'])
+    expect(removeTools).not.toHaveBeenCalled()
+  })
 })
 
 /**

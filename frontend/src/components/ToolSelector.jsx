@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { Wrench, ChevronDown, Search, SlidersHorizontal, Server } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
+import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 
 // Descriptions are the point of this menu -- the reviewer's complaint was a
@@ -24,7 +25,23 @@ const summarize = (text) => {
  * everything else.
  */
 const ToolSelector = () => {
-  const { tools = [], selectedTools, toggleTool, features } = useChat()
+  const { tools: allTools = [], selectedTools, toggleTool, features, complianceLevelFilter } = useChat()
+  // Optional, like ModelSelector's: the chat bar renders in test harnesses and
+  // embeds that do not mount MarketplaceProvider.
+  const marketplace = useOptionalMarketplace()
+
+  // Same source of rows as the Tools and Settings panel (ToolsPanel.jsx): a
+  // tool the panel hides -- because its server is unselected in the
+  // marketplace, or because it is above the active compliance level -- must not
+  // be listable or toggleable from the chat bar either. With no marketplace to
+  // filter against, fall back to the unfiltered list rather than showing none.
+  const complianceEnabled = features?.compliance_levels
+  const tools = useMemo(() => {
+    if (!marketplace) return allTools
+    return complianceEnabled
+      ? marketplace.getComplianceFilteredTools(complianceLevelFilter)
+      : marketplace.getFilteredTools()
+  }, [marketplace, complianceEnabled, complianceLevelFilter, allTools])
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
   const dropdownRef = useRef(null)
