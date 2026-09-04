@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-08-31
+Last updated: 2026-09-04
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -14,6 +14,7 @@ panel.
 | Tab | What it holds | Shown when |
 | --- | ------------- | ---------- |
 | Tools & Integrations | The former tools panel: installed MCP servers, tool and prompt selection, marketplace link | `FEATURE_TOOLS_ENABLED` |
+| Data Sources | Data sources available to search | `FEATURE_RAG_ENABLED` |
 | Prompts | Your custom prompt library ([details](../custom-prompts/README.md)) | `FEATURE_CUSTOM_PROMPTS_ENABLED` |
 | General | LLM temperature, agent iterations, tool approval, compact messages, debug, Globus, and the light/dark toggle | always |
 | User Info | Reserved stub (issue #595) | always |
@@ -90,17 +91,16 @@ place. The **Data Sources:** label opens the picker.
 
 ## Data sources live with the search tool
 
-Data sources are only ever consumed by search, so the picker is now part of the
-**Tools & Integrations** tab rather than only behind its own top-bar drawer.
+Data sources are only ever consumed by search, so the picker is the second tab,
+**Data Sources**, in Tools and Settings rather than sharing the **Tools &
+Integrations** tab.
 
 The left-hand **Sources** drawer is unchanged and still available; both render
 the same `DataSourcesSelector` component. Dataset names wrap instead of being
 clipped, so a long name (or one with a suffix appended) stays readable.
 
-Data source changes apply as soon as you make them, unlike the tool and prompt
-checkboxes below, which are staged until you press **Save Changes**. The
-section says so above the picker, because **Discard Changes** reverts the
-staged tool and prompt selections and leaves the data sources alone.
+Data source changes apply as soon as you make them, unlike tool and prompt
+checkboxes, which are staged until you press **Save Changes**.
 
 ## Top bar sizing
 
@@ -124,7 +124,7 @@ fit and dropped them at widths where they did; "New Chat" was the worst case.
 | Layer | Component | Responsibility |
 | ----- | --------- | -------------- |
 | Shell | `App.jsx` | Owns panel open state, the tab to open on, and the prompt intent |
-| Panel | `SettingsPanel` | Tab chrome; hosts the tools, prompts, general, user-info, and admin tabs |
+| Panel | `SettingsPanel` | Tab chrome; hosts the tools, data sources, prompts, general, user-info, and admin tabs |
 | Tools | `ToolsPanel` (`embedded` prop) | Same component as before; renders bodyless-of-chrome inside the panel and stays mounted across tab switches |
 | Admin | `admin/AdminQuickPanel` + `useAdminConfigActions` | The three cards, sharing notification/modal plumbing with `AdminDashboard` |
 | Prompts | `PromptSelector` -> `utils/settingsPanelEvents` -> `PromptManager` | The picker asks for a tab and an edit/create intent via an `atlas:open-settings` window event |

@@ -6,14 +6,11 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 /**
  * The data source (RAG corpus) picker.
  *
- * Extracted from RagPanel so the same picker can be shown in two places
- * without a second implementation (issue #839 review): the left-hand Data
- * Sources drawer, and -- because sources are only ever used *by* the search
- * tool -- inline in the Tools and Integrations tab, where the reviewer asked
- * for source options to live in the same view as the tool that consumes them
- * instead of behind extra clicks.
+ * Extracted from RagPanel so the same picker can be shown in the left-hand Data
+ * Sources drawer and the Tools and Settings panel without a second
+ * implementation.
  *
- * `dense` trims the padding for the inline (in-tools) placement.
+ * `dense` trims the padding for compact placements.
  */
 const DataSourcesSelector = ({ dense = false }) => {
   const {

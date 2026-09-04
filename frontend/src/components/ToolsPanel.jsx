@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck, Database } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -9,7 +9,6 @@ import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { isUserPromptKey } from '../hooks/chat/useSelections'
-import DataSourcesSelector from './DataSourcesSelector'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
@@ -61,9 +60,6 @@ const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start a
  */
 const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null, onNavigate = null }) => {
   const [searchTerm, setSearchTerm] = useState('')
-  // Data sources open by default when any are selected: the reviewer's point is
-  // that sources belong with the search tool, not one more click away.
-  const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [expandedPrompts, setExpandedPrompts] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
@@ -85,8 +81,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     complianceLevelFilter,
     tools: allTools,
     prompts: allPrompts,
-    features,
-    selectedDataSources
+    features
   } = useChat()
   const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts } = useMarketplace()
   
@@ -729,44 +724,6 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
 
         {/* Tools List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
-          {/* Data sources for the search tool (issue #839 review). Sources are
-              only ever consumed by search, so they live in the same view as the
-              tools rather than behind a separate top-bar drawer. */}
-          {features?.rag && (
-            <div className="px-4 pt-3" data-testid="tools-data-sources">
-              <button
-                type="button"
-                onClick={() => setSourcesCollapsed(v => !v)}
-                aria-expanded={!sourcesCollapsed}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-left"
-              >
-                {sourcesCollapsed
-                  ? <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                  : <ChevronDown className="w-4 h-4 text-gray-300 flex-shrink-0" />}
-                <Database className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                <span className="text-sm font-semibold text-gray-50">Data Sources for Search</span>
-                <span className="ml-auto text-xs text-gray-300 flex-shrink-0">
-                  {selectedDataSources?.size > 0 ? `${selectedDataSources.size} enabled` : 'none enabled'}
-                </span>
-              </button>
-              {!sourcesCollapsed && (
-                <div className="px-3">
-                  {/* DataSourcesSelector writes straight through to the chat
-                      context -- it is shared with the RAG panel, where there is
-                      no staging at all -- while the tool and prompt checkboxes
-                      below are staged until Save. Say so, rather than let
-                      "Discard Changes" look like it covers this section too
-                      (PR #839 review). */}
-                  <p className="pt-1 pb-2 text-xs text-gray-400">
-                    Data source changes apply immediately &mdash; Save and Discard Changes below cover
-                    tool and prompt selections only.
-                  </p>
-                  <DataSourcesSelector dense />
-                </div>
-              )}
-            </div>
-          )}
-
           {serverList.length === 0 ? (
             <div className="text-gray-400 text-center py-12 px-6">
               <div className="text-lg mb-4">No servers selected</div>

@@ -1,10 +1,11 @@
-import { X, RotateCcw, LogIn, LogOut, RefreshCw, CheckCircle, AlertCircle, Sparkles, SlidersHorizontal, UserCircle, Wrench, Shield, Sun, Moon } from 'lucide-react'
+import { X, RotateCcw, LogIn, LogOut, RefreshCw, CheckCircle, AlertCircle, Sparkles, SlidersHorizontal, UserCircle, Wrench, Shield, Sun, Moon, Database } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useGlobusAuth } from '../hooks/useGlobusAuth'
 import PromptManager from './PromptManager'
 import ToolsPanel from './ToolsPanel'
+import DataSourcesSelector from './DataSourcesSelector'
 import AdminQuickPanel from './admin/AdminQuickPanel'
 import CaptureConsentSection from './CaptureConsentSection'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
@@ -13,6 +14,7 @@ import UnsavedChangesDialog from './UnsavedChangesDialog'
 // visible depends on feature flags and admin membership (see visibleTabs).
 const TABS = [
   { id: 'tools', label: 'Tools & Integrations', icon: Wrench },
+  { id: 'dataSources', label: 'Data Sources', icon: Database },
   { id: 'prompts', label: 'Prompts', icon: Sparkles },
   { id: 'general', label: 'General', icon: SlidersHorizontal },
   { id: 'userInfo', label: 'User Info', icon: UserCircle },
@@ -61,12 +63,14 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable, isInAdminGroup } = useChat()
   const customPromptsEnabled = !!features?.custom_prompts
   const toolsEnabled = !!features?.tools
+  const ragEnabled = !!features?.rag
   const visibleTabs = useMemo(() => TABS.filter(tab => {
     if (tab.id === 'prompts') return customPromptsEnabled
     if (tab.id === 'tools') return toolsEnabled
+    if (tab.id === 'dataSources') return ragEnabled
     if (tab.id === 'admin') return !!isInAdminGroup
     return true
-  }), [customPromptsEnabled, toolsEnabled, isInAdminGroup])
+  }), [customPromptsEnabled, toolsEnabled, ragEnabled, isInAdminGroup])
 
   // An action to run once the panel has actually been dismissed -- "Full Admin
   // Page" navigates, and navigating before the unsaved-selection dialog is
@@ -454,6 +458,18 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             closeGuardRef={toolsCloseGuardRef}
             onDirtyChange={setToolsDirty}
           />
+        )}
+
+        {/* Data source changes apply immediately, matching the Sources drawer. */}
+        {ragEnabled && activeTab === 'dataSources' && (
+          <div
+            role="tabpanel"
+            id="settings-tabpanel-dataSources"
+            aria-labelledby="settings-tab-dataSources"
+            className="flex-1 overflow-y-auto custom-scrollbar min-h-0"
+          >
+            <DataSourcesSelector />
+          </div>
         )}
 
         {/* Admin quick controls tab (issue #836). "Full Admin Page" navigates
