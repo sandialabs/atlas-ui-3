@@ -18,6 +18,7 @@ import { buildCorrectionContext } from '../utils/captureCorrection'
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext', () => ({
   useMarketplace: () => ({ isComplianceAccessible: () => true }),
+  useOptionalMarketplace: () => null,
 }))
 vi.mock('../contexts/WSContext')
 vi.mock('../utils/captureCorrection', async (importOriginal) => ({

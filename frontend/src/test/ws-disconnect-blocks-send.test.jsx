@@ -19,6 +19,7 @@ import { useWS } from '../contexts/WSContext'
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext', () => ({
   useMarketplace: () => ({ isComplianceAccessible: () => true }),
+  useOptionalMarketplace: () => null,
 }))
 vi.mock('../contexts/WSContext')
 

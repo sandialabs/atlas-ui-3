@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext', () => ({
   useMarketplace: () => ({ isComplianceAccessible: () => true }),
+  useOptionalMarketplace: () => null,
 }))
 vi.mock('../contexts/WSContext')
 vi.mock('../components/ui/toastContext', () => ({
