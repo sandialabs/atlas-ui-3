@@ -97,6 +97,11 @@ The left-hand **Sources** drawer is unchanged and still available; both render
 the same `DataSourcesSelector` component. Dataset names wrap instead of being
 clipped, so a long name (or one with a suffix appended) stays readable.
 
+Data source changes apply as soon as you make them, unlike the tool and prompt
+checkboxes below, which are staged until you press **Save Changes**. The
+section says so above the picker, because **Discard Changes** reverts the
+staged tool and prompt selections and leaves the data sources alone.
+
 ## Top bar sizing
 
 The admin shield is gone -- admin controls are the Admin tab, and the full
