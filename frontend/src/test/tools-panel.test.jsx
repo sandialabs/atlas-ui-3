@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
 import { useChat } from '../contexts/ChatContext'
@@ -1063,5 +1063,254 @@ describe('ToolsPanel - Custom Information Display', () => {
     // Click again to collapse
     fireEvent.click(infoButton)
     expect(screen.queryByText('Test description for collapse functionality')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Embedded mode (issue #839 review follow-ups): the panel is one tab of the
+ * combined Tools and Settings panel, so a per-tab save must not dismiss the
+ * whole panel, and the still-mounted pending set must not write back keys that
+ * have since disappeared.
+ */
+describe('ToolsPanel - embedded in the combined panel', () => {
+  const testTools = [{
+    server: 'test_server',
+    description: 'Test server description',
+    tools: ['fetch', 'search'],
+    tools_detailed: [],
+    tool_count: 2,
+    prompts: [],
+    prompt_count: 0
+  }]
+
+  const setup = (chatOverrides = {}) => {
+    const context = {
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: testTools,
+      prompts: [],
+      features: {},
+      ...chatOverrides,
+    }
+    useChat.mockReturnValue(context)
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => testTools),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => testTools),
+      getFilteredPrompts: vi.fn(() => []),
+    })
+    return context
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('does not close the panel when Save Changes is used on the tools tab', () => {
+    setup()
+    const onClose = vi.fn()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={onClose} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('asks before discarding, and does not close, on the tools tab', () => {
+    setup()
+    const onClose = vi.fn()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={onClose} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    // Embedded the footer button discards rather than cancelling a close, and
+    // every other exit path asks first, so this one does too.
+    fireEvent.click(screen.getByRole('button', { name: /^Discard Changes$/ }))
+
+    const confirm = screen.getByRole('dialog', { name: /Discard Changes/ })
+    expect(confirm).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+
+    fireEvent.click(within(confirm).getByRole('button', { name: /Discard Changes/ }))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: /Discard Changes/ })).not.toBeInTheDocument()
+  })
+
+  it('still closes the standalone modal on save', () => {
+    setup()
+    const onClose = vi.fn()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen onClose={onClose} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('settles when the context republishes an equal but fresh selection Set', () => {
+    // The re-seed effect depends on the saved Sets. Keyed on Set identity it
+    // would set state on every render and never settle; this render would hang.
+    setup({ selectedTools: new Set(['test_server_fetch']) })
+    const { rerender } = render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    setup({ selectedTools: new Set(['test_server_fetch']) })
+    rerender(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('button', { name: 'fetch' })).toBeInTheDocument()
+  })
+
+  it('confirms the save in place, since it no longer dismisses anything', () => {
+    setup()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(screen.getByRole('status')).toHaveTextContent(/saved/i)
+  })
+
+  it('does not add back a selection for a tool that is not in the live list', () => {
+    // Pruning applies to additions only: a key that is not in the current tool
+    // list is never newly written.
+    const addTools = vi.fn()
+    setup({ selectedTools: new Set(), addTools })
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(addTools).toHaveBeenCalledWith(['test_server_search'])
+  })
+
+  it('keeps a saved selection for a server missing from the live list', () => {
+    // An MCP reload that has republished some servers but not others must not
+    // cost the user their selection for the absent one on the next unrelated
+    // save. Removals are computed against the unpruned pending set.
+    const removeTools = vi.fn()
+    const addTools = vi.fn()
+    setup({
+      selectedTools: new Set(['absent_server_thing', 'test_server_fetch']),
+      addTools,
+      removeTools,
+    })
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    expect(addTools).toHaveBeenCalledWith(['test_server_search'])
+    expect(removeTools).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Data sources moved into the tools view (PR #839 UX review): sources are only
+ * ever consumed by the search tool, so they belong in the same view instead of
+ * behind a separate top-bar drawer.
+ */
+describe('ToolsPanel - data sources beside the search tool', () => {
+  const chatContext = {
+    selectedTools: new Set(),
+    selectedPrompts: new Set(),
+    toggleTool: vi.fn(),
+    togglePrompt: vi.fn(),
+    addTools: vi.fn(),
+    addPrompts: vi.fn(),
+    removeTools: vi.fn(),
+    removePrompts: vi.fn(),
+    clearToolsAndPrompts: vi.fn(),
+    complianceLevelFilter: null,
+    tools: [],
+    prompts: [],
+    models: [],
+    currentModel: null,
+    ragSources: [
+      { serverName: 'corp', id: 'west', label: 'West Region Fleet', serverDisplayName: 'Corporate Cars' },
+    ],
+    toggleDataSource: vi.fn(),
+    addDataSources: vi.fn(),
+    clearDataSources: vi.fn(),
+  }
+
+  const marketplaceContext = {
+    getComplianceFilteredTools: vi.fn(() => []),
+    getComplianceFilteredPrompts: vi.fn(() => []),
+    getFilteredTools: vi.fn(() => []),
+    getFilteredPrompts: vi.fn(() => []),
+    isComplianceAccessible: vi.fn(() => true),
+    complianceLevels: [],
+  }
+
+  const renderPanel = (features) => {
+    useChat.mockReturnValue({
+      ...chatContext,
+      features,
+      selectedDataSources: new Set(),
+    })
+    useMarketplace.mockReturnValue(marketplaceContext)
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('shows the data source picker inline when RAG is enabled', () => {
+    renderPanel({ rag: true })
+    expect(screen.getByTestId('tools-data-sources')).toBeInTheDocument()
+    expect(screen.getByText('Data Sources for Search')).toBeInTheDocument()
+    expect(screen.getByText('West Region Fleet')).toBeInTheDocument()
+  })
+
+  it('collapses the picker without leaving the tools view', () => {
+    renderPanel({ rag: true })
+    fireEvent.click(screen.getByRole('button', { name: /Data Sources for Search/ }))
+    expect(screen.queryByText('West Region Fleet')).not.toBeInTheDocument()
+  })
+
+  it('omits the picker entirely when RAG is off', () => {
+    renderPanel({})
+    expect(screen.queryByTestId('tools-data-sources')).not.toBeInTheDocument()
   })
 })

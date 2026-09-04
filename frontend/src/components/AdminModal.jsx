@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react'
+import { useEscapeKey } from '../hooks/useEscapeKey'
 import { Download, Save, Check, ThumbsUp, ThumbsDown, Minus } from 'lucide-react'
 import 'highlight.js/styles/github-dark.css'
 import MCPDetailsView from './admin/MCPDetailsView'
 
 const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
+  useEscapeKey(true, onClose)
+
   const [content, setContent] = useState(data.content?.value || '')
   const [saving, setSaving] = useState(false)
   const logContainerRef = React.useRef(null)
@@ -404,7 +407,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
   }
 
   return (
-    <div className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto ${
+    <div role="dialog" aria-modal="true" className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto ${
       data.content?.type === 'logs' ? 'p-0' : 'p-4'
     }`}>
       <div className={`bg-gray-800 rounded-lg w-full overflow-y-auto my-8 ${

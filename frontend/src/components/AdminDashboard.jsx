@@ -16,43 +16,30 @@ import MCPServerManager from './admin/MCPServerManager'
 import FeedbackViewerCard from './admin/FeedbackViewerCard'
 import HelpConfigCard from './admin/HelpConfigCard'
 import { useWS } from '../contexts/WSContext'
+import useAdminConfigActions from '../hooks/useAdminConfigActions'
 
 const AdminDashboard = () => {
   const navigate = useNavigate()
   const { isConnected } = useWS()
   const [currentUser, setCurrentUser] = useState('Loading...')
-  const [systemStatus, setSystemStatus] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [modalOpen, setModalOpen] = useState(false)
-  const [modalData, setModalData] = useState({})
-  const [currentEndpoint, setCurrentEndpoint] = useState(null)
-  const [notifications, setNotifications] = useState([])
 
-  const addNotification = useCallback((message, type = 'info') => {
-    const id = Date.now()
-    const notification = { id, message, type }
-    setNotifications(prev => [...prev, notification])
-
-    // Auto-remove after 5 seconds for success/info, 8 seconds for errors
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id))
-    }, type === 'error' ? 8000 : 5000)
-  }, [])
-
-  const removeNotification = (id) => {
-    setNotifications(prev => prev.filter(n => n.id !== id))
-  }
-
-  const loadSystemStatus = async () => {
-    try {
-      const response = await fetch('/admin/system-status')
-      const data = await response.json()
-      setSystemStatus(data)
-    } catch (err) {
-      console.error('Error loading system status:', err)
-    }
-  }
+  // Notifications, system status, and the edit-config modal are shared with the
+  // admin tab of the Tools and Settings panel (issue #836).
+  const {
+    notifications,
+    addNotification,
+    removeNotification,
+    systemStatus,
+    loadSystemStatus,
+    modalOpen,
+    modalData,
+    openModal,
+    closeModal,
+    saveConfig,
+    downloadLogs,
+  } = useAdminConfigActions()
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -78,29 +65,16 @@ const AdminDashboard = () => {
       setError('Error loading admin dashboard: ' + err.message)
       setLoading(false)
     }
-  }, [])
+  }, [loadSystemStatus])
 
   useEffect(() => {
     loadDashboard()
   }, [loadDashboard])
 
-  const openModal = (title, content, endpoint = null, contentCategory = null) => {
-    setModalData({ title, content, contentCategory })
-    setCurrentEndpoint(endpoint)
-    setModalOpen(true)
-  }
-
-  const closeModal = () => {
-    setModalOpen(false)
-    setCurrentEndpoint(null)
-  }
-
   const _manageLLM = async () => {
     try {
       const response = await fetch('/admin/llm-config')
       const data = await response.json()
-      
-      setCurrentEndpoint('llm-config')
       
       openModal('Edit LLM Configuration', {
         type: 'textarea',
@@ -117,8 +91,6 @@ const AdminDashboard = () => {
       const response = await fetch('/admin/help-config')
       const data = await response.json()
       
-      setCurrentEndpoint('help-config')
-      
       openModal('Edit Help Content', {
         type: 'textarea',
         value: data.content,
@@ -126,21 +98,6 @@ const AdminDashboard = () => {
       }, 'help-config')
     } catch (err) {
       addNotification('Error loading help content: ' + err.message, 'error')
-    }
-  }
-
-  const downloadLogs = () => {
-    try {
-      const link = document.createElement('a')
-      link.href = '/admin/logs/download'
-      link.download = `app_log_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.log`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      
-      addNotification('Log download started', 'success')
-    } catch (err) {
-      addNotification('Error downloading logs: ' + err.message, 'error')
     }
   }
 
@@ -225,45 +182,6 @@ const AdminDashboard = () => {
       })
     } catch (err) {
       addNotification('Error loading feedback: ' + err.message, 'error')
-    }
-  }
-
-  const saveConfig = async (content) => {
-    if (!currentEndpoint) return
-    
-    try {
-      let payload
-      let method = 'POST'
-      if (currentEndpoint === 'banners') {
-        const messages = content.split('\n').map(line => line.trim()).filter(line => line)
-        payload = { messages }
-      } else if (currentEndpoint === 'help-config') {
-        // help-config uses PUT to replace the full markdown document
-        payload = { content }
-        method = 'PUT'
-      } else {
-        const fileType = currentEndpoint.includes('json') ? 'json' : 
-                       currentEndpoint.includes('yml') || currentEndpoint.includes('yaml') ? 'yaml' : 'text'
-        payload = { content, file_type: fileType }
-      }
-      
-      const response = await fetch(`/admin/${currentEndpoint}`, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || `HTTP ${response.status}`)
-      }
-      
-      const result = await response.json()
-      addNotification('Configuration saved successfully: ' + result.message, 'success')
-      
-      await loadSystemStatus()
-    } catch (err) {
-      addNotification('Error saving configuration: ' + err.message, 'error')
     }
   }
 

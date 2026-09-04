@@ -8,6 +8,9 @@ import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import { autoResizeComposer, resetComposerHeight, COMPOSER_MAX_HEIGHT } from '../utils/composerAutoResize'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
+import EnabledDataSourcesIndicator from './EnabledDataSourcesIndicator'
+import ModelSelector from './ModelSelector'
+import ToolSelector from './ToolSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
 import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
@@ -938,6 +941,9 @@ const ChatArea = () => {
           {/* Enabled Tools Indicator */}
           <EnabledToolsIndicator />
 
+          {/* Enabled data sources, as pills (issue #839 review) */}
+          <EnabledDataSourcesIndicator />
+
           {/* Warning: WebSocket disconnected - sending is blocked until reconnected */}
           {!isConnected && (
             <div
@@ -1227,9 +1233,14 @@ const ChatArea = () => {
           />
           
           <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
-            <div className="flex items-center gap-3">
+            {/* Chat-bar controls (issue #839 review): the model, tools, and
+                prompts are all changed from where the work happens instead of
+                from the top bar. */}
+            <div className="flex items-center gap-3 flex-wrap min-w-0">
+              <ModelSelector />
+              <ToolSelector />
               <PromptSelector />
-              <span>Press Shift + Enter for new line</span>
+              <span className="hidden sm:inline">Press Shift + Enter for new line</span>
             </div>
             {Object.keys(uploadedFiles).length > 0 && (
               <span>{Object.keys(uploadedFiles).length} file(s) uploaded</span>

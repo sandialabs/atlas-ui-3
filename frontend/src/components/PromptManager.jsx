@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Pencil, Trash2, Check, X, Sparkles } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
@@ -9,10 +9,18 @@ import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/ch
  * Users create, edit, and delete reusable custom prompts here. Picking which
  * one is active for a chat happens in the prompt selector above the chat input;
  * this panel is the management surface and also lets you activate one directly.
+ *
+ * `intent` lets a caller open straight into an editor -- the prompt selector's
+ * per-prompt "edit" and "new system prompt" buttons use it (issue #836).
+ * Shape: `{ type: 'create' }` or `{ type: 'edit', id }`. `onIntentConsumed`
+ * fires once the intent has opened its editor, so the caller can drop it --
+ * otherwise leaving and re-entering this tab would yank the editor back to the
+ * originally-clicked prompt. `onDirtyChange` reports an in-progress draft so
+ * the host panel can guard its close the way it does for tool selections.
  */
 const emptyDraft = { title: '', content: '' }
 
-const PromptManager = () => {
+const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange = null }) => {
   const {
     userPrompts = [],
     userPromptsLoading,
@@ -29,16 +37,75 @@ const PromptManager = () => {
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState(emptyDraft)
   const [saving, setSaving] = useState(false)
+  // Each intent object is applied at most once so a later prompt-list refresh
+  // never re-opens the editor over what the user is typing.
+  const appliedIntentRef = useRef(null)
+
+  useEffect(() => {
+    if (!intent || appliedIntentRef.current === intent) return
+    if (intent.type === 'create') {
+      appliedIntentRef.current = intent
+      setEditingId('new')
+      setDraft(emptyDraft)
+      onIntentConsumed?.()
+      return
+    }
+    if (intent.type === 'edit') {
+      const target = userPrompts.find(p => p.id === intent.id)
+      if (!target) {
+        // Still loading: wait for the list. Resolved without the target -- the
+        // prompt was deleted between the click and the panel opening -- means
+        // the intent can never apply, so retire it rather than leaving it live
+        // to fire at the next unrelated list refresh.
+        if (!userPromptsLoading) {
+          appliedIntentRef.current = intent
+          onIntentConsumed?.()
+        }
+        return
+      }
+      appliedIntentRef.current = intent
+      setEditingId(target.id)
+      setDraft({ title: target.title, content: target.content })
+      onIntentConsumed?.()
+    }
+  }, [intent, userPrompts, userPromptsLoading, onIntentConsumed])
+
+  // Once the user has opened an editor themselves, a still-pending intent has
+  // been overtaken: applying it later would replace whatever they are typing.
+  const claimIntent = () => {
+    if (intent && appliedIntentRef.current !== intent) {
+      appliedIntentRef.current = intent
+      onIntentConsumed?.()
+    }
+  }
+
+  // Let a host panel guard its close: an editor open on text that differs from
+  // what is stored (or anything at all, when creating) is unsaved work.
+  const original = editingId && editingId !== 'new'
+    ? userPrompts.find(p => p.id === editingId)
+    : null
+  const isDirty = editingId !== null && (
+    editingId === 'new'
+      ? draft.title.trim().length > 0 || draft.content.trim().length > 0
+      : !original || draft.title !== original.title || draft.content !== original.content
+  )
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
+  // Stop reporting dirty once this unmounts, so a stale flag cannot block a close.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
   const activeId = isUserPromptKey(activePromptKey) ? userPromptIdFromKey(activePromptKey) : null
   const canSave = draft.title.trim().length > 0 && draft.content.trim().length > 0
 
   const startCreate = () => {
+    claimIntent()
     setEditingId('new')
     setDraft(emptyDraft)
   }
 
   const startEdit = (prompt) => {
+    claimIntent()
     setEditingId(prompt.id)
     setDraft({ title: prompt.title, content: prompt.content })
   }

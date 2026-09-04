@@ -1,27 +1,79 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck, Database } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
+import { useEscapeKey } from '../hooks/useEscapeKey'
+import { isUserPromptKey } from '../hooks/chat/useSelections'
+import DataSourcesSelector from './DataSourcesSelector'
 
 // Default type for schema properties without explicit type
 const DEFAULT_PARAM_TYPE = 'any'
 
+// Set equality by contents. The chat context can republish a fresh Set on every
+// render, so the re-seed effect below must not key off Set identity.
+const sameKeys = (a, b) => {
+  if (a === b) return true
+  if (!a || !b || a.size !== b.size) return false
+  for (const key of a) {
+    if (!b.has(key)) return false
+  }
+  return true
+}
+
+// Replay a change made to the saved selections onto a dirty pending set.
+// `snapshotRef` holds what the saved set looked like the last time this ran, so
+// the additions and removals made elsewhere can be told apart from the edits
+// staged here and merged in without discarding either.
+const applySavedDelta = (setPending, snapshotRef, saved) => {
+  const previous = snapshotRef.current
+  if (sameKeys(previous, saved)) return
+  const added = []
+  const removed = []
+  saved.forEach(key => { if (!previous?.has(key)) added.push(key) })
+  previous?.forEach(key => { if (!saved.has(key)) removed.push(key) })
+  snapshotRef.current = new Set(saved)
+  if (added.length === 0 && removed.length === 0) return
+  setPending(prev => {
+    const next = new Set(prev)
+    added.forEach(key => next.add(key))
+    removed.forEach(key => next.delete(key))
+    return sameKeys(next, prev) ? prev : next
+  })
+}
+
 // Truncation message constant for better maintainability
 const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start and end of content.'
 
-const ToolsPanel = ({ isOpen, onClose }) => {
+/**
+ * Tools, integrations, and prompt selection.
+ *
+ * Renders as a standalone modal by default. When `embedded` is set it renders
+ * only its body so it can live inside the combined "Tools and Settings" panel
+ * (issue #836) as a tab: the parent supplies the modal chrome, keeps this
+ * mounted across tab switches (`active` toggles visibility so pending
+ * selections survive), and routes its own close attempts through
+ * `closeGuardRef` so unsaved tool changes still prompt.
+ */
+const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null, onNavigate = null }) => {
   const [searchTerm, setSearchTerm] = useState('')
+  // Data sources open by default when any are selected: the reviewer's point is
+  // that sources belong with the search tool, not one more click away.
+  const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [expandedPrompts, setExpandedPrompts] = useState(new Set())
   const [collapsedServers, setCollapsedServers] = useState(new Set())
   const [expandedDescriptions, setExpandedDescriptions] = useState(new Set())
   const navigate = useNavigate()
   const prevOpenRef = useRef(false)
+  // What the saved selections looked like the last time the re-seed effect ran,
+  // so changes made outside this tab can be merged into staged edits.
+  const prevSavedToolsRef = useRef(null)
+  const prevSavedPromptsRef = useRef(null)
   const {
     selectedTools: savedSelectedTools,
     selectedPrompts: savedSelectedPrompts,
@@ -33,7 +85,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     complianceLevelFilter,
     tools: allTools,
     prompts: allPrompts,
-    features
+    features,
+    selectedDataSources
   } = useChat()
   const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts } = useMarketplace()
   
@@ -42,6 +95,12 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [pendingSelectedPrompts, setPendingSelectedPrompts] = useState(new Set())
   const [hasChanges, setHasChanges] = useState(false)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
+  // The dialog is raised by two different things: a close attempt (save /
+  // discard / cancel) and the embedded Cancel button, which only discards.
+  const [discardOnly, setDiscardOnly] = useState(false)
+  // Transient "Saved" confirmation for the embedded (tab) save, which no longer
+  // dismisses anything.
+  const [justSaved, setJustSaved] = useState(false)
 
   // Auth status state
   const [tokenModalServer, setTokenModalServer] = useState(null)
@@ -51,15 +110,48 @@ const ToolsPanel = ({ isOpen, onClose }) => {
   const [disconnectError, setDisconnectError] = useState(null)
   const { fetchAuthStatus, uploadToken, removeToken, getServerAuth } = useServerAuthStatus()
   
-  // Initialize pending state from saved state only when panel transitions from closed to open
+  // Seed pending state from saved state when the panel opens, and re-seed it
+  // whenever the saved selections change underneath an un-edited panel. The
+  // panel now stays mounted across tab switches (issue #836), so a save made
+  // elsewhere -- the Admin tab's "Reload MCP" prunes keys for servers that no
+  // longer exist -- would otherwise be undone by a later Save Changes here.
+  //
+  // This runs in the steady state, and the context may hand back a fresh Set on
+  // every render, so it compares contents rather than Set identity: setting
+  // state on identity alone would re-render forever.
   useEffect(() => {
-    if (isOpen && !prevOpenRef.current) {
+    if (!isOpen) {
+      prevOpenRef.current = false
+      return
+    }
+    const opening = !prevOpenRef.current
+    prevOpenRef.current = true
+
+    if (opening) {
+      prevSavedToolsRef.current = new Set(savedSelectedTools)
+      prevSavedPromptsRef.current = new Set(savedSelectedPrompts)
       setPendingSelectedTools(new Set(savedSelectedTools))
       setPendingSelectedPrompts(new Set(savedSelectedPrompts))
       setHasChanges(false)
+      return
     }
-    prevOpenRef.current = isOpen
-  }, [isOpen, savedSelectedTools, savedSelectedPrompts])
+
+    // Staged edits are in flight, so the pending set cannot simply be replaced.
+    // Replay the *delta* in the saved selections onto it instead: a tool turned
+    // on from the chat-bar menu while this tab holds unsaved edits would
+    // otherwise be missing from the pending set, and the next Save would read
+    // that absence as a removal and switch the tool straight back off.
+    if (hasChanges) {
+      applySavedDelta(setPendingSelectedTools, prevSavedToolsRef, savedSelectedTools)
+      applySavedDelta(setPendingSelectedPrompts, prevSavedPromptsRef, savedSelectedPrompts)
+      return
+    }
+
+    prevSavedToolsRef.current = new Set(savedSelectedTools)
+    prevSavedPromptsRef.current = new Set(savedSelectedPrompts)
+    setPendingSelectedTools(prev => (sameKeys(prev, savedSelectedTools) ? prev : new Set(savedSelectedTools)))
+    setPendingSelectedPrompts(prev => (sameKeys(prev, savedSelectedPrompts) ? prev : new Set(savedSelectedPrompts)))
+  }, [isOpen, hasChanges, savedSelectedTools, savedSelectedPrompts])
 
   // Fetch auth status when panel opens
   useEffect(() => {
@@ -135,32 +227,77 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     })
   }
   
-  // Save handler - commits pending changes to context
-  const handleSave = () => {
+  // Commit pending changes to context, without dismissing anything.
+  const commitChanges = () => {
+    // A pending key for a tool that no longer exists (a server dropped by an
+    // MCP reload while the panel was open) is not written back.
+    const liveToolKeys = new Set()
+    const livePromptKeys = new Set()
+    allTools.forEach(server => {
+      server?.tools?.forEach(name => liveToolKeys.add(`${server.server}_${name}`))
+    })
+    allPrompts.forEach(server => {
+      server?.prompts?.forEach(prompt => livePromptKeys.add(`${server.server}_${prompt.name}`))
+    })
+    // The live-key intersection filters *additions* only. Removals are computed
+    // against the unpruned pending set, so a server that is simply absent from
+    // the current list -- an MCP reload that has republished some servers but
+    // not others, a marketplace filter -- keeps the user's saved selection
+    // instead of having it wiped by the next unrelated save.
+    const canAddTool = key => liveToolKeys.size === 0 || liveToolKeys.has(key)
+    const canAddPrompt = key => livePromptKeys.size === 0 || livePromptKeys.has(key) || isUserPromptKey(key)
+
     // Determine what tools to add or remove
-    const toolsToAdd = Array.from(pendingSelectedTools).filter(t => !savedSelectedTools.has(t))
+    const toolsToAdd = Array.from(pendingSelectedTools).filter(t => !savedSelectedTools.has(t) && canAddTool(t))
     const toolsToRemove = Array.from(savedSelectedTools).filter(t => !pendingSelectedTools.has(t))
-    
+
     if (toolsToAdd.length > 0) saveAddTools(toolsToAdd)
     if (toolsToRemove.length > 0) saveRemoveTools(toolsToRemove)
-    
+
     // Determine what prompts to add or remove
-    const promptsToAdd = Array.from(pendingSelectedPrompts).filter(p => !savedSelectedPrompts.has(p))
+    const promptsToAdd = Array.from(pendingSelectedPrompts).filter(p => !savedSelectedPrompts.has(p) && canAddPrompt(p))
     const promptsToRemove = Array.from(savedSelectedPrompts).filter(p => !pendingSelectedPrompts.has(p))
-    
+
     if (promptsToAdd.length > 0) saveAddPrompts(promptsToAdd)
     if (promptsToRemove.length > 0) saveRemovePrompts(promptsToRemove)
 
     setHasChanges(false)
-    onClose()
   }
-  
-  // Cancel handler - reverts pending changes
-  const handleCancel = () => {
+
+  // Revert pending changes back to what is saved, without dismissing anything.
+  const revertChanges = () => {
     setPendingSelectedTools(new Set(savedSelectedTools))
     setPendingSelectedPrompts(new Set(savedSelectedPrompts))
     setHasChanges(false)
-    onClose()
+  }
+
+  // Save handler. Standalone this is the modal's "save and close"; embedded it
+  // is one tab's save, so it commits and stays -- dismissing the combined panel
+  // from here would also exit Prompts, General, User Info and Admin.
+  const handleSave = () => {
+    commitChanges()
+    if (!embedded) {
+      onClose()
+      return
+    }
+    // Embedded the panel stays put, so the only feedback would be the button
+    // greying out. Say it saved instead.
+    setJustSaved(true)
+  }
+
+  // Cancel handler - reverts pending changes. Standalone it is the modal's
+  // "cancel and close"; embedded it discards staged selections without closing,
+  // so it asks first, like every other exit path.
+  const handleCancel = () => {
+    if (embedded) {
+      if (hasChanges) {
+        setDiscardOnly(true)
+        setShowUnsavedDialog(true)
+      }
+      return
+    }
+    revertChanges()
+    finishClose()
   }
   
   // Clear all tools and prompts in pending state
@@ -170,29 +307,95 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setHasChanges(true)
   }
 
+  // Set while the unsaved-changes dialog is up, so a parent that deferred an
+  // action behind the close (navigating to the full admin page) learns that the
+  // user backed out and the action must not run.
+  const closeCancelledRef = useRef(null)
+
+  // An action deferred until this panel has really been dismissed -- navigating
+  // to the marketplace, which also clears the saved selections. Running it
+  // before the dialog is answered would wipe those selections even if the user
+  // then backs out.
+  const afterCloseRef = useRef(null)
+
+  const finishClose = () => {
+    const afterClose = afterCloseRef.current
+    afterCloseRef.current = null
+    onClose()
+    afterClose?.()
+  }
+
   // Handle close attempts - check for unsaved changes
-  const handleCloseAttempt = () => {
+  const handleCloseAttempt = (onCancelled = null, afterClose = null) => {
+    afterCloseRef.current = typeof afterClose === 'function' ? afterClose : null
     if (hasChanges) {
+      closeCancelledRef.current = typeof onCancelled === 'function' ? onCancelled : null
+      setDiscardOnly(false)
       setShowUnsavedDialog(true)
     } else {
-      onClose()
+      finishClose()
     }
   }
 
   // Handle confirmation dialog actions
+  // These two come from the unsaved-changes dialog, which is only raised by a
+  // close attempt -- so they always dismiss, embedded or not.
   const handleSaveAndClose = () => {
-    handleSave() // This already calls onClose()
+    commitChanges()
+    setDiscardOnly(false)
+    closeCancelledRef.current = null
     setShowUnsavedDialog(false)
+    finishClose()
   }
 
   const handleDiscardAndClose = () => {
-    handleCancel() // This already calls onClose()
+    revertChanges()
+    setDiscardOnly(false)
+    closeCancelledRef.current = null
     setShowUnsavedDialog(false)
+    finishClose()
+  }
+
+  // Discard without closing -- the embedded Cancel button's answer.
+  const handleDiscardOnly = () => {
+    revertChanges()
+    setShowUnsavedDialog(false)
+    setDiscardOnly(false)
   }
 
   const handleCancelDialog = () => {
     setShowUnsavedDialog(false)
+    setDiscardOnly(false)
+    afterCloseRef.current = null
+    const onCancelled = closeCancelledRef.current
+    closeCancelledRef.current = null
+    onCancelled?.()
   }
+
+  useEffect(() => {
+    if (!justSaved) return undefined
+    const timer = setTimeout(() => setJustSaved(false), 2500)
+    return () => clearTimeout(timer)
+  }, [justSaved])
+
+  // Any further edit clears the confirmation.
+  useEffect(() => {
+    if (hasChanges) setJustSaved(false)
+  }, [hasChanges])
+
+  // Let an embedding parent know whether there are unsaved selections.
+  useEffect(() => {
+    onDirtyChange?.(hasChanges)
+  }, [hasChanges, onDirtyChange])
+
+  // When embedded, let the parent panel route its close attempts through the
+  // same unsaved-changes guard. Re-registered every render so the ref always
+  // holds a handler closed over current state.
+  useEffect(() => {
+    if (!embedded || !closeGuardRef) return undefined
+    closeGuardRef.current = handleCloseAttempt
+    return () => { closeGuardRef.current = null }
+  })
 
   // Handle token upload for JWT/bearer auth servers
   const handleTokenUpload = async (tokenData) => {
@@ -216,6 +419,12 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     setTokenUploadError(null)
     setTokenModalServer(serverName)
   }
+
+  const closeDisconnectConfirm = useCallback(() => {
+    setDisconnectServer(null)
+    setDisconnectError(null)
+  }, [])
+  useEscapeKey(!!disconnectServer, closeDisconnectConfirm)
 
   // Handle disconnect confirmation
   const handleDisconnect = async () => {
@@ -244,63 +453,82 @@ const ToolsPanel = ({ isOpen, onClose }) => {
     if (prompt.compliance_level) availableComplianceLevels.add(prompt.compliance_level)
   })
 
+  // "Add from Marketplace" leaves this surface and resets the selection, so it
+  // is a close, not a side trip: it routes through the same unsaved-changes
+  // guard as the X, and both the clear and the navigation are deferred until
+  // the close actually goes through. Backing out of the dialog must leave the
+  // saved selections exactly as they were.
   const navigateToMarketplace = () => {
-    clearToolsAndPrompts()
-    navigate('/marketplace')
+    const go = () => {
+      clearToolsAndPrompts()
+      navigate('/marketplace')
+    }
+    // Embedded, the whole panel has to close -- the guard here only covers this
+    // one tab, and an unsaved prompt draft elsewhere deserves its own prompt.
+    if (embedded && onNavigate) {
+      onNavigate(go)
+      return
+    }
+    handleCloseAttempt(null, go)
   }
 
   // Combine tools and prompts into a unified server list
-  const allServers = {}
+  // The panel stays mounted for the life of the combined "Tools and Settings"
+  // panel, so this merge/sort would otherwise redo itself on every unrelated
+  // state change in the host -- each General-tab slider step, for instance.
+  const serverList = useMemo(() => {
+    const allServers = {}
   
-  // Add tools to the unified list
-  tools.forEach(toolServer => {
-    if (!allServers[toolServer.server]) {
-      allServers[toolServer.server] = {
-        server: toolServer.server,
-        description: toolServer.description,
-        short_description: toolServer.short_description,
-        author: toolServer.author,
-        help_email: toolServer.help_email,
-        is_exclusive: toolServer.is_exclusive,
-        compliance_level: toolServer.compliance_level,
-        auth_type: toolServer.auth_type,
-        tools: toolServer.tools || [],
-        tools_detailed: toolServer.tools_detailed || [],
-        tool_count: toolServer.tool_count || 0,
-        prompts: [],
-        prompt_count: 0
+    // Add tools to the unified list
+    tools.forEach(toolServer => {
+      if (!allServers[toolServer.server]) {
+        allServers[toolServer.server] = {
+          server: toolServer.server,
+          description: toolServer.description,
+          short_description: toolServer.short_description,
+          author: toolServer.author,
+          help_email: toolServer.help_email,
+          is_exclusive: toolServer.is_exclusive,
+          compliance_level: toolServer.compliance_level,
+          auth_type: toolServer.auth_type,
+          tools: toolServer.tools || [],
+          tools_detailed: toolServer.tools_detailed || [],
+          tool_count: toolServer.tool_count || 0,
+          prompts: [],
+          prompt_count: 0
+        }
       }
-    }
-  })
+    })
   
-  // Add prompts to the unified list
-  prompts.forEach(promptServer => {
-    if (!allServers[promptServer.server]) {
-      allServers[promptServer.server] = {
-        server: promptServer.server,
-        description: promptServer.description,
-        short_description: promptServer.short_description,
-        author: promptServer.author,
-        help_email: promptServer.help_email,
-        is_exclusive: false,
-        auth_type: promptServer.auth_type,
-        tools: [],
-        tools_detailed: [],
-        tool_count: 0,
-        prompts: promptServer.prompts || [],
-        prompt_count: promptServer.prompt_count || 0
+    // Add prompts to the unified list
+    prompts.forEach(promptServer => {
+      if (!allServers[promptServer.server]) {
+        allServers[promptServer.server] = {
+          server: promptServer.server,
+          description: promptServer.description,
+          short_description: promptServer.short_description,
+          author: promptServer.author,
+          help_email: promptServer.help_email,
+          is_exclusive: false,
+          auth_type: promptServer.auth_type,
+          tools: [],
+          tools_detailed: [],
+          tool_count: 0,
+          prompts: promptServer.prompts || [],
+          prompt_count: promptServer.prompt_count || 0
+        }
+      } else {
+        allServers[promptServer.server].prompts = promptServer.prompts || []
+        allServers[promptServer.server].prompt_count = promptServer.prompt_count || 0
+        // Also update auth_type if not already set
+        if (!allServers[promptServer.server].auth_type && promptServer.auth_type) {
+          allServers[promptServer.server].auth_type = promptServer.auth_type
+        }
       }
-    } else {
-      allServers[promptServer.server].prompts = promptServer.prompts || []
-      allServers[promptServer.server].prompt_count = promptServer.prompt_count || 0
-      // Also update auth_type if not already set
-      if (!allServers[promptServer.server].auth_type && promptServer.auth_type) {
-        allServers[promptServer.server].auth_type = promptServer.auth_type
-      }
-    }
-  })
+    })
   
-  const serverList = sortAtlasFirst(Object.values(allServers))
+    return sortAtlasFirst(Object.values(allServers))
+  }, [tools, prompts])
 
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {
@@ -475,26 +703,8 @@ const ToolsPanel = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null
 
-  return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={handleCloseAttempt}
-    >
-      <div 
-        className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] mx-4 flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-gray-100">Tools & Integrations</h2>
-          <button
-            onClick={handleCloseAttempt}
-            className="p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
+  const panelBody = (
+    <>
         {/* Controls Section */}
         <div className="px-4 py-3 border-b border-gray-700 flex-shrink-0 space-y-3">
           {/* Top Row: Add from Marketplace and Clear All */}
@@ -519,6 +729,44 @@ const ToolsPanel = ({ isOpen, onClose }) => {
 
         {/* Tools List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
+          {/* Data sources for the search tool (issue #839 review). Sources are
+              only ever consumed by search, so they live in the same view as the
+              tools rather than behind a separate top-bar drawer. */}
+          {features?.rag && (
+            <div className="px-4 pt-3" data-testid="tools-data-sources">
+              <button
+                type="button"
+                onClick={() => setSourcesCollapsed(v => !v)}
+                aria-expanded={!sourcesCollapsed}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-left"
+              >
+                {sourcesCollapsed
+                  ? <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                  : <ChevronDown className="w-4 h-4 text-gray-300 flex-shrink-0" />}
+                <Database className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                <span className="text-sm font-semibold text-gray-50">Data Sources for Search</span>
+                <span className="ml-auto text-xs text-gray-300 flex-shrink-0">
+                  {selectedDataSources?.size > 0 ? `${selectedDataSources.size} enabled` : 'none enabled'}
+                </span>
+              </button>
+              {!sourcesCollapsed && (
+                <div className="px-3">
+                  {/* DataSourcesSelector writes straight through to the chat
+                      context -- it is shared with the RAG panel, where there is
+                      no staging at all -- while the tool and prompt checkboxes
+                      below are staged until Save. Say so, rather than let
+                      "Discard Changes" look like it covers this section too
+                      (PR #839 review). */}
+                  <p className="pt-1 pb-2 text-xs text-gray-400">
+                    Data source changes apply immediately &mdash; Save and Discard Changes below cover
+                    tool and prompt selections only.
+                  </p>
+                  <DataSourcesSelector dense />
+                </div>
+              )}
+            </div>
+          )}
+
           {serverList.length === 0 ? (
             <div className="text-gray-400 text-center py-12 px-6">
               <div className="text-lg mb-4">No servers selected</div>
@@ -861,11 +1109,22 @@ const ToolsPanel = ({ isOpen, onClose }) => {
         
         {/* Footer with Save/Cancel buttons */}
         <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-gray-700 flex-shrink-0">
+          {justSaved && (
+            <span role="status" className="flex items-center gap-1.5 text-sm text-green-400 mr-auto">
+              <ShieldCheck className="w-4 h-4" />
+              Tool selections saved
+            </span>
+          )}
           <button
             onClick={handleCancel}
-            className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+            disabled={embedded && !hasChanges}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              embedded && !hasChanges
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
+            }`}
           >
-            Cancel
+            {embedded ? 'Discard Changes' : 'Cancel'}
           </button>
           <button
             onClick={handleSave}
@@ -880,13 +1139,20 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             Save Changes
           </button>
         </div>
-      </div>
+    </>
+  )
 
+  const panelModals = (
+    <>
       {/* Unsaved Changes Confirmation Dialog */}
       <UnsavedChangesDialog
         isOpen={showUnsavedDialog}
-        onSave={handleSaveAndClose}
-        onDiscard={handleDiscardAndClose}
+        title={discardOnly ? 'Discard Changes' : 'Unsaved Changes'}
+        message={discardOnly
+          ? 'This discards the tool and integration selections you have staged. Continue?'
+          : 'You have unsaved changes to your tools and integrations. What would you like to do?'}
+        onSave={discardOnly ? undefined : handleSaveAndClose}
+        onDiscard={discardOnly ? handleDiscardOnly : handleDiscardAndClose}
         onCancel={handleCancelDialog}
       />
 
@@ -906,8 +1172,11 @@ const ToolsPanel = ({ isOpen, onClose }) => {
       {/* Disconnect Confirmation Modal */}
       {disconnectServer && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Disconnect server"
           className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]"
-          onClick={() => { setDisconnectServer(null); setDisconnectError(null) }}
+          onClick={closeDisconnectConfirm}
         >
           <div
             className="bg-gray-800 rounded-lg shadow-xl max-w-sm w-full mx-4 p-6"
@@ -926,7 +1195,7 @@ const ToolsPanel = ({ isOpen, onClose }) => {
             )}
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => { setDisconnectServer(null); setDisconnectError(null) }}
+                onClick={closeDisconnectConfirm}
                 className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
               >
                 Cancel
@@ -941,8 +1210,50 @@ const ToolsPanel = ({ isOpen, onClose }) => {
           </div>
         </div>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div
+        role="tabpanel"
+        id="settings-tabpanel-tools"
+        aria-labelledby="settings-tab-tools"
+        hidden={!active}
+        className={`flex-1 min-h-0 flex-col ${active ? 'flex' : 'hidden'}`}
+      >
+        {panelBody}
+        {panelModals}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={() => handleCloseAttempt()}
+    >
+      <div
+        className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] mx-4 flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
+          <h2 className="text-lg font-semibold text-gray-100">Tools & Integrations</h2>
+          <button
+            onClick={() => handleCloseAttempt()}
+            className="p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {panelBody}
+      </div>
+
+      {panelModals}
     </div>
   )
 }
 
-export default ToolsPanel
+export default memo(ToolsPanel)
