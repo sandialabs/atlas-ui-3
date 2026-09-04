@@ -147,6 +147,35 @@ class TestPromptTextExtraction:
     def test_extract_string(self, service):
         assert service._extract_prompt_text("hello") == "hello"
 
+    def test_extract_get_prompt_result_messages(self, service):
+        """Extracts text from the actual MCP prompts/get response shape."""
+        from mcp.types import GetPromptResult, PromptMessage, TextContent
+
+        prompt_obj = GetPromptResult(
+            messages=[
+                PromptMessage(
+                    role="user",
+                    content=TextContent(type="text", text="Part 1."),
+                ),
+                PromptMessage(
+                    role="assistant",
+                    content=TextContent(type="text", text="Part 2."),
+                ),
+            ]
+        )
+
+        assert service._extract_prompt_text(prompt_obj) == "Part 1.\nPart 2."
+
+    def test_get_prompt_result_without_text_does_not_inject_repr(self, service):
+        """Structured MCP prompt results without text are skipped, not stringified."""
+        from types import SimpleNamespace
+
+        prompt_obj = SimpleNamespace(
+            messages=[SimpleNamespace(content=SimpleNamespace(data=b"image"))]
+        )
+
+        assert service._extract_prompt_text(prompt_obj) is None
+
     def test_extract_multi_content(self, service):
         """Concatenates all TextContent items, not just first."""
         from types import SimpleNamespace
