@@ -122,6 +122,21 @@ class PromptOverrideService:
         if isinstance(prompt_obj, str):
             return prompt_obj
 
+        # MCP prompts/get returns a GetPromptResult whose text lives under
+        # messages[i].content, not on the result itself.
+        if hasattr(prompt_obj, "messages"):
+            messages = getattr(prompt_obj, "messages")
+            if isinstance(messages, list):
+                texts = []
+                for message in messages:
+                    content = getattr(message, "content", None)
+                    content_items = content if isinstance(content, list) else [content]
+                    for item in content_items:
+                        text = getattr(item, "text", None)
+                        if isinstance(text, str):
+                            texts.append(text)
+                return "\n".join(texts) if texts else None
+
         # FastMCP PromptMessage-like: may have 'content' list with text entries
         if hasattr(prompt_obj, "content"):
             content_field = getattr(prompt_obj, "content")
