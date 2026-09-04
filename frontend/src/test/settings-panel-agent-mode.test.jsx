@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsPanel from '../components/SettingsPanel'
+import { ThemeProvider } from '../contexts/ThemeContext'
 import { useChat } from '../contexts/ChatContext'
 
 vi.mock('../contexts/ChatContext', () => ({
@@ -51,7 +52,11 @@ describe('SettingsPanel agent mode settings', () => {
       },
     })
 
-    return render(<SettingsPanel isOpen={true} onClose={vi.fn()} />)
+    return render(
+      <ThemeProvider>
+        <SettingsPanel isOpen={true} onClose={vi.fn()} />
+      </ThemeProvider>
+    )
   }
 
   it('shows agent-specific settings when agent mode is available', async () => {

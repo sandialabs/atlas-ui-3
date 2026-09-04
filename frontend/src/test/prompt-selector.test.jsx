@@ -21,7 +21,9 @@ vi.mock('lucide-react', () => ({
   ChevronDown: () => <span data-testid="chevron-down">v</span>,
   Sparkles: () => <span data-testid="sparkles">*</span>,
   User: () => <span data-testid="user">u</span>,
-  Users: () => <span data-testid="users">U</span>
+  Users: () => <span data-testid="users">U</span>,
+  Pencil: () => <span data-testid="pencil">e</span>,
+  Plus: () => <span data-testid="plus">+</span>
 }))
 
 describe('PromptSelector', () => {
@@ -325,8 +327,8 @@ describe('PromptSelector', () => {
       const button = screen.getByRole('button')
       fireEvent.click(button)
 
-      expect(screen.getByText('Custom Prompts')).toBeInTheDocument()
-      expect(screen.getByText('Select prompts to customize AI behavior')).toBeInTheDocument()
+      expect(screen.getByText('Add Custom Prompts')).toBeInTheDocument()
+      expect(screen.getByText('Pick one below to customize AI behavior')).toBeInTheDocument()
     })
 
     it('should close dropdown when clicking outside', () => {
@@ -335,12 +337,12 @@ describe('PromptSelector', () => {
       const button = screen.getByRole('button')
       fireEvent.click(button)
       
-      expect(screen.getByText('Custom Prompts')).toBeInTheDocument()
+      expect(screen.getByText('Add Custom Prompts')).toBeInTheDocument()
 
       // Click outside
       fireEvent.mouseDown(document.body)
       
-      expect(screen.queryByText('Select prompts to customize AI behavior')).not.toBeInTheDocument()
+      expect(screen.queryByText('Pick one below to customize AI behavior')).not.toBeInTheDocument()
     })
 
     it('should toggle dropdown open/close', () => {
@@ -350,11 +352,11 @@ describe('PromptSelector', () => {
       
       // Open
       fireEvent.click(button)
-      expect(screen.getByText('Custom Prompts')).toBeInTheDocument()
+      expect(screen.getByText('Add Custom Prompts')).toBeInTheDocument()
 
       // Close
       fireEvent.click(button)
-      expect(screen.queryByText('Select prompts to customize AI behavior')).not.toBeInTheDocument()
+      expect(screen.queryByText('Pick one below to customize AI behavior')).not.toBeInTheDocument()
     })
   })
 

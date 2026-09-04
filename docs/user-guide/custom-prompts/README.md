@@ -13,11 +13,16 @@ conversation rather than replacing the default system prompt.
 The screenshots below were captured against a live server (`atlas/main.py`) with
 real LLM keys from `.env`, driving the built frontend through a browser.
 
-### 1. Settings → Prompts tab
+### 1. Tools and Settings → Prompts tab
 
-The Settings panel is now a wider, tabbed modal. **Prompts** is the first tab
-(General holds the legacy settings; **User Info** is a reserved stub for the
-related issue #595).
+The prompt library lives in the **Prompts** tab of the
+[Tools and Settings panel](../tools-and-settings/README.md) (the wrench button
+in the top bar). General holds the legacy settings; **User Info** is a reserved
+stub for the related issue #595.
+
+Shortcut: the prompt picker under the chat input has a pencil next to each of
+your prompts and a **New system prompt** button, both of which open this tab
+with the editor already on that prompt (issue #836).
 
 ![Empty Prompts tab](screenshots/153-01-prompts-tab-empty.png)
 
@@ -71,7 +76,7 @@ from the MCP stale-key validation that previously cleared it):
 | DB | `UserPromptRecord` + `UserPromptRepository` | Per-user CRUD (email-case normalized) on the shared chat-history engine |
 | API | `atlas/routes/user_prompt_routes.py` | `GET/POST/PUT/DELETE /api/user-prompts`, scoped to the authenticated user |
 | WS → LLM | `main.py` → `service` → `orchestrator` → `MessageBuilder` | Threads `custom_system_prompt`; when present it replaces the default system prompt (blank falls back) |
-| UI – manage | `SettingsPanel` (tabbed) + `PromptManager` | Create / edit / delete the library |
+| UI – manage | `SettingsPanel` (Tools and Settings, tabbed) + `PromptManager` | Create / edit / delete the library |
 | UI – pick | `PromptSelector` + `ChatContext` | "My Prompts" section; active prompt's text is sent as `custom_system_prompt` |
 
 ## Running it locally
@@ -84,7 +89,7 @@ cd ../atlas && python main.py        # http://127.0.0.1:$PORT
 
 Requires both `FEATURE_CUSTOM_PROMPTS_ENABLED=true` and
 `FEATURE_CHAT_HISTORY_ENABLED=true` (the prompt library shares the chat-history
-database). When the custom prompt flag is off, the Settings prompt tab and
+database). When the custom prompt flag is off, the Prompts tab and the
 "My Prompts" selector section are hidden.
 
 ## Database / deployment

@@ -116,3 +116,8 @@ screenshots/
 !docs/**/screenshots/
 docs/planning/improvements1.md
 scripts/_e2e_artifacts/
+
+# Node dependencies and local build caches (never committed; test_e2e/node_modules
+# predates this and stays tracked)
+/node_modules/
+frontend/node_modules/

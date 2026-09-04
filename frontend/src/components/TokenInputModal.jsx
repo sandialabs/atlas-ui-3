@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useEscapeKey } from '../hooks/useEscapeKey'
 import { X, Upload, RefreshCw, Eye, EyeOff } from 'lucide-react'
 
 /**
@@ -78,10 +79,14 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
     onClose()
   }
 
+  useEscapeKey(isOpen, handleClose)
+
   if (!isOpen) return null
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]"
       onClick={handleClose}
     >

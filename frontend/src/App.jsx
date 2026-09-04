@@ -1,5 +1,5 @@
 /* eslint-disable no-undef */
-import { useState, useEffect } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom' // Import Link
 import { ChatProvider, useChat } from './contexts/ChatContext'
 import { WSProvider } from './contexts/WSContext'
@@ -8,7 +8,6 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
-import ToolsPanel from './components/ToolsPanel'
 import SettingsPanel from './components/SettingsPanel'
 import RagPanel from './components/RagPanel'
 import CanvasPanel from './components/CanvasPanel'
@@ -26,6 +25,7 @@ import ElicitationDialog from './components/ElicitationDialog'
 import AgentPortal from './components/AgentPortal'
 import { ToastProvider, DialogProvider } from './components/ui/ToastProvider'
 import { watchAppViewportHeight } from './utils/visualViewportHeight'
+import { OPEN_SETTINGS_EVENT, parseOpenSettingsDetail } from './utils/settingsPanelEvents'
 import { useCanvasLayout } from './hooks/useCanvasLayout'
 
 // Log build info to browser console on startup
@@ -34,8 +34,11 @@ console.info(
 )
 
 function ChatInterface() {
-  const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
+  // Tools, prompts, general settings, and admin quick controls are all tabs of
+  // one panel now (issue #836); settingsPanelTab picks which one opens.
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
+  const [settingsPanelTab, setSettingsPanelTab] = useState(null)
+  const [promptIntent, setPromptIntent] = useState(null)
   const [ragPanelOpen, setRagPanelOpen] = useState(false)
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false)
   const [, setCanvasPanelWidth] = useState(0)
@@ -55,20 +58,46 @@ function ChatInterface() {
 
   useEffect(() => watchAppViewportHeight(), [])
 
-  // Auto-open tools panel when returning from marketplace
+  const openSettings = useCallback((tab = null, intent = null) => {
+    setSettingsPanelTab(tab)
+    setPromptIntent(intent)
+    setSettingsPanelOpen(true)
+  }, [])
+
+  const closeSettings = useCallback(() => {
+    setSettingsPanelOpen(false)
+    setPromptIntent(null)
+  }, [])
+
+  // The prompts tab reports back once an intent has opened its editor; holding
+  // it any longer would re-apply it every time that tab is re-entered.
+  const clearPromptIntent = useCallback(() => setPromptIntent(null), [])
+
+  // Auto-open the tools tab when returning from the marketplace
   useEffect(() => {
     const shouldOpenToolsPanel = sessionStorage.getItem('openToolsPanel')
     if (shouldOpenToolsPanel === 'true') {
-      setToolsPanelOpen(true)
+      openSettings('tools')
       sessionStorage.removeItem('openToolsPanel') // Clear the flag
     }
-  }, [])
+  }, [openSettings])
+
+  // Components too deep to receive props (the prompt selector under the chat
+  // box) ask for a specific tab via a window event.
+  useEffect(() => {
+    const handleOpenRequest = (event) => {
+      const { tab, promptIntent: intent } = parseOpenSettingsDetail(event.detail)
+      openSettings(tab, intent)
+    }
+    window.addEventListener(OPEN_SETTINGS_EVENT, handleOpenRequest)
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, handleOpenRequest)
+  }, [openSettings])
 
   // Auto-open canvas panel when content is received
   useEffect(() => {
     if (canvasContent && canvasContent.trim()) {
-      // Close other panels when canvas opens
-      setToolsPanelOpen(false)
+      // Close other panels when canvas opens. The Tools and Settings modal is
+      // left alone on purpose -- closing it would discard unsaved edits.
       setFilesPanelOpen(false)
       setCanvasPanelOpen(true)
     }
@@ -77,8 +106,8 @@ function ChatInterface() {
   // Auto-open canvas panel when custom UI content is received
   useEffect(() => {
     if (customUIContent) {
-      // Close other panels when canvas opens
-      setToolsPanelOpen(false)
+      // Close other panels when canvas opens. The Tools and Settings modal is
+      // left alone on purpose -- closing it would discard unsaved edits.
       setFilesPanelOpen(false)
       setCanvasPanelOpen(true)
     }
@@ -87,8 +116,8 @@ function ChatInterface() {
   // Auto-open canvas panel when viewable files are received
   useEffect(() => {
     if (canvasFiles && canvasFiles.length > 0) {
-      // Close other panels when canvas opens
-      setToolsPanelOpen(false)
+      // Close other panels when canvas opens. The Tools and Settings modal is
+      // left alone on purpose -- closing it would discard unsaved edits.
       setFilesPanelOpen(false)
       setCanvasPanelOpen(true)
     }
@@ -126,28 +155,25 @@ function ChatInterface() {
           <Header
             onToggleSidebar={() => setSidebarMobileOpen(!sidebarMobileOpen)}
             onToggleRag={() => setRagPanelOpen(!ragPanelOpen)}
-            onToggleTools={() => {
-              if (!toolsPanelOpen) {
-                setCanvasPanelOpen(false)
-                setFilesPanelOpen(false)
-              }
-              setToolsPanelOpen(!toolsPanelOpen)
-            }}
             onToggleFiles={() => {
               if (!filesPanelOpen) {
                 setCanvasPanelOpen(false)
-                setToolsPanelOpen(false)
               }
               setFilesPanelOpen(!filesPanelOpen)
             }}
             onToggleCanvas={() => {
               if (!canvasPanelOpen) {
-                setToolsPanelOpen(false)
                 setFilesPanelOpen(false)
               }
               setCanvasPanelOpen(!canvasPanelOpen)
             }}
-            onToggleSettings={() => setSettingsPanelOpen(!settingsPanelOpen)}
+            onToggleSettings={(tab = null) => {
+              if (settingsPanelOpen) {
+                closeSettings()
+              } else {
+                openSettings(tab)
+              }
+            }}
             onCloseCanvas={() => setCanvasPanelOpen(false)}
           />
 
@@ -176,18 +202,13 @@ function ChatInterface() {
           </div>
         </div>
 
-        {/* Tools Panel Overlay */}
-        {features?.tools && (
-          <ToolsPanel
-            isOpen={toolsPanelOpen}
-            onClose={() => setToolsPanelOpen(false)}
-          />
-        )}
-
-        {/* Settings Panel Overlay */}
+        {/* Combined Tools and Settings Panel */}
         <SettingsPanel
           isOpen={settingsPanelOpen}
-          onClose={() => setSettingsPanelOpen(false)}
+          onClose={closeSettings}
+          initialTab={settingsPanelTab}
+          promptIntent={promptIntent}
+          onPromptIntentConsumed={clearPromptIntent}
         />
 
         {/* Right Side Panels Container */}

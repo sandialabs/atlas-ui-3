@@ -3,13 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
-import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
-import TokenInputModal from './TokenInputModal'
 import WorkspaceSelector from './WorkspaceSelector'
-import { Database, ChevronDown, Wrench, Bot, Download, Plus, HelpCircle, Shield, FolderOpen, Monitor, Settings, Menu, X, Key, PanelLeft, HardDrive, Cloud, Printer, Sun, Moon, Eye, Info, Terminal } from 'lucide-react'
+import { Database, Wrench, Bot, Download, Plus, CircleHelp, Shield, FolderOpen, Monitor, Menu, X, PanelLeft, HardDrive, Cloud, Printer, Terminal } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useElementWidth } from '../hooks/useElementWidth'
-import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from './ui/toastContext'
 
 // Save mode display config: label, icon component, button classes, title text
@@ -38,18 +35,24 @@ const SAVE_MODE_CONFIG = {
 }
 
 // Header width (not viewport width) at which the full desktop button cluster
-// fits. Below it the cluster collapses into the hamburger menu. Measured: the
-// cluster stops colliding at a header width of 1289px, so this carries a little
-// headroom for the fonts and locale-dependent labels that shift those widths.
-const DESKTOP_ACTIONS_MIN_WIDTH = 1320
+// fits. Below it the cluster collapses into the hamburger menu. The cluster is
+// smaller since issue #839 -- the model picker moved to the chat bar and the
+// admin shield, Help label, and Portal label are gone -- so the threshold came
+// down with it, and still carries headroom for locale-dependent label widths.
+export const DESKTOP_ACTIONS_MIN_WIDTH = 1080
 
-const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
+// Below this the left-hand buttons drop their text labels and show icons only.
+// This is the header's own width rather than a Tailwind viewport breakpoint
+// (`hidden md:inline`): the header sits beside a sidebar and a canvas panel, so
+// a viewport query kept labels at widths where they no longer fit and dropped
+// them at widths where they did (issue #839 review -- "New chat has this
+// problem in particular").
+export const ACTION_LABELS_MIN_WIDTH = 760
+
+const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
   const {
     user,
-    models,
-    currentModel,
-    setCurrentModel,
     agentModeAvailable,
     agentModeEnabled,
     setAgentModeEnabled,
@@ -60,41 +63,24 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
     messages,
     clearChat,
     features,
-    isInAdminGroup,
     complianceLevelFilter,
     setComplianceLevelFilter,
     selectedDataSources
   } = useChat()
-  const { isComplianceAccessible, complianceLevels } = useMarketplace()
+  const { complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
-  const { theme, toggleTheme } = useTheme()
   const toast = useToast()
-  const [dropdownOpen, setDropdownOpen] = useState(false)
   const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [llmAuthModalModel, setLlmAuthModalModel] = useState(null)
-  const [expandedModelInfo, setExpandedModelInfo] = useState(null)
-  const llmAuth = useLLMAuthStatus()
   // The desktop cluster is gated on the header's own width, not the viewport's:
   // the header sits beside a 256px sidebar, so a viewport query would reveal the
   // cluster while the header still lacks room for it. See useElementWidth.
   const [headerRef, headerWidth] = useElementWidth()
   const showDesktopActions = headerWidth >= DESKTOP_ACTIONS_MIN_WIDTH
-
-  // Fetch LLM auth status on mount
-  useEffect(() => {
-    llmAuth.fetchAuthStatus()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const showActionLabels = headerWidth >= ACTION_LABELS_MIN_WIDTH
   
   // Extract unique compliance levels from all available tools and prompts
   const availableComplianceLevels = complianceLevels.map(l => l.name)
-
-  const handleModelSelect = (model) => {
-    setCurrentModel(model)
-    setDropdownOpen(false)
-    setExpandedModelInfo(null)
-  }
 
   // Reset the compact menu once the header is wide enough for the desktop
   // cluster, so it does not spring back open if the header narrows again. The
@@ -107,7 +93,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
   // Close dropdowns when mobile menu opens
   useEffect(() => {
     if (mobileMenuOpen) {
-      setDropdownOpen(false)
       setDownloadDropdownOpen(false)
     }
   }, [mobileMenuOpen])
@@ -194,9 +179,11 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             title="Toggle Data Sources"
           >
             <Database className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-sm font-medium hidden lg:inline whitespace-nowrap">
-              {selectedDataSources?.size > 0 ? `${selectedDataSources.size} sources` : 'Sources'}
-            </span>
+            {showActionLabels && (
+              <span className="text-sm font-medium whitespace-nowrap">
+                {selectedDataSources?.size > 0 ? `${selectedDataSources.size} sources` : 'Sources'}
+              </span>
+            )}
           </button>
         )}
         
@@ -219,151 +206,17 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
           title="Start New Chat (Ctrl+Alt+N)"
         >
           <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-sm font-medium hidden md:inline whitespace-nowrap">New Chat</span>
+          {showActionLabels && (
+            <span className="text-sm font-medium whitespace-nowrap">New Chat</span>
+          )}
         </button>
       </div>
 
       {/* Right section */}
       <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-        {/* Model Selection Dropdown - Always visible but more compact on mobile.
-            The desktop floor is 7rem rather than the old 160px: a floor wider
-            than this button's now shrinkable wrapper made it spill over its
-            neighbours in a crowded header, while dropping the floor entirely
-            collapsed the label to a bare chevron. 7rem keeps the model name
-            legible without overlapping, and the title exposes it in full. */}
-        <div className="relative min-w-0">
-          <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors min-w-0 sm:min-w-[7rem] max-w-full"
-            title={currentModel ? `Model: ${currentModel}` : 'Select a model'}
-          >
-            <span className="text-xs sm:text-sm text-gray-200 truncate min-w-0">
-              {currentModel || 'Model...'}
-            </span>
-            {(() => {
-              const cm = models.find(m => (typeof m === 'string' ? m : m.name) === currentModel)
-              const cmObj = typeof cm === 'string' ? { name: cm } : cm
-              if (cmObj?.api_key_source === 'user') {
-                const hasKey = cmObj.user_has_key || llmAuth.getModelAuth(currentModel)?.authenticated
-                return <Key className={`w-3 h-3 flex-shrink-0 ${hasKey ? 'text-green-400' : 'text-orange-400'}`} />
-              }
-              return null
-            })()}
-            <ChevronDown className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-          </button>
-          
-          {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 w-72 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
-              {models.length === 0 ? (
-                <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
-              ) : (
-                (() => {
-                  // Filter models by compliance level if feature is enabled
-                  const complianceEnabled = features?.compliance_levels
-                  const filteredModels = complianceEnabled && complianceLevelFilter
-                    ? models.filter(m => {
-                        const model = typeof m === 'string' ? { name: m } : m
-                        return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
-                      })
-                    : models
-
-                  return filteredModels.map(m => {
-                    const model = typeof m === 'string' ? { name: m } : m
-                    const modelName = model.name || m
-                    const needsUserKey = model.api_key_source === 'user'
-                    const hasUserKey = model.user_has_key === true || llmAuth.getModelAuth(modelName)?.authenticated === true
-                    const isDisabled = needsUserKey && !hasUserKey
-                    const isExpanded = expandedModelInfo === modelName
-                    return (
-                      <div
-                        key={modelName}
-                        className="border-b border-gray-700 last:border-b-0 first:rounded-t-lg last:rounded-b-lg"
-                      >
-                        {/* Model row: name, capability icons, (i) button */}
-                        <div className="flex items-center">
-                          <button
-                            onClick={() => !isDisabled && handleModelSelect(modelName)}
-                            className={`flex-1 min-w-0 text-left px-3 py-2 text-sm flex items-center gap-2 ${
-                              isDisabled
-                                ? 'text-gray-500 cursor-not-allowed'
-                                : 'text-gray-200 hover:bg-gray-700'
-                            }`}
-                            disabled={isDisabled}
-                            title={isDisabled ? 'Configure your API key to use this model' : modelName}
-                          >
-                            <span className="truncate">{modelName}</span>
-                            <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                              {model.supports_vision ? (
-                                <Eye className="w-3.5 h-3.5 text-green-400" title="Vision" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5 text-gray-600" title="No vision" />
-                              )}
-                              {model.supports_tools !== false ? (
-                                <Wrench className="w-3.5 h-3.5 text-blue-400" title="Tools" />
-                              ) : (
-                                <Wrench className="w-3.5 h-3.5 text-gray-600" title="No tools" />
-                              )}
-                            </span>
-                          </button>
-                          {needsUserKey && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setLlmAuthModalModel(modelName)
-                                setDropdownOpen(false)
-                              }}
-                              className="px-1.5 py-2 hover:bg-gray-700 transition-colors"
-                              title={hasUserKey ? 'API key configured (click to change)' : 'Click to add your API key'}
-                            >
-                              <Key className={`w-3.5 h-3.5 ${hasUserKey ? 'text-green-400' : 'text-orange-400'}`} />
-                            </button>
-                          )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setExpandedModelInfo(isExpanded ? null : modelName)
-                            }}
-                            className={`px-2 py-2 hover:bg-gray-700 transition-colors ${isExpanded ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}
-                            title="Model info"
-                          >
-                            <Info className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        {/* Expanded model card */}
-                        {isExpanded && (
-                          <div className="px-3 pb-3 pt-2 text-xs bg-gray-900/50 border-t border-gray-700 space-y-2">
-                            {model.model_card && (
-                              <p className="text-gray-300 leading-relaxed whitespace-pre-line">{model.model_card}</p>
-                            )}
-                            {!model.model_card && model.description && (
-                              <p className="text-gray-400">{model.description}</p>
-                            )}
-                            <div className="flex flex-wrap gap-1.5">
-                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_vision ? 'bg-green-900/50 text-green-400 border border-green-800' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
-                                <Eye className="w-3 h-3" />
-                                Vision {model.supports_vision ? '' : '(no)'}
-                              </span>
-                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_tools !== false ? 'bg-blue-900/50 text-blue-400 border border-blue-800' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
-                                <Wrench className="w-3 h-3" />
-                                Tools {model.supports_tools !== false ? '' : '(no)'}
-                              </span>
-                              {complianceEnabled && model.compliance_level && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white">
-                                  <Shield className="w-3 h-3" />
-                                  {model.compliance_level}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })
-                })()
-              )}
-            </div>
-          )}
-        </div>
+        {/* The model picker moved to the chat bar (issue #839 review): the
+            message box is where people work, so the model in use belongs there.
+            See ModelSelector, rendered by ChatArea. */}
 
         {/* Connection Status - Show dot on all screens, text on sm+ */}
         <div className="flex items-center gap-2 text-xs">
@@ -483,74 +336,46 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
             </button>
           )}
 
-          {/* Admin Button - Only show for admin users */}
-          {isInAdminGroup && (
-            <button
-              onClick={() => navigate('/admin')}
-              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-              title="Admin Dashboard"
-            >
-              <Shield className="w-5 h-5" />
-            </button>
-          )}
+          {/* The admin shield is gone from the toolbar (issue #839 review):
+              admin controls are the Admin tab of Tools and Settings, and the
+              full dashboard is one click further in from there. */}
 
-          {/* Theme Toggle */}
+          {/* Tools and Settings -- tools, integrations, prompts, general
+              settings (including light/dark), and admin quick controls all
+              live behind this one button (issue #836). */}
           <button
-            onClick={toggleTheme}
+            onClick={() => onToggleSettings()}
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title="Tools and Settings"
+            aria-label="Tools and Settings"
           >
-            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            <Wrench className="w-5 h-5" />
           </button>
 
-          {/* Settings Button */}
-          <button
-            onClick={onToggleSettings}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-            title="Settings"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
-
-          {/* Help Button */}
+          {/* Help. Icon only, and a ringed question mark rather than the old
+              outline circle: the reviewer asked for a clearer help glyph so the
+              word could go and the toolbar could lose a chunk of text. */}
           <button
             onClick={() => navigate('/help')}
-            className="flex items-center gap-1 px-2 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
             title="Help"
+            aria-label="Help"
           >
-            <HelpCircle className="w-5 h-5" />
-            <span className="text-sm">Help</span>
+            <CircleHelp className="w-5 h-5" />
           </button>
 
           {/* Agent Portal Button */}
           {features?.agent_portal && (
             <button
               onClick={() => navigate('/agent-portal')}
-              className="flex items-center gap-1 px-2 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
               title="Agent Portal -- launch host processes"
+              aria-label="Agent Portal"
             >
               <Terminal className="w-5 h-5" />
-              <span className="text-sm">Portal</span>
             </button>
           )}
 
-          {/* Tools Panel Toggle */}
-          {(() => {
-            if (features?.tools) {
-              return (
-                <button
-                  onClick={onToggleTools}
-                  className="p-2 rounded-lg bg-yellow-500 border border-red-500 block"
-                  title="Toggle Tools, Integrations, and Prompts"
-                >
-                  <Wrench className="w-5 h-5" />
-                </button>
-              );
-            } else {
-              return null; // Render nothing if not showing
-            }
-          })()}
-          
           {/* File Manager Panel Toggle */}
           {features?.files_panel && (
             <button
@@ -718,33 +543,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 </button>
               )}
 
-              {/* Admin Button */}
-              {isInAdminGroup && (
-                <button
-                  onClick={() => {
-                    navigate('/admin')
-                    setMobileMenuOpen(false)
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
-                >
-                  <Shield className="w-5 h-5" />
-                  <span>Admin Dashboard</span>
-                </button>
-              )}
-
-              {/* Theme Toggle */}
-              <button
-                onClick={() => {
-                  toggleTheme()
-                  setMobileMenuOpen(false)
-                }}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
-              >
-                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-              </button>
-
-              {/* Settings Button */}
+              {/* Tools and Settings (issue #836) */}
               <button
                 onClick={() => {
                   onToggleSettings()
@@ -752,8 +551,8 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 }}
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
               >
-                <Settings className="w-5 h-5" />
-                <span>Settings</span>
+                <Wrench className="w-5 h-5" />
+                <span>Tools and Settings</span>
               </button>
 
               {/* Help Button */}
@@ -764,7 +563,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 }}
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
               >
-                <HelpCircle className="w-5 h-5" />
+                <CircleHelp className="w-5 h-5" />
                 <span>Help</span>
               </button>
 
@@ -782,20 +581,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
                 </button>
               )}
 
-              {/* Tools Panel Toggle */}
-              {features?.tools && (
-                <button
-                  onClick={() => {
-                    onToggleTools()
-                    setMobileMenuOpen(false)
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-yellow-500 border border-red-500 text-sm transition-colors"
-                >
-                  <Wrench className="w-5 h-5" />
-                  <span>Tools & Prompts</span>
-                </button>
-              )}
-              
               {/* File Manager Panel Toggle */}
               {features?.files_panel && (
                 <button
@@ -826,14 +611,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         </>
       )}
 
-      {/* Close dropdown when clicking outside */}
-      {dropdownOpen && (
-        <div 
-          className="fixed inset-0 z-40" 
-          onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }}
-        />
-      )}
-      
       {/* Close download dropdown when clicking outside */}
       {downloadDropdownOpen && (
         <div
@@ -842,18 +619,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleTools, onToggleFiles, on
         />
       )}
 
-      {/* LLM API Key Modal */}
-      <TokenInputModal
-        isOpen={llmAuthModalModel !== null}
-        serverName={llmAuthModalModel || ''}
-        onClose={() => setLlmAuthModalModel(null)}
-        onUpload={async (tokenData) => {
-          await llmAuth.uploadToken(llmAuthModalModel, tokenData)
-          setLlmAuthModalModel(null)
-        }}
-        isLoading={llmAuth.loading}
-        error={llmAuth.error}
-      />
     </header>
   )
 }

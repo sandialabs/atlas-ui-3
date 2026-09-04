@@ -78,7 +78,7 @@ The test suite includes:
 - ✅ Welcome screen shows proper messaging
 
 ### 🔧 **Tools Panel Tests**
-- ✅ Toggle Tools button works
+- ✅ Tools and Settings button works
 - ✅ Tools & Integrations panel becomes visible
 - ✅ Marketplace navigation buttons appear
 
