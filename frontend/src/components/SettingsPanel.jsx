@@ -460,14 +460,16 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           />
         )}
 
-        {/* Data source changes apply immediately, matching the Sources drawer. */}
         {ragEnabled && activeTab === 'dataSources' && (
           <div
             role="tabpanel"
             id="settings-tabpanel-dataSources"
             aria-labelledby="settings-tab-dataSources"
-            className="flex-1 overflow-y-auto custom-scrollbar min-h-0"
+            className="flex-1 flex flex-col min-h-0"
           >
+            <p className="px-4 pt-4 text-xs text-gray-400 flex-shrink-0">
+              Data source changes apply immediately, matching the Sources drawer.
+            </p>
             <DataSourcesSelector />
           </div>
         )}
