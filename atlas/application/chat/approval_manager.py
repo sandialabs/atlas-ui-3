@@ -30,6 +30,9 @@ class ToolApprovalRequest:
         self.tool_call_id = tool_call_id
         self.tool_name = tool_name
         self.arguments = arguments
+        # PresentedCall is owned by the caller that actually emits the UI
+        # payload. If a legacy/direct caller omits it, keep the supplied
+        # arguments as-is rather than reconstructing a client-visible form.
         self.display_arguments = arguments if display_arguments is None else display_arguments
         self.allow_edit = allow_edit
         self.user_email = user_email
@@ -55,6 +58,7 @@ class ToolApprovalRequest:
             logger.warning("Approval request timed out for tool %s", safe_tool_name)
             record_tool_decision(
                 user_email=self.user_email,
+                request_owner=self.user_email,
                 tool_call_id=self.tool_call_id,
                 tool_name=self.tool_name,
                 arguments=self.display_arguments,
@@ -107,13 +111,6 @@ class ToolApprovalManager:
         Returns:
             ToolApprovalRequest object
         """
-        if display_arguments is None:
-            # Keep the audit baseline identical to the executor/UI sanitizer
-            # without making callers duplicate that representation.
-            from .utilities.tool_executor import _sanitize_args_for_ui
-
-            display_arguments = _sanitize_args_for_ui(dict(arguments))
-
         request = ToolApprovalRequest(
             tool_call_id,
             tool_name,
@@ -172,16 +169,18 @@ class ToolApprovalManager:
             # not recognize sanitize_for_logging() as one.
             safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
             safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
+            safe_approved = str(approved).replace("\r", "").replace("\n", "")
             logger.warning(
                 "SECURITY: approval response rejected — user %s attempted to "
                 "respond to tool call owned by a different user "
                 "(call_id: %s, approved=%s)",
                 safe_user_email,
                 safe_tool_call_id,
-                approved,
+                safe_approved,
             )
             record_tool_decision(
                 user_email=user_email,
+                request_owner=request.user_email,
                 tool_call_id=request.tool_call_id,
                 tool_name=request.tool_name,
                 arguments=request.display_arguments,
@@ -195,9 +194,10 @@ class ToolApprovalManager:
         # Only the first response affects execution; do not emit contradictory
         # audit evidence for later responses that are ignored by set_response().
         if request.future.done():
+            safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
             logger.debug(
                 "Ignoring duplicate approval response for completed request: %s",
-                sanitize_for_logging(tool_call_id),
+                safe_tool_call_id,
             )
             return True
 
@@ -218,6 +218,7 @@ class ToolApprovalManager:
         request.set_response(approved, arguments, reason)
         record_tool_decision(
             user_email=user_email or request.user_email,
+            request_owner=request.user_email,
             tool_call_id=request.tool_call_id,
             tool_name=request.tool_name,
             arguments=effective_arguments,
@@ -229,10 +230,11 @@ class ToolApprovalManager:
         # Keep the request in the dict for a bit to avoid race conditions
         # It will be cleaned up later
         safe_tool_name = str(request.tool_name).replace("\r", "").replace("\n", "")
+        safe_approved = str(approved).replace("\r", "").replace("\n", "")
         logger.info(
             "Approval response handled for tool %s: approved=%s",
             safe_tool_name,
-            approved,
+            safe_approved,
         )
         return True
 

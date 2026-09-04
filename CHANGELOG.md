@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #887 - 2026-09-04
+- **Tool-approval decisions now keep a reconstructable argument lineage**: the executor stores the exact client-visible arguments it sent in the approval UI, an explicit empty edit (`{}`) is executed as empty rather than silently falling back to the original payload, and the append-only decision audit hashes that presented/authorized form (not the later executed arguments). Cross-user rows name both the responder and the request owner; raw arguments are not persisted.
+
 ### PR #883 - 2026-09-02
 - **The canvas can now take the full window or stack above the chat** (#754): the canvas header gains an expand/shrink control (half <-> full width, with the chat hidden at full) and a move control (beside the chat <-> above the chat), alongside the existing close button. Below 768px the layout is forced to stacked -- a side-by-side split is unreadable on a phone -- and the move control is hidden without overwriting the stored preference, so widening the window restores it. Both choices persist per browser in local storage.
 

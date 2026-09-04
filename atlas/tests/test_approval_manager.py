@@ -326,13 +326,11 @@ class TestToolApprovalManager:
 
         assert request.allow_edit is False
 
-        # Even if arguments are provided, they should be used
+        # Client-supplied replacements are ignored when editing is disabled.
         request.set_response(approved=True, arguments={"arg1": "edited_value"})
         response = await request.wait_for_response(timeout=0.5)
 
-        # The response will contain the edited arguments, but the UI should
-        # respect allow_edit=False to prevent showing edit controls
-        assert response["arguments"] == {"arg1": "edited_value"}
+        assert response["arguments"] == {"arg1": "value1"}
 
     def test_cleanup_nonexistent_request(self):
         """Test cleaning up a request that doesn't exist."""

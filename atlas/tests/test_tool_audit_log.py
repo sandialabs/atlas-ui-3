@@ -1,6 +1,8 @@
 """Unit tests for the standalone tool approval audit sink."""
 
 import json
+import os
+import stat
 
 from atlas.modules.mcp_tools.tool_audit_log import hash_arguments, record_tool_decision
 
@@ -12,6 +14,7 @@ def test_record_tool_decision_is_append_only_and_redacts_payload(tmp_path, monke
     args = {"token": "secret-value", "nested": {"count": 2}}
     record_tool_decision(
         user_email="alice@example.com",
+        request_owner="alice@example.com",
         tool_call_id="call-1",
         tool_name="example_tool",
         arguments=args,
@@ -19,6 +22,7 @@ def test_record_tool_decision_is_append_only_and_redacts_payload(tmp_path, monke
     )
     record_tool_decision(
         user_email="alice@example.com",
+        request_owner="alice@example.com",
         tool_call_id="call-2",
         tool_name="example_tool",
         arguments={"token": "different-secret"},
@@ -32,6 +36,7 @@ def test_record_tool_decision_is_append_only_and_redacts_payload(tmp_path, monke
     second = json.loads(lines[1])
     assert first["decision_args_sha256"] == hash_arguments(args)
     assert first["decision"] == "approved"
+    assert first["request_owner"] == "alice@example.com"
     assert second["decision"] == "rejected"
     assert second["reason_present"] is True
 
@@ -66,3 +71,32 @@ def test_record_tool_decision_never_raises_for_bad_payload_or_write_path(tmp_pat
         decision="approved",
     )
     assert record["decision_args_sha256"] == hash_arguments({"value": 1})
+
+
+def test_audit_file_permissions_are_restrictive(tmp_path, monkeypatch):
+    audit_dir = tmp_path / "audit-dir"
+    path = audit_dir / "tool_call_audit.jsonl"
+    monkeypatch.setenv("TOOL_CALL_AUDIT_PATH", str(path))
+
+    record_tool_decision(
+        user_email="alice@example.com",
+        request_owner="alice@example.com",
+        tool_call_id="call-perms",
+        tool_name="example_tool",
+        arguments={"value": 1},
+        decision="approved",
+    )
+
+    assert path.exists()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(audit_dir.stat().st_mode) == 0o700
+    # Existing files are tightened on the next write as well.
+    os.chmod(path, 0o644)
+    record_tool_decision(
+        user_email="alice@example.com",
+        tool_call_id="call-perms-2",
+        tool_name="example_tool",
+        arguments={"value": 2},
+        decision="approved",
+    )
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600

@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-08-21
+Last updated: 2026-09-04
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -38,6 +38,7 @@ Key settings in the `.env` file include:
 *   **S3 Connection**: Configure the connection to your S3-compatible storage. For local testing, you can set `USE_MOCK_S3=true` to use an in-memory mock instead of a real S3 bucket. **This mock must never be used in production.**
 *   **Log Level**: The `LOG_LEVEL` variable controls logging verbosity and whether sensitive data (user input/output) is logged. Set to `INFO` for production to avoid logging sensitive content, or `DEBUG` for development/testing. See [Logging and Monitoring](logging-monitoring.md) for details.
 *   **Log Directory**: The `APP_LOG_DIR` variable points to the folder where the application log file (`app.jsonl`) will be stored. This path must be updated to a valid directory in your deployment environment.
+*   **Tool Approval Audit**: `TOOL_CALL_AUDIT_PATH` sets the append-only JSONL file for tool-approval decisions (default `data/tool_call_audit.jsonl`). See [Tool Approval System](tool-approval.md#decision-audit-trail).
 *   **Security Headers**: Configure Content Security Policy (CSP) and other security headers. See the Security Configuration section below for details.
 *   **RAG**: Enable RAG using `FEATURE_RAG_ENABLED=true` and configure sources in `rag-sources.json`. When disabled, the backend does not initialize RAG services and does not load `rag-sources.json`. RAG discovery is best-effort: a single failing source will not block others. See [RAG Configuration](external-rag-api.md) for details.
 

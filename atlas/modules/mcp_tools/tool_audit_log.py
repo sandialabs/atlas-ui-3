@@ -4,6 +4,21 @@ The tool executor already emits execution telemetry. This module records the
 approval decision that precedes execution so operators can correlate the two
 using ``tool_call_id`` without storing raw tool arguments.
 
+``decision_args_sha256`` is a SHA-256 of the canonical JSON for the arguments
+seen at the *decision* boundary (the PresentedCall, or the approved edited
+form). It is a correlation/integrity fingerprint, not a confidentiality
+control: low-entropy arguments (filenames, flags, IDs) can be confirmed by
+enumerating likely values. Access control therefore rests on the audit file
+permissions (directory ``0o700``, file ``0o600``), not on the hash.
+
+Trusted fields such as ``_atlas_user`` may be re-injected after the decision,
+so this hash is intentionally not an execution hash. Correlate later
+execution evidence by ``tool_call_id`` rather than assuming the hashes match.
+
+The JSONL file is unbounded. Operators must rotate or archive
+``TOOL_CALL_AUDIT_PATH`` (default ``data/tool_call_audit.jsonl``) according to
+local retention policy.
+
 Audit writes are best-effort and must never block or fail a user action.
 """
 
@@ -32,8 +47,28 @@ def _resolve_audit_path() -> Path:
     if not path.is_absolute():
         project_root = Path(__file__).parent.parent.parent.parent
         path = project_root / path
-    path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _append_audit_line(path: Path, line: str) -> None:
+    """Append one JSONL line, creating an owner-only file when needed."""
+    parent = path.parent
+    created_parent = not parent.exists()
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if created_parent:
+        try:
+            os.chmod(parent, 0o700)
+        except OSError:
+            pass
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as handle:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        handle.write(line)
 
 
 def hash_arguments(arguments: Dict[str, Any]) -> str:
@@ -57,6 +92,7 @@ def record_tool_decision(
     decision_origin: str = "approval_response",
     arguments_edited: bool = False,
     reason_present: bool = False,
+    request_owner: str = "",
 ) -> Dict[str, Any]:
     """Append one tool approval decision to the JSONL audit trail.
 
@@ -65,6 +101,10 @@ def record_tool_decision(
     boundary; later execution may re-inject trusted fields before invoking the
     tool. Execution evidence should therefore be correlated by ``tool_call_id``
     rather than assuming the hashes are equal.
+
+    ``user`` is the actor who produced this decision row (the responder).
+    ``request_owner`` is the user bound to the pending call. They differ on
+    cross-user ownership failures.
 
     This sink is deliberately best-effort: malformed/unserializable payloads,
     path resolution failures, and write failures must never affect approval or
@@ -77,6 +117,7 @@ def record_tool_decision(
             "ts": datetime.now(timezone.utc).isoformat(),
             "event": "tool_approval_decision",
             "user": user_email,
+            "request_owner": request_owner,
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,
             "decision_args_sha256": hash_arguments(arguments),
@@ -87,8 +128,8 @@ def record_tool_decision(
         }
         path = _resolve_audit_path()
         line = json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n"
-        with _lock, open(path, "a", encoding="utf-8") as handle:
-            handle.write(line)
+        with _lock:
+            _append_audit_line(path, line)
     except Exception as exc:
         logger.warning("tool audit log write failed (%s)", type(exc).__name__)
 

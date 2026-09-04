@@ -1,6 +1,6 @@
 # Logging and Monitoring
 
-Last updated: 2026-02-21
+Last updated: 2026-09-04
 
 The application produces structured logs in JSON Lines format (`.jsonl`), which makes them easy to parse and analyze.
 
@@ -51,6 +51,10 @@ The application supports the following log levels (in order of increasing severi
 *   **`ERROR`**: Logs only errors and critical issues.
 
 *   **`CRITICAL`**: Logs only critical system failures.
+
+## Tool Approval Decision Audit
+
+Human tool-approval decisions (approve, reject, timeout, and failed ownership checks) are written to a separate append-only JSONL file, defaulting to `data/tool_call_audit.jsonl`. Override the path with `TOOL_CALL_AUDIT_PATH`. The file records a SHA-256 of the arguments seen at the decision boundary and the acting users; it does not persist raw tool arguments. See [Tool Approval System](tool-approval.md#decision-audit-trail) for the record format, permissions, retention, and hash threat model.
 
 ### Production Recommendations
 
