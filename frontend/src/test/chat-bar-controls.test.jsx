@@ -97,6 +97,20 @@ describe('ToolSelector in the chat bar', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  // The menu closed only on outside mousedown, so a keyboard user who opened it
+  // had no way to dismiss it and focus was left adrift (PR #839 review).
+  it('closes on Escape and returns focus to its button', () => {
+    render(<ToolSelector />)
+    const trigger = screen.getByRole('button', { name: /1 tool/ })
+    fireEvent.click(trigger)
+    expect(screen.getByPlaceholderText('Search tools...')).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByPlaceholderText('Search tools...')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
   // Parity with ToolsPanel (PR #839 review). The menu used to read the raw
   // `tools` list off the chat context, so a tool the panel hid -- its server
   // unselected in the marketplace -- was still listed and toggleable here.

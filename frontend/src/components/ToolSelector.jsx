@@ -1,8 +1,9 @@
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react'
 import { Wrench, ChevronDown, Search, SlidersHorizontal, Server } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
+import { useEscapeKey } from '../hooks/useEscapeKey'
 
 // Descriptions are the point of this menu -- the reviewer's complaint was a
 // "long, indistinguishable list of tool names" -- but a full paragraph in a
@@ -45,6 +46,16 @@ const ToolSelector = () => {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
   const dropdownRef = useRef(null)
+  const triggerRef = useRef(null)
+
+  // Escape closes the menu and puts focus back on the button that opened it,
+  // so it is not lost to the end of the document (PR #839 review). Outside
+  // mousedown alone left keyboard users with no way out.
+  const closeAndRestoreFocus = useCallback(() => {
+    setIsOpen(false)
+    triggerRef.current?.focus()
+  }, [])
+  useEscapeKey(isOpen, closeAndRestoreFocus)
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -82,10 +93,12 @@ const ToolSelector = () => {
     <div ref={dropdownRef} className="relative">
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-400 transition-colors"
         title="Turn tools on and off"
         aria-expanded={isOpen}
+        aria-haspopup="true"
       >
         <Wrench className="w-3 h-3" />
         <span className="underline decoration-dotted">

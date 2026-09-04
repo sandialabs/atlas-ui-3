@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, Wrench, Shield, Key, Eye, Info } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
+import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
 
@@ -27,6 +28,15 @@ const ModelSelector = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [expandedModelInfo, setExpandedModelInfo] = useState(null)
   const [llmAuthModalModel, setLlmAuthModalModel] = useState(null)
+  const triggerRef = useRef(null)
+
+  // Escape closes the menu and returns focus to its button (PR #839 review).
+  const closeAndRestoreFocus = useCallback(() => {
+    setDropdownOpen(false)
+    setExpandedModelInfo(null)
+    triggerRef.current?.focus()
+  }, [])
+  useEscapeKey(dropdownOpen && !llmAuthModalModel, closeAndRestoreFocus)
 
   useEffect(() => {
     llmAuth.fetchAuthStatus()
@@ -47,10 +57,13 @@ const ModelSelector = () => {
     <div className="relative">
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => setDropdownOpen(!dropdownOpen)}
         className="flex items-center gap-1 px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors max-w-[16rem]"
         title={currentModel ? `Model: ${currentModel}` : 'Select a model'}
-        aria-label="Select chat model"
+        aria-label={currentModel ? `Select chat model, currently ${currentModel}` : 'Select chat model'}
+        aria-expanded={dropdownOpen}
+        aria-haspopup="true"
       >
         <span className="text-xs truncate min-w-0">{currentModel || 'Model...'}</span>
         {currentObj?.api_key_source === 'user' && (
