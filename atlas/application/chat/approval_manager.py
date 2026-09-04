@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.modules.mcp_tools.tool_audit_log import record_tool_decision
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,14 @@ class ToolApprovalRequest:
             return await asyncio.wait_for(self.future, timeout=timeout)
         except asyncio.TimeoutError:
             logger.warning(f"Approval request timed out for tool {self.tool_name}")
+            record_tool_decision(
+                user_email=self.user_email,
+                tool_call_id=self.tool_call_id,
+                tool_name=self.tool_name,
+                arguments=self.arguments,
+                decision="timeout",
+                decision_origin="approval_timeout",
+            )
             raise
 
     def set_response(self, approved: bool, arguments: Optional[Dict[str, Any]] = None, reason: Optional[str] = None):
@@ -147,10 +156,42 @@ class ToolApprovalManager:
                 safe_tool_call_id,
                 approved,
             )
+            record_tool_decision(
+                user_email=user_email,
+                tool_call_id=request.tool_call_id,
+                tool_name=request.tool_name,
+                arguments=request.arguments,
+                decision="invalid_responder",
+                decision_origin="ownership_check",
+            )
             return False
+
+        # The request deliberately remains pending until the executor cleans it
+        # up, so a duplicate response can arrive after the Future is resolved.
+        # Only the first response affects execution; do not emit contradictory
+        # audit evidence for later responses that are ignored by set_response().
+        if request.future.done():
+            logger.debug(
+                "Ignoring duplicate approval response for completed request: %s",
+                sanitize_for_logging(tool_call_id),
+            )
+            return True
+
+        effective_arguments = arguments or request.arguments
+        arguments_edited = effective_arguments != request.arguments
 
         logger.debug("Found pending request for %s; setting response", sanitize_for_logging(tool_call_id))
         request.set_response(approved, arguments, reason)
+        record_tool_decision(
+            user_email=user_email or request.user_email,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments=effective_arguments,
+            decision="approved" if approved else "rejected",
+            decision_origin="approval_response",
+            arguments_edited=arguments_edited,
+            reason_present=bool(reason),
+        )
         # Keep the request in the dict for a bit to avoid race conditions
         # It will be cleaned up later
         logger.info(f"Approval response handled for tool {sanitize_for_logging(request.tool_name)}: approved={approved}")
