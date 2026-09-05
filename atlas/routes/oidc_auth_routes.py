@@ -54,15 +54,19 @@ _VERIFIER_KEY = "oidc_code_verifier"
 _NONCE_KEY = "oidc_nonce"
 _RETURN_TO_KEY = "oidc_return_to"
 
-# Error codes echoed to the SPA as a query parameter. Anything not on this
-# list becomes "unknown_error" so an IdP-supplied string can never be
-# reflected into the redirect URL or the log.
-_KNOWN_OAUTH_ERRORS = frozenset({
-    "access_denied", "invalid_request", "unauthorized_client",
-    "unsupported_response_type", "invalid_scope", "server_error",
-    "temporarily_unavailable", "consent_required", "login_required",
-    "interaction_required", "invalid_client",
-})
+# Error codes echoed to the SPA as a query parameter. Written as a map from a
+# constant to itself and read with ``.get``, so the value that reaches the log
+# and the redirect is always one of these literals -- an IdP-supplied (or
+# attacker-crafted) string is never reflected, only used as a lookup key.
+_KNOWN_OAUTH_ERRORS = {
+    code: code
+    for code in (
+        "access_denied", "invalid_request", "unauthorized_client",
+        "unsupported_response_type", "invalid_scope", "server_error",
+        "temporarily_unavailable", "consent_required", "login_required",
+        "interaction_required", "invalid_client",
+    )
+}
 
 
 def _oidc_settings():
@@ -160,14 +164,7 @@ async def oidc_callback(
         return _error_redirect("auth_disabled")
 
     if error:
-        # The logged and redirected value is taken *from the constant set*
-        # rather than from the request, so nothing an IdP (or an attacker
-        # crafting a callback URL) supplies can reach the log or the redirect.
-        error_code = "unknown_error"
-        for known in _KNOWN_OAUTH_ERRORS:
-            if error == known:
-                error_code = known
-                break
+        error_code = _KNOWN_OAUTH_ERRORS.get(error, "unknown_error")
         logger.warning("OIDC authorization error: %s", error_code)
         return _error_redirect(error_code)
 

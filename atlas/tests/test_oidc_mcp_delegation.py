@@ -138,3 +138,25 @@ class TestMintDelegatedToken:
                 "USER@EXAMPLE.GOV", "tools", DELEGATED_CONFIG
             )
         assert token is not None
+
+
+class TestLoggableServerName:
+    """Names must not be able to forge extra log records."""
+
+    def test_plain_name_passes_through(self):
+        from atlas.core.oidc.mcp_delegation import loggable_server_name
+
+        assert loggable_server_name("protected-tools") == "protected-tools"
+
+    def test_line_breaks_are_removed(self):
+        from atlas.core.oidc.mcp_delegation import loggable_server_name
+
+        result = loggable_server_name("tools\r\nERROR forged record")
+        assert "\n" not in result and "\r" not in result
+
+    def test_out_of_allowlist_names_are_replaced(self):
+        from atlas.core.oidc.mcp_delegation import loggable_server_name
+
+        assert loggable_server_name("tools <script>") == "<invalid-name>"
+        assert loggable_server_name("") == "<invalid-name>"
+        assert loggable_server_name("a" * 200) == "<invalid-name>"

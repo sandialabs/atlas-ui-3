@@ -43,8 +43,15 @@ _LOGGABLE_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 
 
 def loggable_server_name(server_name: str) -> str:
-    """Return the server name if it is safe to log verbatim, else a placeholder."""
-    return server_name if _LOGGABLE_NAME.fullmatch(server_name or "") else "<invalid-name>"
+    """Return a form of the server name that is safe to write to a log line.
+
+    Two steps, because either alone leaves a gap: line breaks are stripped so a
+    name can never forge an additional log record, and the result must still
+    match the allowlist or it is replaced wholesale. A name outside the pattern
+    is not one we could attribute anything to anyway.
+    """
+    stripped = (server_name or "").replace("\r", "").replace("\n", "")
+    return stripped if _LOGGABLE_NAME.fullmatch(stripped) else "<invalid-name>"
 
 
 def is_delegated_server(server_config: Dict[str, Any]) -> bool:
