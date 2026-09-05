@@ -863,6 +863,23 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         else:
             kwargs["temperature"] = model_config.temperature or 0.7
 
+        # Reasoning effort, when the model's config asks for one. Sent on every
+        # request to that model, so the tool-carrying and plain paths (and their
+        # streaming twins) all get it from this one place. Omitted when unset, so
+        # no already-working model's payload changes.
+        #
+        # This is what makes OpenAI's GPT-5.6 family usable with tools at all:
+        #     Function tools with reasoning_effort are not supported for
+        #     gpt-5.6-luna in /v1/chat/completions. To use function tools, use
+        #     /v1/responses or set reasoning_effort to 'none'.
+        # (GH #756.) It also clears the separate `temperature` rejection those
+        # models return, because with reasoning off they accept a non-default
+        # temperature again -- which matters here because `temperature` above is
+        # unconditional.
+        reasoning_effort = getattr(model_config, "reasoning_effort", None)
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+
         # Resolve API key based on api_key_source
         api_key_source = getattr(model_config, "api_key_source", "system")
         if api_key_source == "user":

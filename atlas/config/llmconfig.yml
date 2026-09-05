@@ -44,6 +44,25 @@ models:
       calling, and up to 1M tokens of context. It is ideal for classification,
       autocompletion, and fast lightweight tasks where latency matters more than
       peak reasoning quality. Context window: 1M tokens. Output limit: 32K tokens.
+  gpt-5.6-luna:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-5.6-luna"
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+    supports_tools: true
+    # Required, not optional. Without it every tool-carrying request to this
+    # model is rejected with HTTP 400: "Function tools with reasoning_effort are
+    # not supported for gpt-5.6-luna in /v1/chat/completions. To use function
+    # tools, use /v1/responses or set reasoning_effort to 'none'." The same
+    # setting also makes the model accept the non-default temperature this
+    # backend always sends. The other GPT-5.6 models (gpt-5.6-sol,
+    # gpt-5.6-terra) return the same error and need the same line.
+    reasoning_effort: "none"
+    model_card: >
+      GPT-5.6 Luna is the low-cost member of OpenAI's GPT-5.6 reasoning family.
+      Reasoning effort is pinned to "none" here because function tools are
+      rejected on /v1/chat/completions at any other effort level; raise it only
+      if this deployment moves tool calls to /v1/responses.
   groq-gpt-oss-120b:
     model_url: "https://api.groq.com/openai/v1"
     model_name: "openai/gpt-oss-120b"

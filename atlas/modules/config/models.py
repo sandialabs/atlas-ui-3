@@ -105,6 +105,13 @@ class ModelConfig(BaseModel):
     # Whether this model supports tool/function calling.
     # When false, tools are stripped from requests and the user is warned.
     supports_tools: bool = True
+    # Reasoning effort to send with every request to this model, e.g. "none",
+    # "low", "medium", "high". Left unset for models that have no reasoning
+    # control, which is every model shipped before the GPT-5.6 family: the key
+    # is then omitted entirely and the payload is byte-identical to today's.
+    # Required for OpenAI's GPT-5.6 models, which reject function tools on
+    # /v1/chat/completions unless reasoning effort is explicitly "none".
+    reasoning_effort: Optional[str] = None
     # Rich model card text shown in the UI info panel (markdown allowed).
     # Provides details like context window, training info, strengths, etc.
     model_card: Optional[str] = None
