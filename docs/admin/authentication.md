@@ -1,8 +1,15 @@
 # Authentication & Authorization
 
-Last updated: 2026-04-12
+Last updated: 2026-09-04
 
-The application is designed with the expectation that it operates behind a reverse proxy in a production environment. It does **not** handle user authentication (i.e., logging users in) by itself. Instead, it trusts a header that is injected by an upstream authentication service.
+This page describes Atlas's **default** authentication mode: the application
+operates behind a reverse proxy and trusts an identity header injected by an
+upstream authentication service, rather than logging users in itself.
+
+Atlas can alternatively terminate login itself as an OpenID Connect relying
+party -- see [OIDC Login & Delegated Credentials](oidc-authentication.md). That
+mode is opt-in (`FEATURE_OIDC_AUTH_ENABLED`), works with or without a reverse
+proxy, and leaves everything on this page unchanged when it is off.
 
 ## Production Authentication Flow
 

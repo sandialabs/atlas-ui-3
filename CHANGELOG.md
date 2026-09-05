@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #TBD - 2026-09-04
+- **Atlas can now log users in itself as an OIDC relying party** (#891): three related capabilities, all opt-in and all leaving the existing trusted-header auth mode untouched. (1) OIDC login via the Authorization Code flow with PKCE, with the browser holding only an opaque session id and every token staying server-side. (2) Atlas authenticating itself to the IdP as a confidential client via `client_secret_basic`, `client_secret_post`, or a `private_key_jwt` assertion. (3) Delegated downstream authorization as pluggable providers -- RFC 8693 token exchange and Microsoft Entra ID On-Behalf-Of -- so an MCP server configured with `auth_type: "delegated"` receives a short-lived, audience-specific token instead of the user's own, which Atlas never forwards. See `docs/admin/oidc-authentication.md`.
+
 ### PR #890 - 2026-09-04
 - **Follow-ups to the Data Sources tab** (#889): the source rows are real toggle buttons (`aria-pressed`) instead of click-only `<div>`s, so the picker is operable from the keyboard -- promoting it into a focus-trapped modal tab had left every source unreachable by Tab, with "Enable All"/"Clear All" the only way in. Out-of-boundary rows stay focusable via `aria-disabled` so their explanation is still discoverable. The tab strip also scrolls the selected tab into view when the panel opens straight onto one; adding a sixth tab in second position had pushed General, User Info and Admin past the right edge on a narrow window, so those opened with the strip parked at the far left and no tab visibly selected.
 

@@ -17,6 +17,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 ## Security & Access Control
 
 - [Authentication & Authorization](authentication.md) - User authentication and group-based access control
+- [OIDC Login & Delegated Credentials](oidc-authentication.md) - Atlas as an OIDC relying party and confidential OAuth client, with RFC 8693 / Entra OBO delegation
 - [MCP API Key Authentication](mcp-server-authentication.md) - Authenticating to protected MCP servers
 - [MCP Wormhole Authentication](mcp-wormhole-authentication.md) - Forwarding per-session Wormhole subtokens to MCP servers
 - [WebSocket Auth Testing](websocket-auth-testing.md) - Testing WebSocket authentication with wscat

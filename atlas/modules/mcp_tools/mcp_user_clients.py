@@ -8,6 +8,7 @@ mcp_user_client_cache.py. Patched globals (Client, StreamableHttpTransport) are
 referenced via the client module to preserve test patch targets.
 """
 import logging
+import time
 from typing import Dict, Optional
 from urllib.parse import urlsplit
 
@@ -18,6 +19,11 @@ from atlas.core.user_identity import normalize_user_email
 from atlas.modules.config.config_manager import resolve_env_var
 
 logger = logging.getLogger(__name__)
+
+# Local lifetime applied to a delegated token whose issuer advertised no
+# ``expires_in``. Short, because the only safe assumption about an unbounded
+# downstream credential is that it is about to stop working.
+_DELEGATED_TOKEN_DEFAULT_TTL_SECONDS = 300
 
 
 def _client():
@@ -44,12 +50,61 @@ class UserClientMixin:
     def _requires_user_auth(self, server_name: str) -> bool:
         """Check if a server requires per-user authentication.
 
-        Returns True for servers with auth_type 'oauth', 'jwt', 'bearer', or 'api_key'.
-        These servers need user-specific tokens rather than shared/admin tokens.
+        Returns True for servers with auth_type 'oauth', 'jwt', 'bearer',
+        'api_key', or 'delegated'. These servers need user-specific tokens
+        rather than shared/admin tokens.
         """
         config = self.servers_config.get(server_name, {})
         auth_type = config.get("auth_type", "none")
-        return auth_type in ("oauth", "jwt", "bearer", "api_key")
+        return auth_type in ("oauth", "jwt", "bearer", "api_key", "delegated")
+
+    async def _mint_delegated_token(self, user_email, server_name, config):
+        """Obtain a delegated downstream token for a ``delegated`` MCP server.
+
+        Returns the freshly stored token record, or None when delegation is
+        not configured, the user has no OIDC session, or the exchange fails --
+        all of which leave the caller reporting the server as unauthenticated,
+        exactly as before.
+        """
+        from atlas.core.oidc.mcp_delegation import (
+            is_delegated_server,
+            mint_delegated_token_for_server,
+        )
+        from atlas.modules.mcp_tools.token_storage import get_token_storage
+
+        if not is_delegated_server(config):
+            return None
+
+        delegated = await mint_delegated_token_for_server(user_email, server_name, config)
+        if delegated is None:
+            return None
+
+        # A provider that advertises no expiry still gets a short local TTL:
+        # stored with expires_at=None the record would be treated as valid
+        # forever, so an already-dead downstream token would be replayed on
+        # every tool call instead of being re-minted.
+        expires_at = delegated.expires_at
+        if expires_at is None:
+            expires_at = time.time() + _DELEGATED_TOKEN_DEFAULT_TTL_SECONDS
+
+        token_storage = get_token_storage()
+        token_storage.store_token(
+            user_email=user_email,
+            server_name=server_name,
+            token_value=delegated.access_token,
+            token_type="oauth_access",
+            expires_at=expires_at,
+            scopes=delegated.scope,
+            metadata={
+                "source": "delegation",
+                "audience": delegated.audience or "",
+            },
+        )
+        logger.info(
+            "Stored a delegated downstream token for MCP server '%s'",
+            sanitize_for_logging(server_name),
+        )
+        return token_storage.get_valid_token(user_email, server_name)
 
     def _is_wormhole_server(self, server_name: str) -> bool:
         """Return True if a server is configured to receive the Wormhole subtoken."""
@@ -206,14 +261,23 @@ class UserClientMixin:
         stored_token = token_storage.get_valid_token(user_email, server_name)
         logger.debug(f"[AUTH] Token found: {stored_token is not None}")
 
+        # Get server config
+        config = self.servers_config.get(server_name, {})
+
+        if stored_token is None:
+            # A delegated server has no token to upload: Atlas mints one by
+            # exchanging the user's OIDC token for a short-lived,
+            # audience-specific credential scoped to this server. Storing it
+            # keeps the existing expiry-driven client cache invalidation
+            # working unchanged.
+            stored_token = await self._mint_delegated_token(user_email, server_name, config)
+
         if stored_token is None:
             logger.debug(
                 f"[AUTH] No valid token for server '{server_name}' - user needs to authenticate"
             )
             return None
 
-        # Get server config
-        config = self.servers_config.get(server_name, {})
         url = config.get("url")
 
         if not url:
