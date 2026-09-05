@@ -67,6 +67,7 @@ class UserClientMixin:
         exactly as before.
         """
         from atlas.core.oidc.mcp_delegation import (
+            DELEGATION_METADATA_SOURCE,
             is_delegated_server,
             mint_delegated_token_for_server,
         )
@@ -96,7 +97,7 @@ class UserClientMixin:
             expires_at=expires_at,
             scopes=delegated.scope,
             metadata={
-                "source": "delegation",
+                "source": DELEGATION_METADATA_SOURCE,
                 "audience": delegated.audience or "",
             },
         )

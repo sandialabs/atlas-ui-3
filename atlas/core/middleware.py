@@ -2,6 +2,7 @@
 
 import logging
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -46,14 +47,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.oidc_enabled = oidc_enabled
         self.oidc_login_url = oidc_login_url
 
-    def _unauthenticated_redirect_url(self) -> str:
+    def _unauthenticated_redirect_url(self, request: Request) -> str:
         """Where to send an unauthenticated browser.
 
         With OIDC login enabled there is nothing upstream to hand the user to,
         so start the login flow rather than bouncing to the reverse proxy's
-        auth endpoint.
+        auth endpoint. The requested path rides along as ``?next=`` so a deep
+        link survives the round trip -- without it every login lands on ``/``,
+        which silently breaks shared links to a workspace or conversation. The
+        login route re-validates the value against its own allowlist, so
+        nothing here is trusted downstream.
         """
-        return self.oidc_login_url if self.oidc_enabled else self.auth_redirect_url
+        if not self.oidc_enabled:
+            return self.auth_redirect_url
+        target = request.url.path
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return f"{self.oidc_login_url}?{urlencode({'next': target})}"
 
     def _resolve_oidc_user(self, request: Request) -> Optional[str]:
         """Resolve identity from an established OIDC login session.
@@ -170,7 +180,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     )
                 else:
                     return RedirectResponse(
-                        url=self._unauthenticated_redirect_url(), status_code=302
+                        url=self._unauthenticated_redirect_url(request), status_code=302
                     )
 
         # Check for capability token in /api/files/download/ (backward compatibility).
@@ -224,7 +234,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         content={"detail": "Unauthorized"}
                     )
                 else:
-                    redirect_target = self._unauthenticated_redirect_url()
+                    redirect_target = self._unauthenticated_redirect_url(request)
                     logger.warning(
                         f"Missing {self.auth_header_name}, redirecting to {redirect_target}"
                     )

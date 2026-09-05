@@ -72,6 +72,7 @@ OIDC_SESSION_SECRET=<python -c "import secrets; print(secrets.token_urlsafe(32))
 OIDC_SCOPES="openid profile email"
 OIDC_USERNAME_CLAIM=email          # falls back to preferred_username, then sub
 OIDC_SESSION_MAX_AGE_SECONDS=28800
+OIDC_COOKIE_SECURE=                # auto: on when OIDC_REDIRECT_URI is https
 ```
 
 Endpoints are discovered from `<OIDC_ISSUER>/.well-known/openid-configuration`
@@ -162,7 +163,17 @@ credential per user rather than asking the user to upload one:
 ```
 
 `audience` defaults to the server's URL, which is the canonical resource
-identifier the MCP authorization specification uses. If delegation is disabled,
+identifier the MCP authorization specification uses.
+
+**Tool discovery caveat.** Tool discovery runs once at startup with the
+process-level client, before any user has logged in, so there is no session to
+delegate from. A delegated server that also requires authorization on
+`initialize`/`tools/list` will therefore register no tools. Delegated servers
+must currently allow unauthenticated discovery and enforce authorization on
+tool *invocation*; per-user lazy discovery is the fix and is not in this
+change.
+
+If delegation is disabled,
 the user has no OIDC session, or the exchange fails, the server simply reports
 as unauthenticated -- exactly as an unauthenticated bearer server does today.
 A tool call never fails with a delegation stack trace.
@@ -176,6 +187,19 @@ A tool call never fails with a delegation stack trace.
   resolves against this process's session store. This is what lets OIDC mode run
   with no reverse proxy at all. Requests with no session still face the gate
   unchanged.
+- **The session cookie.** It is the login credential, so it carries `Secure`
+  whenever `OIDC_REDIRECT_URI` is https (override with `OIDC_COOKIE_SECURE`),
+  `HttpOnly`, and `SameSite=Lax`. Without `Secure`, a hostname that also has an
+  http listener -- an http-to-https redirect, typically -- would leak the cookie
+  in plaintext before the redirect fires.
+- **Token lifetime.** The IdP's access token usually expires long before the
+  Atlas session does, so it is refreshed on demand, in-process, with one
+  in-flight refresh per session. The refresh token never leaves the server.
+- **Revoking delegated credentials.** Logout and
+  `DELETE /api/auth/oidc/delegated-tokens` clear all three places a delegated
+  credential is held: the delegation cache, the encrypted token store, and any
+  MCP client already built around it. Tokens the user uploaded themselves are
+  left alone.
 - **Sessions are per-process.** The session store is in memory, so a restart or
   a second uvicorn worker forces a fresh (silent) IdP round trip rather than
   putting long-lived credentials into shared storage. Run a single worker, or

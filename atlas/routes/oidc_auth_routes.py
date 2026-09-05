@@ -27,8 +27,8 @@ from atlas.core.oidc.client_authentication import (
     ClientAuthenticationError,
     build_client_credentials_from_settings,
 )
-from atlas.core.oidc.delegation import get_delegation_manager
 from atlas.core.oidc.discovery import OIDCDiscoveryError, get_provider_metadata
+from atlas.core.oidc.mcp_delegation import revoke_delegated_credentials
 from atlas.core.oidc.oidc_client import (
     OIDCFlowError,
     build_authorize_url,
@@ -256,9 +256,10 @@ async def oidc_logout(request: Request):
     session_id = request.session.pop(SESSION_COOKIE_KEY, None)
     existing = store.get(session_id)
     if existing:
-        manager = get_delegation_manager()
-        if manager is not None:
-            manager.invalidate_user(existing.user_id)
+        # Reaches the delegation cache, the encrypted token store, and any MCP
+        # client already built around a delegated credential -- clearing only
+        # the first would leave the credential usable after logout.
+        await revoke_delegated_credentials(existing.user_id)
     store.remove(session_id)
 
     settings = app_factory.get_config_manager().app_settings
@@ -312,8 +313,5 @@ async def oidc_status(request: Request):
 @api_router.delete("/delegated-tokens")
 async def drop_delegated_tokens(current_user: str = Depends(get_current_user)):
     """Discard every cached delegated credential for the current user."""
-    manager = get_delegation_manager()
-    if manager is None:
-        return {"removed_count": 0, "message": "Delegation is not enabled"}
-    removed = manager.invalidate_user(current_user)
+    removed = await revoke_delegated_credentials(current_user)
     return {"removed_count": removed, "message": f"Removed {removed} delegated tokens"}

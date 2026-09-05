@@ -382,10 +382,20 @@ elif config.app_settings.feature_globus_auth_enabled:
 if _session_secret:
     from starlette.middleware.sessions import SessionMiddleware
 
+    # The session cookie is the login credential in OIDC mode, so it must carry
+    # Secure on any https deployment: a hostname with an http listener (an
+    # http-to-https redirect, typically) would otherwise leak it in plaintext
+    # before the redirect fires. Derived from the configured redirect URI so the
+    # common cases need no extra setting, with OIDC_COOKIE_SECURE to override --
+    # a hard "on" would break local http development.
+    _cookie_secure = config.app_settings.oidc_cookie_secure
+    if _cookie_secure is None:
+        _redirect_uri = config.app_settings.oidc_redirect_uri or ""
+        _cookie_secure = _redirect_uri.startswith("https://")
     app.add_middleware(
         SessionMiddleware,
         secret_key=_session_secret,
-        https_only=False,
+        https_only=_cookie_secure,
         same_site="lax",
         max_age=config.app_settings.oidc_session_max_age_seconds,
     )

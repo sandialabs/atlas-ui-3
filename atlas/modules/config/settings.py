@@ -460,6 +460,13 @@ class AppSettings(BaseSettings):
         description="Maximum lifetime of an Atlas OIDC login session, in seconds",
         validation_alias="OIDC_SESSION_MAX_AGE_SECONDS",
     )
+    oidc_cookie_secure: Optional[bool] = Field(
+        default=None,
+        description="Send the Atlas session cookie with the Secure attribute. Defaults to "
+                    "auto: on when OIDC_REDIRECT_URI is https, off for a loopback http "
+                    "development redirect. Set explicitly to override.",
+        validation_alias="OIDC_COOKIE_SECURE",
+    )
     oidc_post_logout_redirect_uri: Optional[str] = Field(
         default=None,
         description="Where the IdP should send the browser after RP-initiated logout",

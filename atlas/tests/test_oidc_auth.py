@@ -749,6 +749,30 @@ class TestMiddlewareOIDCSession:
         response = client.get("/api/whoami", headers={"X-User-Email": "header@example.gov"})
         assert response.json() == {"user": "header@example.gov"}
 
+    def test_browser_redirect_preserves_the_requested_path(self):
+        from fastapi import Request as FastAPIRequest
+
+        from atlas.core.middleware import AuthMiddleware
+        from atlas.core.oidc.session import get_session_store
+
+        get_session_store().clear()
+        app = FastAPI()
+
+        @app.get("/workspace/abc")
+        async def page(request: FastAPIRequest):
+            return {"user": request.state.user_email}
+
+        app.add_middleware(
+            AuthMiddleware, debug_mode=False, proxy_secret_enabled=False, oidc_enabled=True
+        )
+        app.add_middleware(SessionMiddleware, secret_key="test-session-secret")
+
+        response = TestClient(app).get("/workspace/abc?tab=1", follow_redirects=False)
+        assert response.status_code == 302
+        location = response.headers["location"]
+        assert location.startswith("/auth/oidc/login?next=")
+        assert "workspace" in location
+
     def test_missing_everything_is_still_rejected(self):
         from atlas.core.oidc.session import get_session_store
 

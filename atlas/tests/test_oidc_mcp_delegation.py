@@ -160,3 +160,107 @@ class TestLoggableServerName:
         assert loggable_server_name("tools <script>") == "<invalid-name>"
         assert loggable_server_name("") == "<invalid-name>"
         assert loggable_server_name("a" * 200) == "<invalid-name>"
+
+
+class TestSubjectTokenRefresh:
+    """An Atlas session outlives the IdP access token; delegation must notice."""
+
+    @pytest.mark.asyncio
+    async def test_expiring_token_is_refreshed_before_the_exchange(self, user_session):
+        store = get_session_store()
+        session = store.iter_sessions()[0]
+        session.access_token_expires_at = time.time() - 1
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager), patch(
+            "atlas.core.oidc.session_refresh.ensure_fresh_access_token",
+            AsyncMock(return_value="REFRESHED-TOKEN"),
+        ):
+            await mint_delegated_token_for_server(
+                "user@example.gov", "tools", DELEGATED_CONFIG
+            )
+
+        assert manager.requests[0].subject_token == "REFRESHED-TOKEN"
+
+    @pytest.mark.asyncio
+    async def test_a_dead_unrefreshable_token_is_not_presented_downstream(self, user_session):
+        store = get_session_store()
+        session = store.iter_sessions()[0]
+        session.access_token_expires_at = time.time() - 1
+        session.refresh_token = None
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager):
+            token = await mint_delegated_token_for_server(
+                "user@example.gov", "tools", DELEGATED_CONFIG
+            )
+
+        assert token is None
+        assert manager.requests == []
+
+
+class TestRevokeDelegatedCredentials:
+    """Revocation must reach every place a delegated credential is held."""
+
+    @pytest.mark.asyncio
+    async def test_stored_delegated_tokens_are_removed(self, user_session):
+        from atlas.core.oidc.mcp_delegation import revoke_delegated_credentials
+        from atlas.modules.mcp_tools.token_storage import get_token_storage
+
+        storage = get_token_storage()
+        storage.store_token(
+            user_email="user@example.gov",
+            server_name="tools",
+            token_value="DOWNSTREAM",
+            token_type="oauth_access",
+            expires_at=time.time() + 300,
+            metadata={"source": "delegation"},
+        )
+        # A token the user uploaded themselves must survive.
+        storage.store_token(
+            user_email="user@example.gov",
+            server_name="manual",
+            token_value="USER-UPLOADED",
+            token_type="bearer",
+        )
+        try:
+            removed = await revoke_delegated_credentials("user@example.gov")
+            assert removed == 1
+            assert storage.get_token("user@example.gov", "tools") is None
+            assert storage.get_token("user@example.gov", "manual") is not None
+        finally:
+            storage.remove_token("user@example.gov", "manual")
+            storage.remove_token("user@example.gov", "tools")
+
+
+class TestDelegationConfigSurvivesModelDump:
+    """The documented `delegation` block must reach the exchange."""
+
+    def test_delegation_is_a_declared_field(self):
+        from atlas.modules.config.models import MCPServerConfig
+
+        config = MCPServerConfig(**{
+            "url": "https://tools.example.gov/mcp",
+            "auth_type": "delegated",
+            "delegation": {"audience": "api://tools", "scope": "tools.read"},
+        })
+        dumped = config.model_dump()
+        assert dumped["delegation"]["audience"] == "api://tools"
+        assert dumped["delegation"]["scope"] == "tools.read"
+
+    @pytest.mark.asyncio
+    async def test_a_dumped_config_still_carries_audience_and_scope(self, user_session):
+        from atlas.modules.config.models import MCPServerConfig
+
+        config = MCPServerConfig(**{
+            "url": "https://tools.example.gov/mcp",
+            "auth_type": "delegated",
+            "delegation": {"audience": "api://tools", "scope": "tools.read"},
+        }).model_dump()
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager):
+            await mint_delegated_token_for_server("user@example.gov", "tools", config)
+
+        assert manager.requests[0].audience == "api://tools"
+        assert manager.requests[0].scope == "tools.read"
