@@ -131,6 +131,36 @@ describe('WorkspaceSelector', () => {
     expect(screen.getByText('2 tools · 1 source · custom prompt')).toBeInTheDocument()
   })
 
+  const PERSONA_WORKSPACE = {
+    id: 'ws-persona',
+    name: 'Review',
+    description: null,
+    config: {
+      active_prompt_key: 'persona:code-reviewer',
+      selected_tools: [],
+      selected_prompts: [],
+      selected_data_sources: [],
+      rag_enabled: false,
+    },
+  }
+
+  it('names a persona saved as the workspace prompt', () => {
+    setContext({
+      workspaces: [PERSONA_WORKSPACE],
+      personas: [{ id: 'code-reviewer', name: 'Code Reviewer', description: '', content: 'Review code.' }],
+    })
+    render(<WorkspaceSelector />)
+    openDropdown()
+    expect(screen.getByText('Code Reviewer')).toBeInTheDocument()
+  })
+
+  it('falls back to a generic label when the persona no longer exists', () => {
+    setContext({ workspaces: [PERSONA_WORKSPACE], personas: [] })
+    render(<WorkspaceSelector />)
+    openDropdown()
+    expect(screen.getByText('persona')).toBeInTheDocument()
+  })
+
   it('applies a workspace when one is clicked', () => {
     render(<WorkspaceSelector />)
     openDropdown()

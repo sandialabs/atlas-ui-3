@@ -3,8 +3,9 @@ import { createContext, useContext, useEffect, useState, useCallback, useMemo, u
 import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
-import { useSelections, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
 import { useUserPrompts } from '../hooks/useUserPrompts'
+import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
@@ -54,6 +55,9 @@ export const ChatProvider = ({ children }) => {
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
+	// Admin-preconfigured personas loaded from markdown files (issue #880).
+	// Always available: they need no chat history and no per-user storage.
+	const personas = usePersonas()
 	// Workspaces: saved bundles of prompt + RAG source + tool selections
 	const workspacesEnabled = !!config.features?.workspaces
 	const workspaces = useWorkspaces(workspacesEnabled)
@@ -127,6 +131,18 @@ export const ChatProvider = ({ children }) => {
 			clearActivePrompt()
 		}
 	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
+
+	// A persisted persona key can outlive the persona itself: the admin deleted or
+	// renamed the file, or the user lost access to its group. Only clear it once a
+	// successful load has actually told us the persona is gone -- clearing while
+	// the fetch is in flight (or after it failed) would drop the selection on
+	// every refresh and silently fall back to the default prompt.
+	useEffect(() => {
+		if (!personas.loaded || personas.loading || personas.error) return
+		if (!isPersonaKey(activePromptKey)) return
+		if (personas.personas.some(p => p.id === personaIdFromKey(activePromptKey))) return
+		clearActivePrompt()
+	}, [personas.loaded, personas.loading, personas.error, personas.personas, activePromptKey, clearActivePrompt])
 
 	// Which workspace the current selections came from. Persisted so a refresh
 	// keeps showing the workspace whose selections are still loaded.
@@ -498,6 +514,7 @@ export const ChatProvider = ({ children }) => {
 		if (
 			selections.activePromptKey &&
 			!isUserPromptKey(selections.activePromptKey) &&
+			!isPersonaKey(selections.activePromptKey) &&
 			!validPromptKeys.has(selections.activePromptKey)
 		) {
 			// Clear stale active prompt that no longer exists in config
@@ -601,13 +618,27 @@ export const ChatProvider = ({ children }) => {
 			? userPrompts.prompts.find(p => p.id === userPromptIdFromKey(activeKey))
 			: null
 
+		// A preconfigured persona (issue #880) also replaces the system prompt and
+		// is never an MCP prompt, but only its *id* goes on the wire: the server
+		// resolves the text from its own persona folder after re-checking the
+		// access group, so personas work regardless of the custom-prompt flag and
+		// a client can never substitute its own text for one. The id comes from
+		// the active key, not the fetched list: after a reload (or a failed
+		// /api/personas fetch) the list can be empty while the persisted key is
+		// still valid, and sending no id would silently run the default prompt.
+		// If the persona is genuinely gone or gated away, the server resolves it
+		// to None and the default prompt applies -- fail closed on the side that
+		// owns the folder.
+		const activeKeyIsPersona = isPersonaKey(activeKey)
+
 		const sent = sendMessage({
 			type: 'chat',
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
-			selected_prompts: activeKeyIsUserPrompt ? [] : activePrompts,
+			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : activePrompts,
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
+			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
@@ -893,7 +924,7 @@ export const ChatProvider = ({ children }) => {
 			? ([...selectedDataSources].join(', ') || 'None selected')
 			: 'None (RAG disabled)'
 
-		const promptInfoByKey = buildPromptInfoByKey(config.prompts, userPrompts.prompts)
+		const promptInfoByKey = buildPromptInfoByKey(config.prompts, userPrompts.prompts, personas.personas)
 		const activePromptInfo = resolvePromptInfo(selections.activePromptKey, promptInfoByKey)
 		const exportConversation = buildExportConversation(messages, promptInfoByKey)
 
@@ -951,7 +982,7 @@ export const ChatProvider = ({ children }) => {
 			a.download = `chat-export-${ts}.json`
 			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
 		}
-	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.activePromptKey, files.canvasContent, userPrompts.prompts])
+	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.activePromptKey, files.canvasContent, userPrompts.prompts, personas.personas])
 
 	const downloadChat = useCallback(() => exportData(false), [exportData])
 	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
@@ -983,11 +1014,24 @@ export const ChatProvider = ({ children }) => {
 			if (promptsToRemove.length > 0) {
 				selections.removePrompts(promptsToRemove)
 			}
+
+			// Clear the active persona if the new context excludes it: the picker
+			// hides compliance-incompatible personas and the server refuses to
+			// resolve them, so keeping one selected would silently run the
+			// default prompt on the next turn.
+			if (isPersonaKey(selections.activePromptKey)) {
+				const persona = personas.personas.find(
+					p => p.id === personaIdFromKey(selections.activePromptKey)
+				)
+				if (!personaSurvivesComplianceFilter(persona, newLevel)) {
+					clearActivePrompt()
+				}
+			}
 		}
-		
+
 		// Set the new compliance level
 		selections.setComplianceLevelFilter(newLevel)
-	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts])
+	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts, personas.personas, clearActivePrompt])
 
 	// Flatten ragServers into a single list of data source objects for easier consumption
 	const ragSources = config.ragServers.flatMap(server =>
@@ -1096,6 +1140,11 @@ export const ChatProvider = ({ children }) => {
 		makePromptActive: guarded.makePromptActive,
 		clearActivePrompt: guarded.clearActivePrompt,
 		activePromptKey: selections.activePromptKey,
+		// Admin-preconfigured personas (issue #880)
+		personas: personas.personas,
+		personasLoading: personas.loading,
+		personasError: personas.error,
+		fetchPersonas: personas.fetchPersonas,
 		// User-authored custom prompt library (issue #153)
 		userPrompts: userPrompts.prompts,
 		userPromptsLoading: userPrompts.loading,

@@ -29,6 +29,10 @@ vi.mock('../hooks/useGlobusAuth', () => ({
   })
 }))
 
+vi.mock('../contexts/MarketplaceContext', () => ({
+  useMarketplace: () => ({ isComplianceAccessible: () => true }),
+}))
+
 vi.mock('../components/ToolsPanel', () => ({
   default: ({ active }) => <div>{active ? 'tools tab body' : 'tools tab hidden'}</div>
 }))

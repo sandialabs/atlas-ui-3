@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Layers, ChevronDown, Plus, Save, Trash2, Pencil } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
-import { isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
 import { useDialog } from './ui/toastContext'
 import { useToast } from './ui/toastContext'
@@ -26,6 +26,7 @@ const WorkspaceSelector = () => {
     deleteWorkspace,
     clearActiveWorkspace,
     userPrompts = [],
+    personas = [],
     prompts = [],
   } = useChat()
 
@@ -56,6 +57,10 @@ const WorkspaceSelector = () => {
       const match = userPrompts.find(p => p.id === userPromptIdFromKey(key))
       // A prompt deleted out from under the workspace still deserves a label.
       return match ? match.title : 'custom prompt'
+    }
+    if (isPersonaKey(key)) {
+      const match = personas.find(p => p.id === personaIdFromKey(key))
+      return match ? match.name : 'persona'
     }
     return getMcpNameFromKey(key, prompts) || 'custom prompt'
   }
