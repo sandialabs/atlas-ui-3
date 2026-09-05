@@ -571,6 +571,7 @@ async def execute_single_tool(
                     filtered_args,
                     allow_edit,
                     user_email=session_context.get("user_email", ""),
+                    display_arguments=display_args,
                 )
 
                 try:
@@ -588,8 +589,9 @@ async def execute_single_tool(
                             error=reason
                         ))
 
-                    # Use potentially edited arguments
-                    if allow_edit and response.get("arguments"):
+                    # Use potentially edited arguments. An explicit empty dict
+                    # is a real edit and must not be treated as "no arguments".
+                    if allow_edit and response.get("arguments") is not None:
                         edited_args = response["arguments"]
                         # Check if arguments actually changed by comparing with what we sent (display_args)
                         # Use json comparison to avoid false positives from dict ordering

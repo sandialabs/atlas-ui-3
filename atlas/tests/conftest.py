@@ -61,6 +61,7 @@ _STATE_TMPDIR = tempfile.mkdtemp(prefix="atlas-test-state-")
 os.environ["CHAT_HISTORY_DB_URL"] = f"duckdb:///{_STATE_TMPDIR}/chat_history.db"
 os.environ["AGENT_PORTAL_DB_URL"] = f"duckdb:///{_STATE_TMPDIR}/agent_portal.db"
 os.environ["AGENT_PORTAL_AUDIT_PATH"] = f"{_STATE_TMPDIR}/agent_portal_audit.jsonl"
+os.environ["TOOL_CALL_AUDIT_PATH"] = f"{_STATE_TMPDIR}/tool_call_audit.jsonl"
 os.environ["RUNTIME_FEEDBACK_DIR"] = f"{_STATE_TMPDIR}/feedback"
 os.environ["RUNTIME_CAPTURE_DIR"] = f"{_STATE_TMPDIR}/finetune_capture"
 os.environ["MCP_TOKEN_STORAGE_DIR"] = f"{_STATE_TMPDIR}/tokens"

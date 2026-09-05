@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.modules.mcp_tools.tool_audit_log import record_tool_decision
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,15 @@ class ToolApprovalRequest:
         arguments: Dict[str, Any],
         allow_edit: bool = True,
         user_email: str = "",
+        display_arguments: Optional[Dict[str, Any]] = None,
     ):
         self.tool_call_id = tool_call_id
         self.tool_name = tool_name
         self.arguments = arguments
+        # PresentedCall is owned by the caller that actually emits the UI
+        # payload. If a legacy/direct caller omits it, keep the supplied
+        # arguments as-is rather than reconstructing a client-visible form.
+        self.display_arguments = arguments if display_arguments is None else display_arguments
         self.allow_edit = allow_edit
         self.user_email = user_email
         self.future: asyncio.Future = asyncio.Future()
@@ -48,15 +54,30 @@ class ToolApprovalRequest:
         try:
             return await asyncio.wait_for(self.future, timeout=timeout)
         except asyncio.TimeoutError:
-            logger.warning(f"Approval request timed out for tool {self.tool_name}")
+            safe_tool_name = str(self.tool_name).replace("\r", "").replace("\n", "")
+            logger.warning("Approval request timed out for tool %s", safe_tool_name)
+            record_tool_decision(
+                user_email=self.user_email,
+                request_owner=self.user_email,
+                tool_call_id=self.tool_call_id,
+                tool_name=self.tool_name,
+                arguments=self.display_arguments,
+                decision="timeout",
+                decision_origin="approval_timeout",
+            )
             raise
 
     def set_response(self, approved: bool, arguments: Optional[Dict[str, Any]] = None, reason: Optional[str] = None):
         """Set the user's response to this approval request."""
         if not self.future.done():
+            effective_arguments = (
+                arguments
+                if self.allow_edit and arguments is not None
+                else self.arguments
+            )
             self.future.set_result({
                 "approved": approved,
-                "arguments": arguments or self.arguments,
+                "arguments": effective_arguments,
                 "reason": reason
             })
 
@@ -74,6 +95,7 @@ class ToolApprovalManager:
         arguments: Dict[str, Any],
         allow_edit: bool = True,
         user_email: str = "",
+        display_arguments: Optional[Dict[str, Any]] = None,
     ) -> ToolApprovalRequest:
         """
         Create a new approval request.
@@ -84,11 +106,19 @@ class ToolApprovalManager:
             arguments: Tool arguments
             allow_edit: Whether to allow editing of arguments
             user_email: Authenticated email of the user who owns this request
+            display_arguments: Canonical client-visible arguments shown for approval
 
         Returns:
             ToolApprovalRequest object
         """
-        request = ToolApprovalRequest(tool_call_id, tool_name, arguments, allow_edit, user_email=user_email)
+        request = ToolApprovalRequest(
+            tool_call_id,
+            tool_name,
+            arguments,
+            allow_edit,
+            user_email=user_email,
+            display_arguments=display_arguments,
+        )
         self._pending_requests[tool_call_id] = request
         logger.info(f"Created approval request for tool {sanitize_for_logging(tool_name)} (call_id: {sanitize_for_logging(tool_call_id)})")
         return request
@@ -139,21 +169,73 @@ class ToolApprovalManager:
             # not recognize sanitize_for_logging() as one.
             safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
             safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
+            safe_approved = str(approved).replace("\r", "").replace("\n", "")
             logger.warning(
                 "SECURITY: approval response rejected — user %s attempted to "
                 "respond to tool call owned by a different user "
                 "(call_id: %s, approved=%s)",
                 safe_user_email,
                 safe_tool_call_id,
-                approved,
+                safe_approved,
+            )
+            record_tool_decision(
+                user_email=user_email,
+                request_owner=request.user_email,
+                tool_call_id=request.tool_call_id,
+                tool_name=request.tool_name,
+                arguments=request.display_arguments,
+                decision="invalid_responder",
+                decision_origin="ownership_check",
             )
             return False
 
+        # The request deliberately remains pending until the executor cleans it
+        # up, so a duplicate response can arrive after the Future is resolved.
+        # Only the first response affects execution; do not emit contradictory
+        # audit evidence for later responses that are ignored by set_response().
+        if request.future.done():
+            safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
+            logger.debug(
+                "Ignoring duplicate approval response for completed request: %s",
+                safe_tool_call_id,
+            )
+            return True
+
+        # Audit the same client-visible representation used at the approval gate.
+        # Client-supplied arguments only become decision evidence when editing is
+        # allowed; otherwise both the executor and the audit retain the baseline.
+        effective_arguments = request.display_arguments
+        arguments_edited = False
+        if request.allow_edit and arguments is not None:
+            effective_arguments = arguments
+            try:
+                arguments_edited = arguments != request.display_arguments
+            except Exception:
+                # Comparison is audit-only evidence and must never break approval.
+                arguments_edited = True
+
         logger.debug("Found pending request for %s; setting response", sanitize_for_logging(tool_call_id))
         request.set_response(approved, arguments, reason)
+        record_tool_decision(
+            user_email=user_email or request.user_email,
+            request_owner=request.user_email,
+            tool_call_id=request.tool_call_id,
+            tool_name=request.tool_name,
+            arguments=effective_arguments,
+            decision="approved" if approved else "rejected",
+            decision_origin="approval_response",
+            arguments_edited=arguments_edited,
+            reason_present=bool(reason),
+        )
         # Keep the request in the dict for a bit to avoid race conditions
         # It will be cleaned up later
-        logger.info(f"Approval response handled for tool {sanitize_for_logging(request.tool_name)}: approved={approved}")
+        safe_tool_name = str(request.tool_name).replace("\r", "").replace("\n", "")
+        safe_approved = str(approved).replace("\r", "").replace("\n", "")
+        logger.info(
+            "Approval response handled for tool %s: approved=%s",
+            safe_tool_name,
+            safe_approved,
+        )
         return True
 
     def cleanup_request(self, tool_call_id: str):

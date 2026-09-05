@@ -1,6 +1,6 @@
 # Test Isolation
 
-Last updated: 2026-08-18
+Last updated: 2026-09-04
 
 The Python suite runs in a single process, in one pass, with no per-test
 forking. Collection order is not a contract pytest makes -- today it happens to
@@ -19,7 +19,7 @@ guards are in place even for state that app code establishes at *import* time.
 | --- | --- |
 | `AppSettings.model_config["env_file"] = None` | The developer's `.env` changing results from machine to machine |
 | `APP_LOG_DIR` -> temp dir | Test spans and security-risk records landing in the repository's `logs/` |
-| `CHAT_HISTORY_DB_URL`, `AGENT_PORTAL_DB_URL`, `AGENT_PORTAL_AUDIT_PATH`, `RUNTIME_FEEDBACK_DIR`, `RUNTIME_CAPTURE_DIR`, `MCP_TOKEN_STORAGE_DIR` -> temp dirs | Tests reading and writing the developer's real `data/`, `runtime/` and `config/secure/` state |
+| `CHAT_HISTORY_DB_URL`, `AGENT_PORTAL_DB_URL`, `AGENT_PORTAL_AUDIT_PATH`, `TOOL_CALL_AUDIT_PATH`, `RUNTIME_FEEDBACK_DIR`, `RUNTIME_CAPTURE_DIR`, `MCP_TOKEN_STORAGE_DIR` -> temp dirs | Tests reading and writing the developer's real `data/`, `runtime/` and `config/secure/` state |
 | `AUTH_GROUP_CHECK_URL` / `AUTH_GROUP_CHECK_API_KEY` cleared | Authorization tests calling a live external authorizer |
 | `_isolate_config_cache` (autouse) | A test's env changes surviving in the `ConfigManager` singleton's lazily-built config cache |
 | `_isolate_module_singletons` (autouse) | A pinned or lazily-created app singleton (process manager, portal store, hook manager, chat-history engine, ...) surviving into later tests |
