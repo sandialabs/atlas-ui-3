@@ -1,19 +1,43 @@
 import { useChat } from '../contexts/ChatContext'
-import { ChevronDown, Sparkles, User, Pencil, Plus } from 'lucide-react'
+import { useMarketplace } from '../contexts/MarketplaceContext'
+import { ChevronDown, Sparkles, User, Users, Pencil, Plus } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
-import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import { userPromptKey, isUserPromptKey, userPromptIdFromKey, personaKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
+
+// A persona with no description falls back to its prompt text, which the admin
+// can make arbitrarily long. Only two clamped lines are ever visible, so trim
+// before it reaches the DOM rather than rendering 100k characters per entry.
+const PERSONA_PREVIEW_CHARS = 160
+const personaPreview = (content = '') =>
+  content.length > PERSONA_PREVIEW_CHARS
+    ? `${content.slice(0, PERSONA_PREVIEW_CHARS)}...`
+    : content
 
 const PromptSelector = () => {
   const {
     prompts, selectedPrompts, activePromptKey, makePromptActive, clearActivePrompt, removePrompts,
     userPrompts = [],
+    personas = [],
+    personasError = null,
+    fetchPersonas,
+    complianceLevelFilter = null,
     features = {},
   } = useChat()
+  const { isComplianceAccessible } = useMarketplace()
   const customPromptsEnabled = !!features.custom_prompts
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
+
+  // Personas are filtered by the current compliance context exactly like MCP
+  // tools and prompts: with a filter active, a persona needs a compliance
+  // level the filter allows (a level-less persona is hidden). The server
+  // re-checks the same rule when resolving the turn's persona_id.
+  const complianceEnabled = !!features.compliance_levels
+  const visiblePersonas = (complianceEnabled && complianceLevelFilter)
+    ? personas.filter(p => isComplianceAccessible(complianceLevelFilter, p.compliance_level))
+    : personas
 
   // Get all selected prompt keys as an array (these are the "loaded" prompts)
   const selectedPromptKeys = selectedPrompts && selectedPrompts.size > 0
@@ -84,6 +108,11 @@ const PromptSelector = () => {
       const id = userPromptIdFromKey(activePromptKey)
       const match = userPrompts.find(p => p.id === id)
       return match ? match.title : 'Custom Prompt'
+    }
+    if (isPersonaKey(activePromptKey)) {
+      const id = personaIdFromKey(activePromptKey)
+      const match = personas.find(p => p.id === id)
+      return match ? match.name : 'Persona'
     }
     return getMcpNameFromKey(activePromptKey, prompts)
   }
@@ -194,6 +223,68 @@ const PromptSelector = () => {
               </button>
             )
           })}
+
+          {/* Admin-preconfigured personas (issue #880) */}
+          {/* A failed load must not look like "no personas configured": say so
+              and offer a retry instead of rendering nothing at all. */}
+          {personasError && personas.length === 0 && (
+            <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
+              <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                <Users className="w-3 h-3 text-amber-400" />
+                Personas
+              </div>
+              <div className="text-xs text-red-400 mt-1">
+                Could not load personas ({personasError})
+              </div>
+              {fetchPersonas && (
+                <button
+                  onClick={fetchPersonas}
+                  className="mt-1 text-xs text-blue-400 hover:text-blue-300 underline"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+          {visiblePersonas.length > 0 && (
+            <>
+              <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
+                <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                  <Users className="w-3 h-3 text-amber-400" />
+                  Personas
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Preconfigured prompts provided by your administrator
+                </div>
+              </div>
+              {visiblePersonas.map((p) => {
+                const key = personaKey(p.id)
+                const isActive = key === activePromptKey
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handlePromptSelect(key)}
+                    className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0 ${
+                      isActive ? 'bg-blue-900/30' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-200 flex items-center gap-2">
+                          {isActive && <span className="text-blue-400">✓</span>}
+                          <span className="truncate">{p.name}</span>
+                          {isActive && <span className="text-xs text-blue-400">(active)</span>}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                          {p.description || p.preview || personaPreview(p.content)}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </>
+          )}
 
           {/* User-authored custom prompts (issue #153) */}
           {customPromptsEnabled && (

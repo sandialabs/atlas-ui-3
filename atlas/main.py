@@ -86,6 +86,7 @@ from atlas.routes.globus_auth_routes import api_router as globus_api_router
 from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
+from atlas.routes.persona_routes import router as persona_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.suggestion_routes import suggestion_router
 from atlas.routes.telemetry_routes import telemetry_router
@@ -281,6 +282,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start MCP user client cache sweeper: {e}", exc_info=True)
 
+    # Preconfigured personas (issue #880): read the markdown folder once here so
+    # a malformed file surfaces in the startup log rather than on a user's first
+    # request, and so listing them never touches the filesystem per request.
+    try:
+        from atlas.modules.prompts.persona_library import get_persona_library
+
+        personas = get_persona_library().reload()
+        logger.info("Loaded %d preconfigured persona(s)", len(personas))
+    except Exception as e:
+        logger.error(f"Failed to load preconfigured personas: {e}", exc_info=True)
+
     yield
 
     logger.info("Shutting down Chat UI Backend")
@@ -357,6 +369,7 @@ app.include_router(llm_auth_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(user_prompt_router)
+app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
 agent_portal_router = load_agent_portal_router()
@@ -691,15 +704,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                # Authoritative server-side gate for custom system prompts. The
-                # frontend already withholds custom_system_prompt when the feature
-                # is disabled, but a stale or hand-crafted client could still send
-                # one inline -- ignore it here so the flag is the single source of
+                # Authoritative server-side gate for system-prompt overrides.
+                # The frontend already withholds custom_system_prompt when the
+                # feature is disabled, but a stale or hand-crafted client could
+                # still send one inline -- the flag is the single source of
                 # truth for whether a user-supplied prompt replaces the default.
-                custom_system_prompt = (
-                    data.get("custom_system_prompt")
-                    if config_manager.app_settings.custom_prompts_effective
-                    else None
+                # A preconfigured persona (issue #880) is admin-authored content
+                # on the server, not user-supplied text, so it is deliberately
+                # outside the custom-prompt/chat-history flags: the client sends
+                # only an id and the text is resolved after re-checking the
+                # persona's access group for this user and the turn's compliance
+                # filter, which also means a hand-crafted client cannot use
+                # persona_id to smuggle in a prompt of its own.
+                from atlas.modules.prompts.persona_library import (
+                    resolve_chat_system_prompt,
+                )
+
+                custom_system_prompt = await resolve_chat_system_prompt(
+                    data.get("custom_system_prompt"),
+                    data.get("persona_id"),
+                    user_email,
+                    config_manager.app_settings.custom_prompts_effective,
+                    compliance_level_filter=data.get("compliance_level_filter"),
                 )
 
                 try:

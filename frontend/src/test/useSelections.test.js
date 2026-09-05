@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useSelections } from '../hooks/chat/useSelections'
+import { useSelections, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
 
 // Simple in-memory localStorage mock (per-test isolated)
 const createLocalStorageMock = () => {
@@ -157,5 +157,69 @@ describe('useSelections', () => {
     expect(result.current.activePromptKey).toBe('server_added_later')
     expect(result.current.activePrompts).toEqual(['server_added_later'])
     expect(result.current.selectedPrompts.has('server_added_later')).toBe(true)
+  })
+
+  it('makePromptActive keeps a persona out of the MCP selected prompts', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.makePromptActive('persona:code-reviewer')
+    })
+
+    expect(result.current.activePromptKey).toBe('persona:code-reviewer')
+    // A persona is resolved server-side from its id; it is not an MCP prompt.
+    expect(result.current.selectedPrompts.has('persona:code-reviewer')).toBe(false)
+  })
+
+  it('snapshotSelections captures a persona as the workspace active prompt', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.makePromptActive('persona:code-reviewer')
+    })
+
+    const snapshot = result.current.snapshotSelections()
+    expect(snapshot.active_prompt_key).toBe('persona:code-reviewer')
+    expect(snapshot.selected_prompts).not.toContain('persona:code-reviewer')
+  })
+
+  it('applyWorkspace restores a persona without loading it as an MCP prompt', () => {
+    const { result } = renderHook(() => useSelections())
+
+    act(() => {
+      result.current.applyWorkspace({
+        active_prompt_key: 'persona:code-reviewer',
+        selected_tools: [],
+        selected_prompts: [],
+        selected_data_sources: [],
+        rag_enabled: false,
+      })
+    })
+
+    expect(result.current.activePromptKey).toBe('persona:code-reviewer')
+    expect(result.current.selectedPrompts.has('persona:code-reviewer')).toBe(false)
+  })
+})
+
+describe('personaSurvivesComplianceFilter', () => {
+  it('keeps everything when the filter is cleared', () => {
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Internal' }, null)).toBe(true)
+    expect(personaSurvivesComplianceFilter({}, null)).toBe(true)
+  })
+
+  it('keeps a persona whose level matches the new filter', () => {
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Internal' }, 'Internal')).toBe(true)
+  })
+
+  it('drops a persona whose level the new filter excludes', () => {
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Public' }, 'Internal')).toBe(false)
+  })
+
+  it('drops a level-less persona once a filter is active', () => {
+    expect(personaSurvivesComplianceFilter({}, 'Internal')).toBe(false)
+  })
+
+  it('leaves a missing persona to the stale-key effect', () => {
+    expect(personaSurvivesComplianceFilter(undefined, 'Internal')).toBe(true)
   })
 })
