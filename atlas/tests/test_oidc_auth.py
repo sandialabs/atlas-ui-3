@@ -290,8 +290,10 @@ class TestSessionStore:
     def test_remove(self):
         store = OIDCSessionStore()
         session = store.create(user_id="a@b.gov")
-        assert store.remove(session.session_id) is True
-        assert store.remove(session.session_id) is False
+        first_removal = store.remove(session.session_id)
+        second_removal = store.remove(session.session_id)
+        assert first_removal is True
+        assert second_removal is False
 
     def test_capacity_evicts_oldest(self):
         store = OIDCSessionStore(max_sessions=2)
@@ -418,7 +420,9 @@ class TestDelegation:
         assert first.access_token == second.access_token == "token-1"
         assert len(calls) == 1
 
-        assert manager.invalidate_user("A@B.GOV") == 1
+        # Case-insensitive: the cache key normalises the user id.
+        invalidated = manager.invalidate_user("A@B.GOV")
+        assert invalidated == 1
         third = await manager.get_token(request)
         assert third.access_token == "token-2"
 
@@ -434,7 +438,8 @@ class TestDelegation:
         request = DelegationRequest(
             user_id="a@b.gov", subject_token="t", audience="api://downstream"
         )
-        await manager.get_token(request)
+        token = await manager.get_token(request)
+        assert token.access_token == "token"
         assert manager._cache == {}
 
     def test_different_audiences_get_different_cache_keys(self):
@@ -646,6 +651,32 @@ class TestOIDCRoutes:
 
 
 # -- Middleware integration -------------------------------------------------
+
+
+class TestSafeReturnTo:
+    """The post-login destination must never leave the site."""
+
+    @pytest.mark.parametrize("raw", [
+        None,
+        "",
+        "https://evil.example/steal",
+        "//evil.example",
+        "/\\evil.example",
+        "\\evil.example",
+        "javascript:alert(1)",
+        "relative/path",
+        "/" + "a" * 600,
+    ])
+    def test_unsafe_destinations_fall_back_to_root(self, raw):
+        from atlas.routes.oidc_auth_routes import _safe_return_to
+
+        assert _safe_return_to(raw) == "/"
+
+    @pytest.mark.parametrize("raw", ["/", "/workspace", "/chat?id=abc#top", "/a/b/c"])
+    def test_same_site_paths_are_preserved(self, raw):
+        from atlas.routes.oidc_auth_routes import _safe_return_to
+
+        assert _safe_return_to(raw) == raw
 
 
 class TestMiddlewareOIDCSession:

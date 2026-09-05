@@ -117,7 +117,9 @@ async def _post_delegation_request(
         try:
             error_code = str(response.json().get("error", error_code))
         except ValueError:
-            pass
+            # Non-JSON error body: keep the generic code rather than surfacing
+            # provider HTML, which can echo the submitted assertion back.
+            error_code = "unknown_error"
         raise DelegationError(
             f"Delegation endpoint returned {response.status_code} ({error_code})"
         )
@@ -280,8 +282,10 @@ class DelegationManager:
         self._cache.clear()
 
 
-_manager: Optional[DelegationManager] = None
-_manager_signature: Optional[Tuple[str, str, str]] = None
+# The built manager alongside the configuration signature it was built from, so
+# a settings change (provider, endpoint, or client auth method) rebuilds it
+# instead of silently reusing a manager wired to the old configuration.
+_manager_cache: Dict[str, Any] = {"manager": None, "signature": None}
 
 
 def get_delegation_manager(settings=None) -> Optional[DelegationManager]:
@@ -290,8 +294,6 @@ def get_delegation_manager(settings=None) -> Optional[DelegationManager]:
     Returns ``None`` when delegation is disabled or not fully configured, so
     callers can degrade to their existing behaviour instead of failing.
     """
-    global _manager, _manager_signature
-
     if settings is None:
         from atlas.infrastructure.app_factory import app_factory
 
@@ -307,8 +309,9 @@ def get_delegation_manager(settings=None) -> Optional[DelegationManager]:
 
     provider_name = getattr(settings, "oidc_delegation_provider", "token_exchange")
     signature = (provider_name, token_endpoint, settings.oidc_client_auth_method or "")
-    if _manager is not None and _manager_signature == signature:
-        return _manager
+    cached_manager = _manager_cache["manager"]
+    if cached_manager is not None and _manager_cache["signature"] == signature:
+        return cached_manager
 
     from atlas.core.oidc.client_authentication import build_client_credentials_from_settings
 
@@ -325,12 +328,13 @@ def get_delegation_manager(settings=None) -> Optional[DelegationManager]:
         logger.error("Cannot build delegation provider: %s", exc)
         return None
 
-    _manager = DelegationManager(
+    manager = DelegationManager(
         provider,
         min_ttl_seconds=float(getattr(settings, "oidc_delegation_min_ttl_seconds", 60)),
     )
-    _manager_signature = signature
-    return _manager
+    _manager_cache["manager"] = manager
+    _manager_cache["signature"] = signature
+    return manager
 
 
 async def get_delegation_manager_async(settings=None) -> Optional[DelegationManager]:
@@ -371,6 +375,5 @@ async def get_delegation_manager_async(settings=None) -> Optional[DelegationMana
 
 def reset_delegation_manager() -> None:
     """Forget the cached manager (used by tests and on reconfiguration)."""
-    global _manager, _manager_signature
-    _manager = None
-    _manager_signature = None
+    _manager_cache["manager"] = None
+    _manager_cache["signature"] = None

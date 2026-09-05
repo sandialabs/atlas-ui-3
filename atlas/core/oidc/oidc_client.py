@@ -120,7 +120,10 @@ async def _post_token_request(
         try:
             error_code = str(response.json().get("error", error_code))
         except ValueError:
-            pass
+            # A non-JSON error body carries nothing we can safely surface, so
+            # the generic code above stands. Deliberately not logged: some
+            # providers echo the submitted credential back in an HTML error.
+            error_code = "unknown_error"
         raise OIDCFlowError(
             f"Token endpoint returned {response.status_code} ({error_code})"
         )

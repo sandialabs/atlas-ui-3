@@ -14,6 +14,7 @@ id and everything else lives in the server-side session store.
 """
 
 import logging
+import re
 import time
 from typing import Optional
 from urllib.parse import urlencode
@@ -85,17 +86,25 @@ def _redirect_uri(request: Request, settings) -> str:
     return settings.oidc_redirect_uri or str(request.url_for("oidc_callback"))
 
 
+# A same-site destination: one leading slash, then only characters that cannot
+# turn the value into another origin. Matched in full, so a backslash (which
+# some browsers normalise to "/"), a scheme, or an authority all fail.
+_SAFE_RETURN_TO = re.compile(r"/(?!/)[A-Za-z0-9._~!$&'()*+,;=:@/?%#-]{0,512}")
+
+
 def _safe_return_to(raw: Optional[str]) -> str:
     """Constrain the post-login destination to a same-site absolute path.
 
     Without this the ``next`` parameter is an open redirect: an attacker-chosen
     absolute URL would be handed straight to ``RedirectResponse`` after a
-    successful login. ``//evil.example`` is rejected too -- it is protocol
-    relative and leaves the site.
+    successful login. The allowlist is positive rather than a list of rejected
+    prefixes -- ``//evil.example`` is protocol-relative, ``/\\evil.example``
+    is normalised to one by some browsers, and enumerating those escapes is how
+    open-redirect filters are usually defeated.
     """
-    if not raw or not raw.startswith("/") or raw.startswith("//"):
+    if not raw:
         return "/"
-    return raw
+    return raw if _SAFE_RETURN_TO.fullmatch(raw) else "/"
 
 
 def _error_redirect(code: str) -> RedirectResponse:
@@ -151,7 +160,14 @@ async def oidc_callback(
         return _error_redirect("auth_disabled")
 
     if error:
-        error_code = error if error in _KNOWN_OAUTH_ERRORS else "unknown_error"
+        # The logged and redirected value is taken *from the constant set*
+        # rather than from the request, so nothing an IdP (or an attacker
+        # crafting a callback URL) supplies can reach the log or the redirect.
+        error_code = "unknown_error"
+        for known in _KNOWN_OAUTH_ERRORS:
+            if error == known:
+                error_code = known
+                break
         logger.warning("OIDC authorization error: %s", error_code)
         return _error_redirect(error_code)
 

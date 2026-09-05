@@ -21,6 +21,7 @@ specification uses as the canonical resource identifier.
 """
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from atlas.core.oidc.delegation import (
@@ -33,6 +34,17 @@ from atlas.core.oidc.session import get_session_store
 logger = logging.getLogger(__name__)
 
 DELEGATED_AUTH_TYPE = "delegated"
+
+# MCP server names reach the log from configuration, but they also flow from
+# request-shaped call paths, so they are re-derived from a strict allowlist
+# before being logged rather than merely escaped. A name outside the pattern
+# is not a name we can attribute anything to anyway.
+_LOGGABLE_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+
+
+def loggable_server_name(server_name: str) -> str:
+    """Return the server name if it is safe to log verbatim, else a placeholder."""
+    return server_name if _LOGGABLE_NAME.fullmatch(server_name or "") else "<invalid-name>"
 
 
 def is_delegated_server(server_config: Dict[str, Any]) -> bool:
@@ -86,14 +98,15 @@ async def mint_delegated_token_for_server(
     if manager is None:
         logger.debug(
             "MCP server '%s' requests delegation but delegation is not configured",
-            server_name,
+            loggable_server_name(server_name),
         )
         return None
 
     subject_token = _find_subject_token(user_email)
     if not subject_token:
         logger.debug(
-            "No OIDC session token available to delegate for MCP server '%s'", server_name
+            "No OIDC session token available to delegate for MCP server '%s'",
+            loggable_server_name(server_name),
         )
         return None
 
@@ -111,12 +124,16 @@ async def mint_delegated_token_for_server(
     try:
         return await manager.get_token(request)
     except DelegationError as exc:
-        logger.error("Delegated token exchange failed for MCP server '%s': %s", server_name, exc)
+        logger.error(
+            "Delegated token exchange failed for MCP server '%s': %s",
+            loggable_server_name(server_name),
+            exc,
+        )
         return None
     except Exception as exc:  # pragma: no cover - network/provider surprises
         logger.error(
             "Unexpected error minting a delegated token for MCP server '%s': %s",
-            server_name,
+            loggable_server_name(server_name),
             exc,
             exc_info=True,
         )

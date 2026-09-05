@@ -100,9 +100,11 @@ class UserClientMixin:
                 "audience": delegated.audience or "",
             },
         )
+        from atlas.core.oidc.mcp_delegation import loggable_server_name
+
         logger.info(
             "Stored a delegated downstream token for MCP server '%s'",
-            sanitize_for_logging(server_name),
+            loggable_server_name(server_name),
         )
         return token_storage.get_valid_token(user_email, server_name)
 
