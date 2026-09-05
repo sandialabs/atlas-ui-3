@@ -151,6 +151,21 @@ class OAuthConfig(BaseModel):
     callback_port: Optional[int] = None  # Fixed port for OAuth callback (default: random)
 
 
+class DelegationConfig(BaseModel):
+    """Downstream authorization parameters for an ``auth_type: "delegated"`` server.
+
+    Without this model the keys were silently dropped: ``MCPServerConfig`` is a
+    plain ``BaseModel``, so Pydantic discards unknown fields, and the manager
+    rebuilds each server from ``model_dump()``. A documented ``delegation``
+    block therefore never reached the exchange, which then fell back to the
+    server URL as the audience and sent no scope.
+    """
+
+    audience: Optional[str] = None  # Defaults to the server URL when unset
+    resource: Optional[str] = None  # RFC 8693 `resource` parameter
+    scope: Optional[str] = None     # Space-separated scopes for the downstream token
+
+
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server."""
     description: Optional[str] = None
@@ -166,9 +181,10 @@ class MCPServerConfig(BaseModel):
     type: str = "stdio"                  # Server type: "stdio" or "http" (deprecated, use transport)
     transport: Optional[str] = None      # Explicit transport: "stdio", "http", "sse" - takes priority over auto-detection
     # Authentication configuration
-    auth_type: str = "none"  # Authentication type: "none", "api_key", "bearer", "jwt", "oauth"
+    auth_type: str = "none"  # Authentication type: "none", "api_key", "bearer", "jwt", "oauth", "delegated"
     auth_token: Optional[str] = None     # Bearer token for MCP server authentication (supports ${ENV_VAR})
     oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 configuration (when auth_type="oauth")
+    delegation: Optional[DelegationConfig] = None  # Downstream token parameters (when auth_type="delegated")
     wormhole: bool = False  # Forward the per-session Wormhole subtoken (via WORMHOLE_FORWARD_HEADER) when connecting
     compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval

@@ -384,6 +384,122 @@ class AppSettings(BaseSettings):
         validation_alias="GLOBUS_SESSION_SECRET",
     )
 
+    # OIDC / OAuth 2.0 login settings (Authorization Code + PKCE).
+    #
+    # This is an alternative to the trusted-header auth mode: when enabled,
+    # Atlas is itself the OAuth client and terminates login, rather than
+    # trusting a header set by a reverse proxy. Header auth remains the
+    # default and keeps working for existing deployments.
+    feature_oidc_auth_enabled: bool = Field(
+        default=False,
+        description="Enable OIDC login (Authorization Code + PKCE) with Atlas as a confidential OAuth client",
+        validation_alias=AliasChoices("FEATURE_OIDC_AUTH_ENABLED"),
+    )
+    oidc_issuer: Optional[str] = Field(
+        default=None,
+        description="OIDC issuer URL; provider metadata is discovered at "
+                    "<issuer>/.well-known/openid-configuration",
+        validation_alias="OIDC_ISSUER",
+    )
+    oidc_client_id: Optional[str] = Field(
+        default=None,
+        description="OAuth client ID registered with the IdP for Atlas",
+        validation_alias="OIDC_CLIENT_ID",
+    )
+    oidc_client_secret: Optional[str] = Field(
+        default=None,
+        description="OAuth client secret (client_secret_basic / client_secret_post auth methods)",
+        validation_alias="OIDC_CLIENT_SECRET",
+    )
+    oidc_client_auth_method: str = Field(
+        default="client_secret_basic",
+        description="Confidential-client authentication method: client_secret_basic, "
+                    "client_secret_post, or private_key_jwt (preferred where supported)",
+        validation_alias="OIDC_CLIENT_AUTH_METHOD",
+    )
+    oidc_private_key_path: Optional[str] = Field(
+        default=None,
+        description="Path to the PEM private key used for private_key_jwt client authentication",
+        validation_alias="OIDC_PRIVATE_KEY_PATH",
+    )
+    oidc_private_key_id: Optional[str] = Field(
+        default=None,
+        description="Key ID (kid) advertised in the private_key_jwt client assertion header",
+        validation_alias="OIDC_PRIVATE_KEY_ID",
+    )
+    oidc_private_key_algorithm: str = Field(
+        default="RS256",
+        description="Signing algorithm for the private_key_jwt client assertion (RS256, ES256, PS256)",
+        validation_alias="OIDC_PRIVATE_KEY_ALGORITHM",
+    )
+    oidc_redirect_uri: Optional[str] = Field(
+        default=None,
+        description="OIDC redirect URI (e.g. https://atlas.example.gov/auth/oidc/callback). "
+                    "Defaults to the callback route resolved from the incoming request.",
+        validation_alias="OIDC_REDIRECT_URI",
+    )
+    oidc_scopes: str = Field(
+        default="openid profile email",
+        description="Space-separated scopes requested during OIDC login",
+        validation_alias="OIDC_SCOPES",
+    )
+    oidc_session_secret: str = Field(
+        default="",
+        description="Secret key signing the Atlas session cookie for OIDC login. Must be set to a "
+                    "strong random value when FEATURE_OIDC_AUTH_ENABLED=true.",
+        validation_alias="OIDC_SESSION_SECRET",
+    )
+    oidc_username_claim: str = Field(
+        default="email",
+        description="ID token claim used as the Atlas user identity",
+        validation_alias="OIDC_USERNAME_CLAIM",
+    )
+    oidc_session_max_age_seconds: int = Field(
+        default=28800,
+        ge=60,
+        description="Maximum lifetime of an Atlas OIDC login session, in seconds",
+        validation_alias="OIDC_SESSION_MAX_AGE_SECONDS",
+    )
+    oidc_cookie_secure: Optional[bool] = Field(
+        default=None,
+        description="Send the Atlas session cookie with the Secure attribute. Defaults to "
+                    "auto: on when OIDC_REDIRECT_URI is https, off for a loopback http "
+                    "development redirect. Set explicitly to override.",
+        validation_alias="OIDC_COOKIE_SECURE",
+    )
+    oidc_post_logout_redirect_uri: Optional[str] = Field(
+        default=None,
+        description="Where the IdP should send the browser after RP-initiated logout",
+        validation_alias="OIDC_POST_LOGOUT_REDIRECT_URI",
+    )
+
+    # Delegated downstream authorization (RFC 8693 token exchange / Entra OBO).
+    #
+    # Atlas never forwards the user's inbound token to a downstream service.
+    # Instead it exchanges it for a short-lived, audience-specific token.
+    feature_oidc_delegation_enabled: bool = Field(
+        default=False,
+        description="Enable delegated downstream authorization for MCP servers and other resources",
+        validation_alias=AliasChoices("FEATURE_OIDC_DELEGATION_ENABLED"),
+    )
+    oidc_delegation_provider: str = Field(
+        default="token_exchange",
+        description="Delegation mechanism: 'token_exchange' (RFC 8693) or 'entra_obo' "
+                    "(Microsoft Entra ID On-Behalf-Of)",
+        validation_alias="OIDC_DELEGATION_PROVIDER",
+    )
+    oidc_delegation_token_endpoint: Optional[str] = Field(
+        default=None,
+        description="Token endpoint used for delegation. Defaults to the discovered OIDC token endpoint.",
+        validation_alias="OIDC_DELEGATION_TOKEN_ENDPOINT",
+    )
+    oidc_delegation_min_ttl_seconds: int = Field(
+        default=60,
+        ge=0,
+        description="Refresh a cached delegated token once fewer than this many seconds remain",
+        validation_alias="OIDC_DELEGATION_MIN_TTL_SECONDS",
+    )
+
     # S3/MinIO storage settings
     use_mock_s3: bool = False  # Use in-process S3 mock (no Docker required)
     s3_endpoint: str = "http://localhost:9000"

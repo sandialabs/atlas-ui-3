@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #892 - 2026-09-04
+- **OIDC login, confidential-client authentication, and delegated OAuth credentials** (#891): Atlas can now terminate login itself (Authorization Code + PKCE), authenticate to the IdP as a confidential client, and mint short-lived audience-specific downstream tokens via RFC 8693 or Entra OBO. Opt-in; the trusted-header auth mode is unchanged. See `docs/admin/oidc-authentication.md`.
+
 ### PR #882 - 2026-09-02
 - **Preconfigured personas (default system prompts) from a folder of markdown files** (closes #880): admins can drop `.md` files with YAML frontmatter (`name`, `description`, optional `access_group`, `order`) into a personas folder and Atlas offers each one as a selectable system prompt in a new **Personas** section of the prompt picker -- no code changes, no MCP prompt server, and no per-user prompt authoring. Personas with no `access_group` are visible to everyone; gated ones are filtered through the same authorization service as tools and models (and hidden if that check errors). Search order: `PERSONAS_DIR`, `<APP_CONFIG_DIR>/personas/` (`config/personas/` by default), then the packaged samples in `atlas/config/prompts/personas/`. Personas need no per-user storage, so they work with `FEATURE_CUSTOM_PROMPTS_ENABLED`/chat history off: the client sends only the persona id and the server resolves the text after re-checking the access group. An optional `compliance_level` frontmatter field filters personas by the current compliance context, like tools and models, with the same rule re-checked server-side on each turn. New endpoints `GET /api/personas` and `GET /api/personas/{id}`; see `docs/admin/personas.md`.
 
