@@ -164,9 +164,9 @@ async def oidc_callback(
         return _error_redirect("auth_disabled")
 
     if error:
-        error_code = _KNOWN_OAUTH_ERRORS.get(error, "unknown_error")
-        logger.warning("OIDC authorization error: %s", error_code)
-        return _error_redirect(error_code)
+        oauth_error = _KNOWN_OAUTH_ERRORS.get(error, "unknown_error")
+        logger.warning("OIDC authorization error: %s", oauth_error)
+        return _error_redirect(oauth_error)
 
     if not code or not state:
         logger.warning("OIDC callback missing code or state")
