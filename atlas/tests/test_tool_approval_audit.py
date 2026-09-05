@@ -397,17 +397,23 @@ async def test_executor_empty_edit_is_executed_and_matches_presented_call(audit_
     original_requires_approval = te.requires_approval
     te.get_approval_manager = lambda: manager
     te.requires_approval = lambda name, cfg: (True, True, False)
-    approve_task = asyncio.create_task(_approve_when_ready())
-    try:
-        result = await execute_single_tool(
+    execute_task = asyncio.create_task(
+        execute_single_tool(
             tool_call=tool_call,
             session_context={"user_email": "alice@example.com"},
             tool_manager=tool_manager,
             update_callback=_capture,
             config_manager=MagicMock(),
         )
+    )
+    approve_task = asyncio.create_task(_approve_when_ready())
+    try:
         await approve_task
+        result = await asyncio.wait_for(execute_task, timeout=2)
     finally:
+        if not execute_task.done():
+            execute_task.cancel()
+        await asyncio.gather(execute_task, return_exceptions=True)
         te.get_approval_manager = original_get_am
         te.requires_approval = original_requires_approval
 
@@ -462,17 +468,23 @@ async def test_executor_allow_edit_false_ignores_client_replacement_arguments(au
     original_requires_approval = te.requires_approval
     te.get_approval_manager = lambda: manager
     te.requires_approval = lambda name, cfg: (True, False, False)
-    approve_task = asyncio.create_task(_approve_when_ready())
-    try:
-        result = await execute_single_tool(
+    execute_task = asyncio.create_task(
+        execute_single_tool(
             tool_call=tool_call,
             session_context={"user_email": "alice@example.com"},
             tool_manager=tool_manager,
             update_callback=_capture,
             config_manager=MagicMock(),
         )
+    )
+    approve_task = asyncio.create_task(_approve_when_ready())
+    try:
         await approve_task
+        result = await asyncio.wait_for(execute_task, timeout=2)
     finally:
+        if not execute_task.done():
+            execute_task.cancel()
+        await asyncio.gather(execute_task, return_exceptions=True)
         te.get_approval_manager = original_get_am
         te.requires_approval = original_requires_approval
 

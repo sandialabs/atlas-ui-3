@@ -50,6 +50,14 @@ def _resolve_audit_path() -> Path:
     return path
 
 
+def _safe_log_value(value: Any) -> str:
+    """Return one-line, best-effort diagnostic text for an audit identifier."""
+    try:
+        return str(value).replace("\r", "").replace("\n", "")
+    except Exception:
+        return f"<{type(value).__name__}>"
+
+
 def _append_audit_line(path: Path, line: str) -> None:
     """Append one JSONL line, creating an owner-only file when needed."""
     parent = path.parent
@@ -59,7 +67,7 @@ def _append_audit_line(path: Path, line: str) -> None:
         try:
             os.chmod(parent, 0o700)
         except OSError:
-            pass
+            logger.debug("Unable to tighten tool audit directory permissions", exc_info=True)
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
     fd = os.open(path, flags, 0o600)
@@ -67,7 +75,7 @@ def _append_audit_line(path: Path, line: str) -> None:
         try:
             os.chmod(path, 0o600)
         except OSError:
-            pass
+            logger.debug("Unable to tighten tool audit file permissions", exc_info=True)
         handle.write(line)
 
 
@@ -131,6 +139,12 @@ def record_tool_decision(
         with _lock:
             _append_audit_line(path, line)
     except Exception as exc:
-        logger.warning("tool audit log write failed (%s)", type(exc).__name__)
+        logger.warning(
+            "tool audit log write failed (%s): tool_call_id=%s decision=%s decision_origin=%s",
+            type(exc).__name__,
+            _safe_log_value(tool_call_id),
+            _safe_log_value(decision),
+            _safe_log_value(decision_origin),
+        )
 
     return record
