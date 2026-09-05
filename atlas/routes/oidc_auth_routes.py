@@ -59,8 +59,8 @@ _RETURN_TO_KEY = "oidc_return_to"
 # and the redirect is always one of these literals -- an IdP-supplied (or
 # attacker-crafted) string is never reflected, only used as a lookup key.
 _KNOWN_OAUTH_ERRORS = {
-    code: code
-    for code in (
+    name: name
+    for name in (
         "access_denied", "invalid_request", "unauthorized_client",
         "unsupported_response_type", "invalid_scope", "server_error",
         "temporarily_unavailable", "consent_required", "login_required",
