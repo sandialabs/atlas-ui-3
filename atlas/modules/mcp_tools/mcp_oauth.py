@@ -693,10 +693,18 @@ async def register_client(
             "and no client_id is configured for this server"
         )
 
+    # Only ask for grants the server actually advertises: a provider that does
+    # not support refresh_token can reject a registration requesting it
+    # outright, which would make the server unusable rather than merely
+    # short-lived.
+    grant_types = ["authorization_code"]
+    if metadata.supports_refresh():
+        grant_types.append("refresh_token")
+
     body: Dict[str, Any] = {
         "client_name": client_name,
         "redirect_uris": [redirect_uri],
-        "grant_types": ["authorization_code", "refresh_token"],
+        "grant_types": grant_types,
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
         "application_type": "web",
@@ -729,7 +737,21 @@ async def register_client(
     if not client_id:
         raise MCPOAuthError("Dynamic client registration returned no client_id")
 
-    expires_at = document.get("client_secret_expires_at")
+    # Provider-supplied and not always a number: a string or a nonsense value
+    # must not raise out of registration as an unhandled ValueError. RFC 7591
+    # gives 0 the meaning "never expires", which `or None` also collapses to
+    # None -- the same thing RegisteredClient.is_expired() treats as no expiry.
+    raw_expiry = document.get("client_secret_expires_at")
+    try:
+        expires_at = float(raw_expiry) if raw_expiry else None
+    except (TypeError, ValueError):
+        logger.warning(
+            "Authorization server '%s' returned a non-numeric "
+            "client_secret_expires_at; treating the registration as non-expiring",
+            sanitize_for_logging(metadata.issuer),
+        )
+        expires_at = None
+
     logger.info(
         "Registered Atlas as an OAuth client with authorization server '%s'",
         sanitize_for_logging(metadata.issuer),
@@ -740,7 +762,7 @@ async def register_client(
         redirect_uri=redirect_uri,
         client_secret=document.get("client_secret"),
         registered_at=time.time(),
-        client_secret_expires_at=float(expires_at) if expires_at else None,
+        client_secret_expires_at=expires_at,
         scopes=scopes,
     )
 

@@ -177,18 +177,23 @@ def _patch_app_factory(manager, base_url=BASE_URL):
 
 
 def _patch_flow(registered=None, metadata=None):
-    """Patch discovery and registration; the rest of the service runs for real."""
+    """Patch discovery and client resolution; the rest of the service runs for real.
+
+    Both lookups are patched: the authorization path may register, while the
+    refresh path deliberately uses the non-registering lookup.
+    """
+    client = registered or RegisteredClient(
+        client_id="c1", issuer=ISSUER, redirect_uri=CALLBACK
+    )
     return (
         patch.object(
             mcp_oauth_service, "get_server_oauth_metadata",
             AsyncMock(return_value=metadata or _metadata()),
         ),
-        patch.object(
-            mcp_oauth_service, "_resolve_client",
-            AsyncMock(
-                return_value=registered
-                or RegisteredClient(client_id="c1", issuer=ISSUER, redirect_uri=CALLBACK)
-            ),
+        patch.multiple(
+            mcp_oauth_service,
+            _resolve_client=AsyncMock(return_value=client),
+            _existing_client=lambda *args, **kwargs: client,
         ),
     )
 
@@ -1005,3 +1010,95 @@ class TestUnexpectedErrorsDoNotStrandTheBrowser:
         # The local token is already gone: this must read as success.
         assert response.status_code == 200
         assert response.json()["revoked_at_provider"] is False
+
+
+class TestRefreshNeverReRegisters:
+    """Registering during a refresh would invalidate every user's token at once."""
+
+    def _expired(self, storage):
+        storage.store_token(
+            user_email=USER, server_name=SERVER, token_value="old",
+            token_type="oauth_access", expires_at=time.time() - 10,
+            refresh_token="rt-1", scopes="read",
+        )
+
+    @pytest.mark.asyncio
+    async def test_missing_registration_asks_for_reauthorization(self, storage):
+        self._expired(storage)
+
+        class _EmptyStore:
+            def get(self, server_name, issuer):
+                return None
+
+        with patch.object(
+            mcp_oauth_service, "get_server_oauth_metadata",
+            AsyncMock(return_value=_metadata()),
+        ), patch.object(
+            mcp_oauth_service, "_base_url_from_settings", return_value=BASE_URL
+        ), patch.object(
+            mcp_oauth_service, "get_oauth_client_store", return_value=_EmptyStore()
+        ), patch.object(
+            mcp_oauth_service, "register_client",
+            AsyncMock(side_effect=AssertionError("must not register during refresh")),
+        ):
+            assert await mcp_oauth_service.refresh_stored_token(
+                USER, SERVER, SERVERS_CONFIG[SERVER]
+            ) is None
+
+    @pytest.mark.asyncio
+    async def test_redirect_uri_mismatch_asks_for_reauthorization(self, storage):
+        """Atlas's public URL moved: re-registering would break every other user."""
+        self._expired(storage)
+        stale = RegisteredClient(
+            client_id="c1", issuer=ISSUER, redirect_uri="https://old.example/cb"
+        )
+
+        class _Store:
+            def get(self, server_name, issuer):
+                return stale
+
+        with patch.object(
+            mcp_oauth_service, "get_server_oauth_metadata",
+            AsyncMock(return_value=_metadata()),
+        ), patch.object(
+            mcp_oauth_service, "_base_url_from_settings", return_value=BASE_URL
+        ), patch.object(
+            mcp_oauth_service, "get_oauth_client_store", return_value=_Store()
+        ), patch.object(
+            mcp_oauth_service, "register_client",
+            AsyncMock(side_effect=AssertionError("must not register during refresh")),
+        ), patch.object(
+            mcp_oauth_service, "refresh_access_token",
+            AsyncMock(side_effect=AssertionError("must not refresh with a stale client")),
+        ):
+            assert await mcp_oauth_service.refresh_stored_token(
+                USER, SERVER, SERVERS_CONFIG[SERVER]
+            ) is None
+
+    @pytest.mark.asyncio
+    async def test_a_matching_registration_is_used(self, storage):
+        self._expired(storage)
+        good = RegisteredClient(client_id="c1", issuer=ISSUER, redirect_uri=CALLBACK)
+
+        class _Store:
+            def get(self, server_name, issuer):
+                return good
+
+        with patch.object(
+            mcp_oauth_service, "get_server_oauth_metadata",
+            AsyncMock(return_value=_metadata()),
+        ), patch.object(
+            mcp_oauth_service, "_base_url_from_settings", return_value=BASE_URL
+        ), patch.object(
+            mcp_oauth_service, "get_oauth_client_store", return_value=_Store()
+        ), patch.object(
+            mcp_oauth_service, "refresh_access_token",
+            AsyncMock(return_value=TokenResponse(
+                access_token="new", refresh_token="rt-2",
+                expires_at=time.time() + 3600, scopes="read",
+            )),
+        ):
+            refreshed = await mcp_oauth_service.refresh_stored_token(
+                USER, SERVER, SERVERS_CONFIG[SERVER]
+            )
+        assert refreshed.token_value == "new"

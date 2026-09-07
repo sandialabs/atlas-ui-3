@@ -343,7 +343,32 @@ async def _refresh_locked(
         metadata = await get_server_oauth_metadata(server_url(config))
         base_url = _base_url_from_settings()
         redirect_uri = redirect_uri_for(server_name, base_url)
-        client = await _resolve_client(server_name, config, metadata, redirect_uri)
+
+        # Never register during a refresh. The stored refresh token was issued
+        # to one client_id; registering a new one here would rebind the server
+        # to fresh credentials and invalidate every user's refresh token at
+        # once -- turning one user's expired token into a silent mass logout.
+        client = _existing_client(
+            server_name, config, metadata.authorization_server.issuer, redirect_uri
+        )
+        if client is None:
+            logger.info(
+                "No OAuth client registration held for MCP server '%s'; the user "
+                "must authorize again rather than re-registering mid-refresh",
+                sanitize_for_logging(server_name),
+            )
+            return None
+        if client.redirect_uri != redirect_uri:
+            # Atlas's public URL changed. The provider will reject a refresh
+            # bound to the old registration, and re-registering here would
+            # break every other user, so this user re-authorizes instead.
+            logger.info(
+                "Redirect URI changed for MCP server '%s'; re-authorization is "
+                "required before refresh can work again",
+                sanitize_for_logging(server_name),
+            )
+            return None
+
         response = await refresh_access_token(
             metadata=metadata,
             client=client,

@@ -1451,3 +1451,70 @@ describe('ToolsPanel - MCP OAuth connect indicator', () => {
     expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
   })
 })
+
+describe('ToolsPanel - OAuth error retry affordance', () => {
+  let mockStartOAuth
+
+  beforeEach(() => {
+    sessionStorage.clear()
+    mockStartOAuth = vi.fn()
+    authHookState.startOAuth = mockStartOAuth
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: [],
+      prompts: [],
+      features: {}
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => []),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => []),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+  })
+
+  afterEach(() => {
+    authHookState.startOAuth = null
+  })
+
+  const renderWithError = (error) => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error })
+    )
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('offers a retry for a transient failure', () => {
+    renderWithError('temporarily_unavailable')
+
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }))
+
+    expect(mockStartOAuth).toHaveBeenCalledWith('remote-mcp')
+  })
+
+  it('offers a retry when the user declined', () => {
+    renderWithError('access_denied')
+    expect(screen.getByRole('button', { name: /try again/i })).toBeTruthy()
+  })
+
+  it('does not offer a retry for a misconfiguration that will fail identically', () => {
+    renderWithError('discovery_failed')
+
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent(/administrator/i)
+  })
+})

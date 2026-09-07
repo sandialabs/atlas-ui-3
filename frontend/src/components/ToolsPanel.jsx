@@ -83,6 +83,21 @@ const OAUTH_ERROR_MESSAGES = {
   unknown_error: 'The sign-in failed for an unrecognized reason. Please try again, and tell an administrator if it keeps happening.',
 }
 
+// Retrying only helps where the failure is transient or the user's own choice.
+// A misconfigured deployment or an unregistered client will fail identically
+// every time, so offering "Try again" there would just waste the user's time.
+const OAUTH_RETRYABLE_ERRORS = new Set([
+  'access_denied',
+  'invalid_state',
+  'missing_params',
+  'invalid_grant',
+  'server_error',
+  'temporarily_unavailable',
+  'consent_required',
+  'login_required',
+  'interaction_required',
+])
+
 const describeOAuthError = (code) =>
   OAUTH_ERROR_MESSAGES[code] ||
   'The sign-in failed. Please try again, and tell an administrator if it keeps happening.'
@@ -794,6 +809,17 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                   <>
                     Could not connect to <strong>{oauthNotice.server}</strong>.{' '}
                     {describeOAuthError(oauthNotice.error)}
+                    {OAUTH_RETRYABLE_ERRORS.has(oauthNotice.error) && (
+                      <button
+                        onClick={() => {
+                          setOauthNotice(null)
+                          startOAuth(oauthNotice.server)
+                        }}
+                        className="ml-2 underline hover:no-underline font-medium"
+                      >
+                        Try again
+                      </button>
+                    )}
                   </>
                 ) : (
                   <>Connected to <strong>{oauthNotice.server}</strong>.</>

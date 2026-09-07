@@ -859,3 +859,61 @@ class TestDiscoveryFailureCaching:
             release.set()
             with pytest.raises(MCPOAuthError):
                 await stalled
+
+
+class TestRegistrationRobustness:
+    """A provider's registration response is untrusted input."""
+
+    @pytest.mark.asyncio
+    async def test_non_numeric_secret_expiry_does_not_raise(self):
+        """A string here used to reach float() and escape as a raw ValueError."""
+
+        def handler(request):
+            return httpx.Response(
+                201,
+                json={"client_id": "dcr-1", "client_secret_expires_at": "not-a-number"},
+            )
+
+        metadata = parse_authorization_server_metadata(ISSUER, _as_metadata())
+        with _mock_httpx(handler):
+            client = await register_client(
+                metadata, redirect_uri="https://a/cb", client_name="Atlas UI"
+            )
+        assert client.client_id == "dcr-1"
+        assert client.is_expired() is False
+
+    @pytest.mark.asyncio
+    async def test_refresh_grant_is_only_requested_when_advertised(self):
+        """A provider without refresh support can reject the whole registration."""
+        seen = {}
+
+        def handler(request):
+            seen["body"] = json.loads(request.content.decode())
+            return httpx.Response(201, json={"client_id": "dcr-1"})
+
+        metadata = parse_authorization_server_metadata(
+            ISSUER, _as_metadata(grant_types_supported=["authorization_code"])
+        )
+        with _mock_httpx(handler):
+            await register_client(
+                metadata, redirect_uri="https://a/cb", client_name="Atlas UI"
+            )
+        assert seen["body"]["grant_types"] == ["authorization_code"]
+
+    @pytest.mark.asyncio
+    async def test_refresh_grant_requested_when_unadvertised(self):
+        """An empty list means the server advertised nothing, not that it refuses."""
+        seen = {}
+
+        def handler(request):
+            seen["body"] = json.loads(request.content.decode())
+            return httpx.Response(201, json={"client_id": "dcr-1"})
+
+        metadata = parse_authorization_server_metadata(
+            ISSUER, _as_metadata(grant_types_supported=[])
+        )
+        with _mock_httpx(handler):
+            await register_client(
+                metadata, redirect_uri="https://a/cb", client_name="Atlas UI"
+            )
+        assert "refresh_token" in seen["body"]["grant_types"]
