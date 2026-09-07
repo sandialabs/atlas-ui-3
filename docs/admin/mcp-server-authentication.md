@@ -304,8 +304,23 @@ the parameters from the URL.
    rejected
 7. **No Reflected Errors (OAuth):** Provider-supplied error strings are mapped
    through an allowlist before being echoed into the redirect
-8. **Transport (OAuth):** Every discovered endpoint must be `https://` (or
-   loopback `http://`), so a compromised MCP server cannot downgrade the flow
+8. **Transport and destination (OAuth):** Every discovered endpoint must be
+   `https://`, and the protected-resource metadata URL (plus every redirect
+   hop) must share the MCP endpoint's own origin, so a compromised server
+   cannot downgrade the flow or aim Atlas's fetches at arbitrary hosts.
+   Loopback `http://` is accepted only when the MCP server is itself on
+   loopback, so a remote server cannot name `127.0.0.1`.
+
+   **Residual risk worth knowing:** the authorization server legitimately
+   lives on a different origin from the resource (that is the normal shape),
+   so its URL cannot be origin-pinned. A malicious or compromised MCP server
+   can therefore still cause one `GET` to
+   `https://<host-it-names>/.well-known/oauth-authorization-server`. That
+   request carries no Atlas credentials and its response must parse as valid
+   authorization-server metadata to go any further, but it does reach the
+   named host from inside your network. Only add MCP servers you trust, and
+   put egress controls in front of Atlas if that request matters in your
+   environment
 9. **Encrypted Client Registrations:** Dynamic client registrations, including
    any issued `client_secret`, are encrypted with the same key as the tokens
 
