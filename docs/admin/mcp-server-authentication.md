@@ -90,10 +90,104 @@ Configure MCP servers in `config/mcp.json`:
 ```
 
 **Configuration fields:**
-- `auth_type`: Type of authentication required (`api_key`, `jwt`, `bearer`, or `none`)
+- `auth_type`: Type of authentication required (`api_key`, `jwt`, `bearer`, `oauth`, `delegated`, or `none`)
 - `auth_header`: (Optional) Custom header name for API key auth. Defaults to `X-API-Key`. Only used when `auth_type` is `api_key`.
+- `oauth_config`: (Optional) Overrides for `auth_type: oauth`. See [OAuth 2.1 servers](#oauth-21-servers).
 
-**Note:** Per-user authentication (`auth_type: jwt`, `bearer`, `api_key`) is only supported for HTTP/SSE transport servers. Stdio-based servers cannot use per-user authentication because tokens are injected via HTTP headers.
+**Note:** Per-user authentication (`auth_type: jwt`, `bearer`, `api_key`, `oauth`) is only supported for HTTP/SSE transport servers. Stdio-based servers cannot use per-user authentication because tokens are injected via HTTP headers.
+
+## OAuth 2.1 servers
+
+`auth_type: "oauth"` is for remote MCP servers that implement the MCP
+authorization spec: they answer an unauthenticated request with `401` and a
+`WWW-Authenticate: Bearer resource_metadata="..."` challenge. Instead of asking
+the user to obtain a token by hand, Atlas runs the Authorization Code flow with
+PKCE for them, in the browser, and stores the result per user.
+
+### Configuration
+
+Most servers need nothing beyond the auth type, because everything is
+discovered at runtime:
+
+```json
+{
+  "remote-oauth-server": {
+    "description": "A remote MCP server that requires OAuth",
+    "url": "https://mcp.example.com/mcp",
+    "transport": "http",
+    "auth_type": "oauth",
+    "groups": ["users"]
+  }
+}
+```
+
+`oauth_config` exists for the cases discovery cannot cover:
+
+| Field | Purpose |
+|-------|---------|
+| `scopes` | Scopes to request. Defaults to what the resource or authorization server advertises. |
+| `client_name` | Name presented at dynamic client registration. Defaults to `Atlas UI`. |
+| `client_id` | A pre-registered client id, for providers that do not offer dynamic registration. Skips registration entirely. |
+| `client_secret` | Only when a provider insists on a confidential client. Prefer leaving this unset; PKCE is what secures the flow. |
+| `callback_port` | Deprecated and ignored. The callback is an Atlas route, not a local listener. |
+
+### Required setting
+
+Atlas must know the URL browsers use to reach it, so it can build the
+`redirect_uri` it registers with the provider. This is **never** derived from
+the inbound `Host` header, which an attacker controls:
+
+```bash
+MCP_OAUTH_REDIRECT_BASE_URL=https://atlas.example.gov   # falls back to BACKEND_PUBLIC_URL
+```
+
+The resulting callback is `<base>/api/mcp/auth/<server>/oauth/callback`. It
+must be reachable by the user's browser and must be `https://` (an `http://`
+loopback address is accepted for local development).
+
+### What happens
+
+1. The user clicks the key icon next to the server in the Tools panel, which
+   navigates to `GET /api/mcp/auth/<server>/oauth/start`.
+2. Atlas discovers the authorization server: the `401` challenge names an
+   RFC 9728 protected-resource document, which names the authorization
+   server, whose RFC 8414 metadata supplies the endpoints. A server that
+   publishes no challenge is still resolved from the well-known paths.
+3. If Atlas holds no client credentials for that authorization server, it
+   registers itself via RFC 7591 Dynamic Client Registration, as a public
+   client using PKCE. The registration is per MCP server (not per user) and is
+   persisted encrypted, so it is reused across restarts.
+4. The browser is redirected to the provider with `code_challenge_method=S256`
+   and a single-use `state` bound to the user's Atlas session. When the
+   protected-resource document names a `resource`, it is sent as an RFC 8707
+   resource indicator so the issued token is audience-bound.
+5. The provider returns the user to the Atlas callback, which validates the
+   state, redeems the code, and stores the access and refresh tokens
+   encrypted per user.
+6. Later tool calls use the access token. When it expires, Atlas refreshes it
+   silently from the refresh token; only if that fails is the user asked to
+   authorize again.
+7. Disconnecting removes the stored tokens, invalidates cached clients, and
+   revokes at the provider's `revocation_endpoint` when one is advertised.
+
+### How this differs from Globus and OIDC login
+
+These are three separate things and are configured independently:
+
+- **[OIDC login](./oidc-authentication.md)** makes Atlas itself an OAuth
+  relying party so users can log in to Atlas. One statically configured
+  provider.
+- **Globus auth** is a single, pre-registered provider used for Globus
+  transfer and identity, with its own fixed callback.
+- **MCP OAuth** (this page) is per MCP server: an arbitrary number of
+  third-party resource servers, discovered at runtime, each with its own
+  authorization server, its own dynamically registered client credentials, and
+  its own per-user tokens.
+
+`auth_type: "delegated"` is a fourth, different option: Atlas exchanges the
+user's existing OIDC token for a downstream credential without any browser
+interaction. Use `oauth` when the MCP server has its own identity provider the
+user must consent to; use `delegated` when it trusts your OIDC issuer.
 
 ### Environment Variables
 
@@ -186,10 +280,16 @@ A reusable modal component for entering API keys or tokens.
 
 ### ToolsPanel Integration
 
-The Tools panel shows authentication status for servers with `auth_type` of `api_key`, `jwt`, or `bearer`:
+The Tools panel shows authentication status for servers with `auth_type` of `api_key`, `jwt`, `bearer`, or `oauth`:
 
-- **Green shield icon:** Authenticated successfully
-- **Yellow key icon:** Authentication required (click to add token)
+- **Green shield icon:** Authenticated successfully. Click to disconnect.
+- **Yellow key icon:** Authentication required. For `oauth` servers this starts
+  the browser authorization flow; for the others it opens the token modal.
+
+After an OAuth flow the callback returns the browser with
+`?mcp_auth_server=<name>` and either `mcp_auth_success=1` or
+`mcp_auth_error=<code>`, which the panel surfaces as a banner before stripping
+the parameters from the URL.
 
 ## Security Considerations
 
@@ -198,6 +298,16 @@ The Tools panel shows authentication status for servers with `auth_type` of `api
 3. **No Token Logging:** Token values are never logged (sanitized)
 4. **Expiration Tracking:** Optional expiration date tracked and validated
 5. **Secure Storage:** Tokens stored in dedicated secure directory
+6. **CSRF Protection (OAuth):** The `state` is single-use, expires after ten
+   minutes, and is bound to both the server and the user who started the flow,
+   so a callback replayed in another account or aimed at another server is
+   rejected
+7. **No Reflected Errors (OAuth):** Provider-supplied error strings are mapped
+   through an allowlist before being echoed into the redirect
+8. **Transport (OAuth):** Every discovered endpoint must be `https://` (or
+   loopback `http://`), so a compromised MCP server cannot downgrade the flow
+9. **Encrypted Client Registrations:** Dynamic client registrations, including
+   any issued `client_secret`, are encrypted with the same key as the tokens
 
 ## Demo Server
 
@@ -226,7 +336,10 @@ The server runs on port 8006 by default and validates API keys via the `X-API-Ke
 ### Backend
 
 - `atlas/modules/mcp_tools/token_storage.py` - Encrypted token storage
-- `atlas/routes/mcp_auth_routes.py` - API endpoints for token management
+- `atlas/modules/mcp_tools/mcp_oauth.py` - OAuth 2.1 discovery, DCR, token endpoint
+- `atlas/modules/mcp_tools/mcp_oauth_service.py` - Flow orchestration
+- `atlas/modules/mcp_tools/oauth_client_store.py` - Encrypted client registrations
+- `atlas/routes/mcp_auth_routes.py` - API endpoints for token management and the OAuth routes
 - `atlas/modules/mcp_tools/client.py` - MCP client with token injection
 - `atlas/modules/config/config_manager.py` - auth_type configuration
 

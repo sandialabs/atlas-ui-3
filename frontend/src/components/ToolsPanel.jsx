@@ -103,7 +103,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [tokenUploadError, setTokenUploadError] = useState(null)
   const [disconnectServer, setDisconnectServer] = useState(null)
   const [disconnectError, setDisconnectError] = useState(null)
-  const { fetchAuthStatus, uploadToken, removeToken, getServerAuth } = useServerAuthStatus()
+  const { fetchAuthStatus, uploadToken, removeToken, startOAuth, getServerAuth } = useServerAuthStatus()
   
   // Seed pending state from saved state when the panel opens, and re-seed it
   // whenever the saved selections change underneath an un-edited panel. The
@@ -154,6 +154,31 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       fetchAuthStatus()
     }
   }, [isOpen, fetchAuthStatus])
+
+  // The OAuth callback returns the browser here with the outcome in the query
+  // string. Surface it, refresh the status the flow just changed, and strip
+  // the parameters so a reload does not replay the message.
+  const [oauthNotice, setOauthNotice] = useState(null)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const server = params.get('mcp_auth_server')
+    const success = params.get('mcp_auth_success')
+    const failure = params.get('mcp_auth_error')
+    if (!server || (!success && !failure)) return
+
+    setOauthNotice({ server, error: failure || null })
+    fetchAuthStatus()
+
+    params.delete('mcp_auth_server')
+    params.delete('mcp_auth_success')
+    params.delete('mcp_auth_error')
+    const query = params.toString()
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+    )
+  }, [fetchAuthStatus])
   
   // Use pending state while editing
   const selectedTools = pendingSelectedTools
@@ -744,6 +769,33 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                 </h3>
               </div>
               
+              {/* Outcome of an OAuth connection the user just came back from */}
+              {oauthNotice && (
+                <div className="px-4 pt-2">
+                  <div
+                    role="status"
+                    className={`flex items-start gap-2 px-3 py-2 rounded text-xs ${
+                      oauthNotice.error
+                        ? 'bg-red-600/20 text-red-300'
+                        : 'bg-green-600/20 text-green-300'
+                    }`}
+                  >
+                    <span className="flex-1">
+                      {oauthNotice.error
+                        ? `Could not connect to ${oauthNotice.server} (${oauthNotice.error}).`
+                        : `Connected to ${oauthNotice.server}.`}
+                    </span>
+                    <button
+                      onClick={() => setOauthNotice(null)}
+                      className="text-gray-400 hover:text-gray-200"
+                      aria-label="Dismiss"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Search Bar */}
               <div className="px-4 py-2">
                 <div className="relative">
@@ -813,16 +865,23 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                   {server.compliance_level}
                                 </span>
                               )}
-                              {/* Auth Status Indicator - for API key/JWT/bearer servers (not OAuth) */}
-                              {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key') && (() => {
+                              {/* Auth status indicator. An oauth server is connected by
+                                  redirecting to the provider; the others by pasting a token. */}
+                              {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key' || server.auth_type === 'oauth') && (() => {
                                 const serverAuth = getServerAuth(server.server)
                                 const isAuthenticated = serverAuth?.authenticated && !serverAuth?.is_expired
+                                const isOAuth = server.auth_type === 'oauth'
+                                const connectTitle = isOAuth
+                                  ? 'Click to connect with OAuth.'
+                                  : 'Click to add token.'
                                 return (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       if (isAuthenticated) {
                                         setDisconnectServer(server.server)
+                                      } else if (isOAuth) {
+                                        startOAuth(server.server)
                                       } else {
                                         openTokenModal(server.server)
                                       }
@@ -832,7 +891,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
                                         : 'bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400'
                                     }`}
-                                    title={isAuthenticated ? 'Authenticated. Click to disconnect.' : 'Click to add token.'}
+                                    title={isAuthenticated ? 'Authenticated. Click to disconnect.' : connectTitle}
                                   >
                                     {isAuthenticated ? <ShieldCheck className="w-4 h-4" /> : <Key className="w-4 h-4" />}
                                   </button>

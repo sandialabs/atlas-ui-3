@@ -20,6 +20,7 @@ vi.mock('../hooks/useServerAuthStatus', () => ({
     fetchAuthStatus: vi.fn(),
     uploadToken: vi.fn(),
     removeToken: vi.fn(),
+    startOAuth: vi.fn(),
     getServerAuth: vi.fn(() => null)
   })
 }))

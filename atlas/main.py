@@ -366,7 +366,8 @@ app.add_middleware(
     oidc_enabled=config.app_settings.feature_oidc_auth_enabled,
 )
 
-# Session middleware backing the Globus OAuth state and the OIDC login session.
+# Session middleware backing the Globus OAuth state, the OIDC login session,
+# and the in-flight state of the MCP OAuth authorization flow.
 #
 # Registered *after* AuthMiddleware on purpose: Starlette runs the most
 # recently added middleware outermost, so this ordering is what makes
@@ -379,6 +380,12 @@ if config.app_settings.feature_oidc_auth_enabled:
     _session_secret = config.app_settings.oidc_session_secret
 elif config.app_settings.feature_globus_auth_enabled:
     _session_secret = config.app_settings.globus_session_secret
+# The MCP OAuth connect flow needs a browser session to hold its PKCE verifier
+# and single-use state, and it is independent of how users log in to Atlas. A
+# deployment using header auth with an OAuth-protected MCP server would
+# otherwise have no session at all, so a dedicated secret can supply one.
+if not _session_secret:
+    _session_secret = config.app_settings.mcp_oauth_session_secret
 if _session_secret:
     from starlette.middleware.sessions import SessionMiddleware
 
