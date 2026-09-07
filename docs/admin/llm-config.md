@@ -226,6 +226,8 @@ the sampling context. Restrict access to such MCP servers with the server's own
 *   **`pass_user_as_customer_id`**: (boolean, default `false`) When `true`, the logged-in user's identifier is sent as the `x-litellm-customer-id` HTTP header on each request to the model. A [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/customers) uses this header to attribute spend/usage to the end user (customer). See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`customer_id_strip_suffix`**: (string, optional) An email-domain suffix (e.g. `"@mydomain.com"`) to strip from the reverse-proxy-provided username before it is sent as the `x-litellm-customer-id` header — turning `user@mydomain.com` into `user`. Only applies when `pass_user_as_customer_id` is `true` and the username actually ends with the suffix (matched case-insensitively); otherwise the value is sent unchanged. See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.
+*   **`supports_tools`**: (boolean, default `true`) When `false`, tool/function definitions are stripped from requests to this model and the user is warned that tools are unavailable.
+*   **`reasoning_effort`**: (string, optional) The reasoning effort sent with every request to this model. One of `none`, `minimal`, `low`, `medium`, `high`, `xhigh` — an invalid value is rejected when the config file is loaded, not on the first chat. Omit the key (the default) for any model without a reasoning control; the request payload is then unchanged. **OpenAI's GPT-5.6 family requires `"none"` for tool calls** on `/v1/chat/completions`. See [Reasoning Effort](#reasoning-effort) below.
 *   **`compliance_level`**: (string) The security compliance level of this model (e.g., "Public", "Internal"). This is used to filter which models can be used in certain compliance contexts.
 *   **`groups`**: (list of strings, optional) Access-control groups for this model. When omitted or empty (the default), the model is available to everyone. When set, only users who belong to at least one listed group can see or use the model. Enforced at both the model-listing and chat-execution layers. See [Restricting Model Access by Group](#restricting-model-access-by-group-2026-07-10) above.
 
@@ -277,6 +279,39 @@ Behavior notes:
 - If the username does not end with the configured suffix (e.g. a user from a different domain), the full value is sent unchanged.
 - Stripping applies only to the auto-injected logged-in user. A static id pinned via `extra_headers` (point 4 above) is never modified.
 - Leave `customer_id_strip_suffix` unset to send the full username, which is the default.
+
+## Reasoning Effort
+
+Reasoning models expose a knob for how much hidden reasoning to spend before answering. Set it per model with `reasoning_effort`; the value is sent on every request to that model, on all four call paths (plain, tool-carrying, and both streaming variants), because they all build their kwargs in `LiteLLMCaller._get_model_kwargs`.
+
+```yaml
+models:
+  gpt-5.6-luna:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-5.6-luna"
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+    supports_tools: true
+    reasoning_effort: "none"
+```
+
+Accepted values are `none`, `minimal`, `low`, `medium`, `high` and `xhigh` — the set LiteLLM will carry on a chat/completions request. A value outside that set (a typo like `meduim`, or an unquoted `None`, which YAML reads as the *string* `"None"`) raises a configuration error when ATLAS loads `llmconfig.yml`, rather than surfacing as a provider `400` during someone's chat. Surrounding whitespace is trimmed and a blank value is treated as unset.
+
+Omitting the key is the default and the right choice for every model without a reasoning control (GPT-4.1, GPT-4o, the Anthropic, Gemini, Groq and OpenRouter entries): the key is left out of the payload entirely, so nothing about those requests changes.
+
+### GPT-5.6 requires `"none"` for tool calls
+
+OpenAI's GPT-5.6 models (`gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`) reject **every** tool-carrying request on `/v1/chat/completions` unless reasoning effort is explicitly `"none"`:
+
+```
+Function tools with reasoning_effort are not supported for gpt-5.6-luna in
+/v1/chat/completions. To use function tools, use /v1/responses or set
+reasoning_effort to 'none'.
+```
+
+So a GPT-5.6 entry with `supports_tools: true` and no `reasoning_effort` is unusable in agent mode: the request is rejected before any generation. The same setting also makes these models accept the non-default `temperature` ATLAS always sends, which they otherwise reject on its own. Adding `reasoning_effort: "none"` turns reasoning off for that model — a deliberate trade, and worth saying so in the model's `model_card`, since users pick models from that text.
+
+The alternative the error text offers, routing tool calls to `/v1/responses`, is not a drop-in for ATLAS today: that endpoint rejects the unconditional `temperature` these callers send.
 
 ## Vision Image Support (2026-03-23)
 

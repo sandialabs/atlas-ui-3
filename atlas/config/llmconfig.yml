@@ -44,6 +44,35 @@ models:
       calling, and up to 1M tokens of context. It is ideal for classification,
       autocompletion, and fast lightweight tasks where latency matters more than
       peak reasoning quality. Context window: 1M tokens. Output limit: 32K tokens.
+  gpt-5.6-luna:
+    model_url: "https://api.openai.com/v1/chat/completions"
+    model_name: "gpt-5.6-luna"
+    api_key: "${OPENAI_API_KEY}"
+    compliance_level: "External"
+    supports_tools: true
+    # Required, not optional. Without it every tool-carrying request to this
+    # model is rejected with HTTP 400: "Function tools with reasoning_effort are
+    # not supported for gpt-5.6-luna in /v1/chat/completions. To use function
+    # tools, use /v1/responses or set reasoning_effort to 'none'." The same
+    # setting also makes the model accept the non-default temperature this
+    # backend always sends. The other GPT-5.6 models (gpt-5.6-sol,
+    # gpt-5.6-terra) return the same error and need the same line.
+    #
+    # The other route that 400 offers -- moving tool calls to /v1/responses --
+    # is not available to this entry. ATLAS builds every request through
+    # LiteLLMCaller._get_model_kwargs against the chat/completions URL above,
+    # and /v1/responses rejects the unconditional `temperature` that method
+    # always sends ("Unsupported parameter: 'temperature' is not supported with
+    # this model."). Raise the effort here only if this deployment has moved
+    # tool calls to /v1/responses and stopped sending `temperature`.
+    reasoning_effort: "none"
+    model_card: >
+      GPT-5.6 Luna is the low-cost, low-latency member of OpenAI's GPT-5.6
+      family and supports tool/function calling. Reasoning is switched off for
+      this model in ATLAS: replies come back without the extended reasoning pass
+      the family is otherwise capable of, which makes them faster and cheaper.
+      Best for: quick tool-using chat and lightweight tasks. Choose a reasoning
+      model instead for work that needs step-by-step analysis.
   groq-gpt-oss-120b:
     model_url: "https://api.groq.com/openai/v1"
     model_name: "openai/gpt-oss-120b"
