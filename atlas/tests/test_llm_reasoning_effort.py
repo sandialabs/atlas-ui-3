@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from atlas.modules.config.config_manager import LLMConfig, ModelConfig
+from atlas.modules.config.config_manager import ConfigManager, LLMConfig, ModelConfig
 from atlas.modules.config.models import REASONING_EFFORT_VALUES
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
@@ -157,3 +157,60 @@ class TestReasoningEffortIsValidatedAtLoad:
         """The end-to-end point of the validator: the 400 cannot be built."""
         with pytest.raises(ValidationError):
             _make_caller({"gpt-5.6-luna": {"reasoning_effort": "meduim"}})
+
+
+class TestABadEffortReachesTheOperator:
+    """The load-time error documented in docs/admin/llm-config.md must survive the loader.
+
+    ``ConfigManager.llm_config`` builds the whole file with one
+    ``LLMConfig(**data)`` inside a catch-all that falls back to
+    ``LLMConfig(models={})``. Without the ``ValidationError`` re-raise, one typo
+    in one entry loads zero models and leaves only a log line, and the promise
+    that an invalid ``reasoning_effort`` "raises a configuration error when
+    ATLAS loads llmconfig.yml" is not kept.
+    """
+
+    def test_a_typo_raises_instead_of_loading_zero_models(self, monkeypatch):
+        cm = ConfigManager()
+        monkeypatch.setattr(
+            cm,
+            "_load_file_with_error_handling",
+            lambda paths, file_type: {
+                "models": {
+                    "good": {"model_name": "good", "model_url": "https://x/v1"},
+                    "bad": {
+                        "model_name": "bad",
+                        "model_url": "https://x/v1",
+                        "reasoning_effort": "meduim",
+                    },
+                }
+            },
+        )
+        with pytest.raises(ValidationError) as exc:
+            _ = cm.llm_config
+        assert "meduim" in str(exc.value)
+
+    def test_a_missing_file_still_yields_an_empty_config(self, monkeypatch):
+        """The pre-existing no-config-file path is unchanged."""
+        cm = ConfigManager()
+        monkeypatch.setattr(
+            cm, "_load_file_with_error_handling", lambda paths, file_type: None
+        )
+        assert cm.llm_config.models == {}
+
+    def test_a_valid_file_still_loads(self, monkeypatch):
+        cm = ConfigManager()
+        monkeypatch.setattr(
+            cm,
+            "_load_file_with_error_handling",
+            lambda paths, file_type: {
+                "models": {
+                    "gpt-5.6-luna": {
+                        "model_name": "gpt-5.6-luna",
+                        "model_url": "https://x/v1",
+                        "reasoning_effort": "none",
+                    }
+                }
+            },
+        )
+        assert cm.llm_config.models["gpt-5.6-luna"].reasoning_effort == "none"

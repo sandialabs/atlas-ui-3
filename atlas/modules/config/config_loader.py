@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from pydantic import ValidationError
 
 from .models import (
     FileExtractorsConfig,
@@ -200,6 +201,13 @@ class ConfigManager:
                     self._llm_config = LLMConfig(models={})
                     logger.info("Created empty LLM config (no configuration file found)")
 
+            except ValidationError:
+                # A model entry that fails validation is an intentional
+                # refusal-to-start, the same contract app_settings above states.
+                # Falling back here would swap one bad entry for zero models and
+                # leave only a log line, and would contradict docs/admin/llm-config.md,
+                # which promises a load-time error for an invalid `reasoning_effort`.
+                raise
             except Exception as e:
                 logger.error(f"Failed to parse LLM configuration: {e}", exc_info=True)
                 self._llm_config = LLMConfig(models={})
