@@ -110,9 +110,11 @@ class ProviderHandler(BaseHTTPRequestHandler):
                 params.get("code_challenge", [""])[0], redirect_uri
             )
             state = params.get("state", [""])[0]
-            # Encoded, not interpolated: a state carrying CR/LF would otherwise
-            # split the response header.
-            location = f"{redirect_uri}?{urlencode({'code': code, 'state': state})}"
+            # Built from the constant, not the request-supplied redirect_uri
+            # (already equality-checked against it above), and the parameters
+            # are encoded -- a state carrying CR/LF would otherwise split the
+            # response header.
+            location = f"{EXPECTED_REDIRECT}?{urlencode({'code': code, 'state': state})}"
             self.send_response(302)
             self.send_header("Location", location)
             self.end_headers()

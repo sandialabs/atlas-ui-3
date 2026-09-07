@@ -920,7 +920,10 @@ class TestDiscoveryFailureCaching:
 
             release.set()
             with pytest.raises(MCPOAuthError):
-                await stalled
+                # Bound to a name so the await reads as producing a result;
+                # a bare `await task` statement trips CodeQL's
+                # ineffectual-statement query.
+                _ = await stalled
 
 
 class TestRegistrationRobustness:
