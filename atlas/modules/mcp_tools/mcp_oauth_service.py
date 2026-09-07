@@ -13,7 +13,9 @@ The three entry points mirror the three moments in the flow:
 - :func:`refresh_stored_token` -- renew an expired access token silently.
 """
 
+import asyncio
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
@@ -41,6 +43,13 @@ logger = logging.getLogger(__name__)
 OAUTH_METADATA_SOURCE = "mcp_oauth_flow"
 
 DEFAULT_CLIENT_NAME = "Atlas UI"
+
+# Registration and refresh are both read-modify-write cycles against a shared
+# store, so concurrent callers must not race. Keyed per (server, issuer) and
+# per (user, server) respectively; a global lock would serialize unrelated
+# servers behind one slow provider.
+_registration_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_refresh_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def is_oauth_server(config: Dict[str, Any]) -> bool:
@@ -139,24 +148,31 @@ async def _resolve_client(
         )
 
     store = get_oauth_client_store()
-    existing = store.get(server_name, issuer)
-    if existing is not None and existing.redirect_uri == redirect_uri:
-        return existing
-    if existing is not None:
-        # Atlas moved: the provider only accepts the redirect_uri that was
-        # registered, so a stale registration must be replaced.
-        logger.info(
-            "Redirect URI changed for MCP server '%s'; re-registering OAuth client",
-            sanitize_for_logging(server_name),
-        )
 
-    registered = await register_client(
-        metadata.authorization_server,
-        redirect_uri=redirect_uri,
-        client_name=client_name(config),
-        scopes=configured_scopes(config) or " ".join(metadata.default_scopes()) or None,
-    )
-    return store.put(server_name, registered)
+    # Serialized per server and issuer: two users starting authorization at the
+    # same time would otherwise both miss the store, register separate clients,
+    # and have the second registration overwrite the first -- leaving the first
+    # user's callback exchanging its code under a client_id the provider never
+    # issued that code to.
+    async with _registration_locks[f"{server_name}|{issuer.rstrip('/')}"]:
+        existing = store.get(server_name, issuer)
+        if existing is not None and existing.redirect_uri == redirect_uri:
+            return existing
+        if existing is not None:
+            # Atlas moved: the provider only accepts the redirect_uri that was
+            # registered, so a stale registration must be replaced.
+            logger.info(
+                "Redirect URI changed for MCP server '%s'; re-registering OAuth client",
+                sanitize_for_logging(server_name),
+            )
+
+        registered = await register_client(
+            metadata.authorization_server,
+            redirect_uri=redirect_uri,
+            client_name=client_name(config),
+            scopes=configured_scopes(config) or " ".join(metadata.default_scopes()) or None,
+        )
+        return store.put(server_name, registered)
 
 
 def _existing_client(
@@ -317,6 +333,27 @@ async def refresh_stored_token(
     if existing is None or not existing.refresh_token:
         return None
 
+    # Serialized per user and server. Parallel tool calls hitting the same
+    # expired token would otherwise each present the same refresh token; a
+    # provider that rotates refresh tokens accepts the first and rejects the
+    # rest, so calls that could have used the newly stored token would instead
+    # report that re-authorization is required.
+    async with _refresh_locks[f"{user_email.lower()}|{server_name}"]:
+        # Another caller may have refreshed while we waited for the lock.
+        current = token_storage.get_valid_token(user_email, server_name)
+        if current is not None:
+            return current
+
+        existing = token_storage.get_token(user_email, server_name)
+        if existing is None or not existing.refresh_token:
+            return None
+
+        return await _refresh_locked(user_email, server_name, config, existing)
+
+
+async def _refresh_locked(user_email, server_name, config, existing):
+    """Perform the refresh. Caller holds the per-user/server refresh lock."""
+    token_storage = get_token_storage()
     try:
         metadata = await get_server_oauth_metadata(server_url(config))
         base_url = _base_url_from_settings()

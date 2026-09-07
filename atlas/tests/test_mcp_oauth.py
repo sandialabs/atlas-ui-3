@@ -617,3 +617,49 @@ class TestOAuthClientStore:
             storage_dir=tmp_path, encryption_key="a-completely-different-key-32-chars!!"
         )
         assert other.get("srv", ISSUER) is None
+
+
+# --- Redirects during discovery -------------------------------------------
+
+
+class TestDiscoveryRedirects:
+    """Every hop is held to the transport rule, not just the first URL."""
+
+    @pytest.mark.asyncio
+    async def test_a_redirect_to_plaintext_is_refused(self):
+        """A compromised server must not be able to downgrade discovery."""
+
+        def handler(request):
+            if str(request.url).startswith("https://"):
+                return httpx.Response(
+                    302, headers={"Location": "http://evil.example/metadata"}
+                )
+            return httpx.Response(200, json=_as_metadata())
+
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await discover_authorization_server(ISSUER)
+
+    @pytest.mark.asyncio
+    async def test_an_https_redirect_is_followed(self):
+        def handler(request):
+            if str(request.url) == f"{ISSUER}/.well-known/oauth-authorization-server":
+                return httpx.Response(
+                    302, headers={"Location": "https://auth.example.com/moved"}
+                )
+            if str(request.url) == "https://auth.example.com/moved":
+                return httpx.Response(200, json=_as_metadata())
+            return httpx.Response(404, json={})
+
+        with _mock_httpx(handler):
+            metadata = await discover_authorization_server(ISSUER)
+        assert metadata.token_endpoint == f"{ISSUER}/token"
+
+    @pytest.mark.asyncio
+    async def test_a_redirect_loop_terminates(self):
+        def handler(request):
+            return httpx.Response(302, headers={"Location": str(request.url)})
+
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await discover_authorization_server(ISSUER)

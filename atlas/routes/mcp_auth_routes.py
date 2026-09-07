@@ -13,6 +13,7 @@ Updated: 2025-01-21
 import logging
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -320,11 +321,20 @@ async def _authorized_oauth_config(server_name: str, current_user: str) -> Dict[
     return config
 
 
+def _oauth_redirect(server_name: str, **params: str) -> RedirectResponse:
+    """Send the browser back to the SPA with a machine-readable outcome.
+
+    The query string is encoded rather than interpolated: a server name is
+    operator-supplied, and one containing ``&``, ``#`` or ``=`` would
+    otherwise split into extra parameters and confuse the frontend.
+    """
+    query = urlencode({"mcp_auth_server": server_name, **params})
+    return RedirectResponse(f"/?{query}", status_code=302)
+
+
 def _oauth_error_redirect(server_name: str, code: str) -> RedirectResponse:
     """Send the browser back to the SPA with a machine-readable error code."""
-    return RedirectResponse(
-        f"/?mcp_auth_server={server_name}&mcp_auth_error={code}", status_code=302
-    )
+    return _oauth_redirect(server_name, mcp_auth_error=code)
 
 
 def _session_available(request: Request) -> bool:
@@ -490,6 +500,4 @@ async def oauth_callback(
         "MCP OAuth authorization complete for server '%s'",
         sanitize_for_logging(server_name),
     )
-    return RedirectResponse(
-        f"/?mcp_auth_server={server_name}&mcp_auth_success=1", status_code=302
-    )
+    return _oauth_redirect(server_name, mcp_auth_success="1")

@@ -82,6 +82,41 @@ function ChatInterface() {
     }
   }, [openSettings])
 
+  // The MCP OAuth callback is a full-page navigation, so the app reloads with
+  // every panel closed. Handling the outcome here rather than inside the tools
+  // panel is what makes it visible at all: the panel is unmounted at this
+  // point and would never see the query parameters. The result is stashed for
+  // the panel to render, and the parameters are stripped so a reload does not
+  // replay the message.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const server = params.get('mcp_auth_server')
+    const success = params.get('mcp_auth_success')
+    const failure = params.get('mcp_auth_error')
+    if (!server || (!success && !failure)) return
+
+    try {
+      sessionStorage.setItem(
+        'mcpOAuthResult',
+        JSON.stringify({ server, error: failure || null })
+      )
+    } catch {
+      // A browser with storage disabled loses the banner, not the connection.
+    }
+
+    params.delete('mcp_auth_server')
+    params.delete('mcp_auth_success')
+    params.delete('mcp_auth_error')
+    const query = params.toString()
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+    )
+
+    openSettings('tools')
+  }, [openSettings])
+
   // Components too deep to receive props (the prompt selector under the chat
   // box) ask for a specific tab via a window event.
   useEffect(() => {

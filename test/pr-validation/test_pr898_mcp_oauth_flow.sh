@@ -32,3 +32,14 @@ fi
 export PYTHONPATH="$PROJECT_ROOT"
 
 python "$SCRIPT_DIR/fixtures/pr898/mcp_oauth_end_to_end.py"
+
+# Final: run backend unit tests
+echo ""
+echo "Running backend unit tests..."
+./test/run_tests.sh backend > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo "PASSED: Backend unit tests"
+else
+    echo "FAILED: Backend unit tests"
+    exit 1
+fi

@@ -238,15 +238,42 @@ def parse_protected_resource_metadata(document: Any) -> ProtectedResourceMetadat
     )
 
 
+# Redirects are followed by hand (see _fetch_json) so every hop can be checked
+# against the transport rule; this bounds that loop.
+MAX_DISCOVERY_REDIRECTS = 5
+
+
 async def _fetch_json(url: str, *, what: str) -> Dict[str, Any]:
+    """GET a discovery document, validating the transport of every hop.
+
+    Redirects are followed manually rather than by httpx. With
+    ``follow_redirects=True`` only the first URL would be checked, so a
+    compromised server could answer the initial https request with a redirect
+    to plaintext or to an internal address and defeat the very restriction
+    :func:`validate_endpoint_url` exists to impose.
+    """
     validate_endpoint_url(url, what=what)
+    current = url
     try:
         async with httpx.AsyncClient(
-            timeout=DISCOVERY_TIMEOUT_SECONDS, follow_redirects=True
+            timeout=DISCOVERY_TIMEOUT_SECONDS, follow_redirects=False
         ) as client:
-            response = await client.get(url, headers={"Accept": "application/json"})
-            response.raise_for_status()
-            return response.json()
+            for _ in range(MAX_DISCOVERY_REDIRECTS + 1):
+                response = await client.get(
+                    current, headers={"Accept": "application/json"}
+                )
+                if response.is_redirect:
+                    location = response.headers.get("location") or ""
+                    if not location:
+                        raise MCPOAuthError(f"{what} redirect carried no Location")
+                    # Resolve relative redirects against the current URL, then
+                    # hold the destination to the same transport requirement.
+                    current = str(httpx.URL(current).join(location))
+                    validate_endpoint_url(current, what=f"{what} redirect target")
+                    continue
+                response.raise_for_status()
+                return response.json()
+        raise MCPOAuthError(f"{what} exceeded the redirect limit")
     except httpx.HTTPError as exc:
         raise MCPOAuthError(f"Failed to fetch {what}: {exc}") from exc
     except ValueError as exc:

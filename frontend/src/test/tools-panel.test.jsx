@@ -1244,3 +1244,76 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     expect(removeTools).not.toHaveBeenCalled()
   })
 })
+
+describe('ToolsPanel - MCP OAuth outcome banner', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    useChat.mockReturnValue(defaultChatContextForOAuth)
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => []),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => []),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+  })
+
+  const defaultChatContextForOAuth = {
+    selectedTools: new Set(),
+    selectedPrompts: new Set(),
+    toggleTool: vi.fn(),
+    togglePrompt: vi.fn(),
+    addTools: vi.fn(),
+    addPrompts: vi.fn(),
+    removeTools: vi.fn(),
+    removePrompts: vi.fn(),
+    clearToolsAndPrompts: vi.fn(),
+    complianceLevelFilter: 'all',
+    tools: [],
+    prompts: [],
+    features: {}
+  }
+
+  it('shows a success banner left by the OAuth callback', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: null })
+    )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent('Connected to remote-mcp.')
+    // Consumed once, so re-opening the panel does not replay it.
+    expect(sessionStorage.getItem('mcpOAuthResult')).toBeNull()
+  })
+
+  it('shows the error code when the flow failed', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: 'access_denied' })
+    )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Could not connect to remote-mcp (access_denied).'
+    )
+  })
+
+  it('shows no banner when there is no stashed outcome', () => {
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+})

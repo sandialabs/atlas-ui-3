@@ -102,6 +102,10 @@ class _FakeTokenStorage:
     def get_token(self, user_email, server_name):
         return self.tokens.get(self._key(user_email, server_name))
 
+    def get_valid_token(self, user_email, server_name):
+        token = self.get_token(user_email, server_name)
+        return None if token is None or token.is_expired() else token
+
     def update_oauth_tokens(self, user_email, server_name, access_token,
                             expires_at=None, refresh_token=None, scopes=None):
         existing = self.get_token(user_email, server_name)
@@ -519,7 +523,7 @@ class TestRefresh:
     async def test_no_refresh_token_returns_none(self, storage):
         storage.store_token(
             user_email=USER, server_name=SERVER, token_value="old",
-            token_type="oauth_access",
+            token_type="oauth_access", expires_at=time.time() - 10,
         )
         assert await mcp_oauth_service.refresh_stored_token(
             USER, SERVER, SERVERS_CONFIG[SERVER]
@@ -536,7 +540,8 @@ class TestRefresh:
         """A dead refresh token must surface as "re-authorize", not a tool error."""
         storage.store_token(
             user_email=USER, server_name=SERVER, token_value="old",
-            token_type="oauth_access", refresh_token="rt-1",
+            token_type="oauth_access", expires_at=time.time() - 10,
+            refresh_token="rt-1",
         )
         f1, f2 = _patch_flow()
         with f1, f2, patch.object(
@@ -718,3 +723,131 @@ class TestRevocationUsesExistingCredentialsOnly:
             ) is True
         # Both the refresh token and the access token are offered.
         assert revoke.await_count == 2
+
+
+class TestConcurrency:
+    """Registration and refresh are read-modify-write cycles on shared state."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_refresh_calls_the_provider_once(self, storage):
+        """A rotating provider rejects a replayed refresh token, so only one call may run."""
+        import asyncio
+
+        storage.store_token(
+            user_email=USER, server_name=SERVER, token_value="old",
+            token_type="oauth_access", expires_at=time.time() - 10,
+            refresh_token="rt-1", scopes="read",
+        )
+
+        calls = []
+
+        async def _refresh(**kwargs):
+            calls.append(kwargs["refresh_token"])
+            await asyncio.sleep(0)
+            return TokenResponse(
+                access_token="new", refresh_token="rt-2",
+                expires_at=time.time() + 3600, scopes="read",
+            )
+
+        f1, f2 = _patch_flow()
+        with f1, f2, patch.object(
+            mcp_oauth_service, "_base_url_from_settings", return_value=BASE_URL
+        ), patch.object(mcp_oauth_service, "refresh_access_token", _refresh):
+            results = await asyncio.gather(*[
+                mcp_oauth_service.refresh_stored_token(
+                    USER, SERVER, SERVERS_CONFIG[SERVER]
+                )
+                for _ in range(5)
+            ])
+
+        assert len(calls) == 1, f"provider was called {len(calls)} times"
+        # Every caller gets a usable token, not a "re-authorize" None.
+        assert all(result is not None for result in results)
+        assert all(result.token_value == "new" for result in results)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_registration_registers_once(self):
+        """Two users starting at once must not create two client registrations."""
+        import asyncio
+
+        stored = {}
+
+        class _Store:
+            def get(self, server_name, issuer):
+                return stored.get((server_name, issuer))
+
+            def put(self, server_name, client):
+                stored[(server_name, client.issuer)] = client
+                return client
+
+        registrations = []
+
+        async def _register(metadata, **kwargs):
+            registrations.append(kwargs["redirect_uri"])
+            await asyncio.sleep(0)
+            return RegisteredClient(
+                client_id=f"dcr-{len(registrations)}",
+                issuer=metadata.issuer,
+                redirect_uri=kwargs["redirect_uri"],
+            )
+
+        with patch.object(
+            mcp_oauth_service, "get_oauth_client_store", return_value=_Store()
+        ), patch.object(mcp_oauth_service, "register_client", _register):
+            clients = await asyncio.gather(*[
+                mcp_oauth_service._resolve_client(
+                    SERVER, SERVERS_CONFIG[SERVER], _metadata(), CALLBACK
+                )
+                for _ in range(5)
+            ])
+
+        assert len(registrations) == 1, f"registered {len(registrations)} times"
+        assert {client.client_id for client in clients} == {"dcr-1"}
+
+
+class TestRefreshShortCircuit:
+    @pytest.mark.asyncio
+    async def test_a_still_valid_token_is_returned_without_calling_the_provider(
+        self, storage
+    ):
+        """The refresh path is reached only when the stored token is unusable."""
+        storage.store_token(
+            user_email=USER, server_name=SERVER, token_value="still-good",
+            token_type="oauth_access", expires_at=time.time() + 3600,
+            refresh_token="rt-1",
+        )
+        with patch.object(
+            mcp_oauth_service, "refresh_access_token",
+            AsyncMock(side_effect=AssertionError("must not refresh a valid token")),
+        ):
+            result = await mcp_oauth_service.refresh_stored_token(
+                USER, SERVER, SERVERS_CONFIG[SERVER]
+            )
+        assert result.token_value == "still-good"
+
+
+class TestRedirectEncoding:
+    """A server name is operator-supplied and must not split the query string."""
+
+    def test_server_name_is_encoded_in_the_outcome_redirect(self, app, manager, storage):
+        weird = "odd&name=x"
+        manager.servers_config = dict(SERVERS_CONFIG)
+        manager.servers_config[weird] = {
+            "url": "https://mcp.example.com/mcp", "auth_type": "oauth", "groups": ["users"],
+        }
+        manager._authorized.append(weird)
+
+        p1, p2 = _patch_app_factory(manager)
+        with p1, p2:
+            response = TestClient(app).get(
+                f"/api/mcp/auth/{weird}/oauth/callback",
+                params={"error": "access_denied"},
+                follow_redirects=False,
+            )
+
+        location = response.headers["location"]
+        from urllib.parse import parse_qs, urlsplit
+
+        params = parse_qs(urlsplit(location).query)
+        assert params["mcp_auth_server"] == [weird]
+        assert params["mcp_auth_error"] == ["access_denied"]

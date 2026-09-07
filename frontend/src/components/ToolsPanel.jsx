@@ -155,30 +155,29 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     }
   }, [isOpen, fetchAuthStatus])
 
-  // The OAuth callback returns the browser here with the outcome in the query
-  // string. Surface it, refresh the status the flow just changed, and strip
-  // the parameters so a reload does not replay the message.
+  // App.jsx reads the OAuth callback's query parameters (the panel is
+  // unmounted when the callback lands) and leaves the outcome here for us to
+  // show. Consumed once, so re-opening the panel does not replay it.
   const [oauthNotice, setOauthNotice] = useState(null)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const server = params.get('mcp_auth_server')
-    const success = params.get('mcp_auth_success')
-    const failure = params.get('mcp_auth_error')
-    if (!server || (!success && !failure)) return
+    if (!isOpen) return
+    let stashed = null
+    try {
+      stashed = sessionStorage.getItem('mcpOAuthResult')
+      if (stashed) sessionStorage.removeItem('mcpOAuthResult')
+    } catch {
+      // Storage unavailable: no banner, but the connection itself is fine.
+      return
+    }
+    if (!stashed) return
 
-    setOauthNotice({ server, error: failure || null })
+    try {
+      setOauthNotice(JSON.parse(stashed))
+    } catch {
+      return
+    }
     fetchAuthStatus()
-
-    params.delete('mcp_auth_server')
-    params.delete('mcp_auth_success')
-    params.delete('mcp_auth_error')
-    const query = params.toString()
-    window.history.replaceState(
-      {},
-      '',
-      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
-    )
-  }, [fetchAuthStatus])
+  }, [isOpen, fetchAuthStatus])
   
   // Use pending state while editing
   const selectedTools = pendingSelectedTools
@@ -747,6 +746,36 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           </div>
         </div>
 
+        {/* Outcome of an OAuth connection the user just came back from.
+            Outside the server-list branch on purpose: a failed authorization
+            can leave the list empty, and that is exactly when the user most
+            needs to see why. */}
+        {oauthNotice && (
+          <div className="px-4 pt-2">
+            <div
+              role="status"
+              className={`flex items-start gap-2 px-3 py-2 rounded text-xs ${
+                oauthNotice.error
+                  ? 'bg-red-600/20 text-red-300'
+                  : 'bg-green-600/20 text-green-300'
+              }`}
+            >
+              <span className="flex-1">
+                {oauthNotice.error
+                  ? `Could not connect to ${oauthNotice.server} (${oauthNotice.error}).`
+                  : `Connected to ${oauthNotice.server}.`}
+              </span>
+              <button
+                onClick={() => setOauthNotice(null)}
+                className="text-gray-400 hover:text-gray-200"
+                aria-label="Dismiss"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Tools List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
           {serverList.length === 0 ? (
@@ -769,33 +798,6 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                 </h3>
               </div>
               
-              {/* Outcome of an OAuth connection the user just came back from */}
-              {oauthNotice && (
-                <div className="px-4 pt-2">
-                  <div
-                    role="status"
-                    className={`flex items-start gap-2 px-3 py-2 rounded text-xs ${
-                      oauthNotice.error
-                        ? 'bg-red-600/20 text-red-300'
-                        : 'bg-green-600/20 text-green-300'
-                    }`}
-                  >
-                    <span className="flex-1">
-                      {oauthNotice.error
-                        ? `Could not connect to ${oauthNotice.server} (${oauthNotice.error}).`
-                        : `Connected to ${oauthNotice.server}.`}
-                    </span>
-                    <button
-                      onClick={() => setOauthNotice(null)}
-                      className="text-gray-400 hover:text-gray-200"
-                      aria-label="Dismiss"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
               {/* Search Bar */}
               <div className="px-4 py-2">
                 <div className="relative">
