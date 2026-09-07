@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #899 - 2026-09-07
+- **Interactive OAuth 2.1 authorization for MCP servers** (closes #898): Atlas can now obtain a token for an `auth_type: oauth` MCP server instead of only storing one a user pasted in. It discovers the authorization server from the endpoint's RFC 9728 `resource_metadata` challenge, registers itself via RFC 7591 Dynamic Client Registration where offered, and runs Authorization Code + PKCE through its own `/api/mcp/auth/<server>/oauth/start` and `/oauth/callback` routes -- the start route the tool-call error already advertised but that returned 404. Tokens are stored per user in the existing encrypted store and refreshed silently; disconnect revokes at the provider. Set `MCP_OAUTH_REDIRECT_BASE_URL` (and `MCP_OAUTH_SESSION_SECRET` if neither OIDC nor Globus login is enabled). Existing `api_key`/`jwt`/`bearer`/`delegated` modes are unchanged. See `docs/admin/mcp-server-authentication.md`.
+
 ### PR #892 - 2026-09-04
 - **OIDC login, confidential-client authentication, and delegated OAuth credentials** (#891): Atlas can now terminate login itself (Authorization Code + PKCE), authenticate to the IdP as a confidential client, and mint short-lived audience-specific downstream tokens via RFC 8693 or Entra OBO. Opt-in; the trusted-header auth mode is unchanged. See `docs/admin/oidc-authentication.md`.
 
