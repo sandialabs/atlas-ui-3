@@ -1444,11 +1444,37 @@ describe('ToolsPanel - MCP OAuth connect indicator', () => {
     expect(mockStartOAuth).toHaveBeenCalledWith('remote-mcp')
   })
 
-  it('treats an expired token as needing reconnection', () => {
-    mockGetServerAuth = vi.fn(() => ({ authenticated: true, is_expired: true }))
+  it('asks before discarding unsaved selections instead of redirecting away', () => {
+    // Connect is a full-page navigation: firing it with staged changes would
+    // silently throw them away.
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+    fireEvent.click(screen.getByRole('button', { name: /connect with oauth/i }))
+
+    expect(mockStartOAuth).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: /unsaved changes/i })).toBeTruthy()
+  })
+
+  it('treats an expired token with no refresh token as needing reconnection', () => {
+    mockGetServerAuth = vi.fn(() => ({
+      authenticated: true, is_expired: true, has_refresh_token: false
+    }))
     renderPanel()
 
     expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
+  })
+
+  it('still shows an expired-but-refreshable server as connected', () => {
+    // Atlas renews this silently on the next tool call, so telling the user to
+    // reconnect would send them through a flow they do not need.
+    mockGetServerAuth = vi.fn(() => ({
+      authenticated: true, is_expired: true, has_refresh_token: true
+    }))
+    renderPanel()
+
+    expect(screen.getByRole('button', { name: /renews automatically/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /connect with oauth/i })).toBeNull()
   })
 })
 

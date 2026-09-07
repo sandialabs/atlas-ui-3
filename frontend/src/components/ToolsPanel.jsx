@@ -521,6 +521,19 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // guard as the X, and both the clear and the navigation are deferred until
   // the close actually goes through. Backing out of the dialog must leave the
   // saved selections exactly as they were.
+  // Starting OAuth is a full-page navigation to the provider, so any staged
+  // tool selections are lost the moment it fires. It goes through the same
+  // guard as navigating to the marketplace rather than silently discarding
+  // them -- and the redirect only happens once the user has answered.
+  const connectWithOAuth = (serverName) => {
+    const go = () => startOAuth(serverName)
+    if (embedded && onNavigate) {
+      onNavigate(go)
+      return
+    }
+    handleCloseAttempt(null, go)
+  }
+
   const navigateToMarketplace = () => {
     const go = () => {
       clearToolsAndPrompts()
@@ -813,7 +826,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                       <button
                         onClick={() => {
                           setOauthNotice(null)
-                          startOAuth(oauthNotice.server)
+                          connectWithOAuth(oauthNotice.server)
                         }}
                         className="ml-2 underline hover:no-underline font-medium"
                       >
@@ -931,11 +944,21 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                   redirecting to the provider; the others by pasting a token. */}
                               {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key' || server.auth_type === 'oauth') && (() => {
                                 const serverAuth = getServerAuth(server.server)
-                                const isAuthenticated = serverAuth?.authenticated && !serverAuth?.is_expired
                                 const isOAuth = server.auth_type === 'oauth'
+                                // An expired OAuth token with a refresh token is
+                                // not disconnected: Atlas renews it on the next
+                                // tool call. Showing "connect" there sends the
+                                // user through a flow they do not need.
+                                const willRefresh =
+                                  isOAuth && serverAuth?.is_expired && serverAuth?.has_refresh_token
+                                const isAuthenticated =
+                                  serverAuth?.authenticated && (!serverAuth?.is_expired || willRefresh)
                                 const connectTitle = isOAuth
                                   ? 'Click to connect with OAuth.'
                                   : 'Click to add token.'
+                                const connectedTitle = willRefresh
+                                  ? 'Connected. Access renews automatically. Click to disconnect.'
+                                  : 'Authenticated. Click to disconnect.'
                                 return (
                                   <button
                                     onClick={(e) => {
@@ -943,7 +966,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                       if (isAuthenticated) {
                                         setDisconnectServer(server.server)
                                       } else if (isOAuth) {
-                                        startOAuth(server.server)
+                                        connectWithOAuth(server.server)
                                       } else {
                                         openTokenModal(server.server)
                                       }
@@ -953,7 +976,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
                                         : 'bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400'
                                     }`}
-                                    title={isAuthenticated ? 'Authenticated. Click to disconnect.' : connectTitle}
+                                    title={isAuthenticated ? connectedTitle : connectTitle}
                                   >
                                     {isAuthenticated ? <ShieldCheck className="w-4 h-4" /> : <Key className="w-4 h-4" />}
                                   </button>
