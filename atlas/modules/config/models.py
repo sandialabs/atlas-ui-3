@@ -15,7 +15,7 @@ Dependency direction: ``config_loader`` -> ``settings`` -> ``models``.
 
 import os
 import re
-from typing import ClassVar, Dict, List, Literal, Optional
+from typing import ClassVar, Dict, List, Literal, Optional, get_args
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -70,6 +70,16 @@ def resolve_env_var(value: Optional[str], required: bool = True) -> Optional[str
     return value
 
 
+# Reasoning-effort levels LiteLLM will carry on a chat/completions request.
+# Mirrors ``litellm.types.llms.openai.REASONING_EFFORT`` (litellm 1.97.0, the
+# version pinned in uv.lock). Written out here rather than imported so that
+# loading configuration does not depend on a LiteLLM internal type, and so an
+# unusable value is rejected when the config file is read instead of arriving as
+# a provider HTTP 400 in the middle of a user's chat.
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+REASONING_EFFORT_VALUES: tuple = get_args(ReasoningEffort)
+
+
 class ModelConfig(BaseModel):
     """Configuration for a single LLM model."""
     model_name: str
@@ -105,13 +115,15 @@ class ModelConfig(BaseModel):
     # Whether this model supports tool/function calling.
     # When false, tools are stripped from requests and the user is warned.
     supports_tools: bool = True
-    # Reasoning effort to send with every request to this model, e.g. "none",
-    # "low", "medium", "high". Left unset for models that have no reasoning
-    # control, which is every model shipped before the GPT-5.6 family: the key
-    # is then omitted entirely and the payload is byte-identical to today's.
-    # Required for OpenAI's GPT-5.6 models, which reject function tools on
-    # /v1/chat/completions unless reasoning effort is explicitly "none".
-    reasoning_effort: Optional[str] = None
+    # Reasoning effort to send with every request to this model. One of
+    # REASONING_EFFORT_VALUES ("none", "minimal", "low", "medium", "high",
+    # "xhigh"); anything else is rejected when the config file is loaded.
+    # Left unset for models that have no reasoning control, which is every model
+    # shipped before the GPT-5.6 family: the key is then omitted entirely and the
+    # payload is byte-identical to today's. Required for OpenAI's GPT-5.6 models,
+    # which reject function tools on /v1/chat/completions unless reasoning effort
+    # is explicitly "none".
+    reasoning_effort: Optional[ReasoningEffort] = None
     # Rich model card text shown in the UI info panel (markdown allowed).
     # Provides details like context window, training info, strengths, etc.
     model_card: Optional[str] = None
@@ -131,6 +143,41 @@ class ModelConfig(BaseModel):
     # applies when pass_user_as_customer_id is true and the value actually ends
     # with the suffix; otherwise the value is sent unchanged.
     customer_id_strip_suffix: Optional[str] = None
+
+    @field_validator('reasoning_effort', mode='before')
+    @classmethod
+    def validate_reasoning_effort(cls, v):
+        """Reject an unusable reasoning effort while the config file is loading.
+
+        Without this the provider is the first thing to notice: "meduim",
+        "None" and " none" all load without complaint and then come back as an
+        HTTP 400 on a user's first message. Surrounding whitespace is trimmed
+        and a blank value is treated as unset, which is what an operator who
+        clears the field in YAML means.
+        """
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError(
+                f"reasoning_effort must be a string, got {type(v).__name__}. "
+                f"Valid values: {', '.join(REASONING_EFFORT_VALUES)}; omit the key to send none."
+            )
+        normalized = v.strip()
+        if not normalized:
+            return None
+        if normalized not in REASONING_EFFORT_VALUES:
+            hint = ""
+            if normalized.lower() == "none":
+                hint = (
+                    ' Note that "none" must be lowercase and quoted: it means "send '
+                    'reasoning_effort: none", which turns reasoning off. To send no '
+                    "reasoning_effort at all, omit the key."
+                )
+            raise ValueError(
+                f"reasoning_effort must be one of {', '.join(REASONING_EFFORT_VALUES)}, "
+                f"or omitted; got {v!r}.{hint}"
+            )
+        return normalized
 
 
 class LLMConfig(BaseModel):
