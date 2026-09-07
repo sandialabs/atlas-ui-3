@@ -744,11 +744,44 @@ class TestDiscoverySSRFConstraints:
             with pytest.raises(MCPOAuthError):
                 await get_server_oauth_metadata(MCP_URL)
 
-    def test_loopback_is_refused_when_not_explicitly_allowed(self):
-        with pytest.raises(MCPOAuthError, match="loopback"):
-            validate_endpoint_url(
-                "http://127.0.0.1:9999/x", what="test", allow_loopback=False
-            )
+    @pytest.mark.parametrize(
+        "url",
+        [
+            # The obvious ones.
+            "http://127.0.0.1:9999/x",
+            "http://localhost:9999/x",
+            # https must be checked too: gating the address test on http://
+            # left every one of these reachable.
+            "https://127.0.0.1/x",
+            "https://localhost/x",
+            "https://10.0.0.5/x",
+            "https://192.168.1.1/x",
+            "https://172.16.0.1/x",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://[::1]/x",
+            "https://[::ffff:127.0.0.1]/x",
+            "https://[fd00::1]/x",
+            "https://0.0.0.0/x",
+            # Legacy encodings a hand-written allowlist would miss.
+            "https://2130706433/x",
+            "https://0x7f000001/x",
+        ],
+    )
+    def test_internal_addresses_are_refused(self, url):
+        with pytest.raises(MCPOAuthError, match="internal address|https"):
+            validate_endpoint_url(url, what="test", allow_loopback=False)
+
+    @pytest.mark.parametrize(
+        "url",
+        ["https://mcp.example.com/x", "https://8.8.8.8/x", "https://[2606:4700::1111]/x"],
+    )
+    def test_public_addresses_are_allowed(self, url):
+        assert validate_endpoint_url(url, what="test", allow_loopback=False) == url
+
+    def test_non_http_schemes_are_refused(self):
+        for url in ("file:///etc/passwd", "gopher://x/", "ftp://x/"):
+            with pytest.raises(MCPOAuthError):
+                validate_endpoint_url(url, what="test")
 
     def test_a_loopback_mcp_server_may_still_use_loopback(self):
         """Local development against a mock provider keeps working."""
@@ -807,16 +840,39 @@ class TestDiscoveryFailureCaching:
         assert len(attempts) == first, "a cached failure re-fetched"
 
     @pytest.mark.asyncio
-    async def test_a_success_clears_a_cached_failure(self):
-        mcp_oauth.clear_metadata_cache()
+    async def test_a_recovered_provider_is_picked_up_once_the_failure_ttl_lapses(self):
+        """The point is that the *cache expires*, not that a test can clear it."""
+        cache = mcp_oauth._MetadataCache(failure_ttl_seconds=0.01)
+
         with _mock_httpx(lambda request: httpx.Response(500, json={})):
             with pytest.raises(MCPOAuthError):
-                await get_server_oauth_metadata(MCP_URL)
+                await cache.get(MCP_URL)
 
-        mcp_oauth.clear_metadata_cache()
+        # Still inside the failure TTL: the provider is not retried.
+        attempts = []
+
+        def counting(request):
+            attempts.append(str(request.url))
+            return httpx.Response(500, json={})
+
+        with _mock_httpx(counting):
+            with pytest.raises(MCPOAuthError):
+                await cache.get(MCP_URL)
+        assert attempts == [], "a cached failure was re-fetched inside its TTL"
+
+        import asyncio
+
+        await asyncio.sleep(0.02)
+
+        # TTL lapsed: the now-healthy provider is reached and cached.
         with _mock_httpx(_discovery_handler()):
-            metadata = await get_server_oauth_metadata(MCP_URL)
+            metadata = await cache.get(MCP_URL)
         assert metadata.authorization_server.issuer == ISSUER
+
+        # And the failure entry is gone, so a later call uses the success.
+        with _mock_httpx(lambda request: httpx.Response(500, json={})):
+            again = await cache.get(MCP_URL)
+        assert again.authorization_server.issuer == ISSUER
 
     @pytest.mark.asyncio
     async def test_one_stalled_server_does_not_block_another(self):
@@ -923,3 +979,76 @@ class TestRegistrationRobustness:
                 metadata, redirect_uri="https://a/cb", client_name="Atlas UI"
             )
         assert "refresh_token" in seen["body"]["grant_types"]
+
+
+class TestResponseSizeAndTypeLimits:
+    """Provider bodies are untrusted: one click must not exhaust a worker."""
+
+    @pytest.mark.asyncio
+    async def test_an_oversized_discovery_body_is_refused(self):
+        oversized = b'{"padding":"' + b"a" * (mcp_oauth.MAX_RESPONSE_BYTES + 1024) + b'"}'
+
+        def handler(request):
+            return httpx.Response(
+                200, content=oversized, headers={"Content-Type": "application/json"}
+            )
+
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await discover_authorization_server(ISSUER)
+
+    @pytest.mark.asyncio
+    async def test_a_lying_content_length_does_not_bypass_the_ceiling(self):
+        oversized = b'{"padding":"' + b"a" * (mcp_oauth.MAX_RESPONSE_BYTES + 1024) + b'"}'
+
+        def handler(request):
+            return httpx.Response(
+                200,
+                content=oversized,
+                headers={"Content-Type": "application/json", "Content-Length": "10"},
+            )
+
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await discover_authorization_server(ISSUER)
+
+    @pytest.mark.asyncio
+    async def test_a_non_json_content_type_is_refused(self):
+        def handler(request):
+            return httpx.Response(
+                200, content=b"<html>nope</html>", headers={"Content-Type": "text/html"}
+            )
+
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await discover_authorization_server(ISSUER)
+
+    @pytest.mark.asyncio
+    async def test_a_json_suffix_content_type_is_accepted(self):
+        def handler(request):
+            return httpx.Response(
+                200,
+                json=_as_metadata(),
+                headers={"Content-Type": "application/ld+json"},
+            )
+
+        with _mock_httpx(handler):
+            metadata = await discover_authorization_server(ISSUER)
+        assert metadata.issuer == ISSUER
+
+    @pytest.mark.asyncio
+    async def test_an_oversized_token_response_is_refused(self):
+        oversized = b'{"access_token":"' + b"a" * (mcp_oauth.MAX_RESPONSE_BYTES + 1024) + b'"}'
+
+        def handler(request):
+            return httpx.Response(
+                200, content=oversized, headers={"Content-Type": "application/json"}
+            )
+
+        client = RegisteredClient(client_id="c1", issuer=ISSUER, redirect_uri="https://a/cb")
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await exchange_authorization_code(
+                    metadata=_server_metadata(), client=client, code="c",
+                    redirect_uri="https://a/cb", code_verifier="v",
+                )

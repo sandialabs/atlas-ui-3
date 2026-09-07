@@ -170,6 +170,26 @@ loopback address is accepted for local development).
 7. Disconnecting removes the stored tokens, invalidates cached clients, and
    revokes at the provider's `revocation_endpoint` when one is advertised.
 
+### Deployment constraint: run a single worker
+
+The in-flight state of an OAuth connection -- the PKCE verifier and the
+single-use `state` -- is held **in the process that served
+`/oauth/start`**. The discovery cache and the dynamic-registration locks are
+process-local for the same reason.
+
+With more than one worker process, the callback frequently lands on a
+different worker than the one that started the flow, which cannot find the
+record and reports `invalid_state`. The failure is intermittent (roughly
+`(workers - 1) / workers` of attempts) and looks identical to a genuine CSRF
+rejection in the logs, which makes it painful to diagnose. The cache and locks
+degrade less dramatically -- repeated discovery work rather than a visible
+error.
+
+Atlas runs single-worker, so this is a constraint to be aware of rather than
+something you need to configure. If you scale to multiple workers, you need
+either sticky sessions (routing a user's callback back to the worker that
+started their flow) or a shared, encrypted store for the pending records.
+
 ### How this differs from Globus and OIDC login
 
 These are three separate things and are configured independently:

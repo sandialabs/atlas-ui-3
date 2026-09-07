@@ -15,7 +15,6 @@ The three entry points mirror the three moments in the flow:
 
 import asyncio
 import logging
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -47,8 +46,34 @@ DEFAULT_CLIENT_NAME = "Atlas UI"
 # store, so concurrent callers must not race. Keyed per (server, issuer) and
 # per (user, server) respectively; a global lock would serialize unrelated
 # servers behind one slow provider.
-_registration_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_refresh_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+#
+# Bounded: the refresh map is keyed partly by user, so an unbounded dict would
+# grow for the lifetime of the process. Entries are only ever held briefly, so
+# evicting an idle one is safe -- the worst case is that two callers who were
+# not contending anyway get different locks.
+_MAX_TRACKED_LOCKS = 4096
+
+_registration_locks: Dict[str, asyncio.Lock] = {}
+_refresh_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _lock_for(locks: Dict[str, asyncio.Lock], key: str) -> asyncio.Lock:
+    """Return the lock for ``key``, pruning unheld entries when the map grows."""
+    existing = locks.get(key)
+    if existing is not None:
+        return existing
+
+    if len(locks) >= _MAX_TRACKED_LOCKS:
+        # Drop locks nobody is waiting on. A held lock is never evicted, so
+        # this cannot break mutual exclusion for an in-flight caller.
+        for idle_key in [k for k, lock in locks.items() if not lock.locked()]:
+            del locks[idle_key]
+            if len(locks) < _MAX_TRACKED_LOCKS:
+                break
+
+    lock = asyncio.Lock()
+    locks[key] = lock
+    return lock
 
 
 def is_oauth_server(config: Dict[str, Any]) -> bool:
@@ -153,7 +178,7 @@ async def _resolve_client(
     # and have the second registration overwrite the first -- leaving the first
     # user's callback exchanging its code under a client_id the provider never
     # issued that code to.
-    async with _registration_locks[f"{server_name}|{issuer.rstrip('/')}"]:
+    async with _lock_for(_registration_locks, f"{server_name}|{issuer.rstrip('/')}"):
         existing = store.get(server_name, issuer)
         if existing is not None and existing.redirect_uri == redirect_uri:
             return existing
@@ -318,7 +343,7 @@ async def refresh_stored_token(
     # provider that rotates refresh tokens accepts the first and rejects the
     # rest, so calls that could have used the newly stored token would instead
     # report that re-authorization is required.
-    async with _refresh_locks[f"{user_email.lower()}|{server_name}"]:
+    async with _lock_for(_refresh_locks, f"{user_email.lower()}|{server_name}"):
         # Another caller may have refreshed while we waited for the lock.
         current = token_storage.get_valid_token(user_email, server_name)
         if current is not None:

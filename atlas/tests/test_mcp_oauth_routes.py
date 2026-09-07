@@ -388,11 +388,19 @@ class TestOAuthCallback:
         assert storage.get_token(USER, SERVER) is None
 
     def test_expired_pending_state_is_rejected(self, app, manager, storage):
+        """Expiry now lives in the pending store, so patch what the store reads."""
+        from atlas.modules.mcp_tools import oauth_pending_store
+
         client = TestClient(app)
         state = _state_from(_start(client, manager))
-        with patch(
-            "atlas.routes.mcp_auth_routes.time.time",
-            return_value=time.time() + 10_000,
+
+        # Sanity: the record really is there before the clock moves, so this
+        # test cannot pass for the wrong reason.
+        assert oauth_pending_store.get_pending_store()._records.get(state) is not None
+
+        with patch.object(
+            oauth_pending_store.time, "time",
+            return_value=time.time() + oauth_pending_store.PENDING_TTL_SECONDS + 60,
         ):
             response = self._complete(client, manager, state)
         assert "mcp_auth_error=invalid_state" in response.headers["location"]

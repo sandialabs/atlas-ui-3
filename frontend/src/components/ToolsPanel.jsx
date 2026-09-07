@@ -66,7 +66,7 @@ const OAUTH_ERROR_MESSAGES = {
   access_denied: 'You declined the authorization request.',
   invalid_state: 'The sign-in attempt expired or did not match. Please try connecting again.',
   missing_params: 'The provider returned an incomplete response. Please try connecting again.',
-  session_unavailable: 'This Atlas deployment has no browser session configured for OAuth. Ask an administrator to set MCP_OAUTH_SESSION_SECRET.',
+  session_unavailable: 'This Atlas deployment is not set up for OAuth sign-in yet. Please ask an administrator to finish configuring it.',
   discovery_failed: 'Atlas could not reach the server\'s sign-in provider. Ask an administrator to check the server URL and network access.',
   token_exchange_failed: 'The provider rejected the sign-in at the last step. Please try again, and tell an administrator if it keeps happening.',
   not_authorized: 'You are not authorized to connect this server.',

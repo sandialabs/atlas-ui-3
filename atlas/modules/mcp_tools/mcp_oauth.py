@@ -54,6 +54,11 @@ TOKEN_TIMEOUT_SECONDS = 20.0
 REGISTRATION_TIMEOUT_SECONDS = 20.0
 DISCOVERY_CACHE_TTL_SECONDS = 3600.0
 
+# Discovery and token responses are small JSON documents. The bodies are
+# provider-controlled, so they are read with a ceiling rather than into
+# whatever memory the sender feels like consuming.
+MAX_RESPONSE_BYTES = 512 * 1024
+
 # Mirrors atlas.core.oidc.discovery: an http:// endpoint is only tolerated on a
 # loopback host so local development against a mock provider works.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "testserver"})
@@ -74,7 +79,67 @@ class MCPOAuthError(RuntimeError):
 
 def _is_loopback(host: str) -> bool:
     host = (host or "").lower().strip("[]")
-    return host in _LOOPBACK_HOSTS or host.startswith("127.")
+    if host in _LOOPBACK_HOSTS:
+        return True
+    address = _parse_ip(host)
+    return address is not None and address.is_loopback
+
+
+def _parse_ip(host: str):
+    """Parse a host as an IP address, or None when it is a name.
+
+    ``ipaddress`` is what normalizes the encodings an allowlist written by
+    hand would miss: ``0x7f.1``, ``2130706433``, ``::ffff:127.0.0.1`` and
+    ``0.0.0.0`` all resolve to addresses this rejects.
+    """
+    import ipaddress
+
+    host = (host or "").strip("[]")
+    if not host:
+        return None
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    # Integer and other legacy IPv4 encodings that ip_address rejects but
+    # resolvers and HTTP clients still accept.
+    try:
+        packed = int(host, 0)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= packed <= 0xFFFFFFFF:
+        try:
+            return ipaddress.ip_address(packed)
+        except ValueError:
+            return None
+    return None
+
+
+def _is_internal_address(host: str) -> bool:
+    """Whether a host is a literal address Atlas must not be steered at.
+
+    Covers loopback, private (RFC 1918 and IPv6 ULA), link-local, reserved,
+    unspecified and multicast ranges, plus IPv4-mapped IPv6 forms of all of
+    them. Names are not resolved here: this rejects the literal-address case,
+    which is what a hostile discovery document uses to reach inside the
+    network. DNS-based attacks are a deployment-level concern (egress
+    controls), noted in the admin documentation.
+    """
+    address = _parse_ip(host)
+    if address is None:
+        return (host or "").lower() in _LOOPBACK_HOSTS
+    # An IPv4-mapped IPv6 address hides the v4 properties, so unwrap it.
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped
+    return bool(
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_unspecified
+        or address.is_multicast
+    )
 
 
 def origin_of(url: str) -> str:
@@ -104,19 +169,30 @@ def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -
     if not url or not isinstance(url, str):
         raise MCPOAuthError(f"{what} is missing")
     parsed = urlsplit(url)
+    host = parsed.hostname or ""
+
+    if parsed.scheme not in ("https", "http"):
+        raise MCPOAuthError(f"{what} must be an https:// URL")
+
+    # The address check runs for *every* scheme. Gating it on http:// alone
+    # would leave https://127.0.0.1 and https://10.0.0.5 wide open, which is
+    # exactly the internal-probe a hostile discovery document wants.
+    if not allow_loopback and _is_internal_address(host):
+        raise MCPOAuthError(
+            f"{what} points at an internal address, which a remote server is "
+            "not allowed to name"
+        )
+
     if parsed.scheme == "https":
         return url
-    if parsed.scheme == "http" and _is_loopback(parsed.hostname or ""):
-        if not allow_loopback:
-            raise MCPOAuthError(
-                f"{what} points at a loopback address, which a remote server "
-                "is not allowed to name"
-            )
-        logger.warning(
-            "MCP OAuth %s uses http:// on a loopback host; local development only", what
-        )
-        return url
-    raise MCPOAuthError(f"{what} must be an https:// URL")
+
+    # Plaintext is only ever tolerated for a local development server.
+    if not (allow_loopback and _is_loopback(host)):
+        raise MCPOAuthError(f"{what} must be an https:// URL")
+    logger.warning(
+        "MCP OAuth %s uses http:// on a loopback host; local development only", what
+    )
+    return url
 
 
 # --- Metadata models ------------------------------------------------------
@@ -159,6 +235,59 @@ class AuthorizationServerMetadata:
     def supports_refresh(self) -> bool:
         grants = self.grant_types_supported
         return not grants or "refresh_token" in grants
+
+
+async def _read_json_bounded(response: httpx.Response, what: str) -> Any:
+    """Read a provider response as JSON, bounded in size and content type.
+
+    ``httpx`` would otherwise buffer the whole body: a provider (or something
+    impersonating one) answering "connect" with an endless stream would take a
+    worker with it.
+    """
+    declared = response.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > MAX_RESPONSE_BYTES:
+                raise MCPOAuthError(f"{what} is too large")
+        except ValueError:
+            # A malformed Content-Length is not a reason to trust the body;
+            # the streaming ceiling below still applies.
+            pass
+
+    chunks: List[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > MAX_RESPONSE_BYTES:
+            await response.aclose()
+            raise MCPOAuthError(f"{what} exceeded {MAX_RESPONSE_BYTES} bytes")
+        chunks.append(chunk)
+
+    content_type = (response.headers.get("content-type") or "").split(";")[0].strip()
+    # RFC 8414/9728 say application/json; some providers send a +json suffix.
+    if content_type and not (
+        content_type == "application/json" or content_type.endswith("+json")
+    ):
+        raise MCPOAuthError(f"{what} has unexpected content type '{content_type}'")
+
+    import json as _json
+
+    try:
+        return _json.loads(b"".join(chunks).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise MCPOAuthError(f"{what} is not valid JSON") from exc
+
+
+async def _read_json_or_none(response: httpx.Response, what: str) -> Any:
+    """Bounded JSON read that yields None instead of raising.
+
+    Used where an unparseable body is a normal outcome (an error response the
+    provider chose to render as HTML) and the status code carries the meaning.
+    """
+    try:
+        return await _read_json_bounded(response, what)
+    except MCPOAuthError:
+        return None
 
 
 def _string_list(document: Dict[str, Any], key: str) -> List[str]:
@@ -302,20 +431,25 @@ async def _fetch_json(
             timeout=DISCOVERY_TIMEOUT_SECONDS, follow_redirects=False
         ) as client:
             for _ in range(MAX_DISCOVERY_REDIRECTS + 1):
-                response = await client.get(
-                    current, headers={"Accept": "application/json"}
+                request = client.build_request(
+                    "GET", current, headers={"Accept": "application/json"}
                 )
-                if response.is_redirect:
-                    location = response.headers.get("location") or ""
-                    if not location:
-                        raise MCPOAuthError(f"{what} redirect carried no Location")
-                    # Resolve relative redirects against the current URL, then
-                    # hold the destination to the same rules as the first hop.
-                    current = str(httpx.URL(current).join(location))
-                    _check(current, f"{what} redirect target")
-                    continue
-                response.raise_for_status()
-                return response.json()
+                response = await client.send(request, stream=True)
+                try:
+                    if response.is_redirect:
+                        location = response.headers.get("location") or ""
+                        if not location:
+                            raise MCPOAuthError(f"{what} redirect carried no Location")
+                        # Resolve relative redirects against the current URL,
+                        # then hold the destination to the same rules as the
+                        # first hop.
+                        current = str(httpx.URL(current).join(location))
+                        _check(current, f"{what} redirect target")
+                        continue
+                    response.raise_for_status()
+                    return await _read_json_bounded(response, what)
+                finally:
+                    await response.aclose()
         raise MCPOAuthError(f"{what} exceeded the redirect limit")
     except httpx.HTTPError as exc:
         raise MCPOAuthError(f"Failed to fetch {what}: {exc}") from exc
@@ -714,24 +848,31 @@ async def register_client(
 
     try:
         async with httpx.AsyncClient(timeout=REGISTRATION_TIMEOUT_SECONDS) as client:
-            response = await client.post(
+            request = client.build_request(
+                "POST",
                 metadata.registration_endpoint,
                 json=body,
                 headers={"Accept": "application/json"},
             )
+            response = await client.send(request, stream=True)
+            try:
+                status = response.status_code
+                # Read the body either way: a 4xx carries the OAuth error code.
+                document = await _read_json_or_none(
+                    response, "Dynamic client registration response"
+                )
+            finally:
+                await response.aclose()
     except httpx.HTTPError as exc:
         raise MCPOAuthError(f"Dynamic client registration request failed: {exc}") from exc
 
-    if response.status_code >= 400:
+    if status >= 400:
         raise MCPOAuthError(
-            f"Dynamic client registration returned {response.status_code} "
-            f"({_error_code(response)})"
+            f"Dynamic client registration returned {status} "
+            f"({_error_code_from(document)})"
         )
-
-    try:
-        document = response.json()
-    except ValueError as exc:
-        raise MCPOAuthError("Dynamic client registration response is not JSON") from exc
+    if document is None:
+        raise MCPOAuthError("Dynamic client registration response is not JSON")
 
     client_id = document.get("client_id")
     if not client_id:
@@ -770,19 +911,24 @@ async def register_client(
 # --- Step 4: token endpoint calls ----------------------------------------
 
 
-def _error_code(response: httpx.Response) -> str:
-    """Best-effort OAuth error code from a failed response.
+def _error_code_from(document: Any) -> str:
+    """Best-effort OAuth error code from an already-parsed error body.
 
     Only the ``error`` member is surfaced. The raw body is never logged:
     some providers echo submitted credentials back inside an HTML error page.
     """
-    try:
-        document = response.json()
-    except ValueError:
-        return "unknown_error"
     if not isinstance(document, dict):
         return "unknown_error"
     return str(document.get("error") or "unknown_error")
+
+
+async def _error_code(response: httpx.Response) -> str:
+    """Read a failed response's OAuth error code, within the size ceiling."""
+    try:
+        document = await _read_json_bounded(response, "error response")
+    except MCPOAuthError:
+        return "unknown_error"
+    return _error_code_from(document)
 
 
 @dataclass
@@ -825,27 +971,38 @@ async def _post_token_endpoint(
     payload["client_id"] = client.client_id
     # Public clients send no secret. When the server insisted on issuing one,
     # Atlas is a confidential client and authenticates with it.
-    auth = (client.client_id, client.client_secret) if client.client_secret else None
+    auth = (
+        httpx.BasicAuth(client.client_id, client.client_secret)
+        if client.client_secret
+        else None
+    )
 
     try:
         async with httpx.AsyncClient(timeout=TOKEN_TIMEOUT_SECONDS) as http_client:
-            response = await http_client.post(
+            request = http_client.build_request(
+                "POST",
                 token_endpoint,
                 data=payload,
-                auth=auth,
                 headers={"Accept": "application/json"},
             )
+            response = await http_client.send(request, stream=True, auth=auth)
+            try:
+                status = response.status_code
+                document = await _read_json_or_none(
+                    response, "Token endpoint response"
+                )
+            finally:
+                await response.aclose()
     except httpx.HTTPError as exc:
         raise MCPOAuthError(f"Token endpoint request failed: {exc}") from exc
 
-    if response.status_code >= 400:
+    if status >= 400:
         raise MCPOAuthError(
-            f"Token endpoint returned {response.status_code} ({_error_code(response)})"
+            f"Token endpoint returned {status} ({_error_code_from(document)})"
         )
-    try:
-        return _parse_token_response(response.json())
-    except ValueError as exc:
-        raise MCPOAuthError("Token endpoint response is not valid JSON") from exc
+    if document is None:
+        raise MCPOAuthError("Token endpoint response is not valid JSON")
+    return _parse_token_response(document)
 
 
 async def exchange_authorization_code(
@@ -930,7 +1087,7 @@ async def revoke_token(
         logger.warning(
             "MCP OAuth revocation returned %s (%s)",
             response.status_code,
-            _error_code(response),
+            await _error_code(response),
         )
         return False
     return True

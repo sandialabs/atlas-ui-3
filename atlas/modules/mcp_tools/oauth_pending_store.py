@@ -17,6 +17,22 @@ from the cookie is rejected -- so CSRF protection is unchanged while the
 verifier stops travelling to the client.
 
 Records are single-use and expire, so an abandoned flow leaves nothing behind.
+
+**Deployment constraint: this store is process-local.** The record is written
+by the worker that handles ``/oauth/start`` and read by whichever worker
+handles the callback. Across multiple worker processes those are often not the
+same one, and the callback then fails with ``invalid_state`` intermittently --
+roughly (workers - 1) / workers of the time -- with nothing in the logs to
+distinguish it from a genuine CSRF rejection. The discovery cache in
+``mcp_oauth`` and the registration locks in ``mcp_oauth_service`` are
+process-local for the same reason, though those degrade to extra work rather
+than user-visible failure.
+
+Atlas runs single-worker today, which is why this is a note rather than a
+shared backing store. A multi-worker deployment needs either sticky sessions
+routing a user's callback back to the worker that started their flow, or this
+store moved to shared storage (encrypted -- the record holds the PKCE
+verifier).
 """
 
 import logging
