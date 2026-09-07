@@ -114,7 +114,7 @@ class ProviderHandler(BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Location", location)
             self.end_headers()
-            return
+            return None
 
         return self._json({"error": "not_found"}, status=404)
 
@@ -200,7 +200,7 @@ class ProviderHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Length", "0")
             self.end_headers()
-            return
+            return None
 
         return self._json({"error": "not_found"}, status=404)
 
@@ -351,14 +351,16 @@ def main():
           stored is not None and stored.token_value in ACTIVE_ACCESS_TOKENS)
 
     token_file = os.path.join(storage_dir, "mcp_tokens.enc")
-    raw_bytes = open(token_file, "rb").read()
+    with open(token_file, "rb") as handle:
+        raw_bytes = handle.read()
     check("Tokens are not written in plaintext",
           stored is not None and stored.token_value.encode() not in raw_bytes)
 
     registration_file = os.path.join(storage_dir, "mcp_oauth_clients.enc")
     check("The client registration was persisted", os.path.exists(registration_file))
-    check("The registration is not written in plaintext",
-          b"dcr-1" not in open(registration_file, "rb").read())
+    with open(registration_file, "rb") as handle:
+        registration_bytes = handle.read()
+    check("The registration is not written in plaintext", b"dcr-1" not in registration_bytes)
 
     print("\n8. Status now reports the server as authenticated")
     entry = {

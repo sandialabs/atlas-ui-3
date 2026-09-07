@@ -658,3 +658,63 @@ class TestDisconnectRevocation:
         response = self._delete(app, manager, self._token("oauth_access"), revoke)
         assert response.status_code == 200
         assert response.json()["revoked_at_provider"] is False
+
+
+class TestRevocationUsesExistingCredentialsOnly:
+    """Revoking must never create a fresh registration at the provider."""
+
+    @pytest.mark.asyncio
+    async def test_no_registration_means_no_revocation_attempt(self):
+        stored = StoredToken(
+            token_type="oauth_access", token_value="at-1", user_email=USER,
+            server_name=SERVER, created_at=time.time(), refresh_token="rt-1",
+        )
+
+        class _EmptyStore:
+            def get(self, server_name, issuer):
+                return None
+
+        with patch.object(
+            mcp_oauth_service, "get_server_oauth_metadata",
+            AsyncMock(return_value=_metadata()),
+        ), patch.object(
+            mcp_oauth_service, "_base_url_from_settings", return_value=BASE_URL
+        ), patch.object(
+            mcp_oauth_service, "get_oauth_client_store", return_value=_EmptyStore()
+        ), patch.object(
+            mcp_oauth_service, "register_client",
+            AsyncMock(side_effect=AssertionError("must not register to revoke")),
+        ), patch.object(
+            mcp_oauth_service, "revoke_token",
+            AsyncMock(side_effect=AssertionError("must not call revoke")),
+        ):
+            assert await mcp_oauth_service.revoke_stored_token(
+                SERVER, SERVERS_CONFIG[SERVER], stored
+            ) is False
+
+    @pytest.mark.asyncio
+    async def test_stored_registration_is_used(self):
+        stored = StoredToken(
+            token_type="oauth_access", token_value="at-1", user_email=USER,
+            server_name=SERVER, created_at=time.time(), refresh_token="rt-1",
+        )
+        registered = RegisteredClient(client_id="c1", issuer=ISSUER, redirect_uri=CALLBACK)
+
+        class _Store:
+            def get(self, server_name, issuer):
+                return registered
+
+        revoke = AsyncMock(return_value=True)
+        with patch.object(
+            mcp_oauth_service, "get_server_oauth_metadata",
+            AsyncMock(return_value=_metadata()),
+        ), patch.object(
+            mcp_oauth_service, "_base_url_from_settings", return_value=BASE_URL
+        ), patch.object(
+            mcp_oauth_service, "get_oauth_client_store", return_value=_Store()
+        ), patch.object(mcp_oauth_service, "revoke_token", revoke):
+            assert await mcp_oauth_service.revoke_stored_token(
+                SERVER, SERVERS_CONFIG[SERVER], stored
+            ) is True
+        # Both the refresh token and the access token are offered.
+        assert revoke.await_count == 2

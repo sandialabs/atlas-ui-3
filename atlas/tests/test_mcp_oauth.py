@@ -9,14 +9,13 @@ assertions actually see.
 import json
 import time
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
 
 from atlas.modules.mcp_tools import mcp_oauth
 from atlas.modules.mcp_tools.mcp_oauth import (
-    AuthorizationServerMetadata,
     MCPOAuthError,
     ProtectedResourceMetadata,
     RegisteredClient,
@@ -604,9 +603,11 @@ class TestOAuthClientStore:
     def test_remove(self, tmp_path):
         store = self._store(tmp_path)
         store.put("srv", self._client())
-        assert store.remove("srv", ISSUER) is True
+        removed = store.remove("srv", ISSUER)
+        assert removed is True
         assert store.get("srv", ISSUER) is None
-        assert store.remove("srv", ISSUER) is False
+        removed_again = store.remove("srv", ISSUER)
+        assert removed_again is False
 
     def test_rotated_key_resets_rather_than_crashing(self, tmp_path):
         from atlas.modules.mcp_tools.oauth_client_store import MCPOAuthClientStore

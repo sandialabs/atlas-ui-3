@@ -159,6 +159,26 @@ async def _resolve_client(
     return store.put(server_name, registered)
 
 
+def _existing_client(
+    server_name: str, config: Dict[str, Any], issuer: str, redirect_uri: str
+) -> Optional[RegisteredClient]:
+    """Return already-known credentials without registering new ones.
+
+    Used by revocation: registering a fresh client just to revoke a token that
+    a *different* client_id was issued would create an orphaned registration at
+    the provider and revoke nothing.
+    """
+    explicit_id = configured_client_id(config)
+    if explicit_id:
+        return RegisteredClient(
+            client_id=explicit_id,
+            issuer=issuer,
+            redirect_uri=redirect_uri,
+            client_secret=configured_client_secret(config),
+        )
+    return get_oauth_client_store().get(server_name, issuer)
+
+
 @dataclass
 class AuthorizationRequest:
     """An in-flight authorization request, held in the user's session."""
@@ -344,9 +364,20 @@ async def revoke_stored_token(
     try:
         metadata = await get_server_oauth_metadata(server_url(config))
         redirect_uri = redirect_uri_for(server_name, _base_url_from_settings())
-        client = await _resolve_client(server_name, config, metadata, redirect_uri)
     except MCPOAuthError as exc:
         logger.debug("Skipping OAuth revocation for '%s': %s", sanitize_for_logging(server_name), exc)
+        return False
+
+    client = _existing_client(
+        server_name, config, metadata.authorization_server.issuer, redirect_uri
+    )
+    if client is None:
+        # Nothing was registered (or the registration is gone), so there are no
+        # credentials the provider would accept for this revocation.
+        logger.debug(
+            "No OAuth client registration held for '%s'; skipping revocation",
+            sanitize_for_logging(server_name),
+        )
         return False
 
     revoked = False
