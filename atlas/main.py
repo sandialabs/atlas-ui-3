@@ -30,6 +30,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -88,6 +89,8 @@ from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.persona_routes import router as persona_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
+from atlas.routes.oidc_auth_routes import api_router as oidc_api_router
+from atlas.routes.oidc_auth_routes import browser_router as oidc_browser_router
 from atlas.routes.suggestion_routes import suggestion_router
 from atlas.routes.telemetry_routes import telemetry_router
 from atlas.routes.user_prompt_routes import router as user_prompt_router
@@ -318,7 +321,6 @@ RateLimit first to cheaply throttle abusive traffic before heavier logic.
 """
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
-# Session middleware for Globus OAuth state (CSRF protection during login flow)
 # Security: refuse to enable Globus auth with a missing/placeholder session secret
 _GLOBUS_PLACEHOLDER_SECRET = "atlas-globus-session-change-me"
 if config.app_settings.feature_globus_auth_enabled:
@@ -329,14 +331,21 @@ if config.app_settings.feature_globus_auth_enabled:
             "(or is the old placeholder). Set a strong random value in .env."
         )
         config.app_settings.feature_globus_auth_enabled = False
-    else:
-        from starlette.middleware.sessions import SessionMiddleware
-        app.add_middleware(
-            SessionMiddleware,
-            secret_key=_globus_secret,
-            https_only=False,
-            same_site="lax",
+
+# Security: OIDC login needs a signed session cookie to carry the opaque
+# session id and the in-flight PKCE state. Refuse to enable it without one.
+if config.app_settings.feature_oidc_auth_enabled:
+    if not config.app_settings.oidc_session_secret:
+        logger.error(
+            "SECURITY: OIDC auth DISABLED — OIDC_SESSION_SECRET is not set. "
+            "Set a strong random value in .env."
         )
+        config.app_settings.feature_oidc_auth_enabled = False
+    elif not config.app_settings.oidc_issuer or not config.app_settings.oidc_client_id:
+        logger.error(
+            "OIDC auth DISABLED — OIDC_ISSUER and OIDC_CLIENT_ID are both required."
+        )
+        config.app_settings.feature_oidc_auth_enabled = False
 # Domain whitelist check (if enabled) - add before Auth so it runs after
 if config.app_settings.feature_domain_whitelist_enabled:
     app.add_middleware(
@@ -353,8 +362,43 @@ app.add_middleware(
     proxy_secret_enabled=config.app_settings.feature_proxy_secret_enabled,
     proxy_secret_header=config.app_settings.proxy_secret_header,
     proxy_secret=config.app_settings.proxy_secret,
-    auth_redirect_url=config.app_settings.auth_redirect_url
+    auth_redirect_url=config.app_settings.auth_redirect_url,
+    oidc_enabled=config.app_settings.feature_oidc_auth_enabled,
 )
+
+# Session middleware backing the Globus OAuth state and the OIDC login session.
+#
+# Registered *after* AuthMiddleware on purpose: Starlette runs the most
+# recently added middleware outermost, so this ordering is what makes
+# ``request.session`` populated by the time AuthMiddleware looks for an OIDC
+# login session. Registering it earlier (as the Globus-only version did) left
+# the session unavailable to authentication and readable only inside routes
+# that skip auth entirely.
+_session_secret = None
+if config.app_settings.feature_oidc_auth_enabled:
+    _session_secret = config.app_settings.oidc_session_secret
+elif config.app_settings.feature_globus_auth_enabled:
+    _session_secret = config.app_settings.globus_session_secret
+if _session_secret:
+    from starlette.middleware.sessions import SessionMiddleware
+
+    # The session cookie is the login credential in OIDC mode, so it must carry
+    # Secure on any https deployment: a hostname with an http listener (an
+    # http-to-https redirect, typically) would otherwise leak it in plaintext
+    # before the redirect fires. Derived from the configured redirect URI so the
+    # common cases need no extra setting, with OIDC_COOKIE_SECURE to override --
+    # a hard "on" would break local http development.
+    _cookie_secure = config.app_settings.oidc_cookie_secure
+    if _cookie_secure is None:
+        _redirect_uri = config.app_settings.oidc_redirect_uri or ""
+        _cookie_secure = _redirect_uri.startswith("https://")
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=_session_secret,
+        https_only=_cookie_secure,
+        same_site="lax",
+        max_age=config.app_settings.oidc_session_max_age_seconds,
+    )
 
 # Include essential routes (add files API)
 app.include_router(config_router)
@@ -378,6 +422,9 @@ if agent_portal_router is not None:
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
+# OIDC login routes (browser-facing login/callback/logout + JSON status API)
+app.include_router(oidc_browser_router)
+app.include_router(oidc_api_router)
 
 # Serve frontend build (Vite)
 # PyPI package bundles frontend into atlas/static/; local dev uses frontend/dist/
@@ -493,6 +540,28 @@ def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
     )
 
 
+def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
+    """Resolve the OIDC login session behind a WebSocket handshake.
+
+    Starlette's SessionMiddleware populates ``scope["session"]`` for websocket
+    scopes as well as HTTP ones, so the browser's existing login cookie
+    authenticates the socket without a second mechanism. Returns None whenever
+    OIDC login is disabled, the session middleware is absent, or the cookie
+    does not resolve to a live session -- the caller then falls through to the
+    header-based path unchanged.
+    """
+    if not getattr(app_settings, "feature_oidc_auth_enabled", False):
+        return None
+    from atlas.core.oidc.session import SESSION_COOKIE_KEY, get_session_store
+
+    try:
+        session_id = websocket.session.get(SESSION_COOKIE_KEY)
+    except (AssertionError, KeyError):
+        return None
+    oidc_session = get_session_store().get(session_id)
+    return oidc_session.user_id if oidc_session else None
+
+
 # WebSocket endpoint for chat
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -549,9 +618,15 @@ async def websocket_endpoint(websocket: WebSocket):
         )
         raise WebSocketException(code=1008, reason="Origin not allowed")
 
+    # An established OIDC login session authenticates the socket on its own,
+    # exactly as it does for HTTP in AuthMiddleware. Checked before the proxy
+    # secret because an OIDC deployment may have no reverse proxy at all.
+    oidc_ws_user = _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
+
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
-        config_manager.app_settings.feature_proxy_secret_enabled
+        oidc_ws_user is None
+        and config_manager.app_settings.feature_proxy_secret_enabled
         and not is_debug_mode
     ):
         if not config_manager.app_settings.proxy_secret:
@@ -569,7 +644,7 @@ async def websocket_endpoint(websocket: WebSocket):
             raise WebSocketException(code=1008, reason="Invalid proxy secret")
 
     # Authenticate user BEFORE accepting the connection
-    user_email = None
+    user_email = oidc_ws_user
 
     # Check configured auth header first, through the same resolver
     # AuthMiddleware uses. Calling get_user_from_header directly here would
@@ -578,7 +653,7 @@ async def websocket_endpoint(websocket: WebSocket):
     app_settings = config_manager.app_settings
     auth_header_name = app_settings.auth_user_header
     x_email_header = websocket.headers.get(auth_header_name)
-    if x_email_header:
+    if not user_email and x_email_header:
         # Async form: JWT verification can fetch the ALB public key with a
         # blocking 5s httpx call, which would stall the whole event loop.
         user_email = await resolve_user_from_auth_header_async(

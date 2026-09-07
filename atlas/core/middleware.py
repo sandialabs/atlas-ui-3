@@ -2,6 +2,7 @@
 
 import logging
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -29,7 +30,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         proxy_secret_enabled: bool = False,
         proxy_secret_header: str = "X-Proxy-Secret",
         proxy_secret: str = None,
-        auth_redirect_url: str = "/auth"
+        auth_redirect_url: str = "/auth",
+        oidc_enabled: bool = False,
+        oidc_login_url: str = "/auth/oidc/login"
     ):
         super().__init__(app)
         self.debug_mode = debug_mode
@@ -41,6 +44,46 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.proxy_secret_header = proxy_secret_header
         self.proxy_secret = proxy_secret
         self.auth_redirect_url = auth_redirect_url
+        self.oidc_enabled = oidc_enabled
+        self.oidc_login_url = oidc_login_url
+
+    def _unauthenticated_redirect_url(self, request: Request) -> str:
+        """Where to send an unauthenticated browser.
+
+        With OIDC login enabled there is nothing upstream to hand the user to,
+        so start the login flow rather than bouncing to the reverse proxy's
+        auth endpoint. The requested path rides along as ``?next=`` so a deep
+        link survives the round trip -- without it every login lands on ``/``,
+        which silently breaks shared links to a workspace or conversation. The
+        login route re-validates the value against its own allowlist, so
+        nothing here is trusted downstream.
+        """
+        if not self.oidc_enabled:
+            return self.auth_redirect_url
+        target = request.url.path
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return f"{self.oidc_login_url}?{urlencode({'next': target})}"
+
+    def _resolve_oidc_user(self, request: Request) -> Optional[str]:
+        """Resolve identity from an established OIDC login session.
+
+        Returns None whenever OIDC login is disabled, the session middleware is
+        absent, or no live session backs the cookie -- in every one of those
+        cases the caller falls through to the existing header-based path, so
+        enabling OIDC never removes a working authentication mode.
+        """
+        if not self.oidc_enabled:
+            return None
+        from atlas.core.oidc.session import SESSION_COOKIE_KEY, get_session_store
+
+        try:
+            session_id = request.session.get(SESSION_COOKIE_KEY)
+        except (AssertionError, KeyError):
+            # SessionMiddleware is not installed (or not outside this one).
+            return None
+        oidc_session = get_session_store().get(session_id)
+        return oidc_session.user_id if oidc_session else None
 
     async def _resolve_user(self, header_value: Optional[str]) -> Optional[str]:
         """Resolve identity from the auth header, honouring the configured type.
@@ -66,6 +109,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.url.path == '/api/health' or
             request.url.path == '/api/heartbeat' or
             request.url.path.startswith('/auth/globus/') or
+            request.url.path.startswith('/auth/oidc/') or
             request.url.path == self.auth_redirect_url):
             return await call_next(request)
 
@@ -94,6 +138,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Unauthorized: valid capability token required"}
             )
 
+        # An established OIDC login session authenticates the request on its
+        # own, ahead of both the proxy-secret gate and the auth header. Atlas
+        # terminated this login itself: the browser holds a signed cookie
+        # carrying an opaque id that only resolves against this process's
+        # session store, so reaching the backend directly does not let anyone
+        # forge one. That is strictly stronger than the header-spoofing
+        # protection the proxy secret exists to provide, which is what makes
+        # it safe to run OIDC mode with no reverse proxy in front.
+        oidc_user = self._resolve_oidc_user(request)
+        if oidc_user:
+            request.state.user_email = oidc_user
+            request.state.auth_source = "oidc"
+            return await self._finish(request, call_next, oidc_user)
+
         # Validate proxy secret if enabled (skip in debug mode for local development)
         if self.proxy_secret_enabled and not self.debug_mode:
             if not self.proxy_secret:
@@ -121,7 +179,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         content={"detail": "Unauthorized: Invalid proxy secret"}
                     )
                 else:
-                    return RedirectResponse(url=self.auth_redirect_url, status_code=302)
+                    return RedirectResponse(
+                        url=self._unauthenticated_redirect_url(request), status_code=302
+                    )
 
         # Check for capability token in /api/files/download/ (backward compatibility).
         # Browser requests normally authenticate via X-User-Email from nginx, but
@@ -174,12 +234,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         content={"detail": "Unauthorized"}
                     )
                 else:
-                    logger.warning(f"Missing {self.auth_header_name}, redirecting to {self.auth_redirect_url}")
-                    return RedirectResponse(url=self.auth_redirect_url, status_code=302)
+                    redirect_target = self._unauthenticated_redirect_url(request)
+                    logger.warning(
+                        f"Missing {self.auth_header_name}, redirecting to {redirect_target}"
+                    )
+                    return RedirectResponse(url=redirect_target, status_code=302)
 
         # Add user to request state
         request.state.user_email = user_email
+        return await self._finish(request, call_next, user_email)
 
+    async def _finish(self, request: Request, call_next, user_email: str) -> Response:
+        """Shared tail of dispatch: side-effects that apply to any auth source."""
         # Capture the Wormhole subtoken (if present) so it can be forwarded to
         # Wormhole-enabled MCP servers. No-ops when the feature is disabled.
         try:
@@ -188,5 +254,4 @@ class AuthMiddleware(BaseHTTPMiddleware):
         except Exception:  # pragma: no cover - never block a request on this
             logger.debug("Failed to capture Wormhole subtoken from request headers", exc_info=True)
 
-        response = await call_next(request)
-        return response
+        return await call_next(request)

@@ -126,6 +126,14 @@ services:
       - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
       - FEATURE_GLOBUS_AUTH_ENABLED=false
 
+      # OIDC login (Atlas as an OAuth confidential client). Off by default;
+      # the trusted-header auth mode above stays in effect. Enabling it also
+      # requires OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_SESSION_SECRET --
+      # see docs/admin/oidc-authentication.md.
+      - FEATURE_OIDC_AUTH_ENABLED=false
+      # Delegated downstream authorization (RFC 8693 / Entra OBO).
+      - FEATURE_OIDC_DELEGATION_ENABLED=false
+
       # Agent mode configuration
       - AGENT_MAX_STEPS=30
       - AGENT_SLEEP_MAX_SECONDS=7200
