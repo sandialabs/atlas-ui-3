@@ -698,7 +698,7 @@ class TestDiscoverySSRFConstraints:
             result = await discover_protected_resource(MCP_URL)
 
         assert result is None
-        assert not any("attacker.example" in url for url in fetched)
+        assert not any(origin_of(url) == "https://attacker.example" for url in fetched)
 
     @pytest.mark.asyncio
     async def test_redirect_off_origin_is_refused(self):
@@ -710,7 +710,7 @@ class TestDiscoverySSRFConstraints:
             fetched.append(url)
             if url == MCP_URL:
                 return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
-            if "mcp.example.com" in url:
+            if origin_of(url) == origin_of(MCP_URL):
                 return httpx.Response(
                     302, headers={"Location": "https://internal.example/secrets"}
                 )
@@ -720,7 +720,7 @@ class TestDiscoverySSRFConstraints:
             result = await discover_protected_resource(MCP_URL)
 
         assert result is None
-        assert not any("internal.example" in url for url in fetched)
+        assert not any(origin_of(url) == "https://internal.example" for url in fetched)
 
     @pytest.mark.asyncio
     async def test_remote_server_may_not_name_a_loopback_authorization_server(self):
@@ -824,38 +824,44 @@ class TestDiscoveryFailureCaching:
         import asyncio
 
         release = asyncio.Event()
+        entered = asyncio.Event()
         other_url = "https://other.example.com/mcp"
+        other_origin = "https://other.example.com"
 
-        async def slow_handler(request):
-            if "mcp.example.com" in str(request.url):
-                await release.wait()
-            return httpx.Response(404, json={})
-
-        def handler(request):
+        async def handler(request):
             url = str(request.url)
-            if url.startswith("https://other.example.com"):
-                if url == other_url:
-                    return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
-                if url.endswith("/.well-known/oauth-protected-resource"):
-                    return httpx.Response(
-                        200,
-                        json={
-                            "resource": "https://other.example.com",
-                            "authorization_servers": [ISSUER],
-                        },
-                    )
+            # The unhealthy provider hangs until the test releases it, standing
+            # in for a provider that only answers after a long timeout.
+            if origin_of(url) == origin_of(MCP_URL):
+                entered.set()
+                await release.wait()
+                return httpx.Response(404, json={})
+            if url == other_url:
+                return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
+            if url == f"{other_origin}/.well-known/oauth-protected-resource/mcp":
+                return httpx.Response(
+                    200,
+                    json={
+                        "resource": other_origin,
+                        "authorization_servers": [ISSUER],
+                    },
+                )
             if url == f"{ISSUER}/.well-known/oauth-authorization-server":
                 return httpx.Response(200, json=_as_metadata())
             return httpx.Response(404, json={})
 
         with _mock_httpx(handler):
             stalled = asyncio.create_task(get_server_oauth_metadata(MCP_URL))
-            await asyncio.sleep(0)
-            # The healthy server resolves while the other is still in flight.
+            # Only proceed once the stalled discovery is genuinely in flight
+            # and holding its own lock.
+            await asyncio.wait_for(entered.wait(), timeout=5)
+
+            # A global lock would make this block until `release` is set.
             healthy = await asyncio.wait_for(
                 get_server_oauth_metadata(other_url), timeout=5
             )
             assert healthy.authorization_server.issuer == ISSUER
+
             release.set()
             with pytest.raises(MCPOAuthError):
                 await stalled

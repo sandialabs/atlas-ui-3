@@ -24,7 +24,7 @@ import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 FAILURES = []
 
@@ -110,7 +110,9 @@ class ProviderHandler(BaseHTTPRequestHandler):
                 params.get("code_challenge", [""])[0], redirect_uri
             )
             state = params.get("state", [""])[0]
-            location = f"{redirect_uri}?code={code}&state={state}"
+            # Encoded, not interpolated: a state carrying CR/LF would otherwise
+            # split the response header.
+            location = f"{redirect_uri}?{urlencode({'code': code, 'state': state})}"
             self.send_response(302)
             self.send_header("Location", location)
             self.end_headers()
