@@ -12,7 +12,7 @@ Updated: 2025-01-21
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,19 +24,24 @@ from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.mcp_tools import mcp_oauth_service
 from atlas.modules.mcp_tools.mcp_oauth import MCPOAuthError
+from atlas.modules.mcp_tools.oauth_pending_store import (
+    PendingAuthorization,
+    get_pending_store,
+)
 from atlas.modules.mcp_tools.token_storage import get_token_storage
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mcp/auth", tags=["mcp-auth"])
 
-# Session key holding in-flight OAuth authorization requests, keyed by state.
-_PENDING_KEY = "mcp_oauth_pending"
+# Session key holding the ``state`` values this browser has started flows for.
+# Only the states live in the cookie; the PKCE verifier and the rest of the
+# record are held server-side (see oauth_pending_store) because a Starlette
+# session is signed but readable.
+_PENDING_KEY = "mcp_oauth_states"
 
-# An authorization attempt the user never completes should not sit in their
-# session forever, and the cap stops a script from growing the session cookie
-# by repeatedly hitting /oauth/start.
-_PENDING_TTL_SECONDS = 600
+# Cap on states carried in the cookie, so repeatedly hitting /oauth/start
+# cannot grow it without bound.
 _MAX_PENDING = 5
 
 # Error names reflected to the SPA as a query parameter. Written as a map from
@@ -265,9 +270,13 @@ async def remove_token(
                     revoked = await mcp_oauth_service.revoke_stored_token(
                         server_name, server_config, existing
                     )
-                except MCPOAuthError as exc:
-                    logger.debug(
-                        "OAuth revocation skipped for '%s': %s",
+                except Exception as exc:
+                    # The local token is already deleted at this point, so the
+                    # disconnect has succeeded from the user's perspective. A
+                    # store or provider error must not turn that into a 500
+                    # that leaves the UI thinking it is still connected.
+                    logger.warning(
+                        "OAuth revocation failed for '%s': %s",
                         sanitize_for_logging(server_name),
                         exc,
                     )
@@ -347,18 +356,10 @@ def _session_available(request: Request) -> bool:
     return "session" in request.scope
 
 
-def _prune_pending(pending: Dict[str, Any]) -> Dict[str, Any]:
-    """Drop expired entries and keep only the newest few."""
-    now = time.time()
-    live = {
-        state: entry
-        for state, entry in pending.items()
-        if isinstance(entry, dict) and now - float(entry.get("created_at") or 0) < _PENDING_TTL_SECONDS
-    }
-    if len(live) <= _MAX_PENDING:
-        return live
-    newest = sorted(live.items(), key=lambda item: item[1].get("created_at") or 0, reverse=True)
-    return dict(newest[:_MAX_PENDING])
+def _session_states(request: Request) -> List[str]:
+    """The states this browser has open flows for, newest last."""
+    raw = request.session.get(_PENDING_KEY) or []
+    return [item for item in raw if isinstance(item, str)][-_MAX_PENDING:]
 
 
 @router.get("/{server_name}/oauth/start")
@@ -397,18 +398,33 @@ async def start_oauth(
             exc,
         )
         return _oauth_error_redirect(server_name, "discovery_failed")
+    except Exception:
+        # A malformed provider response can surface as ValueError/TypeError
+        # from deep inside parsing, and an unreachable one as OSError. Neither
+        # should strand the user on a raw 500 page mid-flow.
+        logger.exception(
+            "Unexpected error starting OAuth for MCP server '%s'",
+            sanitize_for_logging(server_name),
+        )
+        return _oauth_error_redirect(server_name, "discovery_failed")
 
-    pending = _prune_pending(request.session.get(_PENDING_KEY) or {})
-    pending[prepared.state] = {
-        "server_name": server_name,
-        "code_verifier": prepared.code_verifier,
-        "redirect_uri": prepared.redirect_uri,
-        # Bound to the user who started the flow: a callback replayed in
-        # someone else's browser must not mint a token for this account.
-        "user": current_user.lower(),
-        "created_at": time.time(),
-    }
-    request.session[_PENDING_KEY] = pending
+    # Only the state goes in the cookie. The verifier is the secret binding
+    # the code to this client, so it stays server-side.
+    get_pending_store().put(
+        prepared.state,
+        PendingAuthorization(
+            server_name=server_name,
+            # Bound to the user who started the flow: a callback replayed in
+            # someone else's browser must not mint a token for this account.
+            user=current_user.lower(),
+            code_verifier=prepared.code_verifier,
+            redirect_uri=prepared.redirect_uri,
+            created_at=time.time(),
+        ),
+    )
+    request.session[_PENDING_KEY] = (_session_states(request) + [prepared.state])[
+        -_MAX_PENDING:
+    ]
 
     logger.info(
         "Starting MCP OAuth flow for server '%s'", sanitize_for_logging(server_name)
@@ -430,12 +446,17 @@ async def oauth_callback(
         logger.error("MCP OAuth callback arrived but no session middleware is installed")
         return _oauth_error_redirect(server_name, "session_unavailable")
 
-    pending_all = _prune_pending(request.session.get(_PENDING_KEY) or {})
+    states = _session_states(request)
 
-    # Single-use: remove the in-flight entry before doing any work, so a
-    # replayed callback cannot reuse the same state/verifier pair.
-    entry = pending_all.pop(state, None) if state else None
-    request.session[_PENDING_KEY] = pending_all
+    # Single-use on both sides: drop the state from the cookie and take the
+    # server-side record before doing any work, so a replayed callback cannot
+    # reuse the same state/verifier pair.
+    known_to_browser = bool(state) and state in states
+    if state:
+        request.session[_PENDING_KEY] = [item for item in states if item != state]
+    # Looked up only when the browser presented a state it actually started:
+    # otherwise a third party could burn someone else's pending record.
+    entry = get_pending_store().take(state) if known_to_browser else None
 
     if error:
         error_name = _ALLOWED_PROVIDER_ERROR_NAMES.get(error, "unknown_error")
@@ -457,10 +478,10 @@ async def oauth_callback(
     # The state was issued for one server and one user. A callback that
     # arrives for a different server, or in a session that has since become a
     # different user, is rejected rather than silently storing the token.
-    if entry.get("server_name") != server_name:
+    if entry.server_name != server_name:
         logger.warning("MCP OAuth callback state does not match the server in the path")
         return _oauth_error_redirect(server_name, "invalid_state")
-    if entry.get("user") != (current_user or "").lower():
+    if entry.user != (current_user or "").lower():
         logger.warning("MCP OAuth callback state belongs to a different user")
         return _oauth_error_redirect(server_name, "invalid_state")
 
@@ -479,14 +500,20 @@ async def oauth_callback(
             server_name=server_name,
             config=config,
             code=code,
-            code_verifier=entry.get("code_verifier") or "",
-            redirect_uri=entry.get("redirect_uri") or "",
+            code_verifier=entry.code_verifier,
+            redirect_uri=entry.redirect_uri,
         )
     except MCPOAuthError as exc:
         logger.error(
             "MCP OAuth token exchange failed for server '%s': %s",
             sanitize_for_logging(server_name),
             exc,
+        )
+        return _oauth_error_redirect(server_name, "token_exchange_failed")
+    except Exception:
+        logger.exception(
+            "Unexpected error completing OAuth for MCP server '%s'",
+            sanitize_for_logging(server_name),
         )
         return _oauth_error_redirect(server_name, "token_exchange_failed")
 

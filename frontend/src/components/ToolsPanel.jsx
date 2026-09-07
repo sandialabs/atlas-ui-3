@@ -58,6 +58,35 @@ const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start a
  * selections survive), and routes its own close attempts through
  * `closeGuardRef` so unsaved tool changes still prompt.
  */
+// The OAuth routes redirect back with a machine-readable code. Each one is
+// turned into a sentence that says whether retrying is worth it or whether an
+// administrator has to change something -- "invalid_state" on its own tells a
+// user nothing.
+const OAUTH_ERROR_MESSAGES = {
+  access_denied: 'You declined the authorization request.',
+  invalid_state: 'The sign-in attempt expired or did not match. Please try connecting again.',
+  missing_params: 'The provider returned an incomplete response. Please try connecting again.',
+  session_unavailable: 'This Atlas deployment has no browser session configured for OAuth. Ask an administrator to set MCP_OAUTH_SESSION_SECRET.',
+  discovery_failed: 'Atlas could not reach the server\'s sign-in provider. Ask an administrator to check the server URL and network access.',
+  token_exchange_failed: 'The provider rejected the sign-in at the last step. Please try again, and tell an administrator if it keeps happening.',
+  not_authorized: 'You are not authorized to connect this server.',
+  invalid_client: 'Atlas is not registered correctly with the provider. An administrator needs to look at this.',
+  invalid_grant: 'The authorization expired before it could be used. Please try connecting again.',
+  invalid_scope: 'The server asked for permissions the provider would not grant. An administrator needs to adjust its configuration.',
+  server_error: 'The sign-in provider reported an internal error. Please try again shortly.',
+  temporarily_unavailable: 'The sign-in provider is temporarily unavailable. Please try again shortly.',
+  consent_required: 'The provider needs you to grant consent. Please try connecting again.',
+  login_required: 'The provider needs you to sign in first. Please try connecting again.',
+  interaction_required: 'The provider needs more input from you. Please try connecting again.',
+  unauthorized_client: 'The provider refused Atlas as a client. An administrator needs to look at this.',
+  unsupported_response_type: 'The provider does not support the sign-in method Atlas uses. An administrator needs to look at this.',
+  unknown_error: 'The sign-in failed for an unrecognized reason. Please try again, and tell an administrator if it keeps happening.',
+}
+
+const describeOAuthError = (code) =>
+  OAUTH_ERROR_MESSAGES[code] ||
+  'The sign-in failed. Please try again, and tell an administrator if it keeps happening.'
+
 const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null, onNavigate = null }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
@@ -761,9 +790,14 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
               }`}
             >
               <span className="flex-1">
-                {oauthNotice.error
-                  ? `Could not connect to ${oauthNotice.server} (${oauthNotice.error}).`
-                  : `Connected to ${oauthNotice.server}.`}
+                {oauthNotice.error ? (
+                  <>
+                    Could not connect to <strong>{oauthNotice.server}</strong>.{' '}
+                    {describeOAuthError(oauthNotice.error)}
+                  </>
+                ) : (
+                  <>Connected to <strong>{oauthNotice.server}</strong>.</>
+                )}
               </span>
               <button
                 onClick={() => setOauthNotice(null)}

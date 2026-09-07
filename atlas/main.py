@@ -397,8 +397,19 @@ if _session_secret:
     # a hard "on" would break local http development.
     _cookie_secure = config.app_settings.oidc_cookie_secure
     if _cookie_secure is None:
-        _redirect_uri = config.app_settings.oidc_redirect_uri or ""
-        _cookie_secure = _redirect_uri.startswith("https://")
+        # Every https URL that identifies this deployment counts, not just the
+        # OIDC one. The MCP OAuth flow puts CSRF state in this cookie on
+        # header-auth deployments, where oidc_redirect_uri is unset -- deriving
+        # the flag from that alone would ship the cookie without Secure over
+        # https for exactly the deployment this feature enables.
+        _secure_candidates = (
+            config.app_settings.oidc_redirect_uri,
+            config.app_settings.mcp_oauth_redirect_base_url,
+            config.app_settings.backend_public_url,
+        )
+        _cookie_secure = any(
+            (candidate or "").startswith("https://") for candidate in _secure_candidates
+        )
     app.add_middleware(
         SessionMiddleware,
         secret_key=_session_secret,

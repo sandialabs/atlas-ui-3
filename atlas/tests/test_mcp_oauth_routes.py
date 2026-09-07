@@ -851,3 +851,157 @@ class TestRedirectEncoding:
         params = parse_qs(urlsplit(location).query)
         assert params["mcp_auth_server"] == [weird]
         assert params["mcp_auth_error"] == ["access_denied"]
+
+
+# --- The PKCE verifier must not travel to the browser --------------------
+
+
+class TestPendingAuthorizationStorage:
+    """A Starlette session is signed but readable, so the verifier stays server-side."""
+
+    def test_the_verifier_is_never_written_to_the_cookie(self, app, manager, storage):
+        from atlas.modules.mcp_tools.oauth_pending_store import get_pending_store
+
+        client = TestClient(app)
+        response = _start(client, manager)
+        state = _state_from(response)
+
+        record = get_pending_store()._records.get(state)
+        assert record is not None, "the pending record should be held server-side"
+        verifier = record.code_verifier
+        assert verifier
+
+        # Starlette signs the session cookie with base64-encoded JSON, so its
+        # contents are readable by anyone holding it.
+        import base64
+
+        raw = client.cookies.get("session") or ""
+        payload = raw.split(".")[0]
+        decoded = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        assert verifier.encode() not in decoded
+        # The state is fine to carry: the provider sees it as a query parameter.
+        assert state.encode() in decoded
+
+    def test_a_state_the_browser_never_started_is_not_consumed(
+        self, app, manager, storage
+    ):
+        """A third party must not be able to burn someone else's pending record."""
+        from atlas.modules.mcp_tools.oauth_pending_store import get_pending_store
+
+        victim = TestClient(app)
+        state = _state_from(_start(victim, manager))
+
+        attacker = TestClient(app)
+        p1, p2 = _patch_app_factory(manager)
+        with p1, p2:
+            response = attacker.get(
+                f"/api/mcp/auth/{SERVER}/oauth/callback",
+                params={"code": "c", "state": state},
+                follow_redirects=False,
+            )
+
+        assert "mcp_auth_error=invalid_state" in response.headers["location"]
+        # The victim's record survives, so their own callback still works.
+        assert get_pending_store()._records.get(state) is not None
+
+    def test_records_expire(self):
+        from atlas.modules.mcp_tools.oauth_pending_store import (
+            PENDING_TTL_SECONDS,
+            PendingAuthorization,
+            PendingAuthorizationStore,
+        )
+
+        store = PendingAuthorizationStore()
+        record = PendingAuthorization(
+            server_name=SERVER, user=USER, code_verifier="v",
+            redirect_uri=CALLBACK, created_at=time.time() - PENDING_TTL_SECONDS - 1,
+        )
+        store.put("s1", record)
+        assert store.take("s1") is None
+
+    def test_records_are_single_use(self):
+        from atlas.modules.mcp_tools.oauth_pending_store import (
+            PendingAuthorization,
+            PendingAuthorizationStore,
+        )
+
+        store = PendingAuthorizationStore()
+        store.put("s1", PendingAuthorization(
+            server_name=SERVER, user=USER, code_verifier="v",
+            redirect_uri=CALLBACK, created_at=time.time(),
+        ))
+        assert store.take("s1") is not None
+        assert store.take("s1") is None
+
+    def test_the_store_is_bounded(self):
+        from atlas.modules.mcp_tools.oauth_pending_store import (
+            MAX_PENDING_RECORDS,
+            PendingAuthorization,
+            PendingAuthorizationStore,
+        )
+
+        store = PendingAuthorizationStore()
+        for index in range(MAX_PENDING_RECORDS + 50):
+            store.put(f"s{index}", PendingAuthorization(
+                server_name=SERVER, user=USER, code_verifier="v",
+                redirect_uri=CALLBACK, created_at=time.time() + index,
+            ))
+        assert len(store) <= MAX_PENDING_RECORDS
+
+
+class TestUnexpectedErrorsDoNotStrandTheBrowser:
+    """A raw 500 mid-flow leaves the user with no way back."""
+
+    def test_start_survives_a_non_oauth_exception(self, app, manager, storage):
+        p1, p2 = _patch_app_factory(manager)
+        with p1, p2, patch.object(
+            mcp_oauth_service, "prepare_authorization",
+            AsyncMock(side_effect=ValueError("could not parse expiry")),
+        ):
+            response = TestClient(app).get(
+                f"/api/mcp/auth/{SERVER}/oauth/start", follow_redirects=False
+            )
+        assert response.status_code == 302
+        assert "mcp_auth_error=discovery_failed" in response.headers["location"]
+
+    def test_callback_survives_a_non_oauth_exception(self, app, manager, storage):
+        client = TestClient(app)
+        state = _state_from(_start(client, manager))
+
+        p1, p2 = _patch_app_factory(manager)
+        f1, f2 = _patch_flow()
+        with p1, p2, f1, f2, patch.object(
+            mcp_oauth_service, "exchange_authorization_code",
+            AsyncMock(side_effect=OSError("connection reset")),
+        ):
+            response = client.get(
+                f"/api/mcp/auth/{SERVER}/oauth/callback",
+                params={"code": "c", "state": state},
+                follow_redirects=False,
+            )
+        assert response.status_code == 302
+        assert "mcp_auth_error=token_exchange_failed" in response.headers["location"]
+
+    def test_disconnect_survives_a_revocation_error(self, app, manager, storage):
+        class _Storage:
+            def get_token(self, user, server):
+                return StoredToken(
+                    token_type="oauth_access", token_value="at-1", user_email=USER,
+                    server_name=SERVER, created_at=time.time(), refresh_token="rt-1",
+                )
+
+            def remove_token(self, user, server):
+                return True
+
+        p1, p2 = _patch_app_factory(manager)
+        with p1, p2, patch(
+            "atlas.routes.mcp_auth_routes.get_token_storage", return_value=_Storage()
+        ), patch.object(
+            mcp_oauth_service, "revoke_stored_token",
+            AsyncMock(side_effect=OSError("client store unreadable")),
+        ):
+            response = TestClient(app).delete(f"/api/mcp/auth/{SERVER}/token")
+
+        # The local token is already gone: this must read as success.
+        assert response.status_code == 200
+        assert response.json()["revoked_at_provider"] is False

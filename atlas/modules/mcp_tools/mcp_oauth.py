@@ -38,6 +38,7 @@ import asyncio
 import logging
 import re
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
@@ -76,11 +77,29 @@ def _is_loopback(host: str) -> bool:
     return host in _LOOPBACK_HOSTS or host.startswith("127.")
 
 
-def validate_endpoint_url(url: str, *, what: str) -> str:
+def origin_of(url: str) -> str:
+    """The scheme://host:port of a URL, for same-origin comparisons."""
+    parsed = urlsplit(url)
+    return f"{parsed.scheme}://{parsed.netloc}".lower()
+
+
+def is_loopback_url(url: str) -> bool:
+    """Whether a URL points at a loopback host."""
+    return _is_loopback(urlsplit(url).hostname or "")
+
+
+def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -> str:
     """Require an https:// URL (or http:// on loopback) and return it.
 
     Applied to every URL Atlas fetches or redirects to during the flow,
     including ones read out of discovery documents.
+
+    ``allow_loopback`` must be False for any URL that came out of a remote
+    server's discovery document or challenge header. Otherwise a hostile
+    remote MCP server could name ``http://127.0.0.1:...`` and have Atlas make
+    the request on its behalf, from inside the deployment's network. Loopback
+    stays permitted when the MCP server itself is on loopback, which is the
+    local-development case the allowance exists for.
     """
     if not url or not isinstance(url, str):
         raise MCPOAuthError(f"{what} is missing")
@@ -88,6 +107,11 @@ def validate_endpoint_url(url: str, *, what: str) -> str:
     if parsed.scheme == "https":
         return url
     if parsed.scheme == "http" and _is_loopback(parsed.hostname or ""):
+        if not allow_loopback:
+            raise MCPOAuthError(
+                f"{what} points at a loopback address, which a remote server "
+                "is not allowed to name"
+            )
         logger.warning(
             "MCP OAuth %s uses http:// on a loopback host; local development only", what
         )
@@ -243,7 +267,13 @@ def parse_protected_resource_metadata(document: Any) -> ProtectedResourceMetadat
 MAX_DISCOVERY_REDIRECTS = 5
 
 
-async def _fetch_json(url: str, *, what: str) -> Dict[str, Any]:
+async def _fetch_json(
+    url: str,
+    *,
+    what: str,
+    allow_loopback: bool = True,
+    require_origin: Optional[str] = None,
+) -> Dict[str, Any]:
     """GET a discovery document, validating the transport of every hop.
 
     Redirects are followed manually rather than by httpx. With
@@ -251,8 +281,21 @@ async def _fetch_json(url: str, *, what: str) -> Dict[str, Any]:
     compromised server could answer the initial https request with a redirect
     to plaintext or to an internal address and defeat the very restriction
     :func:`validate_endpoint_url` exists to impose.
+
+    ``require_origin`` pins every hop to one origin. RFC 9728 publishes
+    protected-resource metadata on the resource's own origin, so a challenge
+    (or a redirect) naming somewhere else is not a document Atlas has any
+    reason to fetch -- and following it would turn the MCP server into a
+    request forgery primitive against the deployment's network.
     """
-    validate_endpoint_url(url, what=what)
+    def _check(candidate: str, label: str) -> None:
+        validate_endpoint_url(candidate, what=label, allow_loopback=allow_loopback)
+        if require_origin and origin_of(candidate) != require_origin:
+            raise MCPOAuthError(
+                f"{label} is outside the expected origin {require_origin}"
+            )
+
+    _check(url, what)
     current = url
     try:
         async with httpx.AsyncClient(
@@ -267,9 +310,9 @@ async def _fetch_json(url: str, *, what: str) -> Dict[str, Any]:
                     if not location:
                         raise MCPOAuthError(f"{what} redirect carried no Location")
                     # Resolve relative redirects against the current URL, then
-                    # hold the destination to the same transport requirement.
+                    # hold the destination to the same rules as the first hop.
                     current = str(httpx.URL(current).join(location))
-                    validate_endpoint_url(current, what=f"{what} redirect target")
+                    _check(current, f"{what} redirect target")
                     continue
                 response.raise_for_status()
                 return response.json()
@@ -281,20 +324,41 @@ async def _fetch_json(url: str, *, what: str) -> Dict[str, Any]:
 
 
 async def discover_protected_resource(mcp_url: str) -> Optional[ProtectedResourceMetadata]:
-    """Resolve RFC 9728 metadata for an MCP endpoint, or None if unpublished."""
+    """Resolve RFC 9728 metadata for an MCP endpoint, or None if unpublished.
+
+    The metadata URL is pinned to the MCP endpoint's own origin. RFC 9728
+    publishes it there, so a challenge naming another host is not a document
+    Atlas has any reason to fetch; honouring it would let a hostile MCP server
+    aim server-side GETs at arbitrary hosts, including internal ones.
+    """
+    # A loopback MCP server is the local-development case, and only there may
+    # discovery resolve to loopback addresses.
+    allow_loopback = is_loopback_url(mcp_url)
     validate_endpoint_url(mcp_url, what="MCP server URL")
+    expected_origin = origin_of(mcp_url)
 
     candidates: List[str] = []
     challenge_url = await probe_resource_metadata_url(mcp_url)
     if challenge_url:
-        candidates.append(challenge_url)
+        if origin_of(challenge_url) == expected_origin:
+            candidates.append(challenge_url)
+        else:
+            logger.warning(
+                "Ignoring MCP resource_metadata challenge pointing outside the "
+                "server's own origin"
+            )
     candidates.extend(
         url for url in default_resource_metadata_urls(mcp_url) if url not in candidates
     )
 
     for url in candidates:
         try:
-            document = await _fetch_json(url, what="protected resource metadata")
+            document = await _fetch_json(
+                url,
+                what="protected resource metadata",
+                allow_loopback=allow_loopback,
+                require_origin=expected_origin,
+            )
             return parse_protected_resource_metadata(document)
         except MCPOAuthError as exc:
             logger.debug("Protected resource metadata not usable at a candidate URL: %s", exc)
@@ -323,13 +387,16 @@ def authorization_server_metadata_urls(issuer: str) -> List[str]:
 
 
 def parse_authorization_server_metadata(
-    issuer: str, document: Any
+    issuer: str, document: Any, *, allow_loopback: bool = True
 ) -> AuthorizationServerMetadata:
     if not isinstance(document, dict):
         raise MCPOAuthError("Authorization server metadata is not a JSON object")
 
     advertised = document.get("issuer")
-    if advertised not in (issuer, issuer.rstrip("/")):
+    # Normalize both sides: a provider may publish a trailing slash where the
+    # protected-resource document named it without one (or the reverse), and
+    # comparing raw strings would make such a provider undiscoverable.
+    if not isinstance(advertised, str) or advertised.rstrip("/") != issuer.rstrip("/"):
         # RFC 8414 section 3.3: the issuer in the document must match the one
         # the document was fetched for, or a redirect could substitute another
         # provider's endpoints for the one the resource actually trusts.
@@ -363,23 +430,52 @@ def parse_authorization_server_metadata(
 
     # Discovered endpoints are attacker-influenced; hold them to the same
     # transport requirement as configured ones.
-    validate_endpoint_url(metadata.authorization_endpoint, what="authorization endpoint")
-    validate_endpoint_url(metadata.token_endpoint, what="token endpoint")
+    validate_endpoint_url(
+        metadata.authorization_endpoint,
+        what="authorization endpoint",
+        allow_loopback=allow_loopback,
+    )
+    validate_endpoint_url(
+        metadata.token_endpoint, what="token endpoint", allow_loopback=allow_loopback
+    )
     if metadata.registration_endpoint:
-        validate_endpoint_url(metadata.registration_endpoint, what="registration endpoint")
+        validate_endpoint_url(
+            metadata.registration_endpoint,
+            what="registration endpoint",
+            allow_loopback=allow_loopback,
+        )
     if metadata.revocation_endpoint:
-        validate_endpoint_url(metadata.revocation_endpoint, what="revocation endpoint")
+        validate_endpoint_url(
+            metadata.revocation_endpoint,
+            what="revocation endpoint",
+            allow_loopback=allow_loopback,
+        )
     return metadata
 
 
-async def discover_authorization_server(issuer: str) -> AuthorizationServerMetadata:
-    """Fetch and validate authorization-server metadata for an issuer."""
-    validate_endpoint_url(issuer, what="authorization server issuer")
+async def discover_authorization_server(
+    issuer: str, *, allow_loopback: bool = True
+) -> AuthorizationServerMetadata:
+    """Fetch and validate authorization-server metadata for an issuer.
+
+    The authorization server legitimately lives on a different origin from the
+    resource, so this is not origin-pinned -- but a remote resource still may
+    not name a loopback issuer.
+    """
+    validate_endpoint_url(
+        issuer, what="authorization server issuer", allow_loopback=allow_loopback
+    )
     last_error: Optional[MCPOAuthError] = None
     for url in authorization_server_metadata_urls(issuer):
         try:
-            document = await _fetch_json(url, what="authorization server metadata")
-            return parse_authorization_server_metadata(issuer, document)
+            document = await _fetch_json(
+                url,
+                what="authorization server metadata",
+                allow_loopback=allow_loopback,
+            )
+            return parse_authorization_server_metadata(
+                issuer, document, allow_loopback=allow_loopback
+            )
         except MCPOAuthError as exc:
             last_error = exc
             continue
@@ -414,30 +510,77 @@ class ServerOAuthMetadata:
         return list(_DEFAULT_SCOPES)
 
 
-class _MetadataCache:
-    """TTL cache keyed by MCP URL, guarded so concurrent starts fetch once."""
+# A provider that is down would otherwise re-pay the full sequence of HTTP
+# timeouts on every single tool call. Failures are cached too, but briefly, so
+# a recovered provider is picked up again quickly.
+DISCOVERY_FAILURE_CACHE_TTL_SECONDS = 60.0
 
-    def __init__(self, ttl_seconds: float = DISCOVERY_CACHE_TTL_SECONDS) -> None:
+
+class _MetadataCache:
+    """TTL cache keyed by MCP URL, guarded so concurrent starts fetch once.
+
+    Locks are per URL rather than global: one unreachable provider holding a
+    single shared lock for the length of its timeouts would stall discovery
+    for every healthy server behind it.
+    """
+
+    def __init__(
+        self,
+        ttl_seconds: float = DISCOVERY_CACHE_TTL_SECONDS,
+        failure_ttl_seconds: float = DISCOVERY_FAILURE_CACHE_TTL_SECONDS,
+    ) -> None:
         self._ttl = ttl_seconds
+        self._failure_ttl = failure_ttl_seconds
         self._entries: Dict[str, Tuple[ServerOAuthMetadata, float]] = {}
-        self._lock = asyncio.Lock()
+        self._failures: Dict[str, Tuple[str, float]] = {}
+        self._locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def clear(self) -> None:
         self._entries.clear()
+        self._failures.clear()
+
+    def _cached(self, mcp_url: str) -> Optional[ServerOAuthMetadata]:
+        entry = self._entries.get(mcp_url)
+        if entry and entry[1] > time.monotonic():
+            return entry[0]
+        return None
+
+    def _cached_failure(self, mcp_url: str) -> Optional[str]:
+        entry = self._failures.get(mcp_url)
+        if entry and entry[1] > time.monotonic():
+            return entry[0]
+        return None
 
     async def get(self, mcp_url: str) -> ServerOAuthMetadata:
-        cached = self._entries.get(mcp_url)
-        if cached and cached[1] > time.monotonic():
-            return cached[0]
-        async with self._lock:
-            cached = self._entries.get(mcp_url)
-            if cached and cached[1] > time.monotonic():
-                return cached[0]
-            metadata = await self._discover(mcp_url)
+        cached = self._cached(mcp_url)
+        if cached is not None:
+            return cached
+        failure = self._cached_failure(mcp_url)
+        if failure is not None:
+            raise MCPOAuthError(failure)
+
+        async with self._locks[mcp_url]:
+            # Another coroutine may have resolved (or failed) while we waited.
+            cached = self._cached(mcp_url)
+            if cached is not None:
+                return cached
+            failure = self._cached_failure(mcp_url)
+            if failure is not None:
+                raise MCPOAuthError(failure)
+
+            try:
+                metadata = await self._discover(mcp_url)
+            except MCPOAuthError as exc:
+                self._failures[mcp_url] = (
+                    str(exc), time.monotonic() + self._failure_ttl
+                )
+                raise
+            self._failures.pop(mcp_url, None)
             self._entries[mcp_url] = (metadata, time.monotonic() + self._ttl)
             return metadata
 
     async def _discover(self, mcp_url: str) -> ServerOAuthMetadata:
+        allow_loopback = is_loopback_url(mcp_url)
         protected_resource = await discover_protected_resource(mcp_url)
 
         issuers: List[str] = []
@@ -453,7 +596,9 @@ class _MetadataCache:
         last_error: Optional[MCPOAuthError] = None
         for issuer in issuers:
             try:
-                authorization_server = await discover_authorization_server(issuer)
+                authorization_server = await discover_authorization_server(
+                    issuer, allow_loopback=allow_loopback
+                )
             except MCPOAuthError as exc:
                 last_error = exc
                 continue

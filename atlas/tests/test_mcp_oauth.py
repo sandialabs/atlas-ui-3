@@ -23,8 +23,11 @@ from atlas.modules.mcp_tools.mcp_oauth import (
     authorization_server_metadata_urls,
     default_resource_metadata_urls,
     discover_authorization_server,
+    discover_protected_resource,
     exchange_authorization_code,
     get_server_oauth_metadata,
+    is_loopback_url,
+    origin_of,
     parse_authorization_server_metadata,
     parse_protected_resource_metadata,
     parse_resource_metadata_challenge,
@@ -663,3 +666,196 @@ class TestDiscoveryRedirects:
         with _mock_httpx(handler):
             with pytest.raises(MCPOAuthError):
                 await discover_authorization_server(ISSUER)
+
+
+# --- Request-forgery constraints on discovery -----------------------------
+
+
+class TestDiscoverySSRFConstraints:
+    """A hostile MCP server must not aim Atlas's fetches wherever it likes."""
+
+    @pytest.mark.asyncio
+    async def test_challenge_pointing_off_origin_is_ignored(self):
+        """RFC 9728 publishes on the resource's own origin; anything else is not ours to fetch."""
+        fetched = []
+
+        def handler(request):
+            url = str(request.url)
+            fetched.append(url)
+            if url == MCP_URL:
+                return httpx.Response(
+                    401,
+                    headers={
+                        "WWW-Authenticate": (
+                            'Bearer resource_metadata='
+                            '"https://attacker.example/.well-known/oauth-protected-resource"'
+                        )
+                    },
+                )
+            return httpx.Response(404, json={})
+
+        with _mock_httpx(handler):
+            result = await discover_protected_resource(MCP_URL)
+
+        assert result is None
+        assert not any("attacker.example" in url for url in fetched)
+
+    @pytest.mark.asyncio
+    async def test_redirect_off_origin_is_refused(self):
+        """The origin pin applies to redirect hops, not just the first URL."""
+        fetched = []
+
+        def handler(request):
+            url = str(request.url)
+            fetched.append(url)
+            if url == MCP_URL:
+                return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
+            if "mcp.example.com" in url:
+                return httpx.Response(
+                    302, headers={"Location": "https://internal.example/secrets"}
+                )
+            return httpx.Response(200, json={})
+
+        with _mock_httpx(handler):
+            result = await discover_protected_resource(MCP_URL)
+
+        assert result is None
+        assert not any("internal.example" in url for url in fetched)
+
+    @pytest.mark.asyncio
+    async def test_remote_server_may_not_name_a_loopback_authorization_server(self):
+        """Otherwise a remote server borrows Atlas's position inside the network."""
+
+        def handler(request):
+            url = str(request.url)
+            if url == MCP_URL:
+                return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
+            if url.endswith("/.well-known/oauth-protected-resource"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "resource": "https://mcp.example.com",
+                        "authorization_servers": ["http://127.0.0.1:9999"],
+                    },
+                )
+            return httpx.Response(404, json={})
+
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await get_server_oauth_metadata(MCP_URL)
+
+    def test_loopback_is_refused_when_not_explicitly_allowed(self):
+        with pytest.raises(MCPOAuthError, match="loopback"):
+            validate_endpoint_url(
+                "http://127.0.0.1:9999/x", what="test", allow_loopback=False
+            )
+
+    def test_a_loopback_mcp_server_may_still_use_loopback(self):
+        """Local development against a mock provider keeps working."""
+        assert is_loopback_url("http://127.0.0.1:8931/mcp") is True
+        assert is_loopback_url("https://mcp.example.com/mcp") is False
+
+    def test_origin_of(self):
+        assert origin_of("https://mcp.example.com/mcp?x=1") == "https://mcp.example.com"
+        assert origin_of("https://mcp.example.com:8443/a") == "https://mcp.example.com:8443"
+
+
+class TestIssuerNormalization:
+    """A provider must not become undiscoverable over a trailing slash."""
+
+    def test_document_issuer_may_carry_a_trailing_slash(self):
+        metadata = parse_authorization_server_metadata(
+            ISSUER, _as_metadata(issuer=ISSUER + "/")
+        )
+        assert metadata.issuer == ISSUER + "/"
+
+    def test_requested_issuer_may_carry_a_trailing_slash(self):
+        metadata = parse_authorization_server_metadata(
+            ISSUER + "/", _as_metadata(issuer=ISSUER)
+        )
+        assert metadata.issuer == ISSUER
+
+    def test_a_genuinely_different_issuer_is_still_rejected(self):
+        with pytest.raises(MCPOAuthError, match="issuer"):
+            parse_authorization_server_metadata(
+                ISSUER, _as_metadata(issuer="https://attacker.example")
+            )
+
+    def test_a_non_string_issuer_is_rejected(self):
+        with pytest.raises(MCPOAuthError, match="issuer"):
+            parse_authorization_server_metadata(ISSUER, _as_metadata(issuer=None))
+
+
+class TestDiscoveryFailureCaching:
+    """An unreachable provider must not re-pay its timeouts on every call."""
+
+    @pytest.mark.asyncio
+    async def test_failures_are_cached(self):
+        attempts = []
+
+        def handler(request):
+            attempts.append(str(request.url))
+            return httpx.Response(500, json={})
+
+        with _mock_httpx(handler):
+            with pytest.raises(MCPOAuthError):
+                await get_server_oauth_metadata(MCP_URL)
+            first = len(attempts)
+            with pytest.raises(MCPOAuthError):
+                await get_server_oauth_metadata(MCP_URL)
+
+        assert len(attempts) == first, "a cached failure re-fetched"
+
+    @pytest.mark.asyncio
+    async def test_a_success_clears_a_cached_failure(self):
+        mcp_oauth.clear_metadata_cache()
+        with _mock_httpx(lambda request: httpx.Response(500, json={})):
+            with pytest.raises(MCPOAuthError):
+                await get_server_oauth_metadata(MCP_URL)
+
+        mcp_oauth.clear_metadata_cache()
+        with _mock_httpx(_discovery_handler()):
+            metadata = await get_server_oauth_metadata(MCP_URL)
+        assert metadata.authorization_server.issuer == ISSUER
+
+    @pytest.mark.asyncio
+    async def test_one_stalled_server_does_not_block_another(self):
+        """Locks are per URL: a slow provider must not serialize healthy ones."""
+        import asyncio
+
+        release = asyncio.Event()
+        other_url = "https://other.example.com/mcp"
+
+        async def slow_handler(request):
+            if "mcp.example.com" in str(request.url):
+                await release.wait()
+            return httpx.Response(404, json={})
+
+        def handler(request):
+            url = str(request.url)
+            if url.startswith("https://other.example.com"):
+                if url == other_url:
+                    return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
+                if url.endswith("/.well-known/oauth-protected-resource"):
+                    return httpx.Response(
+                        200,
+                        json={
+                            "resource": "https://other.example.com",
+                            "authorization_servers": [ISSUER],
+                        },
+                    )
+            if url == f"{ISSUER}/.well-known/oauth-authorization-server":
+                return httpx.Response(200, json=_as_metadata())
+            return httpx.Response(404, json={})
+
+        with _mock_httpx(handler):
+            stalled = asyncio.create_task(get_server_oauth_metadata(MCP_URL))
+            await asyncio.sleep(0)
+            # The healthy server resolves while the other is still in flight.
+            healthy = await asyncio.wait_for(
+                get_server_oauth_metadata(other_url), timeout=5
+            )
+            assert healthy.authorization_server.issuer == ISSUER
+            release.set()
+            with pytest.raises(MCPOAuthError):
+                await stalled

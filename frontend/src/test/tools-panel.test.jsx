@@ -2,7 +2,7 @@
  * Tests for ToolsPanel component - tool selection and management
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
@@ -12,6 +12,14 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 // Mock the contexts and hooks
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext')
+// Hoisted so individual tests can steer the hook's return value; vi.mock's
+// factory runs before the module under test is imported, so it cannot close
+// over an ordinary `let` declared below.
+const authHookState = vi.hoisted(() => ({
+  startOAuth: null,
+  getServerAuth: null
+}))
+
 vi.mock('../hooks/useServerAuthStatus', () => ({
   useServerAuthStatus: () => ({
     authStatus: {},
@@ -20,8 +28,8 @@ vi.mock('../hooks/useServerAuthStatus', () => ({
     fetchAuthStatus: vi.fn(),
     uploadToken: vi.fn(),
     removeToken: vi.fn(),
-    startOAuth: vi.fn(),
-    getServerAuth: vi.fn(() => null)
+    startOAuth: authHookState.startOAuth || vi.fn(),
+    getServerAuth: authHookState.getServerAuth || vi.fn(() => null)
   })
 }))
 
@@ -1290,7 +1298,7 @@ describe('ToolsPanel - MCP OAuth outcome banner', () => {
     expect(sessionStorage.getItem('mcpOAuthResult')).toBeNull()
   })
 
-  it('shows the error code when the flow failed', () => {
+  it('explains the failure in words the user can act on', () => {
     sessionStorage.setItem(
       'mcpOAuthResult',
       JSON.stringify({ server: 'remote-mcp', error: 'access_denied' })
@@ -1302,9 +1310,42 @@ describe('ToolsPanel - MCP OAuth outcome banner', () => {
       </BrowserRouter>
     )
 
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Could not connect to remote-mcp (access_denied).'
+    const banner = screen.getByRole('status')
+    expect(banner).toHaveTextContent('Could not connect to remote-mcp.')
+    expect(banner).toHaveTextContent('You declined the authorization request.')
+    // The raw machine code is not what the user is shown.
+    expect(banner).not.toHaveTextContent('access_denied')
+  })
+
+  it('points at an administrator for deployment-level failures', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: 'discovery_failed' })
     )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(/administrator/i)
+  })
+
+  it('still explains an error code it does not recognize', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: 'something_new' })
+    )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(/The sign-in failed/i)
+    expect(screen.getByRole('status')).not.toHaveTextContent('something_new')
   })
 
   it('shows no banner when there is no stashed outcome', () => {
@@ -1315,5 +1356,98 @@ describe('ToolsPanel - MCP OAuth outcome banner', () => {
     )
 
     expect(screen.queryByRole('status')).toBeNull()
+  })
+})
+
+describe('ToolsPanel - MCP OAuth connect indicator', () => {
+  let mockStartOAuth
+  let mockGetServerAuth
+
+  const oauthServer = {
+    server: 'remote-mcp',
+    description: 'A remote MCP server requiring OAuth',
+    auth_type: 'oauth',
+    tools: ['search'],
+    tools_detailed: [],
+    tool_count: 1,
+    prompts: [],
+    prompt_count: 0
+  }
+
+  afterEach(() => {
+    authHookState.startOAuth = null
+    authHookState.getServerAuth = null
+  })
+
+  beforeEach(() => {
+    sessionStorage.clear()
+    mockStartOAuth = vi.fn()
+    mockGetServerAuth = vi.fn(() => null)
+
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: [oauthServer],
+      prompts: [],
+      features: {}
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => [oauthServer]),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => [oauthServer]),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+  })
+
+  const renderPanel = () => {
+    authHookState.startOAuth = mockStartOAuth
+    authHookState.getServerAuth = mockGetServerAuth
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('offers an OAuth connect action for an unauthenticated oauth server', () => {
+    renderPanel()
+
+    const connect = screen.getByRole('button', { name: /connect with oauth/i })
+    expect(connect).toBeTruthy()
+    // An oauth server is connected by redirect, never by pasting a token.
+    expect(screen.queryByRole('button', { name: /add token/i })).toBeNull()
+  })
+
+  it('offers a disconnect action once authenticated', () => {
+    mockGetServerAuth = vi.fn(() => ({ authenticated: true, is_expired: false }))
+    renderPanel()
+
+    expect(
+      screen.getByRole('button', { name: /authenticated\. click to disconnect/i })
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /connect with oauth/i })).toBeNull()
+  })
+
+  it('starts the OAuth flow when the connect action is clicked', () => {
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: /connect with oauth/i }))
+
+    expect(mockStartOAuth).toHaveBeenCalledWith('remote-mcp')
+  })
+
+  it('treats an expired token as needing reconnection', () => {
+    mockGetServerAuth = vi.fn(() => ({ authenticated: true, is_expired: true }))
+    renderPanel()
+
+    expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
   })
 })

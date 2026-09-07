@@ -18,7 +18,6 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
-from urllib.parse import urlsplit
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.oidc.oidc_client import build_authorize_url, generate_pkce_pair, generate_state
@@ -236,18 +235,14 @@ async def prepare_authorization(
         authorization_endpoint=authorization_server.authorization_endpoint,
         client_id=client.client_id,
         redirect_uri=redirect_uri,
-        scope=scopes,
+        # Omitted when empty rather than sent blank. The MCP flow has no ID
+        # token, so it has no nonce; the single-use state bound to the session
+        # is what ties the callback to this browser.
+        scope=scopes or None,
         state=state,
         code_challenge=challenge,
-        # The MCP flow has no ID token, so nonce carries no replay guarantee
-        # here; the single-use state in the session is what binds the callback.
-        nonce="",
         extra_params=extra,
     )
-    # build_authorize_url always emits scope and nonce; drop them when empty so
-    # the provider sees an absent parameter rather than an empty-string one,
-    # which some implementations reject.
-    authorize_url = _drop_empty_params(authorize_url, ("scope", "nonce"))
 
     logger.info(
         "Prepared OAuth authorization for MCP server '%s'",
@@ -259,21 +254,6 @@ async def prepare_authorization(
         code_verifier=verifier,
         redirect_uri=redirect_uri,
         issuer=authorization_server.issuer,
-    )
-
-
-def _drop_empty_params(url: str, names) -> str:
-    """Remove ``name=`` (empty value) query parameters from a URL."""
-    from urllib.parse import parse_qsl, urlencode, urlunsplit
-
-    parts = urlsplit(url)
-    kept = [
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if not (key in names and value == "")
-    ]
-    return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment)
     )
 
 
