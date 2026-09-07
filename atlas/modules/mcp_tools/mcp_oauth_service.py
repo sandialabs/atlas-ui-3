@@ -351,7 +351,12 @@ async def refresh_stored_token(
         return await _refresh_locked(user_email, server_name, config, existing)
 
 
-async def _refresh_locked(user_email, server_name, config, existing):
+async def _refresh_locked(
+    user_email: str,
+    server_name: str,
+    config: Dict[str, Any],
+    existing: StoredToken,
+) -> Optional[StoredToken]:
     """Perform the refresh. Caller holds the per-user/server refresh lock."""
     token_storage = get_token_storage()
     try:
