@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from pydantic import ValidationError
 
 from .models import (
     FileExtractorsConfig,
@@ -185,6 +186,7 @@ class ConfigManager:
     def llm_config(self) -> LLMConfig:
         """Get LLM configuration (cached)."""
         if self._llm_config is None:
+            file_paths = []
             try:
                 # Use config filename from app settings
                 llm_filename = self.app_settings.llm_config_file
@@ -200,6 +202,13 @@ class ConfigManager:
                     self._llm_config = LLMConfig(models={})
                     logger.info("Created empty LLM config (no configuration file found)")
 
+            except ValidationError:
+                logger.error(
+                    "LLM configuration validation failed; searched: %s",
+                    [str(path) for path in file_paths],
+                    exc_info=True,
+                )
+                raise
             except Exception as e:
                 logger.error(f"Failed to parse LLM configuration: {e}", exc_info=True)
                 self._llm_config = LLMConfig(models={})

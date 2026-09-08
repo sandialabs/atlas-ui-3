@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from atlas.modules.config.config_manager import LLMConfig, ModelConfig
+from atlas.modules.config.config_manager import ConfigManager, LLMConfig, ModelConfig
 from atlas.modules.config.models import REASONING_EFFORT_VALUES
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
@@ -157,3 +157,47 @@ class TestReasoningEffortIsValidatedAtLoad:
         """The end-to-end point of the validator: the 400 cannot be built."""
         with pytest.raises(ValidationError):
             _make_caller({"gpt-5.6-luna": {"reasoning_effort": "meduim"}})
+
+
+class TestReasoningEffortConfigLoading:
+    def test_invalid_effort_raises_instead_of_loading_zero_models(self, tmp_path, monkeypatch):
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(
+            "models:\n"
+            "  good:\n"
+            "    model_name: good\n"
+            "    model_url: https://x/v1\n"
+            "  bad:\n"
+            "    model_name: bad\n"
+            "    model_url: https://x/v1\n"
+            "    reasoning_effort: meduim\n",
+            encoding="utf-8",
+        )
+        manager = ConfigManager()
+        monkeypatch.setattr(manager, "_search_paths", lambda _: [config_path])
+
+        with pytest.raises(ValidationError, match="meduim"):
+            manager.llm_config
+
+    def test_missing_config_still_loads_empty_config(self, tmp_path, monkeypatch):
+        missing_path = tmp_path / "llmconfig.yml"
+        manager = ConfigManager()
+        monkeypatch.setattr(manager, "_search_paths", lambda _: [missing_path])
+
+        assert manager.llm_config.models == {}
+
+    def test_valid_config_still_loads_models(self, tmp_path, monkeypatch):
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(
+            "models:\n"
+            "  valid:\n"
+            "    model_name: valid\n"
+            "    model_url: https://x/v1\n"
+            "    reasoning_effort: none\n",
+            encoding="utf-8",
+        )
+        manager = ConfigManager()
+        monkeypatch.setattr(manager, "_search_paths", lambda _: [config_path])
+
+        assert manager.llm_config.models["valid"].reasoning_effort == "none"
+        assert len(manager.llm_config.models) == 1
