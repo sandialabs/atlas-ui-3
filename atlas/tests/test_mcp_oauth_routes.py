@@ -7,6 +7,7 @@ is never reflected back to the browser verbatim.
 """
 
 import time
+from urllib.parse import quote
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -1110,3 +1111,105 @@ class TestRefreshNeverReRegisters:
                 USER, SERVER, SERVERS_CONFIG[SERVER]
             )
         assert refreshed.token_value == "new"
+
+
+class TestCallbackClientIdentity:
+    """The code is redeemed under the identity that started the flow.
+
+    If the stored registration lapsed or was replaced while the user was at
+    the provider, registering a fresh client inside the callback would redeem
+    the code under a client_id the provider never issued it to -- and would
+    rebind the server for every other user. The flow must restart instead.
+    """
+
+    @pytest.mark.asyncio
+    async def test_redeems_with_the_pending_client_id(self, storage):
+        exchange = AsyncMock(
+            return_value=TokenResponse(
+                access_token="at", refresh_token="rt",
+                expires_at=time.time() + 3600, scopes="read",
+            )
+        )
+        f1, f2 = _patch_flow()
+        with f1, f2, patch.object(
+            mcp_oauth_service, "exchange_authorization_code", exchange
+        ):
+            stored = await mcp_oauth_service.complete_authorization(
+                user_email=USER, server_name=SERVER, config=SERVERS_CONFIG[SERVER],
+                code="the-code", code_verifier="v", redirect_uri=CALLBACK,
+                client_id="c1", issuer=ISSUER,
+            )
+        assert stored.token_value == "at"
+        assert exchange.await_args.kwargs["client"].client_id == "c1"
+
+    @pytest.mark.asyncio
+    async def test_registration_replaced_mid_flow_forces_reauthorization(self, storage):
+        """A different stored client_id must not silently redeem the code."""
+        f1, f2 = _patch_flow(
+            registered=RegisteredClient(
+                client_id="c2-registered-later", issuer=ISSUER, redirect_uri=CALLBACK
+            )
+        )
+        with f1, f2, patch.object(
+            mcp_oauth_service, "exchange_authorization_code",
+            AsyncMock(side_effect=AssertionError("must not exchange")),
+        ):
+            with pytest.raises(MCPOAuthError, match="connect again"):
+                await mcp_oauth_service.complete_authorization(
+                    user_email=USER, server_name=SERVER, config=SERVERS_CONFIG[SERVER],
+                    code="the-code", code_verifier="v", redirect_uri=CALLBACK,
+                    client_id="c1", issuer=ISSUER,
+                )
+        assert storage.get_token(USER, SERVER) is None
+
+    @pytest.mark.asyncio
+    async def test_registration_gone_forces_reauthorization_without_registering(self, storage):
+        with patch.object(
+            mcp_oauth_service, "get_server_oauth_metadata",
+            AsyncMock(return_value=_metadata()),
+        ), patch.multiple(
+            mcp_oauth_service,
+            _existing_client=lambda *args, **kwargs: None,
+            _resolve_client=AsyncMock(side_effect=AssertionError("must not register")),
+        ), patch.object(
+            mcp_oauth_service, "exchange_authorization_code",
+            AsyncMock(side_effect=AssertionError("must not exchange")),
+        ):
+            with pytest.raises(MCPOAuthError, match="connect again"):
+                await mcp_oauth_service.complete_authorization(
+                    user_email=USER, server_name=SERVER, config=SERVERS_CONFIG[SERVER],
+                    code="the-code", code_verifier="v", redirect_uri=CALLBACK,
+                    client_id="c1", issuer=ISSUER,
+                )
+
+
+class TestServerNameEncoding:
+    """A server name is a path segment on both sides and must match exactly."""
+
+    def test_redirect_uri_percent_encodes_the_server_segment(self):
+        assert mcp_oauth_service.redirect_uri_for("a b#c", BASE_URL) == (
+            f"{BASE_URL}/api/mcp/auth/a%20b%23c/oauth/callback"
+        )
+
+    def test_status_start_url_matches_the_registered_redirect_uri(self, app, storage):
+        """The advertised start URL and the redirect URI must agree segment-for-segment."""
+        name = "a b#c"
+        manager = _FakeManager(authorized=[name])
+        manager.servers_config = {name: dict(SERVERS_CONFIG[SERVER])}
+
+        class _Storage:
+            def get_user_auth_status(self, user):
+                return {}
+
+        p1, p2 = _patch_app_factory(manager)
+        with p1, p2, patch(
+            "atlas.routes.mcp_auth_routes.get_token_storage", return_value=_Storage()
+        ):
+            body = TestClient(app).get("/api/mcp/auth/status").json()
+
+        entry = {e["server_name"]: e for e in body["servers"]}[name]
+        segment = quote(name, safe="")
+        assert entry["oauth_start_url"] == f"/api/mcp/auth/{segment}/oauth/start"
+        assert mcp_oauth_service.redirect_uri_for(name, BASE_URL).endswith(
+            f"/{segment}/oauth/callback"
+        )

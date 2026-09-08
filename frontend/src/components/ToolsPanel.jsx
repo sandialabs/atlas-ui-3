@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -203,6 +203,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // unmounted when the callback lands) and leaves the outcome here for us to
   // show. Consumed once, so re-opening the panel does not replay it.
   const [oauthNotice, setOauthNotice] = useState(null)
+  // Discovery can take several seconds before the browser leaves for the
+  // provider, so the button says so rather than looking inert.
+  const [oauthConnecting, setOauthConnecting] = useState(null)
   useEffect(() => {
     if (!isOpen) return
     let stashed = null
@@ -526,7 +529,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // guard as navigating to the marketplace rather than silently discarding
   // them -- and the redirect only happens once the user has answered.
   const connectWithOAuth = (serverName) => {
-    const go = () => startOAuth(serverName)
+    const go = () => {
+      setOauthConnecting(serverName)
+      startOAuth(serverName)
+    }
     if (embedded && onNavigate) {
       onNavigate(go)
       return
@@ -810,7 +816,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
         {oauthNotice && (
           <div className="px-4 pt-2">
             <div
-              role="status"
+              role={oauthNotice.error ? 'alert' : 'status'}
               className={`flex items-start gap-2 px-3 py-2 rounded text-xs ${
                 oauthNotice.error
                   ? 'bg-red-600/20 text-red-300'
@@ -959,6 +965,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                 const connectedTitle = willRefresh
                                   ? 'Connected. Access renews automatically. Click to disconnect.'
                                   : 'Authenticated. Click to disconnect.'
+                                const connecting = oauthConnecting === server.server && !isAuthenticated
                                 return (
                                   <button
                                     onClick={(e) => {
@@ -971,14 +978,29 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         openTokenModal(server.server)
                                       }
                                     }}
+                                    disabled={connecting}
                                     className={`flex-shrink-0 p-1 rounded ${
-                                      isAuthenticated
+                                      connecting
+                                        ? 'bg-yellow-600/20 text-yellow-400 cursor-wait'
+                                        : isAuthenticated
                                         ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
                                         : 'bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400'
                                     }`}
-                                    title={isAuthenticated ? connectedTitle : connectTitle}
+                                    title={
+                                      connecting
+                                        ? 'Contacting the authorization server...'
+                                        : isAuthenticated
+                                        ? connectedTitle
+                                        : connectTitle
+                                    }
                                   >
-                                    {isAuthenticated ? <ShieldCheck className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+                                    {connecting ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : isAuthenticated ? (
+                                      <ShieldCheck className="w-4 h-4" />
+                                    ) : (
+                                      <Key className="w-4 h-4" />
+                                    )}
                                   </button>
                                 )
                               })()}

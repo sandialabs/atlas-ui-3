@@ -1310,7 +1310,7 @@ describe('ToolsPanel - MCP OAuth outcome banner', () => {
       </BrowserRouter>
     )
 
-    const banner = screen.getByRole('status')
+    const banner = screen.getByRole('alert')
     expect(banner).toHaveTextContent('Could not connect to remote-mcp.')
     expect(banner).toHaveTextContent('You declined the authorization request.')
     // The raw machine code is not what the user is shown.
@@ -1329,7 +1329,7 @@ describe('ToolsPanel - MCP OAuth outcome banner', () => {
       </BrowserRouter>
     )
 
-    expect(screen.getByRole('status')).toHaveTextContent(/administrator/i)
+    expect(screen.getByRole('alert')).toHaveTextContent(/administrator/i)
   })
 
   it('still explains an error code it does not recognize', () => {
@@ -1344,8 +1344,8 @@ describe('ToolsPanel - MCP OAuth outcome banner', () => {
       </BrowserRouter>
     )
 
-    expect(screen.getByRole('status')).toHaveTextContent(/The sign-in failed/i)
-    expect(screen.getByRole('status')).not.toHaveTextContent('something_new')
+    expect(screen.getByRole('alert')).toHaveTextContent(/The sign-in failed/i)
+    expect(screen.getByRole('alert')).not.toHaveTextContent('something_new')
   })
 
   it('shows no banner when there is no stashed outcome', () => {
@@ -1442,6 +1442,21 @@ describe('ToolsPanel - MCP OAuth connect indicator', () => {
     fireEvent.click(screen.getByRole('button', { name: /connect with oauth/i }))
 
     expect(mockStartOAuth).toHaveBeenCalledWith('remote-mcp')
+  })
+
+  it('shows a busy state while discovery runs so the button is not inert', () => {
+    // /oauth/start does protected-resource and authorization-server discovery
+    // before the browser leaves for the provider, which can take seconds.
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: /connect with oauth/i }))
+
+    const busy = screen.getByRole('button', { name: /contacting the authorization server/i })
+    expect(busy.disabled).toBe(true)
+
+    // A second click cannot start a duplicate flow.
+    fireEvent.click(busy)
+    expect(mockStartOAuth).toHaveBeenCalledTimes(1)
   })
 
   it('asks before discarding unsaved selections instead of redirecting away', () => {
@@ -1541,6 +1556,6 @@ describe('ToolsPanel - OAuth error retry affordance', () => {
     renderWithError('discovery_failed')
 
     expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
-    expect(screen.getByRole('status')).toHaveTextContent(/administrator/i)
+    expect(screen.getByRole('alert')).toHaveTextContent(/administrator/i)
   })
 })

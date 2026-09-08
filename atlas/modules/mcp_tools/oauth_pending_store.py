@@ -60,6 +60,10 @@ class PendingAuthorization:
     code_verifier: str
     redirect_uri: str
     created_at: float
+    # The client identity the authorization URL was built with. Redeeming the
+    # code under any other identity is a bug, not a recoverable state.
+    client_id: str = ""
+    issuer: str = ""
 
     def is_expired(self, now: Optional[float] = None) -> bool:
         return (now or time.time()) - self.created_at >= PENDING_TTL_SECONDS

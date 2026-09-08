@@ -6,6 +6,7 @@ parameters, resource indicators, client authentication -- is what the
 assertions actually see.
 """
 
+import asyncio
 import json
 import time
 from unittest.mock import patch
@@ -1055,3 +1056,38 @@ class TestResponseSizeAndTypeLimits:
                     metadata=_server_metadata(), client=client, code="c",
                     redirect_uri="https://a/cb", code_verifier="v",
                 )
+
+
+class TestDiscoveryDeadline:
+    """One slow provider must not hold a tool call, or its lock, indefinitely."""
+
+    @pytest.mark.asyncio
+    async def test_a_slow_provider_is_abandoned_at_the_total_deadline(self, monkeypatch):
+        monkeypatch.setattr(mcp_oauth, "DISCOVERY_TOTAL_TIMEOUT_SECONDS", 0.05)
+        cache = mcp_oauth._MetadataCache()
+
+        async def never_finishes(mcp_url):
+            await asyncio.sleep(10)
+
+        monkeypatch.setattr(cache, "_discover", never_finishes)
+
+        with pytest.raises(MCPOAuthError, match="Timed out discovering"):
+            await asyncio.wait_for(cache.get(MCP_URL), timeout=2)
+
+    @pytest.mark.asyncio
+    async def test_the_timeout_is_cached_like_any_other_failure(self, monkeypatch):
+        monkeypatch.setattr(mcp_oauth, "DISCOVERY_TOTAL_TIMEOUT_SECONDS", 0.05)
+        cache = mcp_oauth._MetadataCache()
+        attempts = []
+
+        async def never_finishes(mcp_url):
+            attempts.append(mcp_url)
+            await asyncio.sleep(10)
+
+        monkeypatch.setattr(cache, "_discover", never_finishes)
+
+        for _ in range(2):
+            with pytest.raises(MCPOAuthError, match="Timed out discovering"):
+                await asyncio.wait_for(cache.get(MCP_URL), timeout=2)
+
+        assert attempts == [MCP_URL], "the second call re-paid the timeout"

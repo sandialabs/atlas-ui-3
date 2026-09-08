@@ -13,7 +13,7 @@ Updated: 2025-01-21
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -42,7 +42,7 @@ _PENDING_KEY = "mcp_oauth_states"
 
 # Cap on states carried in the cookie, so repeatedly hitting /oauth/start
 # cannot grow it without bound.
-_MAX_PENDING = 5
+_MAX_PENDING = 16
 
 # Error names reflected to the SPA as a query parameter. Written as a map from
 # a constant to itself and read with ``.get``, so the value that reaches the
@@ -110,7 +110,7 @@ async def get_auth_status(current_user: str = Depends(get_current_user)):
             # route, not by pasting a token, so the UI needs the URL here.
             if auth_type == "oauth":
                 server_info["oauth_start_url"] = (
-                    f"/api/mcp/auth/{server_name}/oauth/start"
+                    f"/api/mcp/auth/{quote(server_name, safe='')}/oauth/start"
                 )
 
             # Add token details if authenticated
@@ -420,6 +420,8 @@ async def start_oauth(
             code_verifier=prepared.code_verifier,
             redirect_uri=prepared.redirect_uri,
             created_at=time.time(),
+            client_id=prepared.client_id,
+            issuer=prepared.issuer,
         ),
     )
     request.session[_PENDING_KEY] = (_session_states(request) + [prepared.state])[
@@ -472,7 +474,19 @@ async def oauth_callback(
         return _oauth_error_redirect(server_name, "missing_params")
 
     if entry is None:
-        logger.warning("MCP OAuth callback state is unknown or expired (potential CSRF)")
+        # Distinguished so an operator reading logs can tell a genuine CSRF
+        # attempt from a user who took too long, or from a cookie the browser
+        # dropped between start and callback.
+        if not known_to_browser:
+            logger.warning(
+                "MCP OAuth callback state is absent from the browser session "
+                "(potential CSRF, or the session cookie was lost)"
+            )
+        else:
+            logger.warning(
+                "MCP OAuth callback state was in the session but has no pending "
+                "record left: it expired, was already used, or was evicted"
+            )
         return _oauth_error_redirect(server_name, "invalid_state")
 
     # The state was issued for one server and one user. A callback that
@@ -502,6 +516,8 @@ async def oauth_callback(
             code=code,
             code_verifier=entry.code_verifier,
             redirect_uri=entry.redirect_uri,
+            client_id=entry.client_id,
+            issuer=entry.issuer,
         )
     except MCPOAuthError as exc:
         logger.error(

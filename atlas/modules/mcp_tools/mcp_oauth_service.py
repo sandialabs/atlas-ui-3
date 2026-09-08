@@ -17,6 +17,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.oidc.oidc_client import build_authorize_url, generate_pkce_pair, generate_state
@@ -139,7 +140,9 @@ def redirect_uri_for(server_name: str, base_url: str) -> str:
         )
     base = base_url.rstrip("/")
     validate_endpoint_url(base, what="OAuth callback base URL")
-    return f"{base}/api/mcp/auth/{server_name}/oauth/callback"
+    # Quoted: the frontend builds the start URL with encodeURIComponent, so a
+    # name containing "#", "?" or a space must register the same encoded form.
+    return f"{base}/api/mcp/auth/{quote(server_name, safe='')}/oauth/callback"
 
 
 def resolve_base_url(app_settings) -> str:
@@ -228,6 +231,7 @@ class AuthorizationRequest:
     code_verifier: str
     redirect_uri: str
     issuer: str
+    client_id: str
 
 
 async def prepare_authorization(
@@ -279,6 +283,7 @@ async def prepare_authorization(
         code_verifier=verifier,
         redirect_uri=redirect_uri,
         issuer=authorization_server.issuer,
+        client_id=client.client_id,
     )
 
 
@@ -290,11 +295,32 @@ async def complete_authorization(
     code: str,
     code_verifier: str,
     redirect_uri: str,
+    client_id: str,
+    issuer: str,
 ) -> StoredToken:
     """Redeem the authorization code and persist the tokens for this user."""
     url = server_url(config)
     metadata = await get_server_oauth_metadata(url)
-    client = await _resolve_client(server_name, config, metadata, redirect_uri)
+
+    # The identity that started the flow, not whatever a fresh registration
+    # would produce now. Registering inside the callback would redeem the code
+    # under a client_id the provider never issued it to, and would overwrite
+    # the stored registration every other user's tokens are bound to.
+    client = _existing_client(
+        server_name, config, metadata.authorization_server.issuer, redirect_uri
+    )
+    if client is None or client.client_id != client_id or issuer.rstrip("/") != (
+        metadata.authorization_server.issuer.rstrip("/")
+    ):
+        logger.info(
+            "OAuth client registration for MCP server '%s' changed while the user "
+            "was authorizing; the flow must be restarted rather than re-registered",
+            sanitize_for_logging(server_name),
+        )
+        raise MCPOAuthError(
+            "The stored client registration changed during authorization. "
+            "Please connect again."
+        )
 
     response = await exchange_authorization_code(
         metadata=metadata,

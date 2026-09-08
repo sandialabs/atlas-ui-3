@@ -170,6 +170,23 @@ loopback address is accepted for local development).
 7. Disconnecting removes the stored tokens, invalidates cached clients, and
    revokes at the provider's `revocation_endpoint` when one is advertised.
 
+### Known limitation: discovery URLs are not DNS-resolved
+
+Every URL Atlas fetches during discovery must be `https://`, and any URL that
+came out of a remote server's document is rejected when it names an internal
+*literal* address (loopback, RFC 1918, IPv6 ULA, link-local -- including
+`169.254.169.254` -- reserved, multicast, and the IPv4-mapped IPv6 forms of
+all of them). Atlas does **not** resolve hostnames, so a DNS name that
+resolves to an internal address still passes this check. A hostile or
+compromised MCP server can therefore steer one unauthenticated `GET` at an
+internal HTTPS endpoint; the response is parsed as OAuth metadata and is never
+returned to the caller, but the request is made.
+
+Treat this as a deployment-level concern: restrict the egress the Atlas
+backend is allowed to make (network policy, an egress proxy allowlist), and
+only configure MCP servers you trust to the same degree as any other outbound
+integration.
+
 ### Deployment constraint: run a single worker
 
 The in-flight state of an OAuth connection -- the PKCE verifier and the

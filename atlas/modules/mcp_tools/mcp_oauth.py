@@ -50,6 +50,10 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 logger = logging.getLogger(__name__)
 
 DISCOVERY_TIMEOUT_SECONDS = 10.0
+# Ceiling on a whole discovery attempt. Each candidate issuer is tried against
+# several well-known paths, so per-request timeouts alone let one slow provider
+# hold a tool call -- and the per-URL discovery lock -- for minutes.
+DISCOVERY_TOTAL_TIMEOUT_SECONDS = 30.0
 TOKEN_TIMEOUT_SECONDS = 20.0
 REGISTRATION_TIMEOUT_SECONDS = 20.0
 DISCOVERY_CACHE_TTL_SECONDS = 3600.0
@@ -703,7 +707,18 @@ class _MetadataCache:
                 raise MCPOAuthError(failure)
 
             try:
-                metadata = await self._discover(mcp_url)
+                metadata = await asyncio.wait_for(
+                    self._discover(mcp_url), DISCOVERY_TOTAL_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError as exc:
+                message = (
+                    "Timed out discovering OAuth metadata for the MCP server after "
+                    f"{DISCOVERY_TOTAL_TIMEOUT_SECONDS:.0f}s"
+                )
+                self._failures[mcp_url] = (
+                    message, time.monotonic() + self._failure_ttl
+                )
+                raise MCPOAuthError(message) from exc
             except MCPOAuthError as exc:
                 self._failures[mcp_url] = (
                     str(exc), time.monotonic() + self._failure_ttl
