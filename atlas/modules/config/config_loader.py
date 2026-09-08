@@ -186,11 +186,9 @@ class ConfigManager:
     def llm_config(self) -> LLMConfig:
         """Get LLM configuration (cached)."""
         if self._llm_config is None:
-            file_paths = []
+            llm_filename = self.app_settings.llm_config_file
+            file_paths = self._search_paths(llm_filename)
             try:
-                # Use config filename from app settings
-                llm_filename = self.app_settings.llm_config_file
-                file_paths = self._search_paths(llm_filename)
                 data = self._load_file_with_error_handling(file_paths, "YAML")
 
                 if data:
@@ -206,7 +204,6 @@ class ConfigManager:
                 logger.error(
                     "LLM configuration validation failed; searched: %s",
                     [str(path) for path in file_paths],
-                    exc_info=True,
                 )
                 raise
             except Exception as e:
