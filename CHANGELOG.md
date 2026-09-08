@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #900 - 2026-09-07
+- **Invalid LLM model configuration now fails at load time**: an invalid `reasoning_effort` is no longer swallowed by the generic fallback that silently loads zero models. The validation error includes the configuration search paths, and the admin contract and regression tests cover invalid, missing, and valid YAML configurations.
+
 ### PR #892 - 2026-09-04
 - **OIDC login, confidential-client authentication, and delegated OAuth credentials** (#891): Atlas can now terminate login itself (Authorization Code + PKCE), authenticate to the IdP as a confidential client, and mint short-lived audience-specific downstream tokens via RFC 8693 or Entra OBO. Opt-in; the trusted-header auth mode is unchanged. See `docs/admin/oidc-authentication.md`.
 
