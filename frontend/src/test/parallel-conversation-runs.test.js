@@ -30,7 +30,7 @@ describe('event routing by conversation', () => {
     const deps = makeDeps({ getVisibleConversationId: () => 'conv-a' })
     const handler = createWebSocketHandler(deps)
 
-    handler({ type: 'tool_start', tool_name: 'search', tool_call_id: 't1', conversation_id: 'conv-a' })
+    handler({ type: 'tool_start', tool_name: 'search', tool_call_id: 't1', conversation_id: 'conv-a', run_id: 'run-a' })
 
     expect(deps.addMessage).toHaveBeenCalled()
   })
@@ -40,7 +40,7 @@ describe('event routing by conversation', () => {
     const deps = makeDeps({ getVisibleConversationId: () => 'conv-a', onRunStatus })
     const handler = createWebSocketHandler(deps)
 
-    handler({ type: 'tool_start', tool_name: 'search', tool_call_id: 't1', conversation_id: 'conv-b' })
+    handler({ type: 'tool_start', tool_name: 'search', tool_call_id: 't1', conversation_id: 'conv-b', run_id: 'run-b' })
 
     expect(deps.addMessage).not.toHaveBeenCalled()
     expect(onRunStatus).toHaveBeenCalledWith(
@@ -52,7 +52,7 @@ describe('event routing by conversation', () => {
     const deps = makeDeps({ getVisibleConversationId: () => 'conv-a' })
     const handler = createWebSocketHandler(deps)
 
-    handler({ type: 'conversation_saved', conversation_id: 'conv-b' })
+    handler({ type: 'conversation_saved', conversation_id: 'conv-b', run_id: 'run-b' })
 
     expect(deps.setActiveConversationId).not.toHaveBeenCalled()
   })
@@ -61,7 +61,7 @@ describe('event routing by conversation', () => {
     const deps = makeDeps({ getVisibleConversationId: () => 'conv-a' })
     const handler = createWebSocketHandler(deps)
 
-    handler({ type: 'response_complete', conversation_id: 'conv-b' })
+    handler({ type: 'response_complete', conversation_id: 'conv-b', run_id: 'run-b' })
 
     expect(deps.setIsThinking).not.toHaveBeenCalled()
   })
@@ -75,7 +75,18 @@ describe('event routing by conversation', () => {
     expect(deps.setIsThinking).toHaveBeenCalledWith(false)
   })
 
-  it('applies every event when no conversation is selected yet', () => {
+  it('does not fill a fresh empty chat with a background run\'s output', () => {
+    // Nothing is on screen yet, so there is no conversation to compare against
+    // -- but a tagged event still belongs to a run somewhere else.
+    const deps = makeDeps({ getVisibleConversationId: () => null })
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'response_complete', conversation_id: 'conv-b', run_id: 'run-b' })
+
+    expect(deps.setIsThinking).not.toHaveBeenCalled()
+  })
+
+  it('applies untagged events even when no conversation is selected', () => {
     const deps = makeDeps({ getVisibleConversationId: () => null })
     const handler = createWebSocketHandler(deps)
 

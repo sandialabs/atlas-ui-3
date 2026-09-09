@@ -126,3 +126,15 @@ def test_resume_does_not_disturb_a_run_that_is_not_waiting(registry):
     registry.set_status(run.run_id, RunStatus.RUNNING)
     _resume_waiting_run(registry, USER, {"run_id": run.run_id})
     assert registry.get(run.run_id).status == RunStatus.RUNNING
+
+
+def test_tool_settled_events_are_recognised():
+    """A settled tool clears a stale waiting_for_input status.
+
+    Without this the run keeps working after an approval times out but stays
+    marked "Needs approval" in the conversation list for the rest of its life.
+    """
+    from main import _TOOL_SETTLED_EVENTS
+
+    assert {"tool_complete", "tool_error", "tool_interrupted"} <= _TOOL_SETTLED_EVENTS
+    assert "tool_approval_request" not in _TOOL_SETTLED_EVENTS

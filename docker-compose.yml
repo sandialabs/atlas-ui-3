@@ -99,6 +99,16 @@ services:
       - FEATURE_CHAT_HISTORY_ENABLED=true
       # Per-user custom prompt library (requires chat history)
       - FEATURE_CUSTOM_PROMPTS_ENABLED=false
+      # Parallel conversation runs (issue #884). Applies to agent-mode turns
+      # saved to the server; see docs/admin/parallel-conversation-runs.md.
+      # Counts every run that has not finished, including one paused on a tool
+      # approval.
+      - MAX_CONCURRENT_RUNS_PER_USER=5
+      # Hard limit on a single run's execution time; 0 disables it.
+      - MAX_RUN_WALL_CLOCK_SECONDS=3600
+      # Wait for a tool approval / elicitation response. 0 waits indefinitely,
+      # which is what lets an approval survive the browser being closed.
+      - TOOL_APPROVAL_TIMEOUT_SECONDS=300
       # Session store: "memory" (process-local, default) or a custom type
       # registered in atlas.infrastructure.sessions.factory (issue #760)
       - SESSION_REPOSITORY_TYPE=memory

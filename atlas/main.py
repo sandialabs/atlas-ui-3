@@ -154,6 +154,13 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         logger.debug("Websocket closed before update could be sent: %s", e)
 
 
+# Events that mean "the tool this run was paused on has settled". Used to clear
+# a stale waiting_for_input status; see the run update callback.
+_TOOL_SETTLED_EVENTS = frozenset(
+    {"tool_complete", "tool_error", "tool_interrupted", "tool_result"}
+)
+
+
 def tag_run_event(message: dict, run_id: str, conversation_id: str) -> dict:
     """Stamp an outbound event with the run that produced it (issue #884).
 
@@ -1134,15 +1141,23 @@ async def websocket_endpoint(websocket: WebSocket):
                         # working: reflect that in its status so the client can
                         # show "waiting for you" on a conversation the user is
                         # not currently looking at.
-                        if isinstance(message, dict) and message.get("type") in (
-                            "tool_approval_request",
-                            "elicitation_request",
-                        ):
+                        message_type_out = message.get("type") if isinstance(message, dict) else None
+                        if message_type_out in ("tool_approval_request", "elicitation_request"):
                             run_registry.set_status(
                                 _run_id,
                                 RunStatus.WAITING_FOR_INPUT,
-                                waiting_on=message.get("type"),
+                                waiting_on=message_type_out,
                             )
+                        elif message_type_out in _TOOL_SETTLED_EVENTS:
+                            # The tool the run was paused on has settled one way
+                            # or another. Resolving the pause here as well as on
+                            # the response frame covers the case where nobody
+                            # ever answers and the request times out -- the run
+                            # carries on working, and would otherwise be stuck
+                            # showing "Needs approval" for the rest of its life.
+                            record = run_registry.get(_run_id)
+                            if record is not None and record.status == RunStatus.WAITING_FOR_INPUT:
+                                run_registry.set_status(_run_id, RunStatus.RUNNING)
                         await websocket_update_callback(
                             websocket, tag_run_event(message, _run_id, _conv)
                         )

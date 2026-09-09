@@ -415,13 +415,19 @@ export function createWebSocketHandler(deps) {
       // Route by conversation. With several conversations executing at once,
       // an event that belongs to a background run must not be spliced into the
       // transcript the user is looking at -- that is exactly the "messages in
-      // the wrong chat" failure this feature has to avoid. Events without a
-      // conversation_id (older producers, and everything on the untracked
-      // single-run path) are always applied, so this is inert until the
-      // backend actually tags events.
-      if (data.conversation_id && typeof getVisibleConversationId === 'function') {
+      // the wrong chat" failure this feature has to avoid.
+      //
+      // The `run_id` test is what makes this safe rather than merely
+      // approximate. Only a tracked run tags its events, and a tracked run
+      // always has a conversation id (the server refuses to start one without
+      // it), so a mismatch here is always a background run -- including when
+      // nothing is on screen yet, which is exactly when a fresh, empty chat
+      // would otherwise fill up with another conversation's output. Untagged
+      // events, from older producers and the whole untracked single-run path,
+      // are always applied.
+      if (data.run_id && data.conversation_id && typeof getVisibleConversationId === 'function') {
         const visible = getVisibleConversationId()
-        if (visible && visible !== data.conversation_id) {
+        if (visible !== data.conversation_id) {
           if (typeof onRunStatus === 'function') {
             onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id })
           }
