@@ -39,6 +39,8 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
+from atlas.core.log_sanitizer import sanitize_for_logging
+
 logger = logging.getLogger(__name__)
 
 # How long a run that reached a terminal state stays queryable. Long enough
@@ -273,7 +275,7 @@ class RunRegistry:
         logger.info(
             "Run %s started for conversation %s (active runs for user: %d)",
             record.run_id,
-            conversation_id,
+            sanitize_for_logging(str(conversation_id)),
             len(active) + 1,
         )
         self._notify(record)
@@ -443,6 +445,8 @@ class RunRegistry:
             try:
                 listeners.remove(listener)
             except ValueError:
+                # Already removed -- unsubscribing twice (a reconnect racing a
+                # teardown) is a no-op, not an error.
                 pass
             if not listeners:
                 self._listeners.pop(user_email, None)

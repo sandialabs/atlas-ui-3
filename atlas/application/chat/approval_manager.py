@@ -23,9 +23,13 @@ def resolve_approval_timeout() -> Optional[float]:
     five-minute wait rather than blocking a run forever on a config error.
     """
     try:
-        from atlas.infrastructure.app_factory import app_factory
+        # Read settings through the config module's own accessor rather than
+        # the app factory: the factory pulls in the whole chat pipeline, which
+        # imports this module back, and the resulting import cycle is both a
+        # lint finding and a real fragility.
+        from atlas.modules.config.config_manager import get_app_settings
 
-        configured = app_factory.get_config_manager().app_settings.tool_approval_timeout_seconds
+        configured = get_app_settings().tool_approval_timeout_seconds
     except Exception:  # pragma: no cover - defensive
         return 300.0
     if configured is None:
