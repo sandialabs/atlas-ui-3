@@ -217,6 +217,7 @@ class RoutingMixin:
             try:
                 import uuid
 
+                from atlas.application.chat.approval_manager import resolve_approval_timeout
                 from atlas.application.chat.elicitation_manager import get_elicitation_manager
 
                 elicitation_id = str(uuid.uuid4())
@@ -243,7 +244,7 @@ class RoutingMixin:
                 )
 
                 try:
-                    response = await request.wait_for_response(timeout=300.0)
+                    response = await request.wait_for_response(timeout=resolve_approval_timeout())
                 finally:
                     elicitation_manager.cleanup_request(elicitation_id)
 

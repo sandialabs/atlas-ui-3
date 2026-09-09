@@ -40,6 +40,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 from atlas.application.chat.agent.steering import SteeringChannel, should_steer
+from atlas.application.chat.runs import (
+    ConcurrencyLimitError,
+    ConversationBusyError,
+    RunRegistryError,
+    RunStatus,
+    get_run_registry,
+)
+from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
 from atlas.application.chat.service import UNSET
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
@@ -146,28 +154,134 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         logger.debug("Websocket closed before update could be sent: %s", e)
 
 
-async def cleanup_disconnected_session(chat_service, session_id, user_email, active_chat_task):
+def tag_run_event(message: dict, run_id: str, conversation_id: str) -> dict:
+    """Stamp an outbound event with the run that produced it (issue #884).
+
+    With several conversations executing at once, a bare event is ambiguous:
+    the client cannot tell whether a token, tool row, file, or completion
+    belongs to the conversation on screen or to one running in the background.
+    Every event a tracked run emits carries both ids so the client can route it
+    -- and, crucially, so it can *drop* events for a conversation it is not
+    displaying instead of splicing them into the visible transcript.
+
+    Existing ids are never overwritten: a producer deeper in the pipeline that
+    already knows its own conversation is more authoritative than the run
+    envelope.
+    """
+    if not isinstance(message, dict):
+        return message
+    tagged = dict(message)
+    tagged.setdefault("run_id", run_id)
+    tagged.setdefault("conversation_id", conversation_id)
+    return tagged
+
+
+def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
+    """Cancel the run a stop frame names, if it names one.
+
+    Resolution order is ``run_id`` first, then ``conversation_id``: the id is
+    unambiguous, while the conversation is what an older or simpler client
+    knows. Both go through the registry's ownership check, so a stop frame can
+    only ever reach the sender's own run.
+
+    Returns whether a live run was cancelled, which tells the caller whether to
+    fall back to the connection's untracked task.
+    """
+    record = run_registry.get_for_user(data.get("run_id"), user_email)
+    if record is None:
+        record = run_registry.active_for_conversation(
+            data.get("conversation_id"), user_email
+        )
+    if record is None:
+        return False
+    logger.info("Cancelling run %s on user request", record.run_id)
+    return run_registry.cancel(record.run_id, user_email)
+
+
+def _resume_waiting_run(run_registry, user_email: str, data: dict) -> None:
+    """Move a run back to ``running`` after the input it was waiting on arrives.
+
+    The response frame may name its run; when it does not (older clients, and
+    MCP elicitations that only carry an elicitation id) fall back to the user's
+    single waiting run. Falling back only when exactly one run is waiting keeps
+    the guess safe: with two paused runs the status simply stays as it is until
+    the run itself reports progress, rather than clearing the wrong one.
+    """
+    record = run_registry.get_for_user(data.get("run_id"), user_email)
+    if record is None:
+        record = run_registry.active_for_conversation(
+            data.get("conversation_id"), user_email
+        )
+    if record is None:
+        waiting = [
+            r
+            for r in run_registry.active_for_user(user_email)
+            if r.status == RunStatus.WAITING_FOR_INPUT
+        ]
+        if len(waiting) != 1:
+            return
+        record = waiting[0]
+    if record.status == RunStatus.WAITING_FOR_INPUT:
+        run_registry.set_status(record.run_id, RunStatus.RUNNING)
+
+
+async def cleanup_disconnected_session(
+    chat_service,
+    session_id,
+    user_email,
+    active_chat_task,
+    connection_run_ids=None,
+):
     """Tear down a session whose websocket has closed.
 
-    Cancels the in-flight turn *before* releasing resources: without this the
-    background chat task keeps streaming tokens, calling tools and holding MCP
-    sessions against a session that end_session() is about to tear down -- work
-    nobody can receive.  Mirrors the stop_streaming/reset_session paths.
+    Cancels the in-flight *untracked* turn before releasing resources: without
+    this the background chat task keeps streaming tokens, calling tools and
+    holding MCP sessions against a session that end_session() is about to tear
+    down -- work nobody can receive.  Mirrors the stop_streaming/reset_session
+    paths.
+
+    Tracked runs (issue #884) are the deliberate exception. A run owns its own
+    Session, its own conversation and its own MCP sessions, and it is not owned
+    by this socket: closing the tab must not stop the agent. Those runs are
+    marked detached and left executing, and this function must not release
+    resources belonging to a conversation one of them still owns -- otherwise
+    the run would keep going with its MCP clients pulled out from under it.
     """
+    registry = get_run_registry()
+    surviving = [
+        r for r in registry.active_for_user(user_email or "")
+        if connection_run_ids is None or r.run_id in connection_run_ids
+    ]
+    for record in surviving:
+        registry.mark_detached(record.run_id)
+    if surviving:
+        logger.info(
+            "Client disconnected; leaving %d run(s) executing in the background",
+            len(surviving),
+        )
+
     task = active_chat_task.get("task")
     if task and not task.done():
         logger.info("Cancelling active chat task (client disconnected)")
         task.cancel()
 
-    # Release MCP sessions for this conversation
+    # Release MCP sessions for this conversation, unless a surviving run still
+    # owns that conversation.
     session = await chat_service.session_repository.get(session_id)
     if session:
         conv_id = session.context.get("conversation_id", str(session_id))
-        try:
-            from atlas.modules.mcp_tools import mcp_tool_manager
-            await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
-        except Exception as e:
-            logger.warning("Error releasing MCP sessions on disconnect: %s", e)
+        still_owned = any(r.conversation_id == conv_id for r in surviving)
+        if still_owned:
+            logger.info(
+                "Keeping MCP sessions for conversation %s; a run still owns it",
+                sanitize_for_logging(str(conv_id)),
+            )
+        else:
+            try:
+                from atlas.modules.mcp_tools import mcp_tool_manager
+                await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
+            except Exception as e:
+                logger.warning("Error releasing MCP sessions on disconnect: %s", e)
     await chat_service.end_session(session_id)
     logger.info(f"WebSocket connection closed for session {session_id}")
 
@@ -185,6 +299,26 @@ def _ensure_feedback_directory():
         logger.info(f"Feedback directory ready: {feedback_dir}")
     except Exception as e:
         logger.warning(f"Could not create feedback directory {feedback_dir}: {e}")
+
+
+# How often the run sweeper checks for over-budget runs. A run's wall-clock
+# limit is measured in minutes to hours, so a coarse tick is plenty and keeps
+# an idle server genuinely idle.
+RUN_SWEEP_INTERVAL_SECONDS = 30
+
+
+async def _run_limit_sweeper(config):
+    """Enforce the per-run wall-clock limit and reap old run records (#884)."""
+    registry = get_run_registry()
+    while True:
+        try:
+            await asyncio.sleep(RUN_SWEEP_INTERVAL_SECONDS)
+            registry.enforce_wall_clock(config.app_settings.max_run_wall_clock_seconds)
+            registry.reap_terminal()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - the sweeper must never die
+            logger.warning("Run limit sweeper iteration failed", exc_info=True)
 
 
 @asynccontextmanager
@@ -297,9 +431,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to load preconfigured personas: {e}", exc_info=True)
 
+    # Issue #884: runs outlive the socket that started them, so nothing else
+    # would ever stop a detached run whose agent loop never terminates. This
+    # sweeper is the wall-clock backstop, and it also reaps run records that
+    # have aged past their retention window.
+    run_reaper_task = asyncio.create_task(_run_limit_sweeper(config))
+
     yield
 
     logger.info("Shutting down Chat UI Backend")
+    run_reaper_task.cancel()
     # Stop auto-reconnect task
     await mcp_manager.stop_auto_reconnect()
     # Cleanup MCP clients
@@ -721,6 +862,44 @@ async def websocket_endpoint(websocket: WebSocket):
     connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
     chat_service = app_factory.create_chat_service(connection_adapter)
 
+    # Parallel conversation runs (issue #884). The registry is process-wide and
+    # outlives this socket; ``connection_run_ids`` is just this connection's
+    # view of the runs it started, used on disconnect. Runs the user started
+    # from *another* tab are still visible to this one through the status
+    # listener below, which is what lets any open tab render the
+    # "still running" indicator in conversation history.
+    run_registry = get_run_registry()
+    run_registry.set_max_concurrent_runs_per_user(
+        config_manager.app_settings.max_concurrent_runs_per_user
+    )
+    connection_run_ids: set = set()
+    # Strong references to in-flight status sends: asyncio only holds weak
+    # references to tasks, so without this a status frame can be garbage
+    # collected before it is delivered.
+    status_send_tasks: set = set()
+
+    def _publish_run_status(record) -> None:
+        """Push one run's state to this socket.
+
+        Called synchronously from the registry on every transition, including
+        transitions caused by other connections, so this must never block or
+        raise -- the registry is mid-bookkeeping for every other listener.
+        """
+        if websocket.client_state != WebSocketState.CONNECTED:
+            return
+        try:
+            task = asyncio.create_task(
+                websocket_update_callback(
+                    websocket, {"type": "run_status", "run": record.to_public_dict()}
+                )
+            )
+        except RuntimeError:  # pragma: no cover - no running loop
+            return
+        status_send_tasks.add(task)
+        task.add_done_callback(status_send_tasks.discard)
+
+    unsubscribe_run_status = run_registry.add_listener(user_email, _publish_run_status)
+
     logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
 
     try:
@@ -748,6 +927,59 @@ async def websocket_endpoint(websocket: WebSocket):
                 # agent runner, so this only routes when a loop is genuinely
                 # consuming -- a turn that requested agent mode but fell back
                 # to a non-agent turn never activates the channel.
+                # Issue #884: a tracked run owns its conversation. A second
+                # message for that conversation is steered into the running
+                # loop, exactly as #824 defines -- never started as a second
+                # concurrent turn, because two turns writing the same history
+                # would interleave their writes.
+                frame_conversation_id = data.get("conversation_id")
+                tracked_run = run_registry.active_for_conversation(
+                    frame_conversation_id, user_email
+                )
+                if tracked_run is not None:
+                    steering = tracked_run.steering
+                    if steering is not None and steering.active:
+                        try:
+                            steering.queue.put_nowait(data.get("content", ""))
+                        except asyncio.QueueFull:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": (
+                                    "The agent steering queue is full. Please wait "
+                                    "for the agent to make progress before sending "
+                                    "another steering message."
+                                ),
+                                "error_type": "steering_queue_full",
+                                "run_id": tracked_run.run_id,
+                                "conversation_id": tracked_run.conversation_id,
+                            })
+                            continue
+                        await websocket.send_json({
+                            "type": "agent_update",
+                            "update_type": "steering_queued",
+                            "run_id": tracked_run.run_id,
+                            "conversation_id": tracked_run.conversation_id,
+                        })
+                        continue
+                    # The run exists but its loop is not draining yet (it is
+                    # starting up, or paused waiting for a tool approval).
+                    # Refusing is the honest answer: queueing into a channel
+                    # nobody is guaranteed to drain would silently lose the
+                    # message, and starting a parallel turn would corrupt the
+                    # transcript.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": (
+                            "This conversation already has a run in progress. "
+                            "Wait for it to reach its next step, or stop it, "
+                            "before sending another message."
+                        ),
+                        "error_type": "conversation_busy",
+                        "run_id": tracked_run.run_id,
+                        "conversation_id": tracked_run.conversation_id,
+                    })
+                    continue
+
                 if should_steer(active_chat_task, data.get("conversation_id")):
                     content = data.get("content", "")
                     steering = active_chat_task["steering"]
@@ -833,13 +1065,101 @@ async def websocket_endpoint(websocket: WebSocket):
                 # fresh turn instead of injecting into the old one's context.
                 is_agent_turn = bool(data.get("agent_mode", False))
                 steering_channel = SteeringChannel() if is_agent_turn else None
-                active_chat_task["steering"] = steering_channel
-                active_chat_task["conversation_id"] = data.get("conversation_id")
 
-                async def handle_chat():
+                # Issue #884: decide whether this turn is a *tracked run* --
+                # an execution that owns its own Session, may run alongside
+                # other conversations, and survives this socket closing -- or
+                # a plain turn with the historical one-at-a-time semantics.
+                # Everything downstream keys off ``run_record`` being set, so
+                # a deployment without chat history (or a user in local /
+                # incognito save mode) follows exactly the pre-#884 path.
+                run_record = None
+                if turn_is_eligible_for_background_run(
+                    chat_history_enabled=config_manager.app_settings.feature_chat_history_enabled,
+                    save_mode=data.get("save_mode"),
+                    incognito=data.get("incognito", False),
+                    agent_mode=is_agent_turn,
+                    selected_tools=data.get("selected_tools"),
+                    conversation_id=data.get("conversation_id"),
+                ):
+                    try:
+                        run_record = run_registry.start(
+                            conversation_id=data.get("conversation_id"),
+                            user_email=user_email,
+                            steering=steering_channel,
+                        )
+                    except ConcurrencyLimitError as e:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "error_type": "run_limit_exceeded",
+                            "conversation_id": data.get("conversation_id"),
+                        })
+                        continue
+                    except ConversationBusyError as e:
+                        # Lost a race with another socket of the same user
+                        # between the steer check above and here.
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "error_type": "conversation_busy",
+                            "conversation_id": data.get("conversation_id"),
+                        })
+                        continue
+                    except RunRegistryError as e:  # pragma: no cover - defensive
+                        logger.warning("Run could not be started: %s", e)
+                        run_record = None
+
+                if run_record is None:
+                    # Untracked turn: keep the single-slot behaviour, including
+                    # steering, cancel-on-reset and cancel-on-disconnect.
+                    active_chat_task["steering"] = steering_channel
+                    active_chat_task["conversation_id"] = data.get("conversation_id")
+                    turn_session_id = session_id
+
+                    async def turn_update_callback(message):
+                        await websocket_update_callback(websocket, message)
+                else:
+                    connection_run_ids.add(run_record.run_id)
+                    # The run gets its own session id, so two conversations
+                    # executing at once never share one Session/history object.
+                    turn_session_id = run_record.session_id
+
+                    async def turn_update_callback(
+                        message,
+                        _run_id=run_record.run_id,
+                        _conv=run_record.conversation_id,
+                    ):
+                        # A run that asks for tool approval is paused, not
+                        # working: reflect that in its status so the client can
+                        # show "waiting for you" on a conversation the user is
+                        # not currently looking at.
+                        if isinstance(message, dict) and message.get("type") in (
+                            "tool_approval_request",
+                            "elicitation_request",
+                        ):
+                            run_registry.set_status(
+                                _run_id,
+                                RunStatus.WAITING_FOR_INPUT,
+                                waiting_on=message.get("type"),
+                            )
+                        await websocket_update_callback(
+                            websocket, tag_run_event(message, _run_id, _conv)
+                        )
+
+                # Bind the per-turn values as defaults: the loop reassigns them
+                # on the next message, and a still-running task must keep the
+                # session and callback it was started with.
+                async def handle_chat(
+                    turn_session_id=turn_session_id,
+                    steering_channel=steering_channel,
+                    turn_update_callback=turn_update_callback,
+                    data=data,
+                    custom_system_prompt=custom_system_prompt,
+                ):
                     try:
                         await chat_service.handle_chat_message(
-                            session_id=session_id,
+                            session_id=turn_session_id,
                             content=data.get("content", ""),
                             model=data.get("model", ""),
                             selected_tools=data.get("selected_tools"),
@@ -855,7 +1175,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             # once validated in the service layer, not by the model).
                             compliance_level=data.get("compliance_level_filter"),
                             custom_system_prompt=custom_system_prompt,
-                            update_callback=lambda message: websocket_update_callback(websocket, message),
+                            update_callback=turn_update_callback,
                             files=data.get("files"),
                             incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
                             conversation_id=data.get("conversation_id"),
@@ -965,7 +1285,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "error_type": "unexpected"
                         })
 
-                async def handle_chat_guarded():
+                async def handle_chat_guarded(run_id=(run_record.run_id if run_record else None)):
                     """Run handle_chat so a dead socket cannot orphan the task.
 
                     Every error branch in handle_chat reports back over the
@@ -976,13 +1296,42 @@ async def websocket_endpoint(websocket: WebSocket):
                     error metric is logged before each send, so nothing is lost
                     by absorbing it here.
                     """
+                    outcome = RunStatus.COMPLETED
+                    error_message = None
                     try:
                         await handle_chat()
+                    except asyncio.CancelledError:
+                        outcome = RunStatus.CANCELLED
+                        raise
                     except (WebSocketDisconnect, RuntimeError) as e:
                         logger.info("Chat handler ended; websocket already closed: %s", e)
+                    except Exception as e:  # pragma: no cover - handle_chat absorbs its own
+                        outcome = RunStatus.FAILED
+                        error_message = str(e)
+                        raise
+                    finally:
+                        # A tracked run reaches a terminal state here, and it
+                        # has to be in a ``finally``: a run left non-terminal
+                        # because its task died in an unexpected way would hold
+                        # a slot against the user's concurrency cap forever,
+                        # and its conversation's one-run-at-a-time lock with
+                        # it. ``set_status`` keeps terminal states sticky, so a
+                        # run the user already stopped is not reported as
+                        # completed by its own unwinding task.
+                        if run_id is not None:
+                            run_registry.set_status(run_id, outcome, error=error_message)
 
                 # Start chat handling in background
-                active_chat_task["task"] = asyncio.create_task(handle_chat_guarded())
+                chat_task = asyncio.create_task(handle_chat_guarded())
+                if run_record is None:
+                    active_chat_task["task"] = chat_task
+                else:
+                    run_registry.attach_task(run_record.run_id, chat_task)
+                    await websocket.send_json({
+                        "type": "run_started",
+                        "run_id": run_record.run_id,
+                        "conversation_id": run_record.conversation_id,
+                    })
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection)
@@ -1005,7 +1354,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 session = await chat_service.session_repository.get(session_id)
                 if session:
                     old_conv_id = session.context.get("conversation_id")
-                    if old_conv_id:
+                    # Issue #884: navigation controls what is *visible*, not
+                    # what is allowed to execute. Releasing the MCP sessions of
+                    # a conversation that still has a live run would pull the
+                    # tool clients out from under an agent that is mid-step,
+                    # just because the user looked at something else.
+                    if old_conv_id and run_registry.active_for_conversation(
+                        old_conv_id, user_email
+                    ) is not None:
+                        logger.info(
+                            "Keeping MCP sessions for conversation %s; a run still owns it",
+                            sanitize_for_logging(str(old_conv_id)),
+                        )
+                    elif old_conv_id:
                         try:
                             from atlas.modules.mcp_tools import mcp_tool_manager
                             await mcp_tool_manager.release_sessions(old_conv_id, user_email=user_email)
@@ -1041,6 +1402,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "reset_session":
+                # Issue #884: only the *untracked* turn is cancelled here.
+                # Tracked runs are not owned by the visible conversation, so
+                # "New Chat" must not stop one -- that was precisely the
+                # behaviour this issue removes. They keep executing, keep their
+                # MCP sessions (see below), and keep reporting status to the
+                # client through run_status frames.
+                #
                 # If a chat is still generating when the user starts a new chat,
                 # cancel it first so tokens don't keep streaming into the fresh
                 # session (defense-in-depth; the frontend also sends
@@ -1071,9 +1439,23 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Handle session reset (use authenticated user from connection).
                 # handle_reset_session itself releases the old conversation's
                 # MCP sessions before generating a new conversation_id.
+                # A tracked run may own the conversation this session is
+                # currently pointing at; handle_reset_session would otherwise
+                # release its MCP sessions on the way to a fresh conversation.
+                reset_session_record = await chat_service.session_repository.get(session_id)
+                reset_conv_id = (
+                    reset_session_record.context.get("conversation_id")
+                    if reset_session_record
+                    else None
+                )
+                preserve_resources = (
+                    run_registry.active_for_conversation(reset_conv_id, user_email)
+                    is not None
+                )
                 response = await chat_service.handle_reset_session(
                     session_id=session_id,
-                    user_email=user_email
+                    user_email=user_email,
+                    preserve_conversation_resources=preserve_resources,
                 )
                 await websocket.send_json(response)
 
@@ -1114,14 +1496,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=user_email,
                 )
 
+                # The run that was paused on this approval is working again.
+                _resume_waiting_run(run_registry, user_email, data)
+
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
 
             elif message_type == "stop_streaming":
-                task = active_chat_task.get("task")
-                if task and not task.done():
-                    logger.info("Cancelling active chat task (stop_streaming)")
-                    task.cancel()
+                # Issue #884: Stop addresses one run. A client that names a
+                # run_id (or the conversation it is looking at) stops exactly
+                # that run and nothing else -- stopping A must never stop B.
+                # A frame with neither falls back to the untracked slot, which
+                # is what an older client sends.
+                if not _cancel_addressed_run(run_registry, user_email, data):
+                    task = active_chat_task.get("task")
+                    if task and not task.done():
+                        logger.info("Cancelling active chat task (stop_streaming)")
+                        task.cancel()
 
             elif message_type == "agent_control":
                 # `agent_control` with action="stop" cancels the active agent
@@ -1129,10 +1520,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 # the message is always handled here as a plain task cancel.
                 action = data.get("action")
                 if action == "stop":
-                    task = active_chat_task.get("task")
-                    if task and not task.done():
-                        logger.info("Cancelling active chat task (agent_control stop)")
-                        task.cancel()
+                    if not _cancel_addressed_run(run_registry, user_email, data):
+                        task = active_chat_task.get("task")
+                        if task and not task.done():
+                            logger.info("Cancelling active chat task (agent_control stop)")
+                            task.cancel()
 
             elif message_type == "elicitation_response":
                 # Handle elicitation response
@@ -1154,8 +1546,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     data=response_data
                 )
 
+                _resume_waiting_run(run_registry, user_email, data)
+
                 logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the elicitation will unblock the waiting tool execution
+
+            elif message_type == "list_runs":
+                # Issue #884: how a freshly opened (or reconnected) client
+                # learns which conversations are still working. Without this a
+                # user who closed the tab while an agent was running would
+                # reopen to a history list with no indication that anything is
+                # in flight.
+                await websocket.send_json({
+                    "type": "runs_snapshot",
+                    "runs": run_registry.snapshot_for_user(user_email),
+                    "max_concurrent_runs_per_user": run_registry.max_concurrent_runs_per_user,
+                })
 
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")
@@ -1166,8 +1572,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         await cleanup_disconnected_session(
-            chat_service, session_id, user_email, active_chat_task
+            chat_service, session_id, user_email, active_chat_task, connection_run_ids
         )
+    finally:
+        # Stop feeding run-status frames to a socket that is gone; the runs
+        # themselves keep going.
+        unsubscribe_run_status()
 
 
 if static_dir.exists():

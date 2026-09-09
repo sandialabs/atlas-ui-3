@@ -892,13 +892,20 @@ class ChatService:
     async def handle_reset_session(
         self,
         session_id: UUID,
-        user_email: Optional[str] = None
+        user_email: Optional[str] = None,
+        preserve_conversation_resources: bool = False,
     ) -> Dict[str, Any]:
         """Handle session reset request from frontend.
 
         Generates a new conversation_id so the next conversation
         does not overwrite the previous one (session_id stays the
         same for the lifetime of the WebSocket connection).
+
+        ``preserve_conversation_resources`` keeps the old conversation's MCP
+        sessions alive across the reset. The transport sets it when a run
+        (issue #884) still owns that conversation: starting a new chat is
+        navigation, and it must not strip the tool clients from an agent that
+        is still working in the conversation the user just navigated away from.
         """
         # Capture the old conversation_id before tearing down the session
         # so we can release any MCP sessions/clients scoped to it.
@@ -912,7 +919,12 @@ class ChatService:
         # conversation. Without this, each reset orphans the
         # (user, server, old_conv_id) entries in MCPSessionManager and
         # MCPToolManager._user_clients (cache keys are per-conversation).
-        if old_conv_id:
+        if old_conv_id and preserve_conversation_resources:
+            logger.info(
+                "Keeping MCP sessions for conversation %s across reset; a run still owns it",
+                sanitize_for_logging(str(old_conv_id)),
+            )
+        elif old_conv_id:
             release_sessions = getattr(self.tool_manager, "release_sessions", None)
             if release_sessions is not None:
                 try:

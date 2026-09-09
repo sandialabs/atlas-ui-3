@@ -59,6 +59,8 @@ export function cleanupStreamState() {
  * @param {Function} [deps.setActiveConversationId] - Set the active conversation ID for chat history tracking.
  * @param {Function} deps.streamToken - Dispatch a STREAM_TOKEN action with a text chunk.
  * @param {Function} deps.streamEnd - Dispatch a STREAM_END action to finalize streaming.
+ * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
+ * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
 export function createWebSocketHandler(deps) {
@@ -85,6 +87,8 @@ export function createWebSocketHandler(deps) {
     setActiveConversationId,
     streamToken,
     streamEnd,
+    getVisibleConversationId,
+    onRunStatus,
   } = deps
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
@@ -400,6 +404,31 @@ export function createWebSocketHandler(deps) {
 
   const handleWebSocketMessage = (data) => {
     try {
+      // Parallel conversation runs (issue #884). Run lifecycle frames are not
+      // transcript events -- they drive the per-conversation indicators in the
+      // history list, including for conversations that are not on screen.
+      if (data.type === 'run_started' || data.type === 'run_status' || data.type === 'runs_snapshot') {
+        if (typeof onRunStatus === 'function') onRunStatus(data)
+        return
+      }
+
+      // Route by conversation. With several conversations executing at once,
+      // an event that belongs to a background run must not be spliced into the
+      // transcript the user is looking at -- that is exactly the "messages in
+      // the wrong chat" failure this feature has to avoid. Events without a
+      // conversation_id (older producers, and everything on the untracked
+      // single-run path) are always applied, so this is inert until the
+      // backend actually tags events.
+      if (data.conversation_id && typeof getVisibleConversationId === 'function') {
+        const visible = getVisibleConversationId()
+        if (visible && visible !== data.conversation_id) {
+          if (typeof onRunStatus === 'function') {
+            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id })
+          }
+          return
+        }
+      }
+
   switch (data.type) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {

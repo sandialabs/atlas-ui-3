@@ -26,12 +26,15 @@ class ElicitationRequest:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
-    async def wait_for_response(self, timeout: float = 300.0) -> Dict[str, Any]:
+    async def wait_for_response(self, timeout: Optional[float] = 300.0) -> Dict[str, Any]:
         """
         Wait for the user to respond to the elicitation request.
 
         Args:
-            timeout: Maximum time to wait in seconds (default 5 minutes)
+            timeout: Maximum time to wait in seconds (default 5 minutes).
+                ``None`` (or a non-positive value) waits indefinitely, so a
+                background run (issue #884) stays paused across a disconnect
+                rather than failing while the user is away.
 
         Returns:
             Dict with 'action' and optionally 'data' keys
@@ -39,6 +42,8 @@ class ElicitationRequest:
         Raises:
             asyncio.TimeoutError: If timeout is reached
         """
+        if timeout is None or timeout <= 0:
+            return await self.future
         return await asyncio.wait_for(self.future, timeout=timeout)
 
 

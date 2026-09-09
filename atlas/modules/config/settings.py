@@ -534,6 +534,34 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("FEATURE_CUSTOM_PROMPTS_ENABLED"),
     )
 
+    # Parallel conversation runs (issue #884). A "run" is one history-mutating
+    # execution of a conversation; these caps bound how many a single user may
+    # have in flight and how long one may run unattended. The concurrency cap
+    # counts every run that is not in a terminal state, including a run paused
+    # waiting for tool approval.
+    max_concurrent_runs_per_user: int = Field(
+        5,
+        ge=1,
+        description="Maximum number of simultaneously active conversation runs per user. "
+                    "Runs paused awaiting tool approval count toward this limit.",
+        validation_alias=AliasChoices("MAX_CONCURRENT_RUNS_PER_USER"),
+    )
+    max_run_wall_clock_seconds: int = Field(
+        3600,
+        ge=0,
+        description="Hard wall-clock limit for a single conversation run, in seconds. "
+                    "A run that exceeds it is cancelled. 0 disables the limit.",
+        validation_alias=AliasChoices("MAX_RUN_WALL_CLOCK_SECONDS"),
+    )
+    tool_approval_timeout_seconds: int = Field(
+        300,
+        ge=0,
+        description="How long a run pauses waiting for a tool approval response before "
+                    "giving up. 0 waits indefinitely, which is what lets an approval "
+                    "survive the user closing the browser (issue #884).",
+        validation_alias=AliasChoices("TOOL_APPROVAL_TIMEOUT_SECONDS"),
+    )
+
     @property
     def custom_prompts_effective(self) -> bool:
         """Whether the custom prompt library is actually usable.

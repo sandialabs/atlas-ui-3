@@ -38,6 +38,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 - [Admin Panel](admin-panel.md) - Using the administrative interface
 - [User Feedback](feedback.md) - Collecting and reviewing user feedback
 - [Chat History Persistence](chat-history.md) - Conversation storage and retention
+- [Parallel Conversation Runs](parallel-conversation-runs.md) - Concurrent agent runs, per-user caps, and background execution
 - [PyPI Release Guide](pypi-releases.md) - Publishing the `atlas-chat` package
 
 ## UI Customization

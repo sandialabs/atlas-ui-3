@@ -13,6 +13,7 @@ import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
+import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
@@ -89,6 +90,17 @@ export const ChatProvider = ({ children }) => {
 	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
 	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'none')
 	const [activeConversationId, setActiveConversationId] = useState(null)
+
+	// Parallel conversation runs (issue #884). Keyed by conversation so a run in
+	// a conversation the user is not looking at still has somewhere to live --
+	// and so the history list can mark it as still working.
+	const runs = useConversationRuns()
+	// Read by the websocket handler to route incoming events. A ref, not the
+	// state value: the handler is registered once and must always see the
+	// conversation that is on screen *now*, not the one that was on screen when
+	// it was built.
+	const activeConversationIdRef = useRef(null)
+	activeConversationIdRef.current = activeConversationId
 	const localSaveTimerRef = useRef(null)
 
 	// Method to add a file to attachments
@@ -359,10 +371,24 @@ export const ChatProvider = ({ children }) => {
 			setActiveConversationId,
 			streamToken,
 			streamEnd,
+			getVisibleConversationId: () => activeConversationIdRef.current,
+			onRunStatus: runs.handleRunFrame,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, runs.handleRunFrame])
+
+	// Ask the server which runs are still in flight whenever the socket comes
+	// up. This is what makes a run survive the browser closing in a way the
+	// user can see: reopening the app repopulates the indicators instead of
+	// showing a history list with no sign that an agent is still working.
+	// Gated on the chat-history feature because that is also what gates a run
+	// being created at all -- without it there is never anything to list.
+	useEffect(() => {
+		if (isConnected && sendMessage && config.features?.chat_history) {
+			sendMessage({ type: 'list_runs' })
+		}
+	}, [isConnected, sendMessage, config.features?.chat_history])
 
 	// Safety timeout: if isThinking stays true for too long without any response
 	// from the backend, reset it and show an error so the user is not stuck forever.
@@ -771,9 +797,15 @@ export const ChatProvider = ({ children }) => {
 		// callers (Header/Ctrl+Alt+N) gate follow-up side-effects on this so a
 		// cancelled confirm doesn't still close the canvas or steal focus.
 		const isGenerating = isThinking || isSynthesizing || isStreaming
+		// Issue #884: when the current conversation is a tracked run, New Chat is
+		// pure navigation -- the run keeps going in the background and shows up
+		// as an indicator in history. Only an untracked turn still has to be
+		// stopped, because nothing else can own it once the view is cleared.
+		const hasBackgroundRun = isRunActive(runs.getRun(activeConversationId))
+		const mustStopCurrentTurn = isGenerating && !hasBackgroundRun
 		const hasContent = messages.length > 0
 		if (!skipConfirm && (hasContent || isGenerating)) {
-			const prompt = isGenerating
+			const prompt = mustStopCurrentTurn
 				? 'A response is still being generated. Start a new chat and stop the current response?'
 				: 'Start a new chat? This will clear the current conversation from view.'
 			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
@@ -785,7 +817,7 @@ export const ChatProvider = ({ children }) => {
 		// ask for a new session. Otherwise the in-flight task keeps streaming
 		// tokens and they get appended to the fresh, empty chat (the bug users
 		// see where "the first amount of the output is removed from view").
-		if (sendMessage && isGenerating) {
+		if (sendMessage && mustStopCurrentTurn) {
 			if (agent?.agentModeEnabled) {
 				sendMessage({ type: 'agent_control', action: 'stop' })
 			}
@@ -817,7 +849,7 @@ export const ChatProvider = ({ children }) => {
 			sendMessage({ type: 'reset_session' })
 		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData) => {
@@ -882,20 +914,36 @@ export const ChatProvider = ({ children }) => {
 	}, [files.sessionFiles.files, sendMessage, config.user])
 
 		// Agent controls
+		// Stop addresses one run (issue #884). Naming the conversation -- and the
+		// run id when we have one -- is what keeps stopping conversation A from
+		// stopping whatever is running in B.
 		const stopAgent = useCallback(() => {
 			// Hide the Stop button immediately; the backend stop is best-effort and
 			// the terminal agent_completion event will also clear this.
 			setIsAgentRunning(false)
-			if (sendMessage) sendMessage({ type: 'agent_control', action: 'stop' })
-		}, [sendMessage])
+			if (!sendMessage) return
+			const run = runs.getRun(activeConversationId)
+			sendMessage({
+				type: 'agent_control',
+				action: 'stop',
+				conversation_id: activeConversationId || undefined,
+				run_id: run?.run_id || undefined,
+			})
+		}, [sendMessage, runs, activeConversationId])
 
 		// Stop non-agent streaming
 		const stopStreaming = useCallback(() => {
 			cleanupStreamState()
 			streamEnd()
 			setIsThinking(false)
-			if (sendMessage) sendMessage({ type: 'stop_streaming' })
-		}, [sendMessage, streamEnd])
+			if (!sendMessage) return
+			const run = runs.getRun(activeConversationId)
+			sendMessage({
+				type: 'stop_streaming',
+				conversation_id: activeConversationId || undefined,
+				run_id: run?.run_id || undefined,
+			})
+		}, [sendMessage, streamEnd, runs, activeConversationId])
 
 			const answerAgentQuestion = useCallback((content) => {
 			if (!content || !content.trim()) return
@@ -1114,6 +1162,12 @@ export const ChatProvider = ({ children }) => {
 	}, [addMessage])
 
 	const value = {
+		// Parallel conversation runs (issue #884): conversation_id -> run record,
+		// including conversations that are not on screen.
+		runsByConversation: runs.runsByConversation,
+		activeRunCount: runs.activeRunCount,
+		maxConcurrentRuns: runs.maxConcurrentRuns,
+		getConversationRun: runs.getRun,
 		appName: config.appName,
 		user: config.user,
 		models: config.models,

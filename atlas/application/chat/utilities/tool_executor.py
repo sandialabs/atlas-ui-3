@@ -26,7 +26,7 @@ from atlas.modules.mcp_tools.atlas_server import (
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
-from ..approval_manager import get_approval_manager
+from ..approval_manager import get_approval_manager, resolve_approval_timeout
 from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
 
 logger = logging.getLogger(__name__)
@@ -574,7 +574,7 @@ async def execute_single_tool(
                 )
 
                 try:
-                    response = await request.wait_for_response(timeout=300.0)
+                    response = await request.wait_for_response(timeout=resolve_approval_timeout())
                     approval_manager.cleanup_request(tool_call.id)
 
                     if not response["approved"]:
