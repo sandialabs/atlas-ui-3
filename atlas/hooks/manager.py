@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Hard cap on hook stdout/stderr so a chatty hook cannot balloon memory. Overflow
 # is treated as a hook error (handled per ``on_error``) and logged.
 _MAX_OUTPUT_BYTES = 1 * 1024 * 1024  # 1 MB
+_REAP_TIMEOUT_S = 5.0  # upper bound on waiting for a killed hook to be reaped
 
 # Verdict severity ordering for the "most-restrictive-wins" composition rule.
 # deny > require_approval > modify > continue. A later hook can raise the
@@ -417,15 +418,35 @@ class HookManager:
         return HookDecision(decision="continue")
 
     @staticmethod
-    async def _kill(proc: Any) -> None:
-        """Kill a hook subprocess and reap it, tolerating an already-dead child."""
+    def _signal_kill(proc: Any) -> None:
+        """Send SIGKILL without reaping, tolerating an already-dead child.
+
+        Safe to call from inside a stream reader: it never awaits, so the
+        caller can keep draining the child's pipes (see ``_kill``).
+        """
         try:
             proc.kill()
         except ProcessLookupError:
             # Already exited between the check and the signal -- nothing to kill.
             pass
+
+    @classmethod
+    async def _kill(cls, proc: Any) -> None:
+        """Kill a hook subprocess and reap it, tolerating an already-dead child."""
+        cls._signal_kill(proc)
+        await cls._reap(proc)
+
+    @staticmethod
+    async def _reap(proc: Any) -> None:
+        """Await a dead child's exit status, but never block on it forever.
+
+        ``Process.wait()`` only resolves once *every* stdio pipe has reached
+        EOF, so a caller that stopped reading (or whose reader was cancelled by
+        a timeout) would wait on a pipe nobody is draining. Bound the wait so
+        reaping can never outlive the hook it belongs to.
+        """
         try:
-            await proc.wait()
+            await asyncio.wait_for(proc.wait(), timeout=_REAP_TIMEOUT_S)
         except Exception:  # pragma: no cover - defensive
             # Reaping is best-effort; a failure here must not mask the original
             # timeout/IO error the caller is about to report.
@@ -471,18 +492,24 @@ class HookManager:
                 chunk = await stream.read(65536)
                 if not chunk:
                     return bytes(buf)
+                if overflowed:
+                    # Another stream already tripped the cap. Keep reading so
+                    # this pipe still reaches EOF -- see below -- but discard.
+                    continue
                 total += len(chunk)
                 if total > _MAX_OUTPUT_BYTES:
                     overflowed = True
-                    await cls._kill(proc)
-                    return bytes(buf)
+                    # Signal only: awaiting the reap here would deadlock, since
+                    # the child is not reaped until this very pipe hits EOF.
+                    cls._signal_kill(proc)
+                    continue
                 buf += chunk
 
         _, stdout, stderr = await asyncio.gather(
             _feed(), _drain(proc.stdout), _drain(proc.stderr)
         )
-        if not overflowed:
-            await proc.wait()
+        # Both pipes are at EOF now, so the child is reapable either way.
+        await cls._reap(proc)
         return stdout, stderr, overflowed
 
     @staticmethod

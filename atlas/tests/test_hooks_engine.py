@@ -11,6 +11,7 @@ actual asyncio subprocess path. They are language-agnostic by construction
 (scripts use the host's python) -- this is the contract operators rely on.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -30,6 +31,7 @@ from atlas.hooks import (
     default_on_error,
     set_hook_manager_for_testing,
 )
+from atlas.hooks.manager import _MAX_OUTPUT_BYTES
 from atlas.modules.config.config_loader import ConfigManager
 
 # ----------------------------------------------------------- helpers/fixtures
@@ -498,6 +500,59 @@ class TestSecurity:
 # ---------------------------------------------------------- failure modes
 
 
+
+class _FakeStream:
+    """A stream that yields preset chunks, then EOF."""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self.at_eof = False
+
+    async def read(self, _n):
+        await asyncio.sleep(0)
+        if self._chunks:
+            return self._chunks.pop(0)
+        self.at_eof = True
+        return b""
+
+
+class _FakeProc:
+    """Stands in for asyncio's Process with its reaping order preserved.
+
+    ``BaseSubprocessTransport._try_finish`` only completes ``wait()`` once every
+    stdio pipe has disconnected, so a caller that stops reading mid-stream can
+    never reap the child. Modelling that here makes the deadlock deterministic
+    rather than dependent on pipe-buffer timing.
+    """
+
+    def __init__(self, stdout_chunks, stderr_chunks):
+        self.stdout = _FakeStream(stdout_chunks)
+        self.stderr = _FakeStream(stderr_chunks)
+        self.stdin = _FakeStdin()
+        self.killed = False
+        self.returncode = None
+
+    def kill(self):
+        self.killed = True
+
+    async def wait(self):
+        while not (self.stdout.at_eof and self.stderr.at_eof):
+            await asyncio.sleep(0)
+        self.returncode = -9
+        return self.returncode
+
+
+class _FakeStdin:
+    def write(self, _b):
+        pass
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        pass
+
+
 class TestFailureModes:
     async def test_timeout_kills_and_uses_on_error(self, tmp_path):
         body = f"""\
@@ -546,6 +601,24 @@ class TestFailureModes:
         # decision.
         assert outcome.verdict == "deny"
         assert "1 MB" in outcome.reason
+
+    async def test_overflow_drains_to_eof_instead_of_awaiting_the_reap(self):
+        # Regression: on overflow the reader used to await the child's full
+        # reap. ``Process.wait()`` only resolves once every pipe has reached
+        # EOF, so the reader blocked on a pipe it had itself stopped draining
+        # -- the overflow then surfaced as a timeout, and only after the whole
+        # hook timeout had burned. _FakeProc models that ordering exactly.
+        proc = _FakeProc([b"x" * 65536] * 32, [])  # 2 MB, over the 1 MB cap
+        stdout, stderr, overflowed = await asyncio.wait_for(
+            HookManager._communicate_bounded(proc, b"{}\n"), timeout=5
+        )
+        assert overflowed is True
+        assert proc.killed is True
+        # The cap is enforced while reading: the buffer never holds the whole
+        # stream, even though the reader ran on to EOF to let the child be reaped.
+        assert len(stdout) <= _MAX_OUTPUT_BYTES
+        assert proc.stdout.at_eof and proc.stderr.at_eof
+        assert proc.returncode is not None
 
     async def test_output_within_the_cap_is_returned_intact(self, tmp_path):
         payload = "y" * 10000
