@@ -47,6 +47,7 @@ from atlas.application.chat.runs import (
     RunStatus,
     get_run_registry,
 )
+from atlas.application.chat.runs.context import set_current_run
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
 from atlas.application.chat.service import UNSET
 from atlas.core.auth import resolve_user_from_auth_header_async
@@ -181,6 +182,44 @@ def tag_run_event(message: dict, run_id: str, conversation_id: str) -> dict:
     tagged.setdefault("run_id", run_id)
     tagged.setdefault("conversation_id", conversation_id)
     return tagged
+
+
+async def _release_finished_run(
+    chat_service,
+    run_registry,
+    run_id,
+    session_id,
+    conversation_id,
+    user_email,
+):
+    """Free what a finished run owned (issue #884).
+
+    Every tracked run gets its own ``Session``, so without this each completed
+    run leaves an entry behind in the process-wide session repository -- a slow
+    leak that a long-lived server would never recover from. The conversation's
+    MCP sessions go too, but only once no *other* run still owns that
+    conversation: the whole point of the earlier changes is that navigation and
+    disconnect no longer tear those down while work is in flight, and this must
+    not reintroduce that by the back door.
+
+    Never raises: this runs in the cleanup path of a task that may already be
+    unwinding from a cancellation, and a failure to tidy up must not replace
+    the outcome the user is waiting to see.
+    """
+    try:
+        if session_id is not None:
+            await chat_service.end_session(session_id)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Error ending session for run %s: %s", run_id, e)
+
+    try:
+        if conversation_id and run_registry.active_for_conversation(
+            conversation_id, user_email
+        ) is None:
+            from atlas.modules.mcp_tools import mcp_tool_manager
+            await mcp_tool_manager.release_sessions(conversation_id, user_email=user_email)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Error releasing MCP sessions for run %s: %s", run_id, e)
 
 
 def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
@@ -1080,6 +1119,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Everything downstream keys off ``run_record`` being set, so
                 # a deployment without chat history (or a user in local /
                 # incognito save mode) follows exactly the pre-#884 path.
+                # A brand-new chat has no conversation id yet: the client only
+                # learns one from `conversation_saved`, which arrives *after*
+                # the turn. Requiring the client to supply one would exclude
+                # the single most common case -- the first agent turn in a new
+                # conversation -- from background execution entirely. Mint one
+                # here instead and tell the client (see `run_started` below);
+                # the turn is then saved under the same id the run is keyed by.
+                turn_conversation_id = (data.get("conversation_id") or "").strip() or None
+                if turn_conversation_id is None and is_agent_turn:
+                    turn_conversation_id = str(uuid4())
+                if turn_conversation_id:
+                    data["conversation_id"] = turn_conversation_id
+
                 run_record = None
                 if turn_is_eligible_for_background_run(
                     chat_history_enabled=config_manager.app_settings.feature_chat_history_enabled,
@@ -1087,11 +1139,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     incognito=data.get("incognito", False),
                     agent_mode=is_agent_turn,
                     selected_tools=data.get("selected_tools"),
-                    conversation_id=data.get("conversation_id"),
+                    conversation_id=turn_conversation_id,
                 ):
                     try:
                         run_record = run_registry.start(
-                            conversation_id=data.get("conversation_id"),
+                            conversation_id=turn_conversation_id,
                             user_email=user_email,
                             steering=steering_channel,
                         )
@@ -1148,6 +1200,13 @@ async def websocket_endpoint(websocket: WebSocket):
                                 RunStatus.WAITING_FOR_INPUT,
                                 waiting_on=message_type_out,
                             )
+                            # Keep the frame itself. If the user is looking at
+                            # another conversation (or is not here at all) the
+                            # client discards it, and nothing else holds the
+                            # request id and arguments needed to answer it.
+                            run_registry.set_pending_request(
+                                _run_id, tag_run_event(message, _run_id, _conv)
+                            )
                         elif message_type_out in _TOOL_SETTLED_EVENTS:
                             # The tool the run was paused on has settled one way
                             # or another. Resolving the pause here as well as on
@@ -1165,7 +1224,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Bind the per-turn values as defaults: the loop reassigns them
                 # on the next message, and a still-running task must keep the
                 # session and callback it was started with.
+                # Collects the error type of a domain failure that handle_chat
+                # reports to the client and then swallows. Without it every one
+                # of those turns would be recorded as a *completed* run, and a
+                # user who reconnects could not tell a finished background run
+                # from one that died on a rate limit.
+                turn_failure = []
+
                 async def handle_chat(
+                    turn_failure=turn_failure,
                     turn_session_id=turn_session_id,
                     steering_channel=steering_channel,
                     turn_update_callback=turn_update_callback,
@@ -1206,6 +1273,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
+                        turn_failure.append("rate_limit")
                         log_metric("error", user_email, error_type="rate_limit")
                         await websocket.send_json({
                             "type": "error",
@@ -1214,6 +1282,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMTimeoutError as e:
                         logger.warning(f"Timeout error in chat handler: {e}")
+                        turn_failure.append("timeout")
                         log_metric("error", user_email, error_type="timeout")
                         await websocket.send_json({
                             "type": "error",
@@ -1222,6 +1291,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMAuthenticationError as e:
                         logger.error(f"Authentication error in chat handler: {e}")
+                        turn_failure.append("authentication")
                         log_metric("error", user_email, error_type="authentication")
                         await websocket.send_json({
                             "type": "error",
@@ -1230,6 +1300,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except ContextWindowExceededError as e:
                         logger.warning(f"Context window exceeded in chat handler: {e}")
+                        turn_failure.append("context_window_exceeded")
                         log_metric("error", user_email, error_type="context_window_exceeded")
                         await websocket.send_json({
                             "type": "error",
@@ -1238,6 +1309,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMMalformedToolCallError as e:
                         logger.warning(f"Model returned an unusable tool call in chat handler: {e}")
+                        turn_failure.append("malformed_tool_call")
                         log_metric("error", user_email, error_type="malformed_tool_call")
                         await websocket.send_json({
                             "type": "error",
@@ -1246,6 +1318,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except LLMBadRequestError as e:
                         logger.warning(f"Provider rejected the request in chat handler: {e}")
+                        turn_failure.append("bad_request")
                         log_metric("error", user_email, error_type="bad_request")
                         await websocket.send_json({
                             "type": "error",
@@ -1254,6 +1327,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")
+                        turn_failure.append("validation")
                         log_metric("error", user_email, error_type="validation")
                         await websocket.send_json({
                             "type": "error",
@@ -1262,6 +1336,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except AuthorizationError as e:
                         logger.warning(f"Authorization error in chat handler: {e}")
+                        turn_failure.append("authorization")
                         log_metric("error", user_email, error_type="authorization")
                         await websocket.send_json({
                             "type": "error",
@@ -1285,6 +1360,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         return
                     except DomainError as e:
                         logger.error(f"Domain error in chat handler: {e}", exc_info=True)
+                        turn_failure.append("domain")
                         log_metric("error", user_email, error_type="domain")
                         await websocket.send_json({
                             "type": "error",
@@ -1293,6 +1369,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                     except Exception as e:
                         logger.error(f"Unexpected error in chat handler: {e}", exc_info=True)
+                        turn_failure.append("unexpected")
                         log_metric("error", user_email, error_type="unexpected")
                         await websocket.send_json({
                             "type": "error",
@@ -1300,7 +1377,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             "error_type": "unexpected"
                         })
 
-                async def handle_chat_guarded(run_id=(run_record.run_id if run_record else None)):
+                async def handle_chat_guarded(
+                    run_id=(run_record.run_id if run_record else None),
+                    run_conversation_id=(run_record.conversation_id if run_record else None),
+                    run_session_id=(run_record.session_id if run_record else None),
+                ):
                     """Run handle_chat so a dead socket cannot orphan the task.
 
                     Every error branch in handle_chat reports back over the
@@ -1313,6 +1394,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     """
                     outcome = RunStatus.COMPLETED
                     error_message = None
+                    if run_id is not None:
+                        # Bind before the first await so every frame the agent
+                        # loop publishes -- including the ones that go through
+                        # the shared event publisher rather than this turn's
+                        # callback -- carries this run's identity.
+                        set_current_run(run_id, run_conversation_id)
                     try:
                         await handle_chat()
                     except asyncio.CancelledError:
@@ -1333,8 +1420,21 @@ async def websocket_endpoint(websocket: WebSocket):
                         # it. ``set_status`` keeps terminal states sticky, so a
                         # run the user already stopped is not reported as
                         # completed by its own unwinding task.
+                        if outcome == RunStatus.COMPLETED and turn_failure:
+                            # handle_chat reported this to the client and
+                            # returned normally; the run still did not succeed.
+                            outcome = RunStatus.FAILED
+                            error_message = turn_failure[0]
                         if run_id is not None:
                             run_registry.set_status(run_id, outcome, error=error_message)
+                            await _release_finished_run(
+                                chat_service,
+                                run_registry,
+                                run_id,
+                                run_session_id,
+                                run_conversation_id,
+                                user_email,
+                            )
 
                 # Start chat handling in background
                 chat_task = asyncio.create_task(handle_chat_guarded())
@@ -1415,6 +1515,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         ),
                     }
                 await websocket.send_json(response)
+
+                # Issue #884: if a run in the conversation the user just opened
+                # is blocked on an approval, re-send the request now. It was
+                # dropped when it first arrived (the user was elsewhere), and
+                # without this replay the run stays blocked until it times out
+                # with no way for anyone to answer it.
+                for pending in run_registry.pending_requests_for_conversation(
+                    data.get("conversation_id", ""), user_email
+                ):
+                    await websocket.send_json(pending)
 
             elif message_type == "reset_session":
                 # Issue #884: only the *untracked* turn is cancelled here.
@@ -1577,6 +1687,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     "runs": run_registry.snapshot_for_user(user_email),
                     "max_concurrent_runs_per_user": run_registry.max_concurrent_runs_per_user,
                 })
+                # Replay whatever the currently open conversation is blocked on,
+                # so a reconnect into that conversation can answer it.
+                for pending in run_registry.pending_requests_for_conversation(
+                    data.get("conversation_id"), user_email
+                ):
+                    await websocket.send_json(pending)
 
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")

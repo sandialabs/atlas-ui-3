@@ -386,7 +386,10 @@ export const ChatProvider = ({ children }) => {
 	// being created at all -- without it there is never anything to list.
 	useEffect(() => {
 		if (isConnected && sendMessage && config.features?.chat_history) {
-			sendMessage({ type: 'list_runs' })
+			// Naming the open conversation lets the server replay whatever that
+			// conversation's run is blocked on (a tool approval it sent while we
+			// were away), which is the only way that request can still be answered.
+			sendMessage({ type: 'list_runs', conversation_id: activeConversationIdRef.current || undefined })
 		}
 	}, [isConnected, sendMessage, config.features?.chat_history])
 
@@ -1165,6 +1168,11 @@ export const ChatProvider = ({ children }) => {
 		// Parallel conversation runs (issue #884): conversation_id -> run record,
 		// including conversations that are not on screen.
 		runsByConversation: runs.runsByConversation,
+		// Whether the conversation on screen has work in flight. Derived from
+		// the run snapshot as well as the transient streaming flags, so a user
+		// who reopens the browser onto a still-running conversation gets the
+		// Stop control back rather than an indicator they cannot act on.
+		isConversationRunActive: isRunActive(runs.runsByConversation[activeConversationId]),
 		activeRunCount: runs.activeRunCount,
 		maxConcurrentRuns: runs.maxConcurrentRuns,
 		getConversationRun: runs.getRun,
@@ -1244,7 +1252,9 @@ export const ChatProvider = ({ children }) => {
 		updateToolResult,
 		isWelcomeVisible,
 		isThinking,
-		isAgentRunning,
+		// A run rediscovered after a reconnect has no streaming state behind it,
+		// but it is still running and must still be stoppable (issue #884).
+		isAgentRunning: isAgentRunning || isRunActive(runs.runsByConversation[activeConversationId]),
 		isSynthesizing,
 		sendChatMessage,
 		rewindAndResubmit,

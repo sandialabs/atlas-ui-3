@@ -138,3 +138,61 @@ def test_tool_settled_events_are_recognised():
 
     assert {"tool_complete", "tool_error", "tool_interrupted"} <= _TOOL_SETTLED_EVENTS
     assert "tool_approval_request" not in _TOOL_SETTLED_EVENTS
+
+
+# ---------------------------------------------------------------------------
+# Ambient run identity (tagging events the shared publisher emits)
+# ---------------------------------------------------------------------------
+
+def test_frames_are_stamped_with_the_running_run():
+    """The agent loop publishes through a connection-scoped publisher, so the
+    run identity has to travel out of band or its output is indistinguishable
+    from another conversation's."""
+    from atlas.application.chat.runs.context import (
+        clear_current_run,
+        set_current_run,
+        stamp_with_current_run,
+    )
+
+    clear_current_run()
+    assert stamp_with_current_run({"type": "token_stream"}) == {"type": "token_stream"}
+
+    set_current_run("run-1", "conv-1")
+    try:
+        stamped = stamp_with_current_run({"type": "token_stream", "token": "hi"})
+        assert stamped["run_id"] == "run-1"
+        assert stamped["conversation_id"] == "conv-1"
+
+        # A producer that already knows its conversation keeps it.
+        kept = stamp_with_current_run({"type": "canvas_content", "conversation_id": "conv-real"})
+        assert kept["conversation_id"] == "conv-real"
+    finally:
+        clear_current_run()
+
+
+@pytest.mark.asyncio
+async def test_run_identity_does_not_leak_between_tasks():
+    """Each run's task gets its own context, which is the whole reason a
+    context variable is safe here."""
+    import asyncio
+
+    from atlas.application.chat.runs.context import (
+        clear_current_run,
+        get_current_run,
+        set_current_run,
+    )
+
+    clear_current_run()
+    seen = {}
+
+    async def run_task(run_id, conversation_id):
+        set_current_run(run_id, conversation_id)
+        await asyncio.sleep(0)
+        seen[run_id] = get_current_run()
+
+    await asyncio.gather(run_task("run-a", "conv-a"), run_task("run-b", "conv-b"))
+
+    assert seen["run-a"].conversation_id == "conv-a"
+    assert seen["run-b"].conversation_id == "conv-b"
+    # The parent context is untouched by either task.
+    assert get_current_run() is None

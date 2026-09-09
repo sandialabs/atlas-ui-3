@@ -297,3 +297,50 @@ def test_save_mode_helper_matches_transport_derivation():
     assert save_mode_is_server("server", incognito=True) is False
     assert save_mode_is_server("local") is False
     assert save_mode_is_server(None) is True
+
+
+# ---------------------------------------------------------------------------
+# Pending input requests (replay after the user was elsewhere)
+# ---------------------------------------------------------------------------
+
+def test_pending_request_is_kept_for_replay(registry):
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+    frame = {"type": "tool_approval_request", "tool_call_id": "t1", "arguments": {"q": "x"}}
+    registry.set_status(run.run_id, RunStatus.WAITING_FOR_INPUT, waiting_on="tool_approval_request")
+    registry.set_pending_request(run.run_id, frame)
+
+    replayed = registry.pending_requests_for_conversation("conv-a", USER)
+
+    assert replayed == [frame]
+
+
+def test_pending_request_is_copied_not_aliased(registry):
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+    frame = {"type": "tool_approval_request", "tool_call_id": "t1"}
+    registry.set_status(run.run_id, RunStatus.WAITING_FOR_INPUT)
+    registry.set_pending_request(run.run_id, frame)
+    frame["tool_call_id"] = "mutated"
+
+    assert registry.pending_requests_for_conversation("conv-a", USER)[0]["tool_call_id"] == "t1"
+
+
+def test_pending_request_clears_when_the_run_resumes(registry):
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+    registry.set_status(run.run_id, RunStatus.WAITING_FOR_INPUT)
+    registry.set_pending_request(run.run_id, {"type": "tool_approval_request"})
+
+    registry.set_status(run.run_id, RunStatus.RUNNING)
+
+    assert registry.pending_requests_for_conversation("conv-a", USER) == []
+
+
+def test_pending_request_is_not_readable_by_another_user(registry):
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+    registry.set_status(run.run_id, RunStatus.WAITING_FOR_INPUT)
+    registry.set_pending_request(run.run_id, {"type": "tool_approval_request"})
+
+    assert registry.pending_requests_for_conversation("conv-a", OTHER) == []
+
+
+def test_no_pending_request_for_a_conversation_without_a_run(registry):
+    assert registry.pending_requests_for_conversation("conv-nope", USER) == []

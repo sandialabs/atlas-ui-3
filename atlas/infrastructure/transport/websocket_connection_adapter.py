@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
+from atlas.application.chat.runs.context import stamp_with_current_run
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +33,13 @@ class WebSocketConnectionAdapter:
         returned, leaving the ASGI response complete while this object still
         looks connected -- so the send is guarded as well as checked.
         """
+        # Parallel runs (issue #884): stamp the frame with the run executing in
+        # this context. This is the chokepoint the agent loop's publisher uses,
+        # so tagging here -- rather than at each of its dozens of call sites --
+        # is what stops two concurrent runs' output from being indistinguishable
+        # at the client. A no-op when no run owns the current context.
+        data = stamp_with_current_run(data)
+
         if self.websocket.client_state != WebSocketState.CONNECTED:
             logger.debug("Dropping %s; websocket not connected", data.get("type"))
             return

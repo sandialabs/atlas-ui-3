@@ -130,6 +130,13 @@ class RunRecord:
     # Free-form label for what the run is waiting on (e.g. "tool_approval"),
     # surfaced to the client alongside WAITING_FOR_INPUT.
     waiting_on: Optional[str] = None
+    # The exact frame that asked for input, kept so it can be re-sent.
+    # A request emitted while the user was looking at another conversation (or
+    # had the browser closed) is otherwise gone: the client dropped it, and the
+    # id and arguments needed to answer it exist nowhere else. Replaying it when
+    # the conversation is opened is what makes "a run paused on approval can be
+    # approved after reconnect" true rather than aspirational.
+    pending_request: Optional[Dict[str, Any]] = None
 
     @property
     def is_terminal(self) -> bool:
@@ -314,12 +321,31 @@ class RunRegistry:
         record.updated_at = time.time()
         record.error = error
         record.waiting_on = waiting_on if status == RunStatus.WAITING_FOR_INPUT else None
+        if status != RunStatus.WAITING_FOR_INPUT:
+            # Whatever it was waiting for is no longer outstanding.
+            record.pending_request = None
         if status.is_terminal:
             record.ended_at = record.updated_at
             record.steering = None
             record.task = None
         self._notify(record)
         return record
+
+    def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
+        """Remember the request a run is blocked on, for later replay."""
+        record = self.get(run_id)
+        if record is None or record.is_terminal:
+            return
+        record.pending_request = dict(frame) if isinstance(frame, dict) else None
+
+    def pending_requests_for_conversation(
+        self, conversation_id: Optional[str], user_email: str
+    ) -> List[Dict[str, Any]]:
+        """Outstanding input requests for a conversation, for replay on open."""
+        record = self.active_for_conversation(conversation_id, user_email)
+        if record is None or record.pending_request is None:
+            return []
+        return [record.pending_request]
 
     def mark_detached(self, run_id: str) -> None:
         """Note that the run's originating socket is gone."""
@@ -390,11 +416,15 @@ class RunRegistry:
         return removed
 
     def enforce_wall_clock(self, max_seconds: float, now: Optional[float] = None) -> List[str]:
-        """Cancel non-terminal runs that have exceeded the wall-clock budget.
+        """Stop non-terminal runs that have exceeded the wall-clock budget.
 
         This is the backstop against unbounded unattended execution: a detached
         run has nobody watching it, so nothing else would ever stop it.
-        Returns the ids that were cancelled.
+
+        The run is recorded as ``FAILED``, not ``CANCELLED``: ``CANCELLED``
+        means the user stopped it, and a user who returns to a conversation
+        needs to see that it hit a limit rather than believe they stopped it
+        themselves. Returns the ids that were stopped.
         """
         if max_seconds <= 0:
             return []
@@ -404,7 +434,7 @@ class RunRegistry:
             if now - record.created_at <= max_seconds:
                 continue
             logger.warning(
-                "Run %s exceeded the %.0fs wall-clock limit; cancelling",
+                "Run %s exceeded the %.0fs wall-clock limit; stopping it and marking it failed",
                 record.run_id,
                 max_seconds,
             )

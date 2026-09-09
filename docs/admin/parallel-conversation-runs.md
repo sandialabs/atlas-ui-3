@@ -1,5 +1,7 @@
 # Parallel conversation runs
 
+Last updated: 2026-09-08
+
 Issue #884.
 
 A **run** is one history-mutating execution of a conversation: the agent loop
@@ -39,7 +41,7 @@ of one completion and nothing more.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MAX_CONCURRENT_RUNS_PER_USER` | `5` | Maximum simultaneous runs for one user. |
-| `MAX_RUN_WALL_CLOCK_SECONDS` | `3600` | Hard limit on a single run's execution time. `0` disables it. |
+| `MAX_RUN_WALL_CLOCK_SECONDS` | `3600` | Hard limit on a single run's execution time. A run that exceeds it is stopped and recorded as **failed**. `0` disables it. |
 | `TOOL_APPROVAL_TIMEOUT_SECONDS` | `300` | How long a run waits for a tool approval or elicitation response. `0` waits indefinitely. |
 
 ### The concurrency cap
@@ -71,6 +73,9 @@ queued -> running -> waiting_for_input -> running -> completed
                   \-> cancelled
 ```
 
+A run stopped by the wall-clock limit is recorded as `failed`, not `cancelled`:
+`cancelled` means a person stopped it.
+
 `waiting_for_input` means the run is paused on a tool approval or an MCP
 elicitation. It is the state that drives the amber "Needs approval" marker in
 the conversation list.
@@ -96,8 +101,29 @@ Server to client:
 | `run_status` | One run changed state. Sent to **every** connection belonging to the owner, which is how another open tab keeps its indicators current. |
 | `runs_snapshot` | Reply to `list_runs`; also carries `max_concurrent_runs_per_user`. |
 
+`run_started` also carries the conversation id. A brand-new chat has none of its
+own yet — the client only learns one when the turn is saved — so the server
+mints one at admission and reports it here. Without that, the first agent turn in
+a new conversation could never be a background run, which is the most common case
+of all.
+
+### Pending approvals are replayed, not lost
+
+An approval request that arrives while the user is looking at another
+conversation is not shown as a modal there; the conversation is marked "Needs
+approval" in the history list instead. The server keeps the request frame and
+re-sends it when that conversation is opened (`restore_conversation`) or named on
+`list_runs` after a reconnect, so it can still be answered. Without the replay
+the request id and arguments would exist nowhere the client could reach, and the
+run would sit blocked until it timed out.
+
 Every event a tracked run emits — tokens, agent updates, tool rows, files,
-canvas, completion, errors — carries `run_id` and `conversation_id`. The client
+canvas, completion, errors — carries `run_id` and `conversation_id`. Tagging
+happens in the WebSocket connection adapter, driven by a context variable bound
+inside each run's task: the agent loop publishes most of its output through a
+connection-scoped event publisher rather than the turn's own callback, so
+stamping at the one transport chokepoint is what keeps two concurrent runs
+distinguishable. The client
 uses them to route events, and to discard events for a conversation it is not
 displaying rather than splicing them into the visible transcript.
 
@@ -133,8 +159,9 @@ only when the running loop is not draining its steering channel — it is starti
 up, or paused on an approval. Answer the approval, or stop the run.
 
 **A conversation is stuck showing "Running".**
-Check the server log for the run id. The sweeper cancels runs past
-`MAX_RUN_WALL_CLOCK_SECONDS`; if that is set to `0`, nothing will.
+Check the server log for the run id. The sweeper stops runs past
+`MAX_RUN_WALL_CLOCK_SECONDS` and marks them failed; if that is set to `0`,
+nothing will.
 
 **Runs are not being created at all.**
 All three conditions under "When it applies" must hold. The most common cause is

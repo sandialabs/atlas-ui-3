@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #903 - 2026-09-08
+- **Parallel conversation runs** (#884): agent runs in different conversations now execute at the same time, keep going when the browser is closed, and are stopped individually — navigation no longer cancels work. Capped per user by `MAX_CONCURRENT_RUNS_PER_USER` (default 5). Requires chat history, a server save mode, and an agent-mode turn; every other turn is unchanged. See `docs/admin/parallel-conversation-runs.md`.
+
 ### PR #901 - 2026-09-08
 - Sign browser session cookies with SHA-256 so OIDC and Globus authentication work on FIPS-hardened systems where SHA-1 is unavailable.
 

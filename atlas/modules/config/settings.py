@@ -550,7 +550,8 @@ class AppSettings(BaseSettings):
         3600,
         ge=0,
         description="Hard wall-clock limit for a single conversation run, in seconds. "
-                    "A run that exceeds it is cancelled. 0 disables the limit.",
+                    "A run that exceeds it is stopped and recorded as failed (not "
+                    "cancelled, which means the user stopped it). 0 disables the limit.",
         validation_alias=AliasChoices("MAX_RUN_WALL_CLOCK_SECONDS"),
     )
     tool_approval_timeout_seconds: int = Field(

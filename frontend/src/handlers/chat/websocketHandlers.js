@@ -409,6 +409,19 @@ export function createWebSocketHandler(deps) {
       // history list, including for conversations that are not on screen.
       if (data.type === 'run_started' || data.type === 'run_status' || data.type === 'runs_snapshot') {
         if (typeof onRunStatus === 'function') onRunStatus(data)
+        // A new chat has no conversation id until the turn is saved, so the
+        // server mints one when it admits the run and reports it here. Adopting
+        // it now is what lets the routing below recognise this run's own events
+        // as belonging to the conversation on screen.
+        if (
+          data.type === 'run_started' &&
+          data.conversation_id &&
+          typeof setActiveConversationId === 'function' &&
+          typeof getVisibleConversationId === 'function' &&
+          !getVisibleConversationId()
+        ) {
+          setActiveConversationId(data.conversation_id)
+        }
         return
       }
 
@@ -425,6 +438,12 @@ export function createWebSocketHandler(deps) {
       // would otherwise fill up with another conversation's output. Untagged
       // events, from older producers and the whole untracked single-run path,
       // are always applied.
+      // An approval request for a conversation that is not on screen is not
+      // shown as a modal here -- a prompt about a chat the user is not looking
+      // at, with no context around it, is its own kind of wrong. The run is
+      // flagged as needing attention in the history list instead, and the
+      // server replays the request when that conversation is opened, so the
+      // frame is deferred rather than lost.
       if (data.run_id && data.conversation_id && typeof getVisibleConversationId === 'function') {
         const visible = getVisibleConversationId()
         if (visible !== data.conversation_id) {
