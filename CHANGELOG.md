@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #904 - 2026-09-08
+- Hold `fastmcp` below 4.0 and record why: FastMCP 4 removes server-initiated sampling, which the sampling_demo and tool_planner MCP servers require (tracked in #905).
+
 ### PR #901 - 2026-09-08
 - Sign browser session cookies with SHA-256 so OIDC and Globus authentication work on FIPS-hardened systems where SHA-1 is unavailable.
 
