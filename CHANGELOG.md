@@ -6,8 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #901 - 2026-09-08
+- Sign browser session cookies with SHA-256 so OIDC and Globus authentication work on FIPS-hardened systems where SHA-1 is unavailable.
+
 ### PR #900 - 2026-09-07
 - **Invalid LLM model configuration now fails at load time**: an invalid `reasoning_effort` is no longer swallowed by the generic fallback that silently loads zero models. The validation error includes the configuration search paths, and the admin contract and regression tests cover invalid, missing, and valid YAML configurations.
+- **A hook that floods stdout is reported as an output-cap error instead of hanging until its timeout**: the 1 MB cap killed the child and then awaited its full reap from inside the very reader feeding it. `asyncio` only completes `Process.wait()` once every stdio pipe has reached EOF, so once the reader stopped draining, the reap could not finish -- the overflow surfaced as a generic timeout, and only after the whole hook timeout had elapsed. The reader now signals the kill without awaiting, runs on to EOF (discarding the overflow) so the child is reapable, and every reap is bounded.
 
 ### PR #892 - 2026-09-04
 - **OIDC login, confidential-client authentication, and delegated OAuth credentials** (#891): Atlas can now terminate login itself (Authorization Code + PKCE), authenticate to the IdP as a confidential client, and mint short-lived audience-specific downstream tokens via RFC 8693 or Entra OBO. Opt-in; the trusted-header auth mode is unchanged. See `docs/admin/oidc-authentication.md`.

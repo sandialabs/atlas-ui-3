@@ -21,7 +21,6 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.middleware.sessions import SessionMiddleware
 
 from atlas.core.oidc.client_authentication import (
     ClientAuthenticationError,
@@ -51,6 +50,7 @@ from atlas.core.oidc.oidc_client import (
     normalize_scopes,
 )
 from atlas.core.oidc.session import OIDCSessionStore
+from atlas.core.session_middleware import SessionMiddleware
 
 DISCOVERY_DOC = {
     "issuer": "https://idp.example.gov",
@@ -510,6 +510,20 @@ def _patch_settings(settings):
 
 
 class TestOIDCRoutes:
+    def test_login_works_when_sha1_is_unavailable(self, oidc_app, metadata, monkeypatch):
+        def reject_sha1(*args, **kwargs):
+            raise ValueError("SHA-1 is unavailable")
+
+        monkeypatch.setattr(hashlib, "sha1", reject_sha1)
+        with _patch_settings(_Settings()), patch(
+            "atlas.routes.oidc_auth_routes.get_provider_metadata",
+            AsyncMock(return_value=metadata),
+        ):
+            response = TestClient(oidc_app).get("/auth/oidc/login", follow_redirects=False)
+
+        assert response.status_code == 302
+        assert "session" in response.cookies
+
     def test_login_redirects_to_the_idp_with_pkce(self, oidc_app, metadata):
         with _patch_settings(_Settings()), patch(
             "atlas.routes.oidc_auth_routes.get_provider_metadata",
