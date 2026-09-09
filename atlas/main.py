@@ -209,6 +209,14 @@ async def _release_finished_run(
     try:
         if session_id is not None:
             await chat_service.end_session(session_id)
+            # end_session only marks the session inactive. For a connection's
+            # session that is right -- it is reused for the life of the socket
+            # -- but a run's session is single-use: every run gets a fresh id,
+            # so nothing can ever reach this one again and leaving the record
+            # behind grows the repository by one entry per run, forever.
+            delete = getattr(chat_service.session_repository, "delete", None)
+            if delete is not None:
+                await delete(session_id)
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("Error ending session for run %s: %s", run_id, e)
 
