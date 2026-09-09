@@ -39,6 +39,7 @@ class ConfigManager:
         self._atlas_root = atlas_root or Path(__file__).parent.parent.parent
         self._app_settings: Optional[AppSettings] = None
         self._llm_config: Optional[LLMConfig] = None
+        self._llm_config_error: Optional[ValidationError] = None
         self._mcp_config: Optional[MCPConfig] = None
         self._rag_mcp_config: Optional[MCPConfig] = None
         self._rag_sources_config: Optional[RAGSourcesConfig] = None
@@ -185,6 +186,11 @@ class ConfigManager:
     @property
     def llm_config(self) -> LLMConfig:
         """Get LLM configuration (cached)."""
+        if self._llm_config_error is not None:
+            # A schema-invalid file is a startup-blocking condition, not a
+            # transient one: re-raise the first error instead of re-reading and
+            # re-logging the same file on every access.
+            raise self._llm_config_error
         if self._llm_config is None:
             llm_filename = self.app_settings.llm_config_file
             file_paths = self._search_paths(llm_filename)
@@ -200,11 +206,12 @@ class ConfigManager:
                     self._llm_config = LLMConfig(models={})
                     logger.info("Created empty LLM config (no configuration file found)")
 
-            except ValidationError:
+            except ValidationError as e:
                 logger.error(
                     "LLM configuration validation failed; searched: %s",
                     [str(path) for path in file_paths],
                 )
+                self._llm_config_error = e
                 raise
             except Exception as e:
                 logger.error(f"Failed to parse LLM configuration: {e}", exc_info=True)
@@ -567,6 +574,7 @@ class ConfigManager:
         """Reload all configurations from files."""
         self._app_settings = None
         self._llm_config = None
+        self._llm_config_error = None
         self._mcp_config = None
         self._rag_mcp_config = None
         self._rag_sources_config = None

@@ -295,7 +295,7 @@ models:
     reasoning_effort: "none"
 ```
 
-Accepted values are `none`, `minimal`, `low`, `medium`, `high` and `xhigh` — the set LiteLLM will carry on a chat/completions request. A value outside that set (a typo like `meduim`, or an unquoted `None`, which YAML reads as the *string* `"None"`) raises a configuration error when ATLAS loads `llmconfig.yml`; it is not swallowed by the loader's empty-model fallback. The error includes the configuration search paths, rather than surfacing as a provider `400` during someone's chat. Surrounding whitespace is trimmed and a blank value is treated as unset.
+Accepted values are `none`, `minimal`, `low`, `medium`, `high` and `xhigh` — the set LiteLLM will carry on a chat/completions request. A value outside that set (a typo like `meduim`, or an unquoted `None`, which YAML reads as the *string* `"None"`) raises a configuration error when ATLAS loads `llmconfig.yml`; it is not swallowed by the loader's empty-model fallback. The accompanying log record names the configuration search paths, rather than the problem surfacing as a provider `400` during someone's chat. Surrounding whitespace is trimmed and a blank value is treated as unset.
 
 Omitting the key is the default and the right choice for every model without a reasoning control (GPT-4.1, GPT-4o, the Anthropic, Gemini, Groq and OpenRouter entries): the key is left out of the payload entirely, so nothing about those requests changes.
 

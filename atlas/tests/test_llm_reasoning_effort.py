@@ -179,6 +179,62 @@ class TestReasoningEffortConfigLoading:
         with pytest.raises(ValidationError, match="meduim"):
             manager.llm_config
 
+    def test_validation_failure_is_cached_and_not_re_read(self, tmp_path, monkeypatch):
+        """A schema-invalid file blocks startup; it must not be re-parsed each access."""
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(
+            "models:\n"
+            "  bad:\n"
+            "    model_name: bad\n"
+            "    model_url: https://x/v1\n"
+            "    reasoning_effort: meduim\n",
+            encoding="utf-8",
+        )
+        manager = ConfigManager()
+        calls = []
+
+        def _paths(_name):
+            calls.append(_name)
+            return [config_path]
+
+        monkeypatch.setattr(manager, "_search_paths", _paths)
+
+        with pytest.raises(ValidationError):
+            manager.llm_config
+        with pytest.raises(ValidationError):
+            manager.llm_config
+
+        # The second access re-raised the cached error rather than re-reading.
+        assert len(calls) == 1
+
+    def test_reload_clears_a_cached_validation_failure(self, tmp_path, monkeypatch):
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(
+            "models:\n"
+            "  bad:\n"
+            "    model_name: bad\n"
+            "    model_url: https://x/v1\n"
+            "    reasoning_effort: meduim\n",
+            encoding="utf-8",
+        )
+        manager = ConfigManager()
+        monkeypatch.setattr(manager, "_search_paths", lambda _: [config_path])
+
+        with pytest.raises(ValidationError):
+            manager.llm_config
+
+        config_path.write_text(
+            "models:\n"
+            "  good:\n"
+            "    model_name: good\n"
+            "    model_url: https://x/v1\n"
+            "    reasoning_effort: none\n",
+            encoding="utf-8",
+        )
+        manager.reload_configs()
+
+        assert list(manager.llm_config.models) == ["good"]
+
     def test_missing_config_still_loads_empty_config(self, tmp_path, monkeypatch):
         missing_path = tmp_path / "llmconfig.yml"
         manager = ConfigManager()
