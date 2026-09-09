@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from pydantic import ValidationError
+
+from atlas.domain.errors import ConfigurationError
 
 from .models import (
     FileExtractorsConfig,
@@ -31,6 +34,42 @@ from .settings import AppSettings
 logger = logging.getLogger(__name__)
 
 
+_SENSITIVE_FIELD_HINTS = ("api_key", "key", "secret", "token", "password", "extra_headers")
+
+
+def _redact_validation_error(exc: ValidationError, file_paths: list) -> str:
+    """Summarise a pydantic error without echoing configuration values back.
+
+    ``ValidationError`` embeds the offending input, and for ``missing``-type
+    errors that input is the *whole* model entry -- ``api_key`` and
+    ``extra_headers`` included. ``SecretStr`` does not help here: the input is
+    the raw mapping as it was read from YAML, before any field type applies. So
+    the message is rebuilt from ``exc.errors()``, keeping the location and the
+    reason, and echoing the value only when it is a scalar under a
+    non-sensitive field -- which is what an operator actually needs to see (the
+    typo'd ``reasoning_effort``), and never a credential-bearing mapping.
+    """
+    lines = []
+    for err in exc.errors():
+        loc = ".".join(str(part) for part in err.get("loc", ())) or "<root>"
+        leaf = str(err.get("loc", ("",))[-1]).lower() if err.get("loc") else ""
+        value = err.get("input")
+        sensitive = any(hint in leaf for hint in _SENSITIVE_FIELD_HINTS)
+        if sensitive or not isinstance(value, (str, int, float, bool, type(None))):
+            shown = "<redacted>"
+        else:
+            shown = repr(value)
+            if len(shown) > 80:
+                shown = shown[:77] + "...'"
+        lines.append(f"  {loc}: {err.get('msg', 'invalid')} (got {shown})")
+    searched = ", ".join(str(path) for path in file_paths) or "<no paths searched>"
+    return (
+        "LLM configuration validation failed.\n"
+        + "\n".join(lines)
+        + f"\nSearched: {searched}"
+    )
+
+
 class ConfigManager:
     """Centralized configuration manager with proper error handling."""
 
@@ -38,6 +77,7 @@ class ConfigManager:
         self._atlas_root = atlas_root or Path(__file__).parent.parent.parent
         self._app_settings: Optional[AppSettings] = None
         self._llm_config: Optional[LLMConfig] = None
+        self._llm_config_error: Optional[ConfigurationError] = None
         self._mcp_config: Optional[MCPConfig] = None
         self._rag_mcp_config: Optional[MCPConfig] = None
         self._rag_sources_config: Optional[RAGSourcesConfig] = None
@@ -183,12 +223,24 @@ class ConfigManager:
 
     @property
     def llm_config(self) -> LLMConfig:
-        """Get LLM configuration (cached)."""
+        """Get LLM configuration (cached).
+
+        Unlike the other loaders on this class, a schema-invalid file here is
+        fatal rather than survivable: a silently empty model set looks like a
+        working server with nothing to talk to. ``mcp_config`` and the rest
+        still fall back to an empty config on a validation error, because a
+        missing tool server degrades the app instead of disabling it.
+        """
+        if self._llm_config_error is not None:
+            # A schema-invalid file is a startup-blocking condition, not a
+            # transient one: re-raise the first error instead of re-reading and
+            # re-logging the same file on every access. Strip the accumulated
+            # traceback so repeated accesses do not keep growing it.
+            raise self._llm_config_error.with_traceback(None)
         if self._llm_config is None:
+            llm_filename = self.app_settings.llm_config_file
+            file_paths = self._search_paths(llm_filename)
             try:
-                # Use config filename from app settings
-                llm_filename = self.app_settings.llm_config_file
-                file_paths = self._search_paths(llm_filename)
                 data = self._load_file_with_error_handling(file_paths, "YAML")
 
                 if data:
@@ -200,6 +252,14 @@ class ConfigManager:
                     self._llm_config = LLMConfig(models={})
                     logger.info("Created empty LLM config (no configuration file found)")
 
+            except ValidationError as e:
+                # Never let the raw pydantic error escape: it carries the
+                # offending input, which for a missing required field is the
+                # entire model entry, api_key included.
+                message = _redact_validation_error(e, file_paths)
+                logger.error("%s", message)
+                self._llm_config_error = ConfigurationError(message)
+                raise self._llm_config_error from None
             except Exception as e:
                 logger.error(f"Failed to parse LLM configuration: {e}", exc_info=True)
                 self._llm_config = LLMConfig(models={})
@@ -561,6 +621,7 @@ class ConfigManager:
         """Reload all configurations from files."""
         self._app_settings = None
         self._llm_config = None
+        self._llm_config_error = None
         self._mcp_config = None
         self._rag_mcp_config = None
         self._rag_sources_config = None
