@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
+from atlas.domain.errors import ConfigurationError
 from atlas.modules.config.config_manager import ConfigManager, LLMConfig, ModelConfig
 from atlas.modules.config.models import REASONING_EFFORT_VALUES
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
@@ -176,7 +177,7 @@ class TestReasoningEffortConfigLoading:
         manager = ConfigManager()
         monkeypatch.setattr(manager, "_search_paths", lambda _: [config_path])
 
-        with pytest.raises(ValidationError, match="meduim"):
+        with pytest.raises(ConfigurationError, match="meduim"):
             manager.llm_config
 
     def test_validation_failure_is_cached_and_not_re_read(self, tmp_path, monkeypatch):
@@ -199,9 +200,9 @@ class TestReasoningEffortConfigLoading:
 
         monkeypatch.setattr(manager, "_search_paths", _paths)
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ConfigurationError):
             manager.llm_config
-        with pytest.raises(ValidationError):
+        with pytest.raises(ConfigurationError):
             manager.llm_config
 
         # The second access re-raised the cached error rather than re-reading.
@@ -220,7 +221,7 @@ class TestReasoningEffortConfigLoading:
         manager = ConfigManager()
         monkeypatch.setattr(manager, "_search_paths", lambda _: [config_path])
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ConfigurationError):
             manager.llm_config
 
         config_path.write_text(
@@ -257,3 +258,77 @@ class TestReasoningEffortConfigLoading:
 
         assert manager.llm_config.models["valid"].reasoning_effort == "none"
         assert len(manager.llm_config.models) == 1
+
+    def test_validation_error_does_not_leak_credentials(self, tmp_path, monkeypatch):
+        """A missing required field makes pydantic report the whole entry as input."""
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(
+            "models:\n"
+            "  bad:\n"
+            "    model_name: bad\n"
+            "    api_key: sk-SUPERSECRET\n"
+            "    extra_headers:\n"
+            "      Authorization: Bearer tok-SUPERSECRET\n",
+            encoding="utf-8",
+        )
+        manager = ConfigManager()
+        monkeypatch.setattr(manager, "_search_paths", lambda _: [config_path])
+
+        with pytest.raises(ConfigurationError) as exc:
+            manager.llm_config
+
+        message = str(exc.value)
+        assert "sk-SUPERSECRET" not in message
+        assert "tok-SUPERSECRET" not in message
+        # Still actionable: the failing field and the searched path are named.
+        assert "model_url" in message
+        assert str(config_path) in message
+
+
+class TestConfigCliOnInvalidConfig:
+    """The diagnostic commands must explain a bad config, not traceback on it."""
+
+    def _manager_raising(self, monkeypatch, tmp_path):
+        from atlas.modules.config import cli
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(
+            "models:\n"
+            "  bad:\n"
+            "    model_name: bad\n"
+            "    model_url: https://x/v1\n"
+            "    reasoning_effort: meduim\n",
+            encoding="utf-8",
+        )
+
+        def _factory():
+            manager = ConfigManager()
+            manager._search_paths = lambda _: [config_path]
+            return manager
+
+        monkeypatch.setattr(cli, "ConfigManager", _factory)
+        return cli
+
+    def test_list_models_prints_the_error_and_exits_non_zero(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        cli = self._manager_raising(monkeypatch, tmp_path)
+
+        with pytest.raises(SystemExit) as exc:
+            cli.list_models(None)
+
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "❌" in out
+        assert "meduim" in out
+
+    def test_export_config_prints_the_error_and_exits_non_zero(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        cli = self._manager_raising(monkeypatch, tmp_path)
+
+        with pytest.raises(SystemExit) as exc:
+            cli.export_config(None)
+
+        assert exc.value.code == 1
+        assert "❌" in capsys.readouterr().out

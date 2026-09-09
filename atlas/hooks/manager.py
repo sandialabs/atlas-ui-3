@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 # is treated as a hook error (handled per ``on_error``) and logged.
 _MAX_OUTPUT_BYTES = 1 * 1024 * 1024  # 1 MB
 _REAP_TIMEOUT_S = 5.0  # upper bound on waiting for a killed hook to be reaped
+_OVERFLOW_DRAIN_TIMEOUT_S = 2.0  # upper bound on draining the tail after the cap trips
+_DRAIN_POLL_S = 0.25  # how often an idle read re-checks the overflow deadline
 
 # Verdict severity ordering for the "most-restrictive-wins" composition rule.
 # deny > require_approval > modify > continue. A later hook can raise the
@@ -447,6 +449,12 @@ class HookManager:
         """
         try:
             await asyncio.wait_for(proc.wait(), timeout=_REAP_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            # Worth surfacing: the child outlived SIGKILL for the whole budget,
+            # which in practice means it left a descendant holding its pipes.
+            logger.warning(
+                "hooks: killed hook process was not reaped within %ss", _REAP_TIMEOUT_S
+            )
         except Exception:  # pragma: no cover - defensive
             # Reaping is best-effort; a failure here must not mask the original
             # timeout/IO error the caller is about to report.
@@ -464,8 +472,10 @@ class HookManager:
         child is killed as soon as their combined size crosses
         ``_MAX_OUTPUT_BYTES``. Returns ``(stdout, stderr, overflowed)``.
         """
+        loop = asyncio.get_running_loop()
         total = 0
         overflowed = False
+        overflow_deadline = 0.0
 
         async def _feed() -> None:
             if proc.stdin is None:
@@ -484,21 +494,36 @@ class HookManager:
                     logger.debug("hooks: failed to close hook stdin", exc_info=True)
 
         async def _drain(stream: Any) -> bytes:
-            nonlocal total, overflowed
+            nonlocal total, overflowed, overflow_deadline
             if stream is None:
                 return b""
             buf = bytearray()
             while True:
-                chunk = await stream.read(65536)
+                try:
+                    chunk = await asyncio.wait_for(stream.read(65536), _DRAIN_POLL_S)
+                except asyncio.TimeoutError:
+                    # Idle. Cancelling a StreamReader read consumes nothing, so
+                    # polling is only a chance to re-check the deadline below.
+                    if overflowed and loop.time() >= overflow_deadline:
+                        return bytes(buf)
+                    continue
                 if not chunk:
                     return bytes(buf)
                 if overflowed:
-                    # Another stream already tripped the cap. Keep reading so
-                    # this pipe still reaches EOF -- see below -- but discard.
+                    # Already over the cap (here or on the sibling stream).
+                    # Keep reading so this pipe can still reach EOF and let the
+                    # child be reaped, but drop what arrives -- and give up at
+                    # the deadline: SIGKILL reaches only the direct child, so a
+                    # hook that backgrounded something holding this fd would
+                    # never send EOF, and waiting for it would report "timeout"
+                    # for what is really a cap violation.
+                    if loop.time() >= overflow_deadline:
+                        return bytes(buf)
                     continue
                 total += len(chunk)
                 if total > _MAX_OUTPUT_BYTES:
                     overflowed = True
+                    overflow_deadline = loop.time() + _OVERFLOW_DRAIN_TIMEOUT_S
                     # Signal only: awaiting the reap here would deadlock, since
                     # the child is not reaped until this very pipe hits EOF.
                     cls._signal_kill(proc)
