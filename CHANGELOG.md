@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #901 - 2026-09-08
+- Sign browser session cookies with SHA-256 so OIDC and Globus authentication work on FIPS-hardened systems where SHA-1 is unavailable.
+
 ### PR #899 - 2026-09-07
 - **Interactive OAuth 2.1 authorization for MCP servers** (closes #898): Atlas now runs the Authorization Code + PKCE flow for `auth_type: oauth` servers -- discovering the provider, registering dynamically, and storing per-user tokens -- instead of only accepting a token pasted in by hand. See `docs/admin/mcp-server-authentication.md`.
 

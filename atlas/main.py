@@ -51,6 +51,7 @@ from atlas.core.middleware import AuthMiddleware
 from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
+from atlas.core.session_middleware import SessionMiddleware
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
@@ -387,8 +388,6 @@ elif config.app_settings.feature_globus_auth_enabled:
 if not _session_secret:
     _session_secret = config.app_settings.mcp_oauth_session_secret
 if _session_secret:
-    from starlette.middleware.sessions import SessionMiddleware
-
     # The session cookie is the login credential in OIDC mode, so it must carry
     # Secure on any https deployment: a hostname with an http listener (an
     # http-to-https redirect, typically) would otherwise leak it in plaintext

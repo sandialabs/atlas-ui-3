@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-09-04
+Last updated: 2026-09-08
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -46,10 +46,10 @@ OAuth 2.1 requires it for the code grant. The `state` parameter carries CSRF
 protection and the `nonce` binds the ID token to this browser's request; both
 are single-use and cleared before the code is redeemed.
 
-**Token material never reaches the browser.** The cookie holds only an opaque
-session id; access tokens, refresh tokens, and validated ID token claims live in
-a server-side store inside the Atlas credential boundary. Agents and MCP servers
-never see them.
+**Token material never reaches the browser.** The HMAC-SHA256-signed cookie holds
+only an opaque session id; access tokens, refresh tokens, and validated ID token
+claims live in a server-side store inside the Atlas credential boundary. Agents
+and MCP servers never see them.
 
 ### Routes
 
