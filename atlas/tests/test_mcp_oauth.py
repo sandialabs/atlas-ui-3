@@ -861,8 +861,6 @@ class TestDiscoveryFailureCaching:
                 await cache.get(MCP_URL)
         assert attempts == [], "a cached failure was re-fetched inside its TTL"
 
-        import asyncio
-
         await asyncio.sleep(0.02)
 
         # TTL lapsed: the now-healthy provider is reached and cached.
@@ -878,8 +876,6 @@ class TestDiscoveryFailureCaching:
     @pytest.mark.asyncio
     async def test_one_stalled_server_does_not_block_another(self):
         """Locks are per URL: a slow provider must not serialize healthy ones."""
-        import asyncio
-
         release = asyncio.Event()
         entered = asyncio.Event()
         other_url = "https://other.example.com/mcp"
