@@ -11,10 +11,12 @@ actual asyncio subprocess path. They are language-agnostic by construction
 (scripts use the host's python) -- this is the contract operators rely on.
 """
 
+import asyncio
 import json
 import os
 import sys
 import textwrap
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -30,6 +32,8 @@ from atlas.hooks import (
     default_on_error,
     set_hook_manager_for_testing,
 )
+from atlas.hooks import manager as manager_mod
+from atlas.hooks.manager import _MAX_OUTPUT_BYTES
 from atlas.modules.config.config_loader import ConfigManager
 
 # ----------------------------------------------------------- helpers/fixtures
@@ -498,6 +502,67 @@ class TestSecurity:
 # ---------------------------------------------------------- failure modes
 
 
+
+class _FakeStream:
+    """A stream that yields preset chunks, then EOF.
+
+    With ``never_eof`` it instead blocks forever once the chunks run out, the
+    way a pipe still held open by a backgrounded grandchild would: SIGKILL to
+    the direct child does not close that fd.
+    """
+
+    def __init__(self, chunks, never_eof=False):
+        self._chunks = list(chunks)
+        self._never_eof = never_eof
+        self.at_eof = False
+
+    async def read(self, _n):
+        await asyncio.sleep(0)
+        if self._chunks:
+            return self._chunks.pop(0)
+        if self._never_eof:
+            await asyncio.sleep(3600)
+        self.at_eof = True
+        return b""
+
+
+class _FakeProc:
+    """Stands in for asyncio's Process with its reaping order preserved.
+
+    ``BaseSubprocessTransport._try_finish`` only completes ``wait()`` once every
+    stdio pipe has disconnected, so a caller that stops reading mid-stream can
+    never reap the child. Modelling that here makes the deadlock deterministic
+    rather than dependent on pipe-buffer timing.
+    """
+
+    def __init__(self, stdout_chunks, stderr_chunks, never_eof=False):
+        self.stdout = _FakeStream(stdout_chunks, never_eof=never_eof)
+        self.stderr = _FakeStream(stderr_chunks, never_eof=never_eof)
+        self.stdin = _FakeStdin()
+        self.killed = False
+        self.returncode = None
+
+    def kill(self):
+        self.killed = True
+
+    async def wait(self):
+        while not (self.stdout.at_eof and self.stderr.at_eof):
+            await asyncio.sleep(0)
+        self.returncode = -9
+        return self.returncode
+
+
+class _FakeStdin:
+    def write(self, _b):
+        pass
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        pass
+
+
 class TestFailureModes:
     async def test_timeout_kills_and_uses_on_error(self, tmp_path):
         body = f"""\
@@ -546,6 +611,58 @@ class TestFailureModes:
         # decision.
         assert outcome.verdict == "deny"
         assert "1 MB" in outcome.reason
+
+    async def test_overflow_drains_to_eof_instead_of_awaiting_the_reap(self):
+        # Regression: on overflow the reader used to await the child's full
+        # reap. ``Process.wait()`` only resolves once every pipe has reached
+        # EOF, so the reader blocked on a pipe it had itself stopped draining
+        # -- the overflow then surfaced as a timeout, and only after the whole
+        # hook timeout had burned. _FakeProc models that ordering exactly.
+        proc = _FakeProc([b"x" * 65536] * 32, [])  # 2 MB, over the 1 MB cap
+        stdout, stderr, overflowed = await asyncio.wait_for(
+            HookManager._communicate_bounded(proc, b"{}\n"), timeout=5
+        )
+        assert overflowed is True
+        assert proc.killed is True
+        # The cap is enforced while reading: the buffer never holds the whole
+        # stream, even though the reader ran on to EOF to let the child be reaped.
+        assert len(stdout) <= _MAX_OUTPUT_BYTES
+        assert proc.stdout.at_eof and proc.stderr.at_eof
+        assert proc.returncode is not None
+
+    async def test_overflow_keeps_draining_the_sibling_stream_to_eof(self):
+        # The cap is combined across both pipes, and *both* must reach EOF
+        # before the child can be reaped -- so the stream that did not trip the
+        # cap still has to be drained. Deleting that branch hangs this test.
+        proc = _FakeProc([b"x" * 65536] * 24, [b"e" * 65536] * 24)
+        stdout, stderr, overflowed = await asyncio.wait_for(
+            HookManager._communicate_bounded(proc, b"{}\n"), timeout=5
+        )
+        assert overflowed is True
+        assert proc.stdout.at_eof and proc.stderr.at_eof
+        assert len(stdout) + len(stderr) <= _MAX_OUTPUT_BYTES
+        assert proc.returncode is not None
+
+    async def test_overflow_gives_up_on_a_pipe_that_never_reaches_eof(self, monkeypatch):
+        # SIGKILL reaches only the direct child. A hook that backgrounds a
+        # process holding stdout leaves the pipe open forever; draining to EOF
+        # unconditionally would hang to the hook timeout and misreport the cap
+        # violation as a timeout -- the very symptom this fix is about.
+        # Shrink both deadlines: this test is about the bound existing, not
+        # about its production value, and the real ones would cost ~7s.
+        monkeypatch.setattr(manager_mod, "_OVERFLOW_DRAIN_TIMEOUT_S", 0.2)
+        monkeypatch.setattr(manager_mod, "_REAP_TIMEOUT_S", 0.2)
+        proc = _FakeProc([b"x" * 65536] * 24, [], never_eof=True)
+        t0 = time.monotonic()
+        _stdout, _stderr, overflowed = await asyncio.wait_for(
+            HookManager._communicate_bounded(proc, b"{}\n"), timeout=30
+        )
+        elapsed = time.monotonic() - t0
+        assert overflowed is True
+        assert proc.killed is True
+        # Bounded by the drain deadline plus the reap deadline, not by the
+        # hook's own (much larger) timeout.
+        assert elapsed < 3, f"drain was not bounded: took {elapsed:.1f}s"
 
     async def test_output_within_the_cap_is_returned_intact(self, tmp_path):
         payload = "y" * 10000
