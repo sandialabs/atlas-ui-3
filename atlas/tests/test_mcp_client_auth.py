@@ -523,3 +523,78 @@ class TestGetPromptAuthRouting:
         )
         assert result == "ok"
         manager._get_or_create_user_http_client.assert_awaited_once()
+
+
+class TestSilentOAuthRefreshCallSite:
+    """The expired-oauth-token path in ``_get_user_client``.
+
+    ``_refresh_oauth_token`` itself is covered in test_mcp_oauth.py; what is
+    covered here is that the factory actually calls it when the storage lookup
+    comes back empty, and honours the result. Without these, deleting the call
+    leaves the suite green.
+    """
+
+    @pytest.fixture
+    def manager(self):
+        import asyncio
+
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "oauth-server": {
+                "auth_type": "oauth",
+                "url": "https://mcp.example.com/mcp",
+                "oauth_config": {},
+            }
+        }
+        manager._user_clients = {}
+        manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_expired_oauth_token_is_refreshed_and_used(self, manager):
+        """A refreshable expired token yields a client without user action."""
+        from unittest.mock import AsyncMock
+
+        refreshed = MagicMock()
+        refreshed.token_value = "renewed-access-token"
+        refreshed.metadata = {}
+
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.mcp_oauth_service.refresh_stored_token",
+                   new=AsyncMock(return_value=refreshed)) as mock_refresh, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class, \
+             patch("atlas.modules.mcp_tools.client.StreamableHttpTransport") as mock_transport_class:
+            mock_token_storage = MagicMock()
+            mock_token_storage.get_valid_token.return_value = None
+            mock_storage.return_value = mock_token_storage
+            mock_transport_class.return_value = MagicMock()
+            mock_client_class.return_value = MagicMock()
+
+            result = await manager._get_user_client("oauth-server", "user@example.com")
+
+        assert result is not None
+        mock_refresh.assert_awaited_once()
+        # oauth goes through Client(url, auth=<token>), not a header transport.
+        assert mock_client_class.call_args.kwargs["auth"] == "renewed-access-token"
+
+    @pytest.mark.asyncio
+    async def test_no_client_when_refresh_declines(self, manager):
+        """A refusal leaves the server unauthenticated so the user re-authorizes."""
+        from unittest.mock import AsyncMock
+
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.mcp_oauth_service.refresh_stored_token",
+                   new=AsyncMock(return_value=None)) as mock_refresh:
+            mock_token_storage = MagicMock()
+            mock_token_storage.get_valid_token.return_value = None
+            mock_storage.return_value = mock_token_storage
+
+            result = await manager._get_user_client("oauth-server", "user@example.com")
+
+        assert result is None
+        mock_refresh.assert_awaited_once()

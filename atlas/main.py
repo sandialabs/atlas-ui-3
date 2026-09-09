@@ -367,7 +367,8 @@ app.add_middleware(
     oidc_enabled=config.app_settings.feature_oidc_auth_enabled,
 )
 
-# Session middleware backing the Globus OAuth state and the OIDC login session.
+# Session middleware backing the Globus OAuth state, the OIDC login session,
+# and the in-flight state of the MCP OAuth authorization flow.
 #
 # Registered *after* AuthMiddleware on purpose: Starlette runs the most
 # recently added middleware outermost, so this ordering is what makes
@@ -380,6 +381,12 @@ if config.app_settings.feature_oidc_auth_enabled:
     _session_secret = config.app_settings.oidc_session_secret
 elif config.app_settings.feature_globus_auth_enabled:
     _session_secret = config.app_settings.globus_session_secret
+# The MCP OAuth connect flow needs a browser session to hold its PKCE verifier
+# and single-use state, and it is independent of how users log in to Atlas. A
+# deployment using header auth with an OAuth-protected MCP server would
+# otherwise have no session at all, so a dedicated secret can supply one.
+if not _session_secret:
+    _session_secret = config.app_settings.mcp_oauth_session_secret
 if _session_secret:
     # The session cookie is the login credential in OIDC mode, so it must carry
     # Secure on any https deployment: a hostname with an http listener (an
@@ -389,8 +396,19 @@ if _session_secret:
     # a hard "on" would break local http development.
     _cookie_secure = config.app_settings.oidc_cookie_secure
     if _cookie_secure is None:
-        _redirect_uri = config.app_settings.oidc_redirect_uri or ""
-        _cookie_secure = _redirect_uri.startswith("https://")
+        # Every https URL that identifies this deployment counts, not just the
+        # OIDC one. The MCP OAuth flow puts CSRF state in this cookie on
+        # header-auth deployments, where oidc_redirect_uri is unset -- deriving
+        # the flag from that alone would ship the cookie without Secure over
+        # https for exactly the deployment this feature enables.
+        _secure_candidates = (
+            config.app_settings.oidc_redirect_uri,
+            config.app_settings.mcp_oauth_redirect_base_url,
+            config.app_settings.backend_public_url,
+        )
+        _cookie_secure = any(
+            (candidate or "").startswith("https://") for candidate in _secure_candidates
+        )
     app.add_middleware(
         SessionMiddleware,
         secret_key=_session_secret,

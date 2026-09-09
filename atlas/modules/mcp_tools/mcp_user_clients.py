@@ -58,6 +58,33 @@ class UserClientMixin:
         auth_type = config.get("auth_type", "none")
         return auth_type in ("oauth", "jwt", "bearer", "api_key", "delegated")
 
+    async def _refresh_oauth_token(self, user_email, server_name, config):
+        """Renew an expired OAuth access token from its refresh token.
+
+        Returns the refreshed record, or None when the server is not an oauth
+        server, no refresh token is held, or the provider refuses -- all of
+        which leave the caller reporting the server as unauthenticated so the
+        user is prompted to authorize again.
+        """
+        from atlas.modules.mcp_tools import mcp_oauth_service
+
+        if not mcp_oauth_service.is_oauth_server(config):
+            return None
+
+        try:
+            return await mcp_oauth_service.refresh_stored_token(
+                user_email, server_name, config
+            )
+        except Exception as exc:
+            # A refresh must never turn into a failed tool call: the fallback
+            # is always "ask the user to re-authorize".
+            logger.warning(
+                "OAuth refresh raised for server '%s': %s",
+                sanitize_for_logging(server_name),
+                exc,
+            )
+            return None
+
     async def _mint_delegated_token(self, user_email, server_name, config):
         """Obtain a delegated downstream token for a ``delegated`` MCP server.
 
@@ -266,6 +293,13 @@ class UserClientMixin:
 
         # Get server config
         config = self.servers_config.get(server_name, {})
+
+        if stored_token is None:
+            # An oauth server whose access token has expired can usually renew
+            # itself silently: get_valid_token returned None, but a refresh
+            # token may still be on the record. Only if that fails does the
+            # user get sent back through the browser flow.
+            stored_token = await self._refresh_oauth_token(user_email, server_name, config)
 
         if stored_token is None:
             # A delegated server has no token to upload: Atlas mints one by

@@ -63,23 +63,32 @@ def build_authorize_url(
     authorization_endpoint: str,
     client_id: str,
     redirect_uri: str,
-    scope: str,
     state: str,
     code_challenge: str,
-    nonce: str,
+    scope: Optional[str] = None,
+    nonce: Optional[str] = None,
     extra_params: Optional[Dict[str, str]] = None,
 ) -> str:
-    """Build the IdP authorization URL for the code flow with PKCE."""
+    """Build the IdP authorization URL for the code flow with PKCE.
+
+    ``scope`` and ``nonce`` are optional and omitted entirely when empty.
+    OIDC login always supplies both; the MCP OAuth flow has no ID token, so it
+    has no nonce, and it may have no scopes to request. Emitting ``nonce=`` or
+    ``scope=`` with an empty value is not the same as omitting the parameter,
+    and some authorization servers reject the empty form.
+    """
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
-        "scope": scope,
         "state": state,
-        "nonce": nonce,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    if scope:
+        params["scope"] = scope
+    if nonce:
+        params["nonce"] = nonce
     if extra_params:
         params.update(extra_params)
     separator = "&" if "?" in authorization_endpoint else "?"

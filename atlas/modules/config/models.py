@@ -195,14 +195,19 @@ class LLMConfig(BaseModel):
 
 
 class OAuthConfig(BaseModel):
-    """OAuth 2.1 configuration for MCP server authentication.
+    """OAuth 2.1 configuration for an ``auth_type: "oauth"`` MCP server.
 
-    Supports the OAuth 2.1 Authorization Code Grant with PKCE as implemented
-    by FastMCP. See https://gofastmcp.com/clients/auth/oauth for details.
+    Every field is optional: Atlas discovers the authorization server from the
+    MCP endpoint (RFC 9728 -> RFC 8414) and registers itself dynamically
+    (RFC 7591), so a server usually needs nothing here at all. The fields
+    exist for providers that do not offer dynamic registration, or where an
+    operator wants to pin the scopes Atlas asks for.
     """
-    scopes: Optional[List[str]] = None  # OAuth scopes to request (e.g., ["read", "write"])
-    client_name: str = "Atlas UI"  # Client name for dynamic registration
-    callback_port: Optional[int] = None  # Fixed port for OAuth callback (default: random)
+    scopes: Optional[List[str]] = None  # Scopes to request; default: whatever the server advertises
+    client_name: str = "Atlas UI"  # Client name presented at dynamic registration
+    client_id: Optional[str] = None  # Pre-registered client_id; skips dynamic registration
+    client_secret: Optional[str] = None  # Only for a provider that requires a confidential client
+    callback_port: Optional[int] = None  # Deprecated and ignored: the callback is an Atlas route
 
 
 class DelegationConfig(BaseModel):
