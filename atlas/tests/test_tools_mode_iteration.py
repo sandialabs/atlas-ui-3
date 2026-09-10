@@ -372,8 +372,6 @@ async def test_the_requesting_user_reaches_the_schema_scoping_api_non_streaming(
     with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
         mock_te.execute_multiple_tools = AsyncMock(return_value=[])
         mock_te.build_files_manifest = MagicMock(return_value=None)
-        # Schemas are resolved before the LLM call, which this scripted
-        # double does not implement for the non-streaming path.
         try:
             await runner.run(
                 session=_session(),
@@ -383,6 +381,9 @@ async def test_the_requesting_user_reaches_the_schema_scoping_api_non_streaming(
                 user_email="owner@example.gov",
             )
         except Exception:
+            # Expected: schemas are resolved before the LLM call, and this
+            # scripted double does not implement the non-streaming call path.
+            # What is under test is the argument that already went out.
             pass
 
     args, kwargs = runner.tool_manager.get_tools_schema.call_args
