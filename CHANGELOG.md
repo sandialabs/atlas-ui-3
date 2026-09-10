@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #920 - 2026-09-10
+- Transient LLM failures (rate limits, timeouts, 5xx) are now retried with exponential backoff on the streaming path (previously none) as well as the non-streaming path, with the retry count configurable via `LLM_MAX_RETRIES` (default 5) and a cumulative backoff cap via `LLM_RETRY_MAX_WAIT_SECONDS` (default 300s = 5 minutes); once a streaming response has yielded a token, failures surface instead of retrying (closes #919).
+
 ### PR #917 - 2026-09-10
 - A workspace selector now sits in the chat-bar footer next to the model/tools/prompt controls (gated on the workspaces feature). It shares the header switcher's active-workspace state, so switching context works from either control, and its panel opens upward to stay on screen above the chat bar (closes #916).
 
