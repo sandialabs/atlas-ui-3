@@ -148,7 +148,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     complianceLevelFilter,
     tools: allTools,
     prompts: allPrompts,
-    features
+    features,
+    refreshConfig
   } = useChat()
   const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts, isComplianceAccessible } = useMarketplace()
   
@@ -486,6 +487,17 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     return () => { closeGuardRef.current = null }
   })
 
+  // Re-fetch /api/config after an in-page authorization change. OAuth connects
+  // by full-page navigation and picks the new catalogue up on reload, but token
+  // upload and disconnect stay on the page, so the tool list would otherwise
+  // keep showing what was visible before the credential changed.
+  const refreshCatalogue = useCallback(() => {
+    if (!refreshConfig) return
+    Promise.resolve(refreshConfig()).catch(err => {
+      console.error('Failed to refresh config after auth change:', err)
+    })
+  }, [refreshConfig])
+
   // Handle token upload for JWT/bearer auth servers
   const handleTokenUpload = async (tokenData) => {
     if (!tokenModalServer) return
@@ -495,6 +507,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       await uploadToken(tokenModalServer, tokenData)
       setTokenModalServer(null)
       setTokenUploadError(null)
+      // The token may unlock a server that gates tools/list, so the catalogue
+      // the panel is rendering is now stale. Refresh it rather than making the
+      // user reload the page. Best-effort: the connection itself succeeded.
+      refreshCatalogue()
     } catch (err) {
       console.error('Token upload failed:', err)
       setTokenUploadError(err.message || 'Failed to save token. Please try again.')
@@ -522,6 +538,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     try {
       await removeToken(disconnectServer)
       setDisconnectServer(null)
+      // Dropping the token can remove tools that were only visible through it.
+      refreshCatalogue()
     } catch (err) {
       console.error('Token disconnect failed:', err)
       setDisconnectError(err?.message || 'Failed to disconnect. Please try again.')

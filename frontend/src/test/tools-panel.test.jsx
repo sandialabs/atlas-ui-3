@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
 import { useChat } from '../contexts/ChatContext'
@@ -18,7 +18,9 @@ vi.mock('../contexts/MarketplaceContext')
 const authHookState = vi.hoisted(() => ({
   startOAuth: null,
   getServerAuth: null,
-  authStatus: null
+  authStatus: null,
+  uploadToken: null,
+  removeToken: null
 }))
 
 vi.mock('../hooks/useServerAuthStatus', () => ({
@@ -27,8 +29,8 @@ vi.mock('../hooks/useServerAuthStatus', () => ({
     loading: false,
     error: null,
     fetchAuthStatus: vi.fn(),
-    uploadToken: vi.fn(),
-    removeToken: vi.fn(),
+    uploadToken: authHookState.uploadToken || vi.fn(),
+    removeToken: authHookState.removeToken || vi.fn(),
     startOAuth: authHookState.startOAuth || vi.fn(),
     getServerAuth: authHookState.getServerAuth || vi.fn(() => null)
   })
@@ -1709,5 +1711,122 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
     })
 
     expect(screen.queryByText('quiet')).toBeNull()
+  })
+})
+
+
+describe('ToolsPanel - catalogue refresh after an in-page auth change', () => {
+  // A server that gates tools/list publishes nothing until the user authorizes.
+  // OAuth connects by full-page navigation, so it re-fetches /api/config on the
+  // way back; token upload and disconnect stay on the page and must ask for the
+  // refresh themselves, or the panel keeps showing the pre-credential catalogue.
+  const bearerServer = {
+    server: 'token-mcp',
+    description: 'A server authenticated by pasted token',
+    auth_type: 'bearer',
+    tools: [],
+    tools_detailed: [],
+    tool_count: 0,
+    prompts: [],
+    prompt_count: 0
+  }
+
+  let refreshConfig
+
+  afterEach(() => {
+    authHookState.getServerAuth = null
+    authHookState.uploadToken = null
+    authHookState.removeToken = null
+  })
+
+  const setup = ({ authenticated = false } = {}) => {
+    sessionStorage.clear()
+    refreshConfig = vi.fn(() => Promise.resolve({}))
+    authHookState.getServerAuth = vi.fn(() => ({
+      auth_type: 'bearer',
+      authenticated,
+      is_expired: false
+    }))
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: [bearerServer],
+      prompts: [],
+      features: {},
+      refreshConfig
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => [bearerServer]),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => [bearerServer]),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('re-fetches the config after a token unlocks a server', async () => {
+    authHookState.uploadToken = vi.fn(() => Promise.resolve(true))
+    setup()
+
+    fireEvent.click(screen.getByRole('button', { name: /click to add token/i }))
+    fireEvent.change(screen.getByPlaceholderText(/paste your api key/i), {
+      target: { value: 'a-token' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^upload token$/i }))
+
+    await waitFor(() => expect(refreshConfig).toHaveBeenCalled())
+  })
+
+  it('does not refresh when the token was rejected', async () => {
+    authHookState.uploadToken = vi.fn(() => Promise.reject(new Error('nope')))
+    setup()
+
+    fireEvent.click(screen.getByRole('button', { name: /click to add token/i }))
+    fireEvent.change(screen.getByPlaceholderText(/paste your api key/i), {
+      target: { value: 'a-token' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^upload token$/i }))
+
+    await waitFor(() => expect(authHookState.uploadToken).toHaveBeenCalled())
+    expect(refreshConfig).not.toHaveBeenCalled()
+  })
+
+  it('re-fetches the config after disconnecting, so withdrawn tools disappear', async () => {
+    authHookState.removeToken = vi.fn(() => Promise.resolve(true))
+    setup({ authenticated: true })
+
+    fireEvent.click(screen.getByRole('button', { name: /click to disconnect/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^disconnect$/i }))
+
+    await waitFor(() => expect(refreshConfig).toHaveBeenCalled())
+  })
+
+  it('survives a context that predates the refresh hook', async () => {
+    // Older callers of ToolsPanel may not supply refreshConfig at all; the
+    // connect flow must still complete rather than throwing.
+    authHookState.uploadToken = vi.fn(() => Promise.resolve(true))
+    setup()
+    const ctx = useChat.mock.results[0]?.value
+    useChat.mockReturnValue({ ...ctx, refreshConfig: undefined })
+
+    fireEvent.click(screen.getByRole('button', { name: /click to add token/i }))
+    fireEvent.change(screen.getByPlaceholderText(/paste your api key/i), {
+      target: { value: 'a-token' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^upload token$/i }))
+
+    await waitFor(() => expect(authHookState.uploadToken).toHaveBeenCalled())
   })
 })
