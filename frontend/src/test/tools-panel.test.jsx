@@ -1582,7 +1582,7 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
     authHookState.authStatus = null
   })
 
-  const renderWith = (authStatus, tools = []) => {
+  const renderWith = (authStatus, tools = [], chatOverrides = {}) => {
     authHookState.authStatus = authStatus
     authHookState.getServerAuth = vi.fn(name => authStatus[name] || null)
     useChat.mockReturnValue({
@@ -1598,7 +1598,8 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
       complianceLevelFilter: 'all',
       tools,
       prompts: [],
-      features: {}
+      features: {},
+      ...chatOverrides
     })
     useMarketplace.mockReturnValue({
       getComplianceFilteredTools: vi.fn(() => tools),
@@ -1639,6 +1640,23 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
   it('does not synthesize a row for a connected server with nothing to offer', () => {
     renderWith({
       'remote-mcp': { ...pendingStatus, authenticated: true }
+    })
+
+    expect(screen.queryByText('remote-mcp')).toBeNull()
+  })
+
+  it('explains that tools appear after connecting', () => {
+    renderWith({ 'remote-mcp': pendingStatus })
+
+    expect(screen.getByText(/tools appear after you connect/i)).toBeTruthy()
+  })
+
+  it('does not synthesize a row while a compliance level is being filtered on', () => {
+    // The auth status carries no compliance_level, and the filter is strict
+    // about resources that have none -- an unlabelled row must not slip past it.
+    renderWith({ 'remote-mcp': pendingStatus }, [], {
+      complianceLevelFilter: 'secret',
+      features: { compliance_levels: true }
     })
 
     expect(screen.queryByText('remote-mcp')).toBeNull()

@@ -618,7 +618,12 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     // still describe them. Only unauthenticated ones are synthesized: once
     // connected, a server with genuinely no tools has nothing to offer and no
     // action left to take.
-    Object.values(authStatus || {}).forEach(status => {
+    //
+    // Skipped entirely while a compliance level is being filtered on: the auth
+    // status carries no compliance_level, so these rows would slip past a
+    // filter that is deliberately strict about resources with no level at all.
+    const complianceFiltered = complianceEnabled && !!complianceLevelFilter
+    if (!complianceFiltered) Object.values(authStatus || {}).forEach(status => {
       const name = status?.server_name
       if (!name || allServers[name]) return
       if (!status.auth_required || status.authenticated) return
@@ -640,7 +645,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     })
 
     return sortAtlasFirst(Object.values(allServers))
-  }, [tools, prompts, authStatus])
+  }, [tools, prompts, authStatus, complianceEnabled, complianceLevelFilter])
 
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {
@@ -1107,6 +1112,19 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                             {/* Tools and Prompts - only show when not collapsed */}
                             {!isCollapsed && (
                               <>
+                                {/* A server that gates discovery behind auth has
+                                    nothing to list until the user connects; say
+                                    so rather than showing a blank body. */}
+                                {totalItems === 0 && server.auth_type === 'oauth' && (
+                                  <p className="text-xs text-gray-500 italic mb-2">
+                                    Tools appear after you connect.
+                                  </p>
+                                )}
+                                {totalItems === 0 && server.auth_type !== 'oauth' && (
+                                  <p className="text-xs text-gray-500 italic mb-2">
+                                    No tools discovered yet.
+                                  </p>
+                                )}
                                 {/* Tools Display */}
                                 {server.tools.length > 0 && (
                                   <div className="mb-4">

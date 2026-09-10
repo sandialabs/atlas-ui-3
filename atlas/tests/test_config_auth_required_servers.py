@@ -51,9 +51,16 @@ class _FakeManager:
     async def get_authorized_servers(self, user, is_user_in_group):
         return list(self.servers_config)
 
-    async def discover_tools_for_user_servers(self, user_email, server_names):
-        self.discovery_calls.append((user_email, list(server_names)))
+    async def discover_tools_for_user_servers(
+        self, user_email, server_names, *, wait_timeout=None
+    ):
+        self.discovery_calls.append((user_email, list(server_names), wait_timeout))
         return dict(self._user_tools)
+
+    def get_visible_tools_for_server(self, user_email, server_name):
+        if server_name in self._user_tools:
+            return self._user_tools[server_name]
+        return (self.available_tools.get(server_name) or {}).get("tools") or []
 
 
 def _servers_by_name(payload):
@@ -124,6 +131,17 @@ def test_per_user_discovery_result_is_used_for_the_payload():
     assert servers["remote-mcp"]["tools"] == ["search"]
     assert servers["remote-mcp"]["tools_detailed"][0]["description"] == "search tool"
     assert manager.discovery_calls  # discovery was actually attempted
+
+
+def test_the_inline_discovery_wait_is_bounded():
+    """The SPA polls /api/config; one slow server must not stall every poll."""
+    manager = _FakeManager({"remote-mcp": {"auth_type": "oauth"}})
+
+    _run(manager)
+
+    assert manager.discovery_calls
+    wait_timeout = manager.discovery_calls[0][2]
+    assert wait_timeout is not None and wait_timeout <= 5
 
 
 def test_discovery_failure_does_not_break_the_config_payload():

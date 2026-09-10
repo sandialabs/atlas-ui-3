@@ -22,6 +22,11 @@ from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
 
 logger = logging.getLogger(__name__)
 
+# How long /api/config waits for lazy per-user MCP discovery before returning
+# without it. Short on purpose: the SPA polls this endpoint, and the discovery
+# it kicked off keeps running for the next request either way.
+MCP_USER_DISCOVERY_WAIT_SECONDS = 2.0
+
 router = APIRouter(prefix="/api", tags=["config"])
 
 
@@ -273,10 +278,15 @@ async def get_config(
         # (possibly) a stored token, retry those with the user's own client.
         # Results are cached per (user, server), so this is a no-op on all but
         # the first request after a token appears (issue #912).
-        user_tools = {}
+        #
+        # Bounded, because this endpoint is polled by the SPA: past the wait the
+        # discovery keeps running and its result is picked up by a later
+        # request, rather than one slow server stalling every /api/config.
         try:
-            user_tools = await mcp_manager.discover_tools_for_user_servers(
-                current_user, authorized_servers
+            await mcp_manager.discover_tools_for_user_servers(
+                current_user,
+                authorized_servers,
+                wait_timeout=MCP_USER_DISCOVERY_WAIT_SECONDS,
             )
         except Exception as e:  # never let discovery break the config payload
             logger.warning(
@@ -312,13 +322,13 @@ async def get_config(
                 auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
                 needs_user_credentials = auth_required or auth_type == 'delegated'
 
-                # Prefer what this user's own credentials revealed; fall back to
-                # the shared catalogue from the anonymous startup sweep.
-                server_tools = user_tools.get(server_name)
-                if server_tools is None:
-                    server_tools = (
-                        mcp_manager.available_tools.get(server_name) or {}
-                    ).get('tools') or []
+                # This user's own discovery, falling back to the shared
+                # catalogue only when that came from a real anonymous sweep. A
+                # gated server's tool metadata, fetched with someone else's
+                # token, is not this user's to read.
+                server_tools = mcp_manager.get_visible_tools_for_server(
+                    current_user, server_name
+                )
 
                 # A server that needs per-user credentials is listed even with
                 # zero tools. For an auth_required one its row is the only place

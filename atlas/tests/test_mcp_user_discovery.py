@@ -245,14 +245,19 @@ class TestPromotionIntoTheSharedInventory:
         ]
 
     @pytest.mark.asyncio
-    async def test_startup_failure_record_is_cleared_once_the_server_answers(self):
+    async def test_the_global_failure_record_is_left_alone(self):
+        """One user's success does not prove the process-level client works.
+
+        Clearing it would drop the server out of reconnect tracking while
+        reporting it healthy to operators.
+        """
         manager = _manager()
         manager._record_server_failure(SERVER, "401 Unauthorized")
         manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
 
         await manager.discover_tools_for_user(USER, SERVER)
 
-        assert SERVER not in manager._failed_servers
+        assert SERVER in manager._failed_servers
 
     @pytest.mark.asyncio
     async def test_an_empty_catalogue_is_not_promoted(self):
@@ -350,3 +355,121 @@ class TestCacheInvalidation:
         await manager.discover_tools()
 
         assert manager.get_user_tools_for_server(USER, SERVER) is None
+
+
+class TestOneUsersViewIsNotAnothers:
+    """A gated server hid its metadata from anonymous callers on purpose."""
+
+    @pytest.mark.asyncio
+    async def test_a_promoted_catalogue_is_not_shown_to_another_user(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+
+        assert [t.name for t in manager.get_visible_tools_for_server(USER, SERVER)] == [
+            "search"
+        ]
+        assert manager.get_visible_tools_for_server("other@example.gov", SERVER) == []
+
+    @pytest.mark.asyncio
+    async def test_an_anonymous_catalogue_is_shown_to_everyone(self):
+        manager = _manager(
+            available_tools={SERVER: {"tools": [_tool("public")], "config": {}}}
+        )
+
+        assert [
+            t.name for t in manager.get_visible_tools_for_server("anyone@example.gov", SERVER)
+        ] == ["public"]
+
+    @pytest.mark.asyncio
+    async def test_disconnecting_withdraws_the_published_catalogue(self):
+        """A revoked user's tool names must not stay routable for everyone."""
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+        assert manager.get_server_for_tool(f"{SERVER}_search") == SERVER
+
+        manager.clear_user_tool_cache(USER, SERVER)
+
+        assert manager.available_tools[SERVER]["tools"] == []
+        assert manager.get_server_for_tool(f"{SERVER}_search") is None
+
+    @pytest.mark.asyncio
+    async def test_another_users_catalogue_is_left_published(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+
+        manager.clear_user_tool_cache("other@example.gov", SERVER)
+
+        assert manager.available_tools[SERVER]["tools"]
+
+    @pytest.mark.asyncio
+    async def test_a_promoted_server_is_still_a_discovery_candidate(self):
+        """Otherwise the TTL never refreshes for exactly these servers."""
+        manager = _manager()
+        client = _FakeClient([_tool("search")])
+        manager._get_user_client = AsyncMock(return_value=client)
+        await manager.discover_tools_for_user(USER, SERVER)
+
+        # A second user has their own discovery run rather than inheriting the
+        # first user's promoted view.
+        await manager.discover_tools_for_user_servers("other@example.gov", [SERVER])
+
+        assert client.list_calls == 2
+
+    @pytest.mark.asyncio
+    async def test_an_anonymously_discovered_server_is_never_a_candidate(self):
+        manager = _manager(
+            available_tools={SERVER: {"tools": [_tool("public")], "config": {}}}
+        )
+        manager._get_user_client = AsyncMock()
+
+        await manager.discover_tools_for_user_servers(USER, [SERVER])
+
+        manager._get_user_client.assert_not_awaited()
+
+
+class TestTaskSupportMetadataIsNotClobbered:
+    @pytest.mark.asyncio
+    async def test_a_declined_promotion_leaves_the_sweeps_entries_alone(self):
+        """A narrower per-user view must not flip tools to task-allowed."""
+        manager = _manager(
+            available_tools={SERVER: {"tools": [_tool("public")], "config": {}}}
+        )
+        manager._tool_task_forbidden = {(SERVER, "public"), (SERVER, "other")}
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert (SERVER, "public") in manager._tool_task_forbidden
+        assert (SERVER, "other") in manager._tool_task_forbidden
+
+
+class TestTheCallerCanBoundTheWait:
+    @pytest.mark.asyncio
+    async def test_a_slow_server_does_not_stall_the_caller(self):
+        manager = _manager()
+        release = asyncio.Event()
+
+        async def slow_client(server_name, user_email, conversation_id):
+            await release.wait()
+            return _FakeClient([_tool("search")])
+
+        manager._get_user_client = slow_client
+
+        found = await manager.discover_tools_for_user_servers(
+            USER, [SERVER], wait_timeout=0.01
+        )
+        assert found == {}
+
+        # The discovery was shielded, not cancelled: it finishes in the
+        # background and its result is there for the next request.
+        release.set()
+        for _ in range(50):
+            await asyncio.sleep(0)
+            if manager.get_user_tools_for_server(USER, SERVER):
+                break
+        assert [t.name for t in manager.get_user_tools_for_server(USER, SERVER)] == [
+            "search"
+        ]

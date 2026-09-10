@@ -13,12 +13,17 @@ This mixin adds the missing half: discovery performed *with the user's own
 client*, cached per ``(user, server)``, refreshed when the user authorizes and
 lazily on first use afterwards.
 
-The result is promoted into the shared ``available_tools``/``_tool_index``
-only when the process-level sweep found nothing for that server, so the tools
-can be selected, schema'd and dispatched by the existing (user-agnostic) paths.
-Promotion never widens access: every call into an auth-required server still
-goes through ``_get_user_client`` and raises ``AuthenticationRequiredException``
-for a user who holds no token of their own.
+**Whose catalogue is whose.** A gated server chose to hide its tool metadata
+from anonymous callers, so a catalogue obtained with one user's token is that
+user's to see: ``get_visible_tools_for_server`` serves each requester their own
+entry and falls back to the shared one only when it came from a real anonymous
+sweep. The shared ``available_tools``/``_tool_index`` are still populated from
+a per-user result -- marked ``user_scoped`` -- because ``get_tools_schema`` and
+``get_server_for_tool`` are user-agnostic and nothing could be scheduled or
+routed otherwise. That publication is withdrawn when the user it came from
+disconnects. It never widens access either way: every call into an
+auth-required server goes through ``_get_user_client`` and raises
+``AuthenticationRequiredException`` for a user holding no token of their own.
 """
 import asyncio
 import logging
@@ -38,6 +43,12 @@ _USER_DISCOVERY_TTL_SECONDS = 300.0
 # be retried on every request.
 _USER_DISCOVERY_RETRY_SECONDS = 60.0
 
+# Ceiling on resident cache entries before expired ones are swept. Keys are
+# (user, server), so this only bites on a large deployment with many auth-gated
+# servers -- but "never evicts" is not a property a long-lived process should
+# have.
+_MAX_USER_DISCOVERY_ENTRIES = 2000
+
 
 class UserDiscoveryMixin:
     """Authenticated, per-user tool discovery and its cache."""
@@ -55,19 +66,65 @@ class UserDiscoveryMixin:
             self._user_discovery_failures: Dict[Tuple[str, str], float] = {}
         if not hasattr(self, "_user_discovery_locks"):
             self._user_discovery_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
+        if not hasattr(self, "_user_discovery_tasks"):
+            self._user_discovery_tasks: set = set()
 
     @staticmethod
     def _user_discovery_key(user_email: str, server_name: str) -> Tuple[str, str]:
         return (normalize_user_email(user_email), server_name)
 
+    # --- inventory queries ------------------------------------------------
+
+    def _has_anonymous_catalogue(self, server_name: str) -> bool:
+        """Whether the shared catalogue for this server came from the sweep.
+
+        A ``user_scoped`` entry was published from one user's token and does
+        not mean the server answers anonymously, so it must not stand in for
+        another user's view or suppress their own discovery.
+        """
+        entry = self.available_tools.get(server_name) or {}
+        return bool(entry.get("tools")) and not entry.get("user_scoped")
+
+    def get_user_tools_for_server(
+        self, user_email: str, server_name: str
+    ) -> Optional[List[Any]]:
+        """Tools this user's own credentials revealed, or None if never run."""
+        self._ensure_user_discovery_state()
+        entry = self._user_available_tools.get(
+            self._user_discovery_key(user_email, server_name)
+        )
+        return None if entry is None else entry.get("tools", [])
+
+    def get_visible_tools_for_server(
+        self, user_email: str, server_name: str
+    ) -> List[Any]:
+        """The tools ``user_email`` may be shown for ``server_name``.
+
+        Their own discovery wins. The shared catalogue stands in only when it
+        was obtained anonymously -- a gated server's metadata, fetched with
+        someone else's token, is not this user's to read.
+        """
+        entry = self.available_tools.get(server_name) or {}
+        if not self._requires_user_auth(server_name):
+            return entry.get("tools") or []
+        own = self.get_user_tools_for_server(user_email, server_name)
+        if own is not None:
+            return own
+        if entry.get("user_scoped"):
+            return []
+        return entry.get("tools") or []
+
+    # --- cache maintenance ------------------------------------------------
+
     def clear_user_tool_cache(
         self, user_email: Optional[str] = None, server_name: Optional[str] = None
     ) -> None:
-        """Drop cached per-user discovery.
+        """Drop cached per-user discovery, and unpublish what it promoted.
 
         Called with no arguments on config reload (every catalogue is now
-        suspect), and with a user (and usually a server) when that user's
-        token changes, since the catalogue was a function of that token.
+        suspect), and with a user (and usually a server) when that user's token
+        changes. A revoked user's tool names and schemas must not stay
+        published and routable for everyone else.
         """
         self._ensure_user_discovery_state()
         user_lc = None if user_email is None else normalize_user_email(user_email)
@@ -79,6 +136,7 @@ class UserDiscoveryMixin:
                 return False
             return True
 
+        cleared = [k for k in self._user_available_tools if matches(k)]
         for cache in (self._user_available_tools, self._user_discovery_failures):
             for key in [k for k in cache if matches(k)]:
                 cache.pop(key, None)
@@ -89,15 +147,41 @@ class UserDiscoveryMixin:
         ]:
             self._user_discovery_locks.pop(key, None)
 
-    def get_user_tools_for_server(
-        self, user_email: str, server_name: str
-    ) -> Optional[List[Any]]:
-        """Tools this user's own credentials revealed, or None if never run."""
-        self._ensure_user_discovery_state()
-        entry = self._user_available_tools.get(
-            self._user_discovery_key(user_email, server_name)
+        for owner, server in cleared:
+            self._withdraw_promoted_tools(server, owner)
+
+    def _withdraw_promoted_tools(self, server_name: str, user_lc: str) -> None:
+        """Unpublish a shared catalogue that came from this user, if it did."""
+        entry = self.available_tools.get(server_name) or {}
+        if not entry.get("user_scoped") or entry.get("discovered_for") != user_lc:
+            return
+        self.available_tools[server_name] = {
+            "tools": [],
+            "config": self.servers_config.get(server_name, {}),
+        }
+        self._rebuild_tool_index()
+        logger.info(
+            "Withdrew the per-user tool catalogue published for server '%s'",
+            sanitize_for_logging(server_name),
         )
-        return None if entry is None else entry.get("tools", [])
+
+    def _prune_user_discovery_state(self) -> None:
+        """Drop expired entries once the caches grow past the ceiling."""
+        if len(self._user_available_tools) <= _MAX_USER_DISCOVERY_ENTRIES:
+            if len(self._user_discovery_failures) <= _MAX_USER_DISCOVERY_ENTRIES:
+                return
+        now = time.time()
+        for key, entry in list(self._user_available_tools.items()):
+            if (now - entry.get("discovered_at", 0.0)) >= _USER_DISCOVERY_TTL_SECONDS:
+                self._user_available_tools.pop(key, None)
+        for key, at in list(self._user_discovery_failures.items()):
+            if (now - at) >= _USER_DISCOVERY_RETRY_SECONDS:
+                self._user_discovery_failures.pop(key, None)
+        for key, lock in list(self._user_discovery_locks.items()):
+            if not lock.locked():
+                self._user_discovery_locks.pop(key, None)
+
+    # --- discovery --------------------------------------------------------
 
     async def discover_tools_for_user(
         self,
@@ -118,10 +202,9 @@ class UserDiscoveryMixin:
 
         self._ensure_user_discovery_state()
         key = self._user_discovery_key(user_email, server_name)
-        now = time.time()
 
         if not force:
-            hit, cached = self._cached_user_tools(key, now)
+            hit, cached = self._cached_user_tools(key, time.time())
             if hit:
                 return cached
 
@@ -181,27 +264,58 @@ class UserDiscoveryMixin:
             len(tools),
             safe_server,
         )
-        self._promote_user_tools(server_name, tools)
+        self._promote_user_tools(server_name, tools, key[0])
+        self._prune_user_discovery_state()
         return tools
 
     async def discover_tools_for_user_servers(
-        self, user_email: str, server_names: List[str]
+        self,
+        user_email: str,
+        server_names: List[str],
+        *,
+        wait_timeout: Optional[float] = None,
     ) -> Dict[str, List[Any]]:
         """Lazily discover every auth-gated server in ``server_names`` at once.
 
-        Only servers the process-level sweep found no tools for are attempted;
-        a server that answers ``tools/list`` anonymously is already covered.
-        Servers are probed concurrently so a request that fans out over several
-        of them costs one discovery timeout rather than N.
+        Servers whose catalogue came from a real anonymous sweep are skipped --
+        they are already covered, and probing them per user would cost a
+        connection per request for nothing. The rest go through
+        ``discover_tools_for_user``, whose TTL and cool-down make a repeat call
+        free; that is what lets a promoted catalogue still refresh, which a
+        filter on ``available_tools`` alone would prevent forever.
+
+        ``wait_timeout`` bounds how long the *caller* waits. On expiry the
+        discovery is left running (shielded, not cancelled) so its result lands
+        in the cache for the next request, rather than one slow server stalling
+        every ``/api/config`` response for the full discovery timeout.
         """
+        self._ensure_user_discovery_state()
         candidates = [
             name for name in server_names
-            if self._requires_user_auth(name)
-            and not (self.available_tools.get(name) or {}).get("tools")
+            if self._requires_user_auth(name) and not self._has_anonymous_catalogue(name)
         ]
         if not candidates:
             return {}
 
+        task = asyncio.ensure_future(self._discover_many(user_email, candidates))
+        self._user_discovery_tasks.add(task)
+        task.add_done_callback(self._user_discovery_tasks.discard)
+        if wait_timeout is None:
+            return await task
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=wait_timeout)
+        except asyncio.TimeoutError:
+            logger.debug(
+                "Per-user tool discovery still running after %ss; continuing "
+                "without it (results land in the cache for the next request)",
+                wait_timeout,
+            )
+            return {}
+
+    async def _discover_many(
+        self, user_email: str, candidates: List[str]
+    ) -> Dict[str, List[Any]]:
+        """Probe each candidate concurrently; never raise at the caller."""
         results = await asyncio.gather(
             *(self.discover_tools_for_user(user_email, name) for name in candidates),
             return_exceptions=True,
@@ -214,7 +328,7 @@ class UserDiscoveryMixin:
                 logger.warning(
                     "Per-user tool discovery raised for server '%s': %s",
                     sanitize_for_logging(name),
-                    result,
+                    sanitize_for_logging(str(result)),
                 )
                 continue
             if result:
@@ -226,17 +340,19 @@ class UserDiscoveryMixin:
     ) -> Optional[List[Any]]:
         """``tools/list`` over an already-built client, or None on failure.
 
+        The timeout covers connection setup as well as the call: an auth-gated
+        server that hangs on ``initialize`` is exactly the shape this feature
+        exists for, and a timeout around ``list_tools`` alone would not bound it.
+
         Deliberately not ``_discover_tools_for_server``: that helper records a
         *global* server failure, and one user's expired token must not mark the
         server as broken for everyone or feed the reconnect backoff.
         """
         safe_server = sanitize_for_logging(server_name)
-        discovery_timeout = self._discovery_timeout()
         try:
-            async with client:
-                tools = await asyncio.wait_for(
-                    client.list_tools(), timeout=discovery_timeout
-                )
+            tools = await asyncio.wait_for(
+                self._open_and_list(client), timeout=self._discovery_timeout()
+            )
         except Exception as exc:
             logger.warning(
                 "Per-user tool discovery failed for server '%s': %s: %s",
@@ -246,39 +362,51 @@ class UserDiscoveryMixin:
             )
             logger.debug("Per-user discovery traceback for %s:", safe_server, exc_info=True)
             return None
-        tools = list(tools or [])
-        self._apply_task_support_metadata(server_name, tools)
-        return tools
+        return list(tools or [])
+
+    @staticmethod
+    async def _open_and_list(client: Any) -> List[Any]:
+        async with client:
+            return await client.list_tools()
 
     def _discovery_timeout(self) -> float:
         from atlas.modules.mcp_tools import client as client_module
         return client_module.config_manager.app_settings.mcp_discovery_timeout
 
-    def _promote_user_tools(self, server_name: str, tools: List[Any]) -> None:
+    def _rebuild_tool_index(self) -> None:
+        from atlas.modules.mcp_tools.mcp_discovery import _build_tool_index
+        self._tool_index = _build_tool_index(self.available_tools)
+
+    def _promote_user_tools(
+        self, server_name: str, tools: List[Any], user_lc: str
+    ) -> None:
         """Publish a per-user catalogue into the shared inventory, if empty.
 
         Without this the tools stay invisible to ``get_tools_schema`` and
         ``get_server_for_tool``, so the model could neither be offered them nor
-        have a call routed back to the owning server. A process-level sweep
-        that *did* succeed always wins: it is the operator-visible catalogue,
-        and one user's view must not overwrite it.
-        """
-        from atlas.modules.mcp_tools.mcp_discovery import _build_tool_index
+        have a call routed back to the owning server. A successful anonymous
+        sweep always wins: it is the operator-visible catalogue, and one user's
+        view must not overwrite it.
 
-        existing = self.available_tools.get(server_name) or {}
-        if existing.get("tools"):
+        The task-support metadata is applied only once promotion is accepted.
+        Recording it unconditionally would purge the whole server's
+        ``_tool_task_forbidden`` set and rebuild it from a possibly narrower
+        per-user ``tools/list``, flipping tools the anonymous sweep had marked
+        task-forbidden to task-allowed process-wide.
+        """
+        if not tools or self._has_anonymous_catalogue(server_name):
             return
-        if not tools:
-            return
+        self._apply_task_support_metadata(server_name, tools)
         self.available_tools[server_name] = {
             "tools": tools,
             "config": self.servers_config.get(server_name, {}),
+            # Marks this catalogue as one user's view, so it is not served to
+            # anyone else, does not suppress their own discovery, and is
+            # withdrawn when that user disconnects.
+            "user_scoped": True,
+            "discovered_for": user_lc,
         }
-        self._tool_index = _build_tool_index(self.available_tools)
-        # The startup sweep recorded a failure for this server; it is reachable
-        # after all, just not anonymously. Leaving the record in place would
-        # keep the reconnect loop retrying a connection that can never succeed.
-        self._clear_server_failure(server_name)
+        self._rebuild_tool_index()
         logger.info(
             "Published %d per-user tool(s) for server '%s' into the shared inventory",
             len(tools),
