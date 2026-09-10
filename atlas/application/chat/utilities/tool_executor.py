@@ -23,6 +23,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     LEGACY_SERVER_NAMES,
     normalize_tool_name,
 )
+from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
@@ -238,7 +239,7 @@ def tool_accepts_mcp_data(tool_name: str, tool_manager) -> bool:
         return False
 
     try:
-        tools_schema = tool_manager.get_tools_schema([tool_name])
+        tools_schema = tool_manager.get_tools_schema([tool_name], UNSCOPED)
         if not tools_schema:
             return False
 
@@ -303,12 +304,21 @@ def build_mcp_data(tool_manager, user_email: Optional[str] = None) -> Dict[str, 
                 continue
         config = server_data.get("config", {}) or {}
 
+        # The shared entry for a user_scoped server holds the union of its
+        # owners' tools so they can be routed. Two owners can expose a
+        # same-named tool with different descriptions and schemas, so the
+        # object emitted here has to come from the requester's own catalogue
+        # rather than from whichever owner's landed in the union first.
+        own_tool = getattr(tool_manager, "_own_tool_object", None)
         tools_info = []
         for tool in tools_list:
+            emitted = tool
+            if server_data.get("user_scoped") and own_tool is not None:
+                emitted = own_tool(server_name, user_email, getattr(tool, "name", None)) or tool
             tool_entry = {
                 "name": f"{server_name}_{tool.name}",
-                "description": getattr(tool, "description", "") or "",
-                "parameters": getattr(tool, "inputSchema", {}) or {},
+                "description": getattr(emitted, "description", "") or "",
+                "parameters": getattr(emitted, "inputSchema", {}) or {},
             }
             tools_info.append(tool_entry)
 
@@ -333,7 +343,7 @@ def tool_accepts_atlas_user(tool_name: str, tool_manager) -> bool:
 
     try:
         # Get the tool schema for this specific tool
-        tools_schema = tool_manager.get_tools_schema([tool_name])
+        tools_schema = tool_manager.get_tools_schema([tool_name], UNSCOPED)
         if not tools_schema:
             return False
 
@@ -818,7 +828,7 @@ def _filter_args_to_schema(parsed_args: Dict[str, Any], tool_name: str, tool_man
     like original_* and file_url(s) to avoid Pydantic validation errors.
     """
     try:
-        tools_schema = tool_manager.get_tools_schema([tool_name]) if tool_manager else []
+        tools_schema = tool_manager.get_tools_schema([tool_name], UNSCOPED) if tool_manager else []
         found_schema = False
         allowed: set[str] = set()
         for tool_schema in tools_schema or []:

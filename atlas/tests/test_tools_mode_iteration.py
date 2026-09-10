@@ -335,3 +335,55 @@ async def test_data_sources_do_not_inject_context_and_offer_the_search_tool():
     assert llm.seen_messages[0] == [{"role": "user", "content": "what is in the docs?"}]
     requested = runner.tool_manager.get_tools_schema.call_args[0][0]
     assert requested == ["calc", "atlas_search"]
+
+
+@pytest.mark.asyncio
+async def test_the_requesting_user_reaches_the_schema_scoping_api():
+    """Tool schemas are scoped per user; the mode must actually pass the user.
+
+    A server that gates ``tools/list`` publishes its catalogue marked
+    ``user_scoped``, and ``get_tools_schema`` withholds one that is not the
+    requester's. That protection is only worth anything if the user reaches
+    it, so this pins the argument rather than the scoping logic.
+    """
+    llm = ScriptedToolsLLM(turns=[("Done.", None)])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = AsyncMock(return_value=[])
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=_session(),
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            selected_tools=["calc"],
+            user_email="owner@example.gov",
+        )
+
+    args, kwargs = runner.tool_manager.get_tools_schema.call_args
+    assert (kwargs.get("user_email") or (args[1] if len(args) > 1 else None)) == "owner@example.gov"
+
+
+@pytest.mark.asyncio
+async def test_the_requesting_user_reaches_the_schema_scoping_api_non_streaming():
+    llm = ScriptedToolsLLM(turns=[("Done.", None)])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = AsyncMock(return_value=[])
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        # Schemas are resolved before the LLM call, which this scripted
+        # double does not implement for the non-streaming path.
+        try:
+            await runner.run(
+                session=_session(),
+                model="test-model",
+                messages=[{"role": "user", "content": "hi"}],
+                selected_tools=["calc"],
+                user_email="owner@example.gov",
+            )
+        except Exception:
+            pass
+
+    args, kwargs = runner.tool_manager.get_tools_schema.call_args
+    assert (kwargs.get("user_email") or (args[1] if len(args) > 1 else None)) == "owner@example.gov"

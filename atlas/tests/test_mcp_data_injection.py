@@ -342,3 +342,51 @@ class TestBuildMcpDataIsScopedToTheRequestingUser:
         result = build_mcp_data(plain, "anyone@example.gov")
 
         assert result["available_servers"] == []
+
+
+class TestBuildMcpDataEmitsTheRequestersOwnToolObject:
+    """Co-owners of a same-named tool must not read each other's schema."""
+
+    def _manager_with_two_owners(self):
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"remote-mcp": {"auth_type": "oauth"}}
+        first = FakeTool("search", "first owner's wording", {"type": "object", "properties": {"a": {}}})
+        second = FakeTool("search", "second owner's wording", {"type": "object", "properties": {"b": {}}})
+        manager._user_available_tools = {
+            ("first@example.gov", "remote-mcp"): {
+                "tools": [first], "config": {}, "discovered_at": time.time(),
+            },
+            ("second@example.gov", "remote-mcp"): {
+                "tools": [second], "config": {}, "discovered_at": time.time(),
+            },
+        }
+        manager._user_discovery_failures = {}
+        # The shared entry holds one object per name -- here the first owner's.
+        manager.available_tools = {
+            "remote-mcp": {
+                "tools": [first],
+                "config": {},
+                "user_scoped": True,
+                "discovered_for": {"first@example.gov", "second@example.gov"},
+            }
+        }
+        return manager
+
+    def test_each_owner_reads_their_own_description_and_schema(self):
+        manager = self._manager_with_two_owners()
+
+        second = build_mcp_data(manager, "second@example.gov")
+
+        tool = second["available_servers"][0]["tools"][0]
+        assert tool["description"] == "second owner's wording"
+        assert tool["parameters"]["properties"] == {"b": {}}
+
+    def test_the_owner_whose_object_is_published_is_unaffected(self):
+        manager = self._manager_with_two_owners()
+
+        first = build_mcp_data(manager, "first@example.gov")
+
+        tool = first["available_servers"][0]["tools"][0]
+        assert tool["description"] == "first owner's wording"

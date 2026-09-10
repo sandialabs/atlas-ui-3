@@ -224,7 +224,7 @@ class TestPromotionIntoTheSharedInventory:
 
         assert [t.name for t in manager.available_tools[SERVER]["tools"]] == ["search"]
         assert manager.get_server_for_tool(f"{SERVER}_search") == SERVER
-        schema = manager.get_tools_schema([f"{SERVER}_search"])
+        schema = manager.get_tools_schema([f"{SERVER}_search"], USER)
         assert schema and schema[0]["function"]["name"] == f"{SERVER}_search"
 
     @pytest.mark.asyncio
@@ -830,11 +830,19 @@ class TestSchemaMetadataIsScopedToItsOwner:
         assert manager.get_tools_schema([f"{SERVER}_search"], "other@example.gov") == []
 
     @pytest.mark.asyncio
-    async def test_an_omitted_user_keeps_the_historic_behaviour(self):
-        """Internal callers resolving an already-authorized tool still work."""
+    async def test_only_the_explicit_sentinel_skips_scoping(self):
+        """Internal callers resolving an already-authorized tool still work.
+
+        An *omitted* user is an unknown one, not an unscoped one: it is what a
+        session with no user produces, and that must not be the way a gated
+        catalogue reaches the model.
+        """
+        from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
+
         manager = await self._promoted()
 
-        assert len(manager.get_tools_schema([f"{SERVER}_search"])) == 1
+        assert len(manager.get_tools_schema([f"{SERVER}_search"], UNSCOPED)) == 1
+        assert manager.get_tools_schema([f"{SERVER}_search"]) == []
 
     @pytest.mark.asyncio
     async def test_an_anonymous_catalogue_is_readable_by_anyone(self):
@@ -987,3 +995,87 @@ class TestEachOwnerGetsTheirOwnToolObject:
 
         assert mine[0]["function"]["description"] == "mine only"
         assert theirs[0]["function"]["description"] == "theirs only"
+
+
+class TestADiscoveryOutlivedByItsCredentialIsDiscarded:
+    """Disconnect can land while tools/list is still in flight."""
+
+    @pytest.mark.asyncio
+    async def test_a_revoked_run_neither_caches_nor_promotes(self):
+        manager = _manager()
+        released = asyncio.Event()
+        revoked = asyncio.Event()
+
+        class _SlowClient(_FakeClient):
+            async def list_tools(self):
+                revoked.set()
+                await released.wait()
+                return [_tool("search")]
+
+        manager._get_user_client = AsyncMock(return_value=_SlowClient())
+        task = asyncio.create_task(
+            manager.discover_tools_for_user(USER, SERVER, force=True)
+        )
+        await revoked.wait()
+        # The user disconnects mid-flight.
+        manager.clear_user_tool_cache(USER, SERVER)
+        released.set()
+
+        assert await task is None
+        assert (USER, SERVER) not in manager._user_available_tools
+        assert SERVER not in manager.available_tools
+
+    @pytest.mark.asyncio
+    async def test_an_undisturbed_run_still_publishes(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+
+        tools = await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert [t.name for t in tools] == ["search"]
+        assert SERVER in manager.available_tools
+
+
+class TestAnUnknownUserCannotReadAGatedCatalogue:
+    """get_tools_schema feeds the model, so it fails closed like build_mcp_data."""
+
+    async def _promoted(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(
+            return_value=_FakeClient([_tool("search", description="private")])
+        )
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_no_user_withholds_the_schema(self):
+        manager = await self._promoted()
+
+        assert manager.get_tools_schema([f"{SERVER}_search"]) == []
+        assert manager.get_tools_schema([f"{SERVER}_search"], None) == []
+
+    @pytest.mark.asyncio
+    async def test_the_unscoped_sentinel_still_resolves_for_execution(self):
+        # Execution has already authorized the call; it needs the schema to
+        # filter arguments, and there is no user to scope against there.
+        manager = await self._promoted()
+
+        schema = manager.get_tools_schema(
+            [f"{SERVER}_search"], mcp_user_discovery_unscoped()
+        )
+
+        assert schema[0]["function"]["description"] == "private"
+
+    @pytest.mark.asyncio
+    async def test_an_anonymous_catalogue_is_still_public(self):
+        manager = _manager(available_tools={
+            "open-server": {"tools": [_tool("ping")], "config": {}},
+        })
+
+        assert manager.get_tools_schema(["open-server_ping"]) != []
+
+
+def mcp_user_discovery_unscoped():
+    from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
+
+    return UNSCOPED

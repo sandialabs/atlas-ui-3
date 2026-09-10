@@ -346,6 +346,20 @@ class TestRemoveToken:
             "test@example.com", "test-server"
         )
 
+    def test_a_failing_client_invalidation_still_disconnects(self, client, mock_dependencies):
+        """The token is already gone; a cleanup failure is not a failed disconnect."""
+        manager = mock_dependencies["tool_manager"]
+        manager._invalidate_user_client = AsyncMock(side_effect=RuntimeError("boom"))
+
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 200
+        # And the revoked catalogue is unpublished regardless, so it cannot
+        # stay listed and routable for everyone else.
+        manager.clear_user_tool_cache.assert_called_once_with(
+            "test@example.com", "test-server"
+        )
+
     def test_remove_token_not_found(self, client, mock_dependencies):
         """Should return 404 when token doesn't exist."""
         mock_dependencies["token_storage"].remove_token.return_value = False

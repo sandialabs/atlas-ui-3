@@ -325,11 +325,15 @@ async def remove_token(
                 detail=f"No token found for server '{server_name}'"
             )
 
-        # Invalidate any cached client for this user/server combination
+        # Invalidate any cached client for this user/server combination.
+        # The token is already gone, so unpublishing what it discovered comes
+        # first and unconditionally: a failure to drop the cached client must
+        # not leave the revoked catalogue routable, nor report 500 for a
+        # disconnect that has in fact happened.
         tool_manager = app_factory.get_mcp_manager()
         if tool_manager is not None:
-            await tool_manager._invalidate_user_client(current_user, server_name)
             _drop_user_tool_cache(tool_manager, current_user, server_name)
+            await _invalidate_user_client_quietly(tool_manager, current_user, server_name)
             logger.debug(f"Invalidated cached client for server '{server_name}'")
 
         # Best-effort revocation at the provider, after the local record is

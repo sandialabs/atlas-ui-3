@@ -42,7 +42,9 @@ class ToolManagerProtocol(Protocol):
         """Get schemas for specified tools.
 
         ``user_email`` scopes the result to catalogues that user may read; see
-        ``DiscoveryMixin.get_tools_schema``. Omitted means unscoped.
+        ``DiscoveryMixin.get_tools_schema``. Omitted or ``None`` is an unknown
+        user and withholds user-scoped catalogues; internal callers acting on
+        an already-authorized tool pass ``mcp_discovery.UNSCOPED``.
         """
         ...
 

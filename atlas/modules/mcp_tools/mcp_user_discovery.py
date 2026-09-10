@@ -21,9 +21,19 @@ sweep. The shared ``available_tools``/``_tool_index`` are still populated from
 a per-user result -- marked ``user_scoped`` -- because ``get_tools_schema`` and
 ``get_server_for_tool`` are user-agnostic and nothing could be scheduled or
 routed otherwise. That publication is withdrawn when the user it came from
-disconnects. It never widens access either way: every call into an
-auth-required server goes through ``_get_user_client`` and raises
+disconnects. It never widens access: every call into an auth-required server
+goes through ``_get_user_client``, which for a token-based server
+(``oauth``/``bearer``/``jwt``/``api_key``) raises
 ``AuthenticationRequiredException`` for a user holding no token of their own.
+
+``delegated`` servers are the case where that sentence needs care.
+``_get_user_client`` mints a delegated credential from the caller's *own*
+session rather than reusing the owner's, so a promoted tool is callable by a
+non-owner -- but as themselves, with whatever the server grants their identity,
+which is precisely what ``delegated`` means. Promotion therefore discloses the
+tool's existence and schema to other users of the deployment, not the owner's
+access. A deployment that does not want a delegated server's catalogue visible
+before each user has probed it should not mark it ``delegated``.
 """
 import asyncio
 import logging
@@ -68,6 +78,11 @@ class UserDiscoveryMixin:
             self._user_discovery_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
         if not hasattr(self, "_user_discovery_tasks"):
             self._user_discovery_tasks: set = set()
+        if not hasattr(self, "_user_discovery_generation"):
+            # Bumped whenever a (user, server)'s cache is cleared, so a
+            # discovery that was already in flight can tell that its result
+            # describes a credential the user has since given up.
+            self._user_discovery_generation: Dict[Tuple[str, str], int] = {}
 
     @staticmethod
     def _user_discovery_key(user_email: str, server_name: str) -> Tuple[str, str]:
@@ -157,6 +172,13 @@ class UserDiscoveryMixin:
         for cache in (self._user_available_tools, self._user_discovery_failures):
             for key in [k for k in cache if matches(k)]:
                 cache.pop(key, None)
+        # A discovery that is still running holds its lock and will write its
+        # result after this returns. Bumping the generation for every key this
+        # clear covers -- including ones with no cache entry, which is exactly
+        # the in-flight case -- makes that write recognise itself as stale and
+        # drop the result instead of republishing a revoked catalogue.
+        for key in [k for k in self._user_discovery_locks if matches(k)]:
+            self._user_discovery_generation[key] = self._discovery_generation(key) + 1
         # An in-flight discovery still needs its lock; only idle ones are swept.
         for key in [
             k for k, lock in self._user_discovery_locks.items()
@@ -294,6 +316,12 @@ class UserDiscoveryMixin:
         for key, lock in list(self._user_discovery_locks.items()):
             if not lock.locked():
                 self._user_discovery_locks.pop(key, None)
+        # Generations outlive their cache entry on purpose -- they exist to
+        # invalidate a run that is still going -- but a key with no lock has
+        # nothing in flight, so forgetting its counter cannot resurrect one.
+        for key in list(self._user_discovery_generation):
+            if key not in self._user_discovery_locks:
+                self._user_discovery_generation.pop(key, None)
 
     # --- discovery --------------------------------------------------------
 
@@ -346,11 +374,20 @@ class UserDiscoveryMixin:
             return True, None
         return False, None
 
+    def _discovery_generation(self, key) -> int:
+        """Current generation for this (user, server); 0 until first cleared."""
+        self._ensure_user_discovery_state()
+        return self._user_discovery_generation.get(key, 0)
+
     async def _run_user_discovery(
         self, user_email: str, server_name: str, key
     ) -> Optional[List[Any]]:
         """The discovery itself, run under this (user, server)'s lock."""
         now = time.time()
+        # Snapshot before the await: if the user disconnects while tools/list
+        # is in flight, this run's result belongs to a credential that no
+        # longer exists and must not be cached or promoted.
+        generation = self._discovery_generation(key)
         safe_server = sanitize_for_logging(server_name)
         # conversation_id is deliberately None: discovery is not part of any
         # conversation, and borrowing a conversation's client would perturb
@@ -368,12 +405,22 @@ class UserDiscoveryMixin:
 
         tools = await self._list_tools_with_client(server_name, client)
         if tools is None:
+            if self._discovery_generation(key) != generation:
+                return None
             self._user_discovery_failures[key] = now
             self._expire_stale_user_entry(key, server_name)
             # Pruned here as well as on success: a user whose discovery keeps
             # failing only ever writes to the failure and lock maps, and those
             # must not be the two that grow without bound.
             self._prune_user_discovery_state()
+            return None
+
+        if self._discovery_generation(key) != generation:
+            logger.info(
+                "Discarding per-user discovery for server '%s': the user's "
+                "credential was withdrawn while it ran",
+                safe_server,
+            )
             return None
 
         self._user_discovery_failures.pop(key, None)

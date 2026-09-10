@@ -25,6 +25,14 @@ from .sleep_tool import sleep_tool_enabled
 
 logger = logging.getLogger(__name__)
 
+# Passed as ``user_email`` by the internal callers that resolve a tool the
+# request has already been authorized to run (execution, telemetry), where
+# there is no user to scope against and omitting one must not be read as
+# "unknown". An actual ``None`` means the user could not be established, and
+# every user_scoped catalogue is withheld -- the same way ``build_mcp_data``
+# fails closed, since both feed the model's context.
+UNSCOPED = "__atlas_unscoped__"
+
 _ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
 _ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
 # NOTE: these schemas are deliberately model-facing only. User identity and the
@@ -550,7 +558,7 @@ class DiscoveryMixin:
         tool_name: Optional[str],
     ):
         """This user's own object for the tool, when the server is user-scoped."""
-        if user_email is None or not server_name or tool_name is None:
+        if user_email is None or user_email == UNSCOPED or not server_name or tool_name is None:
             return None
         entry = self.available_tools.get(server_name) or {}
         if not entry.get("user_scoped"):
@@ -582,11 +590,17 @@ class DiscoveryMixin:
         it. Reading the live entry also makes this expire on the same TTL every
         other read path enforces, rather than outliving it.
         """
-        if user_email is None or not server_name:
+        if not server_name:
             return True
         entry = self.available_tools.get(server_name) or {}
         if not entry.get("user_scoped"):
             return True
+        if user_email == UNSCOPED:
+            # An internal caller acting on an already-authorized tool.
+            return True
+        if user_email is None:
+            # Unknown user: a user_scoped catalogue is not theirs to read.
+            return False
         own = getattr(self, "get_user_tools_for_server", None)
         if own is None:
             return False
@@ -632,9 +646,10 @@ class DiscoveryMixin:
         purpose; those catalogues are published into the shared inventory
         marked ``user_scoped`` so they can be routed at all, and passing the
         requesting user here keeps another user's catalogue out of the schema
-        handed to the model. Omitted (the default) preserves the historic
-        user-agnostic behaviour for internal callers that resolve a tool they
-        have already authorized.
+        handed to the model. ``UNSCOPED`` preserves the user-agnostic
+        behaviour for internal callers that resolve a tool the request has
+        already been authorized to run; an omitted or ``None`` user is an
+        *unknown* one and withholds every ``user_scoped`` catalogue.
 
 
         Previous implementation attempted to derive the server name by stripping the last
