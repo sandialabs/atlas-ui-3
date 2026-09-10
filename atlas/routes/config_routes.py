@@ -9,16 +9,18 @@ from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
-from atlas.routes.files_routes import get_file_upload_limit_config
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
     ATLAS_SERVER_NAME,
     ATLAS_TOOL_SCHEMAS,
     DISCOVER_TOOL_NAME,
     SEARCH_TOOL_NAME,
+)
+from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
 from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
+from atlas.routes.files_routes import get_file_upload_limit_config
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +269,20 @@ async def get_config(
             and app_settings.feature_atlas_rag_tools_enabled
         )
         atlas_sleep_enabled = sleep_tool_enabled(app_settings)
+
+        # Servers that gate tools/list behind authorization discovered nothing
+        # at startup, when no user was logged in. Now that there is a user with
+        # (possibly) a stored token, retry those with the user's own client.
+        # Results are cached per (user, server), so this is a no-op on all but
+        # the first request after a token appears (issue #912).
+        user_tools = {}
+        try:
+            user_tools = await mcp_manager.discover_tools_for_user_servers(
+                current_user, authorized_servers
+            )
+        except Exception as e:  # never let discovery break the config payload
+            logger.warning("Per-user MCP tool discovery failed: %s", e)
+
         authorized_servers.append(ATLAS_SERVER_NAME)
 
         # Only build tool information for servers the user is authorized to access
@@ -277,12 +293,31 @@ async def get_config(
                     sleep_enabled=atlas_sleep_enabled,
                     search_enabled=atlas_search_enabled,
                 ))
-            elif server_name in mcp_manager.available_tools:
-                server_tools = mcp_manager.available_tools[server_name]['tools']
-                server_config = mcp_manager.available_tools[server_name]['config']
+            else:
+                # Config comes from mcp.json rather than the discovery result,
+                # so a server that never connected still describes itself.
+                server_config = (
+                    mcp_manager.servers_config.get(server_name)
+                    or (mcp_manager.available_tools.get(server_name) or {}).get('config')
+                    or {}
+                )
+                auth_type = server_config.get('auth_type', 'none')
+                auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
 
-                # Only include servers that have tools and user has access to
-                if server_tools:  # Only show servers with actual tools
+                # Prefer what this user's own credentials revealed; fall back to
+                # the shared catalogue from the anonymous startup sweep.
+                server_tools = user_tools.get(server_name)
+                if server_tools is None:
+                    server_tools = (
+                        mcp_manager.available_tools.get(server_name) or {}
+                    ).get('tools') or []
+
+                # A server that requires authorization is listed even with zero
+                # tools: its row is the only place the connect control lives, so
+                # hiding it leaves the user no way out of the bootstrap deadlock
+                # (issue #912). A server that needs nothing and offers nothing is
+                # still omitted -- there would be nothing to show and nothing to do.
+                if server_tools or auth_required:
                     # Build detailed tool information including descriptions and input schemas
                     tools_detailed = []
                     for tool in server_tools:
@@ -292,10 +327,6 @@ async def get_config(
                             'inputSchema': getattr(tool, 'inputSchema', {}) or {}
                         }
                         tools_detailed.append(tool_detail)
-
-                    # Determine auth_type from server config
-                    auth_type = server_config.get('auth_type', 'none')
-                    auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
 
                     tools_info.append({
                         'server': server_name,

@@ -23,7 +23,6 @@ from .atlas_server import (
 )
 from .sleep_tool import sleep_tool_enabled
 
-
 logger = logging.getLogger(__name__)
 
 _ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
@@ -142,6 +141,24 @@ def _build_tool_index(available_tools) -> Dict[str, Dict[str, Any]]:
 class DiscoveryMixin:
     """Tool/prompt discovery and inventory query helpers."""
 
+    def _apply_task_support_metadata(self, server_name: str, tools) -> None:
+        """Rebuild this server's per-tool task-forbidden cache from fresh metadata.
+
+        Stale entries are dropped first so a server upgrade that flips a tool
+        from "forbidden" to "optional"/"required" takes effect on the next
+        discovery without a process restart. Per MCP SEP-1686, an absent
+        taskSupport value defaults to "forbidden"; only "optional" or
+        "required" leaves us willing to try task mode for a given tool.
+        """
+        self._tool_task_forbidden = {
+            entry for entry in self._tool_task_forbidden
+            if entry[0] != server_name
+        }
+        for tool in tools:
+            mode = self._discover_task_support_mode(tool)
+            if mode in ("forbidden", None):
+                self._tool_task_forbidden.add((server_name, tool.name))
+
     async def _discover_tools_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover tools for a single server. Returns server tools data."""
         safe_server_name = sanitize_for_logging(server_name)
@@ -170,21 +187,7 @@ class DiscoveryMixin:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
-                # Rebuild the per-tool task-forbidden cache for this server
-                # from the freshly discovered metadata. Drop any stale entries
-                # first so a server upgrade that flips a tool from "forbidden"
-                # to "optional"/"required" takes effect on next reload without
-                # a process restart. Per MCP SEP-1686, an absent taskSupport
-                # value defaults to "forbidden"; only "optional" or "required"
-                # leaves us willing to try task mode for a given tool.
-                self._tool_task_forbidden = {
-                    entry for entry in self._tool_task_forbidden
-                    if entry[0] != server_name
-                }
-                for tool in tools:
-                    mode = self._discover_task_support_mode(tool)
-                    if mode in ("forbidden", None):
-                        self._tool_task_forbidden.add((server_name, tool.name))
+                self._apply_task_support_metadata(server_name, tools)
                 logger.debug("Stored %d tools for %s", len(tools), safe_server_name)
                 return server_data
         except Exception as e:
@@ -244,6 +247,13 @@ class DiscoveryMixin:
         logger.info("Starting MCP tool discovery for %d connected servers", len(self.clients))
         logger.debug("Tool discovery servers: %s", list(self.clients.keys()))
         self.available_tools = {}
+        # Every per-user catalogue was discovered against the previous config
+        # (and some were promoted into available_tools, which is being reset
+        # here), so they are all stale. They are re-discovered lazily on the
+        # owning user's next request.
+        clear_user_cache = getattr(self, "clear_user_tool_cache", None)
+        if clear_user_cache is not None:
+            clear_user_cache()
 
         # Create tasks for parallel tool discovery
         tasks = [

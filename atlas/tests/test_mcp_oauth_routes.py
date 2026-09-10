@@ -127,12 +127,24 @@ class _FakeManager:
         self.servers_config = SERVERS_CONFIG
         self._authorized = authorized if authorized is not None else [SERVER, "bearer-server"]
         self.invalidated = []
+        self.cache_cleared = []
+        self.rediscovered = []
+        self.discovery_error = None
 
     async def get_authorized_servers(self, user, is_user_in_group):
         return list(self._authorized)
 
     async def _invalidate_user_client(self, user, server):
         self.invalidated.append((user, server))
+
+    def clear_user_tool_cache(self, user, server=None):
+        self.cache_cleared.append((user, server))
+
+    async def discover_tools_for_user(self, user, server, force=False):
+        self.rediscovered.append((user, server, force))
+        if self.discovery_error is not None:
+            raise self.discovery_error
+        return []
 
 
 @pytest.fixture
@@ -305,6 +317,27 @@ class TestOAuthCallback:
         assert stored.metadata["source"] == mcp_oauth_service.OAUTH_METADATA_SOURCE
         # The cached client built while unauthenticated is dropped.
         assert (USER, SERVER) in manager.invalidated
+
+    def test_successful_callback_rediscovers_tools_for_the_user(self, app, manager, storage):
+        """A server that gates tools/list has no tools until this runs (#912)."""
+        client = TestClient(app)
+        state = _state_from(_start(client, manager))
+
+        assert "mcp_auth_success=1" in self._complete(client, manager, state).headers["location"]
+
+        assert manager.cache_cleared == [(USER, SERVER)]
+        assert manager.rediscovered == [(USER, SERVER, True)]
+
+    def test_a_failed_rediscovery_still_reports_success(self, app, manager, storage):
+        """Authorization did succeed; the token is stored either way."""
+        manager.discovery_error = RuntimeError("server unreachable")
+        client = TestClient(app)
+        state = _state_from(_start(client, manager))
+
+        response = self._complete(client, manager, state)
+
+        assert "mcp_auth_success=1" in response.headers["location"]
+        assert storage.get_token(USER, SERVER) is not None
 
     def test_state_is_single_use(self, app, manager, storage):
         client = TestClient(app)

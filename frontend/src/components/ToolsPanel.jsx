@@ -147,7 +147,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [tokenUploadError, setTokenUploadError] = useState(null)
   const [disconnectServer, setDisconnectServer] = useState(null)
   const [disconnectError, setDisconnectError] = useState(null)
-  const { fetchAuthStatus, uploadToken, removeToken, startOAuth, getServerAuth } = useServerAuthStatus()
+  const { authStatus, fetchAuthStatus, uploadToken, removeToken, startOAuth, getServerAuth } = useServerAuthStatus()
   
   // Seed pending state from saved state when the panel opens, and re-seed it
   // whenever the saved selections change underneath an un-edited panel. The
@@ -609,8 +609,38 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       }
     })
   
+    // A server that requires authorization and has discovered nothing yet still
+    // needs a row: the connect control lives on it, so leaving it out is a
+    // bootstrap deadlock -- no tools until the user authorizes, and no way to
+    // authorize because the control only appears once there are tools
+    // (issue #912). /api/mcp/auth/status lists every configured server the user
+    // can reach, including ones with no tools, so it is the one source that can
+    // still describe them. Only unauthenticated ones are synthesized: once
+    // connected, a server with genuinely no tools has nothing to offer and no
+    // action left to take.
+    Object.values(authStatus || {}).forEach(status => {
+      const name = status?.server_name
+      if (!name || allServers[name]) return
+      if (!status.auth_required || status.authenticated) return
+      allServers[name] = {
+        server: name,
+        description: status.description || '',
+        short_description: status.description || '',
+        author: '',
+        help_email: '',
+        is_exclusive: false,
+        compliance_level: null,
+        auth_type: status.auth_type,
+        tools: [],
+        tools_detailed: [],
+        tool_count: 0,
+        prompts: [],
+        prompt_count: 0
+      }
+    })
+
     return sortAtlasFirst(Object.values(allServers))
-  }, [tools, prompts])
+  }, [tools, prompts, authStatus])
 
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {

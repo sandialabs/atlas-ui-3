@@ -165,13 +165,14 @@ credential per user rather than asking the user to upload one:
 `audience` defaults to the server's URL, which is the canonical resource
 identifier the MCP authorization specification uses.
 
-**Tool discovery caveat.** Tool discovery runs once at startup with the
-process-level client, before any user has logged in, so there is no session to
-delegate from. A delegated server that also requires authorization on
-`initialize`/`tools/list` will therefore register no tools. Delegated servers
-must currently allow unauthenticated discovery and enforce authorization on
-tool *invocation*; per-user lazy discovery is the fix and is not in this
-change.
+**Tool discovery.** The startup discovery sweep runs with the process-level
+client, before any user has logged in, so there is no session to delegate
+from: a delegated server that also requires authorization on
+`initialize`/`tools/list` registers no tools there. Atlas retries such servers
+lazily with the user's own client on their next request, minting a delegated
+token for the attempt, and caches the result per (user, server). The tools
+appear once a user with a valid OIDC session has loaded the app; until then
+the server is listed with no tools rather than being hidden.
 
 If delegation is disabled,
 the user has no OIDC session, or the exchange fails, the server simply reports

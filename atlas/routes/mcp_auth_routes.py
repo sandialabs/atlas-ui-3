@@ -59,6 +59,43 @@ _ALLOWED_PROVIDER_ERROR_NAMES = {
 }
 
 
+
+def _drop_user_tool_cache(mcp_manager, user_email: str, server_name: str) -> None:
+    """Forget the tools discovered for this user/server under the old token."""
+    clear = getattr(mcp_manager, "clear_user_tool_cache", None)
+    if clear is None:
+        return
+    try:
+        clear(user_email, server_name)
+    except Exception:
+        logger.debug("Could not clear per-user tool cache", exc_info=True)
+
+
+async def _rediscover_after_authorization(mcp_manager, user_email: str, server_name: str) -> None:
+    """Re-run tool discovery for one server as the user who just authorized.
+
+    A server that gates ``tools/list`` behind authorization contributed no
+    tools to the startup sweep, and nothing else re-runs discovery -- so
+    without this the user completes the flow, is told they are connected, and
+    still sees no tools (issue #912). Best-effort: a failure here must not turn
+    a successful authorization into an error.
+    """
+    if mcp_manager is None:
+        return
+    _drop_user_tool_cache(mcp_manager, user_email, server_name)
+    discover = getattr(mcp_manager, "discover_tools_for_user", None)
+    if discover is None:
+        return
+    try:
+        await discover(user_email, server_name, force=True)
+    except Exception:
+        logger.warning(
+            "Post-authorization tool discovery failed for MCP server '%s'",
+            sanitize_for_logging(server_name),
+            exc_info=True,
+        )
+
+
 class TokenUpload(BaseModel):
     """Request body for uploading an API key or token."""
     token: str
@@ -205,6 +242,12 @@ async def upload_token(
         sanitized_server = sanitize_for_logging(server_name)
         logger.info(f"User uploaded token for MCP server '{sanitized_server}'")
 
+        # The stored token supersedes whatever this user's client and tool
+        # catalogue were built from, including the empty catalogue left by an
+        # anonymous startup sweep that the server answered with a 401.
+        await mcp_manager._invalidate_user_client(current_user, server_name)
+        await _rediscover_after_authorization(mcp_manager, current_user, server_name)
+
         return {
             "message": f"Token stored for server '{server_name}'",
             "server_name": server_name,
@@ -251,6 +294,7 @@ async def remove_token(
         tool_manager = app_factory.get_mcp_manager()
         if tool_manager is not None:
             await tool_manager._invalidate_user_client(current_user, server_name)
+            _drop_user_tool_cache(tool_manager, current_user, server_name)
             logger.debug(f"Invalidated cached client for server '{server_name}'")
 
         # Best-effort revocation at the provider, after the local record is
@@ -538,6 +582,9 @@ async def oauth_callback(
     mcp_manager = app_factory.get_mcp_manager()
     if mcp_manager is not None:
         await mcp_manager._invalidate_user_client(current_user, server_name)
+        # Servers that gate tools/list behind authorization have no tools until
+        # this runs, so it is part of completing the flow, not an optimisation.
+        await _rediscover_after_authorization(mcp_manager, current_user, server_name)
 
     logger.info(
         "MCP OAuth authorization complete for server '%s'",

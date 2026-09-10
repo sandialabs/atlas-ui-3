@@ -17,12 +17,13 @@ vi.mock('../contexts/MarketplaceContext')
 // over an ordinary `let` declared below.
 const authHookState = vi.hoisted(() => ({
   startOAuth: null,
-  getServerAuth: null
+  getServerAuth: null,
+  authStatus: null
 }))
 
 vi.mock('../hooks/useServerAuthStatus', () => ({
   useServerAuthStatus: () => ({
-    authStatus: {},
+    authStatus: authHookState.authStatus || {},
     loading: false,
     error: null,
     fetchAuthStatus: vi.fn(),
@@ -1557,5 +1558,102 @@ describe('ToolsPanel - OAuth error retry affordance', () => {
 
     expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
     expect(screen.getByRole('alert')).toHaveTextContent(/administrator/i)
+  })
+})
+
+/**
+ * A server that gates tools/list behind authorization discovers nothing until
+ * the user connects -- and the connect control lives on the server's row. If
+ * the row only appears once there are tools, there is no way out (issue #912).
+ */
+describe('ToolsPanel - servers that require authorization but have no tools', () => {
+  const pendingStatus = {
+    server_name: 'remote-mcp',
+    auth_type: 'oauth',
+    auth_required: true,
+    authenticated: false,
+    description: 'Remote MCP server',
+    oauth_start_url: '/api/mcp/auth/remote-mcp/oauth/start'
+  }
+
+  afterEach(() => {
+    authHookState.startOAuth = null
+    authHookState.getServerAuth = null
+    authHookState.authStatus = null
+  })
+
+  const renderWith = (authStatus, tools = []) => {
+    authHookState.authStatus = authStatus
+    authHookState.getServerAuth = vi.fn(name => authStatus[name] || null)
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools,
+      prompts: [],
+      features: {}
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => tools),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => tools),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('renders a row with a connect control for a server that has no tools yet', () => {
+    renderWith({ 'remote-mcp': pendingStatus })
+
+    expect(screen.getByText('remote-mcp')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
+  })
+
+  it('does not duplicate a server that the tools payload already describes', () => {
+    renderWith({ 'remote-mcp': pendingStatus }, [{
+      server: 'remote-mcp',
+      description: 'Remote MCP server',
+      tools: ['search'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0,
+      auth_type: 'oauth'
+    }])
+
+    expect(screen.getAllByText('remote-mcp')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'search' })).toBeTruthy()
+  })
+
+  it('does not synthesize a row for a connected server with nothing to offer', () => {
+    renderWith({
+      'remote-mcp': { ...pendingStatus, authenticated: true }
+    })
+
+    expect(screen.queryByText('remote-mcp')).toBeNull()
+  })
+
+  it('does not synthesize a row for a server that needs no authorization', () => {
+    renderWith({
+      quiet: {
+        server_name: 'quiet',
+        auth_type: 'none',
+        auth_required: false,
+        authenticated: false
+      }
+    })
+
+    expect(screen.queryByText('quiet')).toBeNull()
   })
 })
