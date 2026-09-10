@@ -14,7 +14,7 @@ import { useToast } from './ui/toastContext'
  * click instead of re-picking every selection. Saving captures whatever is
  * currently selected; switching replaces the current selections wholesale.
  */
-const WorkspaceSelector = () => {
+const WorkspaceSelector = ({ placement = 'down' }) => {
   const {
     workspaces = [],
     workspacesLoading,
@@ -161,7 +161,11 @@ const WorkspaceSelector = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 top-full mt-1 w-80 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
+        <div
+          className={`absolute left-0 w-80 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto ${
+            placement === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
+        >
           <div className="p-2 border-b border-gray-700">
             <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
               <Layers className="w-3 h-3 text-purple-400" />

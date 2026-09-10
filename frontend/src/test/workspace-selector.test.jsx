@@ -90,7 +90,10 @@ describe('WorkspaceSelector', () => {
   }
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    // reset (not just clear) so mockImplementation calls made inside a test
+    // body -- e.g. the two-selector sync test below -- cannot leak into the
+    // next test and make the suite order-dependent.
+    vi.resetAllMocks()
     useDialog.mockReturnValue({ prompt: dialogPrompt, confirm: dialogConfirm })
     useToast.mockReturnValue({ success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() })
     setContext()
@@ -235,6 +238,38 @@ describe('WorkspaceSelector', () => {
     openDropdown()
     fireEvent.click(screen.getByText('No workspace'))
     expect(clearActiveWorkspace).toHaveBeenCalled()
+  })
+
+  it('stays synchronized when multiple selectors are rendered', () => {
+    let activeWorkspaceId = 'ws-work'
+    switchWorkspace.mockImplementation((workspaceId) => {
+      activeWorkspaceId = workspaceId
+      return true
+    })
+    useChat.mockImplementation(() => ({
+      ...baseContext,
+      activeWorkspaceId,
+      switchWorkspace,
+    }))
+
+    const { rerender } = render(
+      <>
+        <WorkspaceSelector />
+        <WorkspaceSelector />
+      </>
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: /workspaces:/i })[1])
+    fireEvent.click(screen.getByText('Home'))
+
+    rerender(
+      <>
+        <WorkspaceSelector />
+        <WorkspaceSelector />
+      </>
+    )
+
+    expect(screen.getAllByRole('button', { name: /workspaces: home/i })).toHaveLength(2)
   })
 
   it('shows an empty state when the user has no workspaces', () => {

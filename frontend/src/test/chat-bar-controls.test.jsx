@@ -8,14 +8,25 @@
  */
 import { render, screen, fireEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { BrowserRouter } from 'react-router-dom'
+import ChatArea from '../components/ChatArea'
 import ToolSelector from '../components/ToolSelector'
 import EnabledDataSourcesIndicator from '../components/EnabledDataSourcesIndicator'
 import { useChat } from '../contexts/ChatContext'
-import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
+import { useWS } from '../contexts/WSContext'
+import { useOptionalMarketplace, useMarketplace } from '../contexts/MarketplaceContext'
 import { OPEN_SETTINGS_EVENT, parseOpenSettingsDetail } from '../utils/settingsPanelEvents'
 
 vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
-vi.mock('../contexts/MarketplaceContext', () => ({ useOptionalMarketplace: vi.fn() }))
+vi.mock('../contexts/WSContext', () => ({ useWS: vi.fn() }))
+vi.mock('../contexts/MarketplaceContext', () => ({
+  useOptionalMarketplace: vi.fn(),
+  useMarketplace: vi.fn(),
+}))
+vi.mock('../components/ui/toastContext', () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() }),
+  useDialog: () => ({ prompt: vi.fn(), confirm: vi.fn() }),
+}))
 
 const tools = [{
   server: 'files',
@@ -224,5 +235,87 @@ describe('EnabledDataSourcesIndicator', () => {
     renderWith(['corp:west', 'corp:east', 'corp:central', 'corp:exec'])
     const more = screen.getByText('+1 more')
     expect(more.closest('.overflow-x-auto')).toBeNull()
+  })
+})
+
+// The footer workspace control is the whole point of PR #917, so its gating
+// and opening direction are asserted against the real control row rather
+// than the selector in isolation (PR #917 review).
+describe('WorkspaceSelector in the chat bar', () => {
+  const chatAreaContext = {
+    messages: [],
+    isWelcomeVisible: true,
+    isThinking: false,
+    sendChatMessage: vi.fn(),
+    currentModel: 'gpt-4',
+    models: [],
+    tools: [],
+    prompts: [],
+    personas: [],
+    userPrompts: [],
+    selectedTools: new Set(),
+    selectedPrompts: new Set(),
+    selectedDataSources: new Set(),
+    toggleTool: vi.fn(),
+    togglePrompt: vi.fn(),
+    sessionFiles: { files: [], total_files: 0, categories: {} },
+    agentModeEnabled: false,
+    agentPendingQuestion: null,
+    setAgentPendingQuestion: vi.fn(),
+    stopAgent: vi.fn(),
+    answerAgentQuestion: vi.fn(),
+    followUpSuggestions: [],
+    setFollowUpSuggestions: vi.fn(),
+    // WorkspaceSelector's state/actions come from the same shared useChat()
+    // path the header selector uses.
+    workspaces: [],
+    activeWorkspaceId: null,
+    switchWorkspace: vi.fn(),
+    clearActiveWorkspace: vi.fn(),
+  }
+
+  const renderChatArea = features => {
+    useChat.mockReturnValue({ ...chatAreaContext, features })
+    useWS.mockReturnValue({ isConnected: true, sendMessage: vi.fn() })
+    useOptionalMarketplace.mockReturnValue(null)
+    useMarketplace.mockReturnValue({ isComplianceAccessible: () => true })
+    return render(
+      <BrowserRouter>
+        <ChatArea />
+      </BrowserRouter>
+    )
+  }
+
+  it('renders the workspace control in the chat bar when the workspaces feature is on', () => {
+    renderChatArea({ workspaces: true })
+    const control = screen.getByRole('button', { name: 'Workspaces' })
+    expect(control.closest('[aria-label="Chat controls"]')).not.toBeNull()
+  })
+
+  // Mirrors the ToolSelector feature-gating case above: the control belongs
+  // to the chat bar only when the feature flag is on.
+  it('renders no workspace control when the workspaces feature is off', () => {
+    renderChatArea({})
+    expect(screen.queryByRole('button', { name: /workspaces/i })).not.toBeInTheDocument()
+  })
+
+  it('is hidden when features is undefined', () => {
+    renderChatArea(undefined)
+    expect(screen.queryByRole('button', { name: /workspaces/i })).not.toBeInTheDocument()
+  })
+
+  // The chat bar is pinned to the bottom of the viewport and the chat area
+  // root clips overflow, so the panel must open upward like the footer's
+  // tool autocomplete, not downward where it is unreachable (PR #917 review).
+  it('opens its panel upward from the chat bar', () => {
+    renderChatArea({ workspaces: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
+    const panel = screen
+      .getByRole('button', { name: 'Workspaces' })
+      .closest('.relative')
+      .querySelector('.absolute')
+    expect(panel).not.toBeNull()
+    expect(panel.className).toContain('bottom-full')
+    expect(panel.className).not.toContain('top-full')
   })
 })
