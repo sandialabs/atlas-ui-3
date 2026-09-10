@@ -90,6 +90,18 @@ def test_auth_required_server_with_no_tools_is_listed():
     assert servers["remote-mcp"]["description"] == "Remote MCP"
 
 
+def test_delegated_server_with_no_tools_is_listed_but_not_connectable():
+    """It needs per-user credentials, but Atlas mints them -- nothing to connect."""
+    manager = _FakeManager({"delegated-mcp": {"auth_type": "delegated"}})
+
+    servers = _servers_by_name(_run(manager))
+
+    assert "delegated-mcp" in servers
+    assert servers["delegated-mcp"]["tools"] == []
+    assert servers["delegated-mcp"]["auth_required"] is False
+    assert servers["delegated-mcp"]["auth_type"] == "delegated"
+
+
 def test_open_server_with_no_tools_is_still_omitted():
     """Nothing to show and nothing to do -- the old behaviour is kept."""
     manager = _FakeManager(

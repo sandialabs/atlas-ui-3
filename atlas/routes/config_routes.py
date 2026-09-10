@@ -280,7 +280,9 @@ async def get_config(
             )
         except Exception as e:  # never let discovery break the config payload
             logger.warning(
-                "Per-user MCP tool discovery failed: %s", sanitize_for_logging(str(e))
+                "Per-user MCP tool discovery failed: %s",
+                sanitize_for_logging(str(e)),
+                exc_info=True,
             )
 
         authorized_servers.append(ATLAS_SERVER_NAME)
@@ -302,7 +304,13 @@ async def get_config(
                     or {}
                 )
                 auth_type = server_config.get('auth_type', 'none')
+                # auth_required drives the panel's connect control, and a
+                # delegated server has nothing for the user to connect: Atlas
+                # mints its token from their OIDC session. It still needs
+                # per-user credentials, though, so it belongs in the group of
+                # servers listed before they have discovered anything.
                 auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
+                needs_user_credentials = auth_required or auth_type == 'delegated'
 
                 # Prefer what this user's own credentials revealed; fall back to
                 # the shared catalogue from the anonymous startup sweep.
@@ -312,12 +320,15 @@ async def get_config(
                         mcp_manager.available_tools.get(server_name) or {}
                     ).get('tools') or []
 
-                # A server that requires authorization is listed even with zero
-                # tools: its row is the only place the connect control lives, so
-                # hiding it leaves the user no way out of the bootstrap deadlock
-                # (issue #912). A server that needs nothing and offers nothing is
-                # still omitted -- there would be nothing to show and nothing to do.
-                if server_tools or auth_required:
+                # A server that needs per-user credentials is listed even with
+                # zero tools. For an auth_required one its row is the only place
+                # the connect control lives, so hiding it leaves the user no way
+                # out of the bootstrap deadlock (issue #912); for a delegated one
+                # the row is how the user learns the server exists at all while
+                # discovery has yet to succeed for them. A server that needs
+                # nothing and offers nothing is still omitted -- there would be
+                # nothing to show and nothing to do.
+                if server_tools or needs_user_credentials:
                     # Build detailed tool information including descriptions and input schemas
                     tools_detailed = []
                     for tool in server_tools:
