@@ -9,18 +9,16 @@ from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
+from atlas.routes.files_routes import get_file_upload_limit_config
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
     ATLAS_SERVER_NAME,
     ATLAS_TOOL_SCHEMAS,
     DISCOVER_TOOL_NAME,
     SEARCH_TOOL_NAME,
-)
-from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
 from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
-from atlas.routes.files_routes import get_file_upload_limit_config
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +279,9 @@ async def get_config(
                 current_user, authorized_servers
             )
         except Exception as e:  # never let discovery break the config payload
-            logger.warning("Per-user MCP tool discovery failed: %s", e)
+            logger.warning(
+                "Per-user MCP tool discovery failed: %s", sanitize_for_logging(str(e))
+            )
 
         authorized_servers.append(ATLAS_SERVER_NAME)
 
