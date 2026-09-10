@@ -402,3 +402,42 @@ def test_warns_when_no_authorization_source_is_configured(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
         AppSettings(debug_mode=False, auth_group_check_url=None, ADMIN_USERS="alice@example.org")
     assert "No authorization source is configured" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_users_group_short_circuit_is_case_and_whitespace_tolerant(monkeypatch):
+    """``Users`` / `` users `` in a hand-edited ``groups`` list must still hit
+    the default-users short-circuit instead of denying everyone (Copilot review
+    on PR #911): group-name tolerance cannot stop at the static table."""
+    _production_static_env(monkeypatch)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    assert await is_user_in_group("nobody@example.org", "Users") is True
+    assert await is_user_in_group("nobody@example.org", " users ") is True
+
+
+@pytest.mark.asyncio
+async def test_static_config_ignored_when_authorizer_url_set_without_api_key(monkeypatch):
+    """An endpoint configured without a usable API key must fail closed.
+
+    ``AUTH_GROUP_CHECK_URL`` without ``AUTH_GROUP_CHECK_API_KEY`` -- a failed
+    secret injection, a misspelled variable -- does not take the external
+    branch. If static config were consulted there, a listed admin would keep
+    admin exactly while the authoritative service is unreachable, which is the
+    opposite of what "the endpoint is authoritative" promises.
+    """
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    assert await is_user_in_group("alice@example.org", "admin") is False
+    # The unrelated default is unchanged: everyone is still in ``users``.
+    assert await is_user_in_group("alice@example.org", "users") is True

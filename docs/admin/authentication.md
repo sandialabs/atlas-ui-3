@@ -282,7 +282,7 @@ ADMIN_USERS=alice@example.org,bob@example.org
 
 Everyone listed satisfies a check against `ADMIN_GROUP` (whatever it is named).
 
-**Arbitrary groups**, which is what makes a `groups` restriction on an MCP server or a `required_groups` model meaningful outside debug mode:
+**Arbitrary groups**, which is what makes a `groups` restriction on an MCP server or model meaningful outside debug mode:
 
 ```
 AUTH_STATIC_GROUPS=admin:alice@example.org,bob@example.org;mcp_advanced:alice@example.org
@@ -293,7 +293,7 @@ Semicolons separate groups, a colon separates the group name from its members, a
 Notes:
 
 - **Matching is case-insensitive and whitespace-tolerant** on both group names and identities, since the values come from IdP claims and hand-edited config.
-- **An external authorizer stays authoritative.** When `AUTH_GROUP_CHECK_URL` is configured, its verdict is final and the static config is not consulted as an additional grant.
+- **An external authorizer stays authoritative.** When `AUTH_GROUP_CHECK_URL` is configured, its verdict is final and the static config is not consulted as an additional grant. This holds even if `AUTH_GROUP_CHECK_API_KEY` is missing: an endpoint configured without a usable key fails closed rather than falling back to static grants.
 - **Static config only ever grants.** Users not listed keep the existing behaviour — they are in `users` and nothing else.
 - A malformed `AUTH_STATIC_GROUPS` entry is skipped with a warning rather than failing startup; the effect is denial, not a partially-parsed grant.
 - If `DEBUG_MODE=false`, no `AUTH_GROUP_CHECK_URL` is set, and neither variable is configured, Atlas logs a startup warning: in that combination no user can be an admin and any group-restricted MCP server is hidden from everyone.

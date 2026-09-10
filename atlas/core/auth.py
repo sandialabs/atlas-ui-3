@@ -114,16 +114,27 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # unlike the mock table -- available outside debug mode. Without it, a
         # deployment with no external authorizer has no way to make anyone an
         # admin or to scope an MCP server to a subset of users (issue #910).
-        # Values come from IdP claims and hand-edited config, so both sides are
-        # normalized to stripped lowercase.
-        static_members = app_settings.static_group_members.get(
-            (group_id or "").strip().lower()
-        )
-        if static_members and (user_id or "").strip().lower() in static_members:
-            return True
+        #
+        # Group names arrive from hand-edited config (the `groups` lists on
+        # MCP servers and models) and identities from IdP claims, so casing
+        # and stray whitespace are noise everywhere below -- not only in the
+        # static table.
+        normalized_group = (group_id or "").strip().lower()
+
+        # Gated on ``auth_url`` alone, not on the ``auth_url and api_key`` pair
+        # that selects the branch above: a deployment that configures an
+        # endpoint but whose API key is missing (a failed secret injection, a
+        # misspelled variable) lands here, and granting static admin in that
+        # window would preserve access precisely when the authoritative service
+        # has dropped out. Failing closed there is the whole point of calling
+        # the endpoint authoritative.
+        if not auth_url:
+            static_members = app_settings.static_group_members.get(normalized_group)
+            if static_members and (user_id or "").strip().lower() in static_members:
+                return True
 
         # Everybody is in the users group by default
-        if (group_id == "users"):
+        if normalized_group == "users":
             return True
         # Mock group membership is only available in debug mode
         if not app_settings.debug_mode:

@@ -1000,7 +1000,6 @@ class AppSettings(BaseSettings):
             )
         return self._static_group_members_cache
 
-
     model_config = {
         "env_file": "../.env",
         "env_file_encoding": "utf-8",
