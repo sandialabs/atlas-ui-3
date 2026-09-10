@@ -64,9 +64,10 @@ MAX_TOOL_IMAGE_TOTAL_B64_BYTES = 12 * 1024 * 1024
 
 _INTRO_PREFIX = "[Automated system note, not written by the user: "
 _UNSEEN_NOTE = (
-    _INTRO_PREFIX + "this tool also returned an image, but the current "
-    "model does not support vision input, so the image cannot be shown "
-    "here. The file is saved in the session files.]"
+    _INTRO_PREFIX + "tool(s) {tools} returned image(s) that are saved in "
+    "the session files, but the current model does not support vision "
+    "input, so the images cannot be shown here. Ask about them only via "
+    "the tools that produced them.]"
 )
 _DEMOTED_NOTE = (
     _INTRO_PREFIX + "{count} image(s) returned by a tool were removed "
@@ -227,19 +228,18 @@ class ToolImageInjector:
     """Appends tool-returned images to the live LLM transcript, under caps.
 
     One instance per turn: it tracks the synthetic messages it injected so
-    the rolling "most recent N" cap can demote older images as new ones
-    arrive. All entry points are fail-open -- an injection problem degrades
-    to the pre-fix behavior (text-only tool result) instead of breaking the
-    turn.
+    the rolling "most recent N" cap can demote older images -- individually,
+    not message-by-message -- as new ones arrive. All entry points are
+    fail-open: an injection problem degrades to the pre-fix behavior
+    (text-only tool result) instead of breaking the turn.
     """
 
     def __init__(self, *, enabled: bool):
         self._enabled = bool(enabled)
-        # Live injected messages with their per-message image count and
-        # base64 char total, oldest first.
+        # Live injected messages, oldest first, each with the per-image
+        # base64 lengths of the image blocks still present in it (same
+        # order as the blocks).
         self._live: List[Dict[str, Any]] = []
-        self._live_image_counts: List[int] = []
-        self._live_b64_totals: List[int] = []
 
     @property
     def enabled(self) -> bool:
@@ -255,9 +255,9 @@ class ToolImageInjector:
 
         When the model supports vision, appends one synthetic user message
         per step carrying that step's images (most-recent-wins caps). When
-        it does not, appends a short note to each image-bearing tool
-        message so the model knows an image exists and why it cannot see
-        it.
+        it does not, appends a short ``role: "system"`` note after the tool
+        results -- the tool result JSON itself is left untouched -- so the
+        model knows images exist and why it cannot see them.
         """
         if not tool_results:
             return
@@ -265,7 +265,7 @@ class ToolImageInjector:
             if self._enabled:
                 self._inject(messages, tool_results, tool_names or {})
             else:
-                self._note_unseen(messages, tool_results)
+                self._note_unseen(messages, tool_results, tool_names or {})
         except Exception:
             logger.warning(
                 "Tool image context injection failed; continuing without it",
@@ -300,11 +300,28 @@ class ToolImageInjector:
         if not images:
             return
 
-        # Aggregate budget: drop the newest images that cannot fit after
-        # demoting everything older. Keeps the request payload bounded.
+        # A single step cannot hold more images than the rolling cap: one
+        # oversized message would later be demoted wholesale. The newest of
+        # the batch wins, mirroring the transcript-wide policy.
+        if len(images) > MAX_TOOL_IMAGES_PER_TURN:
+            logger.warning(
+                "Tool returned %d images; keeping the newest %d for the LLM",
+                len(images), MAX_TOOL_IMAGES_PER_TURN,
+            )
+            images = images[-MAX_TOOL_IMAGES_PER_TURN:]
+
+        # Aggregate budget, newest wins: demote the oldest live images,
+        # individually, until the new payload fits. Only a payload that
+        # cannot fit even with nothing else live is dropped, which the
+        # per-image cap already makes near-impossible.
         kept: List[Dict[str, str]] = []
-        pending_total = sum(self._live_b64_totals)
+        pending_total = self._live_b64_total()
         for image in images:
+            while (
+                pending_total + len(image["b64"]) > MAX_TOOL_IMAGE_TOTAL_B64_BYTES
+                and self._live
+            ):
+                pending_total -= self._demote_oldest_images(1)[1]
             if pending_total + len(image["b64"]) > MAX_TOOL_IMAGE_TOTAL_B64_BYTES:
                 logger.warning(
                     "Dropping tool-returned image from LLM context: aggregate "
@@ -319,34 +336,66 @@ class ToolImageInjector:
 
         message = build_tool_image_message(kept, tool_names_used)
         messages.append(message)
-        self._live.append(message)
-        self._live_image_counts.append(len(kept))
-        self._live_b64_totals.append(sum(len(img["b64"]) for img in kept))
+        self._live.append({
+            "message": message,
+            "b64_lengths": [len(img["b64"]) for img in kept],
+        })
         self._enforce_count_cap()
         logger.info(
             "Injected %d tool-returned image(s) into the LLM transcript "
             "(%d image(s) live, %d base64 chars)",
-            len(kept), sum(self._live_image_counts), sum(self._live_b64_totals),
+            len(kept), self._live_image_count(), self._live_b64_total(),
         )
 
+    def _live_image_count(self) -> int:
+        return sum(len(entry["b64_lengths"]) for entry in self._live)
+
+    def _live_b64_total(self) -> int:
+        return sum(sum(entry["b64_lengths"]) for entry in self._live)
+
     def _enforce_count_cap(self) -> None:
-        while sum(self._live_image_counts) > MAX_TOOL_IMAGES_PER_TURN:
-            if not self._demote_oldest():
-                break
+        overflow = self._live_image_count() - MAX_TOOL_IMAGES_PER_TURN
+        while overflow > 0 and self._live:
+            overflow -= self._demote_oldest_images(overflow)[0]
 
-    def _demote_oldest(self) -> bool:
-        """Demote the oldest live image message to a text note, in place.
+    def _demote_oldest_images(self, count: int) -> tuple[int, int]:
+        """Demote up to *count* images from the oldest live message.
 
-        The dict object stays in the transcript (mutated), so message
-        ordering and the transcript's role sequence are untouched.
+        Image blocks are removed from the message's content list oldest
+        first; when a message's last image is taken, the message is
+        replaced in place with a one-line note (the dict object stays, so
+        transcript ordering and the role sequence are untouched). Returns
+        ``(demoted_count, demoted_b64_chars)``.
         """
         if not self._live:
-            return False
-        message = self._live.pop(0)
-        image_count = self._live_image_counts.pop(0)
-        self._live_b64_totals.pop(0)
-        message["content"] = _DEMOTED_NOTE.format(count=image_count)
-        return True
+            return 0, 0
+        entry = self._live[0]
+        message = entry["message"]
+        blocks = message.get("content")
+        if not isinstance(blocks, list):
+            self._live.pop(0)
+            return 0, 0
+
+        demoted = 0
+        demoted_chars = 0
+        while demoted < count and entry["b64_lengths"]:
+            # Find and drop the first (oldest) image block.
+            for index, block in enumerate(blocks):
+                if isinstance(block, dict) and block.get("type") == "image_url":
+                    removed = entry["b64_lengths"].pop(0)
+                    demoted += 1
+                    demoted_chars += removed
+                    blocks.pop(index)
+                    break
+            else:
+                break
+
+        if not entry["b64_lengths"]:
+            message["content"] = _DEMOTED_NOTE.format(
+                count=_count_injected_images(message),
+            )
+            self._live.pop(0)
+        return demoted, demoted_chars
 
     # -- non-vision path -----------------------------------------------------
 
@@ -354,40 +403,55 @@ class ToolImageInjector:
         self,
         messages: List[Dict[str, Any]],
         tool_results: List[Any],
+        tool_names: Dict[str, str],
     ) -> None:
+        noted_tools: List[str] = []
         for result in tool_results:
             artifacts = getattr(result, "artifacts", None) or []
             if not any(_is_image_artifact(a) for a in artifacts):
                 continue
-            tool_message = self._find_tool_message(
-                messages, getattr(result, "tool_call_id", None),
-            )
-            if tool_message is None or not isinstance(
-                tool_message.get("content"), str,
-            ):
-                continue
-            if _UNSEEN_NOTE in tool_message["content"]:
-                continue
-            tool_message["content"] = f"{tool_message['content']}\n\n{_UNSEEN_NOTE}"
-            logger.info(
-                "Noted an unseen tool-returned image on tool message %s "
-                "(model does not support vision)",
-                result.tool_call_id,
-            )
+            tool_name = tool_names.get(getattr(result, "tool_call_id", None), "")
+            if not tool_name:
+                for artifact in artifacts:
+                    tool_name = _tool_name_from_artifact(
+                        artifact if isinstance(artifact, dict) else {}
+                    )
+                    if tool_name:
+                        break
+            noted_tools.append(tool_name or "a tool")
+        if not noted_tools:
+            return
+        # A separate system message, not an edit to the tool result: tool
+        # output is often JSON and must stay parseable (the same position
+        # the tools-mode synthesis paths already use for their manifests).
+        messages.append({
+            "role": "system",
+            "content": _UNSEEN_NOTE.format(
+                tools=", ".join(dict.fromkeys(noted_tools)),
+            ),
+        })
+        logger.info(
+            "Noted %d unseen tool-returned image(s) after the tool results "
+            "(model does not support vision)",
+            len(noted_tools),
+        )
 
-    @staticmethod
-    def _find_tool_message(
-        messages: List[Dict[str, Any]],
-        tool_call_id: Optional[str],
-    ) -> Optional[Dict[str, Any]]:
-        """Locate the tool message for a call id, scanning backwards."""
-        if not tool_call_id:
-            return None
-        for message in reversed(messages):
-            if (
-                isinstance(message, dict)
-                and message.get("role") == "tool"
-                and message.get("tool_call_id") == tool_call_id
-            ):
-                return message
-        return None
+
+def _count_injected_images(message: Dict[str, Any]) -> int:
+    """How many images the (already trimmed) synthetic message carried.
+
+    The demotion note reports the full original count, so read it from the
+    intro text block before it is replaced.
+    """
+    blocks = message.get("content")
+    if isinstance(blocks, list):
+        for block in blocks:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "")
+                marker = " returned "
+                if marker in text:
+                    segment = text.split(marker, 1)[1]
+                    digits = segment.split(" ", 1)[0]
+                    if digits.isdigit():
+                        return int(digits)
+    return 0

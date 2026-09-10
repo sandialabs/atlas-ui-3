@@ -126,8 +126,9 @@ async def main() -> int:
                 if "fusion360_fusion_mcp_read" not in blocks[0].get("text", ""):
                     failures.append("intro text does not name the tool")
 
-        # 3. Vision disabled: no image message, but the tool result gains a
-        #    note so the model knows an image exists and why it cannot see it.
+        # 3. Vision disabled: no image message, no edit to the tool JSON --
+        #    the note rides as a separate system message so the tool result
+        #    stays parseable.
         messages_off = [
             {"role": "user", "content": "screenshot"},
             {"role": "tool", "content": content, "tool_call_id": "call_screenshot_1"},
@@ -135,10 +136,13 @@ async def main() -> int:
         ToolImageInjector(enabled=False).after_tool_results(
             messages_off, [tool_result],
         )
-        if len(messages_off) != 2:
-            failures.append("vision-off path must not add messages")
-        if "does not support vision" not in messages_off[-1]["content"]:
-            failures.append("vision-off path must annotate the tool result")
+        if len(messages_off) != 3:
+            failures.append("vision-off path must add exactly one note message")
+        if messages_off[1]["content"] != content:
+            failures.append("vision-off path must not mutate the tool result JSON")
+        note = messages_off[-1]
+        if note.get("role") != "system" or "does not support vision" not in note.get("content", ""):
+            failures.append(f"vision-off note missing or wrong shape: {note!r}")
 
         # 4. Text-only tool: nothing injected either way.
         text_call = await client.call_tool("text_only", {})

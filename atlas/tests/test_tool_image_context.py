@@ -229,16 +229,25 @@ class TestToolImageInjector:
         ToolImageInjector(enabled=True).after_tool_results(messages, [result])
         assert messages == [{"role": "user", "content": "hi"}]
 
-    def test_vision_disabled_appends_note_to_tool_message(self):
+    def test_vision_disabled_appends_separate_note_message(self):
+        # The tool result JSON must stay untouched (it is often parsed);
+        # the note rides as its own system message after the tool results.
+        tool_content = '{"results": {}}'
         messages = [
             {"role": "user", "content": "screenshot"},
-            {"role": "tool", "content": '{"results": {}}', "tool_call_id": "call_1"},
+            {"role": "tool", "content": tool_content, "tool_call_id": "call_1"},
         ]
         injector = ToolImageInjector(enabled=False)
-        injector.after_tool_results(messages, [_image_result()])
-        assert len(messages) == 2
-        assert "does not support vision" in messages[1]["content"]
-        assert '{"results": {}}' in messages[1]["content"]
+        injector.after_tool_results(
+            messages, [_image_result()],
+            tool_names={"call_1": "fusion360_fusion_mcp_read"},
+        )
+        assert len(messages) == 3
+        assert messages[1]["content"] == tool_content  # JSON preserved
+        note = messages[2]
+        assert note["role"] == "system"
+        assert "does not support vision" in note["content"]
+        assert "fusion360_fusion_mcp_read" in note["content"]
 
     def test_vision_disabled_note_skipped_for_non_image_artifacts(self):
         messages = [{"role": "tool", "content": "plain", "tool_call_id": "c1"}]
@@ -247,7 +256,7 @@ class TestToolImageInjector:
             artifacts=[{"name": "out.pptx", "b64": _PNG_B64, "mime": "application/vnd.x"}],
         )
         ToolImageInjector(enabled=False).after_tool_results(messages, [result])
-        assert messages[0]["content"] == "plain"
+        assert len(messages) == 1
 
     def test_rolling_cap_demotes_oldest_images(self):
         messages = []
@@ -271,6 +280,93 @@ class TestToolImageInjector:
         )
         assert total_live == MAX_TOOL_IMAGES_PER_TURN
         assert len(demoted) == 2
+
+    def test_batch_over_cap_keeps_newest_images(self):
+        # One tool result carrying more images than the rolling cap must not
+        # create an oversized message that later demotes to zero images: the
+        # newest cap-sized slice is kept up front.
+        artifacts = [_png_artifact(f"mcp_image_{i}.png") for i in range(MAX_TOOL_IMAGES_PER_TURN + 3)]
+        messages = []
+        ToolImageInjector(enabled=True).after_tool_results(
+            messages, [_image_result(artifacts=artifacts)],
+        )
+        image_blocks = [
+            b for b in messages[-1]["content"]
+            if isinstance(b, dict) and b.get("type") == "image_url"
+        ]
+        assert len(image_blocks) == MAX_TOOL_IMAGES_PER_TURN
+        # The intro must say 6 (the retained count), not 9.
+        assert f"returned {MAX_TOOL_IMAGES_PER_TURN} images" in messages[-1]["content"][0]["text"]
+
+    def test_batch_boundary_demotes_individually_not_wholesale(self):
+        # 4 images, then 4 more: the rolling cap of 6 must trim 2 images off
+        # the oldest message (keeping its remaining images + a note-free
+        # text) rather than dropping the entire first message.
+        messages = []
+        injector = ToolImageInjector(enabled=True)
+        for step, batch in enumerate((4, 4)):
+            artifacts = [_png_artifact(f"s{step}_img{i}.png") for i in range(batch)]
+            messages.append({"role": "tool", "content": "{}", "tool_call_id": f"call_{step}"})
+            injector.after_tool_results(
+                messages, [_image_result(tool_call_id=f"call_{step}", artifacts=artifacts)],
+            )
+        live = [
+            len([b for b in m["content"] if isinstance(b, dict) and b.get("type") == "image_url"])
+            for m in messages
+            if isinstance(m.get("content"), list)
+        ]
+        assert sum(live) == MAX_TOOL_IMAGES_PER_TURN
+        assert live == [2, 4]  # oldest message trimmed by 2, not destroyed
+        # No message was fully demoted to a note (the first still holds 2).
+        assert not any(
+            isinstance(m.get("content"), str) and "removed from context" in m.get("content", "")
+            for m in messages
+        )
+
+    def test_budget_evicts_old_images_instead_of_rejecting_new(self):
+        # With the aggregate budget exhausted by old images, a new image
+        # must evict the oldest live images rather than being dropped --
+        # most-recent-wins. Three images of ~4.2 MB base64 each overfill
+        # the 12 MB budget, so each new injection demotes the oldest live
+        # image until it fits.
+        from atlas.application.chat.utilities.tool_image_context import (
+            MAX_TOOL_IMAGE_TOTAL_B64_BYTES,
+        )
+
+        # A long run of "A" is valid base64 (decodes to zero bytes); the
+        # string length is the payload size the caps see.
+        big_b64 = "A" * (MAX_TOOL_IMAGE_TOTAL_B64_BYTES // 3 + 10000)
+        messages = []
+        injector = ToolImageInjector(enabled=True)
+        for step in range(3):
+            artifacts = [{"name": f"big{step}.png", "b64": big_b64, "mime": "image/png"}]
+            messages.append({"role": "tool", "content": "{}", "tool_call_id": f"call_{step}"})
+            injector.after_tool_results(
+                messages, [_image_result(tool_call_id=f"call_{step}", artifacts=artifacts)],
+            )
+        demoted_notes = [
+            m for m in messages
+            if isinstance(m.get("content"), str) and "removed from context" in m.get("content", "")
+        ]
+        live_image_messages = [
+            m for m in messages
+            if isinstance(m.get("content"), list)
+            and any(b.get("type") == "image_url" for b in m["content"] if isinstance(b, dict))
+        ]
+        # The oldest message was demoted to a note; the two newest images
+        # fit side by side and both stay live (each is just over a third of
+        # the 12 MB budget -- under the 5 MB per-image cap -- so only one
+        # eviction was needed to admit the third).
+        assert len(demoted_notes) == 1
+        assert len(live_image_messages) == 2
+        live_urls = [
+            b["image_url"]["url"]
+            for m in live_image_messages
+            for b in m["content"]
+            if isinstance(b, dict) and b.get("type") == "image_url"
+        ]
+        assert len(live_urls) == 2
+        assert all(big_b64 in url for url in live_urls)
 
     def test_injection_never_raises_on_bad_results(self):
         messages = [{"role": "user", "content": "hi"}]
@@ -410,12 +506,60 @@ class TestAgenticLoopInjectsToolImages:
         second_call_messages = llm.message_history[1]
         assert not any(isinstance(m.get("content"), list) for m in second_call_messages)
         tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
-        assert "does not support vision" in tool_messages[0]["content"]
+        # The note rides as its own system message; the tool JSON is untouched.
+        system_notes = [m for m in second_call_messages if m.get("role") == "system"]
+        assert any(
+            "does not support vision" in (m.get("content") or "") for m in system_notes
+        )
+        assert tool_messages[0]["content"] == '{"results": {}}'
 
 
 # ---------------------------------------------------------------------------
 # Tools-mode workflow integration
 # ---------------------------------------------------------------------------
+
+class TestSynthesisUserQuestionLookup:
+    @pytest.mark.asyncio
+    async def test_list_content_user_messages_skipped_for_question(self):
+        # The synthetic tool-image message (and any multimodal user turn)
+        # carries a list of content blocks; the synthesis prompt lookup must
+        # skip it and use the real textual question instead. Feeding the
+        # list to the prompt provider's ``.strip()`` used to raise and be
+        # swallowed, silently dropping the configured synthesis prompt.
+        from atlas.application.chat.utilities.tool_executor import (
+            synthesize_tool_results,
+        )
+
+        class _PromptProvider:
+            def get_tool_synthesis_prompt(self, user_question):
+                return f"PROMPT[{user_question}]"
+
+        class _LlmCaller:
+            def __init__(self):
+                self.prompts_seen = []
+
+            async def call_plain(self, model, messages, user_email=None):
+                self.prompts_seen.extend(
+                    m["content"] for m in messages
+                    if m.get("role") == "system" and str(m.get("content", "")).startswith("PROMPT")
+                )
+                return "answer"
+
+        caller = _LlmCaller()
+        messages = [
+            {"role": "user", "content": "check the rocket"},
+            {"role": "tool", "content": "{}", "tool_call_id": "c1"},
+            {"role": "user", "content": [
+                {"type": "text", "text": "[Automated system note]"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,x"}},
+            ]},
+        ]
+        await synthesize_tool_results(
+            model="m", messages=messages, llm_caller=caller,
+            prompt_provider=_PromptProvider(),
+        )
+        assert caller.prompts_seen == ["PROMPT[check the rocket]"]
+
 
 class TestExecuteToolsWorkflowInjectsToolImages:
     @pytest.mark.asyncio

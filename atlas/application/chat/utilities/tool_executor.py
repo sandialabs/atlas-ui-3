@@ -1054,10 +1054,19 @@ async def synthesize_tool_results(
 
     Pure function that coordinates LLM call for synthesis.
     """
-    # Extract latest user question (walk backwards)
+    # Extract latest user question (walk backwards). Only plain-string user
+    # messages count: multimodal user turns (inline image/PDF blocks from
+    # build_messages, or the synthetic tool-image message from issue #909)
+    # carry a list of content blocks, and the prompt provider's
+    # ``user_question.strip()`` would raise on those, silently dropping the
+    # configured synthesis prompt.
     user_question = ""
     for m in reversed(messages):
-        if m.get("role") == "user" and m.get("content"):
+        if (
+            m.get("role") == "user"
+            and isinstance(m.get("content"), str)
+            and m.get("content")
+        ):
             user_question = m["content"]
             break
 

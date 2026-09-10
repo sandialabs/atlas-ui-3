@@ -166,12 +166,15 @@ Details and limits of that pipeline:
 
 * **Vision gating.** Images are only injected when the selected model is
   configured with `supports_vision: true` in `llmconfig.yml`. On other
-  models the tool result carries a short note telling the model an image
-  exists but cannot be shown, instead of the model silently guessing.
+  models a `role: "system"` note is appended after the tool results saying
+  images were returned but cannot be shown -- the tool result JSON itself
+  is never modified.
 * **Rolling recency cap.** At most 6 tool-returned images are kept in the
-  live transcript at once. When a new image pushes past the cap, the oldest
-  injected message is demoted in place to a one-line note; the file itself
-  remains in the session files.
+  live transcript at once, newest wins: when a new image pushes past the
+  cap or the size budget, the oldest image blocks are removed (individually,
+  so one tool returning many images does not lose all of them) and a fully
+  emptied message is demoted in place to a one-line note. The files
+  themselves remain in the session files.
 * **Size limits.** 5 MB of base64 per image, 12 MB aggregate across the
   turn's transcript -- well under the ~20 MB total-request ceilings some
   providers enforce.
