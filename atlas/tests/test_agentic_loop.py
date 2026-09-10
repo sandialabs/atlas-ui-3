@@ -1183,3 +1183,36 @@ class TestAgenticLoopSteering:
         user_msgs = [m for m in context.history.messages if m.role.value == "user"]
         assert len(user_msgs) == 0
         assert result.final_answer == "Done."
+
+
+class TestTheSessionUserReachesTheSchemaScopingAPI:
+    """Tool schemas are scoped per user; agent mode must pass the user.
+
+    A server that gates `tools/list` publishes its catalogue marked
+    `user_scoped`, and `get_tools_schema` withholds one that is not the
+    requester's. The parameter defaults to None, so this pins the argument
+    rather than the scoping logic -- deleting it would silently reopen the
+    cross-user disclosure.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_loop_forwards_the_context_user(self):
+        llm = FakeLLM([LLMResponse(content="Done.")])
+        events, handler = _collect_events()
+        tool_mgr = _make_tool_manager({"search": "found"})
+
+        loop = _make_loop(llm, tool_mgr)
+        await loop.run(
+            model="test-model",
+            messages=[{"role": "user", "content": "Hi"}],
+            context=_make_context(),
+            selected_tools=["search"],
+            data_sources=None,
+            max_steps=5,
+            temperature=0.7,
+            event_handler=handler,
+        )
+
+        args, kwargs = tool_mgr.get_tools_schema.call_args
+        passed = kwargs.get("user_email") or (args[1] if len(args) > 1 else None)
+        assert passed == "test@example.com"

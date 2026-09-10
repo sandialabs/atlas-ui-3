@@ -6,6 +6,7 @@ receive structured metadata about all available MCP tools, following
 the same pattern as the _atlas_user injection feature.
 """
 
+import time
 from unittest.mock import MagicMock
 
 from atlas.application.chat.utilities.tool_executor import (
@@ -29,7 +30,7 @@ def _make_tool_manager(available_tools=None, schema_override=None):
     manager = MagicMock()
     manager.available_tools = available_tools or {}
 
-    def get_tools_schema(tool_names):
+    def get_tools_schema(tool_names, user_email=None):
         if schema_override is not None:
             return schema_override
         schemas = []
@@ -268,3 +269,124 @@ class TestInjectMcpData:
             None,
         )
         assert "_mcp_data" not in result
+
+
+class TestBuildMcpDataIsScopedToTheRequestingUser:
+    """_mcp_data carries names, descriptions and schemas into model context."""
+
+    def _manager_with_user_scoped_server(self):
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"remote-mcp": {"auth_type": "oauth"}}
+        manager._user_available_tools = {
+            ("owner@example.gov", "remote-mcp"): {
+                "tools": [FakeTool("search", "private detail")],
+                "config": {},
+                "discovered_at": time.time(),
+            }
+        }
+        manager._user_discovery_failures = {}
+        manager.available_tools = {
+            "remote-mcp": {
+                "tools": [FakeTool("search", "private detail")],
+                "config": {},
+                "user_scoped": True,
+                "discovered_for": {"owner@example.gov"},
+            }
+        }
+        return manager
+
+    def test_the_owner_sees_the_server(self):
+        manager = self._manager_with_user_scoped_server()
+
+        result = build_mcp_data(manager, "owner@example.gov")
+
+        assert [s["server_name"] for s in result["available_servers"]] == ["remote-mcp"]
+
+    def test_a_non_owner_sees_nothing(self):
+        manager = self._manager_with_user_scoped_server()
+
+        result = build_mcp_data(manager, "other@example.gov")
+
+        assert result["available_servers"] == []
+
+    def test_an_anonymous_catalogue_is_visible_to_anyone(self):
+        manager = self._manager_with_user_scoped_server()
+        manager.available_tools["remote-mcp"].pop("user_scoped")
+
+        result = build_mcp_data(manager, "other@example.gov")
+
+        assert [s["server_name"] for s in result["available_servers"]] == ["remote-mcp"]
+
+
+    def test_an_unknown_user_is_not_treated_as_unrestricted(self):
+        """A session with no user must not be the way a gated catalogue leaks."""
+        manager = self._manager_with_user_scoped_server()
+
+        result = build_mcp_data(manager, None)
+
+        assert result["available_servers"] == []
+
+    def test_a_manager_that_cannot_be_checked_omits_user_scoped(self):
+        plain = MagicMock()
+        plain.available_tools = {
+            "remote-mcp": {
+                "tools": [FakeTool("search")],
+                "config": {},
+                "user_scoped": True,
+            }
+        }
+        plain._may_read_catalogue = None
+
+        result = build_mcp_data(plain, "anyone@example.gov")
+
+        assert result["available_servers"] == []
+
+
+class TestBuildMcpDataEmitsTheRequestersOwnToolObject:
+    """Co-owners of a same-named tool must not read each other's schema."""
+
+    def _manager_with_two_owners(self):
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"remote-mcp": {"auth_type": "oauth"}}
+        first = FakeTool("search", "first owner's wording", {"type": "object", "properties": {"a": {}}})
+        second = FakeTool("search", "second owner's wording", {"type": "object", "properties": {"b": {}}})
+        manager._user_available_tools = {
+            ("first@example.gov", "remote-mcp"): {
+                "tools": [first], "config": {}, "discovered_at": time.time(),
+            },
+            ("second@example.gov", "remote-mcp"): {
+                "tools": [second], "config": {}, "discovered_at": time.time(),
+            },
+        }
+        manager._user_discovery_failures = {}
+        # The shared entry holds one object per name -- here the first owner's.
+        manager.available_tools = {
+            "remote-mcp": {
+                "tools": [first],
+                "config": {},
+                "user_scoped": True,
+                "discovered_for": {"first@example.gov", "second@example.gov"},
+            }
+        }
+        return manager
+
+    def test_each_owner_reads_their_own_description_and_schema(self):
+        manager = self._manager_with_two_owners()
+
+        second = build_mcp_data(manager, "second@example.gov")
+
+        tool = second["available_servers"][0]["tools"][0]
+        assert tool["description"] == "second owner's wording"
+        assert tool["parameters"]["properties"] == {"b": {}}
+
+    def test_the_owner_whose_object_is_published_is_unaffected(self):
+        manager = self._manager_with_two_owners()
+
+        first = build_mcp_data(manager, "first@example.gov")
+
+        tool = first["available_servers"][0]["tools"][0]
+        assert tool["description"] == "first owner's wording"

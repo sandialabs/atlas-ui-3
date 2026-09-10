@@ -98,6 +98,29 @@ const OAUTH_RETRYABLE_ERRORS = new Set([
   'interaction_required',
 ])
 
+// Which auth types put a connect control on the server row. An oauth server
+// connects by redirect, the rest by pasting a token, but every one of them is
+// a server the user can do something about.
+const CONNECTABLE_AUTH_TYPES = new Set(['jwt', 'bearer', 'api_key', 'oauth'])
+
+// Shared by the connect button and the empty-body hint so the two cannot
+// disagree about whether this server is waiting on the user.
+const connectState = (server, serverAuth) => {
+  const isOAuth = server.auth_type === 'oauth'
+  // An expired OAuth token with a refresh token is not disconnected: Atlas
+  // renews it on the next tool call. Showing "connect" there sends the user
+  // through a flow they do not need.
+  const willRefresh = isOAuth && serverAuth?.is_expired && serverAuth?.has_refresh_token
+  return {
+    isOAuth,
+    willRefresh,
+    connectable: CONNECTABLE_AUTH_TYPES.has(server.auth_type),
+    isAuthenticated: Boolean(
+      serverAuth?.authenticated && (!serverAuth?.is_expired || willRefresh)
+    ),
+  }
+}
+
 const describeOAuthError = (code) =>
   OAUTH_ERROR_MESSAGES[code] ||
   'The sign-in failed. Please try again, and tell an administrator if it keeps happening.'
@@ -125,9 +148,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     complianceLevelFilter,
     tools: allTools,
     prompts: allPrompts,
-    features
+    features,
+    refreshConfig
   } = useChat()
-  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts } = useMarketplace()
+  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts, isComplianceAccessible } = useMarketplace()
   
   // Local state for pending changes
   const [pendingSelectedTools, setPendingSelectedTools] = useState(new Set())
@@ -147,7 +171,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [tokenUploadError, setTokenUploadError] = useState(null)
   const [disconnectServer, setDisconnectServer] = useState(null)
   const [disconnectError, setDisconnectError] = useState(null)
-  const { fetchAuthStatus, uploadToken, removeToken, startOAuth, getServerAuth } = useServerAuthStatus()
+  const { authStatus, fetchAuthStatus, uploadToken, removeToken, startOAuth, getServerAuth } = useServerAuthStatus()
   
   // Seed pending state from saved state when the panel opens, and re-seed it
   // whenever the saved selections change underneath an un-edited panel. The
@@ -463,6 +487,17 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     return () => { closeGuardRef.current = null }
   })
 
+  // Re-fetch /api/config after an in-page authorization change. OAuth connects
+  // by full-page navigation and picks the new catalogue up on reload, but token
+  // upload and disconnect stay on the page, so the tool list would otherwise
+  // keep showing what was visible before the credential changed.
+  const refreshCatalogue = useCallback(() => {
+    if (!refreshConfig) return
+    Promise.resolve(refreshConfig()).catch(err => {
+      console.error('Failed to refresh config after auth change:', err)
+    })
+  }, [refreshConfig])
+
   // Handle token upload for JWT/bearer auth servers
   const handleTokenUpload = async (tokenData) => {
     if (!tokenModalServer) return
@@ -472,6 +507,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       await uploadToken(tokenModalServer, tokenData)
       setTokenModalServer(null)
       setTokenUploadError(null)
+      // The token may unlock a server that gates tools/list, so the catalogue
+      // the panel is rendering is now stale. Refresh it rather than making the
+      // user reload the page. Best-effort: the connection itself succeeded.
+      refreshCatalogue()
     } catch (err) {
       console.error('Token upload failed:', err)
       setTokenUploadError(err.message || 'Failed to save token. Please try again.')
@@ -499,6 +538,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     try {
       await removeToken(disconnectServer)
       setDisconnectServer(null)
+      // Dropping the token can remove tools that were only visible through it.
+      refreshCatalogue()
     } catch (err) {
       console.error('Token disconnect failed:', err)
       setDisconnectError(err?.message || 'Failed to disconnect. Please try again.')
@@ -609,8 +650,51 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       }
     })
   
+    // A server that requires authorization and has discovered nothing yet still
+    // needs a row: the connect control lives on it, so leaving it out is a
+    // bootstrap deadlock -- no tools until the user authorizes, and no way to
+    // authorize because the control only appears once there are tools
+    // (issue #912). /api/mcp/auth/status lists every configured server the user
+    // can reach, including ones with no tools, so it is the one source that can
+    // still describe them. Only unauthenticated ones are synthesized: once
+    // connected, a server with genuinely no tools has nothing to offer and no
+    // action left to take.
+    //
+    // A compliance filter still applies, but per row rather than by dropping
+    // the whole synthesis: the auth status reports each server's
+    // compliance_level, so these rows are judged by the same strict rule as
+    // the discovered ones. Skipping them all put the bootstrap deadlock back
+    // behind a persisted UI preference.
+    const complianceFilterActive = complianceEnabled && !!complianceLevelFilter
+    Object.values(authStatus || {}).forEach(status => {
+      const name = status?.server_name
+      if (!name || allServers[name]) return
+      if (!status.auth_required || status.authenticated) return
+      if (
+        complianceFilterActive &&
+        !isComplianceAccessible(complianceLevelFilter, status.compliance_level)
+      ) {
+        return
+      }
+      allServers[name] = {
+        server: name,
+        description: status.description || '',
+        short_description: status.description || '',
+        author: '',
+        help_email: '',
+        is_exclusive: false,
+        compliance_level: status.compliance_level ?? null,
+        auth_type: status.auth_type,
+        tools: [],
+        tools_detailed: [],
+        tool_count: 0,
+        prompts: [],
+        prompt_count: 0
+      }
+    })
+
     return sortAtlasFirst(Object.values(allServers))
-  }, [tools, prompts])
+  }, [tools, prompts, authStatus, complianceEnabled, complianceLevelFilter, isComplianceAccessible])
 
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {
@@ -903,6 +987,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                     const toolCount = server.tools.length
                     const promptCount = server.prompts.length
                     const totalItems = toolCount + promptCount
+                    const authState = connectState(server, getServerAuth(server.server))
                     
                     return (
                       <div key={server.server} className="bg-gray-700 rounded-lg overflow-hidden">
@@ -948,17 +1033,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                               )}
                               {/* Auth status indicator. An oauth server is connected by
                                   redirecting to the provider; the others by pasting a token. */}
-                              {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key' || server.auth_type === 'oauth') && (() => {
-                                const serverAuth = getServerAuth(server.server)
-                                const isOAuth = server.auth_type === 'oauth'
-                                // An expired OAuth token with a refresh token is
-                                // not disconnected: Atlas renews it on the next
-                                // tool call. Showing "connect" there sends the
-                                // user through a flow they do not need.
-                                const willRefresh =
-                                  isOAuth && serverAuth?.is_expired && serverAuth?.has_refresh_token
-                                const isAuthenticated =
-                                  serverAuth?.authenticated && (!serverAuth?.is_expired || willRefresh)
+                              {authState.connectable && (() => {
+                                const { isOAuth, willRefresh, isAuthenticated } = authState
                                 const connectTitle = isOAuth
                                   ? 'Click to connect with OAuth.'
                                   : 'Click to add token.'
@@ -1077,6 +1153,16 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                             {/* Tools and Prompts - only show when not collapsed */}
                             {!isCollapsed && (
                               <>
+                                {/* A server that gates discovery behind auth has
+                                    nothing to list until the user connects; say
+                                    so rather than showing a blank body. */}
+                                {totalItems === 0 && (
+                                  <p className="text-xs text-gray-500 italic mb-2">
+                                    {authState.connectable && !authState.isAuthenticated
+                                      ? 'Tools appear after you connect.'
+                                      : 'No tools discovered yet.'}
+                                  </p>
+                                )}
                                 {/* Tools Display */}
                                 {server.tools.length > 0 && (
                                   <div className="mb-4">

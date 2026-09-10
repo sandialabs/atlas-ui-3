@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
 import { useChat } from '../contexts/ChatContext'
@@ -17,17 +17,20 @@ vi.mock('../contexts/MarketplaceContext')
 // over an ordinary `let` declared below.
 const authHookState = vi.hoisted(() => ({
   startOAuth: null,
-  getServerAuth: null
+  getServerAuth: null,
+  authStatus: null,
+  uploadToken: null,
+  removeToken: null
 }))
 
 vi.mock('../hooks/useServerAuthStatus', () => ({
   useServerAuthStatus: () => ({
-    authStatus: {},
+    authStatus: authHookState.authStatus || {},
     loading: false,
     error: null,
     fetchAuthStatus: vi.fn(),
-    uploadToken: vi.fn(),
-    removeToken: vi.fn(),
+    uploadToken: authHookState.uploadToken || vi.fn(),
+    removeToken: authHookState.removeToken || vi.fn(),
     startOAuth: authHookState.startOAuth || vi.fn(),
     getServerAuth: authHookState.getServerAuth || vi.fn(() => null)
   })
@@ -60,7 +63,8 @@ describe('ToolsPanel - Tool Selection', () => {
     getComplianceFilteredTools: vi.fn(() => []),
     getComplianceFilteredPrompts: vi.fn(() => []),
     getFilteredTools: vi.fn(() => []),
-    getFilteredPrompts: vi.fn(() => [])
+    getFilteredPrompts: vi.fn(() => []),
+    isComplianceAccessible: vi.fn(() => true)
   }
 
   beforeEach(() => {
@@ -1557,5 +1561,272 @@ describe('ToolsPanel - OAuth error retry affordance', () => {
 
     expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
     expect(screen.getByRole('alert')).toHaveTextContent(/administrator/i)
+  })
+})
+
+/**
+ * A server that gates tools/list behind authorization discovers nothing until
+ * the user connects -- and the connect control lives on the server's row. If
+ * the row only appears once there are tools, there is no way out (issue #912).
+ */
+describe('ToolsPanel - servers that require authorization but have no tools', () => {
+  const pendingStatus = {
+    server_name: 'remote-mcp',
+    auth_type: 'oauth',
+    auth_required: true,
+    authenticated: false,
+    description: 'Remote MCP server',
+    oauth_start_url: '/api/mcp/auth/remote-mcp/oauth/start'
+  }
+
+  afterEach(() => {
+    authHookState.startOAuth = null
+    authHookState.getServerAuth = null
+    authHookState.authStatus = null
+  })
+
+  const renderWith = (authStatus, tools = [], chatOverrides = {}, marketplaceOverrides = {}) => {
+    authHookState.authStatus = authStatus
+    authHookState.getServerAuth = vi.fn(name => authStatus[name] || null)
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools,
+      prompts: [],
+      features: {},
+      ...chatOverrides
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => tools),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => tools),
+      getFilteredPrompts: vi.fn(() => []),
+      // The real rule: strict, and a resource with no level never matches.
+      isComplianceAccessible: vi.fn(
+        (userLevel, resourceLevel) => !!resourceLevel && resourceLevel === userLevel
+      ),
+      ...marketplaceOverrides
+    })
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('renders a row with a connect control for a server that has no tools yet', () => {
+    renderWith({ 'remote-mcp': pendingStatus })
+
+    expect(screen.getByText('remote-mcp')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
+  })
+
+  it('does not duplicate a server that the tools payload already describes', () => {
+    renderWith({ 'remote-mcp': pendingStatus }, [{
+      server: 'remote-mcp',
+      description: 'Remote MCP server',
+      tools: ['search'],
+      tools_detailed: [],
+      tool_count: 1,
+      prompts: [],
+      prompt_count: 0,
+      auth_type: 'oauth'
+    }])
+
+    expect(screen.getAllByText('remote-mcp')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'search' })).toBeTruthy()
+  })
+
+  it('does not synthesize a row for a connected server with nothing to offer', () => {
+    renderWith({
+      'remote-mcp': { ...pendingStatus, authenticated: true }
+    })
+
+    expect(screen.queryByText('remote-mcp')).toBeNull()
+  })
+
+  it('explains that tools appear after connecting', () => {
+    renderWith({ 'remote-mcp': pendingStatus })
+
+    expect(screen.getByText(/tools appear after you connect/i)).toBeTruthy()
+  })
+
+  it('does not synthesize a row the compliance filter excludes', () => {
+    // Strict: a server with no compliance_level never matches an active filter.
+    renderWith({ 'remote-mcp': pendingStatus }, [], {
+      complianceLevelFilter: 'secret',
+      features: { compliance_levels: true }
+    })
+
+    expect(screen.queryByText('remote-mcp')).toBeNull()
+  })
+
+  it('still synthesizes a row the compliance filter admits', () => {
+    // Dropping every synthesized row while a filter was active put the
+    // bootstrap deadlock back behind a persisted UI preference.
+    renderWith(
+      { 'remote-mcp': { ...pendingStatus, compliance_level: 'secret' } },
+      [],
+      { complianceLevelFilter: 'secret', features: { compliance_levels: true } }
+    )
+
+    expect(screen.getByText('remote-mcp')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
+  })
+
+  it('offers a token control and the same hint for a non-oauth server', () => {
+    // api_key/bearer/jwt servers get a connect control too, so they must not
+    // be told "No tools discovered yet." beside it.
+    renderWith({
+      'keyed-mcp': {
+        server_name: 'keyed-mcp',
+        auth_type: 'api_key',
+        auth_required: true,
+        authenticated: false
+      }
+    })
+
+    expect(screen.getByText('keyed-mcp')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /add token/i })).toBeTruthy()
+    expect(screen.getByText(/tools appear after you connect/i)).toBeTruthy()
+    expect(screen.queryByText(/no tools discovered yet/i)).toBeNull()
+  })
+
+  it('does not synthesize a row for a server that needs no authorization', () => {
+    renderWith({
+      quiet: {
+        server_name: 'quiet',
+        auth_type: 'none',
+        auth_required: false,
+        authenticated: false
+      }
+    })
+
+    expect(screen.queryByText('quiet')).toBeNull()
+  })
+})
+
+
+describe('ToolsPanel - catalogue refresh after an in-page auth change', () => {
+  // A server that gates tools/list publishes nothing until the user authorizes.
+  // OAuth connects by full-page navigation, so it re-fetches /api/config on the
+  // way back; token upload and disconnect stay on the page and must ask for the
+  // refresh themselves, or the panel keeps showing the pre-credential catalogue.
+  const bearerServer = {
+    server: 'token-mcp',
+    description: 'A server authenticated by pasted token',
+    auth_type: 'bearer',
+    tools: [],
+    tools_detailed: [],
+    tool_count: 0,
+    prompts: [],
+    prompt_count: 0
+  }
+
+  let refreshConfig
+
+  afterEach(() => {
+    authHookState.getServerAuth = null
+    authHookState.uploadToken = null
+    authHookState.removeToken = null
+  })
+
+  const setup = ({ authenticated = false } = {}) => {
+    sessionStorage.clear()
+    refreshConfig = vi.fn(() => Promise.resolve({}))
+    authHookState.getServerAuth = vi.fn(() => ({
+      auth_type: 'bearer',
+      authenticated,
+      is_expired: false
+    }))
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: [bearerServer],
+      prompts: [],
+      features: {},
+      refreshConfig
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => [bearerServer]),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => [bearerServer]),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('re-fetches the config after a token unlocks a server', async () => {
+    authHookState.uploadToken = vi.fn(() => Promise.resolve(true))
+    setup()
+
+    fireEvent.click(screen.getByRole('button', { name: /click to add token/i }))
+    fireEvent.change(screen.getByPlaceholderText(/paste your api key/i), {
+      target: { value: 'a-token' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^upload token$/i }))
+
+    await waitFor(() => expect(refreshConfig).toHaveBeenCalled())
+  })
+
+  it('does not refresh when the token was rejected', async () => {
+    authHookState.uploadToken = vi.fn(() => Promise.reject(new Error('nope')))
+    setup()
+
+    fireEvent.click(screen.getByRole('button', { name: /click to add token/i }))
+    fireEvent.change(screen.getByPlaceholderText(/paste your api key/i), {
+      target: { value: 'a-token' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^upload token$/i }))
+
+    await waitFor(() => expect(authHookState.uploadToken).toHaveBeenCalled())
+    expect(refreshConfig).not.toHaveBeenCalled()
+  })
+
+  it('re-fetches the config after disconnecting, so withdrawn tools disappear', async () => {
+    authHookState.removeToken = vi.fn(() => Promise.resolve(true))
+    setup({ authenticated: true })
+
+    fireEvent.click(screen.getByRole('button', { name: /click to disconnect/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^disconnect$/i }))
+
+    await waitFor(() => expect(refreshConfig).toHaveBeenCalled())
+  })
+
+  it('survives a context that predates the refresh hook', async () => {
+    // Older callers of ToolsPanel may not supply refreshConfig at all; the
+    // connect flow must still complete rather than throwing.
+    authHookState.uploadToken = vi.fn(() => Promise.resolve(true))
+    setup()
+    const ctx = useChat.mock.results[0]?.value
+    useChat.mockReturnValue({ ...ctx, refreshConfig: undefined })
+
+    fireEvent.click(screen.getByRole('button', { name: /click to add token/i }))
+    fireEvent.change(screen.getByPlaceholderText(/paste your api key/i), {
+      target: { value: 'a-token' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^upload token$/i }))
+
+    await waitFor(() => expect(authHookState.uploadToken).toHaveBeenCalled())
   })
 })

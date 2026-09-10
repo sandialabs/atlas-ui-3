@@ -59,6 +59,88 @@ _ALLOWED_PROVIDER_ERROR_NAMES = {
 }
 
 
+
+def _drop_user_tool_cache(
+    mcp_manager, user_email: str, server_name: str, *, required: bool = False
+) -> None:
+    """Forget the tools discovered for this user/server under the old token.
+
+    ``required`` is for the disconnect path, where this is the withdrawal
+    itself rather than a refresh: leaving the tool names and schemas obtained
+    under a revoked token published and routable is the failure this is meant
+    to prevent, so the caller is told rather than left reporting success. On a
+    token *upload* the same failure is harmless -- the credential is valid and
+    the catalogue only stale -- and stays a logged best-effort.
+    """
+    clear = getattr(mcp_manager, "clear_user_tool_cache", None)
+    if clear is None:
+        # A manager that never published a per-user catalogue has none to
+        # withdraw. The probe is what makes duck-typed managers work at all,
+        # so this is not a failure even on the disconnect path.
+        return
+    try:
+        clear(user_email, server_name)
+    except Exception:
+        if required:
+            logger.error(
+                "Could not withdraw the per-user tool catalogue on disconnect",
+                exc_info=True,
+            )
+            raise
+        logger.debug("Could not clear per-user tool cache", exc_info=True)
+
+
+async def _invalidate_user_client_quietly(
+    mcp_manager, user_email: str, server_name: str
+) -> None:
+    """Drop this user's cached client for the server, never raising.
+
+    Called after the token is already persisted, where an exception would
+    report a failed upload for one that in fact succeeded. The stale client is
+    also re-created on next use, so failing to close it costs a connection,
+    not correctness.
+    """
+    if mcp_manager is None:
+        return
+    invalidate = getattr(mcp_manager, "_invalidate_user_client", None)
+    if invalidate is None:
+        return
+    try:
+        await invalidate(user_email, server_name)
+    except Exception:
+        logger.warning(
+            "Could not invalidate the cached client for MCP server '%s' after a "
+            "token upload; it will be rebuilt on next use",
+            sanitize_for_logging(server_name),
+            exc_info=True,
+        )
+
+
+async def _rediscover_after_authorization(mcp_manager, user_email: str, server_name: str) -> None:
+    """Re-run tool discovery for one server as the user who just authorized.
+
+    A server that gates ``tools/list`` behind authorization contributed no
+    tools to the startup sweep, and nothing else re-runs discovery -- so
+    without this the user completes the flow, is told they are connected, and
+    still sees no tools (issue #912). Best-effort: a failure here must not turn
+    a successful authorization into an error.
+    """
+    if mcp_manager is None:
+        return
+    _drop_user_tool_cache(mcp_manager, user_email, server_name)
+    discover = getattr(mcp_manager, "discover_tools_for_user", None)
+    if discover is None:
+        return
+    try:
+        await discover(user_email, server_name, force=True)
+    except Exception:
+        logger.warning(
+            "Post-authorization tool discovery failed for MCP server '%s'",
+            sanitize_for_logging(server_name),
+            exc_info=True,
+        )
+
+
 class TokenUpload(BaseModel):
     """Request body for uploading an API key or token."""
     token: str
@@ -104,6 +186,10 @@ async def get_auth_status(current_user: str = Depends(get_current_user)):
                 "auth_required": auth_type != "none",
                 "authenticated": token_status is not None,
                 "description": server_config.get("description", ""),
+                # The Tools panel synthesizes a row from this for a server with
+                # no discovered tools, and a compliance filter has to be able to
+                # judge that row on the same footing as a real one.
+                "compliance_level": server_config.get("compliance_level"),
             }
 
             # An oauth server is connected by visiting Atlas's own start
@@ -205,6 +291,17 @@ async def upload_token(
         sanitized_server = sanitize_for_logging(server_name)
         logger.info(f"User uploaded token for MCP server '{sanitized_server}'")
 
+        # The stored token supersedes whatever this user's client and tool
+        # catalogue were built from, including the empty catalogue left by an
+        # anonymous startup sweep that the server answered with a 401.
+        # The token is stored by this point, so nothing here may turn a
+        # successful upload into an error. _invalidate_user_client closes live
+        # sessions and can raise on its own, so it is best-effort like the
+        # rediscovery that follows it, not merely guarded against a missing
+        # manager.
+        await _invalidate_user_client_quietly(mcp_manager, current_user, server_name)
+        await _rediscover_after_authorization(mcp_manager, current_user, server_name)
+
         return {
             "message": f"Token stored for server '{server_name}'",
             "server_name": server_name,
@@ -238,6 +335,20 @@ async def remove_token(
         # provider is unreachable.
         existing = token_storage.get_token(current_user, server_name)
 
+        # Unpublish what the token discovered *before* deleting it. The
+        # withdrawal is the security-relevant half of a disconnect and fails
+        # closed, so doing it first is what makes that failure recoverable: the
+        # token is still stored, so the 500 below is honest ("this disconnect
+        # did not happen") and the retry takes the same path again instead of
+        # short-circuiting on 404 with the catalogue still published and the
+        # provider token still live. Withdrawing a catalogue whose token turns
+        # out to be valid costs nothing -- the next discovery republishes it.
+        tool_manager = app_factory.get_mcp_manager()
+        if tool_manager is not None:
+            _drop_user_tool_cache(
+                tool_manager, current_user, server_name, required=True
+            )
+
         # Remove the token
         removed = token_storage.remove_token(current_user, server_name)
 
@@ -247,10 +358,11 @@ async def remove_token(
                 detail=f"No token found for server '{server_name}'"
             )
 
-        # Invalidate any cached client for this user/server combination
-        tool_manager = app_factory.get_mcp_manager()
+        # Dropping the cached client is the cleanup half and stays quiet: it
+        # cannot disclose anything, and failing it must not report a disconnect
+        # that has in fact happened as an error.
         if tool_manager is not None:
-            await tool_manager._invalidate_user_client(current_user, server_name)
+            await _invalidate_user_client_quietly(tool_manager, current_user, server_name)
             logger.debug(f"Invalidated cached client for server '{server_name}'")
 
         # Best-effort revocation at the provider, after the local record is
@@ -536,8 +648,13 @@ async def oauth_callback(
     # A newly authorized server may have a cached client built when no token
     # existed; drop it so the next call picks the token up.
     mcp_manager = app_factory.get_mcp_manager()
-    if mcp_manager is not None:
-        await mcp_manager._invalidate_user_client(current_user, server_name)
+    # The token is already stored, so a failure closing the stale client must
+    # not turn a completed authorization into a 500 instead of the success
+    # redirect -- same reasoning as the token upload route.
+    await _invalidate_user_client_quietly(mcp_manager, current_user, server_name)
+    # Servers that gate tools/list behind authorization have no tools until
+    # this runs, so it is part of completing the flow, not an optimisation.
+    await _rediscover_after_authorization(mcp_manager, current_user, server_name)
 
     logger.info(
         "MCP OAuth authorization complete for server '%s'",

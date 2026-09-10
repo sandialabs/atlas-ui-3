@@ -33,11 +33,24 @@ class ToolManagerProtocol(Protocol):
     """Protocol for tool management."""
 
     def get_available_tools(self) -> List[str]:
-        """Get list of available tool names."""
+        """Get list of available tool names.
+
+        Names only, and not scoped to any user: filter through the manager's
+        visibility check before showing this to one. See
+        ``DiscoveryMixin.get_available_tools``.
+        """
         ...
 
-    def get_tools_schema(self, tool_names: List[str]) -> List[Dict[str, Any]]:
-        """Get schemas for specified tools."""
+    def get_tools_schema(
+        self, tool_names: List[str], user_email: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get schemas for specified tools.
+
+        ``user_email`` scopes the result to catalogues that user may read; see
+        ``DiscoveryMixin.get_tools_schema``. Omitted or ``None`` is an unknown
+        user and withholds user-scoped catalogues; internal callers acting on
+        an already-authorized tool pass ``mcp_discovery.UNSCOPED``.
+        """
         ...
 
     async def execute_tool(

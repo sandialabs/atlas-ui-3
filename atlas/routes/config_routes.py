@@ -22,6 +22,11 @@ from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
 
 logger = logging.getLogger(__name__)
 
+# How long /api/config waits for lazy per-user MCP discovery before returning
+# without it. Short on purpose: the SPA polls this endpoint, and the discovery
+# it kicked off keeps running for the next request either way.
+MCP_USER_DISCOVERY_WAIT_SECONDS = 2.0
+
 router = APIRouter(prefix="/api", tags=["config"])
 
 
@@ -267,6 +272,29 @@ async def get_config(
             and app_settings.feature_atlas_rag_tools_enabled
         )
         atlas_sleep_enabled = sleep_tool_enabled(app_settings)
+
+        # Servers that gate tools/list behind authorization discovered nothing
+        # at startup, when no user was logged in. Now that there is a user with
+        # (possibly) a stored token, retry those with the user's own client.
+        # Results are cached per (user, server), so this is a no-op on all but
+        # the first request after a token appears (issue #912).
+        #
+        # Bounded, because this endpoint is polled by the SPA: past the wait the
+        # discovery keeps running and its result is picked up by a later
+        # request, rather than one slow server stalling every /api/config.
+        try:
+            await mcp_manager.discover_tools_for_user_servers(
+                current_user,
+                authorized_servers,
+                wait_timeout=MCP_USER_DISCOVERY_WAIT_SECONDS,
+            )
+        except Exception as e:  # never let discovery break the config payload
+            logger.warning(
+                "Per-user MCP tool discovery failed: %s",
+                sanitize_for_logging(str(e)),
+                exc_info=True,
+            )
+
         authorized_servers.append(ATLAS_SERVER_NAME)
 
         # Only build tool information for servers the user is authorized to access
@@ -277,12 +305,40 @@ async def get_config(
                     sleep_enabled=atlas_sleep_enabled,
                     search_enabled=atlas_search_enabled,
                 ))
-            elif server_name in mcp_manager.available_tools:
-                server_tools = mcp_manager.available_tools[server_name]['tools']
-                server_config = mcp_manager.available_tools[server_name]['config']
+            else:
+                # Config comes from mcp.json rather than the discovery result,
+                # so a server that never connected still describes itself.
+                server_config = (
+                    mcp_manager.servers_config.get(server_name)
+                    or (mcp_manager.available_tools.get(server_name) or {}).get('config')
+                    or {}
+                )
+                auth_type = server_config.get('auth_type', 'none')
+                # auth_required drives the panel's connect control, and a
+                # delegated server has nothing for the user to connect: Atlas
+                # mints its token from their OIDC session. It still needs
+                # per-user credentials, though, so it belongs in the group of
+                # servers listed before they have discovered anything.
+                auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
+                needs_user_credentials = auth_required or auth_type == 'delegated'
 
-                # Only include servers that have tools and user has access to
-                if server_tools:  # Only show servers with actual tools
+                # This user's own discovery, falling back to the shared
+                # catalogue only when that came from a real anonymous sweep. A
+                # gated server's tool metadata, fetched with someone else's
+                # token, is not this user's to read.
+                server_tools = mcp_manager.get_visible_tools_for_server(
+                    current_user, server_name
+                )
+
+                # A server that needs per-user credentials is listed even with
+                # zero tools. For an auth_required one its row is the only place
+                # the connect control lives, so hiding it leaves the user no way
+                # out of the bootstrap deadlock (issue #912); for a delegated one
+                # the row is how the user learns the server exists at all while
+                # discovery has yet to succeed for them. A server that needs
+                # nothing and offers nothing is still omitted -- there would be
+                # nothing to show and nothing to do.
+                if server_tools or needs_user_credentials:
                     # Build detailed tool information including descriptions and input schemas
                     tools_detailed = []
                     for tool in server_tools:
@@ -292,10 +348,6 @@ async def get_config(
                             'inputSchema': getattr(tool, 'inputSchema', {}) or {}
                         }
                         tools_detailed.append(tool_detail)
-
-                    # Determine auth_type from server config
-                    auth_type = server_config.get('auth_type', 'none')
-                    auth_required = auth_type in ('jwt', 'bearer', 'oauth', 'api_key')
 
                     tools_info.append({
                         'server': server_name,

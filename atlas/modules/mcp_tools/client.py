@@ -47,6 +47,7 @@ from atlas.modules.mcp_tools.mcp_user_client_cache import (
     UserClientCacheMixin,
 )
 from atlas.modules.mcp_tools.mcp_user_clients import UserClientMixin
+from atlas.modules.mcp_tools.mcp_user_discovery import UserDiscoveryMixin
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ class MCPToolManager(
     UserClientMixin,
     UserClientCacheMixin,
     DiscoveryMixin,
+    UserDiscoveryMixin,
     ResultProcessorMixin,
     ExecutionMixin,
 ):
@@ -144,6 +146,14 @@ class MCPToolManager(
         self.clients = {}
         self.available_tools = {}
         self.available_prompts = {}
+
+        # Tools discovered with a specific user's credentials, for servers that
+        # gate tools/list behind authorization (issue #912).
+        # Key: (user_email_lower, server_name) -> {tools, config, discovered_at}
+        self._user_available_tools: Dict[tuple, Dict[str, Any]] = {}
+        # Last failed per-user discovery attempt, same key, used as a cool-down
+        # so lazy discovery cannot hammer an unreachable server.
+        self._user_discovery_failures: Dict[tuple, float] = {}
 
         # Track failed servers for reconnection with backoff
         self._failed_servers: Dict[str, Dict[str, Any]] = {}

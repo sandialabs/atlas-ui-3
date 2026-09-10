@@ -23,8 +23,26 @@ from .atlas_server import (
 )
 from .sleep_tool import sleep_tool_enabled
 
-
 logger = logging.getLogger(__name__)
+
+# Passed as ``user_email`` by the internal callers that resolve a tool the
+# request has already been authorized to run (execution, telemetry), where
+# there is no user to scope against and omitting one must not be read as
+# "unknown". An actual ``None`` means the user could not be established, and
+# every user_scoped catalogue is withheld -- the same way ``build_mcp_data``
+# fails closed, since both feed the model's context.
+#
+# Deliberately not a string: ``user_email`` is header-derived, and a sentinel
+# sharing its value space would let any path that can influence that string
+# turn off every scoping check. This is compared by identity.
+class _Unscoped:
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "UNSCOPED"
+
+
+UNSCOPED = _Unscoped()
 
 _ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
 _ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
@@ -142,6 +160,24 @@ def _build_tool_index(available_tools) -> Dict[str, Dict[str, Any]]:
 class DiscoveryMixin:
     """Tool/prompt discovery and inventory query helpers."""
 
+    def _apply_task_support_metadata(self, server_name: str, tools) -> None:
+        """Rebuild this server's per-tool task-forbidden cache from fresh metadata.
+
+        Stale entries are dropped first so a server upgrade that flips a tool
+        from "forbidden" to "optional"/"required" takes effect on the next
+        discovery without a process restart. Per MCP SEP-1686, an absent
+        taskSupport value defaults to "forbidden"; only "optional" or
+        "required" leaves us willing to try task mode for a given tool.
+        """
+        self._tool_task_forbidden = {
+            entry for entry in self._tool_task_forbidden
+            if entry[0] != server_name
+        }
+        for tool in tools:
+            mode = self._discover_task_support_mode(tool)
+            if mode in ("forbidden", None):
+                self._tool_task_forbidden.add((server_name, tool.name))
+
     async def _discover_tools_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover tools for a single server. Returns server tools data."""
         safe_server_name = sanitize_for_logging(server_name)
@@ -170,21 +206,7 @@ class DiscoveryMixin:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
-                # Rebuild the per-tool task-forbidden cache for this server
-                # from the freshly discovered metadata. Drop any stale entries
-                # first so a server upgrade that flips a tool from "forbidden"
-                # to "optional"/"required" takes effect on next reload without
-                # a process restart. Per MCP SEP-1686, an absent taskSupport
-                # value defaults to "forbidden"; only "optional" or "required"
-                # leaves us willing to try task mode for a given tool.
-                self._tool_task_forbidden = {
-                    entry for entry in self._tool_task_forbidden
-                    if entry[0] != server_name
-                }
-                for tool in tools:
-                    mode = self._discover_task_support_mode(tool)
-                    if mode in ("forbidden", None):
-                        self._tool_task_forbidden.add((server_name, tool.name))
+                self._apply_task_support_metadata(server_name, tools)
                 logger.debug("Stored %d tools for %s", len(tools), safe_server_name)
                 return server_data
         except Exception as e:
@@ -244,6 +266,13 @@ class DiscoveryMixin:
         logger.info("Starting MCP tool discovery for %d connected servers", len(self.clients))
         logger.debug("Tool discovery servers: %s", list(self.clients.keys()))
         self.available_tools = {}
+        # Every per-user catalogue was discovered against the previous config
+        # (and some were promoted into available_tools, which is being reset
+        # here), so they are all stale. They are re-discovered lazily on the
+        # owning user's next request.
+        clear_user_cache = getattr(self, "clear_user_tool_cache", None)
+        if clear_user_cache is not None:
+            clear_user_cache()
 
         # Create tasks for parallel tool discovery
         tasks = [
@@ -523,7 +552,16 @@ class DiscoveryMixin:
         return authorized_servers
 
     def get_available_tools(self) -> List[str]:
-        """Get list of available tool names."""
+        """Get list of available tool names.
+
+        **Not user-scoped, deliberately.** It returns fully-qualified *names*
+        only -- no descriptions, no input schemas -- and it enumerates the
+        promoted ``user_scoped`` entries along with everything else, because
+        the shared inventory is what routing is built from. A caller that puts
+        this list anywhere a user can see it needs to filter it through
+        ``_may_read_catalogue`` first; ``get_tools_schema`` and
+        ``build_mcp_data`` are the user-facing paths and already do.
+        """
         available_tools = []
         available_tools.extend(ATLAS_TOOL_NAMES)
         for server_name, server_data in self.available_tools.items():
@@ -532,6 +570,64 @@ class DiscoveryMixin:
             for tool in server_data.get('tools', []):
                 available_tools.append(f"{server_name}_{tool.name}")
         return available_tools
+
+    def _own_tool_object(
+        self,
+        server_name: Optional[str],
+        user_email: Optional[str],
+        tool_name: Optional[str],
+    ):
+        """This user's own object for the tool, when the server is user-scoped."""
+        if user_email is None or user_email is UNSCOPED or not server_name or tool_name is None:
+            return None
+        entry = self.available_tools.get(server_name) or {}
+        if not entry.get("user_scoped"):
+            return None
+        own = getattr(self, "get_user_tools_for_server", None)
+        if own is None:
+            return None
+        for tool in own(user_email, server_name) or []:
+            if getattr(tool, "name", None) == tool_name:
+                return tool
+        return None
+
+    def _may_read_catalogue(
+        self,
+        server_name: Optional[str],
+        user_email: Optional[str],
+        tool_name: Optional[str] = None,
+    ) -> bool:
+        """Whether ``user_email`` may read this server's tool metadata.
+
+        Only ``user_scoped`` catalogues are restricted -- one user's view of a
+        server that refused to describe itself anonymously. Everything an
+        anonymous sweep found is, by the server's own choice, public.
+
+        The answer comes from the user's own *live* per-user catalogue, not
+        from membership in ``discovered_for``: the shared entry holds the union
+        of every owner's tools so they can be routed, and an owner who can
+        route a name is not thereby entitled to read another owner's schema for
+        it. Reading the live entry also makes this expire on the same TTL every
+        other read path enforces, rather than outliving it.
+        """
+        if not server_name:
+            return True
+        entry = self.available_tools.get(server_name) or {}
+        if not entry.get("user_scoped"):
+            return True
+        if user_email is UNSCOPED:
+            # An internal caller acting on an already-authorized tool.
+            return True
+        if user_email is None:
+            # Unknown user: a user_scoped catalogue is not theirs to read.
+            return False
+        own = getattr(self, "get_user_tools_for_server", None)
+        if own is None:
+            return False
+        mine = own(user_email, server_name) or []
+        if tool_name is None:
+            return bool(mine)
+        return any(getattr(t, "name", None) == tool_name for t in mine)
 
     def get_server_for_tool(self, tool_name: str) -> Optional[str]:
         """Return the owning MCP server name for a fully-qualified tool name.
@@ -559,8 +655,22 @@ class DiscoveryMixin:
         entry = index.get(tool_name) if index else None
         return entry.get("server") if entry else None
 
-    def get_tools_schema(self, tool_names: List[str]) -> List[Dict[str, Any]]:
+    def get_tools_schema(
+        self, tool_names: List[str], user_email: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Get schemas for specified tools.
+
+        ``user_email`` scopes the result to what that user is entitled to read.
+        A server that gates ``tools/list`` behind authorization hid its tool
+        names, descriptions and input schemas from anonymous callers on
+        purpose; those catalogues are published into the shared inventory
+        marked ``user_scoped`` so they can be routed at all, and passing the
+        requesting user here keeps another user's catalogue out of the schema
+        handed to the model. ``UNSCOPED`` preserves the user-agnostic
+        behaviour for internal callers that resolve a tool the request has
+        already been authorized to run; an omitted or ``None`` user is an
+        *unknown* one and withholds every ``user_scoped`` catalogue.
+
 
         Previous implementation attempted to derive the server name by stripping the last
         underscore-delimited segment from the fully-qualified tool name. This broke when
@@ -584,6 +694,7 @@ class DiscoveryMixin:
 
         matched = []
         missing = []
+        withheld = []
         sleep_enabled, search_enabled = _atlas_tool_flags()
         seen_atlas = set()
         for requested in tool_names:
@@ -602,7 +713,24 @@ class DiscoveryMixin:
             if not entry:
                 missing.append(requested)
                 continue
-            tool = entry['tool']
+            tool_obj = entry.get('tool')
+            server_of = entry.get('server')
+            tool_name_only = getattr(tool_obj, 'name', None)
+            if not self._may_read_catalogue(server_of, user_email, tool_name_only):
+                # Not "missing" in the "no such tool" sense: it exists, but its
+                # metadata is not this caller's to read, and saying so to the
+                # *caller* would itself disclose it. It is still counted as
+                # unresolved so the turn does not silently run as though the
+                # user had never selected it -- the commonest cause is an
+                # expired per-user catalogue, which reads identically here to
+                # another user's.
+                withheld.append(requested)
+                continue
+            # The index keeps one object per name, which for a user_scoped
+            # server may be a co-owner's. Two owners can expose a same-named
+            # tool with different descriptions and schemas, so resolve the
+            # object from the requester's own catalogue.
+            tool = self._own_tool_object(server_of, user_email, tool_name_only) or tool_obj
             matched.append({
                 "type": "function",
                 "function": {
@@ -614,5 +742,14 @@ class DiscoveryMixin:
 
         if missing:
             logger.debug("get_tools_schema: no schema for %d tool(s)", len(missing))
+        if withheld:
+            # info, not debug: a selected tool vanishing from the schema is a
+            # user-visible behaviour change and the operator needs to be able
+            # to tell it from a model that simply chose not to call the tool.
+            logger.info(
+                "get_tools_schema: withheld %d tool(s) whose per-user catalogue "
+                "is not readable by the requester (expired, or another user's)",
+                len(withheld),
+            )
 
         return matched

@@ -51,7 +51,8 @@ async def safe_execute_with_tools(
 
 async def safe_get_tools_schema(
     tool_manager,
-    selected_tools: List[str]
+    selected_tools: List[str],
+    user_email: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Safely get tools schema with error handling.
@@ -62,7 +63,7 @@ async def safe_get_tools_schema(
         raise ValidationError("Tool manager not configured")
 
     try:
-        tools_schema = tool_manager.get_tools_schema(selected_tools)
+        tools_schema = tool_manager.get_tools_schema(selected_tools, user_email)
         logger.info(f"Got {len(tools_schema)} tool schemas for selected tools: {selected_tools}")
         return tools_schema
     except Exception as e:

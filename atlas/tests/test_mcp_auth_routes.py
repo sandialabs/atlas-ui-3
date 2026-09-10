@@ -136,6 +136,13 @@ class TestUploadToken:
             mock_mcp_manager.servers_config = {
                 "test-server": {"auth_type": "api_key", "description": "Test Server"},
             }
+            # Set explicitly rather than leaning on the blanket AsyncMock:
+            # clear_user_tool_cache is synchronous on the real manager, and an
+            # AsyncMock would silently hand back an un-awaited coroutine,
+            # leaving a missing await here undetected.
+            mock_mcp_manager.clear_user_tool_cache = MagicMock()
+            mock_mcp_manager._invalidate_user_client = AsyncMock()
+            mock_mcp_manager.discover_tools_for_user = AsyncMock(return_value=[])
             mock_factory.get_mcp_manager.return_value = mock_mcp_manager
 
             mock_token_storage = MagicMock()
@@ -166,6 +173,38 @@ class TestUploadToken:
         assert data["message"] == "Token stored for server 'test-server'"
         assert data["server_name"] == "test-server"
         assert data["token_type"] == "api_key"
+
+    def test_upload_token_refreshes_the_users_view_of_the_server(self, client, mock_dependencies):
+        """The stored token supersedes the client and catalogue built without it."""
+        response = client.post(
+            "/api/mcp/auth/test-server/token",
+            json={"token": "my-api-key-123"}
+        )
+
+        assert response.status_code == 200
+        manager = mock_dependencies["mcp_manager"]
+        manager._invalidate_user_client.assert_awaited_once_with(
+            "test@example.com", "test-server"
+        )
+        manager.clear_user_tool_cache.assert_called_once_with(
+            "test@example.com", "test-server"
+        )
+        manager.discover_tools_for_user.assert_awaited_once_with(
+            "test@example.com", "test-server", force=True
+        )
+
+    def test_upload_token_survives_a_failed_rediscovery(self, client, mock_dependencies):
+        """Storing the token succeeded; discovery is a best-effort follow-up."""
+        mock_dependencies["mcp_manager"].discover_tools_for_user = AsyncMock(
+            side_effect=RuntimeError("server unreachable")
+        )
+
+        response = client.post(
+            "/api/mcp/auth/test-server/token",
+            json={"token": "my-api-key-123"}
+        )
+
+        assert response.status_code == 200
 
     def test_upload_token_with_expiry(self, client, mock_dependencies):
         """Should store token with expiration time."""
@@ -267,6 +306,8 @@ class TestRemoveToken:
             # Mock tool manager for cache invalidation
             mock_tool_manager = AsyncMock()
             mock_tool_manager._invalidate_user_client = AsyncMock()
+            # Synchronous on the real manager -- see the note in TestUploadToken.
+            mock_tool_manager.clear_user_tool_cache = MagicMock()
             mock_factory.get_mcp_manager.return_value = mock_tool_manager
 
             yield {
@@ -293,6 +334,62 @@ class TestRemoveToken:
         assert response.status_code == 200
         # Verify cache invalidation was called
         mock_dependencies["tool_manager"]._invalidate_user_client.assert_called_once_with(
+            "test@example.com", "test-server"
+        )
+
+    def test_remove_token_clears_the_users_tool_cache(self, client, mock_dependencies):
+        """A revoked user's discovered tools must not stay cached or published."""
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 200
+        mock_dependencies["tool_manager"].clear_user_tool_cache.assert_called_once_with(
+            "test@example.com", "test-server"
+        )
+
+    def test_a_failed_withdrawal_is_reported_rather_than_hidden(self, client, mock_dependencies):
+        """Leaving a revoked catalogue published behind a 200 is the failure."""
+        manager = mock_dependencies["tool_manager"]
+        manager.clear_user_tool_cache = MagicMock(side_effect=RuntimeError("boom"))
+
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 500
+
+    def test_a_failed_withdrawal_leaves_the_disconnect_retryable(self, client, mock_dependencies):
+        """The 500 must not be terminal: the token is still there to retry on."""
+        manager = mock_dependencies["tool_manager"]
+        manager.clear_user_tool_cache = MagicMock(side_effect=RuntimeError("boom"))
+
+        assert client.delete("/api/mcp/auth/test-server/token").status_code == 500
+        # The token was not deleted, so the retry takes the same path rather
+        # than short-circuiting on 404 with the catalogue still published.
+        mock_dependencies["token_storage"].remove_token.assert_not_called()
+
+        manager.clear_user_tool_cache = MagicMock()
+        assert client.delete("/api/mcp/auth/test-server/token").status_code == 200
+
+    def test_a_manager_without_the_withdrawal_api_still_disconnects(self, client, mock_dependencies):
+        """The getattr probe is what makes duck-typed managers work at all."""
+        plain = MagicMock()
+        del plain.clear_user_tool_cache
+        plain._invalidate_user_client = AsyncMock()
+        mock_dependencies["factory"].get_mcp_manager.return_value = plain
+
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 200
+
+    def test_a_failing_client_invalidation_still_disconnects(self, client, mock_dependencies):
+        """The token is already gone; a cleanup failure is not a failed disconnect."""
+        manager = mock_dependencies["tool_manager"]
+        manager._invalidate_user_client = AsyncMock(side_effect=RuntimeError("boom"))
+
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 200
+        # And the revoked catalogue is unpublished regardless, so it cannot
+        # stay listed and routable for everyone else.
+        manager.clear_user_tool_cache.assert_called_once_with(
             "test@example.com", "test-server"
         )
 
