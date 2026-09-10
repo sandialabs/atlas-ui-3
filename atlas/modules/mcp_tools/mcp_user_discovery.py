@@ -53,6 +53,8 @@ class UserDiscoveryMixin:
             self._user_available_tools: Dict[Tuple[str, str], Dict[str, Any]] = {}
         if not hasattr(self, "_user_discovery_failures"):
             self._user_discovery_failures: Dict[Tuple[str, str], float] = {}
+        if not hasattr(self, "_user_discovery_locks"):
+            self._user_discovery_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
 
     @staticmethod
     def _user_discovery_key(user_email: str, server_name: str) -> Tuple[str, str]:
@@ -80,6 +82,12 @@ class UserDiscoveryMixin:
         for cache in (self._user_available_tools, self._user_discovery_failures):
             for key in [k for k in cache if matches(k)]:
                 cache.pop(key, None)
+        # An in-flight discovery still needs its lock; only idle ones are swept.
+        for key in [
+            k for k, lock in self._user_discovery_locks.items()
+            if matches(k) and not lock.locked()
+        ]:
+            self._user_discovery_locks.pop(key, None)
 
     def get_user_tools_for_server(
         self, user_email: str, server_name: str
@@ -113,13 +121,37 @@ class UserDiscoveryMixin:
         now = time.time()
 
         if not force:
-            entry = self._user_available_tools.get(key)
-            if entry is not None and (now - entry.get("discovered_at", 0.0)) < _USER_DISCOVERY_TTL_SECONDS:
-                return entry.get("tools", [])
-            last_failure = self._user_discovery_failures.get(key)
-            if last_failure is not None and (now - last_failure) < _USER_DISCOVERY_RETRY_SECONDS:
-                return entry.get("tools", []) if entry is not None else None
+            hit, cached = self._cached_user_tools(key, now)
+            if hit:
+                return cached
 
+        # One discovery per (user, server) at a time. /api/config is polled, so
+        # without this a slow server would accumulate a fresh connection per
+        # in-flight request instead of the callers sharing one result.
+        lock = self._user_discovery_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            if not force:
+                # A concurrent caller may have finished while we waited.
+                hit, cached = self._cached_user_tools(key, time.time())
+                if hit:
+                    return cached
+            return await self._run_user_discovery(user_email, server_name, key)
+
+    def _cached_user_tools(self, key, now: float):
+        """(hit, tools) from the caches, honouring the TTL and the cool-down."""
+        entry = self._user_available_tools.get(key)
+        if entry is not None and (now - entry.get("discovered_at", 0.0)) < _USER_DISCOVERY_TTL_SECONDS:
+            return True, entry.get("tools", [])
+        last_failure = self._user_discovery_failures.get(key)
+        if last_failure is not None and (now - last_failure) < _USER_DISCOVERY_RETRY_SECONDS:
+            return True, (entry.get("tools", []) if entry is not None else None)
+        return False, None
+
+    async def _run_user_discovery(
+        self, user_email: str, server_name: str, key
+    ) -> Optional[List[Any]]:
+        """The discovery itself, run under this (user, server)'s lock."""
+        now = time.time()
         safe_server = sanitize_for_logging(server_name)
         # conversation_id is deliberately None: discovery is not part of any
         # conversation, and borrowing a conversation's client would perturb

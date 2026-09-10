@@ -7,6 +7,7 @@ cover the second discovery path: run with the user's own client, cached per
 -- the anonymous sweep found nothing.
 """
 
+import asyncio
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -100,6 +101,28 @@ class TestDiscoverToolsForUser:
         await manager.discover_tools_for_user(USER, SERVER)
 
         assert client.list_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_callers_share_one_discovery(self):
+        """/api/config is polled; a slow server must not get a client per request."""
+        manager = _manager()
+        client = _FakeClient([_tool("search")])
+        started = asyncio.Event()
+
+        async def slow_client(server_name, user_email, conversation_id):
+            started.set()
+            await asyncio.sleep(0)
+            return client
+
+        manager._get_user_client = slow_client
+
+        results = await asyncio.gather(
+            manager.discover_tools_for_user(USER, SERVER),
+            manager.discover_tools_for_user(USER, SERVER),
+        )
+
+        assert client.list_calls == 1
+        assert all(r is not None for r in results)
 
     @pytest.mark.asyncio
     async def test_force_bypasses_the_cache(self):
