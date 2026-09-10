@@ -270,6 +270,34 @@ You can configure the application to call an external HTTP endpoint to check for
         }
         ```
 
+### Static Configuration: `ADMIN_USERS` / `AUTH_STATIC_GROUPS`
+
+For deployments that do not run an authorization service, group membership can be configured statically. This is consulted **after** `AUTH_GROUP_CHECK_URL` and **before** the debug-only mock table, and — unlike the mock table — it works with `DEBUG_MODE=false`.
+
+**Admins only** (the common case):
+
+```
+ADMIN_USERS=alice@example.org,bob@example.org
+```
+
+Everyone listed satisfies a check against `ADMIN_GROUP` (whatever it is named).
+
+**Arbitrary groups**, which is what makes a `groups` restriction on an MCP server or a `required_groups` model meaningful outside debug mode:
+
+```
+AUTH_STATIC_GROUPS=admin:alice@example.org,bob@example.org;mcp_advanced:alice@example.org
+```
+
+Semicolons separate groups, a colon separates the group name from its members, and commas separate members. `ADMIN_USERS` is exactly sugar for a single `<ADMIN_GROUP>:` entry; when both are set the memberships are unioned.
+
+Notes:
+
+- **Matching is case-insensitive and whitespace-tolerant** on both group names and identities, since the values come from IdP claims and hand-edited config.
+- **An external authorizer stays authoritative.** When `AUTH_GROUP_CHECK_URL` is configured, its verdict is final and the static config is not consulted as an additional grant.
+- **Static config only ever grants.** Users not listed keep the existing behaviour — they are in `users` and nothing else.
+- A malformed `AUTH_STATIC_GROUPS` entry is skipped with a warning rather than failing startup; the effect is denial, not a partially-parsed grant.
+- If `DEBUG_MODE=false`, no `AUTH_GROUP_CHECK_URL` is set, and neither variable is configured, Atlas logs a startup warning: in that combination no user can be an admin and any group-restricted MCP server is hidden from everyone.
+
 If `AUTH_GROUP_CHECK_URL` is not set, the application will fall back to the mock implementation in `atlas/core/auth.py`.
 
 When using the mock implementation (no external endpoint configured), **all users are treated as part of the `users` group by default**. This ensures that basic, non-privileged features remain available even without an authorization service. Higher-privilege groups such as `admin` require explicit membership via your real authorization system. The mock group table (which grants admin access to the configured test user) is **only active when `DEBUG_MODE=true`**. In production mode, no admin privileges are granted via the mock — only the default `users` group is available.
