@@ -12,6 +12,8 @@ import json
 import logging
 import sys
 
+from atlas.domain.errors import ConfigurationError
+
 from .config_manager import ConfigManager
 
 # Set up logging for CLI
@@ -42,7 +44,14 @@ def validate_config(args) -> None:
 def list_models(args) -> None:
     """List all available LLM models."""
     config_manager = ConfigManager()
-    llm_config = config_manager.llm_config
+    try:
+        llm_config = config_manager.llm_config
+    except ConfigurationError as e:
+        # This command exists to explain a bad config; a raw traceback
+        # is the least useful thing to show for the very file it is
+        # meant to diagnose.
+        print(f"\n❌ {e}")
+        sys.exit(1)
 
     if not llm_config.models:
         print("❌ No models configured")
@@ -150,11 +159,15 @@ def export_config(args) -> None:
     """Export current configuration as JSON."""
     config_manager = ConfigManager()
 
-    config_data = {
-        "app_settings": config_manager.app_settings.model_dump(),
-        "llm_config": config_manager.llm_config.model_dump(),
-        "mcp_config": config_manager.mcp_config.model_dump()
-    }
+    try:
+        config_data = {
+            "app_settings": config_manager.app_settings.model_dump(),
+            "llm_config": config_manager.llm_config.model_dump(),
+            "mcp_config": config_manager.mcp_config.model_dump()
+        }
+    except ConfigurationError as e:
+        print(f"\n❌ {e}")
+        sys.exit(1)
 
     if args.output:
         with open(args.output, 'w') as f:

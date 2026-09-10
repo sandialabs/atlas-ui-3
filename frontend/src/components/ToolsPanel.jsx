@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -58,6 +58,50 @@ const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start a
  * selections survive), and routes its own close attempts through
  * `closeGuardRef` so unsaved tool changes still prompt.
  */
+// The OAuth routes redirect back with a machine-readable code. Each one is
+// turned into a sentence that says whether retrying is worth it or whether an
+// administrator has to change something -- "invalid_state" on its own tells a
+// user nothing.
+const OAUTH_ERROR_MESSAGES = {
+  access_denied: 'You declined the authorization request.',
+  invalid_state: 'The sign-in attempt expired or did not match. Please try connecting again.',
+  missing_params: 'The provider returned an incomplete response. Please try connecting again.',
+  session_unavailable: 'This Atlas deployment is not set up for OAuth sign-in yet. Please ask an administrator to finish configuring it.',
+  discovery_failed: 'Atlas could not reach the server\'s sign-in provider. Ask an administrator to check the server URL and network access.',
+  token_exchange_failed: 'The provider rejected the sign-in at the last step. Please try again, and tell an administrator if it keeps happening.',
+  not_authorized: 'You are not authorized to connect this server.',
+  invalid_client: 'Atlas is not registered correctly with the provider. An administrator needs to look at this.',
+  invalid_grant: 'The authorization expired before it could be used. Please try connecting again.',
+  invalid_scope: 'The server asked for permissions the provider would not grant. An administrator needs to adjust its configuration.',
+  server_error: 'The sign-in provider reported an internal error. Please try again shortly.',
+  temporarily_unavailable: 'The sign-in provider is temporarily unavailable. Please try again shortly.',
+  consent_required: 'The provider needs you to grant consent. Please try connecting again.',
+  login_required: 'The provider needs you to sign in first. Please try connecting again.',
+  interaction_required: 'The provider needs more input from you. Please try connecting again.',
+  unauthorized_client: 'The provider refused Atlas as a client. An administrator needs to look at this.',
+  unsupported_response_type: 'The provider does not support the sign-in method Atlas uses. An administrator needs to look at this.',
+  unknown_error: 'The sign-in failed for an unrecognized reason. Please try again, and tell an administrator if it keeps happening.',
+}
+
+// Retrying only helps where the failure is transient or the user's own choice.
+// A misconfigured deployment or an unregistered client will fail identically
+// every time, so offering "Try again" there would just waste the user's time.
+const OAUTH_RETRYABLE_ERRORS = new Set([
+  'access_denied',
+  'invalid_state',
+  'missing_params',
+  'invalid_grant',
+  'server_error',
+  'temporarily_unavailable',
+  'consent_required',
+  'login_required',
+  'interaction_required',
+])
+
+const describeOAuthError = (code) =>
+  OAUTH_ERROR_MESSAGES[code] ||
+  'The sign-in failed. Please try again, and tell an administrator if it keeps happening.'
+
 const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null, onNavigate = null }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
@@ -103,7 +147,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const [tokenUploadError, setTokenUploadError] = useState(null)
   const [disconnectServer, setDisconnectServer] = useState(null)
   const [disconnectError, setDisconnectError] = useState(null)
-  const { fetchAuthStatus, uploadToken, removeToken, getServerAuth } = useServerAuthStatus()
+  const { fetchAuthStatus, uploadToken, removeToken, startOAuth, getServerAuth } = useServerAuthStatus()
   
   // Seed pending state from saved state when the panel opens, and re-seed it
   // whenever the saved selections change underneath an un-edited panel. The
@@ -153,6 +197,33 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     if (isOpen) {
       fetchAuthStatus()
     }
+  }, [isOpen, fetchAuthStatus])
+
+  // App.jsx reads the OAuth callback's query parameters (the panel is
+  // unmounted when the callback lands) and leaves the outcome here for us to
+  // show. Consumed once, so re-opening the panel does not replay it.
+  const [oauthNotice, setOauthNotice] = useState(null)
+  // Discovery can take several seconds before the browser leaves for the
+  // provider, so the button says so rather than looking inert.
+  const [oauthConnecting, setOauthConnecting] = useState(null)
+  useEffect(() => {
+    if (!isOpen) return
+    let stashed = null
+    try {
+      stashed = sessionStorage.getItem('mcpOAuthResult')
+      if (stashed) sessionStorage.removeItem('mcpOAuthResult')
+    } catch {
+      // Storage unavailable: no banner, but the connection itself is fine.
+      return
+    }
+    if (!stashed) return
+
+    try {
+      setOauthNotice(JSON.parse(stashed))
+    } catch {
+      return
+    }
+    fetchAuthStatus()
   }, [isOpen, fetchAuthStatus])
   
   // Use pending state while editing
@@ -453,6 +524,22 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // guard as the X, and both the clear and the navigation are deferred until
   // the close actually goes through. Backing out of the dialog must leave the
   // saved selections exactly as they were.
+  // Starting OAuth is a full-page navigation to the provider, so any staged
+  // tool selections are lost the moment it fires. It goes through the same
+  // guard as navigating to the marketplace rather than silently discarding
+  // them -- and the redirect only happens once the user has answered.
+  const connectWithOAuth = (serverName) => {
+    const go = () => {
+      setOauthConnecting(serverName)
+      startOAuth(serverName)
+    }
+    if (embedded && onNavigate) {
+      onNavigate(go)
+      return
+    }
+    handleCloseAttempt(null, go)
+  }
+
   const navigateToMarketplace = () => {
     const go = () => {
       clearToolsAndPrompts()
@@ -722,6 +809,52 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           </div>
         </div>
 
+        {/* Outcome of an OAuth connection the user just came back from.
+            Outside the server-list branch on purpose: a failed authorization
+            can leave the list empty, and that is exactly when the user most
+            needs to see why. */}
+        {oauthNotice && (
+          <div className="px-4 pt-2">
+            <div
+              role={oauthNotice.error ? 'alert' : 'status'}
+              className={`flex items-start gap-2 px-3 py-2 rounded text-xs ${
+                oauthNotice.error
+                  ? 'bg-red-600/20 text-red-300'
+                  : 'bg-green-600/20 text-green-300'
+              }`}
+            >
+              <span className="flex-1">
+                {oauthNotice.error ? (
+                  <>
+                    Could not connect to <strong>{oauthNotice.server}</strong>.{' '}
+                    {describeOAuthError(oauthNotice.error)}
+                    {OAUTH_RETRYABLE_ERRORS.has(oauthNotice.error) && (
+                      <button
+                        onClick={() => {
+                          setOauthNotice(null)
+                          connectWithOAuth(oauthNotice.server)
+                        }}
+                        className="ml-2 underline hover:no-underline font-medium"
+                      >
+                        Try again
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>Connected to <strong>{oauthNotice.server}</strong>.</>
+                )}
+              </span>
+              <button
+                onClick={() => setOauthNotice(null)}
+                className="text-gray-400 hover:text-gray-200"
+                aria-label="Dismiss"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Tools List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
           {serverList.length === 0 ? (
@@ -813,28 +946,61 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                   {server.compliance_level}
                                 </span>
                               )}
-                              {/* Auth Status Indicator - for API key/JWT/bearer servers (not OAuth) */}
-                              {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key') && (() => {
+                              {/* Auth status indicator. An oauth server is connected by
+                                  redirecting to the provider; the others by pasting a token. */}
+                              {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key' || server.auth_type === 'oauth') && (() => {
                                 const serverAuth = getServerAuth(server.server)
-                                const isAuthenticated = serverAuth?.authenticated && !serverAuth?.is_expired
+                                const isOAuth = server.auth_type === 'oauth'
+                                // An expired OAuth token with a refresh token is
+                                // not disconnected: Atlas renews it on the next
+                                // tool call. Showing "connect" there sends the
+                                // user through a flow they do not need.
+                                const willRefresh =
+                                  isOAuth && serverAuth?.is_expired && serverAuth?.has_refresh_token
+                                const isAuthenticated =
+                                  serverAuth?.authenticated && (!serverAuth?.is_expired || willRefresh)
+                                const connectTitle = isOAuth
+                                  ? 'Click to connect with OAuth.'
+                                  : 'Click to add token.'
+                                const connectedTitle = willRefresh
+                                  ? 'Connected. Access renews automatically. Click to disconnect.'
+                                  : 'Authenticated. Click to disconnect.'
+                                const connecting = oauthConnecting === server.server && !isAuthenticated
                                 return (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       if (isAuthenticated) {
                                         setDisconnectServer(server.server)
+                                      } else if (isOAuth) {
+                                        connectWithOAuth(server.server)
                                       } else {
                                         openTokenModal(server.server)
                                       }
                                     }}
+                                    disabled={connecting}
                                     className={`flex-shrink-0 p-1 rounded ${
-                                      isAuthenticated
+                                      connecting
+                                        ? 'bg-yellow-600/20 text-yellow-400 cursor-wait'
+                                        : isAuthenticated
                                         ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
                                         : 'bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400'
                                     }`}
-                                    title={isAuthenticated ? 'Authenticated. Click to disconnect.' : 'Click to add token.'}
+                                    title={
+                                      connecting
+                                        ? 'Contacting the authorization server...'
+                                        : isAuthenticated
+                                        ? connectedTitle
+                                        : connectTitle
+                                    }
                                   >
-                                    {isAuthenticated ? <ShieldCheck className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+                                    {connecting ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : isAuthenticated ? (
+                                      <ShieldCheck className="w-4 h-4" />
+                                    ) : (
+                                      <Key className="w-4 h-4" />
+                                    )}
                                   </button>
                                 )
                               })()}

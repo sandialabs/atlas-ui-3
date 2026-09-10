@@ -256,6 +256,15 @@ class MCPTokenStorage:
         self._tokens: Dict[str, StoredToken] = {}
         self._load_tokens()
 
+    @property
+    def storage_dir(self) -> Path:
+        """Directory holding the encrypted stores.
+
+        Exposed so sibling stores (e.g. the OAuth client registration store)
+        land beside the token file without re-deriving the fallback search.
+        """
+        return self._storage_dir
+
     def _get_storage_dir(self, app_settings) -> Path:
         """Get storage directory from settings or default locations.
 

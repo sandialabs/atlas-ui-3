@@ -2,7 +2,7 @@
  * Tests for ToolsPanel component - tool selection and management
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
@@ -12,6 +12,14 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 // Mock the contexts and hooks
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext')
+// Hoisted so individual tests can steer the hook's return value; vi.mock's
+// factory runs before the module under test is imported, so it cannot close
+// over an ordinary `let` declared below.
+const authHookState = vi.hoisted(() => ({
+  startOAuth: null,
+  getServerAuth: null
+}))
+
 vi.mock('../hooks/useServerAuthStatus', () => ({
   useServerAuthStatus: () => ({
     authStatus: {},
@@ -20,7 +28,8 @@ vi.mock('../hooks/useServerAuthStatus', () => ({
     fetchAuthStatus: vi.fn(),
     uploadToken: vi.fn(),
     removeToken: vi.fn(),
-    getServerAuth: vi.fn(() => null)
+    startOAuth: authHookState.startOAuth || vi.fn(),
+    getServerAuth: authHookState.getServerAuth || vi.fn(() => null)
   })
 }))
 
@@ -1241,5 +1250,312 @@ describe('ToolsPanel - embedded in the combined panel', () => {
 
     expect(addTools).toHaveBeenCalledWith(['test_server_search'])
     expect(removeTools).not.toHaveBeenCalled()
+  })
+})
+
+describe('ToolsPanel - MCP OAuth outcome banner', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    useChat.mockReturnValue(defaultChatContextForOAuth)
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => []),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => []),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+  })
+
+  const defaultChatContextForOAuth = {
+    selectedTools: new Set(),
+    selectedPrompts: new Set(),
+    toggleTool: vi.fn(),
+    togglePrompt: vi.fn(),
+    addTools: vi.fn(),
+    addPrompts: vi.fn(),
+    removeTools: vi.fn(),
+    removePrompts: vi.fn(),
+    clearToolsAndPrompts: vi.fn(),
+    complianceLevelFilter: 'all',
+    tools: [],
+    prompts: [],
+    features: {}
+  }
+
+  it('shows a success banner left by the OAuth callback', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: null })
+    )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent('Connected to remote-mcp.')
+    // Consumed once, so re-opening the panel does not replay it.
+    expect(sessionStorage.getItem('mcpOAuthResult')).toBeNull()
+  })
+
+  it('explains the failure in words the user can act on', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: 'access_denied' })
+    )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent('Could not connect to remote-mcp.')
+    expect(banner).toHaveTextContent('You declined the authorization request.')
+    // The raw machine code is not what the user is shown.
+    expect(banner).not.toHaveTextContent('access_denied')
+  })
+
+  it('points at an administrator for deployment-level failures', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: 'discovery_failed' })
+    )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/administrator/i)
+  })
+
+  it('still explains an error code it does not recognize', () => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error: 'something_new' })
+    )
+
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/The sign-in failed/i)
+    expect(screen.getByRole('alert')).not.toHaveTextContent('something_new')
+  })
+
+  it('shows no banner when there is no stashed outcome', () => {
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+})
+
+describe('ToolsPanel - MCP OAuth connect indicator', () => {
+  let mockStartOAuth
+  let mockGetServerAuth
+
+  const oauthServer = {
+    server: 'remote-mcp',
+    description: 'A remote MCP server requiring OAuth',
+    auth_type: 'oauth',
+    tools: ['search'],
+    tools_detailed: [],
+    tool_count: 1,
+    prompts: [],
+    prompt_count: 0
+  }
+
+  afterEach(() => {
+    authHookState.startOAuth = null
+    authHookState.getServerAuth = null
+  })
+
+  beforeEach(() => {
+    sessionStorage.clear()
+    mockStartOAuth = vi.fn()
+    mockGetServerAuth = vi.fn(() => null)
+
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: [oauthServer],
+      prompts: [],
+      features: {}
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => [oauthServer]),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => [oauthServer]),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+  })
+
+  const renderPanel = () => {
+    authHookState.startOAuth = mockStartOAuth
+    authHookState.getServerAuth = mockGetServerAuth
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('offers an OAuth connect action for an unauthenticated oauth server', () => {
+    renderPanel()
+
+    const connect = screen.getByRole('button', { name: /connect with oauth/i })
+    expect(connect).toBeTruthy()
+    // An oauth server is connected by redirect, never by pasting a token.
+    expect(screen.queryByRole('button', { name: /add token/i })).toBeNull()
+  })
+
+  it('offers a disconnect action once authenticated', () => {
+    mockGetServerAuth = vi.fn(() => ({ authenticated: true, is_expired: false }))
+    renderPanel()
+
+    expect(
+      screen.getByRole('button', { name: /authenticated\. click to disconnect/i })
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /connect with oauth/i })).toBeNull()
+  })
+
+  it('starts the OAuth flow when the connect action is clicked', () => {
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: /connect with oauth/i }))
+
+    expect(mockStartOAuth).toHaveBeenCalledWith('remote-mcp')
+  })
+
+  it('shows a busy state while discovery runs so the button is not inert', () => {
+    // /oauth/start does protected-resource and authorization-server discovery
+    // before the browser leaves for the provider, which can take seconds.
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: /connect with oauth/i }))
+
+    const busy = screen.getByRole('button', { name: /contacting the authorization server/i })
+    expect(busy.disabled).toBe(true)
+
+    // A second click cannot start a duplicate flow.
+    fireEvent.click(busy)
+    expect(mockStartOAuth).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks before discarding unsaved selections instead of redirecting away', () => {
+    // Connect is a full-page navigation: firing it with staged changes would
+    // silently throw them away.
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: 'search' }))
+    fireEvent.click(screen.getByRole('button', { name: /connect with oauth/i }))
+
+    expect(mockStartOAuth).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: /unsaved changes/i })).toBeTruthy()
+  })
+
+  it('treats an expired token with no refresh token as needing reconnection', () => {
+    mockGetServerAuth = vi.fn(() => ({
+      authenticated: true, is_expired: true, has_refresh_token: false
+    }))
+    renderPanel()
+
+    expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
+  })
+
+  it('still shows an expired-but-refreshable server as connected', () => {
+    // Atlas renews this silently on the next tool call, so telling the user to
+    // reconnect would send them through a flow they do not need.
+    mockGetServerAuth = vi.fn(() => ({
+      authenticated: true, is_expired: true, has_refresh_token: true
+    }))
+    renderPanel()
+
+    expect(screen.getByRole('button', { name: /renews automatically/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /connect with oauth/i })).toBeNull()
+  })
+})
+
+describe('ToolsPanel - OAuth error retry affordance', () => {
+  let mockStartOAuth
+
+  beforeEach(() => {
+    sessionStorage.clear()
+    mockStartOAuth = vi.fn()
+    authHookState.startOAuth = mockStartOAuth
+    useChat.mockReturnValue({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: [],
+      prompts: [],
+      features: {}
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => []),
+      getComplianceFilteredPrompts: vi.fn(() => []),
+      getFilteredTools: vi.fn(() => []),
+      getFilteredPrompts: vi.fn(() => [])
+    })
+  })
+
+  afterEach(() => {
+    authHookState.startOAuth = null
+  })
+
+  const renderWithError = (error) => {
+    sessionStorage.setItem(
+      'mcpOAuthResult',
+      JSON.stringify({ server: 'remote-mcp', error })
+    )
+    return render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('offers a retry for a transient failure', () => {
+    renderWithError('temporarily_unavailable')
+
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }))
+
+    expect(mockStartOAuth).toHaveBeenCalledWith('remote-mcp')
+  })
+
+  it('offers a retry when the user declined', () => {
+    renderWithError('access_denied')
+    expect(screen.getByRole('button', { name: /try again/i })).toBeTruthy()
+  })
+
+  it('does not offer a retry for a misconfiguration that will fail identically', () => {
+    renderWithError('discovery_failed')
+
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent(/administrator/i)
   })
 })

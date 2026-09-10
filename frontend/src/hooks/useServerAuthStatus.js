@@ -106,6 +106,21 @@ export function useServerAuthStatus() {
   }, [fetchAuthStatus])
 
   /**
+   * Begin the OAuth 2.1 authorization flow for a server.
+   *
+   * A full-page navigation rather than fetch(): the backend answers with a
+   * redirect to the provider's consent screen, which the user has to see and
+   * interact with. The provider returns them to the Atlas callback, which
+   * redirects back here with mcp_auth_success or mcp_auth_error set.
+   *
+   * GET /api/mcp/auth/{serverName}/oauth/start
+   * @param {string} serverName - The server to authorize
+   */
+  const startOAuth = useCallback((serverName) => {
+    window.location.href = `/api/mcp/auth/${encodeURIComponent(serverName)}/oauth/start`
+  }, [])
+
+  /**
    * Get auth status for a specific server
    * @param {string} serverName - The server name to look up
    * @returns {Object|null} Server auth status or null if not found
@@ -121,6 +136,7 @@ export function useServerAuthStatus() {
     fetchAuthStatus,
     uploadToken,
     removeToken,
+    startOAuth,
     getServerAuth
   }
 }

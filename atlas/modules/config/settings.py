@@ -265,6 +265,24 @@ class AppSettings(BaseSettings):
         description="Encryption key for user tokens. Required: Atlas refuses to start without it",
         validation_alias="MCP_TOKEN_ENCRYPTION_KEY"
     )
+    mcp_oauth_session_secret: Optional[str] = Field(
+        default=None,
+        description=(
+            "Secret backing the browser session that holds in-flight MCP OAuth state. "
+            "Only needed when neither OIDC nor Globus login is enabled, since those "
+            "already install session middleware."
+        ),
+        validation_alias="MCP_OAUTH_SESSION_SECRET"
+    )
+    mcp_oauth_redirect_base_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Public base URL browsers use to reach Atlas, used to build the MCP OAuth "
+            "callback redirect_uri. Falls back to BACKEND_PUBLIC_URL. Never derived from "
+            "the inbound Host header, which an attacker controls."
+        ),
+        validation_alias="MCP_OAUTH_REDIRECT_BASE_URL"
+    )
 
     # Admin settings
     admin_group: str = "admin"

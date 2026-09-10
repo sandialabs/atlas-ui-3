@@ -6,11 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #904 - 2026-09-08
+- Hold `fastmcp` below 4.0 and record why: FastMCP 4 removes server-initiated sampling, which the sampling_demo and tool_planner MCP servers require (tracked in #905).
+
 ### PR #903 - 2026-09-08
 - **Parallel conversation runs** (#884): agent runs in different conversations now execute at the same time, keep going when the browser is closed, and are stopped individually — navigation no longer cancels work. Capped per user by `MAX_CONCURRENT_RUNS_PER_USER` (default 5). Requires chat history, a server save mode, and an agent-mode turn; every other turn is unchanged. See `docs/admin/parallel-conversation-runs.md`.
 
 ### PR #901 - 2026-09-08
 - Sign browser session cookies with SHA-256 so OIDC and Globus authentication work on FIPS-hardened systems where SHA-1 is unavailable.
+
+### PR #900 - 2026-09-07
+- **Invalid LLM model configuration now fails at load time**: an invalid `reasoning_effort` is no longer swallowed by the generic fallback that silently loads zero models. The validation error includes the configuration search paths, and the admin contract and regression tests cover invalid, missing, and valid YAML configurations. The failure is cached, so a schema-invalid file is not re-parsed and re-logged on every access; `reload_configs()` clears it. The raised error is a redacted `ConfigurationError` rather than the raw pydantic one: pydantic reports the offending input, which for a missing required field is the whole model entry including `api_key` and `extra_headers`, so the message is rebuilt to name the field, the reason and the searched paths while echoing only the scalar that actually failed. `atlas-config list-models` and `export-config` print that message and exit non-zero instead of a traceback.
+- **A hook that floods stdout is reported as an output-cap error instead of hanging until its timeout**: the 1 MB cap killed the child and then awaited its full reap from inside the very reader feeding it. `asyncio` only completes `Process.wait()` once every stdio pipe has reached EOF, so once the reader stopped draining, the reap could not finish -- the overflow surfaced as a generic timeout, and only after the whole hook timeout had elapsed. The reader now signals the kill without awaiting and runs on to EOF (discarding the overflow) so the child is reapable. Both the tail drain and the reap are bounded, since SIGKILL reaches only the direct child -- a hook that backgrounds a process holding stdout never closes it, and waiting would report a timeout for what is really a cap violation.
+
+### PR #899 - 2026-09-07
+- **Interactive OAuth 2.1 authorization for MCP servers** (closes #898): Atlas now runs the Authorization Code + PKCE flow for `auth_type: oauth` servers -- discovering the provider, registering dynamically, and storing per-user tokens -- instead of only accepting a token pasted in by hand. See `docs/admin/mcp-server-authentication.md`.
 
 ### PR #892 - 2026-09-04
 - **OIDC login, confidential-client authentication, and delegated OAuth credentials** (#891): Atlas can now terminate login itself (Authorization Code + PKCE), authenticate to the IdP as a confidential client, and mint short-lived audience-specific downstream tokens via RFC 8693 or Entra OBO. Opt-in; the trusted-header auth mode is unchanged. See `docs/admin/oidc-authentication.md`.
