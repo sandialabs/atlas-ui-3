@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #914 - 2026-09-10
 - **MCP tool-returned images now reach the LLM, not just the canvas** (closes #909): screenshot-only tools no longer normalize to `{"results": {}}` for the model; images are attached after the step's tool results as a synthetic user message, gated on `supports_vision`, with rolling 6-image and per-image/aggregate base64 budgets and MIME/base64 re-validation. Details and limits in `docs/developer/mcp-tool-outputs.md`.
 
+### PR #911 - 2026-09-09
+- **Admins and groups can be configured statically, without an external authorization service** (closes #910): `ADMIN_USERS=alice@example.org,bob@example.org` grants `ADMIN_GROUP`, and `AUTH_STATIC_GROUPS=admin:alice@example.org;mcp_advanced:alice@example.org` generalizes that to arbitrary groups, so a `groups` restriction on an MCP server or model is meaningful outside debug mode. Static membership is consulted after `AUTH_GROUP_CHECK_URL` (a real authorization service stays authoritative) and before the debug-only mock table, so it works with `DEBUG_MODE=false` -- previously that combination collapsed to "everyone is in `users`, nobody is in anything else", leaving admin unreachable by every identity. Matching is case-insensitive and whitespace-tolerant since the values come from IdP claims; malformed entries are skipped with a warning rather than failing startup. Atlas now also logs a startup warning when `DEBUG_MODE=false`, no `AUTH_GROUP_CHECK_URL` and no static config are all true, which used to be silent.
+
 ### PR #904 - 2026-09-08
 - Hold `fastmcp` below 4.0 and record why: FastMCP 4 removes server-initiated sampling, which the sampling_demo and tool_planner MCP servers require (tracked in #905).
 
