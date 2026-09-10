@@ -50,8 +50,13 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
        is on outside debug mode / a development environment -- so the bypass can
        only ever override the mock table below, never a real authorization service.
     2. External endpoint: when ``AUTH_GROUP_CHECK_URL`` and ``AUTH_GROUP_CHECK_API_KEY``
-       are configured, query the HTTP authorization service for membership.
-    3. Mock table (fallback for local development): everyone is in the ``users``
+       are configured, query the HTTP authorization service for membership. A real
+       authorization service is authoritative: the static config below is not
+       consulted as an additional grant when an endpoint is configured.
+    3. Static config: ``ADMIN_USERS`` and ``AUTH_STATIC_GROUPS`` grant membership
+       without an external service, in production mode as well as debug. Matching
+       is case-insensitive and whitespace-tolerant.
+    4. Mock table (fallback for local development): everyone is in the ``users``
        group; the debug-only mock table grants admin to the configured test users.
 
     Args:
@@ -104,8 +109,32 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
             logger.error(f"Error during external auth check: {e}", exc_info=True)
             return False
     else:
+        # Statically configured membership (ADMIN_USERS / AUTH_STATIC_GROUPS).
+        # Checked before the ``users`` short-circuit and the mock table, and --
+        # unlike the mock table -- available outside debug mode. Without it, a
+        # deployment with no external authorizer has no way to make anyone an
+        # admin or to scope an MCP server to a subset of users (issue #910).
+        #
+        # Group names arrive from hand-edited config (the `groups` lists on
+        # MCP servers and models) and identities from IdP claims, so casing
+        # and stray whitespace are noise everywhere below -- not only in the
+        # static table.
+        normalized_group = (group_id or "").strip().lower()
+
+        # Gated on ``auth_url`` alone, not on the ``auth_url and api_key`` pair
+        # that selects the branch above: a deployment that configures an
+        # endpoint but whose API key is missing (a failed secret injection, a
+        # misspelled variable) lands here, and granting static admin in that
+        # window would preserve access precisely when the authoritative service
+        # has dropped out. Failing closed there is the whole point of calling
+        # the endpoint authoritative.
+        if not auth_url:
+            static_members = app_settings.static_group_members.get(normalized_group)
+            if static_members and (user_id or "").strip().lower() in static_members:
+                return True
+
         # Everybody is in the users group by default
-        if (group_id == "users"):
+        if normalized_group == "users":
             return True
         # Mock group membership is only available in debug mode
         if not app_settings.debug_mode:
