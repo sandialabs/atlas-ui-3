@@ -29,6 +29,7 @@ from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
+from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
@@ -192,6 +193,11 @@ class ToolsModeRunner:
                 config_manager=self.config_manager,
                 skip_approval=self.skip_approval,
                 user_email=user_email,
+                # Issue #909: tool-returned images reach the synthesis call
+                # as a synthetic user message when the model supports vision.
+                image_injector=ToolImageInjector(
+                    enabled=model_supports_vision(self.config_manager, model),
+                ),
             )
         except BaseException:
             # A Stop / disconnect during tool execution would otherwise discard
@@ -382,6 +388,11 @@ class ToolsModeRunner:
         current_response = final_llm_response
         executed_signatures: set = set()
         extra_round = 0
+        # Issue #909: one injector per turn tracks the rolling most-recent-N
+        # cap across continuation rounds.
+        image_injector = ToolImageInjector(
+            enabled=model_supports_vision(self.config_manager, model),
+        )
 
         try:
             while True:
@@ -441,6 +452,16 @@ class ToolsModeRunner:
                         "content": content,
                         "tool_call_id": tc_id,
                     })
+
+                # Issue #909: attach tool-returned images to the transcript so
+                # the next continuation round (or synthesis) can see them.
+                image_injector.after_tool_results(
+                    messages, results,
+                    tool_names={
+                        self._tool_call_id(tc): self._tool_call_signature(tc)[0]
+                        for tc in fresh
+                    },
+                )
 
                 if self.artifact_processor:
                     await self.artifact_processor(session, results, effective_callback)

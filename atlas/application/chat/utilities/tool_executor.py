@@ -28,6 +28,7 @@ from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredExceptio
 
 from ..approval_manager import get_approval_manager
 from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
+from .tool_image_context import ToolImageInjector
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +129,17 @@ async def execute_tools_workflow(
     config_manager=None,
     skip_approval: bool = False,
     user_email: Optional[str] = None,
+    image_injector: Optional["ToolImageInjector"] = None,
 ) -> tuple[str, List[ToolResult]]:
     """
     Execute the complete tools workflow: calls -> results -> synthesis.
 
     Pure function that coordinates tool execution without maintaining state.
+
+    ``image_injector`` (issue #909) receives the step's tool results right
+    after their messages are appended, so tool-returned images reach the
+    synthesis call as a synthetic user message when the model supports
+    vision.
     """
     logger.debug("Entering execute_tools_workflow")
     # Add assistant message with tool calls
@@ -159,6 +166,18 @@ async def execute_tools_workflow(
             "content": result.content,
             "tool_call_id": result.tool_call_id
         })
+
+    if image_injector is not None:
+        tool_names: Dict[Any, str] = {}
+        for tc in (llm_response.tool_calls or []):
+            try:
+                tool_names[tc.id] = tc.function.name
+            except AttributeError:
+                fn = tc.get("function") if isinstance(tc, dict) else None
+                tool_names[tc.get("id") if isinstance(tc, dict) else None] = (
+                    fn.get("name", "") if isinstance(fn, dict) else ""
+                )
+        image_injector.after_tool_results(messages, tool_results, tool_names=tool_names)
 
     # Determine if synthesis is needed
     final_response = await handle_synthesis_decision(

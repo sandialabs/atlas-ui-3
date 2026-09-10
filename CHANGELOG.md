@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #910 - 2026-09-10
+- **MCP tool-returned images now reach the LLM, not just the canvas** (closes #909): a tool's ImageContent blocks were routed to the canvas while the model saw only the normalized text result -- `{"results": {}}` for a screenshot-only tool -- so agent-mode work on visual outputs (CAD screenshots, charts, browser captures) ran blind. Images are now attached to the live transcript as a synthetic user message right after the step's tool results (the OpenAI-style API rejects image content inside `role: "tool"` messages, so this is the portable form across providers via LiteLLM). Gated on the model's `supports_vision` setting (unsupported models get a note explaining the image exists but cannot be shown); capped at 6 live images with 5 MB/12 MB per-image/aggregate base64 budgets that demote the oldest images to notes; re-validated for MIME allowlist and base64 integrity at injection time. Applies to agent mode and tools mode; injection is fail-open. See `docs/developer/mcp-tool-outputs.md`.
+
 ### PR #904 - 2026-09-08
 - Hold `fastmcp` below 4.0 and record why: FastMCP 4 removes server-initiated sampling, which the sampling_demo and tool_planner MCP servers require (tracked in #905).
 
