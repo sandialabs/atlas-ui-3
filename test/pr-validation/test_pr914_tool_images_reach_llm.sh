@@ -13,8 +13,9 @@
 # - ToolImageInjector (vision on) appends a synthetic user message holding
 #   the image as an image_url data-URI block whose bytes decode to the
 #   exact PNG the tool returned, with an intro naming the tool.
-# - ToolImageInjector (vision off) adds no messages but annotates the tool
-#   result with the "does not support vision" note.
+# - ToolImageInjector (vision off) adds one separate role:system note
+#   message and leaves the tool result JSON untouched (it must stay
+#   parseable).
 # - A text-only tool triggers neither injection nor a note.
 # - Backend unit tests pass.
 
