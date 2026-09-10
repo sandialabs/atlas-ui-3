@@ -1,15 +1,13 @@
 # Sampling Demo MCP Server
 
-This MCP server demonstrates **LLM sampling** capabilities introduced in FastMCP 2.0.0+. Sampling allows tools to request text generation from an LLM during execution, enabling AI-powered analysis, generation, reasoning, and more without the client needing to orchestrate multiple calls.
+This MCP server keeps sampling-oriented tool shapes but now follows a **client-driven LLM** pattern compatible with FastMCP 4.x. Tools no longer call `ctx.sample()` from inside the server. Instead, the MCP client/model can provide optional generated fields, and each tool includes deterministic fallback behavior when those fields are omitted.
 
 ## Overview
 
-LLM sampling enables interactive workflows where tools can:
-- Request LLM text generation mid-execution
-- Build multi-turn conversations with context
-- Leverage AI capabilities for analysis and generation
-- Implement agentic workflows with reasoning
-- Control generation parameters (temperature, max_tokens, model preferences)
+Client-driven generation enables workflows where tools can:
+- Accept model-generated text from the calling client
+- Preserve multi-step tool interfaces without server back-channel requests
+- Return deterministic fallbacks when generated content is not provided
 
 ## Available Tools
 
@@ -70,24 +68,11 @@ After the sampling_demo server is enabled, you can test it with prompts like:
 
 ## Technical Details
 
-### Sampling Parameters
+### Client-Driven Flow
 
-Tools can control LLM generation with parameters:
-
-- **messages**: Simple string or list of SamplingMessage objects for multi-turn
-- **system_prompt**: Establishes LLM role and behavior
-- **temperature**: Controls randomness (0.0 = deterministic, 1.0 = creative)
-- **max_tokens**: Maximum tokens to generate (default: 512)
-- **model_preferences**: Hints for which models the client should prefer
-
-### Sampling Flow
-
-1. Tool calls `ctx.sample()` with parameters
-2. FastMCP client sends sampling request to Atlas backend
-3. Backend's sampling handler routes request to configured LLM (via LiteLLM)
-4. LLM generates response based on parameters
-5. Response is returned to the tool execution
-6. Tool processes and returns result to user
+1. Client/model decides whether to generate text for optional tool fields (for example `summary`, `generated_code`, `translation`).
+2. Client calls the tool with those values.
+3. Tool returns provided text, or deterministic fallback output if values are omitted.
 
 ### Model Selection
 
@@ -127,27 +112,22 @@ The FastMCP framework will display available tools and their schemas.
 
 ## References
 
-- [FastMCP Sampling Documentation](https://gofastmcp.com/clients/sampling)
-- [MCP Specification - Sampling](https://spec.modelcontextprotocol.io/)
-- FastMCP Version: 2.0.0+
+- [MCP Specification](https://spec.modelcontextprotocol.io/)
+- FastMCP Version: 4.x compatible
 
-## Example Tool Implementation
+## Example Tool Implementation (Client-Driven)
 
 ```python
-from fastmcp import FastMCP, Context
+from fastmcp import FastMCP
 
 mcp = FastMCP("My Server")
 
 @mcp.tool
-async def analyze_text(text: str, ctx: Context) -> str:
-    """Analyze text using LLM sampling."""
-    result = await ctx.sample(
-        messages=f"Analyze this text: {text}",
-        system_prompt="You are an expert analyst.",
-        temperature=0.5,
-        max_tokens=500
-    )
-    return result.text or "Analysis failed"
+async def analyze_text(text: str, analysis: str | None = None) -> str:
+    """Use client-provided analysis, with deterministic fallback."""
+    if analysis:
+        return analysis
+    return f"Analysis placeholder for: {text}"
 ```
 
 ## Comparison with Elicitation

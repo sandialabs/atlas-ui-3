@@ -237,23 +237,22 @@ class TestPlanWithTools:
         )
         assert result["results"]["operation"] == "plan_with_tools"
         script = _decode_artifact(result)
-        assert "Sampling unavailable" in script
+        assert "Task: test task" in script
+        assert "atlas_chat_cli.py" in script
         assert "test task" in script
 
     @pytest.mark.asyncio
     async def test_without_mcp_data_still_works(self):
         result = await _call_plan_with_tools(task="do something")
         script = _decode_artifact(result)
-        assert "Sampling unavailable" in script
+        assert "Replace the placeholder command below" in script
         assert "No tools available" in script
 
     @pytest.mark.asyncio
-    async def test_with_mocked_ctx_sample(self):
+    async def test_with_client_generated_script(self):
         mock_ctx = MagicMock()
-        mock_result = MagicMock()
-        mock_result.text = "#!/bin/bash\nset -e\npython atlas_chat_cli.py 'hello' --tools calc_add"
-        mock_ctx.sample = AsyncMock(return_value=mock_result)
         mock_ctx.report_progress = AsyncMock()
+        generated_script = "#!/bin/bash\nset -e\npython atlas_chat_cli.py 'hello' --tools calc_add"
 
         mcp_data = {
             "available_servers": [
@@ -275,27 +274,28 @@ class TestPlanWithTools:
         }
 
         result = await _call_plan_with_tools(
-            task="add two numbers", _mcp_data=mcp_data, ctx=mock_ctx
+            task="add two numbers",
+            generated_script=generated_script,
+            _mcp_data=mcp_data,
+            ctx=mock_ctx,
         )
 
         script = _decode_artifact(result)
         assert "atlas_chat_cli.py" in script
+        assert "calc_add" in script
         assert result["artifacts"][0]["name"].endswith(".sh")
-        mock_ctx.sample.assert_awaited_once()
-
-        call_kwargs = mock_ctx.sample.call_args
-        assert call_kwargs.kwargs["temperature"] == 0.3
-        assert call_kwargs.kwargs["max_tokens"] == 10000
-        assert "task planner" in call_kwargs.kwargs["system_prompt"].lower()
+        mock_ctx.report_progress.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_sample_returns_none_text(self):
+    async def test_empty_generated_script_falls_back(self):
         mock_ctx = MagicMock()
-        mock_result = MagicMock()
-        mock_result.text = None
-        mock_ctx.sample = AsyncMock(return_value=mock_result)
         mock_ctx.report_progress = AsyncMock()
 
-        result = await _call_plan_with_tools(task="test", _mcp_data={}, ctx=mock_ctx)
+        result = await _call_plan_with_tools(
+            task="test",
+            generated_script="   ",
+            _mcp_data={},
+            ctx=mock_ctx,
+        )
         script = _decode_artifact(result)
-        assert "Unable to generate plan" in script
+        assert "Replace the placeholder command below" in script
