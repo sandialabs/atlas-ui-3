@@ -118,6 +118,7 @@ class ToolsModeRunner:
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
             with_search_tool(selected_tools, selected_data_sources, self.config_manager),
+            user_email,
         )
 
         llm_response = await error_handler.safe_call_llm_with_tools(
@@ -261,6 +262,7 @@ class ToolsModeRunner:
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
             with_search_tool(selected_tools, selected_data_sources, self.config_manager),
+            user_email,
         )
 
         tool_choice = "auto"

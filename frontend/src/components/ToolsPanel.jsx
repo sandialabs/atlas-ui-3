@@ -150,7 +150,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     prompts: allPrompts,
     features
   } = useChat()
-  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts } = useMarketplace()
+  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts, isComplianceAccessible } = useMarketplace()
   
   // Local state for pending changes
   const [pendingSelectedTools, setPendingSelectedTools] = useState(new Set())
@@ -642,14 +642,22 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     // connected, a server with genuinely no tools has nothing to offer and no
     // action left to take.
     //
-    // Skipped entirely while a compliance level is being filtered on: the auth
-    // status carries no compliance_level, so these rows would slip past a
-    // filter that is deliberately strict about resources with no level at all.
-    const complianceFiltered = complianceEnabled && !!complianceLevelFilter
-    if (!complianceFiltered) Object.values(authStatus || {}).forEach(status => {
+    // A compliance filter still applies, but per row rather than by dropping
+    // the whole synthesis: the auth status reports each server's
+    // compliance_level, so these rows are judged by the same strict rule as
+    // the discovered ones. Skipping them all put the bootstrap deadlock back
+    // behind a persisted UI preference.
+    const complianceFilterActive = complianceEnabled && !!complianceLevelFilter
+    Object.values(authStatus || {}).forEach(status => {
       const name = status?.server_name
       if (!name || allServers[name]) return
       if (!status.auth_required || status.authenticated) return
+      if (
+        complianceFilterActive &&
+        !isComplianceAccessible(complianceLevelFilter, status.compliance_level)
+      ) {
+        return
+      }
       allServers[name] = {
         server: name,
         description: status.description || '',
@@ -657,7 +665,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
         author: '',
         help_email: '',
         is_exclusive: false,
-        compliance_level: null,
+        compliance_level: status.compliance_level ?? null,
         auth_type: status.auth_type,
         tools: [],
         tools_detailed: [],
@@ -668,7 +676,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     })
 
     return sortAtlasFirst(Object.values(allServers))
-  }, [tools, prompts, authStatus, complianceEnabled, complianceLevelFilter])
+  }, [tools, prompts, authStatus, complianceEnabled, complianceLevelFilter, isComplianceAccessible])
 
   // Filter servers based on search term
   const filteredServers = serverList.filter(server => {

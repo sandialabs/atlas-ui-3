@@ -543,6 +543,23 @@ class DiscoveryMixin:
                 available_tools.append(f"{server_name}_{tool.name}")
         return available_tools
 
+    def _may_read_catalogue(
+        self, server_name: Optional[str], user_email: Optional[str]
+    ) -> bool:
+        """Whether ``user_email`` may read this server's tool metadata.
+
+        Only ``user_scoped`` catalogues are restricted -- one user's view of a
+        server that refused to describe itself anonymously. Everything an
+        anonymous sweep found is, by the server's own choice, public.
+        """
+        if user_email is None or not server_name:
+            return True
+        entry = self.available_tools.get(server_name) or {}
+        if not entry.get("user_scoped"):
+            return True
+        from atlas.core.user_identity import normalize_user_email
+        return normalize_user_email(user_email) in set(entry.get("discovered_for") or ())
+
     def get_server_for_tool(self, tool_name: str) -> Optional[str]:
         """Return the owning MCP server name for a fully-qualified tool name.
 
@@ -569,8 +586,21 @@ class DiscoveryMixin:
         entry = index.get(tool_name) if index else None
         return entry.get("server") if entry else None
 
-    def get_tools_schema(self, tool_names: List[str]) -> List[Dict[str, Any]]:
+    def get_tools_schema(
+        self, tool_names: List[str], user_email: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Get schemas for specified tools.
+
+        ``user_email`` scopes the result to what that user is entitled to read.
+        A server that gates ``tools/list`` behind authorization hid its tool
+        names, descriptions and input schemas from anonymous callers on
+        purpose; those catalogues are published into the shared inventory
+        marked ``user_scoped`` so they can be routed at all, and passing the
+        requesting user here keeps another user's catalogue out of the schema
+        handed to the model. Omitted (the default) preserves the historic
+        user-agnostic behaviour for internal callers that resolve a tool they
+        have already authorized.
+
 
         Previous implementation attempted to derive the server name by stripping the last
         underscore-delimited segment from the fully-qualified tool name. This broke when
@@ -611,6 +641,10 @@ class DiscoveryMixin:
             entry = index.get(requested)
             if not entry:
                 missing.append(requested)
+                continue
+            if not self._may_read_catalogue(entry.get('server'), user_email):
+                # Not "missing": it exists, but its metadata is not this
+                # caller's to read, and saying so would itself disclose it.
                 continue
             tool = entry['tool']
             matched.append({

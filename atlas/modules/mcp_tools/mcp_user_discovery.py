@@ -88,12 +88,26 @@ class UserDiscoveryMixin:
     def get_user_tools_for_server(
         self, user_email: str, server_name: str
     ) -> Optional[List[Any]]:
-        """Tools this user's own credentials revealed, or None if never run."""
+        """Tools this user's own credentials revealed, or None.
+
+        None also once the entry is past its TTL. A per-user catalogue is a
+        statement about a token that worked at a point in time; when the token
+        stops working, re-discovery fails and nothing overwrites the entry, so
+        without an expiry here a revoked user would keep being served the tool
+        list their access used to justify.
+        """
         self._ensure_user_discovery_state()
-        entry = self._user_available_tools.get(
-            self._user_discovery_key(user_email, server_name)
-        )
-        return None if entry is None else entry.get("tools", [])
+        key = self._user_discovery_key(user_email, server_name)
+        entry = self._user_available_tools.get(key)
+        if entry is None:
+            return None
+        if self._is_expired(entry):
+            return None
+        return entry.get("tools", [])
+
+    @staticmethod
+    def _is_expired(entry: Dict[str, Any]) -> bool:
+        return (time.time() - entry.get("discovered_at", 0.0)) >= _USER_DISCOVERY_TTL_SECONDS
 
     def get_visible_tools_for_server(
         self, user_email: str, server_name: str
@@ -150,10 +164,19 @@ class UserDiscoveryMixin:
         ]:
             self._user_discovery_locks.pop(key, None)
 
+        # One rebuild for the whole clear, not one per withdrawal: each rebuild
+        # re-walks every server's tools, and a full reload clears up to
+        # _MAX_USER_DISCOVERY_ENTRIES keys at once.
+        changed = False
         for owner, server in cleared:
-            self._withdraw_promoted_tools(server, owner)
+            if self._withdraw_promoted_tools(server, owner, rebuild_index=False):
+                changed = True
+        if changed:
+            self._rebuild_tool_index()
 
-    def _withdraw_promoted_tools(self, server_name: str, user_lc: str) -> None:
+    def _withdraw_promoted_tools(
+        self, server_name: str, user_lc: str, *, rebuild_index: bool = True
+    ) -> bool:
         """Drop this user's claim on the shared catalogue, and republish.
 
         A promoted catalogue can be owned by several users -- each one's
@@ -167,10 +190,10 @@ class UserDiscoveryMixin:
         self._ensure_user_discovery_state()
         entry = self.available_tools.get(server_name) or {}
         if not entry.get("user_scoped"):
-            return
+            return False
         owners = set(entry.get("discovered_for") or ())
         if user_lc not in owners:
-            return
+            return False
         owners.discard(user_lc)
 
         safe_server = sanitize_for_logging(server_name)
@@ -180,35 +203,43 @@ class UserDiscoveryMixin:
                 "tools": [],
                 "config": self.servers_config.get(server_name, {}),
             }
-            self._rebuild_tool_index()
+            if rebuild_index:
+                self._rebuild_tool_index()
             logger.info(
                 "Withdrew the per-user tool catalogue published for server '%s'",
                 safe_server,
             )
-            return
+            return True
 
         # sorted() only to make which survivor is published deterministic.
         heir = sorted(survivors)[0]
+        heir_tools = self._live_user_tools(server_name, heir)
+        # The sweep entries still describe the departing owner's tool set, so a
+        # tool the heir exposes without taskSupport would otherwise inherit the
+        # other catalogue's verdict.
+        self._apply_task_support_metadata(server_name, heir_tools)
         self.available_tools[server_name] = {
-            "tools": self._live_user_tools(server_name, heir),
+            "tools": heir_tools,
             "config": self.servers_config.get(server_name, {}),
             "user_scoped": True,
             "discovered_for": survivors,
         }
-        self._rebuild_tool_index()
+        if rebuild_index:
+            self._rebuild_tool_index()
         logger.info(
             "Republished the tool catalogue for server '%s' from a remaining "
             "authorized user (%d still hold one)",
             safe_server,
             len(survivors),
         )
+        return True
 
     def _live_user_tools(self, server_name: str, user_lc: str) -> List[Any]:
         """This user's cached tools for the server, if still within the TTL."""
         entry = self._user_available_tools.get((user_lc, server_name))
         if not entry or not entry.get("tools"):
             return []
-        if (time.time() - entry.get("discovered_at", 0.0)) >= _USER_DISCOVERY_TTL_SECONDS:
+        if self._is_expired(entry):
             return []
         return entry["tools"]
 
@@ -274,7 +305,9 @@ class UserDiscoveryMixin:
             return True, entry.get("tools", [])
         last_failure = self._user_discovery_failures.get(key)
         if last_failure is not None and (now - last_failure) < _USER_DISCOVERY_RETRY_SECONDS:
-            return True, (entry.get("tools", []) if entry is not None else None)
+            # The cool-down suppresses the retry, not the expiry: an entry that
+            # has outlived its TTL is no more trustworthy for being un-retried.
+            return True, None
         return False, None
 
     async def _run_user_discovery(
@@ -293,12 +326,14 @@ class UserDiscoveryMixin:
                 safe_server,
             )
             self._user_discovery_failures[key] = now
+            self._expire_stale_user_entry(key, server_name)
             self._prune_user_discovery_state()
             return None
 
         tools = await self._list_tools_with_client(server_name, client)
         if tools is None:
             self._user_discovery_failures[key] = now
+            self._expire_stale_user_entry(key, server_name)
             # Pruned here as well as on success: a user whose discovery keeps
             # failing only ever writes to the failure and lock maps, and those
             # must not be the two that grow without bound.
@@ -319,6 +354,20 @@ class UserDiscoveryMixin:
         self._promote_user_tools(server_name, tools, key[0])
         self._prune_user_discovery_state()
         return tools
+
+    def _expire_stale_user_entry(self, key, server_name: str) -> None:
+        """Forget a past-TTL catalogue whose owner can no longer be verified.
+
+        Only once it is stale: a single failed probe against a server that is
+        briefly unreachable should not cost a user the catalogue their still-
+        valid token earned minutes ago. Once it is past the TTL, though, the
+        failure is the only evidence available and it says no.
+        """
+        entry = self._user_available_tools.get(key)
+        if entry is None or not self._is_expired(entry):
+            return
+        self._user_available_tools.pop(key, None)
+        self._withdraw_promoted_tools(server_name, key[0])
 
     async def discover_tools_for_user_servers(
         self,
@@ -446,7 +495,13 @@ class UserDiscoveryMixin:
         per-user ``tools/list``, flipping tools the anonymous sweep had marked
         task-forbidden to task-allowed process-wide.
         """
-        if not tools or self._has_anonymous_catalogue(server_name):
+        if self._has_anonymous_catalogue(server_name):
+            return
+        if not tools:
+            # Not merely "nothing to publish": this user previously published a
+            # catalogue and now sees none, so what they published has no live
+            # owner and must not keep being routed.
+            self._withdraw_promoted_tools(server_name, user_lc)
             return
         self._apply_task_support_metadata(server_name, tools)
         existing = self.available_tools.get(server_name) or {}

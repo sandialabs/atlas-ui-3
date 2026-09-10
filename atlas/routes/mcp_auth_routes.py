@@ -141,6 +141,10 @@ async def get_auth_status(current_user: str = Depends(get_current_user)):
                 "auth_required": auth_type != "none",
                 "authenticated": token_status is not None,
                 "description": server_config.get("description", ""),
+                # The Tools panel synthesizes a row from this for a server with
+                # no discovered tools, and a compliance filter has to be able to
+                # judge that row on the same footing as a real one.
+                "compliance_level": server_config.get("compliance_level"),
             }
 
             # An oauth server is connected by visiting Atlas's own start
@@ -245,7 +249,11 @@ async def upload_token(
         # The stored token supersedes whatever this user's client and tool
         # catalogue were built from, including the empty catalogue left by an
         # anonymous startup sweep that the server answered with a 401.
-        await mcp_manager._invalidate_user_client(current_user, server_name)
+        # The token is stored by this point, so nothing here may turn a
+        # successful upload into an error -- matching the guard
+        # _rediscover_after_authorization already applies.
+        if mcp_manager is not None:
+            await mcp_manager._invalidate_user_client(current_user, server_name)
         await _rediscover_after_authorization(mcp_manager, current_user, server_name)
 
         return {

@@ -29,7 +29,7 @@ def _make_tool_manager(available_tools=None, schema_override=None):
     manager = MagicMock()
     manager.available_tools = available_tools or {}
 
-    def get_tools_schema(tool_names):
+    def get_tools_schema(tool_names, user_email=None):
         if schema_override is not None:
             return schema_override
         schemas = []

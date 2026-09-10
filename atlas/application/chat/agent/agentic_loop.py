@@ -138,7 +138,7 @@ class AgenticLoop(AgentLoopProtocol):
         tools_schema: List[Dict[str, Any]] = []
         if effective_tools and self.tool_manager:
             tools_schema = await error_handler.safe_get_tools_schema(
-                self.tool_manager, effective_tools,
+                self.tool_manager, effective_tools, context.user_email,
             )
 
         use_streaming = streaming and event_publisher

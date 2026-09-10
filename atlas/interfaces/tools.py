@@ -36,8 +36,14 @@ class ToolManagerProtocol(Protocol):
         """Get list of available tool names."""
         ...
 
-    def get_tools_schema(self, tool_names: List[str]) -> List[Dict[str, Any]]:
-        """Get schemas for specified tools."""
+    def get_tools_schema(
+        self, tool_names: List[str], user_email: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get schemas for specified tools.
+
+        ``user_email`` scopes the result to catalogues that user may read; see
+        ``DiscoveryMixin.get_tools_schema``. Omitted means unscoped.
+        """
         ...
 
     async def execute_tool(

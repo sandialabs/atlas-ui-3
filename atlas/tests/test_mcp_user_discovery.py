@@ -646,3 +646,214 @@ class TestAPublicCatalogueIsNotHiddenByAnEmptyProbe:
         await manager.discover_tools_for_user(USER, SERVER, force=True)
 
         assert manager.get_visible_tools_for_server(USER, SERVER) == []
+
+
+class TestAStaleCatalogueIsNotServedForever:
+    """A per-user catalogue is a claim about a token that worked once."""
+
+    @pytest.mark.asyncio
+    async def test_an_expired_entry_is_not_returned_to_its_owner(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+
+        manager._user_available_tools[(USER, SERVER)]["discovered_at"] = (
+            time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        )
+
+        assert manager.get_user_tools_for_server(USER, SERVER) is None
+
+    @pytest.mark.asyncio
+    async def test_a_cool_down_does_not_hand_back_a_stale_catalogue(self):
+        """The cool-down suppresses the retry, not the expiry."""
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+        manager._user_available_tools[(USER, SERVER)]["discovered_at"] = (
+            time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        )
+        # The token has stopped working.
+        manager._get_user_client = AsyncMock(return_value=None)
+
+        assert await manager.discover_tools_for_user(USER, SERVER) is None
+        # Cooling down now -- and still not serving what the dead token bought.
+        assert await manager.discover_tools_for_user(USER, SERVER) is None
+        assert manager.get_user_tools_for_server(USER, SERVER) is None
+
+    @pytest.mark.asyncio
+    async def test_a_revoked_token_unpublishes_the_stale_catalogue(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+        assert manager.get_server_for_tool(f"{SERVER}_search") == SERVER
+
+        manager._user_available_tools[(USER, SERVER)]["discovered_at"] = (
+            time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        )
+        manager._get_user_client = AsyncMock(return_value=None)
+        await manager.discover_tools_for_user(USER, SERVER)
+
+        assert manager.available_tools[SERVER]["tools"] == []
+        assert manager.get_server_for_tool(f"{SERVER}_search") is None
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_catalogue_survives_one_failed_probe(self):
+        """A briefly unreachable server must not cost a live token its tools."""
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+
+        manager._get_user_client = AsyncMock(return_value=None)
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert [t.name for t in manager.get_user_tools_for_server(USER, SERVER)] == [
+            "search"
+        ]
+        assert manager.available_tools[SERVER]["tools"]
+
+
+class TestAnEmptyRediscoveryUnpublishes:
+    @pytest.mark.asyncio
+    async def test_a_second_empty_discovery_withdraws_the_first_catalogue(self):
+        """Otherwise the old names stay routable with no live owner."""
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+        assert manager.get_server_for_tool(f"{SERVER}_search") == SERVER
+
+        # The server now answers this user with nothing -- their grant was cut.
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert manager.available_tools[SERVER]["tools"] == []
+        assert manager.get_server_for_tool(f"{SERVER}_search") is None
+        assert manager.get_visible_tools_for_server(USER, SERVER) == []
+
+    @pytest.mark.asyncio
+    async def test_an_empty_discovery_leaves_another_owners_catalogue(self):
+        manager = _manager()
+        other = "other@example.gov"
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
+        await manager.discover_tools_for_user(other, SERVER)
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert [t.name for t in manager.available_tools[SERVER]["tools"]] == ["theirs"]
+        assert manager.get_server_for_tool(f"{SERVER}_theirs") == SERVER
+
+    @pytest.mark.asyncio
+    async def test_an_empty_discovery_does_not_touch_an_anonymous_catalogue(self):
+        manager = _manager(
+            available_tools={SERVER: {"tools": [_tool("public")], "config": {}}}
+        )
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([]))
+
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert [t.name for t in manager.available_tools[SERVER]["tools"]] == ["public"]
+
+
+class TestTaskSupportFollowsTheRepublishedSet:
+    @pytest.mark.asyncio
+    async def test_the_heirs_tools_are_re_swept(self):
+        """_tool_task_forbidden must describe the catalogue actually published."""
+        manager = _manager()
+        other = "other@example.gov"
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("mine")]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
+        await manager.discover_tools_for_user(other, SERVER, force=True)
+        # Stale verdict from the departing owner's sweep.
+        manager._tool_task_forbidden = {(SERVER, "theirs"), (SERVER, "mine")}
+
+        manager.clear_user_tool_cache(other, SERVER)
+
+        assert [t.name for t in manager.available_tools[SERVER]["tools"]] == ["mine"]
+        # Rebuilt from the heir's tools, so the departed owner's entry is gone.
+        assert (SERVER, "theirs") not in manager._tool_task_forbidden
+
+
+class TestTheIndexIsRebuiltOncePerBulkClear:
+    @pytest.mark.asyncio
+    async def test_a_full_clear_rebuilds_the_index_once(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        for i in range(5):
+            await manager.discover_tools_for_user(f"u{i}@example.gov", SERVER, force=True)
+
+        with patch.object(
+            MCPToolManager, "_rebuild_tool_index", autospec=True
+        ) as rebuild:
+            manager.clear_user_tool_cache()
+
+        assert rebuild.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_clear_that_withdraws_nothing_rebuilds_nothing(self):
+        manager = _manager()
+        manager._user_available_tools[("nobody@example.gov", SERVER)] = {
+            "tools": [], "config": {}, "discovered_at": time.time(),
+        }
+
+        with patch.object(
+            MCPToolManager, "_rebuild_tool_index", autospec=True
+        ) as rebuild:
+            manager.clear_user_tool_cache()
+
+        assert rebuild.call_count == 0
+
+
+class TestSchemaMetadataIsScopedToItsOwner:
+    """A gated server's descriptions and input schemas are not public."""
+
+    async def _promoted(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(
+            return_value=_FakeClient([_tool("search", description="private detail")])
+        )
+        await manager.discover_tools_for_user(USER, SERVER)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_the_owner_gets_the_schema(self):
+        manager = await self._promoted()
+
+        schema = manager.get_tools_schema([f"{SERVER}_search"], USER)
+
+        assert [s["function"]["name"] for s in schema] == [f"{SERVER}_search"]
+        assert schema[0]["function"]["description"] == "private detail"
+
+    @pytest.mark.asyncio
+    async def test_another_user_gets_nothing(self):
+        manager = await self._promoted()
+
+        assert manager.get_tools_schema([f"{SERVER}_search"], "other@example.gov") == []
+
+    @pytest.mark.asyncio
+    async def test_an_omitted_user_keeps_the_historic_behaviour(self):
+        """Internal callers resolving an already-authorized tool still work."""
+        manager = await self._promoted()
+
+        assert len(manager.get_tools_schema([f"{SERVER}_search"])) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_anonymous_catalogue_is_readable_by_anyone(self):
+        manager = _manager(
+            available_tools={
+                SERVER: {"tools": [_tool("public", description="fine")], "config": {}}
+            }
+        )
+
+        schema = manager.get_tools_schema([f"{SERVER}_public"], "anyone@example.gov")
+
+        assert [s["function"]["name"] for s in schema] == [f"{SERVER}_public"]
+
+    @pytest.mark.asyncio
+    async def test_a_co_owner_gets_the_schema(self):
+        manager = await self._promoted()
+        other = "other@example.gov"
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(other, SERVER, force=True)
+
+        assert len(manager.get_tools_schema([f"{SERVER}_search"], other)) == 1
+        assert len(manager.get_tools_schema([f"{SERVER}_search"], USER)) == 1

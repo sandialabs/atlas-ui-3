@@ -71,7 +71,7 @@ async def test_tool_acl_filters_unauthorized(monkeypatch):
             # and drops every tool, so the test would pass even with ACL
             # filtering completely broken.
             return ["allowed"]
-        def get_tools_schema(self, names):
+        def get_tools_schema(self, names, user_email=None):
             # Minimal schema for selected tools
             out = []
             for n in names:

@@ -61,7 +61,8 @@ describe('ToolsPanel - Tool Selection', () => {
     getComplianceFilteredTools: vi.fn(() => []),
     getComplianceFilteredPrompts: vi.fn(() => []),
     getFilteredTools: vi.fn(() => []),
-    getFilteredPrompts: vi.fn(() => [])
+    getFilteredPrompts: vi.fn(() => []),
+    isComplianceAccessible: vi.fn(() => true)
   }
 
   beforeEach(() => {
@@ -1582,7 +1583,7 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
     authHookState.authStatus = null
   })
 
-  const renderWith = (authStatus, tools = [], chatOverrides = {}) => {
+  const renderWith = (authStatus, tools = [], chatOverrides = {}, marketplaceOverrides = {}) => {
     authHookState.authStatus = authStatus
     authHookState.getServerAuth = vi.fn(name => authStatus[name] || null)
     useChat.mockReturnValue({
@@ -1605,7 +1606,12 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
       getComplianceFilteredTools: vi.fn(() => tools),
       getComplianceFilteredPrompts: vi.fn(() => []),
       getFilteredTools: vi.fn(() => tools),
-      getFilteredPrompts: vi.fn(() => [])
+      getFilteredPrompts: vi.fn(() => []),
+      // The real rule: strict, and a resource with no level never matches.
+      isComplianceAccessible: vi.fn(
+        (userLevel, resourceLevel) => !!resourceLevel && resourceLevel === userLevel
+      ),
+      ...marketplaceOverrides
     })
     return render(
       <BrowserRouter>
@@ -1651,15 +1657,45 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
     expect(screen.getByText(/tools appear after you connect/i)).toBeTruthy()
   })
 
-  it('does not synthesize a row while a compliance level is being filtered on', () => {
-    // The auth status carries no compliance_level, and the filter is strict
-    // about resources that have none -- an unlabelled row must not slip past it.
+  it('does not synthesize a row the compliance filter excludes', () => {
+    // Strict: a server with no compliance_level never matches an active filter.
     renderWith({ 'remote-mcp': pendingStatus }, [], {
       complianceLevelFilter: 'secret',
       features: { compliance_levels: true }
     })
 
     expect(screen.queryByText('remote-mcp')).toBeNull()
+  })
+
+  it('still synthesizes a row the compliance filter admits', () => {
+    // Dropping every synthesized row while a filter was active put the
+    // bootstrap deadlock back behind a persisted UI preference.
+    renderWith(
+      { 'remote-mcp': { ...pendingStatus, compliance_level: 'secret' } },
+      [],
+      { complianceLevelFilter: 'secret', features: { compliance_levels: true } }
+    )
+
+    expect(screen.getByText('remote-mcp')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
+  })
+
+  it('offers a token control and the same hint for a non-oauth server', () => {
+    // api_key/bearer/jwt servers get a connect control too, so they must not
+    // be told "No tools discovered yet." beside it.
+    renderWith({
+      'keyed-mcp': {
+        server_name: 'keyed-mcp',
+        auth_type: 'api_key',
+        auth_required: true,
+        authenticated: false
+      }
+    })
+
+    expect(screen.getByText('keyed-mcp')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /add token/i })).toBeTruthy()
+    expect(screen.getByText(/tools appear after you connect/i)).toBeTruthy()
+    expect(screen.queryByText(/no tools discovered yet/i)).toBeNull()
   })
 
   it('does not synthesize a row for a server that needs no authorization', () => {
