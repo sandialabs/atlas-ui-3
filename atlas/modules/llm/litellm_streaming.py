@@ -19,6 +19,7 @@ from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import LLMMalformedToolCallError
 
 from .models import LLMResponse, split_provider
+from .retry_config import _llm_retry_settings, _retry_backoff_delay
 from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
     tool_call_function_field,
@@ -33,6 +34,30 @@ KNOWN_FINISH_REASONS = frozenset(
 )
 
 
+async def _close_stream_quietly(response: Any) -> None:
+    """Best-effort close of an abandoned stream so its HTTP connection is freed.
+
+    Called before a retry: the failed attempt's stream is discarded, and an
+    unclosed response would hold its connection until garbage collection.
+    Every failure here is swallowed -- the retry must not be blocked by a
+    cleanup problem.
+    """
+    try:
+        aclose = getattr(response, "aclose", None)
+        if aclose is not None:
+            result = aclose()
+            if asyncio.iscoroutine(result):
+                await result
+            return
+        close = getattr(response, "close", None)
+        if close is not None:
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
+    except Exception:
+        logger.debug("Failed to close abandoned LLM stream", exc_info=True)
+
+
 class LiteLLMStreamingMixin:
     """Mixin providing streaming LLM methods for LiteLLMCaller.
 
@@ -40,6 +65,7 @@ class LiteLLMStreamingMixin:
       - _get_litellm_model_name(model_name) -> str
       - _get_model_kwargs(model_name, temperature, user_email) -> dict
       - _prepare_messages(model_name, messages) -> list
+      - _is_retryable_error(exc) -> bool (retry policy for stream failures)
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> (successful, exclusions, failures)
       - _build_rag_completion_response(rag_response, display_source) -> str
       - _build_rag_exclusion_notice(exclusions) -> str
@@ -91,60 +117,102 @@ class LiteLLMStreamingMixin:
 
         with start_span("llm.call", span_attrs) as span:
             start_ns = time.monotonic_ns()
+            max_retries, max_wait = _llm_retry_settings()
+            attempt = 0
+            waited = 0.0
             try:
                 total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
                 logger.info("Streaming plain LLM call: %d messages, %d chars", len(messages), total_chars)
 
-                response = await acompletion(
-                    model=litellm_model,
-                    messages=self._prepare_messages(model_name, messages),
-                    stream=True,
-                    **model_kwargs,
-                )
-
                 chunk_count = 0
                 total_chunks_seen = 0
                 accumulated_chars = 0
-                async for chunk in response:
-                    total_chunks_seen += 1
-                    delta = chunk.choices[0].delta if chunk.choices else None
-                    if total_chunks_seen <= 3:
-                        logger.debug(
-                            "Stream chunk #%d for %s: choices=%s, delta=%s, content_len=%s",
-                            total_chunks_seen, model_name,
-                            bool(chunk.choices), type(delta).__name__ if delta else None,
-                            len(delta.content) if delta and delta.content else 0,
+                # A token handed to the consumer cannot be un-handed: once any
+                # content has been yielded, the turn is partially delivered and
+                # the only safe reaction to a later failure is to surface it,
+                # not to restart the stream and duplicate what was already sent.
+                yielded_any = False
+                while True:
+                    response = None
+                    try:
+                        response = await acompletion(
+                            model=litellm_model,
+                            messages=self._prepare_messages(model_name, messages),
+                            stream=True,
+                            **model_kwargs,
                         )
-                    if delta and delta.content:
-                        yield delta.content
-                        chunk_count += 1
-                        accumulated_chars += len(delta.content)
-                        # Yield control periodically to prevent backpressure buildup
-                        if chunk_count % 50 == 0:
-                            await asyncio.sleep(0)
 
-                if chunk_count == 0 and total_chunks_seen > 0:
-                    logger.warning(
-                        "Stream for %s received %d chunks but yielded 0 tokens",
-                        model_name, total_chunks_seen,
-                    )
-                log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
-                set_attrs(span, {
-                    "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
-                    "chunk_count": chunk_count,
-                    "output_chars": accumulated_chars,
-                    # Streaming LLM calls don't carry usage metadata; publish a
-                    # char-based estimate under a distinct name so downstream
-                    # aggregations never silently mix real token counts with
-                    # approximations.
-                    "output_tokens_estimate": accumulated_chars // 4,
-                    "retry_count": 0,
-                })
+                        async for chunk in response:
+                            total_chunks_seen += 1
+                            delta = chunk.choices[0].delta if chunk.choices else None
+                            if total_chunks_seen <= 3:
+                                logger.debug(
+                                    "Stream chunk #%d for %s: choices=%s, delta=%s, content_len=%s",
+                                    total_chunks_seen, model_name,
+                                    bool(chunk.choices), type(delta).__name__ if delta else None,
+                                    len(delta.content) if delta and delta.content else 0,
+                                )
+                            if delta and delta.content:
+                                yielded_any = True
+                                yield delta.content
+                                chunk_count += 1
+                                accumulated_chars += len(delta.content)
+                                # Yield control periodically to prevent backpressure buildup
+                                if chunk_count % 50 == 0:
+                                    await asyncio.sleep(0)
+
+                        if chunk_count == 0 and total_chunks_seen > 0:
+                            logger.warning(
+                                "Stream for %s received %d chunks but yielded 0 tokens",
+                                model_name, total_chunks_seen,
+                            )
+                        log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
+                        set_attrs(span, {
+                            "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                            "chunk_count": chunk_count,
+                            "output_chars": accumulated_chars,
+                            # Streaming LLM calls don't carry usage metadata; publish a
+                            # char-based estimate under a distinct name so downstream
+                            # aggregations never silently mix real token counts with
+                            # approximations.
+                            "output_tokens_estimate": accumulated_chars // 4,
+                            "retry_count": attempt,
+                            "retry_wait_seconds": waited,
+                        })
+                        break
+
+                    except Exception as exc:
+                        if response is not None:
+                            await _close_stream_quietly(response)
+                        if (
+                            yielded_any
+                            or attempt >= max_retries
+                            or not self._is_retryable_error(exc)
+                        ):
+                            raise
+                        delay = _retry_backoff_delay(attempt, max_wait, waited)
+                        if delay is None:
+                            logger.warning(
+                                "Streaming LLM call failed (attempt %d/%d); retry wait budget "
+                                "(%.0fs) exhausted, giving up: %s",
+                                attempt + 1, max_retries + 1, max_wait, exc,
+                            )
+                            raise
+                        logger.warning(
+                            "Streaming LLM call failed before any token (attempt %d/%d), "
+                            "retrying in %.1fs: %s",
+                            attempt + 1, max_retries + 1, delay, exc,
+                        )
+                        attempt += 1
+                        waited += delay
+                        await asyncio.sleep(delay)
 
             except Exception as exc:
                 set_attrs(span, {
                     "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                     "error_type": type(exc).__name__,
+                    "retry_count": attempt,
+                    "retry_wait_seconds": waited,
                 })
                 logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
                 self._raise_llm_domain_error(exc)
@@ -304,6 +372,9 @@ class LiteLLMStreamingMixin:
 
         with start_span("llm.call", span_attrs) as span:
             start_ns = time.monotonic_ns()
+            max_retries, max_wait = _llm_retry_settings()
+            attempt = 0
+            waited = 0.0
             try:
                 total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
                 logger.info(
@@ -311,58 +382,103 @@ class LiteLLMStreamingMixin:
                     len(messages), total_chars, len(tools_schema),
                 )
 
-                response = await acompletion(
-                    model=litellm_model,
-                    messages=self._prepare_messages(model_name, messages),
-                    tools=tools_schema,
-                    tool_choice=tool_choice,
-                    stream=True,
-                    **model_kwargs,
-                )
-
                 accumulated_content = ""
                 accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
                 chunk_count = 0
                 finish_reason: Optional[str] = None
+                # Text tokens are yielded as they arrive, so the same rule as
+                # stream_plain applies: after the first yielded token a failure
+                # must surface, not retry -- restarting would duplicate the
+                # partial answer the user already sees. Tool-call fragments
+                # alone are still retryable: they stay inside this generator
+                # until the final LLMResponse, so nothing has been delivered.
+                yielded_any = False
+                while True:
+                    response = None
+                    try:
+                        response = await acompletion(
+                            model=litellm_model,
+                            messages=self._prepare_messages(model_name, messages),
+                            tools=tools_schema,
+                            tool_choice=tool_choice,
+                            stream=True,
+                            **model_kwargs,
+                        )
 
-                async for chunk in response:
-                    choice = chunk.choices[0] if chunk.choices else None
-                    if choice is not None:
-                        # Providers send the reason on the final chunk; keep the
-                        # last non-empty one so a truncated turn ("length") can
-                        # be told apart from a model that simply emitted bad JSON.
-                        finish_reason = getattr(choice, "finish_reason", None) or finish_reason
-                    delta = choice.delta if choice is not None else None
-                    if not delta:
-                        continue
+                        async for chunk in response:
+                            choice = chunk.choices[0] if chunk.choices else None
+                            if choice is not None:
+                                # Providers send the reason on the final chunk; keep the
+                                # last non-empty one so a truncated turn ("length") can
+                                # be told apart from a model that simply emitted bad JSON.
+                                finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                            delta = choice.delta if choice is not None else None
+                            if not delta:
+                                continue
 
-                    # Yield text content as it arrives
-                    if delta.content:
-                        accumulated_content += delta.content
-                        yield delta.content
-                        chunk_count += 1
-                        # Yield control periodically to prevent backpressure buildup
-                        if chunk_count % 50 == 0:
-                            await asyncio.sleep(0)
+                            # Yield text content as it arrives
+                            if delta.content:
+                                yielded_any = True
+                                accumulated_content += delta.content
+                                yield delta.content
+                                chunk_count += 1
+                                # Yield control periodically to prevent backpressure buildup
+                                if chunk_count % 50 == 0:
+                                    await asyncio.sleep(0)
 
-                    # Accumulate tool call fragments
-                    if hasattr(delta, "tool_calls") and delta.tool_calls:
-                        for tc_delta in delta.tool_calls:
-                            idx = tc_delta.index if hasattr(tc_delta, "index") else 0
-                            if idx not in accumulated_tool_calls:
-                                accumulated_tool_calls[idx] = {
-                                    "id": getattr(tc_delta, "id", None) or "",
-                                    "type": "function",
-                                    "function": {"name": "", "arguments": ""},
-                                }
-                            entry = accumulated_tool_calls[idx]
-                            if hasattr(tc_delta, "id") and tc_delta.id:
-                                entry["id"] = tc_delta.id
-                            if hasattr(tc_delta, "function") and tc_delta.function:
-                                if hasattr(tc_delta.function, "name") and tc_delta.function.name:
-                                    entry["function"]["name"] += tc_delta.function.name
-                                if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
-                                    entry["function"]["arguments"] += tc_delta.function.arguments
+                            # Accumulate tool call fragments
+                            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                                for tc_delta in delta.tool_calls:
+                                    idx = tc_delta.index if hasattr(tc_delta, "index") else 0
+                                    if idx not in accumulated_tool_calls:
+                                        accumulated_tool_calls[idx] = {
+                                            "id": getattr(tc_delta, "id", None) or "",
+                                            "type": "function",
+                                            "function": {"name": "", "arguments": ""},
+                                        }
+                                    entry = accumulated_tool_calls[idx]
+                                    if hasattr(tc_delta, "id") and tc_delta.id:
+                                        entry["id"] = tc_delta.id
+                                    if hasattr(tc_delta, "function") and tc_delta.function:
+                                        if hasattr(tc_delta.function, "name") and tc_delta.function.name:
+                                            entry["function"]["name"] += tc_delta.function.name
+                                        if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
+                                            entry["function"]["arguments"] += tc_delta.function.arguments
+
+                        break
+
+                    except Exception as exc:
+                        if response is not None:
+                            await _close_stream_quietly(response)
+                        if (
+                            yielded_any
+                            or attempt >= max_retries
+                            or not self._is_retryable_error(exc)
+                        ):
+                            raise
+                        delay = _retry_backoff_delay(attempt, max_wait, waited)
+                        if delay is None:
+                            logger.warning(
+                                "Streaming LLM call with tools failed (attempt %d/%d); "
+                                "retry wait budget (%.0fs) exhausted, giving up: %s",
+                                attempt + 1, max_retries + 1, max_wait, exc,
+                            )
+                            raise
+                        logger.warning(
+                            "Streaming LLM call with tools failed before any token "
+                            "(attempt %d/%d), retrying in %.1fs: %s",
+                            attempt + 1, max_retries + 1, delay, exc,
+                        )
+                        # Fresh attempt: throw away any half-accumulated
+                        # fragments so a retried stream cannot mix chunks from
+                        # two different provider responses.
+                        accumulated_content = ""
+                        accumulated_tool_calls = {}
+                        chunk_count = 0
+                        finish_reason = None
+                        attempt += 1
+                        waited += delay
+                        await asyncio.sleep(delay)
 
                 # Build final tool_calls list using litellm's own response type
                 # rather than SimpleNamespace. The objects are appended verbatim
@@ -414,7 +530,8 @@ class LiteLLMStreamingMixin:
                     "output_chars": len(accumulated_content),
                     "output_tokens_estimate": len(accumulated_content) // 4,
                     "tool_calls_count": len(tool_calls_list) if tool_calls_list else 0,
-                    "retry_count": 0,
+                    "retry_count": attempt,
+                    "retry_wait_seconds": waited,
                 })
 
                 # Opt-in fine-tune capture: record full I/O for this call when a
@@ -434,6 +551,8 @@ class LiteLLMStreamingMixin:
                 set_attrs(span, {
                     "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                     "error_type": type(exc).__name__,
+                    "retry_count": attempt,
+                    "retry_wait_seconds": waited,
                 })
                 logger.error("Error in streaming LLM call with tools: %s", exc, exc_info=True)
                 self._raise_llm_domain_error(exc, tools_schema=tools_schema)

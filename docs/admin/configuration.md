@@ -105,6 +105,35 @@ AGENT_SLEEP_MAX_TURN_SECONDS=7200
 - **Deploys**: a turn parked in a long sleep delays graceful shutdown; expect such turns to be
   killed by a rolling restart.
 
+### LLM Retry on Transient Failures
+
+High-traffic LLM services can reject calls with rate-limit (429), timeout, or server (5xx) errors.
+Atlas retries those transient failures automatically with exponential backoff (1s base, doubling
+per attempt, up to 0.5s of jitter) on both streaming and non-streaming calls (issue #919).
+Deterministic failures -- rejected requests (400), authentication errors, and context-window
+overflows -- are never retried.
+
+```bash
+# Number of retries AFTER the first attempt (default: 5, so up to 6 calls).
+# 0 disables retries entirely.
+LLM_MAX_RETRIES=5
+
+# Cap on the CUMULATIVE time spent waiting between attempts, in seconds
+# (default: 300 = 5 minutes). The final sleep is shortened so the total never
+# exceeds this; once the budget is spent, the underlying error surfaces.
+LLM_RETRY_MAX_WAIT_SECONDS=300
+```
+
+- **Scope**: retries cover the streaming path (the main chat flow) and plain/RAG/tools calls. Once
+  a streaming response has already yielded a token to the user, a later failure is reported
+  instead of retried -- restarting the stream would duplicate the partial answer.
+- **User experience**: during backoff the chat shows nothing for that turn, then either the answer
+  begins normally or the usual error message arrives. The maximum user-visible wait per LLM call is
+  therefore roughly `LLM_RETRY_MAX_WAIT_SECONDS` plus the provider latency of each attempt; with
+  the defaults and a 1s base delay, five retries wait about 31s in total, well under the cap.
+- **Reverse proxies**: same consideration as `atlas_sleep` above -- a turn waiting out a backoff
+  sends nothing over its WebSocket; keep proxy idle timeouts longer than the cap you configure.
+
 ## System Prompt Time Injection (issue #823)
 
 The current date/time is appended to the rendered system prompt on every turn so the model
