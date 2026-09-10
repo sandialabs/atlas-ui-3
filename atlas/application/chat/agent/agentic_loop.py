@@ -32,6 +32,7 @@ from ..utilities import error_handler, tool_executor
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
+from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .steering import SteeringChannel
 from .streaming_final_answer import stream_final_answer
@@ -228,6 +229,14 @@ class AgenticLoop(AgentLoopProtocol):
         # would let one turn inherit another's spent sleep budget.
         turn_sleep_budget: Dict[str, Any] = {}
 
+        # Tool-returned images reach the LLM as a synthetic user message
+        # appended after each step's tool results (issue #909). Gated on the
+        # model's configured vision support; one injector per turn tracks the
+        # rolling most-recent-N cap across the loop's steps.
+        image_injector = ToolImageInjector(
+            enabled=model_supports_vision(self.config_manager, model),
+        )
+
         while steps < max_steps:
             steps += 1
 
@@ -354,6 +363,17 @@ class AgenticLoop(AgentLoopProtocol):
                     "content": result.content,
                     "tool_call_id": result.tool_call_id,
                 })
+
+            # Issue #909: the artifacts on these results (e.g. a screenshot)
+            # went to the canvas but never to the model. Attach the images to
+            # the transcript now so the next LLM call can actually see them.
+            # _to_tool_call_dict normalizes both attribute objects and plain
+            # dicts, so the id -> name map works for either shape.
+            tool_names = {
+                normalized["id"]: normalized["function"]["name"]
+                for normalized in (_to_tool_call_dict(tc) for tc in tool_calls)
+            }
+            image_injector.after_tool_results(messages, results, tool_names=tool_names)
 
             await event_handler(AgentEvent(
                 type="agent_tool_results", payload={"results": results},
