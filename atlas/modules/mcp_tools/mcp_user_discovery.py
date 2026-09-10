@@ -108,8 +108,11 @@ class UserDiscoveryMixin:
         if not self._requires_user_auth(server_name):
             return entry.get("tools") or []
         own = self.get_user_tools_for_server(user_email, server_name)
-        if own is not None:
+        if own:
             return own
+        # An *empty* own result is not an answer, only the absence of one: a
+        # server whose tools/list is public still has tools this user may see,
+        # and an authenticated probe that came back empty must not hide them.
         if entry.get("user_scoped"):
             return []
         return entry.get("tools") or []
@@ -151,19 +154,63 @@ class UserDiscoveryMixin:
             self._withdraw_promoted_tools(server, owner)
 
     def _withdraw_promoted_tools(self, server_name: str, user_lc: str) -> None:
-        """Unpublish a shared catalogue that came from this user, if it did."""
+        """Drop this user's claim on the shared catalogue, and republish.
+
+        A promoted catalogue can be owned by several users -- each one's
+        discovery re-promotes -- so one owner leaving is not a reason to
+        unpublish. Any surviving owner with a live cache entry gets their
+        catalogue published in its place; only when the last one goes is the
+        server emptied. Republishing from a survivor rather than leaving the
+        departing user's tools in place is what keeps the listing and
+        ``get_server_for_tool`` agreeing on the same set.
+        """
+        self._ensure_user_discovery_state()
         entry = self.available_tools.get(server_name) or {}
-        if not entry.get("user_scoped") or entry.get("discovered_for") != user_lc:
+        if not entry.get("user_scoped"):
             return
+        owners = set(entry.get("discovered_for") or ())
+        if user_lc not in owners:
+            return
+        owners.discard(user_lc)
+
+        safe_server = sanitize_for_logging(server_name)
+        survivors = {o for o in owners if self._live_user_tools(server_name, o)}
+        if not survivors:
+            self.available_tools[server_name] = {
+                "tools": [],
+                "config": self.servers_config.get(server_name, {}),
+            }
+            self._rebuild_tool_index()
+            logger.info(
+                "Withdrew the per-user tool catalogue published for server '%s'",
+                safe_server,
+            )
+            return
+
+        # sorted() only to make which survivor is published deterministic.
+        heir = sorted(survivors)[0]
         self.available_tools[server_name] = {
-            "tools": [],
+            "tools": self._live_user_tools(server_name, heir),
             "config": self.servers_config.get(server_name, {}),
+            "user_scoped": True,
+            "discovered_for": survivors,
         }
         self._rebuild_tool_index()
         logger.info(
-            "Withdrew the per-user tool catalogue published for server '%s'",
-            sanitize_for_logging(server_name),
+            "Republished the tool catalogue for server '%s' from a remaining "
+            "authorized user (%d still hold one)",
+            safe_server,
+            len(survivors),
         )
+
+    def _live_user_tools(self, server_name: str, user_lc: str) -> List[Any]:
+        """This user's cached tools for the server, if still within the TTL."""
+        entry = self._user_available_tools.get((user_lc, server_name))
+        if not entry or not entry.get("tools"):
+            return []
+        if (time.time() - entry.get("discovered_at", 0.0)) >= _USER_DISCOVERY_TTL_SECONDS:
+            return []
+        return entry["tools"]
 
     def _prune_user_discovery_state(self) -> None:
         """Drop expired entries once the caches grow past the ceiling."""
@@ -246,11 +293,16 @@ class UserDiscoveryMixin:
                 safe_server,
             )
             self._user_discovery_failures[key] = now
+            self._prune_user_discovery_state()
             return None
 
         tools = await self._list_tools_with_client(server_name, client)
         if tools is None:
             self._user_discovery_failures[key] = now
+            # Pruned here as well as on success: a user whose discovery keeps
+            # failing only ever writes to the failure and lock maps, and those
+            # must not be the two that grow without bound.
+            self._prune_user_discovery_state()
             return None
 
         self._user_discovery_failures.pop(key, None)
@@ -397,6 +449,9 @@ class UserDiscoveryMixin:
         if not tools or self._has_anonymous_catalogue(server_name):
             return
         self._apply_task_support_metadata(server_name, tools)
+        existing = self.available_tools.get(server_name) or {}
+        owners = set(existing.get("discovered_for") or ()) if existing.get("user_scoped") else set()
+        owners.add(user_lc)
         self.available_tools[server_name] = {
             "tools": tools,
             "config": self.servers_config.get(server_name, {}),
@@ -404,7 +459,10 @@ class UserDiscoveryMixin:
             # anyone else, does not suppress their own discovery, and is
             # withdrawn when that user disconnects.
             "user_scoped": True,
-            "discovered_for": user_lc,
+            # Every user whose discovery currently stands behind this
+            # catalogue, so one of them disconnecting withdraws only their own
+            # claim (see _withdraw_promoted_tools).
+            "discovered_for": owners,
         }
         self._rebuild_tool_index()
         logger.info(

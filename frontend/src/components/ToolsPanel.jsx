@@ -98,6 +98,29 @@ const OAUTH_RETRYABLE_ERRORS = new Set([
   'interaction_required',
 ])
 
+// Which auth types put a connect control on the server row. An oauth server
+// connects by redirect, the rest by pasting a token, but every one of them is
+// a server the user can do something about.
+const CONNECTABLE_AUTH_TYPES = new Set(['jwt', 'bearer', 'api_key', 'oauth'])
+
+// Shared by the connect button and the empty-body hint so the two cannot
+// disagree about whether this server is waiting on the user.
+const connectState = (server, serverAuth) => {
+  const isOAuth = server.auth_type === 'oauth'
+  // An expired OAuth token with a refresh token is not disconnected: Atlas
+  // renews it on the next tool call. Showing "connect" there sends the user
+  // through a flow they do not need.
+  const willRefresh = isOAuth && serverAuth?.is_expired && serverAuth?.has_refresh_token
+  return {
+    isOAuth,
+    willRefresh,
+    connectable: CONNECTABLE_AUTH_TYPES.has(server.auth_type),
+    isAuthenticated: Boolean(
+      serverAuth?.authenticated && (!serverAuth?.is_expired || willRefresh)
+    ),
+  }
+}
+
 const describeOAuthError = (code) =>
   OAUTH_ERROR_MESSAGES[code] ||
   'The sign-in failed. Please try again, and tell an administrator if it keeps happening.'
@@ -938,6 +961,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                     const toolCount = server.tools.length
                     const promptCount = server.prompts.length
                     const totalItems = toolCount + promptCount
+                    const authState = connectState(server, getServerAuth(server.server))
                     
                     return (
                       <div key={server.server} className="bg-gray-700 rounded-lg overflow-hidden">
@@ -983,17 +1007,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                               )}
                               {/* Auth status indicator. An oauth server is connected by
                                   redirecting to the provider; the others by pasting a token. */}
-                              {(server.auth_type === 'jwt' || server.auth_type === 'bearer' || server.auth_type === 'api_key' || server.auth_type === 'oauth') && (() => {
-                                const serverAuth = getServerAuth(server.server)
-                                const isOAuth = server.auth_type === 'oauth'
-                                // An expired OAuth token with a refresh token is
-                                // not disconnected: Atlas renews it on the next
-                                // tool call. Showing "connect" there sends the
-                                // user through a flow they do not need.
-                                const willRefresh =
-                                  isOAuth && serverAuth?.is_expired && serverAuth?.has_refresh_token
-                                const isAuthenticated =
-                                  serverAuth?.authenticated && (!serverAuth?.is_expired || willRefresh)
+                              {authState.connectable && (() => {
+                                const { isOAuth, willRefresh, isAuthenticated } = authState
                                 const connectTitle = isOAuth
                                   ? 'Click to connect with OAuth.'
                                   : 'Click to add token.'
@@ -1115,14 +1130,11 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                 {/* A server that gates discovery behind auth has
                                     nothing to list until the user connects; say
                                     so rather than showing a blank body. */}
-                                {totalItems === 0 && server.auth_type === 'oauth' && (
+                                {totalItems === 0 && (
                                   <p className="text-xs text-gray-500 italic mb-2">
-                                    Tools appear after you connect.
-                                  </p>
-                                )}
-                                {totalItems === 0 && server.auth_type !== 'oauth' && (
-                                  <p className="text-xs text-gray-500 italic mb-2">
-                                    No tools discovered yet.
+                                    {authState.connectable && !authState.isAuthenticated
+                                      ? 'Tools appear after you connect.'
+                                      : 'No tools discovered yet.'}
                                   </p>
                                 )}
                                 {/* Tools Display */}

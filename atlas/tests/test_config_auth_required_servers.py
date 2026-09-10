@@ -6,6 +6,7 @@ omitting it leaves the user with no way to authorize -- and no tools until
 they do.
 """
 
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +15,8 @@ from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config.config_manager import config_manager
+from atlas.modules.mcp_tools.mcp_user_clients import UserClientMixin
+from atlas.modules.mcp_tools.mcp_user_discovery import UserDiscoveryMixin
 
 
 def _set_proxy_secret_on_app(secret="test-proxy-secret"):
@@ -38,8 +41,16 @@ def _tool(name):
     )
 
 
-class _FakeManager:
-    """Only the surface /api/config touches."""
+class _FakeManager(UserClientMixin, UserDiscoveryMixin):
+    """Only the surface /api/config touches.
+
+    ``get_visible_tools_for_server`` and ``_requires_user_auth`` are the real
+    implementations, inherited rather than restated: a fake that reimplements
+    the scoping rule cannot fail when the production rule changes, which is
+    the one thing these tests exist to catch. Only the network -- the actual
+    per-user discovery -- is scripted, and it lands in the same per-user cache
+    the real path writes to.
+    """
 
     def __init__(self, servers_config, available_tools=None, user_tools=None):
         self.servers_config = servers_config
@@ -47,6 +58,7 @@ class _FakeManager:
         self.available_prompts = {}
         self._user_tools = user_tools or {}
         self.discovery_calls = []
+        self._ensure_user_discovery_state()
 
     async def get_authorized_servers(self, user, is_user_in_group):
         return list(self.servers_config)
@@ -55,12 +67,11 @@ class _FakeManager:
         self, user_email, server_names, *, wait_timeout=None
     ):
         self.discovery_calls.append((user_email, list(server_names), wait_timeout))
+        for server_name, tools in self._user_tools.items():
+            self._user_available_tools[
+                self._user_discovery_key(user_email, server_name)
+            ] = {"tools": tools, "config": {}, "discovered_at": time.time()}
         return dict(self._user_tools)
-
-    def get_visible_tools_for_server(self, user_email, server_name):
-        if server_name in self._user_tools:
-            return self._user_tools[server_name]
-        return (self.available_tools.get(server_name) or {}).get("tools") or []
 
 
 def _servers_by_name(payload):

@@ -473,3 +473,176 @@ class TestTheCallerCanBoundTheWait:
         assert [t.name for t in manager.get_user_tools_for_server(USER, SERVER)] == [
             "search"
         ]
+
+
+class TestTheDiscoveryTimeoutCoversConnectionSetup:
+    """An auth-gated server that hangs on ``initialize`` is the shape at issue."""
+
+    @pytest.mark.asyncio
+    async def test_a_client_that_hangs_before_list_tools_times_out(self):
+        manager = _manager()
+
+        class _HangingClient:
+            def __init__(self):
+                self.entered = False
+
+            async def __aenter__(self):
+                self.entered = True
+                await asyncio.Event().wait()  # never opens
+
+            async def __aexit__(self, *exc_info):
+                return False
+
+            async def list_tools(self):  # pragma: no cover - never reached
+                raise AssertionError("list_tools must not be reached")
+
+        client = _HangingClient()
+        manager._get_user_client = AsyncMock(return_value=client)
+
+        with patch.object(MCPToolManager, "_discovery_timeout", return_value=0.01):
+            tools = await manager.discover_tools_for_user(USER, SERVER)
+
+        assert tools is None
+        assert client.entered
+        # A timeout is a per-user failure, not a global one, and it cools down.
+        assert manager._user_discovery_failures
+        assert manager._failed_servers == {}
+
+
+class TestTheCachesAreBounded:
+    @pytest.mark.asyncio
+    async def test_expired_entries_are_evicted_once_past_the_ceiling(self):
+        manager = _manager()
+        stale = time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        for i in range(mcp_user_discovery._MAX_USER_DISCOVERY_ENTRIES + 1):
+            manager._user_available_tools[(f"u{i}@example.gov", SERVER)] = {
+                "tools": [_tool("search")],
+                "config": {},
+                "discovered_at": stale,
+            }
+        manager._user_discovery_failures[("cold@example.gov", SERVER)] = (
+            time.time() - mcp_user_discovery._USER_DISCOVERY_RETRY_SECONDS - 1
+        )
+        manager._user_discovery_failures[("warm@example.gov", SERVER)] = time.time()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+
+        await manager.discover_tools_for_user(USER, SERVER)
+
+        # Only the fresh entry -- this run's own -- survives the sweep.
+        assert list(manager._user_available_tools) == [(USER, SERVER)]
+        # A cool-down that has not expired is still honoured.
+        assert list(manager._user_discovery_failures) == [("warm@example.gov", SERVER)]
+
+    @pytest.mark.asyncio
+    async def test_a_repeatedly_failing_user_also_triggers_the_sweep(self):
+        """The failure path writes to the caches too, so it must prune too."""
+        manager = _manager()
+        stale = time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        for i in range(mcp_user_discovery._MAX_USER_DISCOVERY_ENTRIES + 1):
+            manager._user_available_tools[(f"u{i}@example.gov", SERVER)] = {
+                "tools": [_tool("search")],
+                "config": {},
+                "discovered_at": stale,
+            }
+        manager._get_user_client = AsyncMock(return_value=None)  # no token
+
+        assert await manager.discover_tools_for_user(USER, SERVER) is None
+
+        assert manager._user_available_tools == {}
+
+
+class TestSeveralUsersCanOwnOnePromotedCatalogue:
+    """Ownership is a set: one owner leaving must not strand the others."""
+
+    async def _promote_for(self, manager, user, tool_name):
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool(tool_name)]))
+        await manager.discover_tools_for_user(user, SERVER, force=True)
+
+    @pytest.mark.asyncio
+    async def test_the_first_owners_disconnect_still_withdraws_their_claim(self):
+        manager = _manager()
+        other = "other@example.gov"
+        await self._promote_for(manager, USER, "search")
+        await self._promote_for(manager, other, "search")
+
+        assert manager.available_tools[SERVER]["discovered_for"] == {USER, other}
+
+        manager.clear_user_tool_cache(USER, SERVER)
+
+        # The second user still holds a catalogue, so it stays published --
+        # and published for them alone.
+        assert manager.available_tools[SERVER]["discovered_for"] == {other}
+        assert manager.get_server_for_tool(f"{SERVER}_search") == SERVER
+
+    @pytest.mark.asyncio
+    async def test_a_survivors_catalogue_is_republished_not_left_stale(self):
+        """Otherwise the listing and get_server_for_tool disagree."""
+        manager = _manager()
+        other = "other@example.gov"
+        await self._promote_for(manager, USER, "mine")
+        await self._promote_for(manager, other, "theirs")
+
+        # The second promotion published 'theirs'; when that user leaves, the
+        # first user's tools must become routable again, not vanish.
+        manager.clear_user_tool_cache(other, SERVER)
+
+        assert [t.name for t in manager.available_tools[SERVER]["tools"]] == ["mine"]
+        assert manager.get_server_for_tool(f"{SERVER}_mine") == SERVER
+        assert manager.get_server_for_tool(f"{SERVER}_theirs") is None
+        assert [
+            t.name for t in manager.get_visible_tools_for_server(USER, SERVER)
+        ] == ["mine"]
+
+    @pytest.mark.asyncio
+    async def test_the_last_owner_leaving_empties_the_server(self):
+        manager = _manager()
+        other = "other@example.gov"
+        await self._promote_for(manager, USER, "search")
+        await self._promote_for(manager, other, "search")
+
+        manager.clear_user_tool_cache(USER, SERVER)
+        manager.clear_user_tool_cache(other, SERVER)
+
+        assert manager.available_tools[SERVER]["tools"] == []
+        assert manager.get_server_for_tool(f"{SERVER}_search") is None
+
+    @pytest.mark.asyncio
+    async def test_an_expired_survivor_does_not_keep_the_catalogue_alive(self):
+        manager = _manager()
+        other = "other@example.gov"
+        await self._promote_for(manager, USER, "mine")
+        await self._promote_for(manager, other, "theirs")
+        # The first user's entry is past its TTL: it is no longer evidence
+        # that they can still see anything.
+        manager._user_available_tools[(USER, SERVER)]["discovered_at"] = (
+            time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        )
+
+        manager.clear_user_tool_cache(other, SERVER)
+
+        assert manager.available_tools[SERVER]["tools"] == []
+
+
+class TestAPublicCatalogueIsNotHiddenByAnEmptyProbe:
+    @pytest.mark.asyncio
+    async def test_an_empty_authenticated_result_falls_back_to_the_sweep(self):
+        """A server may gate invocation but answer tools/list to anyone."""
+        manager = _manager(
+            available_tools={SERVER: {"tools": [_tool("public")], "config": {}}}
+        )
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([]))
+
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert [
+            t.name for t in manager.get_visible_tools_for_server(USER, SERVER)
+        ] == ["public"]
+
+    @pytest.mark.asyncio
+    async def test_an_empty_probe_against_a_gated_server_still_shows_nothing(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([]))
+
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+
+        assert manager.get_visible_tools_for_server(USER, SERVER) == []
