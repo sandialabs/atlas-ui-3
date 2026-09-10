@@ -11,6 +11,7 @@ import PromptSelector from './PromptSelector'
 import EnabledDataSourcesIndicator from './EnabledDataSourcesIndicator'
 import ModelSelector from './ModelSelector'
 import ToolSelector from './ToolSelector'
+import WorkspaceSelector from './WorkspaceSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
 import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
@@ -1239,6 +1240,7 @@ const ChatArea = () => {
             <div className="flex items-center gap-3 flex-wrap min-w-0">
               <ModelSelector />
               <ToolSelector />
+              {features?.workspaces && <WorkspaceSelector />}
               <PromptSelector />
               <span className="hidden sm:inline">Press Shift + Enter for new line</span>
             </div>

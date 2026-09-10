@@ -237,6 +237,38 @@ describe('WorkspaceSelector', () => {
     expect(clearActiveWorkspace).toHaveBeenCalled()
   })
 
+  it('stays synchronized when multiple selectors are rendered', () => {
+    let activeWorkspaceId = 'ws-work'
+    switchWorkspace.mockImplementation((workspaceId) => {
+      activeWorkspaceId = workspaceId
+      return true
+    })
+    useChat.mockImplementation(() => ({
+      ...baseContext,
+      activeWorkspaceId,
+      switchWorkspace,
+    }))
+
+    const { rerender } = render(
+      <>
+        <WorkspaceSelector />
+        <WorkspaceSelector />
+      </>
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: /workspaces:/i })[1])
+    fireEvent.click(screen.getByText('Home'))
+
+    rerender(
+      <>
+        <WorkspaceSelector />
+        <WorkspaceSelector />
+      </>
+    )
+
+    expect(screen.getAllByRole('button', { name: /workspaces: home/i })).toHaveLength(2)
+  })
+
   it('shows an empty state when the user has no workspaces', () => {
     setContext({ workspaces: [] })
     render(<WorkspaceSelector />)
