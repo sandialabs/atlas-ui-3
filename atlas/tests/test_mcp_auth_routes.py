@@ -346,6 +346,15 @@ class TestRemoveToken:
             "test@example.com", "test-server"
         )
 
+    def test_a_failed_withdrawal_is_reported_rather_than_hidden(self, client, mock_dependencies):
+        """Leaving a revoked catalogue published behind a 200 is the failure."""
+        manager = mock_dependencies["tool_manager"]
+        manager.clear_user_tool_cache = MagicMock(side_effect=RuntimeError("boom"))
+
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 500
+
     def test_a_failing_client_invalidation_still_disconnects(self, client, mock_dependencies):
         """The token is already gone; a cleanup failure is not a failed disconnect."""
         manager = mock_dependencies["tool_manager"]

@@ -1079,3 +1079,60 @@ def mcp_user_discovery_unscoped():
     from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
 
     return UNSCOPED
+
+
+class TestExpiryIsNotDeferredByTheCoolDown:
+    @pytest.mark.asyncio
+    async def test_a_stale_catalogue_is_withdrawn_even_while_cooling_down(self):
+        """A failing user must not keep their expired catalogue published."""
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        assert manager.available_tools[SERVER]["tools"]
+
+        # The next probe fails, starting the cool-down, and time moves past
+        # the TTL of the entry the earlier success wrote.
+        manager._get_user_client = AsyncMock(return_value=None)
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        key = (USER, SERVER)
+        manager._user_available_tools[key]["discovered_at"] -= 10_000
+        manager._user_discovery_failures[key] = time.time()
+
+        assert await manager.discover_tools_for_user(USER, SERVER) is None
+        assert key not in manager._user_available_tools
+        assert not manager.available_tools[SERVER]["tools"]
+
+
+class TestWithdrawalClearsTaskSupportMetadata:
+    @pytest.mark.asyncio
+    async def test_emptying_a_server_forgets_its_task_verdicts(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        assert (SERVER, "search") in manager._tool_task_forbidden
+
+        manager.clear_user_tool_cache(USER, SERVER)
+
+        assert not manager.available_tools[SERVER]["tools"]
+        assert (SERVER, "search") not in manager._tool_task_forbidden
+
+
+class TestTheUnscopedSentinelIsNotAString:
+    def test_a_user_email_cannot_impersonate_it(self):
+        """It is header-derived; a string sentinel would share its value space."""
+        from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
+
+        manager = _manager(available_tools={
+            SERVER: {
+                "tools": [_tool("search", description="private")],
+                "config": {},
+                "user_scoped": True,
+                "discovered_for": {"owner@example.gov"},
+            },
+        })
+        manager._user_available_tools = {}
+
+        assert not isinstance(UNSCOPED, str)
+        assert manager.get_tools_schema([f"{SERVER}_search"], "UNSCOPED") == []
+        assert manager.get_tools_schema([f"{SERVER}_search"], "__atlas_unscoped__") == []
+        assert manager.get_tools_schema([f"{SERVER}_search"], UNSCOPED) != []

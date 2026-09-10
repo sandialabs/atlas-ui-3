@@ -31,7 +31,18 @@ logger = logging.getLogger(__name__)
 # "unknown". An actual ``None`` means the user could not be established, and
 # every user_scoped catalogue is withheld -- the same way ``build_mcp_data``
 # fails closed, since both feed the model's context.
-UNSCOPED = "__atlas_unscoped__"
+#
+# Deliberately not a string: ``user_email`` is header-derived, and a sentinel
+# sharing its value space would let any path that can influence that string
+# turn off every scoping check. This is compared by identity.
+class _Unscoped:
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "UNSCOPED"
+
+
+UNSCOPED = _Unscoped()
 
 _ATLAS_RAG_DISCOVER_TOOL = "atlas_rag_discover_data_sources"
 _ATLAS_RAG_QUERY_TOOL = "atlas_rag_query"
@@ -558,7 +569,7 @@ class DiscoveryMixin:
         tool_name: Optional[str],
     ):
         """This user's own object for the tool, when the server is user-scoped."""
-        if user_email is None or user_email == UNSCOPED or not server_name or tool_name is None:
+        if user_email is None or user_email is UNSCOPED or not server_name or tool_name is None:
             return None
         entry = self.available_tools.get(server_name) or {}
         if not entry.get("user_scoped"):
@@ -595,7 +606,7 @@ class DiscoveryMixin:
         entry = self.available_tools.get(server_name) or {}
         if not entry.get("user_scoped"):
             return True
-        if user_email == UNSCOPED:
+        if user_email is UNSCOPED:
             # An internal caller acting on an already-authorized tool.
             return True
         if user_email is None:
@@ -674,6 +685,7 @@ class DiscoveryMixin:
 
         matched = []
         missing = []
+        withheld = []
         sleep_enabled, search_enabled = _atlas_tool_flags()
         seen_atlas = set()
         for requested in tool_names:
@@ -696,8 +708,14 @@ class DiscoveryMixin:
             server_of = entry.get('server')
             tool_name_only = getattr(tool_obj, 'name', None)
             if not self._may_read_catalogue(server_of, user_email, tool_name_only):
-                # Not "missing": it exists, but its metadata is not this
-                # caller's to read, and saying so would itself disclose it.
+                # Not "missing" in the "no such tool" sense: it exists, but its
+                # metadata is not this caller's to read, and saying so to the
+                # *caller* would itself disclose it. It is still counted as
+                # unresolved so the turn does not silently run as though the
+                # user had never selected it -- the commonest cause is an
+                # expired per-user catalogue, which reads identically here to
+                # another user's.
+                withheld.append(requested)
                 continue
             # The index keeps one object per name, which for a user_scoped
             # server may be a co-owner's. Two owners can expose a same-named
@@ -715,5 +733,14 @@ class DiscoveryMixin:
 
         if missing:
             logger.debug("get_tools_schema: no schema for %d tool(s)", len(missing))
+        if withheld:
+            # info, not debug: a selected tool vanishing from the schema is a
+            # user-visible behaviour change and the operator needs to be able
+            # to tell it from a model that simply chose not to call the tool.
+            logger.info(
+                "get_tools_schema: withheld %d tool(s) whose per-user catalogue "
+                "is not readable by the requester (expired, or another user's)",
+                len(withheld),
+            )
 
         return matched

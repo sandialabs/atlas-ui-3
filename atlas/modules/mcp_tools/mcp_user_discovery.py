@@ -225,6 +225,10 @@ class UserDiscoveryMixin:
                 "tools": [],
                 "config": self.servers_config.get(server_name, {}),
             }
+            # An empty catalogue has no tools to describe, so leaving the
+            # departed owner's taskSupport verdicts behind would let them
+            # decide for whatever is discovered next.
+            self._apply_task_support_metadata(server_name, [])
             if rebuild_index:
                 self._rebuild_tool_index()
             logger.info(
@@ -367,6 +371,13 @@ class UserDiscoveryMixin:
         entry = self._user_available_tools.get(key)
         if entry is not None and (now - entry.get("discovered_at", 0.0)) < _USER_DISCOVERY_TTL_SECONDS:
             return True, entry.get("tools", [])
+        # Expiry is not the cool-down's to defer. A past-TTL entry is withdrawn
+        # here, before the cool-down can answer for it: otherwise a user whose
+        # discovery is failing keeps their stale catalogue published and
+        # routable for the whole cool-down window, which is the opposite of
+        # what the failure says.
+        if entry is not None:
+            self._expire_stale_user_entry(key, key[1])
         last_failure = self._user_discovery_failures.get(key)
         if last_failure is not None and (now - last_failure) < _USER_DISCOVERY_RETRY_SECONDS:
             # The cool-down suppresses the retry, not the expiry: an entry that
