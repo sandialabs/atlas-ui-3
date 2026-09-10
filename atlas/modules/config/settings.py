@@ -2,12 +2,64 @@
 
 import logging
 import sys
-from typing import Optional
+from typing import Dict, FrozenSet, Optional
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
+
+
+def parse_static_groups(
+    static_groups: str,
+    admin_users: str = "",
+    admin_group: str = "admin",
+) -> Dict[str, FrozenSet[str]]:
+    """Parse statically configured group membership into a lookup table.
+
+    ``static_groups`` uses ``group:user1,user2;group2:user3`` -- semicolons
+    separate groups, a colon separates the group name from its members, and
+    commas separate members. ``admin_users`` is sugar for a single
+    ``<admin_group>:`` entry, so a deployment that only needs admins never has
+    to learn the longer syntax; the two are unioned when both are set.
+
+    Group names and user identifiers are lower-cased and stripped, because the
+    values come from IdP claims and from hand-edited config, where casing and
+    stray whitespace are not meaningful.
+
+    Malformed entries are skipped with a warning rather than raising: a typo in
+    one group should not take the deployment down, and denying access is the
+    safe direction.
+    """
+    table: Dict[str, set] = {}
+
+    def _add(group: str, members) -> None:
+        group = group.strip().lower()
+        if not group:
+            return
+        cleaned = {m.strip().lower() for m in members}
+        cleaned.discard("")
+        if not cleaned:
+            return
+        table.setdefault(group, set()).update(cleaned)
+
+    for entry in (static_groups or "").split(";"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" not in entry:
+            logger.warning(
+                "Ignoring malformed AUTH_STATIC_GROUPS entry (expected "
+                "'group:user1,user2'): %r",
+                entry,
+            )
+            continue
+        group, _, members = entry.partition(":")
+        _add(group, members.split(","))
+
+    _add(admin_group, (admin_users or "").split(","))
+
+    return {group: frozenset(members) for group, members in table.items()}
 
 
 def build_db_url_from_parts(
@@ -291,6 +343,23 @@ class AppSettings(BaseSettings):
         default="admin@example.com",
         validation_alias="ADMIN_TEST_USER",
         description="Admin test user for development/test auth flows"
+    )
+    admin_users: str = Field(
+        default="",
+        validation_alias="ADMIN_USERS",
+        description=(
+            "Comma-separated identities granted ADMIN_GROUP without an external "
+            "authorization service. Sugar for a single AUTH_STATIC_GROUPS entry."
+        ),
+    )
+    auth_static_groups: str = Field(
+        default="",
+        validation_alias="AUTH_STATIC_GROUPS",
+        description=(
+            "Statically configured group membership: "
+            "'group:user1,user2;group2:user3'. Consulted after "
+            "AUTH_GROUP_CHECK_URL and before the debug-only mock table."
+        ),
     )
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
@@ -888,6 +957,48 @@ class AppSettings(BaseSettings):
                 "local development convenience only and must never be enabled in production."
             )
         return self
+
+    @model_validator(mode='after')
+    def warn_when_no_authorization_source_configured(self):
+        """Warn when nothing can ever grant a group outside ``users``.
+
+        With DEBUG_MODE=false, no AUTH_GROUP_CHECK_URL and no static config,
+        ``is_user_in_group`` collapses to a single bit: everyone is in
+        ``users`` and nobody is in anything else. Admin routes are then
+        unreachable by every identity, and ``groups:`` on an MCP server hides
+        that server from everyone. That used to be entirely silent.
+        """
+        if (
+            not self.debug_mode
+            and not self.auth_group_check_url
+            and not self.static_group_members
+        ):
+            logger.warning(
+                "No authorization source is configured (DEBUG_MODE=false, no "
+                "AUTH_GROUP_CHECK_URL, no ADMIN_USERS/AUTH_STATIC_GROUPS). Every "
+                "user is in the 'users' group and in no other group, so admin "
+                "routes are unreachable and any MCP server with a 'groups' "
+                "restriction is hidden from everyone. Set ADMIN_USERS=you@example.org "
+                "to grant admin, or configure AUTH_GROUP_CHECK_URL."
+            )
+        return self
+
+    _static_group_members_cache: Optional[Dict[str, FrozenSet[str]]] = PrivateAttr(default=None)
+
+    @property
+    def static_group_members(self) -> Dict[str, FrozenSet[str]]:
+        """Statically configured membership, normalized and cached.
+
+        Parsed lazily and memoized: ``is_user_in_group`` consults this on every
+        authorization check, and the source strings only change when settings
+        are rebuilt (``config_manager.reload_configs`` constructs a new
+        ``AppSettings``, which starts with an empty cache).
+        """
+        if self._static_group_members_cache is None:
+            self._static_group_members_cache = parse_static_groups(
+                self.auth_static_groups, self.admin_users, self.admin_group
+            )
+        return self._static_group_members_cache
 
     model_config = {
         "env_file": "../.env",
