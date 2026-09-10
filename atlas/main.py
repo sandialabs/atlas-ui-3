@@ -1494,13 +1494,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 ):
                     """Run handle_chat so a dead socket cannot orphan the task.
 
-                    Every error branch in handle_chat reports back over the
-                    websocket.  If the client is already gone that send raises a
-                    *second* exception from inside the except block, which
-                    escapes the task entirely and surfaces only as an
-                    "exception was never retrieved" warning at GC time.  The
-                    error metric is logged before each send, so nothing is lost
-                    by absorbing it here.
+                    Every error branch in handle_chat reports back to the
+                    client. Those reports go through `turn_update_callback`,
+                    which already drops the frame when the socket has closed, so
+                    the common "client went away mid-turn" case no longer raises
+                    a *second* exception from inside an except block -- which
+                    would escape the task entirely and surface only as an
+                    "exception was never retrieved" warning at GC time. This
+                    guard stays as the backstop for anything else that unwinds
+                    out of a handler; the error metric is logged before each
+                    send, so nothing is lost by absorbing it here.
                     """
                     outcome = RunStatus.COMPLETED
                     error_message = None
