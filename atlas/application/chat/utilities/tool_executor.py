@@ -28,7 +28,7 @@ from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredExceptio
 
 from ..approval_manager import get_approval_manager
 from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
-from .tool_image_context import ToolImageInjector
+from .tool_image_context import ToolImageInjector, is_tool_image_message
 
 logger = logging.getLogger(__name__)
 
@@ -1054,21 +1054,33 @@ async def synthesize_tool_results(
 
     Pure function that coordinates LLM call for synthesis.
     """
-    # Extract latest user question (walk backwards). Only plain-string user
-    # messages count: multimodal user turns (inline image/PDF blocks from
-    # build_messages, or the synthetic tool-image message from issue #909)
-    # carry a list of content blocks, and the prompt provider's
-    # ``user_question.strip()`` would raise on those, silently dropping the
-    # configured synthesis prompt.
+    # Extract latest user question (walk backwards). The question is the
+    # latest genuine user turn: text content directly, or the text blocks
+    # of a multimodal turn (inline image/PDF blocks from build_messages).
+    # Synthetic tool-image messages from issue #909 are recognized
+    # structurally (see ``is_tool_image_message``) and skipped -- feeding
+    # their block list to the prompt provider's ``user_question.strip()``
+    # used to raise and be swallowed, silently dropping the configured
+    # synthesis prompt, and after a rolling-cap demotion their string note
+    # would otherwise be mistaken for the question.
     user_question = ""
     for m in reversed(messages):
-        if (
-            m.get("role") == "user"
-            and isinstance(m.get("content"), str)
-            and m.get("content")
-        ):
-            user_question = m["content"]
+        if m.get("role") != "user" or is_tool_image_message(m):
+            continue
+        content = m.get("content")
+        if isinstance(content, str) and content:
+            user_question = content
             break
+        if isinstance(content, list):
+            texts = [
+                block["text"] for block in content
+                if isinstance(block, dict)
+                and block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+            ]
+            if texts:
+                user_question = "\n".join(texts)
+                break
 
     prompt_text = None
     if prompt_provider:

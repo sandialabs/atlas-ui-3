@@ -29,7 +29,11 @@ from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
-from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
+from ..utilities.tool_image_context import (
+    ToolImageInjector,
+    is_tool_image_message,
+    model_supports_vision,
+)
 from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
@@ -567,21 +571,33 @@ class ToolsModeRunner:
             except Exception:
                 pass  # Best-effort UI notification; synthesis proceeds regardless
 
-        # Build synthesis messages. Only plain-string user messages count as
-        # the question: multimodal user turns (inline image/PDF blocks from
-        # build_messages, or the synthetic tool-image message from issue
-        # #909) carry a list of content blocks, and the prompt provider's
-        # ``user_question.strip()`` would raise on those, silently dropping
-        # the configured synthesis prompt.
+        # Build synthesis messages. The question is the latest genuine user
+        # turn: text content directly, or the text blocks of a multimodal
+        # turn (inline image/PDF blocks from build_messages). Synthetic
+        # tool-image messages from issue #909 are recognized structurally
+        # (see ``is_tool_image_message``) and skipped -- feeding their block
+        # list to the prompt provider's ``user_question.strip()`` used to
+        # raise and be swallowed, silently dropping the configured synthesis
+        # prompt, and after a rolling-cap demotion their string note would
+        # otherwise be mistaken for the question.
         user_question = ""
         for m in reversed(messages):
-            if (
-                m.get("role") == "user"
-                and isinstance(m.get("content"), str)
-                and m.get("content")
-            ):
-                user_question = m["content"]
+            if m.get("role") != "user" or is_tool_image_message(m):
+                continue
+            content = m.get("content")
+            if isinstance(content, str) and content:
+                user_question = content
                 break
+            if isinstance(content, list):
+                texts = [
+                    block["text"] for block in content
+                    if isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                ]
+                if texts:
+                    user_question = "\n".join(texts)
+                    break
 
         synthesis_messages = list(messages)
         if self.prompt_provider:

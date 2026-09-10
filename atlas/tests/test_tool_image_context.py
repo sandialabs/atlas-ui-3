@@ -16,7 +16,7 @@ import os
 import sys
 from types import SimpleNamespace
 from typing import List
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -92,6 +92,23 @@ class TestExtractLlmReadyImages:
         images = extract_llm_ready_images([artifact], "shot")
         assert len(images) == 1
         assert images[0]["mime"] == "image/jpeg"
+
+    def test_explicit_mime_is_decisive_even_when_extension_looks_like_an_image(self):
+        # {"name": "shot.png", "mime": "image/svg+xml"} must be skipped, not
+        # relabelled PNG by the filename extension: the provider request
+        # would fail on the magic-byte mismatch behind the data URI.
+        artifact = {
+            "name": "shot.png",
+            "b64": base64.b64encode(b"<svg/>").decode(),
+            "mime": "image/svg+xml",
+            "viewer": "image",
+        }
+        assert extract_llm_ready_images([artifact], "shot") == []
+
+    def test_explicit_allowlisted_mime_wins_over_extension(self):
+        artifact = {"name": "weird.svg", "b64": _PNG_B64, "mime": "image/png"}
+        images = extract_llm_ready_images([artifact], "shot")
+        assert images and images[0]["mime"] == "image/png"
 
     def test_skips_invalid_base64(self):
         artifact = {
@@ -380,6 +397,77 @@ class TestToolImageInjector:
         ToolImageInjector(enabled=True).after_tool_results(messages, [])
         assert messages == [{"role": "user", "content": "hi"}]
 
+    def test_stripped_image_blocks_terminate_instead_of_hanging(self):
+        # A live entry whose image blocks were stripped externally (while its
+        # bookkeeping still claims images) must be retired on the next
+        # over-cap injection -- a zero-progress return would leave both
+        # caller loops spinning the request handler at 100% CPU.
+        messages = []
+        injector = ToolImageInjector(enabled=True)
+        injector.after_tool_results(messages, [_image_result()])
+        injected = messages[-1]
+        injected["content"] = [
+            block for block in injected["content"]
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        batch = [_png_artifact(f"mcp_image_{i}.png") for i in range(MAX_TOOL_IMAGES_PER_TURN)]
+        messages.append({"role": "tool", "content": "{}", "tool_call_id": "call_2"})
+        injector.after_tool_results(
+            messages, [_image_result(tool_call_id="call_2", artifacts=batch)],
+        )
+        # The stale entry was replaced in place with the demotion note.
+        assert isinstance(injected["content"], str)
+        assert "removed from context" in injected["content"]
+        # The newest batch is fully live (cap respected, loop terminated).
+        live_blocks = [
+            block for block in messages[-1]["content"]
+            if isinstance(block, dict) and block.get("type") == "image_url"
+        ]
+        assert len(live_blocks) == MAX_TOOL_IMAGES_PER_TURN
+
+    def test_budget_rejection_appends_explanation_note(self, monkeypatch):
+        # When every image of a step is rejected by the aggregate budget the
+        # model must still learn images existed -- silence would leave it
+        # with {"results": {}} and no explanation (the original symptom).
+        import atlas.application.chat.utilities.tool_image_context as tic
+
+        monkeypatch.setattr(tic, "MAX_TOOL_IMAGE_TOTAL_B64_BYTES", 10)
+        messages = []
+        injector = tic.ToolImageInjector(enabled=True)
+        messages.append({"role": "tool", "content": "{}", "tool_call_id": "c1"})
+        injector.after_tool_results(
+            messages, [_image_result()], tool_names={"c1": "screenshot_tool"},
+        )
+        note = messages[-1]
+        assert note["role"] == "system"
+        assert "exceeded the" in note["content"]
+        assert "screenshot_tool" in note["content"]
+        assert not any(isinstance(m.get("content"), list) for m in messages)
+
+    def test_tool_label_sanitized_in_notes_and_intro(self):
+        # Tool names land inside user/system transcript messages; MCP-server
+        # prose must not. Unmapped ids fall back to the artifact description
+        # and get bounded to a filename-like subset.
+        prose = "Image returned by ssh -i key user@host; rm -rf / && pwned"
+        artifacts = [dict(_png_artifact(), description=prose)]
+        messages = [{"role": "tool", "content": "{}", "tool_call_id": "cx"}]
+        ToolImageInjector(enabled=True).after_tool_results(
+            messages, [_image_result(artifacts=artifacts)],
+        )
+        intro = messages[-1]["content"][0]["text"]
+        assert "rm -rf" not in intro
+        assert "@" not in intro
+        assert ";" not in intro
+        assert "ssh" in intro  # the sanitized prefix survives
+
+        note_messages = [{"role": "tool", "content": "{}", "tool_call_id": "cx"}]
+        ToolImageInjector(enabled=False).after_tool_results(
+            note_messages, [_image_result(artifacts=artifacts)],
+        )
+        note = note_messages[-1]["content"]
+        assert "rm -rf" not in note
+        assert "@" not in note
+
 
 # ---------------------------------------------------------------------------
 # Agentic loop integration
@@ -549,10 +637,88 @@ class TestSynthesisUserQuestionLookup:
         messages = [
             {"role": "user", "content": "check the rocket"},
             {"role": "tool", "content": "{}", "tool_call_id": "c1"},
+            build_tool_image_message(
+                [{"name": "a.png", "b64": _PNG_B64, "mime": "image/png"}],
+                ["screenshot_tool"],
+            ),
+        ]
+        await synthesize_tool_results(
+            model="m", messages=messages, llm_caller=caller,
+            prompt_provider=_PromptProvider(),
+        )
+        assert caller.prompts_seen == ["PROMPT[check the rocket]"]
+
+    @pytest.mark.asyncio
+    async def test_text_blocks_of_genuine_multimodal_user_turn_are_used(self):
+        # A real user turn that carries attachments (text + image/PDF blocks)
+        # is still the question: its text blocks feed the synthesis prompt.
+        from atlas.application.chat.utilities.tool_executor import (
+            synthesize_tool_results,
+        )
+
+        class _PromptProvider:
+            def get_tool_synthesis_prompt(self, user_question):
+                return f"PROMPT[{user_question}]"
+
+        class _LlmCaller:
+            def __init__(self):
+                self.prompts_seen = []
+
+            async def call_plain(self, model, messages, user_email=None):
+                self.prompts_seen.extend(
+                    m["content"] for m in messages
+                    if m.get("role") == "system" and str(m.get("content", "")).startswith("PROMPT")
+                )
+                return "answer"
+
+        caller = _LlmCaller()
+        messages = [
             {"role": "user", "content": [
-                {"type": "text", "text": "[Automated system note]"},
+                {"type": "text", "text": "compare with this chart"},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,x"}},
             ]},
+            {"role": "tool", "content": "{}", "tool_call_id": "c1"},
+        ]
+        await synthesize_tool_results(
+            model="m", messages=messages, llm_caller=caller,
+            prompt_provider=_PromptProvider(),
+        )
+        assert caller.prompts_seen == ["PROMPT[compare with this chart]"]
+
+    @pytest.mark.asyncio
+    async def test_demoted_tool_image_note_is_not_the_question(self):
+        # After the rolling cap empties an injected message, the message is
+        # left as a plain-string note -- which the string-only lookup would
+        # mistake for the user's question. The structural check must skip it.
+        from atlas.application.chat.utilities.tool_executor import (
+            synthesize_tool_results,
+        )
+        from atlas.application.chat.utilities.tool_image_context import (
+            _INTRO_PREFIX,
+        )
+
+        class _PromptProvider:
+            def get_tool_synthesis_prompt(self, user_question):
+                return f"PROMPT[{user_question}]"
+
+        class _LlmCaller:
+            def __init__(self):
+                self.prompts_seen = []
+
+            async def call_plain(self, model, messages, user_email=None):
+                self.prompts_seen.extend(
+                    m["content"] for m in messages
+                    if m.get("role") == "system" and str(m.get("content", "")).startswith("PROMPT")
+                )
+                return "answer"
+
+        caller = _LlmCaller()
+        messages = [
+            {"role": "user", "content": "check the rocket"},
+            {"role": "tool", "content": "{}", "tool_call_id": "c1"},
+            {"role": "user", "content": _INTRO_PREFIX + "3 image(s) returned "
+             "by a tool were removed from context to stay within the "
+             "tool-image budget. The file(s) remain in the session files.]"},
         ]
         await synthesize_tool_results(
             model="m", messages=messages, llm_caller=caller,
@@ -649,4 +815,98 @@ class TestExecuteToolsWorkflowInjectsToolImages:
         assert not any(
             m.get("role") == "user" and isinstance(m.get("content"), list)
             for m in messages
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tools-mode continuation loop integration
+# ---------------------------------------------------------------------------
+
+class _ScriptedStreamingLLM:
+    """stream_with_tools pops one scripted turn per call (text, tool_calls)."""
+
+    def __init__(self, turns):
+        self._turns = list(turns)
+        self.seen_messages: List[List[dict]] = []
+
+    async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                temperature=0.7, user_email=None):
+        self.seen_messages.append([dict(m) for m in messages])
+        text, tool_calls = self._turns.pop(0) if self._turns else (None, None)
+        if text:
+            yield text
+        yield LLMResponse(content=text or "", tool_calls=tool_calls)
+
+    async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+        yield "synthesized"
+
+
+class TestToolsModeContinuationInjectsToolImages:
+    @pytest.mark.asyncio
+    async def test_continuation_round_sees_image_with_real_tool_name(self):
+        # The tools-mode streaming continuation loop must inject the step's
+        # image so the next round (and synthesis) can see it, labeled with
+        # the real tool name from the call map.
+        from atlas.application.chat.modes.tools import ToolsModeRunner
+
+        def _tc(call_id, name, arguments="{}"):
+            return SimpleNamespace(
+                id=call_id, type="function",
+                function=SimpleNamespace(name=name, arguments=arguments),
+            )
+
+        llm = _ScriptedStreamingLLM(turns=[
+            ("taking the shot", [_tc("c1", "fusion_shot")]),
+            ("I can see the rocket now.", None),
+        ])
+
+        async def _execute_multiple(tool_calls, session_context, tool_manager,
+                                    update_callback=None, config_manager=None,
+                                    skip_approval=False):
+            return [_image_result(tool_call_id=tc.id) for tc in tool_calls]
+
+        config = SimpleNamespace(
+            llm_config=SimpleNamespace(
+                models={"test-model": SimpleNamespace(supports_vision=True)},
+            ),
+            app_settings=SimpleNamespace(
+                tools_mode_max_extra_rounds=3,
+                feature_agent_mode_available=False,
+            ),
+        )
+        tool_manager = MagicMock()
+        tool_manager.get_tools_schema = MagicMock(return_value=[{"type": "function"}])
+        runner = ToolsModeRunner(
+            llm=llm,
+            tool_manager=tool_manager,
+            event_publisher=AsyncMock(),
+            config_manager=config,
+        )
+        session = MagicMock()
+        session.history = MagicMock()
+        session.history.add_message = MagicMock()
+        session.session_id = "s1"
+        session.files = {}
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.execute_multiple_tools = _execute_multiple
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            await runner.run_streaming(
+                session=session,
+                model="test-model",
+                messages=[{"role": "user", "content": "screenshot the model"}],
+                selected_tools=["fusion_shot"],
+            )
+
+        continuation_messages = llm.seen_messages[1]
+        injected = [
+            m for m in continuation_messages
+            if m.get("role") == "user" and isinstance(m.get("content"), list)
+        ]
+        assert len(injected) == 1
+        blocks = injected[0]["content"]
+        assert "fusion_shot" in blocks[0]["text"]
+        assert any(
+            isinstance(block, dict) and block.get("type") == "image_url"
+            for block in blocks
         )

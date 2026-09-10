@@ -184,7 +184,14 @@ Details and limits of that pipeline:
   the session files list, but not the pixels.
 * **Validation.** MIME types are checked against a raster allowlist
   (PNG/JPEG/GIF/WebP/BMP -- SVG is excluded) and base64 payloads are
-  re-validated and size-capped at injection time.
+  re-validated and size-capped at injection time. An explicit `mime` field
+  is decisive: an artifact whose MIME is outside the allowlist is skipped
+  even when its filename ends in `.png` (the extension fallback applies
+  only to artifacts without a MIME field).
+* **Budget rejection.** If every image of a step is rejected (budget
+  exhausted), a `role: "system"` note explains that images were returned
+  and saved to the session files, so the model is never left with a bare
+  `{"results": {}}` and no explanation.
 
 All of this is best-effort: an injection failure degrades to the old
 text-only behavior rather than breaking the tool-calling turn.

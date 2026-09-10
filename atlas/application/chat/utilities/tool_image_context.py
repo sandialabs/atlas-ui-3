@@ -74,6 +74,12 @@ _DEMOTED_NOTE = (
     "from context to stay within the tool-image budget. The file(s) "
     "remain in the session files.]"
 )
+_REJECTED_NOTE = (
+    _INTRO_PREFIX + "tool(s) {tools} returned image(s) that exceeded the "
+    "tool-image context budget, so they are not shown here. The file(s) "
+    "remain in the session files and can be inspected via the tools that "
+    "produced them.]"
+)
 
 # Filename extension -> LLM-ready image MIME, for artifacts without a mime field.
 _EXT_TO_IMAGE_MIME = {
@@ -104,14 +110,18 @@ def model_supports_vision(config_manager: Any, model: str) -> bool:
 def _infer_image_mime(artifact: Dict[str, Any]) -> Optional[str]:
     """Return the artifact's LLM-ready image MIME type, or None.
 
-    Prefers the explicit ``mime`` field; falls back to the filename
-    extension. Anything outside the vision-ready allowlist (SVG included --
-    it is vector XML the vision APIs do not accept as image input) yields
-    None.
+    An explicit ``mime``/``mime_type`` field is decisive: it is returned
+    only when it is in the vision-ready allowlist, otherwise None. The
+    filename extension is consulted only when the artifact carries no MIME
+    field at all -- relabelling ``{"name": "shot.png", "mime":
+    "image/svg+xml"}`` as PNG would embed an SVG payload behind a PNG data
+    URI and fail the provider request on the magic bytes (SVG itself is
+    vector XML the vision APIs do not accept as image input).
     """
     mime = artifact.get("mime") or artifact.get("mime_type")
-    if isinstance(mime, str) and mime.strip().lower() in _LLM_READY_IMAGE_MIME_TYPES:
-        return mime.strip().lower()
+    if isinstance(mime, str) and mime.strip():
+        normalized = mime.strip().lower()
+        return normalized if normalized in _LLM_READY_IMAGE_MIME_TYPES else None
 
     name = artifact.get("name") or ""
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -215,12 +225,55 @@ def _is_image_artifact(artifact: Any) -> bool:
     return isinstance(mime, str) and mime.lower().startswith("image/")
 
 
+def is_tool_image_message(message: Dict[str, Any]) -> bool:
+    """True when *message* is one this module injected (or later demoted).
+
+    Injected messages are ``role: "user"`` with a content-block list whose
+    first text block starts with the module's automated-note prefix; after
+    the rolling cap empties one, the same message is left as a plain-string
+    note with that prefix. Downstream user-question lookups use this to
+    skip them without trusting any wire-visible marker (an extra key on the
+    message dict would reach provider requests, which strict APIs reject).
+
+    Any message carrying this module's note prefix is treated as injected,
+    which is safe: the prefix is not something tools or users emit.
+    """
+    if message.get("role") != "user":
+        return False
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.startswith(_INTRO_PREFIX)
+    if isinstance(content, list):
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+                and block["text"].startswith(_INTRO_PREFIX)
+            ):
+                return True
+    return False
+
+
+def _sanitize_tool_label(name: str) -> str:
+    """Bound a tool name before it is embedded in a transcript note.
+
+    Names can come from the model's own tool_calls or, worst case, from an
+    MCP server's artifact description; either way they are third-party
+    strings about to land verbatim inside a ``role: "user"``/``system``
+    message. Keep a conservative filename-like subset and a short length.
+    """
+    cleaned = "".join(c if c.isalnum() or c in "_.-" else "_" for c in name)
+    cleaned = cleaned.strip("_") or "a tool"
+    return cleaned[:64]
+
+
 def _tool_name_from_artifact(artifact: Dict[str, Any]) -> str:
     """Best-effort tool name from the artifact description field."""
     description = artifact.get("description") or ""
     prefix = "Image returned by "
     if isinstance(description, str) and description.startswith(prefix):
-        return description[len(prefix):].strip()
+        return _sanitize_tool_label(description[len(prefix):].strip())
     return ""
 
 
@@ -283,9 +336,11 @@ class ToolImageInjector:
         images: List[Dict[str, str]] = []
         tool_names_used: List[str] = []
         for result in tool_results:
-            tool_name = tool_names.get(getattr(result, "tool_call_id", None), "")
+            tool_name = _sanitize_tool_label(
+                tool_names.get(getattr(result, "tool_call_id", None), "")
+            )
             artifacts = getattr(result, "artifacts", None) or []
-            if not tool_name:
+            if tool_name == "a tool":
                 for artifact in artifacts:
                     tool_name = _tool_name_from_artifact(
                         artifact if isinstance(artifact, dict) else {}
@@ -321,7 +376,10 @@ class ToolImageInjector:
                 pending_total + len(image["b64"]) > MAX_TOOL_IMAGE_TOTAL_B64_BYTES
                 and self._live
             ):
-                pending_total -= self._demote_oldest_images(1)[1]
+                removed_chars = self._demote_oldest_images(1)[1]
+                if removed_chars <= 0:
+                    break  # defensive: a live entry yielded nothing to evict
+                pending_total -= removed_chars
             if pending_total + len(image["b64"]) > MAX_TOOL_IMAGE_TOTAL_B64_BYTES:
                 logger.warning(
                     "Dropping tool-returned image from LLM context: aggregate "
@@ -332,12 +390,22 @@ class ToolImageInjector:
             pending_total += len(image["b64"])
             kept.append(image)
         if not kept:
+            # Image artifacts existed but every one was rejected (budget):
+            # say so, or the model is left with ``{"results": {}}`` and no
+            # explanation -- the exact symptom this module exists to remove.
+            messages.append({
+                "role": "system",
+                "content": _REJECTED_NOTE.format(
+                    tools=", ".join(dict.fromkeys(tool_names_used)) or "a tool",
+                ),
+            })
             return
 
         message = build_tool_image_message(kept, tool_names_used)
         messages.append(message)
         self._live.append({
             "message": message,
+            "count": len(kept),
             "b64_lengths": [len(img["b64"]) for img in kept],
         })
         self._enforce_count_cap()
@@ -356,7 +424,10 @@ class ToolImageInjector:
     def _enforce_count_cap(self) -> None:
         overflow = self._live_image_count() - MAX_TOOL_IMAGES_PER_TURN
         while overflow > 0 and self._live:
-            overflow -= self._demote_oldest_images(overflow)[0]
+            demoted = self._demote_oldest_images(overflow)[0]
+            if demoted <= 0:
+                break  # defensive: a live entry yielded nothing to demote
+            overflow -= demoted
 
     def _demote_oldest_images(self, count: int) -> tuple[int, int]:
         """Demote up to *count* images from the oldest live message.
@@ -366,6 +437,11 @@ class ToolImageInjector:
         replaced in place with a one-line note (the dict object stays, so
         transcript ordering and the role sequence are untouched). Returns
         ``(demoted_count, demoted_b64_chars)``.
+
+        A live entry whose image blocks vanished without this module's
+        involvement (external transcript surgery) is treated as exhausted:
+        it is converted to the note and popped, so every call to this
+        method makes progress and no caller loop can spin.
         """
         if not self._live:
             return 0, 0
@@ -388,11 +464,20 @@ class ToolImageInjector:
                     blocks.pop(index)
                     break
             else:
+                # The entry still claims images but the message no longer
+                # carries matching blocks (desync): stop trusting it.
                 break
 
         if not entry["b64_lengths"]:
             message["content"] = _DEMOTED_NOTE.format(
-                count=_count_injected_images(message),
+                count=entry.get("count", demoted),
+            )
+            self._live.pop(0)
+        elif demoted == 0:
+            # Desynced entry (blocks stripped externally): retire it so
+            # callers always make progress, and leave a note in its place.
+            message["content"] = _DEMOTED_NOTE.format(
+                count=entry.get("count", 0),
             )
             self._live.pop(0)
         return demoted, demoted_chars
@@ -418,7 +503,7 @@ class ToolImageInjector:
                     )
                     if tool_name:
                         break
-            noted_tools.append(tool_name or "a tool")
+            noted_tools.append(_sanitize_tool_label(tool_name) if tool_name else "a tool")
         if not noted_tools:
             return
         # A separate system message, not an edit to the tool result: tool
@@ -435,23 +520,3 @@ class ToolImageInjector:
             "(model does not support vision)",
             len(noted_tools),
         )
-
-
-def _count_injected_images(message: Dict[str, Any]) -> int:
-    """How many images the (already trimmed) synthetic message carried.
-
-    The demotion note reports the full original count, so read it from the
-    intro text block before it is replaced.
-    """
-    blocks = message.get("content")
-    if isinstance(blocks, list):
-        for block in blocks:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text = block.get("text", "")
-                marker = " returned "
-                if marker in text:
-                    segment = text.split(marker, 1)[1]
-                    digits = segment.split(" ", 1)[0]
-                    if digits.isdigit():
-                        return int(digits)
-    return 0
