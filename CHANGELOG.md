@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #917 - 2026-09-10
-- The chat-bar workspace selector now uses the same workspace switch path as the header selector, so changing either control updates the shared active workspace immediately (closes #916).
+- A workspace selector now sits in the chat-bar footer next to the model/tools/prompt controls (gated on the workspaces feature). It shares the header switcher's active-workspace state, so switching context works from either control, and its panel opens upward to stay on screen above the chat bar (closes #916).
 
 ### PR #914 - 2026-09-10
 - **MCP tool-returned images now reach the LLM, not just the canvas** (closes #909): screenshot-only tools no longer normalize to `{"results": {}}` for the model; images are attached after the step's tool results as a synthetic user message, gated on `supports_vision`, with rolling 6-image and per-image/aggregate base64 budgets and MIME/base64 re-validation. Details and limits in `docs/developer/mcp-tool-outputs.md`.

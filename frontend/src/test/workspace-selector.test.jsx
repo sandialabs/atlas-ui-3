@@ -90,7 +90,10 @@ describe('WorkspaceSelector', () => {
   }
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    // reset (not just clear) so mockImplementation calls made inside a test
+    // body -- e.g. the two-selector sync test below -- cannot leak into the
+    // next test and make the suite order-dependent.
+    vi.resetAllMocks()
     useDialog.mockReturnValue({ prompt: dialogPrompt, confirm: dialogConfirm })
     useToast.mockReturnValue({ success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() })
     setContext()
