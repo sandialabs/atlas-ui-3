@@ -857,3 +857,81 @@ class TestSchemaMetadataIsScopedToItsOwner:
 
         assert len(manager.get_tools_schema([f"{SERVER}_search"], other)) == 1
         assert len(manager.get_tools_schema([f"{SERVER}_search"], USER)) == 1
+
+
+class TestCoOwnersDoNotClobberEachOther:
+    """The shared entry routes for everyone; reads stay per-owner."""
+
+    async def _two_owners(self):
+        manager = _manager()
+        other = "other@example.gov"
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("mine")]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
+        await manager.discover_tools_for_user(other, SERVER, force=True)
+        return manager, other
+
+    @pytest.mark.asyncio
+    async def test_both_owners_tools_stay_routable(self):
+        manager, other = await self._two_owners()
+
+        assert manager.get_server_for_tool(f"{SERVER}_mine") == SERVER
+        assert manager.get_server_for_tool(f"{SERVER}_theirs") == SERVER
+
+    @pytest.mark.asyncio
+    async def test_each_owner_is_listed_only_their_own(self):
+        manager, other = await self._two_owners()
+
+        assert [
+            t.name for t in manager.get_visible_tools_for_server(USER, SERVER)
+        ] == ["mine"]
+        assert [
+            t.name for t in manager.get_visible_tools_for_server(other, SERVER)
+        ] == ["theirs"]
+
+    @pytest.mark.asyncio
+    async def test_an_owner_cannot_read_the_other_owners_schema(self):
+        """Routable is not readable: co-ownership is not shared disclosure."""
+        manager, other = await self._two_owners()
+
+        assert manager.get_tools_schema([f"{SERVER}_theirs"], USER) == []
+        assert len(manager.get_tools_schema([f"{SERVER}_theirs"], other)) == 1
+        assert manager.get_tools_schema([f"{SERVER}_mine"], other) == []
+        assert len(manager.get_tools_schema([f"{SERVER}_mine"], USER)) == 1
+
+
+class TestReadAccessExpiresWithTheEntry:
+    @pytest.mark.asyncio
+    async def test_an_expired_owner_may_no_longer_read(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+        assert len(manager.get_tools_schema([f"{SERVER}_search"], USER)) == 1
+
+        manager._user_available_tools[(USER, SERVER)]["discovered_at"] = (
+            time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        )
+
+        assert manager.get_tools_schema([f"{SERVER}_search"], USER) == []
+
+    @pytest.mark.asyncio
+    async def test_pruning_withdraws_what_it_evicts(self):
+        manager = _manager()
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
+        await manager.discover_tools_for_user(USER, SERVER)
+        assert manager.get_server_for_tool(f"{SERVER}_search") == SERVER
+
+        manager._user_available_tools[(USER, SERVER)]["discovered_at"] = (
+            time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1
+        )
+        # Push the cache past the ceiling so the sweep runs.
+        for i in range(mcp_user_discovery._MAX_USER_DISCOVERY_ENTRIES + 1):
+            manager._user_available_tools[(f"u{i}@example.gov", "other-server")] = {
+                "tools": [], "config": {},
+                "discovered_at": time.time() - mcp_user_discovery._USER_DISCOVERY_TTL_SECONDS - 1,
+            }
+        manager._prune_user_discovery_state()
+
+        assert (USER, SERVER) not in manager._user_available_tools
+        assert manager.available_tools[SERVER]["tools"] == []
+        assert manager.get_server_for_tool(f"{SERVER}_search") is None

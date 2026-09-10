@@ -71,6 +71,32 @@ def _drop_user_tool_cache(mcp_manager, user_email: str, server_name: str) -> Non
         logger.debug("Could not clear per-user tool cache", exc_info=True)
 
 
+async def _invalidate_user_client_quietly(
+    mcp_manager, user_email: str, server_name: str
+) -> None:
+    """Drop this user's cached client for the server, never raising.
+
+    Called after the token is already persisted, where an exception would
+    report a failed upload for one that in fact succeeded. The stale client is
+    also re-created on next use, so failing to close it costs a connection,
+    not correctness.
+    """
+    if mcp_manager is None:
+        return
+    invalidate = getattr(mcp_manager, "_invalidate_user_client", None)
+    if invalidate is None:
+        return
+    try:
+        await invalidate(user_email, server_name)
+    except Exception:
+        logger.warning(
+            "Could not invalidate the cached client for MCP server '%s' after a "
+            "token upload; it will be rebuilt on next use",
+            sanitize_for_logging(server_name),
+            exc_info=True,
+        )
+
+
 async def _rediscover_after_authorization(mcp_manager, user_email: str, server_name: str) -> None:
     """Re-run tool discovery for one server as the user who just authorized.
 
@@ -250,10 +276,11 @@ async def upload_token(
         # catalogue were built from, including the empty catalogue left by an
         # anonymous startup sweep that the server answered with a 401.
         # The token is stored by this point, so nothing here may turn a
-        # successful upload into an error -- matching the guard
-        # _rediscover_after_authorization already applies.
-        if mcp_manager is not None:
-            await mcp_manager._invalidate_user_client(current_user, server_name)
+        # successful upload into an error. _invalidate_user_client closes live
+        # sessions and can raise on its own, so it is best-effort like the
+        # rediscovery that follows it, not merely guarded against a missing
+        # manager.
+        await _invalidate_user_client_quietly(mcp_manager, current_user, server_name)
         await _rediscover_after_authorization(mcp_manager, current_user, server_name)
 
         return {

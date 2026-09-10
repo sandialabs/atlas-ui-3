@@ -213,7 +213,9 @@ class UserDiscoveryMixin:
 
         # sorted() only to make which survivor is published deterministic.
         heir = sorted(survivors)[0]
-        heir_tools = self._live_user_tools(server_name, heir)
+        heir_tools = self._merged_owner_tools(
+            server_name, survivors, heir, self._live_user_tools(server_name, heir)
+        )
         # The sweep entries still describe the departing owner's tool set, so a
         # tool the heir exposes without taskSupport would otherwise inherit the
         # other catalogue's verdict.
@@ -234,6 +236,30 @@ class UserDiscoveryMixin:
         )
         return True
 
+    def _merged_owner_tools(
+        self, server_name: str, owners, user_lc: str, fresh: List[Any]
+    ) -> List[Any]:
+        """The union of every live owner's catalogue, by tool name.
+
+        ``fresh`` is this promotion's result, which is newer than whatever is
+        cached for ``user_lc``. First writer of a name wins, so a tool the
+        promoting user just described is not overwritten by another owner's
+        older copy of the same name.
+        """
+        merged: Dict[str, Any] = {}
+        for tool in fresh:
+            name = getattr(tool, "name", None)
+            if name is not None:
+                merged.setdefault(name, tool)
+        for owner in sorted(owners):
+            if owner == user_lc:
+                continue
+            for tool in self._live_user_tools(server_name, owner):
+                name = getattr(tool, "name", None)
+                if name is not None:
+                    merged.setdefault(name, tool)
+        return list(merged.values())
+
     def _live_user_tools(self, server_name: str, user_lc: str) -> List[Any]:
         """This user's cached tools for the server, if still within the TTL."""
         entry = self._user_available_tools.get((user_lc, server_name))
@@ -249,9 +275,19 @@ class UserDiscoveryMixin:
             if len(self._user_discovery_failures) <= _MAX_USER_DISCOVERY_ENTRIES:
                 return
         now = time.time()
+        evicted = []
         for key, entry in list(self._user_available_tools.items()):
             if (now - entry.get("discovered_at", 0.0)) >= _USER_DISCOVERY_TTL_SECONDS:
                 self._user_available_tools.pop(key, None)
+                evicted.append(key)
+        # An eviction is a withdrawal: leaving the promotion standing would let
+        # a catalogue outlive the entry that justified it.
+        changed = False
+        for owner, server in evicted:
+            if self._withdraw_promoted_tools(server, owner, rebuild_index=False):
+                changed = True
+        if changed:
+            self._rebuild_tool_index()
         for key, at in list(self._user_discovery_failures.items()):
             if (now - at) >= _USER_DISCOVERY_RETRY_SECONDS:
                 self._user_discovery_failures.pop(key, None)
@@ -507,8 +543,15 @@ class UserDiscoveryMixin:
         existing = self.available_tools.get(server_name) or {}
         owners = set(existing.get("discovered_for") or ()) if existing.get("user_scoped") else set()
         owners.add(user_lc)
+        # The shared entry exists so tools can be *routed*; it must therefore
+        # cover every live owner, not just the last one to promote. Publishing
+        # this user's list alone left an earlier owner still offered their own
+        # cached names by /api/config while the index could no longer resolve
+        # them. Who may *read* which tool is a separate question, answered
+        # per-user against their own catalogue -- see _may_read_catalogue.
+        merged = self._merged_owner_tools(server_name, owners, user_lc, tools)
         self.available_tools[server_name] = {
-            "tools": tools,
+            "tools": merged,
             "config": self.servers_config.get(server_name, {}),
             # Marks this catalogue as one user's view, so it is not served to
             # anyone else, does not suppress their own discovery, and is

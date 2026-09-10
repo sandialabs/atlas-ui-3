@@ -6,6 +6,7 @@ receive structured metadata about all available MCP tools, following
 the same pattern as the _atlas_user injection feature.
 """
 
+import time
 from unittest.mock import MagicMock
 
 from atlas.application.chat.utilities.tool_executor import (
@@ -268,3 +269,52 @@ class TestInjectMcpData:
             None,
         )
         assert "_mcp_data" not in result
+
+
+class TestBuildMcpDataIsScopedToTheRequestingUser:
+    """_mcp_data carries names, descriptions and schemas into model context."""
+
+    def _manager_with_user_scoped_server(self):
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {"remote-mcp": {"auth_type": "oauth"}}
+        manager._user_available_tools = {
+            ("owner@example.gov", "remote-mcp"): {
+                "tools": [FakeTool("search", "private detail")],
+                "config": {},
+                "discovered_at": time.time(),
+            }
+        }
+        manager._user_discovery_failures = {}
+        manager.available_tools = {
+            "remote-mcp": {
+                "tools": [FakeTool("search", "private detail")],
+                "config": {},
+                "user_scoped": True,
+                "discovered_for": {"owner@example.gov"},
+            }
+        }
+        return manager
+
+    def test_the_owner_sees_the_server(self):
+        manager = self._manager_with_user_scoped_server()
+
+        result = build_mcp_data(manager, "owner@example.gov")
+
+        assert [s["server_name"] for s in result["available_servers"]] == ["remote-mcp"]
+
+    def test_a_non_owner_sees_nothing(self):
+        manager = self._manager_with_user_scoped_server()
+
+        result = build_mcp_data(manager, "other@example.gov")
+
+        assert result["available_servers"] == []
+
+    def test_an_anonymous_catalogue_is_visible_to_anyone(self):
+        manager = self._manager_with_user_scoped_server()
+        manager.available_tools["remote-mcp"].pop("user_scoped")
+
+        result = build_mcp_data(manager, "other@example.gov")
+
+        assert [s["server_name"] for s in result["available_servers"]] == ["remote-mcp"]

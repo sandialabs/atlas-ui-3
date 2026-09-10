@@ -544,21 +544,36 @@ class DiscoveryMixin:
         return available_tools
 
     def _may_read_catalogue(
-        self, server_name: Optional[str], user_email: Optional[str]
+        self,
+        server_name: Optional[str],
+        user_email: Optional[str],
+        tool_name: Optional[str] = None,
     ) -> bool:
         """Whether ``user_email`` may read this server's tool metadata.
 
         Only ``user_scoped`` catalogues are restricted -- one user's view of a
         server that refused to describe itself anonymously. Everything an
         anonymous sweep found is, by the server's own choice, public.
+
+        The answer comes from the user's own *live* per-user catalogue, not
+        from membership in ``discovered_for``: the shared entry holds the union
+        of every owner's tools so they can be routed, and an owner who can
+        route a name is not thereby entitled to read another owner's schema for
+        it. Reading the live entry also makes this expire on the same TTL every
+        other read path enforces, rather than outliving it.
         """
         if user_email is None or not server_name:
             return True
         entry = self.available_tools.get(server_name) or {}
         if not entry.get("user_scoped"):
             return True
-        from atlas.core.user_identity import normalize_user_email
-        return normalize_user_email(user_email) in set(entry.get("discovered_for") or ())
+        own = getattr(self, "get_user_tools_for_server", None)
+        if own is None:
+            return False
+        mine = own(user_email, server_name) or []
+        if tool_name is None:
+            return bool(mine)
+        return any(getattr(t, "name", None) == tool_name for t in mine)
 
     def get_server_for_tool(self, tool_name: str) -> Optional[str]:
         """Return the owning MCP server name for a fully-qualified tool name.
@@ -642,7 +657,10 @@ class DiscoveryMixin:
             if not entry:
                 missing.append(requested)
                 continue
-            if not self._may_read_catalogue(entry.get('server'), user_email):
+            tool_obj = entry.get('tool')
+            if not self._may_read_catalogue(
+                entry.get('server'), user_email, getattr(tool_obj, 'name', None)
+            ):
                 # Not "missing": it exists, but its metadata is not this
                 # caller's to read, and saying so would itself disclose it.
                 continue

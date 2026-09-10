@@ -254,9 +254,13 @@ def tool_accepts_mcp_data(tool_name: str, tool_manager) -> bool:
         return False
 
 
-def build_mcp_data(tool_manager) -> Dict[str, Any]:
+def build_mcp_data(tool_manager, user_email: Optional[str] = None) -> Dict[str, Any]:
     """
     Build structured metadata about all available MCP tools for injection.
+
+    ``user_email`` scopes the result the same way ``get_tools_schema`` does:
+    a catalogue discovered under another user's credentials is not this
+    caller's to read. Omitted means unscoped, for internal callers.
 
     Returns a dict with server and tool information that planning tools
     can use to reason about available capabilities.
@@ -266,11 +270,27 @@ def build_mcp_data(tool_manager) -> Dict[str, Any]:
     if not tool_manager or not hasattr(tool_manager, "available_tools"):
         return {"available_servers": available_servers}
 
+    may_read = getattr(tool_manager, "_may_read_catalogue", None)
+
     for server_name, server_data in tool_manager.available_tools.items():
         if server_name == ATLAS_SERVER_NAME or server_name in LEGACY_SERVER_NAMES:
             continue
 
+        # Same scoping as get_tools_schema: this dict carries names,
+        # descriptions and full inputSchemas into the model's context, so a
+        # user_scoped catalogue that is not this user's must not appear here
+        # either.
+        if may_read is not None and not may_read(server_name, user_email):
+            continue
+
         tools_list = server_data.get("tools", []) or []
+        if may_read is not None and user_email is not None:
+            tools_list = [
+                t for t in tools_list
+                if may_read(server_name, user_email, getattr(t, "name", None))
+            ]
+            if not tools_list:
+                continue
         config = server_data.get("config", {}) or {}
 
         tools_info = []
@@ -913,7 +933,7 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
 
         # Inject _mcp_data if the tool schema declares it
         if tool_manager and tool_accepts_mcp_data(tool_name, tool_manager):
-            parsed_args["_mcp_data"] = build_mcp_data(tool_manager)
+            parsed_args["_mcp_data"] = build_mcp_data(tool_manager, user_email)
 
         # Provide URL hints for filename/file_names fields
         files_ctx = session_context.get("files", {})
