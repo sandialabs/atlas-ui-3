@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #913 - 2026-09-09
+- MCP servers that require authorization on `tools/list` now have their tools discovered with the user's own credentials, refreshed when the OAuth flow completes, so they are usable at all (#912).
+- The Tools panel lists a server that requires authorization even when it has discovered no tools yet, so its connect control is reachable.
+
 ### PR #904 - 2026-09-08
 - Hold `fastmcp` below 4.0 and record why: FastMCP 4 removes server-initiated sampling, which the sampling_demo and tool_planner MCP servers require (tracked in #905).
 
