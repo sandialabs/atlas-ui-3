@@ -539,7 +539,6 @@ class UserDiscoveryMixin:
             # owner and must not keep being routed.
             self._withdraw_promoted_tools(server_name, user_lc)
             return
-        self._apply_task_support_metadata(server_name, tools)
         existing = self.available_tools.get(server_name) or {}
         owners = set(existing.get("discovered_for") or ()) if existing.get("user_scoped") else set()
         owners.add(user_lc)
@@ -550,6 +549,11 @@ class UserDiscoveryMixin:
         # them. Who may *read* which tool is a separate question, answered
         # per-user against their own catalogue -- see _may_read_catalogue.
         merged = self._merged_owner_tools(server_name, owners, user_lc, tools)
+        # Swept against the merged set, not this promotion's slice: the helper
+        # purges every (server, *) entry and rebuilds, so sweeping the narrower
+        # list would drop a co-owner's task-forbidden tools and make them
+        # dispatchable process-wide.
+        self._apply_task_support_metadata(server_name, merged)
         self.available_tools[server_name] = {
             "tools": merged,
             "config": self.servers_config.get(server_name, {}),
@@ -565,6 +569,6 @@ class UserDiscoveryMixin:
         self._rebuild_tool_index()
         logger.info(
             "Published %d per-user tool(s) for server '%s' into the shared inventory",
-            len(tools),
+            len(merged),
             sanitize_for_logging(server_name),
         )

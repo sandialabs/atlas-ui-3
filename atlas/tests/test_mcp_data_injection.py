@@ -318,3 +318,27 @@ class TestBuildMcpDataIsScopedToTheRequestingUser:
         result = build_mcp_data(manager, "other@example.gov")
 
         assert [s["server_name"] for s in result["available_servers"]] == ["remote-mcp"]
+
+
+    def test_an_unknown_user_is_not_treated_as_unrestricted(self):
+        """A session with no user must not be the way a gated catalogue leaks."""
+        manager = self._manager_with_user_scoped_server()
+
+        result = build_mcp_data(manager, None)
+
+        assert result["available_servers"] == []
+
+    def test_a_manager_that_cannot_be_checked_omits_user_scoped(self):
+        plain = MagicMock()
+        plain.available_tools = {
+            "remote-mcp": {
+                "tools": [FakeTool("search")],
+                "config": {},
+                "user_scoped": True,
+            }
+        }
+        plain._may_read_catalogue = None
+
+        result = build_mcp_data(plain, "anyone@example.gov")
+
+        assert result["available_servers"] == []

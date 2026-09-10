@@ -260,7 +260,13 @@ def build_mcp_data(tool_manager, user_email: Optional[str] = None) -> Dict[str, 
 
     ``user_email`` scopes the result the same way ``get_tools_schema`` does:
     a catalogue discovered under another user's credentials is not this
-    caller's to read. Omitted means unscoped, for internal callers.
+    caller's to read.
+
+    This fails **closed**. A missing user is "unknown", not "unrestricted":
+    the model-facing caller forwards whatever the session carries, and a
+    session with no user must not be the way a ``user_scoped`` catalogue
+    reaches a prompt. When the user cannot be established, or the manager
+    offers no way to check, ``user_scoped`` servers are omitted entirely.
 
     Returns a dict with server and tool information that planning tools
     can use to reason about available capabilities.
@@ -280,11 +286,15 @@ def build_mcp_data(tool_manager, user_email: Optional[str] = None) -> Dict[str, 
         # descriptions and full inputSchemas into the model's context, so a
         # user_scoped catalogue that is not this user's must not appear here
         # either.
-        if may_read is not None and not may_read(server_name, user_email):
-            continue
+        if server_data.get("user_scoped"):
+            # Unknown user, or no way to verify: omit rather than disclose.
+            if user_email is None or may_read is None:
+                continue
+            if not may_read(server_name, user_email):
+                continue
 
         tools_list = server_data.get("tools", []) or []
-        if may_read is not None and user_email is not None:
+        if server_data.get("user_scoped") and may_read is not None:
             tools_list = [
                 t for t in tools_list
                 if may_read(server_name, user_email, getattr(t, "name", None))

@@ -935,3 +935,55 @@ class TestReadAccessExpiresWithTheEntry:
         assert (USER, SERVER) not in manager._user_available_tools
         assert manager.available_tools[SERVER]["tools"] == []
         assert manager.get_server_for_tool(f"{SERVER}_search") is None
+
+
+class TestTaskSupportCoversEveryPublishedTool:
+    @pytest.mark.asyncio
+    async def test_a_co_owners_forbidden_tool_stays_forbidden(self):
+        """The sweep purges (server, *) and rebuilds, so it must see the union."""
+        manager = _manager()
+        other = "other@example.gov"
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("mine")]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        # The first owner's tool declares no taskSupport, so the sweep marks it.
+        manager._tool_task_forbidden.add((SERVER, "mine"))
+
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
+        await manager.discover_tools_for_user(other, SERVER, force=True)
+
+        assert (SERVER, "mine") in manager._tool_task_forbidden
+
+    @pytest.mark.asyncio
+    async def test_both_owners_tools_are_published(self):
+        manager = _manager()
+        other = "other@example.gov"
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("mine")]))
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
+        await manager.discover_tools_for_user(other, SERVER, force=True)
+
+        assert sorted(t.name for t in manager.available_tools[SERVER]["tools"]) == [
+            "mine", "theirs"
+        ]
+
+
+class TestEachOwnerGetsTheirOwnToolObject:
+    @pytest.mark.asyncio
+    async def test_a_same_named_tool_resolves_per_owner(self):
+        """The index keeps one object per name; the schema must not leak it."""
+        manager = _manager()
+        other = "other@example.gov"
+        manager._get_user_client = AsyncMock(
+            return_value=_FakeClient([_tool("search", description="mine only")])
+        )
+        await manager.discover_tools_for_user(USER, SERVER, force=True)
+        manager._get_user_client = AsyncMock(
+            return_value=_FakeClient([_tool("search", description="theirs only")])
+        )
+        await manager.discover_tools_for_user(other, SERVER, force=True)
+
+        mine = manager.get_tools_schema([f"{SERVER}_search"], USER)
+        theirs = manager.get_tools_schema([f"{SERVER}_search"], other)
+
+        assert mine[0]["function"]["description"] == "mine only"
+        assert theirs[0]["function"]["description"] == "theirs only"

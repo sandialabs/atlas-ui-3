@@ -615,11 +615,13 @@ async def oauth_callback(
     # A newly authorized server may have a cached client built when no token
     # existed; drop it so the next call picks the token up.
     mcp_manager = app_factory.get_mcp_manager()
-    if mcp_manager is not None:
-        await mcp_manager._invalidate_user_client(current_user, server_name)
-        # Servers that gate tools/list behind authorization have no tools until
-        # this runs, so it is part of completing the flow, not an optimisation.
-        await _rediscover_after_authorization(mcp_manager, current_user, server_name)
+    # The token is already stored, so a failure closing the stale client must
+    # not turn a completed authorization into a 500 instead of the success
+    # redirect -- same reasoning as the token upload route.
+    await _invalidate_user_client_quietly(mcp_manager, current_user, server_name)
+    # Servers that gate tools/list behind authorization have no tools until
+    # this runs, so it is part of completing the flow, not an optimisation.
+    await _rediscover_after_authorization(mcp_manager, current_user, server_name)
 
     logger.info(
         "MCP OAuth authorization complete for server '%s'",

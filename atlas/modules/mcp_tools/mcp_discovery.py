@@ -543,6 +543,26 @@ class DiscoveryMixin:
                 available_tools.append(f"{server_name}_{tool.name}")
         return available_tools
 
+    def _own_tool_object(
+        self,
+        server_name: Optional[str],
+        user_email: Optional[str],
+        tool_name: Optional[str],
+    ):
+        """This user's own object for the tool, when the server is user-scoped."""
+        if user_email is None or not server_name or tool_name is None:
+            return None
+        entry = self.available_tools.get(server_name) or {}
+        if not entry.get("user_scoped"):
+            return None
+        own = getattr(self, "get_user_tools_for_server", None)
+        if own is None:
+            return None
+        for tool in own(user_email, server_name) or []:
+            if getattr(tool, "name", None) == tool_name:
+                return tool
+        return None
+
     def _may_read_catalogue(
         self,
         server_name: Optional[str],
@@ -658,13 +678,17 @@ class DiscoveryMixin:
                 missing.append(requested)
                 continue
             tool_obj = entry.get('tool')
-            if not self._may_read_catalogue(
-                entry.get('server'), user_email, getattr(tool_obj, 'name', None)
-            ):
+            server_of = entry.get('server')
+            tool_name_only = getattr(tool_obj, 'name', None)
+            if not self._may_read_catalogue(server_of, user_email, tool_name_only):
                 # Not "missing": it exists, but its metadata is not this
                 # caller's to read, and saying so would itself disclose it.
                 continue
-            tool = entry['tool']
+            # The index keeps one object per name, which for a user_scoped
+            # server may be a co-owner's. Two owners can expose a same-named
+            # tool with different descriptions and schemas, so resolve the
+            # object from the requester's own catalogue.
+            tool = self._own_tool_object(server_of, user_email, tool_name_only) or tool_obj
             matched.append({
                 "type": "function",
                 "function": {
