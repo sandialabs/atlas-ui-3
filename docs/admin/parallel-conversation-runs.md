@@ -62,6 +62,18 @@ approval fails five minutes later whether or not anyone is watching. Set it to
 answers; `MAX_RUN_WALL_CLOCK_SECONDS`, not the approval timeout, is then the
 backstop against waiting forever.
 
+Setting **both** to `0` leaves a run paused on an approval with no expiry at
+all: it waits forever, holding a slot against the user's
+`MAX_CONCURRENT_RUNS_PER_USER` cap and its conversation's one-run-at-a-time
+lock for the life of the process. Atlas logs a warning at startup for that
+combination rather than refusing to start, since an operator may have chosen it
+deliberately — but leave at least one of the two non-zero unless you have.
+
+An elicitation or approval can only be answered by the user it was created for.
+A response arriving from any other account is rejected and logged, which matters
+most when the wait is indefinite: the request id stays answerable for as long as
+the process lives.
+
 Pending approvals live in memory. They survive a disconnect but **not** a server
 restart — see "Limitations" below.
 

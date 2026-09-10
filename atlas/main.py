@@ -238,18 +238,79 @@ def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
     knows. Both go through the registry's ownership check, so a stop frame can
     only ever reach the sender's own run.
 
-    Returns whether a live run was cancelled, which tells the caller whether to
-    fall back to the connection's untracked task.
+    Returns whether the frame *addressed a tracked run at all* -- not whether
+    the cancel took effect. The caller uses this to decide whether to fall back
+    to cancelling the connection's untracked task, and those are different
+    questions: a stale stop frame naming a run that already finished addressed
+    a run, and must not be allowed to cancel an unrelated untracked turn that
+    happens to be in flight on this socket.
     """
-    record = run_registry.get_for_user(data.get("run_id"), user_email)
+    addressed_run_id = data.get("run_id")
+    record = run_registry.get_for_user(addressed_run_id, user_email)
     if record is None:
         record = run_registry.active_for_conversation(
             data.get("conversation_id"), user_email
         )
     if record is None:
-        return False
+        # A frame naming a run id we cannot resolve still addressed a run (it
+        # is terminal, reaped, or another user's). Treat it as addressed so the
+        # untracked fallback stays reserved for clients that name nothing.
+        return bool(addressed_run_id)
     logger.info("Cancelling run %s on user request", record.run_id)
-    return run_registry.cancel(record.run_id, user_email)
+    run_registry.cancel(record.run_id, user_email)
+    return True
+
+
+def _download_session_candidates(run_registry, session_id, user_email: str, data: dict):
+    """Sessions to search for a downloadable file, most likely first.
+
+    The connection session comes first. After it come the sessions of this
+    user's runs -- the run the frame names, if it names one, then the rest --
+    because a file a background run produced is registered on the run's own
+    session. Every candidate is a run owned by ``user_email`` (the registry
+    lookups are ownership-checked) and ``handle_download_file`` re-checks the
+    user against the file itself, so widening the search does not widen access.
+    """
+    candidates = [session_id]
+
+    def _add(record):
+        if record is not None and record.session_id not in candidates:
+            candidates.append(record.session_id)
+
+    _add(run_registry.get_for_user(data.get("run_id"), user_email))
+    _add(run_registry.active_for_conversation(data.get("conversation_id"), user_email))
+    for record in run_registry.records_for_user(user_email or ""):
+        _add(record)
+    return candidates
+
+
+async def _seed_run_session_files(
+    chat_service, connection_session_id, run_session_id, user_email: str
+) -> None:
+    """Give a tracked run's session the files attached to the connection.
+
+    ``attach_file`` writes into the connection session's ``context["files"]``.
+    A tracked run executes against its own Session (so two conversations never
+    share one history object), which would otherwise start with no file map at
+    all, making a just-attached file invisible to the very turn that was sent
+    to act on it.
+    """
+    if run_session_id == connection_session_id:
+        return
+    try:
+        connection_session = await chat_service.session_repository.get(
+            connection_session_id
+        )
+        files = (connection_session.context.get("files") if connection_session else None)
+        run_session = await chat_service.session_repository.get(run_session_id)
+        if run_session is None:
+            run_session = await chat_service.create_session(run_session_id, user_email)
+        if files:
+            run_session.context.setdefault("files", {}).update(dict(files))
+    except Exception as e:  # pragma: no cover - defensive
+        # A missing file map must not stop the run from starting; the turn
+        # simply behaves as it did before this seeding existed.
+        logger.warning("Could not seed run session files: %s", e)
 
 
 def _resume_waiting_run(run_registry, user_email: str, data: dict) -> None:
@@ -324,7 +385,13 @@ async def cleanup_disconnected_session(
     session = await chat_service.session_repository.get(session_id)
     if session:
         conv_id = session.context.get("conversation_id", str(session_id))
-        still_owned = any(r.conversation_id == conv_id for r in surviving)
+        # Ask the registry, not this connection's run set: a run started in
+        # another tab owns this conversation just as much, and closing *this*
+        # tab must not pull its MCP sessions out from under it. `surviving`
+        # is connection-scoped and would be empty in exactly that case.
+        still_owned = (
+            registry.active_for_conversation(conv_id, user_email or "") is not None
+        )
         if still_owned:
             logger.info(
                 "Keeping MCP sessions for conversation %s; a run still owns it",
@@ -1209,6 +1276,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     # The run gets its own session id, so two conversations
                     # executing at once never share one Session/history object.
                     turn_session_id = run_record.session_id
+                    # Files attached via `attach_file` land on the *connection*
+                    # session's context, which the run's fresh session cannot
+                    # see -- the tool that needs them would report the file as
+                    # missing. Create the run session here (the same path
+                    # handle_chat_message would take lazily) and carry the file
+                    # map across. Copied, not shared, so the run and the
+                    # connection cannot mutate each other's state.
+                    await _seed_run_session_files(
+                        chat_service, session_id, turn_session_id, user_email
+                    )
 
                     async def turn_update_callback(
                         message,
@@ -1257,6 +1334,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 # from one that died on a rate limit.
                 turn_failure = []
 
+                # Every frame this coroutine emits -- the error branches and the
+                # cancellation flush included -- goes through
+                # `turn_update_callback`, never `websocket.send_json` directly.
+                # The callback is what stamps `run_id`/`conversation_id` on a
+                # tracked run's frames; a raw send carries no run identity, so a
+                # background run's rate-limit or timeout error would be rendered
+                # into whichever conversation the user happens to be looking at.
                 async def handle_chat(
                     turn_failure=turn_failure,
                     turn_session_id=turn_session_id,
@@ -1301,7 +1385,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Rate limit error in chat handler: {e}")
                         turn_failure.append("rate_limit")
                         log_metric("error", user_email, error_type="rate_limit")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "rate_limit"
@@ -1310,7 +1394,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Timeout error in chat handler: {e}")
                         turn_failure.append("timeout")
                         log_metric("error", user_email, error_type="timeout")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "timeout"
@@ -1319,7 +1403,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.error(f"Authentication error in chat handler: {e}")
                         turn_failure.append("authentication")
                         log_metric("error", user_email, error_type="authentication")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "authentication"
@@ -1328,7 +1412,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Context window exceeded in chat handler: {e}")
                         turn_failure.append("context_window_exceeded")
                         log_metric("error", user_email, error_type="context_window_exceeded")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "context_window_exceeded"
@@ -1337,7 +1421,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Model returned an unusable tool call in chat handler: {e}")
                         turn_failure.append("malformed_tool_call")
                         log_metric("error", user_email, error_type="malformed_tool_call")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "malformed_tool_call"
@@ -1346,7 +1430,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Provider rejected the request in chat handler: {e}")
                         turn_failure.append("bad_request")
                         log_metric("error", user_email, error_type="bad_request")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "bad_request"
@@ -1355,7 +1439,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Validation error in chat handler: {e}")
                         turn_failure.append("validation")
                         log_metric("error", user_email, error_type="validation")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "validation"
@@ -1364,7 +1448,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Authorization error in chat handler: {e}")
                         turn_failure.append("authorization")
                         log_metric("error", user_email, error_type="authorization")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "authorization"
@@ -1372,13 +1456,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     except asyncio.CancelledError:
                         logger.info("Chat task cancelled by user (stop_streaming)")
                         try:
-                            await websocket.send_json({
+                            await turn_update_callback({
                                 "type": "token_stream",
                                 "token": "",
                                 "is_first": False,
                                 "is_last": True,
                             })
-                            await websocket.send_json({
+                            await turn_update_callback({
                                 "type": "response_complete",
                             })
                         except Exception:
@@ -1388,7 +1472,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.error(f"Domain error in chat handler: {e}", exc_info=True)
                         turn_failure.append("domain")
                         log_metric("error", user_email, error_type="domain")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "domain"
@@ -1397,7 +1481,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.error(f"Unexpected error in chat handler: {e}", exc_info=True)
                         turn_failure.append("unexpected")
                         log_metric("error", user_email, error_type="unexpected")
-                        await websocket.send_json({
+                        await turn_update_callback({
                             "type": "error",
                             "message": "An unexpected error occurred. Please try again or contact support if the issue persists.",
                             "error_type": "unexpected"
@@ -1453,14 +1537,32 @@ async def websocket_endpoint(websocket: WebSocket):
                             error_message = turn_failure[0]
                         if run_id is not None:
                             run_registry.set_status(run_id, outcome, error=error_message)
-                            await _release_finished_run(
-                                chat_service,
-                                run_registry,
-                                run_id,
-                                run_session_id,
-                                run_conversation_id,
-                                user_email,
+                            # This `finally` often runs while the task is
+                            # already unwinding from a cancellation. A *second*
+                            # cancellation delivered during the await below
+                            # would abandon the release half-done, leaking the
+                            # run's Session and leaving the conversation's MCP
+                            # sessions held. Shield it so the cleanup always
+                            # runs to completion, and swallow the
+                            # CancelledError the shield re-raises here -- the
+                            # run's terminal status is already recorded, so
+                            # there is nothing further this task owes anyone.
+                            release = asyncio.shield(
+                                asyncio.ensure_future(
+                                    _release_finished_run(
+                                        chat_service,
+                                        run_registry,
+                                        run_id,
+                                        run_session_id,
+                                        run_conversation_id,
+                                        user_email,
+                                    )
+                                )
                             )
+                            try:
+                                await release
+                            except asyncio.CancelledError:
+                                pass
 
                 # Start chat handling in background
                 chat_task = asyncio.create_task(handle_chat_guarded())
@@ -1475,12 +1577,30 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
 
             elif message_type == "download_file":
-                # Handle file download (use authenticated user from connection)
-                response = await chat_service.handle_download_file(
-                    session_id=session_id,
-                    filename=data.get("filename", ""),
-                    user_email=user_email
-                )
+                # Handle file download (use authenticated user from connection).
+                # A file produced by a tracked run lives in that run's session
+                # file map, not the connection's, so searching only the
+                # connection session would fail every download of a background
+                # run's output. Try the connection session first (the common
+                # case and the cheapest), then the sessions of this user's runs.
+                filename = data.get("filename", "")
+                response = None
+                for candidate_session_id in _download_session_candidates(
+                    run_registry, session_id, user_email, data
+                ):
+                    response = await chat_service.handle_download_file(
+                        session_id=candidate_session_id,
+                        filename=filename,
+                        user_email=user_email,
+                    )
+                    if not response.get("error"):
+                        break
+                # Echo the run identity the client addressed so a client that
+                # routes frames by conversation can place the reply.
+                if response is not None:
+                    for key in ("run_id", "conversation_id"):
+                        if data.get(key) and not response.get(key):
+                            response[key] = data.get(key)
                 await websocket.send_json(response)
 
             elif message_type == "restore_conversation":
@@ -1691,10 +1811,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     f"action={action}"
                 )
 
+                # Fail-closed ownership check lives in the manager: a bound
+                # elicitation only accepts a response from the user it was
+                # created for, so an id leaked to another session cannot inject
+                # data into this tool execution.
                 result = elicitation_manager.handle_elicitation_response(
                     elicitation_id=elicitation_id,
                     action=action,
-                    data=response_data
+                    data=response_data,
+                    user_email=user_email,
                 )
 
                 _resume_waiting_run(run_registry, user_email, data)

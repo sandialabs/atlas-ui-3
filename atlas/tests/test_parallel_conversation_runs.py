@@ -7,6 +7,7 @@ which run a stop/approval frame addresses.
 """
 
 import asyncio
+import logging
 import time
 
 import pytest
@@ -344,3 +345,48 @@ def test_pending_request_is_not_readable_by_another_user(registry):
 
 def test_no_pending_request_for_a_conversation_without_a_run(registry):
     assert registry.pending_requests_for_conversation("conv-nope", USER) == []
+
+
+# ---------------------------------------------------------------------------
+# Unbounded-run configuration guard
+# ---------------------------------------------------------------------------
+
+def test_indefinite_approval_plus_no_wall_clock_warns(caplog):
+    """Each setting is fine alone; together a paused run can never expire.
+
+    An indefinite approval wait is what lets a pause survive a closed browser,
+    and disabling the wall-clock limit suits genuinely long agent turns. With
+    both, a detached run waiting on an approval nobody answers holds a slot
+    against the user's concurrency cap and its conversation's lock for the life
+    of the process. We warn rather than refuse to start: an operator may have
+    chosen exactly this.
+    """
+    from atlas.modules.config.settings import AppSettings
+
+    with caplog.at_level(logging.WARNING):
+        AppSettings(
+            _env_file=None,
+            TOOL_APPROVAL_TIMEOUT_SECONDS=0,
+            MAX_RUN_WALL_CLOCK_SECONDS=0,
+        )
+
+    assert any(
+        "no expiry" in r.message for r in caplog.records
+    ), [r.message for r in caplog.records]
+
+
+@pytest.mark.parametrize(
+    "approval_timeout,wall_clock",
+    [(0, 3600), (300, 0), (300, 3600)],
+)
+def test_only_the_both_zero_combination_warns(caplog, approval_timeout, wall_clock):
+    from atlas.modules.config.settings import AppSettings
+
+    with caplog.at_level(logging.WARNING):
+        AppSettings(
+            _env_file=None,
+            TOOL_APPROVAL_TIMEOUT_SECONDS=approval_timeout,
+            MAX_RUN_WALL_CLOCK_SECONDS=wall_clock,
+        )
+
+    assert not any("no expiry" in r.message for r in caplog.records)

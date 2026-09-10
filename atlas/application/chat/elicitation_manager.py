@@ -23,6 +23,10 @@ class ElicitationRequest:
     tool_name: str
     message: str
     response_schema: Dict[str, Any]
+    # Authenticated owner of this elicitation. Bound at creation so a response
+    # frame from a different user cannot inject data into this tool execution
+    # (mirrors ToolApprovalRequest.user_email). Empty means "legacy, unbound".
+    user_email: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
@@ -67,7 +71,8 @@ class ElicitationManager:
         tool_call_id: str,
         tool_name: str,
         message: str,
-        response_schema: Dict[str, Any]
+        response_schema: Dict[str, Any],
+        user_email: str = "",
     ) -> ElicitationRequest:
         """
         Create a new elicitation request.
@@ -78,6 +83,7 @@ class ElicitationManager:
             tool_name: Name of the tool requesting input
             message: Prompt message to display to user
             response_schema: JSON schema defining expected response structure
+            user_email: Authenticated email of the user who owns this request
 
         Returns:
             ElicitationRequest object that can be awaited for response
@@ -87,7 +93,8 @@ class ElicitationManager:
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             message=message,
-            response_schema=response_schema
+            response_schema=response_schema,
+            user_email=user_email,
         )
         self._pending_requests[elicitation_id] = request
         logger.info(
@@ -100,7 +107,8 @@ class ElicitationManager:
         self,
         elicitation_id: str,
         action: str,
-        data: Optional[Dict[str, Any]] = None
+        data: Optional[Dict[str, Any]] = None,
+        user_email: str = "",
     ) -> bool:
         """
         Handle an elicitation response from the user.
@@ -109,13 +117,35 @@ class ElicitationManager:
             elicitation_id: ID of the elicitation being responded to
             action: User action - "accept", "decline", or "cancel"
             data: Optional response data (present when action is "accept")
+            user_email: Authenticated email of the responding user
 
         Returns:
-            True if response was handled, False if request not found
+            True if response was handled, False if request not found or the
+            responder does not own it
         """
         request = self._pending_requests.get(elicitation_id)
         if not request:
             logger.warning(f"Received response for unknown elicitation: {elicitation_id}")
+            return False
+
+        # Security: verify the responding user owns this elicitation. Without
+        # this, any authenticated user holding an elicitation id could feed
+        # data into another user's tool execution -- and because a background
+        # run may wait indefinitely (issue #884), the id stays answerable for
+        # the process lifetime. Fail-closed: a bound request REQUIRES a
+        # matching responder. Legacy unbound requests skip the check.
+        if request.user_email and request.user_email != user_email:
+            # Inline CR/LF stripping: CodeQL py/log-injection recognizes this
+            # as a sanitizer where it does not recognize sanitize_for_logging().
+            safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
+            safe_elicitation_id = str(elicitation_id).replace("\r", "").replace("\n", "")
+            logger.warning(
+                "SECURITY: elicitation response rejected - user %s attempted to "
+                "respond to elicitation owned by a different user (id: %s, action: %s)",
+                safe_user_email,
+                safe_elicitation_id,
+                str(action).replace("\r", "").replace("\n", ""),
+            )
             return False
 
         response = {

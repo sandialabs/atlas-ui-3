@@ -230,6 +230,17 @@ class RunRegistry:
             if r.user_email == user_email and not r.is_terminal
         ]
 
+    def records_for_user(self, user_email: str) -> List[RunRecord]:
+        """Every retained run for this user, newest first, terminal included.
+
+        The download path needs the terminal ones: a file is usually fetched
+        just *after* the run that produced it finished, and that run's session
+        is where the file is registered.
+        """
+        records = [r for r in self._runs.values() if r.user_email == user_email]
+        records.sort(key=lambda r: r.created_at, reverse=True)
+        return records
+
     def snapshot_for_user(self, user_email: str) -> List[Dict[str, Any]]:
         """Every run this user can still meaningfully see, newest first.
 

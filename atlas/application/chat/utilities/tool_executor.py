@@ -574,8 +574,20 @@ async def execute_single_tool(
                 )
 
                 try:
-                    response = await request.wait_for_response(timeout=resolve_approval_timeout())
-                    approval_manager.cleanup_request(tool_call.id)
+                    try:
+                        response = await request.wait_for_response(
+                            timeout=resolve_approval_timeout()
+                        )
+                    finally:
+                        # Cancellation (user Stop, or the run wall-clock
+                        # sweeper) unwinds straight through both the success and
+                        # the timeout path, so without a finally the pending
+                        # request -- and the filtered_args it holds -- would
+                        # leak for the process lifetime. With
+                        # TOOL_APPROVAL_TIMEOUT_SECONDS=0 the wait is
+                        # indefinite, so cancellation is the *only* way out and
+                        # this is the only cleanup that runs.
+                        approval_manager.cleanup_request(tool_call.id)
 
                     if not response["approved"]:
                         # Tool was rejected
@@ -618,7 +630,7 @@ async def execute_single_tool(
                             logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
 
                 except asyncio.TimeoutError:
-                    approval_manager.cleanup_request(tool_call.id)
+                    # Cleanup already ran in the finally above.
                     logger.warning(f"Approval timeout for tool {tool_call.function.name}")
                     return _finalize_span(ToolResult(
                         tool_call_id=tool_call.id,

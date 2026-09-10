@@ -825,6 +825,32 @@ class AppSettings(BaseSettings):
         return self
 
     @model_validator(mode='after')
+    def warn_on_unbounded_background_runs(self):
+        """Warn when nothing can ever end a run paused on tool approval.
+
+        Each setting is individually reasonable: an indefinite approval wait is
+        what lets a pause survive a closed browser, and disabling the wall-clock
+        limit suits a deployment with genuinely long agent turns. Together they
+        leave a detached run waiting on an approval nobody will answer with no
+        expiry at all -- it holds a slot against the user's concurrency cap and
+        its conversation's lock for the life of the process. Warn rather than
+        reject: an operator may have chosen exactly this, and refusing to start
+        would be a worse failure than saying so loudly.
+        """
+        if (
+            self.tool_approval_timeout_seconds == 0
+            and self.max_run_wall_clock_seconds == 0
+        ):
+            logger.warning(
+                "TOOL_APPROVAL_TIMEOUT_SECONDS=0 combined with "
+                "MAX_RUN_WALL_CLOCK_SECONDS=0 leaves a run paused on tool "
+                "approval with no expiry: it waits forever and keeps holding a "
+                "concurrency slot and its conversation's lock. Set at least one "
+                "of the two to a non-zero value unless this is intentional."
+            )
+        return self
+
+    @model_validator(mode='after')
     def validate_aws_alb_config(self):
         """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth."""
         if self.auth_user_header_type == "aws-alb-jwt":

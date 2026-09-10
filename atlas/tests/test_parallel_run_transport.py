@@ -6,8 +6,13 @@ frame is resolved to exactly one run.
 """
 
 import pytest
-
-from main import _cancel_addressed_run, _resume_waiting_run, tag_run_event
+from main import (
+    _cancel_addressed_run,
+    _download_session_candidates,
+    _resume_waiting_run,
+    _seed_run_session_files,
+    tag_run_event,
+)
 
 from atlas.application.chat.runs import RunRegistry, RunStatus, reset_run_registry
 
@@ -59,11 +64,40 @@ def test_stop_by_run_id_cancels_only_that_run(registry):
     run_a = registry.start(conversation_id="conv-a", user_email=USER)
     run_b = registry.start(conversation_id="conv-b", user_email=USER)
 
-    assert _cancel_addressed_run(registry, USER, {"run_id": run_a.run_id}) is False
-    # No task attached, so nothing was *cancelled*, but the record is terminal
-    # and B is untouched -- the isolation criterion.
+    # The frame addressed a run, so the transport must NOT fall back to the
+    # connection's untracked task -- even though no task was attached here and
+    # so nothing was actually cancelled.
+    assert _cancel_addressed_run(registry, USER, {"run_id": run_a.run_id}) is True
     assert registry.get(run_a.run_id).status == RunStatus.CANCELLED
     assert registry.get(run_b.run_id).status != RunStatus.CANCELLED
+
+
+def test_stale_stop_frame_does_not_fall_back_to_the_legacy_slot(registry):
+    """A stop frame naming an already-terminal run must not cancel something else.
+
+    `cancel()` reports False for a run that has already finished, which is
+    indistinguishable from "no run named" if the return value is taken to mean
+    "a cancel happened". Taking it to mean "the frame addressed a run" keeps the
+    untracked fallback reserved for clients that name nothing, so a stale stop
+    cannot reach an unrelated turn in flight on this socket.
+    """
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+    registry.set_status(run.run_id, RunStatus.COMPLETED)
+
+    assert _cancel_addressed_run(registry, USER, {"run_id": run.run_id}) is True
+
+
+def test_stop_frame_naming_an_unknown_run_does_not_fall_back(registry):
+    """Reaped or foreign run ids are addressed, not absent."""
+    assert _cancel_addressed_run(registry, USER, {"run_id": "no-such-run"}) is True
+
+
+def test_stop_frame_with_only_an_unknown_conversation_falls_back(registry):
+    """Nothing resolvable and no run id named: the legacy slot is the target."""
+    assert (
+        _cancel_addressed_run(registry, USER, {"conversation_id": "conv-unknown"})
+        is False
+    )
 
 
 def test_stop_by_conversation_id_resolves_the_run(registry):
@@ -196,3 +230,145 @@ async def test_run_identity_does_not_leak_between_tasks():
     assert seen["run-b"].conversation_id == "conv-b"
     # The parent context is untouched by either task.
     assert get_current_run() is None
+
+
+# ---------------------------------------------------------------------------
+# Download routing
+# ---------------------------------------------------------------------------
+
+def test_download_searches_the_connection_session_first(registry):
+    """The common case must stay the first (and usually only) lookup."""
+    candidates = _download_session_candidates(registry, "conn-session", USER, {})
+    assert candidates[0] == "conn-session"
+
+
+def test_download_reaches_the_named_runs_session(registry):
+    """A file a background run produced lives on that run's own session.
+
+    Searching only the connection session is what made every download of a
+    background run's output fail with "File not found in session".
+    """
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+
+    candidates = _download_session_candidates(
+        registry, "conn-session", USER, {"run_id": run.run_id}
+    )
+
+    assert run.session_id in candidates
+
+
+def test_download_reaches_a_finished_runs_session(registry):
+    """A file is usually fetched just after the run that produced it ended."""
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+    registry.set_status(run.run_id, RunStatus.COMPLETED)
+
+    candidates = _download_session_candidates(registry, "conn-session", USER, {})
+
+    assert run.session_id in candidates
+
+
+def test_download_never_reaches_another_users_run(registry):
+    """Widening the search must not widen access."""
+    foreign = registry.start(conversation_id="conv-x", user_email=OTHER)
+
+    candidates = _download_session_candidates(
+        registry, "conn-session", USER, {"run_id": foreign.run_id}
+    )
+
+    assert foreign.session_id not in candidates
+
+
+def test_download_candidates_are_deduplicated(registry):
+    run = registry.start(conversation_id="conv-a", user_email=USER)
+
+    candidates = _download_session_candidates(
+        registry,
+        "conn-session",
+        USER,
+        {"run_id": run.run_id, "conversation_id": "conv-a"},
+    )
+
+    assert len(candidates) == len(set(candidates))
+
+
+# ---------------------------------------------------------------------------
+# Attached files reaching a tracked run
+# ---------------------------------------------------------------------------
+
+class _FakeSession:
+    def __init__(self, context=None):
+        self.context = context if context is not None else {}
+
+
+class _FakeSessionRepo:
+    """Mirrors the real repository's by-reference storage."""
+
+    def __init__(self, sessions):
+        self._sessions = sessions
+
+    async def get(self, session_id):
+        return self._sessions.get(session_id)
+
+
+class _FakeChatService:
+    def __init__(self, sessions):
+        self.session_repository = _FakeSessionRepo(sessions)
+        self.created = []
+
+    async def create_session(self, session_id, user_email=None):
+        session = _FakeSession()
+        self.session_repository._sessions[session_id] = session
+        self.created.append(session_id)
+        return session
+
+
+@pytest.mark.asyncio
+async def test_attached_files_are_copied_onto_the_run_session():
+    """A file attached just before the turn must be visible to the run.
+
+    `attach_file` writes to the connection session; the run executes against
+    its own, which would otherwise start empty.
+    """
+    attached = {"report.csv": {"key": "s3/report.csv"}}
+    sessions = {"conn": _FakeSession({"files": attached})}
+    service = _FakeChatService(sessions)
+
+    await _seed_run_session_files(service, "conn", "run-session", USER)
+
+    assert sessions["run-session"].context["files"] == attached
+
+
+@pytest.mark.asyncio
+async def test_seeding_copies_rather_than_shares_the_file_map():
+    """The run and the connection must not mutate each other's state."""
+    sessions = {"conn": _FakeSession({"files": {"a.txt": {"key": "s3/a"}}})}
+    service = _FakeChatService(sessions)
+
+    await _seed_run_session_files(service, "conn", "run-session", USER)
+    sessions["run-session"].context["files"]["b.txt"] = {"key": "s3/b"}
+
+    assert "b.txt" not in sessions["conn"].context["files"]
+
+
+@pytest.mark.asyncio
+async def test_seeding_is_a_noop_for_an_untracked_turn():
+    """An untracked turn already runs on the connection session."""
+    sessions = {"conn": _FakeSession({"files": {"a.txt": {"key": "s3/a"}}})}
+    service = _FakeChatService(sessions)
+
+    await _seed_run_session_files(service, "conn", "conn", USER)
+
+    assert service.created == []
+
+
+@pytest.mark.asyncio
+async def test_seeding_failure_does_not_stop_the_run():
+    """Cleanup-style helper: a missing file map must not abort admission."""
+
+    class _Exploding(_FakeChatService):
+        async def create_session(self, session_id, user_email=None):
+            raise RuntimeError("hook denied")
+
+    service = _Exploding({"conn": _FakeSession({"files": {"a.txt": {}}})})
+
+    await _seed_run_session_files(service, "conn", "run-session", USER)
