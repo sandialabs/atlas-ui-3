@@ -1,6 +1,6 @@
 # MCP Tool Outputs
 
-Last updated: 2026-08-27
+Last updated: 2026-09-10
 
 This guide covers the different ways MCP tools can return data to Atlas, including text results, artifacts, images, and iframes. MCP servers are independent processes that expose functions (tools) that the LLM can call.
 
@@ -152,6 +152,42 @@ def generate_multiple_charts() -> List[ImageContent]:
 - You want to specify viewer hints or custom display configuration
 
 Both approaches work and will display images in the canvas panel. ImageContent is automatically converted to artifacts internally.
+
+### How the model sees tool-returned images (issue #909)
+
+Images returned by a tool are also placed in front of the LLM itself, not
+just the canvas. Because the OpenAI-style chat API rejects image content
+inside a `role: "tool"` message, Atlas appends a synthetic **user** message
+right after the step's tool results containing the image as an `image_url`
+data-URI block; LiteLLM translates that block to the active provider's
+native format (Anthropic image block, Gemini `inline_data`, Bedrock image).
+
+Details and limits of that pipeline:
+
+* **Vision gating.** Images are only injected when the selected model is
+  configured with `supports_vision: true` in `llmconfig.yml`. On other
+  models a `role: "system"` note is appended after the tool results saying
+  images were returned but cannot be shown -- the tool result JSON itself
+  is never modified.
+* **Rolling recency cap.** At most 6 tool-returned images are kept in the
+  live transcript at once, newest wins: when a new image pushes past the
+  cap or the size budget, the oldest image blocks are removed (individually,
+  so one tool returning many images does not lose all of them) and a fully
+  emptied message is demoted in place to a one-line note. The files
+  themselves remain in the session files.
+* **Size limits.** 5 MB of base64 per image, 12 MB aggregate across the
+  turn's transcript -- well under the ~20 MB total-request ceilings some
+  providers enforce.
+* **Turn lifetime.** Injected images live in the working transcript of the
+  turn that produced them only. Conversation history is text-only, so a
+  later turn sees the tool call (via the agent tool digest) and the file in
+  the session files list, but not the pixels.
+* **Validation.** MIME types are checked against a raster allowlist
+  (PNG/JPEG/GIF/WebP/BMP -- SVG is excluded) and base64 payloads are
+  re-validated and size-capped at injection time.
+
+All of this is best-effort: an injection failure degrades to the old
+text-only behavior rather than breaking the tool-calling turn.
 
 ## Displaying External Content with Iframes
 
