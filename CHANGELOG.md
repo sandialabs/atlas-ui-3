@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove server-initiated MCP sampling from `sampling_demo` and `tool_planner` so FastMCP 4.x works with client-driven model generation (#905).
 - Lift the root `fastmcp` dependency cap to allow 4.x updates and remove the Dependabot major-version ignore for `fastmcp`.
 
+### PR #917 - 2026-09-10
+- A workspace selector now sits in the chat-bar footer next to the model/tools/prompt controls (gated on the workspaces feature). It shares the header switcher's active-workspace state, so switching context works from either control, and its panel opens upward to stay on screen above the chat bar (closes #916).
+
 ### PR #914 - 2026-09-10
 - **MCP tool-returned images now reach the LLM, not just the canvas** (closes #909): screenshot-only tools no longer normalize to `{"results": {}}` for the model; images are attached after the step's tool results as a synthetic user message, gated on `supports_vision`, with rolling 6-image and per-image/aggregate base64 budgets and MIME/base64 re-validation. Details and limits in `docs/developer/mcp-tool-outputs.md`.
 

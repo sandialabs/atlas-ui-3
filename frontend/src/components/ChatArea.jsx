@@ -11,6 +11,7 @@ import PromptSelector from './PromptSelector'
 import EnabledDataSourcesIndicator from './EnabledDataSourcesIndicator'
 import ModelSelector from './ModelSelector'
 import ToolSelector from './ToolSelector'
+import WorkspaceSelector from './WorkspaceSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
 import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
@@ -1235,10 +1236,13 @@ const ChatArea = () => {
           <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
             {/* Chat-bar controls (issue #839 review): the model, tools, and
                 prompts are all changed from where the work happens instead of
-                from the top bar. */}
-            <div className="flex items-center gap-3 flex-wrap min-w-0">
+                from the top bar. The workspace panel opens upward because this
+                row is pinned to the bottom of the viewport and a downward
+                panel is clipped by the chat area's overflow-hidden root. */}
+            <div role="group" aria-label="Chat controls" className="flex items-center gap-3 flex-wrap min-w-0">
               <ModelSelector />
               <ToolSelector />
+              {features?.workspaces && <WorkspaceSelector placement="up" />}
               <PromptSelector />
               <span className="hidden sm:inline">Press Shift + Enter for new line</span>
             </div>
