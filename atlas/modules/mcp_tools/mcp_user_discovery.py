@@ -409,6 +409,10 @@ class UserDiscoveryMixin:
                 "Per-user tool discovery skipped for '%s': user holds no token",
                 safe_server,
             )
+            if self._discovery_generation(key) != generation:
+                # The credential was revoked while the client was being built;
+                # a cool-down recorded against it would outlive it.
+                return None
             self._user_discovery_failures[key] = now
             self._expire_stale_user_entry(key, server_name)
             self._prune_user_discovery_state()

@@ -552,7 +552,16 @@ class DiscoveryMixin:
         return authorized_servers
 
     def get_available_tools(self) -> List[str]:
-        """Get list of available tool names."""
+        """Get list of available tool names.
+
+        **Not user-scoped, deliberately.** It returns fully-qualified *names*
+        only -- no descriptions, no input schemas -- and it enumerates the
+        promoted ``user_scoped`` entries along with everything else, because
+        the shared inventory is what routing is built from. A caller that puts
+        this list anywhere a user can see it needs to filter it through
+        ``_may_read_catalogue`` first; ``get_tools_schema`` and
+        ``build_mcp_data`` are the user-facing paths and already do.
+        """
         available_tools = []
         available_tools.extend(ATLAS_TOOL_NAMES)
         for server_name, server_data in self.available_tools.items():

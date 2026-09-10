@@ -74,8 +74,9 @@ def _drop_user_tool_cache(
     """
     clear = getattr(mcp_manager, "clear_user_tool_cache", None)
     if clear is None:
-        if required:
-            raise RuntimeError("tool manager cannot withdraw a per-user catalogue")
+        # A manager that never published a per-user catalogue has none to
+        # withdraw. The probe is what makes duck-typed managers work at all,
+        # so this is not a failure even on the disconnect path.
         return
     try:
         clear(user_email, server_name)
@@ -334,6 +335,20 @@ async def remove_token(
         # provider is unreachable.
         existing = token_storage.get_token(current_user, server_name)
 
+        # Unpublish what the token discovered *before* deleting it. The
+        # withdrawal is the security-relevant half of a disconnect and fails
+        # closed, so doing it first is what makes that failure recoverable: the
+        # token is still stored, so the 500 below is honest ("this disconnect
+        # did not happen") and the retry takes the same path again instead of
+        # short-circuiting on 404 with the catalogue still published and the
+        # provider token still live. Withdrawing a catalogue whose token turns
+        # out to be valid costs nothing -- the next discovery republishes it.
+        tool_manager = app_factory.get_mcp_manager()
+        if tool_manager is not None:
+            _drop_user_tool_cache(
+                tool_manager, current_user, server_name, required=True
+            )
+
         # Remove the token
         removed = token_storage.remove_token(current_user, server_name)
 
@@ -343,18 +358,10 @@ async def remove_token(
                 detail=f"No token found for server '{server_name}'"
             )
 
-        # The token is already gone, so unpublishing what it discovered comes
-        # first: the withdrawal is the security-relevant half of a disconnect,
-        # and it fails closed -- an error here is reported rather than leaving
-        # the revoked catalogue published and routable behind a 200. Dropping
-        # the cached client is the cleanup half and stays quiet: it cannot
-        # disclose anything, and failing it must not report a disconnect that
-        # has in fact happened as an error.
-        tool_manager = app_factory.get_mcp_manager()
+        # Dropping the cached client is the cleanup half and stays quiet: it
+        # cannot disclose anything, and failing it must not report a disconnect
+        # that has in fact happened as an error.
         if tool_manager is not None:
-            _drop_user_tool_cache(
-                tool_manager, current_user, server_name, required=True
-            )
             await _invalidate_user_client_quietly(tool_manager, current_user, server_name)
             logger.debug(f"Invalidated cached client for server '{server_name}'")
 

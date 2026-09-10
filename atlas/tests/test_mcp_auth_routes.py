@@ -355,6 +355,30 @@ class TestRemoveToken:
 
         assert response.status_code == 500
 
+    def test_a_failed_withdrawal_leaves_the_disconnect_retryable(self, client, mock_dependencies):
+        """The 500 must not be terminal: the token is still there to retry on."""
+        manager = mock_dependencies["tool_manager"]
+        manager.clear_user_tool_cache = MagicMock(side_effect=RuntimeError("boom"))
+
+        assert client.delete("/api/mcp/auth/test-server/token").status_code == 500
+        # The token was not deleted, so the retry takes the same path rather
+        # than short-circuiting on 404 with the catalogue still published.
+        mock_dependencies["token_storage"].remove_token.assert_not_called()
+
+        manager.clear_user_tool_cache = MagicMock()
+        assert client.delete("/api/mcp/auth/test-server/token").status_code == 200
+
+    def test_a_manager_without_the_withdrawal_api_still_disconnects(self, client, mock_dependencies):
+        """The getattr probe is what makes duck-typed managers work at all."""
+        plain = MagicMock()
+        del plain.clear_user_tool_cache
+        plain._invalidate_user_client = AsyncMock()
+        mock_dependencies["factory"].get_mcp_manager.return_value = plain
+
+        response = client.delete("/api/mcp/auth/test-server/token")
+
+        assert response.status_code == 200
+
     def test_a_failing_client_invalidation_still_disconnects(self, client, mock_dependencies):
         """The token is already gone; a cleanup failure is not a failed disconnect."""
         manager = mock_dependencies["tool_manager"]
