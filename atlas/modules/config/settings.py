@@ -983,6 +983,8 @@ class AppSettings(BaseSettings):
             )
         return self
 
+    _static_group_members_cache: Optional[Dict[str, FrozenSet[str]]] = PrivateAttr(default=None)
+
     @property
     def static_group_members(self) -> Dict[str, FrozenSet[str]]:
         """Statically configured membership, normalized and cached.
@@ -998,7 +1000,6 @@ class AppSettings(BaseSettings):
             )
         return self._static_group_members_cache
 
-    _static_group_members_cache: Optional[Dict[str, FrozenSet[str]]] = PrivateAttr(default=None)
 
     model_config = {
         "env_file": "../.env",
