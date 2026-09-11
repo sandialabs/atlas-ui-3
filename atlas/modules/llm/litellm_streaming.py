@@ -16,7 +16,7 @@ from atlas.application.chat.capture.capture_context import record_llm_call
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
-from atlas.domain.errors import LLMMalformedToolCallError
+from atlas.domain.errors import LLMEmptyStreamError, LLMMalformedToolCallError
 
 from .models import LLMResponse, split_provider
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
@@ -32,6 +32,21 @@ logger = logging.getLogger(__name__)
 KNOWN_FINISH_REASONS = frozenset(
     {"stop", "length", "tool_calls", "function_call", "content_filter"}
 )
+
+
+def _check_empty_stream(
+    content_chunks: int, model_name: str, start_ns: int, has_tool_calls: bool = False,
+) -> None:
+    # LiteLLM may synthesize a metadata-only chunk for an empty provider stream.
+    if content_chunks == 0 and not has_tool_calls:
+        logger.warning(
+            "LLM stream for %s completed with zero content chunks and no tool calls after %.2fs",
+            sanitize_for_logging(model_name),
+            (time.monotonic_ns() - start_ns) / 1_000_000_000,
+        )
+        raise LLMEmptyStreamError(
+            "The LLM service returned an empty response. Please try again or select a different model."
+        )
 
 
 async def _close_stream_quietly(response: Any) -> None:
@@ -120,13 +135,12 @@ class LiteLLMStreamingMixin:
             max_retries, max_wait = _llm_retry_settings()
             attempt = 0
             waited = 0.0
+            chunk_count = 0
+            accumulated_chars = 0
             try:
                 total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
                 logger.info("Streaming plain LLM call: %d messages, %d chars", len(messages), total_chars)
 
-                chunk_count = 0
-                total_chunks_seen = 0
-                accumulated_chars = 0
                 # A token handed to the consumer cannot be un-handed: once any
                 # content has been yielded, the turn is partially delivered and
                 # the only safe reaction to a later failure is to surface it,
@@ -134,6 +148,8 @@ class LiteLLMStreamingMixin:
                 yielded_any = False
                 while True:
                     response = None
+                    total_chunks_seen = 0
+                    attempt_start_ns = time.monotonic_ns()
                     try:
                         response = await acompletion(
                             model=litellm_model,
@@ -161,11 +177,7 @@ class LiteLLMStreamingMixin:
                                 if chunk_count % 50 == 0:
                                     await asyncio.sleep(0)
 
-                        if chunk_count == 0 and total_chunks_seen > 0:
-                            logger.warning(
-                                "Stream for %s received %d chunks but yielded 0 tokens",
-                                model_name, total_chunks_seen,
-                            )
+                        _check_empty_stream(chunk_count, model_name, attempt_start_ns)
                         log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
                         set_attrs(span, {
                             "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
@@ -211,6 +223,8 @@ class LiteLLMStreamingMixin:
                 set_attrs(span, {
                     "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                     "error_type": type(exc).__name__,
+                    "chunk_count": chunk_count,
+                    "output_chars": accumulated_chars,
                     "retry_count": attempt,
                     "retry_wait_seconds": waited,
                 })
@@ -375,6 +389,9 @@ class LiteLLMStreamingMixin:
             max_retries, max_wait = _llm_retry_settings()
             attempt = 0
             waited = 0.0
+            accumulated_content = ""
+            accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
+            chunk_count = 0
             try:
                 total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
                 logger.info(
@@ -382,9 +399,6 @@ class LiteLLMStreamingMixin:
                     len(messages), total_chars, len(tools_schema),
                 )
 
-                accumulated_content = ""
-                accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
-                chunk_count = 0
                 finish_reason: Optional[str] = None
                 # Text tokens are yielded as they arrive, so the same rule as
                 # stream_plain applies: after the first yielded token a failure
@@ -395,6 +409,7 @@ class LiteLLMStreamingMixin:
                 yielded_any = False
                 while True:
                     response = None
+                    attempt_start_ns = time.monotonic_ns()
                     try:
                         response = await acompletion(
                             model=litellm_model,
@@ -445,6 +460,10 @@ class LiteLLMStreamingMixin:
                                         if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
                                             entry["function"]["arguments"] += tc_delta.function.arguments
 
+                        _check_empty_stream(
+                            chunk_count, model_name, attempt_start_ns,
+                            has_tool_calls=bool(accumulated_tool_calls),
+                        )
                         break
 
                     except Exception as exc:
@@ -551,6 +570,9 @@ class LiteLLMStreamingMixin:
                 set_attrs(span, {
                     "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                     "error_type": type(exc).__name__,
+                    "chunk_count": chunk_count,
+                    "output_chars": len(accumulated_content),
+                    "tool_calls_count": len(accumulated_tool_calls),
                     "retry_count": attempt,
                     "retry_wait_seconds": waited,
                 })

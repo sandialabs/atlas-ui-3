@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #923 - 2026-09-11
+- Add global and per-model LLM request timeouts; zero-chunk streams now log a warning, retry within the existing budget, and surface an error when retries are exhausted (closes #922).
+
 ### PR #920 - 2026-09-10
 - Transient LLM failures (rate limits, timeouts, 5xx) are now retried with exponential backoff on the streaming path (previously none) as well as the non-streaming path, with the retry count configurable via `LLM_MAX_RETRIES` (default 5) and a cumulative backoff cap via `LLM_RETRY_MAX_WAIT_SECONDS` (default 300s = 5 minutes); once a streaming response has yielded a token, failures surface instead of retrying (closes #919).
 

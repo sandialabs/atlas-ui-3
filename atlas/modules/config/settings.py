@@ -97,6 +97,13 @@ class AppSettings(BaseSettings):
     app_name: str = "ATLAS"
     port: int = 8000
     debug_mode: bool = False
+    llm_request_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Timeout in seconds for each LLM request, including streaming reads",
+        validation_alias="LLM_REQUEST_TIMEOUT_SECONDS",
+    )
     skip_authorization_checks: bool = Field(
         False,
         description=(
