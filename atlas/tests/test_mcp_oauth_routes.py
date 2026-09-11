@@ -8,8 +8,8 @@ is never reflected back to the browser verbatim.
 
 import hashlib
 import time
-from urllib.parse import quote
 from unittest.mock import AsyncMock, patch
+from urllib.parse import quote
 
 import pytest
 from fastapi import FastAPI
@@ -229,6 +229,9 @@ class TestOAuthStart:
         def reject_sha1(*args, **kwargs):
             raise ValueError("SHA-1 is unavailable")
 
+        # itsdangerous's default digest is a lazy wrapper that re-reads
+        # hashlib.sha1 on every signature, so patching after the middleware
+        # is constructed still exercises the SHA-1 path Starlette would use.
         monkeypatch.setattr(hashlib, "sha1", reject_sha1)
         response = _start(TestClient(app), manager)
 
@@ -236,6 +239,8 @@ class TestOAuthStart:
         assert "session" in response.cookies
         middleware = app.middleware_stack
         while not isinstance(middleware, SessionMiddleware):
+            if not hasattr(middleware, "app"):
+                pytest.fail("SessionMiddleware not found in app middleware stack")
             middleware = middleware.app
         assert middleware.signer.digest_method is hashlib.sha256
 
