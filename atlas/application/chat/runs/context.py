@@ -49,12 +49,12 @@ def clear_current_run() -> None:
 
 
 def tag_event(
-    data: Dict[str, Any],
+    data: Any,
     run_id: str,
     conversation_id: str,
     *,
     copy: bool = True,
-) -> Dict[str, Any]:
+) -> Any:
     """Stamp an outbound event with the run that produced it (issue #884).
 
     The single authority for the tagging rule; every caller goes through here
@@ -71,6 +71,10 @@ def tag_event(
     already knows its own conversation is more authoritative than the run
     envelope.
 
+    Anything that is not a dict is returned untouched -- the publisher and the
+    turn callback both forward whatever a producer handed them, and a non-dict
+    frame has nowhere to put the ids.
+
     ``copy`` picks between the two call sites' needs. The turn callback is
     handed an event it does not own, so it copies. The publisher builds each
     frame fresh per send and stamps in place, because copying every token event
@@ -84,7 +88,7 @@ def tag_event(
     return tagged
 
 
-def stamp_with_current_run(data: Dict[str, Any]) -> Dict[str, Any]:
+def stamp_with_current_run(data: Any) -> Any:
     """Add run_id/conversation_id to an outgoing frame, if a run is executing.
 
     Resolves the ambient run and delegates the stamping rule to
