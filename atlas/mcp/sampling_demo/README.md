@@ -11,44 +11,35 @@ Client-driven generation enables workflows where tools can:
 
 ## Available Tools
 
-### Basic Sampling
+Each tool keeps its original demo shape, but the generated text now comes from the caller via optional fields:
 
-1. **`summarize_text(text)`** - Text Summarization
-   - Demonstrates basic LLM sampling
-   - Requests the LLM to generate a concise summary
-   - Uses simple prompt without additional parameters
+1. **`summarize_text(text, summary=None)`**
+   - Caller may provide `summary`
+   - Fallback truncates the source text deterministically
 
-2. **`analyze_sentiment(text)`** - Sentiment Analysis
-   - Demonstrates sampling with system prompts
-   - Uses lower temperature (0.3) for consistent analysis
-   - System prompt establishes LLM role as sentiment analyzer
+2. **`analyze_sentiment(text, analysis=None)`**
+   - Caller may provide `analysis`
+   - Fallback uses simple keyword matching
 
-3. **`generate_code(description, language)`** - Code Generation
-   - Demonstrates sampling with model preferences
-   - Hints which models should be preferred (gpt-4, claude-3-sonnet, etc.)
-   - Uses higher max_tokens (1000) for code generation
+3. **`generate_code(description, language, generated_code=None)`**
+   - Caller may provide `generated_code`
+   - Fallback returns a starter snippet for the requested language
 
-4. **`creative_story(prompt)`** - Creative Writing
-   - Demonstrates high temperature sampling for creativity
-   - Uses temperature=0.9 for varied, creative outputs
-   - Limited to 500 tokens for short stories
+4. **`creative_story(prompt, story=None)`**
+   - Caller may provide `story`
+   - Fallback returns a short deterministic story stub
 
-### Advanced Sampling
+5. **`multi_turn_conversation(topic, initial_response=None, follow_up_response=None)`**
+   - Caller may provide one or both conversation turns
+   - Fallback returns deterministic initial and follow-up text
 
-5. **`multi_turn_conversation(topic)`** - Multi-turn Conversation
-   - Demonstrates maintaining conversation context
-   - Multiple sequential sampling calls with message history
-   - Builds up conversation across sampling requests
+6. **`research_question(question, breakdown=None, answer=None)`**
+   - Caller may provide `breakdown` and `answer`
+   - Fallback returns deterministic placeholder analysis and answer text
 
-6. **`research_question(question)`** - Agentic Research
-   - Demonstrates agentic workflow with sampling
-   - Multiple sampling calls to break down and answer questions
-   - Shows complex reasoning and synthesis
-
-7. **`translate_and_explain(text, target_language)`** - Sequential Tasks
-   - Demonstrates multi-step workflows
-   - First sampling for translation, second for explanation
-   - Shows how to chain sampling results
+7. **`translate_and_explain(text, target_language, translation=None, explanation=None)`**
+   - Caller may provide `translation` and `explanation`
+   - Fallback returns deterministic placeholder text for both fields
 
 ## Usage Examples
 
@@ -74,14 +65,12 @@ After the sampling_demo server is enabled, you can test it with prompts like:
 2. Client calls the tool with those values.
 3. Tool returns provided text, or deterministic fallback output if values are omitted.
 
-### Model Selection
+### Caller Responsibilities
 
-The sampling handler selects models based on:
-1. **Model preferences** provided in the sampling request
-2. **Configured models** in Atlas llmconfig.yml
-3. **Default model** as fallback
-
-Model preferences are hints, not requirements. The backend uses the first matching configured model or falls back to the default.
+The MCP caller is responsible for any actual LLM generation:
+1. Read the tool schema to find optional generated fields such as `summary`, `generated_code`, or `translation`
+2. Produce those values with the caller's own model flow if desired
+3. Call the tool with those values, or omit them to use the deterministic fallback path
 
 ## Configuration
 
@@ -139,11 +128,11 @@ async def analyze_text(text: str, analysis: str | None = None) -> str:
 | Use cases | Forms, confirmations | Analysis, generation |
 | Timeout | 5 minutes | 5 minutes |
 | Multiple turns | Supported | Supported |
-| Parameters | Response schema | Temperature, max_tokens, model preferences |
+| Parameters | Response schema | Optional caller-supplied generated fields |
 
 ## Support
 
-For issues or questions about sampling:
+For issues or questions about this demo:
 - Check Atlas UI documentation in `/docs` folder
-- Review FastMCP sampling docs at https://gofastmcp.com
+- Review the tool schemas for the optional caller-supplied fields
 - Report bugs via GitHub issues
