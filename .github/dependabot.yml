@@ -24,6 +24,13 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # FastMCP 4 implements MCP 2026-07-28, which removed server-initiated
+      # requests (SEP-2322). Atlas still depends on FastMCP 3.x sampling and
+      # elicitation callback wiring outside the client-driven demos.
+      - dependency-name: "fastmcp"
+        update-types:
+          - "version-update:semver-major"
   # Python dependencies (file-extractor-mock)
   - package-ecosystem: "pip"
     directory: "/mocks/file-extractor-mock"

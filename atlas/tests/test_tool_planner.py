@@ -2,6 +2,7 @@
 
 import base64
 import importlib.util
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -30,6 +31,16 @@ def _decode_artifact(result: dict) -> str:
 async def _call_plan_with_tools(**kwargs):
     """Call the unwrapped plan_with_tools async function."""
     return await _plan_with_tools_fn(**kwargs)
+
+
+def _assert_bash_parses(script: str) -> None:
+    """Fail the test if the generated shell script is not valid bash syntax."""
+    subprocess.run(
+        ["bash", "-n"],
+        input=script,
+        text=True,
+        check=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +248,10 @@ class TestPlanWithTools:
         )
         assert result["results"]["operation"] == "plan_with_tools"
         script = _decode_artifact(result)
-        assert "Task: test task" in script
+        assert "# test task" in script
         assert "atlas_chat_cli.py" in script
-        assert "test task" in script
+        assert "REPLACE_WITH_ATLAS_INSTRUCTION" in script
+        _assert_bash_parses(script)
 
     @pytest.mark.asyncio
     async def test_without_mcp_data_still_works(self):
@@ -299,3 +311,53 @@ class TestPlanWithTools:
         )
         script = _decode_artifact(result)
         assert "Replace the placeholder command below" in script
+
+    @pytest.mark.asyncio
+    async def test_default_script_comments_multiline_blocks_and_parses(self):
+        result = await _call_plan_with_tools(
+            task='line one\nline "two"',
+            _mcp_data={
+                "available_servers": [
+                    {
+                        "server_name": "calc",
+                        "description": "Calculator",
+                        "tools": [
+                            {
+                                "name": "calc_add",
+                                "description": "Add numbers",
+                                "parameters": {},
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+        script = _decode_artifact(result)
+        assert "\n# line one\n# line \"two\"\n" in script
+        assert "\n# Server: calc (Calculator)\n" in script
+        assert "\nServer: calc" not in script
+        _assert_bash_parses(script)
+
+    @pytest.mark.asyncio
+    async def test_generated_script_without_bash_shebang_falls_back(self):
+        result = await _call_plan_with_tools(
+            task="unsafe",
+            generated_script="echo hello",
+            _mcp_data={},
+        )
+
+        script = _decode_artifact(result)
+        assert script.startswith("#!/bin/bash")
+        assert "Replace the placeholder command below" in script
+
+    @pytest.mark.asyncio
+    async def test_generated_script_over_size_limit_falls_back(self):
+        result = await _call_plan_with_tools(
+            task="oversize",
+            generated_script="#!/bin/bash\n" + ("echo hi\n" * 10000),
+            _mcp_data={},
+        )
+
+        script = _decode_artifact(result)
+        assert "REPLACE_WITH_ATLAS_INSTRUCTION" in script

@@ -24,6 +24,7 @@ from fastmcp import Context
 from atlas.mcp_shared.server_factory import create_stdio_server
 
 mcp = create_stdio_server("Tool Planner")
+MAX_SCRIPT_BYTES = 64 * 1024
 
 
 def format_tools_for_llm(mcp_data: Dict[str, Any]) -> str:
@@ -114,6 +115,33 @@ def _sanitize_filename(task: str, max_length: int = 40) -> str:
     return slug[:max_length] if slug else "plan"
 
 
+def _comment_block(title: str, text: str) -> str:
+    """Render a multi-line text block as shell comments."""
+    lines = [f"# {title}"]
+    for line in text.splitlines() or [""]:
+        lines.append(f"# {line}" if line else "#")
+    return "\n".join(lines)
+
+
+def _normalize_generated_script(generated_script: Optional[str]) -> Optional[str]:
+    """Accept only reasonably sized bash scripts with an explicit shebang."""
+    if not isinstance(generated_script, str):
+        return None
+
+    script_text = generated_script.strip()
+    if not script_text:
+        return None
+
+    if len(script_text.encode("utf-8")) > MAX_SCRIPT_BYTES:
+        return None
+
+    first_line = script_text.splitlines()[0]
+    if first_line not in ("#!/bin/bash", "#!/usr/bin/env bash"):
+        return None
+
+    return script_text if script_text.endswith("\n") else f"{script_text}\n"
+
+
 def _build_artifact_response(
     script_text: str, task: str
 ) -> Dict[str, Any]:
@@ -176,17 +204,17 @@ async def plan_with_tools(
     """
     mcp_data = _mcp_data or {}
     tools_reference = format_tools_for_llm(mcp_data)
-    user_message = build_planning_prompt(task, tools_reference)
+    planning_prompt = build_planning_prompt(task, tools_reference)
 
     def _default_script() -> str:
         return (
             "#!/bin/bash\n"
             "set -e\n\n"
-            f"# Task: {task}\n"
+            f"{_comment_block('Task', task)}\n\n"
             "# Replace the placeholder command below with client-generated\n"
-            "# atlas_chat_cli.py steps based on the tools reference.\n"
-            f"#\n# Tools reference:\n{tools_reference}\n\n"
-            f'python atlas_chat_cli.py "{user_message}" --tools atlas_discover_sources\n'
+            "# atlas_chat_cli.py steps based on the planning prompt.\n\n"
+            f"{_comment_block('Planning prompt', planning_prompt)}\n\n"
+            'python atlas_chat_cli.py "REPLACE_WITH_ATLAS_INSTRUCTION" --tools atlas_discover_sources\n'
         )
 
     server_count = len(mcp_data.get("available_servers", []))
@@ -197,11 +225,7 @@ async def plan_with_tools(
             message=f"Discovered {server_count} servers, preparing script artifact...",
         )
 
-    script_text = (
-        generated_script.strip()
-        if isinstance(generated_script, str) and generated_script.strip()
-        else _default_script()
-    )
+    script_text = _normalize_generated_script(generated_script) or _default_script()
     response = _build_artifact_response(script_text, task)
 
     if ctx is not None:

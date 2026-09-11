@@ -200,3 +200,65 @@ class TestSamplingDemoTools:
         text = result.content[0].text
         assert "Translation to Spanish" in text
         assert "Translation Notes" in text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_name", "arguments", "expected_text"),
+        [
+            (
+                "summarize_text",
+                {"text": "Long text that needs summarization.", "summary": "Client summary"},
+                "Client summary",
+            ),
+            (
+                "analyze_sentiment",
+                {"text": "I love this product!", "analysis": "Custom sentiment analysis"},
+                "Custom sentiment analysis",
+            ),
+            (
+                "generate_code",
+                {
+                    "description": "calculate fibonacci numbers",
+                    "language": "Python",
+                    "generated_code": "def fib(n):\n    return n",
+                },
+                "def fib(n):",
+            ),
+            (
+                "creative_story",
+                {"prompt": "a robot learning to paint", "story": "Custom story"},
+                "Custom story",
+            ),
+            (
+                "multi_turn_conversation",
+                {
+                    "topic": "artificial intelligence",
+                    "initial_response": "Initial turn",
+                    "follow_up_response": "Follow-up turn",
+                },
+                "Follow-up turn",
+            ),
+            (
+                "research_question",
+                {
+                    "question": "What are the benefits of renewable energy?",
+                    "breakdown": "1. Cost\n2. Reliability",
+                    "answer": "They reduce emissions.",
+                },
+                "They reduce emissions.",
+            ),
+            (
+                "translate_and_explain",
+                {
+                    "text": "Hello, how are you?",
+                    "target_language": "Spanish",
+                    "translation": "Hola, ¿cómo estás?",
+                    "explanation": "Uses the informal singular form.",
+                },
+                "Uses the informal singular form.",
+            ),
+        ],
+    )
+    async def test_tools_accept_client_generated_fields(self, tool_name, arguments, expected_text):
+        result = await self._call_tool(tool_name, arguments)
+        assert expected_text in result.content[0].text

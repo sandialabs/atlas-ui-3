@@ -2,7 +2,9 @@
 
 **Last updated: 2026-01-14**
 
-Atlas UI 3 supports **LLM sampling**, an advanced MCP feature (FastMCP 2.0.0+) that enables MCP tools to request text generation from an LLM during execution. This allows tools to leverage AI capabilities for analysis, generation, reasoning, and more—without the client needing to orchestrate multiple calls.
+Atlas UI 3 supports **LLM sampling** for FastMCP 3.x servers that call `ctx.sample()` during tool execution. This allows tools to leverage AI capabilities for analysis, generation, reasoning, and more without the client needing to orchestrate multiple calls. Atlas also includes a separate client-driven pattern for tools that accept caller-supplied generated fields instead of invoking `ctx.sample()` directly.
+
+> Note: the bundled `sampling_demo` server now uses the client-driven pattern. It is no longer a live example of server-initiated sampling, and Atlas still pins `fastmcp` below 4.0 while the remaining sampling/elicitation callback wiring is migrated.
 
 ## What is LLM Sampling?
 
@@ -105,16 +107,11 @@ async def research_topic(topic: str, ctx: Context) -> str:
 
 ## Trying LLM Sampling
 
-To experience sampling features:
+To experiment with server-initiated sampling:
 
-1. **Access Admin Panel**: Log into Atlas UI 3 and go to the admin panel
-2. **Enable Demo Server**: Enable the `sampling_demo` MCP server
-3. **Try These Prompts**:
-   - "Summarize this text using the sampling demo: [your text]"
-   - "Analyze the sentiment of this review: [review text]"
-   - "Generate Python code that calculates fibonacci numbers"
-   - "Write a creative story about artificial intelligence"
-   - "Research this question: What are renewable energy benefits?"
+1. Build or enable an MCP server that still calls `ctx.sample()` directly.
+2. Confirm the server runs against the repo's pinned FastMCP 3.x dependency set.
+3. Invoke the tool from Atlas UI and verify the tool blocks on the LLM response before returning.
 
 ### Example: Summarization in Action
 
@@ -124,17 +121,9 @@ Here's what the sampling demo looks like when summarizing text:
 
 The tool uses LLM sampling to generate a concise summary, demonstrating how MCP tools can leverage AI capabilities during execution.
 
-### Available Demo Tools
+### Client-Driven Alternative
 
-The sampling demo MCP server includes these example tools:
-
-- **`summarize_text`**: Basic text summarization
-- **`analyze_sentiment`**: Sentiment analysis with system prompt
-- **`generate_code`**: Code generation with model preferences
-- **`creative_story`**: High-temperature creative writing
-- **`multi_turn_conversation`**: Build conversation context
-- **`research_question`**: Multi-step agentic research
-- **`translate_and_explain`**: Sequential sampling workflow
+If you need a FastMCP tool shape that does not rely on server-initiated sampling, review `atlas/mcp/sampling_demo/README.md`. That demo accepts optional caller-supplied generated fields and falls back to deterministic output when those fields are omitted.
 
 ## Model Selection
 
@@ -186,6 +175,7 @@ When building MCP tools with sampling (requires FastMCP 2.0.0+):
 - Model selection respects configured models and compliance levels
 - System prompts are prepended to message history
 - All sampling calls are logged for debugging
+- Atlas currently pins `fastmcp` below 4.0 because the remaining callback wiring for sampling and elicitation still depends on the FastMCP 3.x back-channel APIs
 
 ## Troubleshooting
 
@@ -199,4 +189,4 @@ When building MCP tools with sampling (requires FastMCP 2.0.0+):
 
 ---
 
-For technical documentation on creating sampling-enabled MCP tools, see the [Sampling Demo MCP Server Documentation](../../../atlas/mcp/sampling_demo/README.md) and [FastMCP Sampling Documentation](https://gofastmcp.com/clients/sampling).
+For technical documentation on creating sampling-enabled MCP tools, see the [FastMCP Sampling Documentation](https://gofastmcp.com/clients/sampling). For the separate client-driven pattern used by the bundled demo server, see the [Sampling Demo MCP Server Documentation](../../../atlas/mcp/sampling_demo/README.md).

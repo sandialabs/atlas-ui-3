@@ -24,14 +24,14 @@ def _truncate_words(text: str, max_words: int = 40) -> str:
 
 @mcp.tool
 async def summarize_text(text: str, summary: str | None = None) -> str:
-    """Return a provided summary or a deterministic fallback summary."""
+    """Return the optional client-supplied `summary` or a deterministic fallback."""
     fallback = _truncate_words(text.strip(), max_words=40)
     return _clean_or_default(summary, fallback or "Unable to generate summary")
 
 
 @mcp.tool
 async def analyze_sentiment(text: str, analysis: str | None = None) -> str:
-    """Return client-provided analysis or simple keyword-based sentiment."""
+    """Return the optional client-supplied `analysis` or simple keyword-based sentiment."""
     provided = _clean_or_default(analysis, "")
     if provided:
         return provided
@@ -48,7 +48,7 @@ async def analyze_sentiment(text: str, analysis: str | None = None) -> str:
 
 @mcp.tool
 async def generate_code(description: str, language: str, generated_code: str | None = None) -> str:
-    """Return client-provided code or a minimal starter snippet."""
+    """Return the optional client-supplied `generated_code` or a minimal starter snippet."""
     fallback = (
         f"# {language} starter snippet\n"
         f"# Goal: {description}\n"
@@ -60,7 +60,7 @@ async def generate_code(description: str, language: str, generated_code: str | N
 
 @mcp.tool
 async def creative_story(prompt: str, story: str | None = None) -> str:
-    """Return client-provided story or a short deterministic fallback."""
+    """Return the optional client-supplied `story` or a short deterministic fallback."""
     fallback = (
         f"Story prompt: {prompt}\n"
         "A curious traveler set out to explore this idea and discovered something meaningful."
@@ -74,7 +74,7 @@ async def multi_turn_conversation(
     initial_response: str | None = None,
     follow_up_response: str | None = None,
 ) -> str:
-    """Return a two-turn conversation summary supplied by the client."""
+    """Return optional client-supplied conversation turns or deterministic defaults."""
     initial = _clean_or_default(initial_response, f"Key aspects of {topic} include context, tradeoffs, and outcomes.")
     follow_up = _clean_or_default(follow_up_response, f"The top priority in {topic} is understanding the constraints.")
     return f"**Discussion on {topic}**\n\n**Initial Response:**\n{initial}\n\n**Follow-up:**\n{follow_up}"
@@ -86,7 +86,7 @@ async def research_question(
     breakdown: str | None = None,
     answer: str | None = None,
 ) -> str:
-    """Return client-provided analysis/answer or deterministic placeholders."""
+    """Return optional client-supplied `breakdown`/`answer` or deterministic placeholders."""
     breakdown_text = _clean_or_default(breakdown, "1. Define scope\n2. Gather evidence\n3. Compare alternatives")
     answer_text = _clean_or_default(answer, "Provide a synthesized answer from the client-side model output.")
     return f"**Research Question:** {question}\n\n**Analysis:**\n{breakdown_text}\n\n**Answer:**\n{answer_text}"
@@ -99,7 +99,7 @@ async def translate_and_explain(
     translation: str | None = None,
     explanation: str | None = None,
 ) -> str:
-    """Return client-provided translation/explanation or deterministic placeholders."""
+    """Return optional client-supplied `translation`/`explanation` or deterministic placeholders."""
     translated = _clean_or_default(translation, f"[{target_language} translation needed] {text}")
     notes = _clean_or_default(explanation, "Provide translation rationale from the client-side model output.")
     return f"**Translation to {target_language}:**\n{translated}\n\n**Translation Notes:**\n{notes}"
