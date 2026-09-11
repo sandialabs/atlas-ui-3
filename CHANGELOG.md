@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #918 - 2026-09-10
 - Remove server-initiated MCP sampling from `sampling_demo` and `tool_planner` so FastMCP 4.x works with client-driven model generation (#905).
-- Lift the root `fastmcp` dependency cap to allow 4.x updates and remove the Dependabot major-version ignore for `fastmcp`.
+- Keep the root `fastmcp` dependency cap below 4.0 and retain the Dependabot major-version ignore until the remaining back-channel demos are migrated.
 
 ### PR #917 - 2026-09-10
 - A workspace selector now sits in the chat-bar footer next to the model/tools/prompt controls (gated on the workspaces feature). It shares the header switcher's active-workspace state, so switching context works from either control, and its panel opens upward to stay on screen above the chat bar (closes #916).

@@ -24,6 +24,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "fastmcp"
+        update-types: ["version-update:semver-major"]
   # Python dependencies (file-extractor-mock)
   - package-ecosystem: "pip"
     directory: "/mocks/file-extractor-mock"

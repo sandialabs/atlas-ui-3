@@ -200,3 +200,67 @@ class TestSamplingDemoTools:
         text = result.content[0].text
         assert "Translation to Spanish" in text
         assert "Translation Notes" in text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_name", "arguments", "expected_text"),
+        [
+            (
+                "summarize_text",
+                {"text": "Long text that needs summarization.", "summary": "Client summary"},
+                "Client summary",
+            ),
+            (
+                "analyze_sentiment",
+                {"text": "I love this product!", "analysis": "Custom sentiment"},
+                "Custom sentiment",
+            ),
+            (
+                "generate_code",
+                {
+                    "description": "calculate fibonacci numbers",
+                    "language": "Python",
+                    "generated_code": "print('client code')",
+                },
+                "print('client code')",
+            ),
+            (
+                "creative_story",
+                {"prompt": "a robot learning to paint", "story": "Client story"},
+                "Client story",
+            ),
+            (
+                "multi_turn_conversation",
+                {
+                    "topic": "artificial intelligence",
+                    "initial_response": "Client initial",
+                    "follow_up_response": "Client follow-up",
+                },
+                "Client follow-up",
+            ),
+            (
+                "research_question",
+                {
+                    "question": "What are the benefits of renewable energy?",
+                    "breakdown": "Client breakdown",
+                    "answer": "Client answer",
+                },
+                "Client answer",
+            ),
+            (
+                "translate_and_explain",
+                {
+                    "text": "Hello, how are you?",
+                    "target_language": "Spanish",
+                    "translation": "Hola, ¿cómo estás?",
+                    "explanation": "Client explanation",
+                },
+                "Client explanation",
+            ),
+        ],
+    )
+    async def test_tools_accept_client_supplied_generated_fields(
+        self, tool_name, arguments, expected_text
+    ):
+        result = await self._call_tool(tool_name, arguments)
+        assert result.content[0].text == expected_text or expected_text in result.content[0].text

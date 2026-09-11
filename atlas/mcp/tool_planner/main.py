@@ -25,6 +25,9 @@ from atlas.mcp_shared.server_factory import create_stdio_server
 
 mcp = create_stdio_server("Tool Planner")
 
+MAX_GENERATED_SCRIPT_BYTES = 64 * 1024
+PLACEHOLDER_COMMAND = 'python atlas_chat_cli.py "REPLACE_ME" --tools atlas_discover_sources'
+
 
 def format_tools_for_llm(mcp_data: Dict[str, Any]) -> str:
     """Convert _mcp_data into a human-readable CLI tool reference.
@@ -114,6 +117,24 @@ def _sanitize_filename(task: str, max_length: int = 40) -> str:
     return slug[:max_length] if slug else "plan"
 
 
+def _comment_block(text: str) -> str:
+    """Render arbitrary multi-line text as commented shell lines."""
+    lines = text.splitlines() or [""]
+    return "\n".join("#" if not line else f"# {line}" for line in lines)
+
+
+def _validate_generated_script(generated_script: str) -> str:
+    """Validate caller-provided script text before packaging it as an artifact."""
+    script_text = generated_script.strip()
+    if len(script_text.encode("utf-8")) > MAX_GENERATED_SCRIPT_BYTES:
+        raise ValueError(
+            f"generated_script exceeds {MAX_GENERATED_SCRIPT_BYTES} bytes"
+        )
+    if not script_text.startswith("#!/bin/bash"):
+        raise ValueError("generated_script must start with #!/bin/bash")
+    return script_text
+
+
 def _build_artifact_response(
     script_text: str, task: str
 ) -> Dict[str, Any]:
@@ -162,7 +183,9 @@ async def plan_with_tools(
     This tool receives metadata about all available MCP tools via _mcp_data
     injection. The calling client can provide ``generated_script`` from its own
     LLM run; otherwise this tool returns a deterministic starter script and
-    embeds prompt guidance comments built from available tool metadata.
+    embeds prompt guidance comments built from available tool metadata. Any
+    provided ``generated_script`` must be a bash script that starts with
+    ``#!/bin/bash`` and stays within the size cap enforced below.
 
     Args:
         task: Description of the task to accomplish.
@@ -176,17 +199,23 @@ async def plan_with_tools(
     """
     mcp_data = _mcp_data or {}
     tools_reference = format_tools_for_llm(mcp_data)
-    user_message = build_planning_prompt(task, tools_reference)
+    planning_guidance = build_planning_prompt(task, tools_reference)
+    task_comments = _comment_block(f"Task: {task}")
+    tools_comments = _comment_block("Tools reference:\n" + tools_reference)
+    guidance_comments = _comment_block("Planning guidance:\n" + planning_guidance)
 
     def _default_script() -> str:
         return (
             "#!/bin/bash\n"
             "set -e\n\n"
-            f"# Task: {task}\n"
+            f"{task_comments}\n"
             "# Replace the placeholder command below with client-generated\n"
             "# atlas_chat_cli.py steps based on the tools reference.\n"
-            f"#\n# Tools reference:\n{tools_reference}\n\n"
-            f'python atlas_chat_cli.py "{user_message}" --tools atlas_discover_sources\n'
+            "#\n"
+            f"{tools_comments}\n"
+            "#\n"
+            f"{guidance_comments}\n\n"
+            f"{PLACEHOLDER_COMMAND}\n"
         )
 
     server_count = len(mcp_data.get("available_servers", []))
@@ -197,11 +226,9 @@ async def plan_with_tools(
             message=f"Discovered {server_count} servers, preparing script artifact...",
         )
 
-    script_text = (
-        generated_script.strip()
-        if isinstance(generated_script, str) and generated_script.strip()
-        else _default_script()
-    )
+    script_text = _default_script()
+    if isinstance(generated_script, str) and generated_script.strip():
+        script_text = _validate_generated_script(generated_script)
     response = _build_artifact_response(script_text, task)
 
     if ctx is not None:
