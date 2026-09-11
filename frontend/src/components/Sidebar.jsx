@@ -45,9 +45,38 @@ const MIN_WIDTH = 200
 const MAX_WIDTH = 480
 const DEFAULT_WIDTH = 256
 
+// Per-conversation run indicator (issue #884). Background progress is never
+// gated on the user having the conversation open, so this is the only place a
+// run in another conversation becomes visible: without it, "your agent is
+// still working over there" is invisible state.
+const RUN_INDICATORS = {
+  queued: { label: 'Queued', dot: 'bg-blue-400', text: 'text-blue-400', pulse: true },
+  running: { label: 'Running', dot: 'bg-green-400', text: 'text-green-400', pulse: true },
+  waiting_for_input: { label: 'Needs approval', dot: 'bg-amber-400', text: 'text-amber-400', pulse: true },
+  failed: { label: 'Failed', dot: 'bg-red-400', text: 'text-red-400', pulse: false },
+  cancelled: { label: 'Stopped', dot: 'bg-gray-500', text: 'text-gray-500', pulse: false },
+}
+
+export function RunIndicator({ run }) {
+  // `completed` is deliberately absent: a finished run is just a conversation
+  // with new messages in it, and a permanent green tick on every row it ever
+  // touched would be noise.
+  const style = run && RUN_INDICATORS[run.status]
+  if (!style) return null
+  return (
+    <span className={`flex items-center gap-1 text-xs ${style.text}`} title={run.error || style.label}>
+      <span className={`h-1.5 w-1.5 rounded-full ${style.dot} ${style.pulse ? 'animate-pulse' : ''}`} />
+      {style.label}
+    </span>
+  )
+}
+
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
     features, activeConversationId, loadSavedConversation, messages, saveMode, clearChat,
+    // Parallel conversation runs (issue #884): which conversations are still
+    // working, including ones the user is not currently viewing.
+    runsByConversation,
   } = useChat()
 
   const chatHistoryEnabled = features?.chat_history
@@ -323,6 +352,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-gray-600">{formatDate(conv.updated_at)}</span>
                         <span className="text-xs text-gray-600">{conv.message_count} msgs</span>
+                        <RunIndicator run={(runsByConversation || {})[conv.id]} />
                       </div>
                       {conv.tags && conv.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1">

@@ -59,6 +59,8 @@ export function cleanupStreamState() {
  * @param {Function} [deps.setActiveConversationId] - Set the active conversation ID for chat history tracking.
  * @param {Function} deps.streamToken - Dispatch a STREAM_TOKEN action with a text chunk.
  * @param {Function} deps.streamEnd - Dispatch a STREAM_END action to finalize streaming.
+ * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
+ * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
 export function createWebSocketHandler(deps) {
@@ -85,6 +87,8 @@ export function createWebSocketHandler(deps) {
     setActiveConversationId,
     streamToken,
     streamEnd,
+    getVisibleConversationId,
+    onRunStatus,
   } = deps
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
@@ -400,6 +404,56 @@ export function createWebSocketHandler(deps) {
 
   const handleWebSocketMessage = (data) => {
     try {
+      // Parallel conversation runs (issue #884). Run lifecycle frames are not
+      // transcript events -- they drive the per-conversation indicators in the
+      // history list, including for conversations that are not on screen.
+      if (data.type === 'run_started' || data.type === 'run_status' || data.type === 'runs_snapshot') {
+        if (typeof onRunStatus === 'function') onRunStatus(data)
+        // A new chat has no conversation id until the turn is saved, so the
+        // server mints one when it admits the run and reports it here. Adopting
+        // it now is what lets the routing below recognise this run's own events
+        // as belonging to the conversation on screen.
+        if (
+          data.type === 'run_started' &&
+          data.conversation_id &&
+          typeof setActiveConversationId === 'function' &&
+          typeof getVisibleConversationId === 'function' &&
+          !getVisibleConversationId()
+        ) {
+          setActiveConversationId(data.conversation_id)
+        }
+        return
+      }
+
+      // Route by conversation. With several conversations executing at once,
+      // an event that belongs to a background run must not be spliced into the
+      // transcript the user is looking at -- that is exactly the "messages in
+      // the wrong chat" failure this feature has to avoid.
+      //
+      // The `run_id` test is what makes this safe rather than merely
+      // approximate. Only a tracked run tags its events, and a tracked run
+      // always has a conversation id (the server refuses to start one without
+      // it), so a mismatch here is always a background run -- including when
+      // nothing is on screen yet, which is exactly when a fresh, empty chat
+      // would otherwise fill up with another conversation's output. Untagged
+      // events, from older producers and the whole untracked single-run path,
+      // are always applied.
+      // An approval request for a conversation that is not on screen is not
+      // shown as a modal here -- a prompt about a chat the user is not looking
+      // at, with no context around it, is its own kind of wrong. The run is
+      // flagged as needing attention in the history list instead, and the
+      // server replays the request when that conversation is opened, so the
+      // frame is deferred rather than lost.
+      if (data.run_id && data.conversation_id && typeof getVisibleConversationId === 'function') {
+        const visible = getVisibleConversationId()
+        if (visible !== data.conversation_id) {
+          if (typeof onRunStatus === 'function') {
+            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id })
+          }
+          return
+        }
+      }
+
   switch (data.type) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {

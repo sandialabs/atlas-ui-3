@@ -25,10 +25,14 @@ class _ElicitationRoutingContext:
         server_name: str,
         tool_call: ToolCall,
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+        user_email: str = "",
     ):
         self.server_name = server_name
         self.tool_call = tool_call
         self.update_cb = update_cb
+        # Carried so the elicitation request can be bound to its owner, which
+        # is what lets the response handler reject another user's answer.
+        self.user_email = user_email
 
 # Context-local override used to route MCP logs to the *current* request/session.
 # This prevents cross-user log leakage when MCPToolManager is shared across connections.
@@ -165,13 +169,14 @@ class RoutingMixin:
         server_name: str,
         tool_call: ToolCall,
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+        user_email: str = "",
     ) -> AsyncIterator[None]:
         """
         Set up elicitation routing for a tool call.
         Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
         Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
         """
-        routing = _ElicitationRoutingContext(server_name, tool_call, update_cb)
+        routing = _ElicitationRoutingContext(server_name, tool_call, update_cb, user_email)
         routing_key = (server_name, tool_call.id)
         self._elicitation_routing[routing_key] = routing
         try:
@@ -217,6 +222,7 @@ class RoutingMixin:
             try:
                 import uuid
 
+                from atlas.application.chat.approval_manager import resolve_approval_timeout
                 from atlas.application.chat.elicitation_manager import get_elicitation_manager
 
                 elicitation_id = str(uuid.uuid4())
@@ -228,6 +234,7 @@ class RoutingMixin:
                     tool_name=routing.tool_call.name,
                     message=message,
                     response_schema=response_schema,
+                    user_email=getattr(routing, "user_email", "") or "",
                 )
 
                 logger.debug(f"Sending elicitation_request to frontend for server '{server_name}'")
@@ -243,7 +250,7 @@ class RoutingMixin:
                 )
 
                 try:
-                    response = await request.wait_for_response(timeout=300.0)
+                    response = await request.wait_for_response(timeout=resolve_approval_timeout())
                 finally:
                     elicitation_manager.cleanup_request(elicitation_id)
 

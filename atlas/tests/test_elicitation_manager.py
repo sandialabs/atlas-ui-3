@@ -103,6 +103,85 @@ class TestElicitationRequest:
             await request.wait_for_response(timeout=0.1)
 
 
+class TestElicitationOwnership:
+    """A bound elicitation only accepts a response from the user who owns it.
+
+    Without this, any authenticated user holding an elicitation id could feed
+    data into another user's tool execution -- and because a background run can
+    wait indefinitely (issue #884), the id stays answerable for the life of the
+    process rather than for a 5-minute window.
+    """
+
+    def _bound_manager(self):
+        manager = ElicitationManager()
+        request = manager.create_elicitation_request(
+            elicitation_id="elicit_owned",
+            tool_call_id="tool_1",
+            tool_name="test_tool",
+            message="Enter your name",
+            response_schema={"type": "object"},
+            user_email="owner@example.com",
+        )
+        return manager, request
+
+    @pytest.mark.asyncio
+    async def test_owner_can_respond(self):
+        manager, request = self._bound_manager()
+
+        assert manager.handle_elicitation_response(
+            elicitation_id="elicit_owned",
+            action="accept",
+            data={"name": "ok"},
+            user_email="owner@example.com",
+        ) is True
+        assert request.future.done()
+
+    @pytest.mark.asyncio
+    async def test_other_user_is_rejected_and_request_stays_pending(self):
+        manager, request = self._bound_manager()
+
+        assert manager.handle_elicitation_response(
+            elicitation_id="elicit_owned",
+            action="accept",
+            data={"name": "injected"},
+            user_email="attacker@example.com",
+        ) is False
+        # Fail-closed: the waiting tool execution must not be resumed at all.
+        assert not request.future.done()
+
+    @pytest.mark.asyncio
+    async def test_missing_responder_is_rejected_for_a_bound_request(self):
+        """Fail-closed: a bound request REQUIRES a matching responder."""
+        manager, request = self._bound_manager()
+
+        assert manager.handle_elicitation_response(
+            elicitation_id="elicit_owned",
+            action="accept",
+            data={"name": "injected"},
+        ) is False
+        assert not request.future.done()
+
+    @pytest.mark.asyncio
+    async def test_legacy_unbound_request_still_answerable(self):
+        """Back-compat: requests created without an owner skip the check."""
+        manager = ElicitationManager()
+        request = manager.create_elicitation_request(
+            elicitation_id="elicit_legacy",
+            tool_call_id="tool_2",
+            tool_name="test_tool",
+            message="Enter your name",
+            response_schema={"type": "object"},
+        )
+
+        assert manager.handle_elicitation_response(
+            elicitation_id="elicit_legacy",
+            action="accept",
+            data={"name": "ok"},
+            user_email="anyone@example.com",
+        ) is True
+        assert request.future.done()
+
+
 class TestElicitationManager:
     """Test ElicitationManager class."""
 

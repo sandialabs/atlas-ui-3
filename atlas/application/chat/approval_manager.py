@@ -14,6 +14,29 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 logger = logging.getLogger(__name__)
 
 
+def resolve_approval_timeout() -> Optional[float]:
+    """Configured wait for a tool approval / elicitation response.
+
+    ``TOOL_APPROVAL_TIMEOUT_SECONDS=0`` means "wait indefinitely", which is how
+    a deployment opts into approvals that survive the user closing the browser
+    (issue #884). Any failure to read settings falls back to the historical
+    five-minute wait rather than blocking a run forever on a config error.
+    """
+    try:
+        # Read settings through the config module's own accessor rather than
+        # the app factory: the factory pulls in the whole chat pipeline, which
+        # imports this module back, and the resulting import cycle is both a
+        # lint finding and a real fragility.
+        from atlas.modules.config.config_manager import get_app_settings
+
+        configured = get_app_settings().tool_approval_timeout_seconds
+    except Exception:  # pragma: no cover - defensive
+        return 300.0
+    if configured is None:
+        return 300.0
+    return None if configured <= 0 else float(configured)
+
+
 class ToolApprovalRequest:
     """Represents a pending tool approval request."""
 
@@ -32,12 +55,18 @@ class ToolApprovalRequest:
         self.user_email = user_email
         self.future: asyncio.Future = asyncio.Future()
 
-    async def wait_for_response(self, timeout: float = 300.0) -> Dict[str, Any]:
+    async def wait_for_response(self, timeout: Optional[float] = 300.0) -> Dict[str, Any]:
         """
         Wait for user response to this approval request.
 
         Args:
-            timeout: Maximum time to wait in seconds (default 5 minutes)
+            timeout: Maximum time to wait in seconds (default 5 minutes).
+                ``None`` (or a non-positive value) waits indefinitely. That is
+                what makes an approval pause survive the user closing the
+                browser: a background run (issue #884) blocks here until the
+                user comes back and answers, instead of failing five minutes
+                later with nobody watching. The run's wall-clock limit, not
+                this timeout, is the backstop against waiting forever.
 
         Returns:
             Dict with 'approved', 'arguments', and optional 'reason'
@@ -45,6 +74,8 @@ class ToolApprovalRequest:
         Raises:
             asyncio.TimeoutError: If timeout is reached
         """
+        if timeout is None or timeout <= 0:
+            return await self.future
         try:
             return await asyncio.wait_for(self.future, timeout=timeout)
         except asyncio.TimeoutError:
