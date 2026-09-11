@@ -45,6 +45,7 @@ from atlas.domain.errors import (
     DataSourcePermissionError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMEmptyStreamError,
     LLMError,
     LLMServiceError,
     LLMTimeoutError,
@@ -411,6 +412,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         retryable. Rate limits, timeouts, and generic service errors (5xx) are
         retried with backoff.
         """
+        if isinstance(exc, LLMEmptyStreamError):
+            return True
+
         error_str = str(exc).lower()
 
         # A rejected request is deterministic: the identical payload will be
@@ -873,8 +877,14 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             raise ValueError(f"Model {model_name} not found in configuration")
 
         model_config = self.llm_config.models[model_name]
+        from atlas.modules.config.config_manager import get_app_settings
+
+        timeout = getattr(model_config, "request_timeout_seconds", None)
+        if timeout is None:
+            timeout = get_app_settings().llm_request_timeout_seconds
         kwargs = {
             "max_tokens": model_config.max_tokens or 1000,
+            "timeout": timeout,
         }
 
         # Use provided temperature or fall back to config temperature

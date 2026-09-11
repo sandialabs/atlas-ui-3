@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-09-07
+Last updated: 2026-09-11
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -38,6 +38,34 @@ models:
 ```
 
 **Note**: The second example demonstrates environment variable expansion in `extra_headers`, which is useful for services like OpenRouter that require site identification headers.
+
+## Request Timeouts and Empty Streams
+
+`LLM_REQUEST_TIMEOUT_SECONDS` sets the timeout passed to LiteLLM for every
+streaming and non-streaming request (default: **120 seconds**). Override it for
+an individual model with `request_timeout_seconds` in `config/llmconfig.yml`:
+
+```yaml
+models:
+  slow-model:
+    model_name: openai/slow-model
+    model_url: https://example.org/v1
+    request_timeout_seconds: 240
+```
+
+Both values must be positive, finite numbers. An omitted or null per-model value
+inherits the global setting. The timeout applies to the provider request and
+streaming reads, not the entire chat turn; a stream delivering chunks can run
+longer, and retries each get a fresh timeout.
+
+A stream that closes without delivering any text or tool calls (including
+metadata-only streams) is logged at warning level
+with its model and elapsed time, even when metrics logging is disabled. It is
+retried using `LLM_MAX_RETRIES` (default: 5 retries after the first attempt) and
+`LLM_RETRY_MAX_WAIT_SECONDS` (default: 300 seconds of cumulative backoff).
+If the budget is exhausted, the client receives an error instead of an empty
+successful response. Tool-only responses are valid, and failures after text
+has reached the client are never retried to avoid duplicating partial output.
 
 ## Environment Variable Expansion in LLM Configs
 

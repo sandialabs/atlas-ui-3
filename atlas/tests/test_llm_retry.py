@@ -17,6 +17,7 @@ import pytest
 from atlas.domain.errors import (
     ContextWindowExceededError,
     LLMAuthenticationError,
+    LLMEmptyStreamError,
     RateLimitError,
 )
 from atlas.modules.config.config_manager import config_manager
@@ -466,6 +467,132 @@ class TestStreamingRetry:
     """
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("with_tools", [False, True])
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_empty_stream_retries_then_recovers(
+        self, mock_sleep, caller, with_tools, caplog,
+    ):
+        empty = _FakeStream([])
+        success = _FakeStream(["recovered"])
+        completion = AsyncMock(side_effect=[empty, success])
+        with (
+            patch.object(streaming_module, "acompletion", completion),
+            patch.object(caller, "_get_litellm_model_name", return_value="test-model"),
+            patch.object(caller, "_get_model_kwargs", return_value={}),
+        ):
+            stream = (
+                caller.stream_with_tools("test-model", [], [{"type": "function"}])
+                if with_tools else caller.stream_plain("test-model", [])
+            )
+            items = [item async for item in stream]
+
+        assert [item for item in items if isinstance(item, str)] == ["recovered"]
+        assert completion.call_count == 2
+        assert mock_sleep.call_count == 1
+        assert empty.closed
+        assert "test-model completed with zero content chunks and no tool calls after " in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("with_tools", [False, True])
+    @pytest.mark.parametrize(
+        "retries,wait_budget,expected_calls", [(2, 300, 3), (0, 300, 1), (2, 0, 1)],
+    )
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_empty_stream_exhaustion_surfaces_domain_error(
+        self, mock_sleep, caller, monkeypatch, with_tools, retries,
+        wait_budget, expected_calls, caplog,
+    ):
+        monkeypatch.setenv("LLM_MAX_RETRIES", str(retries))
+        monkeypatch.setenv("LLM_RETRY_MAX_WAIT_SECONDS", str(wait_budget))
+        streams = [_FakeStream([]) for _ in range(expected_calls)]
+        completion = AsyncMock(side_effect=streams)
+        with (
+            patch.object(streaming_module, "acompletion", completion),
+            patch.object(streaming_module, "set_attrs") as set_attrs,
+            patch.object(caller, "_get_litellm_model_name", return_value="test-model"),
+            patch.object(caller, "_get_model_kwargs", return_value={}),
+        ):
+            stream = (
+                caller.stream_with_tools("test-model", [], [{"type": "function"}])
+                if with_tools else caller.stream_plain("test-model", [])
+            )
+            items = []
+            with pytest.raises(LLMEmptyStreamError, match="empty response"):
+                async for item in stream:
+                    items.append(item)
+
+        assert items == []
+        assert completion.call_count == expected_calls
+        assert all(stream.closed for stream in streams)
+        assert caplog.text.count("completed with zero content chunks and no tool calls after ") == expected_calls
+        assert mock_sleep.call_count == expected_calls - 1
+        attrs = set_attrs.call_args.args[1]
+        assert attrs["error_type"] == "LLMEmptyStreamError"
+        assert attrs["chunk_count"] == 0
+        assert attrs["output_chars"] == 0
+        assert attrs["retry_count"] == expected_calls - 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("with_tools", [False, True])
+    async def test_metadata_only_stream_is_empty(self, caller, with_tools, monkeypatch):
+        monkeypatch.setenv("LLM_MAX_RETRIES", "0")
+        completion = AsyncMock(return_value=_FakeStream([None]))
+        with (
+            patch.object(streaming_module, "acompletion", completion),
+            patch.object(caller, "_get_litellm_model_name", return_value="test-model"),
+            patch.object(caller, "_get_model_kwargs", return_value={}),
+        ):
+            stream = (
+                caller.stream_with_tools("test-model", [], [{"type": "function"}])
+                if with_tools else caller.stream_plain("test-model", [])
+            )
+            with pytest.raises(LLMEmptyStreamError):
+                async for _ in stream:
+                    pass
+        assert completion.call_count == 1
+
+    @pytest.mark.asyncio
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_empty_detection_is_per_attempt(self, mock_sleep, caller):
+        completion = AsyncMock(side_effect=[
+            _FakeStream([None], error=_rate_limit_exc()),
+            _FakeStream([]),
+            _FakeStream(["recovered"]),
+        ])
+        with (
+            patch.object(streaming_module, "acompletion", completion),
+            patch.object(caller, "_get_litellm_model_name", return_value="test-model"),
+            patch.object(caller, "_get_model_kwargs", return_value={}),
+        ):
+            items = [item async for item in caller.stream_plain("test-model", [])]
+        assert items == ["recovered"]
+        assert completion.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_tool_only_stream_is_not_empty(self, caller):
+        async def tool_stream():
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+                content=None,
+                tool_calls=[SimpleNamespace(
+                    index=0, id="call_1",
+                    function=SimpleNamespace(name="test_tool", arguments="{}"),
+                )],
+            ))])
+
+        completion = AsyncMock(return_value=tool_stream())
+        with (
+            patch.object(streaming_module, "acompletion", completion),
+            patch.object(caller, "_get_litellm_model_name", return_value="test-model"),
+            patch.object(caller, "_get_model_kwargs", return_value={}),
+        ):
+            items = [item async for item in caller.stream_with_tools(
+                "test-model", [], [{"type": "function"}],
+            )]
+        assert len(items) == 1
+        assert items[0].tool_calls[0].function.name == "test_tool"
+        assert completion.call_count == 1
+
+    @pytest.mark.asyncio
     @patch("asyncio.sleep", new_callable=AsyncMock)
     async def test_stream_plain_retries_rate_limit_before_first_token(self, mock_sleep, caller):
         """A rate limit at stream establishment is retried, then tokens flow."""
@@ -575,4 +702,3 @@ class TestStreamingRetry:
 
         assert collected == ["partial"]
         assert mock_acompletion.call_count == 1
-
