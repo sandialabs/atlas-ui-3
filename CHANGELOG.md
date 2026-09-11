@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #924 - 2026-09-11
+- The two run-event tagging implementations (`tag_run_event` on the transport callback and `stamp_with_current_run` on the shared publisher) now share one authority, `tag_event`, with the copy-vs-in-place choice made explicit; the publisher hot path still stamps in place and is covered by a test (closes #915).
+
 ### PR #920 - 2026-09-10
 - Transient LLM failures (rate limits, timeouts, 5xx) are now retried with exponential backoff on the streaming path (previously none) as well as the non-streaming path, with the retry count configurable via `LLM_MAX_RETRIES` (default 5) and a cumulative backoff cap via `LLM_RETRY_MAX_WAIT_SECONDS` (default 300s = 5 minutes); once a streaming response has yielded a token, failures surface instead of retrying (closes #919).
 
