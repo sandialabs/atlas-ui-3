@@ -5,6 +5,8 @@ an event is stamped with the run that produced it, and how a stop / approval
 frame is resolved to exactly one run.
 """
 
+import copy
+
 import pytest
 from main import (
     _cancel_addressed_run,
@@ -200,6 +202,89 @@ def test_frames_are_stamped_with_the_running_run():
         # A producer that already knows its conversation keeps it.
         kept = stamp_with_current_run({"type": "canvas_content", "conversation_id": "conv-real"})
         assert kept["conversation_id"] == "conv-real"
+    finally:
+        clear_current_run()
+
+
+def test_publisher_hot_path_stamps_in_place_without_copying():
+    """The two tagging call sites were collapsed into one rule (issue #915),
+    but the publisher path must keep stamping in place: it builds each frame
+    fresh per send, and copying every token event would be pure waste."""
+    from atlas.application.chat.runs.context import (
+        clear_current_run,
+        set_current_run,
+        stamp_with_current_run,
+    )
+
+    set_current_run("run-1", "conv-1")
+    try:
+        frame = {"type": "token_stream", "token": "hi"}
+        stamped = stamp_with_current_run(frame)
+        assert stamped is frame
+        assert frame["run_id"] == "run-1"
+        assert frame["conversation_id"] == "conv-1"
+    finally:
+        clear_current_run()
+
+
+@pytest.mark.parametrize(
+    "event,expected",
+    [
+        # A bare event gets both ids.
+        (
+            {"type": "token_stream", "token": "hi"},
+            {
+                "type": "token_stream",
+                "token": "hi",
+                "run_id": "run-1",
+                "conversation_id": "conv-1",
+            },
+        ),
+        # A producer that already named its own conversation keeps it, and
+        # still picks up the run id.
+        (
+            {"type": "canvas_content", "conversation_id": "conv-real"},
+            {
+                "type": "canvas_content",
+                "conversation_id": "conv-real",
+                "run_id": "run-1",
+            },
+        ),
+        # Both ids pre-set: nothing is touched.
+        (
+            {"type": "chat_response", "run_id": "run-real", "conversation_id": "conv-real"},
+            {"type": "chat_response", "run_id": "run-real", "conversation_id": "conv-real"},
+        ),
+        # Not a dict: nowhere to put the ids, so it passes straight through.
+        ("not-a-dict", "not-a-dict"),
+        (None, None),
+    ],
+)
+def test_both_tagging_entry_points_share_one_rule(event, expected):
+    """One function implements the stamping rule; the other delegates.
+
+    The expected values are written out literally rather than derived from
+    ``tag_event``: an oracle computed by the very function under test would
+    move in lockstep with a regression inside it (``setdefault`` quietly
+    becoming assignment, say) and the two entry points would still agree.
+
+    Parametrised across the shapes the rule actually distinguishes, so a
+    divergence between the entry points cannot hide in an input a single
+    happy-path case never reaches.
+    """
+    from atlas.application.chat.runs.context import (
+        clear_current_run,
+        set_current_run,
+        stamp_with_current_run,
+        tag_event,
+    )
+
+    assert tag_event(copy.deepcopy(event), "run-1", "conv-1") == expected
+    assert tag_run_event(copy.deepcopy(event), "run-1", "conv-1") == expected
+
+    set_current_run("run-1", "conv-1")
+    try:
+        assert stamp_with_current_run(copy.deepcopy(event)) == expected
     finally:
         clear_current_run()
 

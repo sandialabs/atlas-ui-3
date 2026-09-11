@@ -18,7 +18,7 @@ adapter stamps outgoing frames from it.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 
 class RunContext(NamedTuple):
@@ -48,17 +48,53 @@ def clear_current_run() -> None:
     _current_run.set(None)
 
 
-def stamp_with_current_run(data: Dict[str, Any]) -> Dict[str, Any]:
+def tag_event(
+    data: Any,
+    run_id: str,
+    conversation_id: str,
+    *,
+    copy: bool = True,
+) -> Any:
+    """Stamp an outbound event with the run that produced it (issue #884).
+
+    The single authority for the tagging rule; every caller goes through here
+    so the rule cannot drift between code paths (issue #915).
+
+    With several conversations executing at once, a bare event is ambiguous:
+    the client cannot tell whether a token, tool row, file, or completion
+    belongs to the conversation on screen or to one running in the background.
+    Every event a tracked run emits carries both ids so the client can route it
+    -- and, crucially, so it can *drop* events for a conversation it is not
+    displaying instead of splicing them into the visible transcript.
+
+    Existing ids are never overwritten: a producer deeper in the pipeline that
+    already knows its own conversation is more authoritative than the run
+    envelope.
+
+    Anything that is not a dict is returned untouched -- the publisher and the
+    turn callback both forward whatever a producer handed them, and a non-dict
+    frame has nowhere to put the ids.
+
+    ``copy`` picks between the two call sites' needs. The turn callback is
+    handed an event it does not own, so it copies. The publisher builds each
+    frame fresh per send and stamps in place, because copying every token event
+    would be wasteful for no benefit.
+    """
+    if not isinstance(data, dict):
+        return data
+    tagged = dict(data) if copy else data
+    tagged.setdefault("run_id", run_id)
+    tagged.setdefault("conversation_id", conversation_id)
+    return tagged
+
+
+def stamp_with_current_run(data: Any) -> Any:
     """Add run_id/conversation_id to an outgoing frame, if a run is executing.
 
-    Mutates and returns the frame: it is built fresh per send by the publisher,
-    and copying every token event would be wasteful for no benefit. Existing
-    values win -- a producer that knows its own conversation is more
-    authoritative than the ambient run.
+    Resolves the ambient run and delegates the stamping rule to
+    :func:`tag_event`, in place -- see its ``copy`` note for why.
     """
     context = _current_run.get()
-    if context is None or not isinstance(data, dict):
+    if context is None:
         return data
-    data.setdefault("run_id", context.run_id)
-    data.setdefault("conversation_id", context.conversation_id)
-    return data
+    return tag_event(data, context.run_id, context.conversation_id, copy=False)

@@ -30,7 +30,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -47,7 +47,7 @@ from atlas.application.chat.runs import (
     RunStatus,
     get_run_registry,
 )
-from atlas.application.chat.runs.context import set_current_run
+from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
 from atlas.application.chat.service import UNSET
 from atlas.core.auth import resolve_user_from_auth_header_async
@@ -162,26 +162,14 @@ _TOOL_SETTLED_EVENTS = frozenset(
 )
 
 
-def tag_run_event(message: dict, run_id: str, conversation_id: str) -> dict:
+def tag_run_event(message: Any, run_id: str, conversation_id: str) -> Any:
     """Stamp an outbound event with the run that produced it (issue #884).
 
-    With several conversations executing at once, a bare event is ambiguous:
-    the client cannot tell whether a token, tool row, file, or completion
-    belongs to the conversation on screen or to one running in the background.
-    Every event a tracked run emits carries both ids so the client can route it
-    -- and, crucially, so it can *drop* events for a conversation it is not
-    displaying instead of splicing them into the visible transcript.
-
-    Existing ids are never overwritten: a producer deeper in the pipeline that
-    already knows its own conversation is more authoritative than the run
-    envelope.
+    Delegates to the single tagging authority (issue #915); copies because the
+    event belongs to the caller. Inherits that authority's non-dict
+    passthrough, hence ``Any``. See :func:`tag_event` for the rule itself.
     """
-    if not isinstance(message, dict):
-        return message
-    tagged = dict(message)
-    tagged.setdefault("run_id", run_id)
-    tagged.setdefault("conversation_id", conversation_id)
-    return tagged
+    return tag_event(message, run_id, conversation_id, copy=True)
 
 
 async def _release_finished_run(

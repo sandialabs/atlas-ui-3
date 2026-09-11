@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #924 - 2026-09-11
+- The two run-event tagging implementations (`tag_run_event` on the transport callback and `stamp_with_current_run` on the shared publisher) now share one authority, `tag_event`, with the copy-vs-in-place choice made explicit; the publisher hot path still stamps in place and is covered by a test (closes #915).
+
 ### PR #923 - 2026-09-11
 - Add global and per-model LLM request timeouts; zero-chunk streams now log a warning, retry within the existing budget, and surface an error when retries are exhausted (closes #922).
 
