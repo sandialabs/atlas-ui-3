@@ -18,7 +18,7 @@ adapter stamps outgoing frames from it.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 
 class RunContext(NamedTuple):

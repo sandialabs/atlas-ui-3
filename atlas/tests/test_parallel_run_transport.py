@@ -228,23 +228,48 @@ def test_publisher_hot_path_stamps_in_place_without_copying():
 
 
 @pytest.mark.parametrize(
-    "event",
+    "event,expected",
     [
-        {"type": "token_stream", "token": "hi"},
-        # A producer that already named its own conversation, and one that
-        # named both ids: existing values must survive either entry point.
-        {"type": "canvas_content", "conversation_id": "conv-real"},
-        {"type": "chat_response", "run_id": "run-real", "conversation_id": "conv-real"},
+        # A bare event gets both ids.
+        (
+            {"type": "token_stream", "token": "hi"},
+            {
+                "type": "token_stream",
+                "token": "hi",
+                "run_id": "run-1",
+                "conversation_id": "conv-1",
+            },
+        ),
+        # A producer that already named its own conversation keeps it, and
+        # still picks up the run id.
+        (
+            {"type": "canvas_content", "conversation_id": "conv-real"},
+            {
+                "type": "canvas_content",
+                "conversation_id": "conv-real",
+                "run_id": "run-1",
+            },
+        ),
+        # Both ids pre-set: nothing is touched.
+        (
+            {"type": "chat_response", "run_id": "run-real", "conversation_id": "conv-real"},
+            {"type": "chat_response", "run_id": "run-real", "conversation_id": "conv-real"},
+        ),
         # Not a dict: nowhere to put the ids, so it passes straight through.
-        "not-a-dict",
-        None,
+        ("not-a-dict", "not-a-dict"),
+        (None, None),
     ],
 )
-def test_both_tagging_entry_points_share_one_rule(event):
+def test_both_tagging_entry_points_share_one_rule(event, expected):
     """One function implements the stamping rule; the other delegates.
 
+    The expected values are written out literally rather than derived from
+    ``tag_event``: an oracle computed by the very function under test would
+    move in lockstep with a regression inside it (``setdefault`` quietly
+    becoming assignment, say) and the two entry points would still agree.
+
     Parametrised across the shapes the rule actually distinguishes, so a
-    divergence between the two entry points cannot hide in an input the single
+    divergence between the entry points cannot hide in an input a single
     happy-path case never reaches.
     """
     from atlas.application.chat.runs.context import (
@@ -254,8 +279,7 @@ def test_both_tagging_entry_points_share_one_rule(event):
         tag_event,
     )
 
-    expected = tag_event(copy.deepcopy(event), "run-1", "conv-1")
-
+    assert tag_event(copy.deepcopy(event), "run-1", "conv-1") == expected
     assert tag_run_event(copy.deepcopy(event), "run-1", "conv-1") == expected
 
     set_current_run("run-1", "conv-1")
