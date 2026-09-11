@@ -6,15 +6,16 @@ crosses users or servers, and the fact that a provider-supplied error string
 is never reflected back to the browser verbatim.
 """
 
+import hashlib
 import time
-from urllib.parse import quote
 from unittest.mock import AsyncMock, patch
+from urllib.parse import quote
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.middleware.sessions import SessionMiddleware
 
+from atlas.core.session_middleware import SessionMiddleware
 from atlas.modules.mcp_tools import mcp_oauth_service
 from atlas.modules.mcp_tools.mcp_oauth import (
     MCPOAuthError,
@@ -222,6 +223,27 @@ def _start(client, manager, server=SERVER):
 
 
 class TestOAuthStart:
+    def test_start_works_when_sha1_is_unavailable(
+        self, app, manager, storage, monkeypatch
+    ):
+        def reject_sha1(*args, **kwargs):
+            raise ValueError("SHA-1 is unavailable")
+
+        # itsdangerous's default digest is a lazy wrapper that re-reads
+        # hashlib.sha1 on every signature, so patching after the middleware
+        # is constructed still exercises the SHA-1 path Starlette would use.
+        monkeypatch.setattr(hashlib, "sha1", reject_sha1)
+        response = _start(TestClient(app), manager)
+
+        assert response.status_code == 302
+        assert "session" in response.cookies
+        middleware = app.middleware_stack
+        while not isinstance(middleware, SessionMiddleware):
+            if not hasattr(middleware, "app"):
+                pytest.fail("SessionMiddleware not found in app middleware stack")
+            middleware = middleware.app
+        assert middleware.signer.digest_method is hashlib.sha256
+
     def test_redirects_to_provider_with_pkce(self, app, manager, storage):
         response = _start(TestClient(app), manager)
         assert response.status_code == 302

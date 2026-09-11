@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #928 - 2026-09-11
+- MCP OAuth route tests now use FIPS-safe SHA-256 session signing, with behavioral and repository-scan coverage preventing SHA-1 session-signing regressions (closes #927).
+
 ### PR #924 - 2026-09-11
 - The two run-event tagging implementations (`tag_run_event` on the transport callback and `stamp_with_current_run` on the shared publisher) now share one authority, `tag_event`, with the copy-vs-in-place choice made explicit; the publisher hot path still stamps in place and is covered by a test (closes #915).
 
