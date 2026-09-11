@@ -85,7 +85,7 @@ The timeout is cleared whenever `isThinking` becomes false (normal completion or
 
 ### 8. Auto-Retry for Transient LLM Errors (2026-03-10)
 
-`LiteLLMCaller._acompletion_with_retry()` wraps litellm `acompletion` calls with automatic retry and exponential backoff. Transient errors (rate limit, timeout, 5xx server errors) are retried up to `MAX_LLM_RETRIES` (3) times. Auth errors and other non-transient errors raise immediately without retry.
+`LiteLLMCaller._acompletion_with_retry()` wraps litellm `acompletion` calls with automatic retry and exponential backoff. Transient errors (rate limit, timeout, 5xx server errors) are retried up to `LLM_MAX_RETRIES` (default 5) times, with the cumulative backoff capped at `LLM_RETRY_MAX_WAIT_SECONDS` (default 300s = 5 minutes) -- see issue #919. The streaming generators in `litellm_streaming.py` follow the same policy until the first token is yielded. Auth errors and other non-transient errors raise immediately without retry.
 
 - `_is_retryable_error()` classifies exceptions: rate limits, timeouts, and server errors (502/503/429) are retryable; auth errors are not
 - Backoff: `RETRY_BASE_DELAY_SECONDS * 2^attempt + jitter` (1s, 2s, 4s base with random 0-0.5s jitter)

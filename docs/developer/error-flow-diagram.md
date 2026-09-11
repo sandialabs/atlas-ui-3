@@ -1,6 +1,6 @@
 # Error Flow Diagram
 
-Last updated: 2026-07-24
+Last updated: 2026-09-10
 
 ## Complete Error Handling Flow
 
@@ -196,8 +196,8 @@ Three ordering constraints matter here:
 
 `_is_retryable_error()` returns `False` for `BadRequestError` before its
 transient-keyword tests, for the same reason: a 400 is deterministic, and one
-that happens to contain `timeout` would otherwise be retried three times with
-backoff before failing.
+that happens to contain `timeout` would otherwise be retried up to
+`LLM_MAX_RETRIES` times (default 5, issue #919) with backoff before failing.
 
 `call_with_rag()` falls back to a simpler call when RAG breaks, so its
 passthrough tuple catches `LLMError` — a provider rejection is not a RAG

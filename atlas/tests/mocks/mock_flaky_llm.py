@@ -52,7 +52,8 @@ class AlwaysFailLLMResponse:
 
     Args:
         exception: The exception instance to raise on every call.
-        count: How many calls to prepare for (should be >= MAX_LLM_RETRIES + 1).
+        count: How many calls to prepare for (should be >= the configured
+            retry count + 1, i.e. 6 by default).
     """
 
     def __init__(self, exception: Optional[Exception] = None, count: int = 10):

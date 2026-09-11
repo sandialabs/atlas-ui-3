@@ -13,7 +13,6 @@ fallbacks, cost tracking, and provider-specific optimizations.
 
 import asyncio
 import logging
-import random
 import re
 import time
 import warnings
@@ -55,6 +54,7 @@ from atlas.modules.config.config_manager import resolve_env_var
 
 from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse, split_provider
+from .retry_config import _llm_retry_settings, _retry_backoff_delay
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +75,6 @@ litellm.modify_params = True
 # probe -- until it finally fails and falls back to tiktoken anyway.  Opting out
 # skips straight to the fallback, so token counts are unchanged.
 litellm.disable_hf_tokenizer_download = True
-
-# Retry configuration for transient LLM errors
-MAX_LLM_RETRIES = 3
-RETRY_BASE_DELAY_SECONDS = 1.0
 
 # Substrings that mark a provider rejection as being about the tool payload
 # rather than the rest of the request. Only when one of these appears (and the
@@ -457,8 +453,11 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
     async def _acompletion_with_retry(self, **kwargs):
         """Call litellm.acompletion with automatic retry for transient errors.
 
-        Retries up to MAX_LLM_RETRIES times with exponential backoff and jitter.
-        Auth errors are raised immediately without retry.
+        Retries transient failures up to LLM_MAX_RETRIES times (env
+        configurable, default 5) with exponential backoff and jitter. The
+        cumulative backoff is capped at LLM_RETRY_MAX_WAIT_SECONDS (default
+        300s = 5 minutes, issue #919). Auth errors are raised immediately
+        without retry.
         """
         litellm_model = kwargs.get("model", "")
         provider, model_suffix = split_provider(litellm_model)
@@ -474,10 +473,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             "message_count": len(kwargs.get("messages") or []),
         }
 
+        max_retries, max_wait = _llm_retry_settings()
         last_exc = None
         with start_span("llm.call", initial_attrs) as span:
             start_ns = time.monotonic_ns()
-            for attempt in range(MAX_LLM_RETRIES + 1):
+            attempt = 0
+            waited = 0.0
+            while attempt <= max_retries:
                 try:
                     response = await acompletion(**kwargs)
                     set_attrs(span, _llm_response_attrs(response, attempt))
@@ -487,20 +489,38 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     return response
                 except Exception as exc:
                     last_exc = exc
-                    remaining = MAX_LLM_RETRIES - attempt
-                    if remaining > 0 and self._is_retryable_error(exc):
-                        delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 0.5)
+                    if attempt < max_retries and self._is_retryable_error(exc):
+                        delay = _retry_backoff_delay(attempt, max_wait, waited)
+                        if delay is None:
+                            # Wait budget exhausted: further backoff would
+                            # exceed the configured ceiling, so surface the
+                            # failure instead of sleeping past it.
+                            logger.warning(
+                                "LLM call failed (attempt %d/%d); retry wait budget "
+                                "(%.0fs) exhausted, giving up: %s",
+                                attempt + 1, max_retries + 1, max_wait, exc,
+                            )
+                            set_attrs(span, {
+                                "retry_count": attempt,
+                                "retry_wait_seconds": waited,
+                                "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                                "error_type": type(exc).__name__,
+                            })
+                            raise
                         logger.warning(
                             "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
                             attempt + 1,
-                            MAX_LLM_RETRIES + 1,
+                            max_retries + 1,
                             delay,
                             exc,
                         )
+                        attempt += 1
+                        waited += delay
                         await asyncio.sleep(delay)
                     else:
                         set_attrs(span, {
                             "retry_count": attempt,
+                            "retry_wait_seconds": waited,
                             "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                             "error_type": type(exc).__name__,
                         })
