@@ -204,6 +204,36 @@ def test_frames_are_stamped_with_the_running_run():
         clear_current_run()
 
 
+def test_publisher_hot_path_stamps_in_place_without_copying():
+    """The two tagging call sites were collapsed into one rule (issue #915),
+    but the publisher path must keep stamping in place: it builds each frame
+    fresh per send, and copying every token event would be pure waste."""
+    from atlas.application.chat.runs.context import (
+        clear_current_run,
+        set_current_run,
+        stamp_with_current_run,
+    )
+
+    set_current_run("run-1", "conv-1")
+    try:
+        frame = {"type": "token_stream", "token": "hi"}
+        stamped = stamp_with_current_run(frame)
+        assert stamped is frame
+        assert frame["run_id"] == "run-1"
+        assert frame["conversation_id"] == "conv-1"
+    finally:
+        clear_current_run()
+
+
+def test_both_tagging_entry_points_share_one_rule():
+    """One function implements the stamping rule; the other delegates."""
+    from atlas.application.chat.runs.context import tag_event
+
+    assert tag_run_event({"type": "x"}, "run-1", "conv-1") == tag_event(
+        {"type": "x"}, "run-1", "conv-1"
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_identity_does_not_leak_between_tasks():
     """Each run's task gets its own context, which is the whole reason a
