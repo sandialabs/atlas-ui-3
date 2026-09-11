@@ -59,6 +59,11 @@ class LLMServiceError(LLMError):
     pass
 
 
+class LLMEmptyStreamError(LLMServiceError):
+    """The provider closed a stream without sending text or tool calls."""
+    pass
+
+
 class LLMBadRequestError(LLMError):
     """Raised when the provider rejects the request itself.
 

@@ -88,6 +88,10 @@ class ModelConfig(BaseModel):
     description: Optional[str] = None
     max_tokens: Optional[int] = 10000
     temperature: Optional[float] = 0.7
+    request_timeout_seconds: Optional[float] = Field(
+        default=None, gt=0, allow_inf_nan=False,
+        description="Override LLM_REQUEST_TIMEOUT_SECONDS for this model",
+    )
     # Optional extra HTTP headers (e.g. for providers like OpenRouter)
     extra_headers: Optional[Dict[str, str]] = None
     # Compliance/security level (e.g., "External", "Internal", "Public")
