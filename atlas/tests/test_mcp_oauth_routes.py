@@ -234,6 +234,10 @@ class TestOAuthStart:
 
         assert response.status_code == 302
         assert "session" in response.cookies
+        middleware = app.middleware_stack
+        while not isinstance(middleware, SessionMiddleware):
+            middleware = middleware.app
+        assert middleware.signer.digest_method is hashlib.sha256
 
     def test_redirects_to_provider_with_pkce(self, app, manager, storage):
         response = _start(TestClient(app), manager)
