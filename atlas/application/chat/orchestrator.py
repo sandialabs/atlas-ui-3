@@ -12,6 +12,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.config.settings import configured_agent_max_steps
 from atlas.modules.mcp_tools.atlas_server import SEARCH_TOOL_NAME, normalize_tool_name
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
@@ -150,6 +151,13 @@ class ChatOrchestrator:
         except Exception:
             return True
 
+    def _agent_mode_available(self) -> bool:
+        """Whether the deployment's agent-mode kill switch allows agent runs."""
+        settings = getattr(self.config_manager, "app_settings", None)
+        if settings is None:
+            return True
+        return bool(getattr(settings, "feature_agent_mode_available", True))
+
     def _bounded_agent_steps(self, requested: Any) -> int:
         """Clamp the client-supplied step count to the configured maximum.
 
@@ -163,10 +171,7 @@ class ChatOrchestrator:
         configured = 10
         settings = getattr(self.config_manager, "app_settings", None)
         if settings is not None:
-            try:
-                configured = int(getattr(settings, "agent_max_steps", 10) or 10)
-            except (TypeError, ValueError):
-                configured = 10
+            configured = configured_agent_max_steps(settings)
         configured = max(configured, 1)
 
         if requested is None:
@@ -510,6 +515,20 @@ class ChatOrchestrator:
         # The reachability check runs inside the tool-running branches below,
         # after authorization filtering, so it judges the tool list the LLM
         # will actually see.
+
+        # Admin kill switch (issue #849 review): the flag can still arrive on the
+        # wire from a client with a stale config cache, so the server refuses
+        # agent mode itself when the deployment has the feature disabled --
+        # client-side gating alone would let one cached turn through.
+        if agent_mode and not self._agent_mode_available():
+            logger.info("Agent mode is disabled by configuration; running as a normal chat turn")
+            await self.event_publisher.publish_warning(
+                message=(
+                    "**Agent mode is disabled.** This deployment has agent mode turned off, "
+                    "so this message ran without it."
+                ),
+            )
+            agent_mode = False
 
         # Agent mode needs at least one tool to act on. With no tools selected
         # the agentic loop has nothing to call, and tool-seeking prompts can

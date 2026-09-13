@@ -7,6 +7,7 @@ must NOT trigger RAG mode.
 """
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -230,3 +231,62 @@ async def test_agent_mode_with_selected_atlas_rag_tool_routes_to_agent():
 
     called_kwargs = mocks["agent"].await_args.kwargs
     assert called_kwargs["selected_tools"] == ["atlas_rag_query"]
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_kill_switch_downgrades_to_plain():
+    """``FEATURE_AGENT_MODE_AVAILABLE=false`` must be enforced server-side.
+
+    The client-side gate trusts a config cache that can be stale, so a browser
+    may still send ``agent_mode: true`` on its first turn after an admin
+    disables the feature; the orchestrator refuses it regardless (#849
+    review).
+    """
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        return_value=["server_tool1"]
+    )
+    orch.config_manager = SimpleNamespace(
+        app_settings=SimpleNamespace(feature_agent_mode_available=False, agent_max_steps=10)
+    )
+
+    await orch.execute(
+        session_id=sid,
+        content="do a task",
+        model="test-model",
+        selected_tools=["server_tool1"],
+        agent_mode=True,
+    )
+
+    mocks["agent"].assert_not_awaited()
+    mocks["tools"].assert_awaited_once()
+    mocks["warning"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_kill_switch_off_is_noop_when_enabled():
+    """Default deployments (no kill switch) keep routing agent turns."""
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        return_value=["server_tool1"]
+    )
+    orch.config_manager = SimpleNamespace(
+        app_settings=SimpleNamespace(feature_agent_mode_available=True, agent_max_steps=10)
+    )
+
+    await orch.execute(
+        session_id=sid,
+        content="do a task",
+        model="test-model",
+        selected_tools=["server_tool1"],
+        agent_mode=True,
+    )
+
+    mocks["agent"].assert_awaited_once()
+    mocks["warning"].assert_not_awaited()

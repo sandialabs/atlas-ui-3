@@ -123,10 +123,11 @@ export function useChatConfig() {
   )
   // Admin-configured ceiling for the agent loop (issue #849): bounds the Max
   // Agent Iterations slider so its upper end matches what the server will
-  // actually honor. Falls back to the old hardcoded bound until config lands.
+  // actually honor. Falls back to the server's default AGENT_MAX_STEPS until
+  // config lands, so a pre-config choice is already within the real ceiling.
   const [agentMaxStepsLimit, setAgentMaxStepsLimit] = useState(() => {
     const v = Number(cached.current?.agent_max_steps)
-    return Number.isFinite(v) && v > 0 ? v : 50
+    return Number.isFinite(v) && v > 0 ? v : 10
   })
   const [isInAdminGroup, setIsInAdminGroup] = useState(false)
   // Tracks whether we have received at least one config response (cache or network)
@@ -148,7 +149,7 @@ export function useChatConfig() {
     setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
     setAgentModeAvailable(!!cfg.agent_mode_available)
     const maxSteps = Number(cfg.agent_max_steps)
-    setAgentMaxStepsLimit(Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 50)
+    setAgentMaxStepsLimit(Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 10)
     setIsInAdminGroup(!!cfg.is_in_admin_group)
 
     if (!isShell) {

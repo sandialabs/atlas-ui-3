@@ -41,6 +41,8 @@ describe('Message agent_status rendering (issue #849)', () => {
 
   it('renders only the small Agent box when the marker has no text', () => {
     render(<Message message={{ ...baseMessage, content: '' }} onRewind={null} userIndex={null} />)
+    // The row is announced to screen readers via role="status" + its name.
+    expect(screen.getByRole('status', { name: 'Agent mode started' })).toBeInTheDocument()
     expect(screen.getByText('Agent')).toBeInTheDocument()
     expect(screen.queryByText(/Agent Mode Started/)).not.toBeInTheDocument()
   })

@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-09-04
+Last updated: 2026-09-13
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now

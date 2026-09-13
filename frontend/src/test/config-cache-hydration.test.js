@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { CONFIG_CACHE_KEY } from '../hooks/chat/useChatConfig'
+import { renderHook } from '@testing-library/react'
+import { useChatConfig, CONFIG_CACHE_KEY } from '../hooks/chat/useChatConfig'
 
 // Sample full config response
 const FULL_CONFIG = {
@@ -245,6 +246,49 @@ describe('Shell Config Application', () => {
 
     expect(models).toHaveLength(2)
     expect(models[0].name).toBe('gpt-4o')
+  })
+})
+
+describe('agentMaxStepsLimit parsing (issue #849)', () => {
+  let storage = {}
+
+  beforeEach(() => {
+    storage = {}
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key) => storage[key] ?? null),
+      setItem: vi.fn((key, value) => { storage[key] = value }),
+      removeItem: vi.fn((key) => { delete storage[key] })
+    })
+    // A never-resolving fetch keeps the mount-time config fetch from
+    // overwriting the cache-derived value under test.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const renderWithCache = (cacheValue) => {
+    if (cacheValue !== undefined) {
+      storage[CONFIG_CACHE_KEY] = JSON.stringify({ ...FULL_CONFIG, agent_max_steps: cacheValue })
+    }
+    return renderHook(() => useChatConfig())
+  }
+
+  it('uses a valid cached ceiling', () => {
+    const { result } = renderWithCache(30)
+    expect(result.current.agentMaxStepsLimit).toBe(30)
+  })
+
+  it.each([
+    ['missing (no cache)', undefined],
+    ['null', null],
+    ['zero', 0],
+    ['negative', -5],
+    ['non-numeric string', 'abc'],
+  ])('falls back to the server default for %s', (_label, value) => {
+    const { result } = renderWithCache(value)
+    expect(result.current.agentMaxStepsLimit).toBe(10)
   })
 })
 

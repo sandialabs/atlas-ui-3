@@ -672,7 +672,7 @@ export const ChatProvider = ({ children }) => {
 // preference must not leak a live agent_mode even if the hook's inputs drift
 // (issue #849 review).
 agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
-			agent_max_steps: Math.min(settings.maxIterations || agent.agentMaxSteps, config.agentMaxStepsLimit || 50),
+			agent_max_steps: Math.min(settings.maxIterations || agent.agentMaxSteps, config.agentMaxStepsLimit || 10),
 			temperature: settings.llmTemperature || 0.7,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,

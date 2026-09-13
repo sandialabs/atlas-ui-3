@@ -65,7 +65,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable, isInAdminGroup, agentMaxStepsLimit } = useChat()
   // Admin-configured ceiling for the agent loop (issue #849); keeps the
   // slider's upper bound aligned with what the backend will actually honor.
-  const maxStepsLimit = Number(agentMaxStepsLimit) > 0 ? Number(agentMaxStepsLimit) : 50
+  // Server default (10) until config lands.
+  const maxStepsLimit = Number(agentMaxStepsLimit) > 0 ? Number(agentMaxStepsLimit) : 10
   const customPromptsEnabled = !!features?.custom_prompts
   const toolsEnabled = !!features?.tools
   const ragEnabled = !!features?.rag
@@ -290,9 +291,19 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
   // A stored max-iterations value above the admin-configured ceiling is
   // clamped so the slider and the value chip never advertise a step count
-  // the backend would just clamp away (issue #849).
+  // the backend would just clamp away (issue #849). The corrected value is
+  // persisted too, so direct consumers of chatui-settings never see an
+  // unreachable number.
   useEffect(() => {
     setSettings(prev => (prev.maxIterations > maxStepsLimit ? { ...prev, maxIterations: maxStepsLimit } : prev))
+    try {
+      const raw = JSON.parse(localStorage.getItem('chatui-settings') || '{}')
+      if ((raw.maxIterations ?? 0) > maxStepsLimit) {
+        localStorage.setItem('chatui-settings', JSON.stringify({ ...raw, maxIterations: maxStepsLimit }))
+      }
+    } catch {
+      /* ignore malformed stored settings */
+    }
   }, [maxStepsLimit])
 
   // Save settings to localStorage whenever they change
@@ -313,8 +324,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   }
 
   const handleReset = () => {
-    setSettings(defaultSettings)
-    saveSettings(defaultSettings)
+    // The reset defaults must also respect the admin ceiling (issue #849).
+    const defaults = { ...defaultSettings, maxIterations: Math.min(defaultSettings.maxIterations, maxStepsLimit) }
+    setSettings(defaults)
+    saveSettings(defaults)
   }
 
   // Reverting General is deferred behind the close: a later guard can abort the
