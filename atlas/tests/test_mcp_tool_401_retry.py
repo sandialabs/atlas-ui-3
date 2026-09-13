@@ -142,6 +142,27 @@ class TestCallTool401Retry:
         manager._refresh_oauth_token.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_retry_without_buildable_client_gets_401_specific_message(self, manager):
+        """A refused forced refresh + expired token ends in the reconnect error.
+
+        The retry cannot build a client at all, which used to surface the
+        generic "requires authentication" signal; the recovery path now gives
+        it the same 401-specific message as a refused retry.
+        """
+        failing = _fake_client(call_side_effect=_http_401())
+
+        manager._get_user_client = AsyncMock(side_effect=[failing, None])
+        manager._refresh_oauth_token = AsyncMock(return_value=None)
+
+        with pytest.raises(AuthenticationRequiredException) as exc_info:
+            await manager.call_tool(SERVER, "my_tool", {}, user_email=USER, conversation_id=CONV)
+
+        message = str(exc_info.value)
+        assert "401" in message
+        assert "reconnected/re-authorized" in message
+        assert exc_info.value.oauth_start_url == f"/api/mcp/auth/{SERVER}/oauth/start"
+
+    @pytest.mark.asyncio
     async def test_no_retry_for_non_401_errors(self, manager):
         failing = _fake_client(call_side_effect=RuntimeError("boom"))
 
@@ -338,9 +359,6 @@ class TestRefreshInvalidatesCachedClients:
 
         oauth_client = MagicMock()
         oauth_client.redirect_uri = "redirect-uri"
-
-        async def _metadata(url):
-            return MagicMock()
 
         with patch("atlas.modules.mcp_tools.mcp_oauth_service.get_token_storage",
                    return_value=storage), \

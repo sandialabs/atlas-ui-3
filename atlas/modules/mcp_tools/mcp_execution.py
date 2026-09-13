@@ -382,40 +382,55 @@ class ExecutionMixin:
                     conversation_id=conversation_id,
                     update_cb=update_cb,
                 )
-            except AuthenticationRequiredException:
-                # The retry itself could not even build an authenticated client;
-                # that is already the friendly "reconnect" signal -- pass it on.
-                raise
+            except (AuthenticationRequiredException,) as retry_auth:
+                # The retry could not even build an authenticated client (the
+                # forced refresh refused and the stored token is expired).
+                # Give it the same 401-specific reconnect message as a refused
+                # retry instead of the generic no-token signal.
+                raise self._unauthorized_recovery_error(
+                    server_name, retry_auth
+                ) from retry_auth
             except Exception as retry_exc:
                 if _is_unauthorized_error(retry_exc):
-                    auth_type = self.servers_config.get(server_name, {}).get(
-                        "auth_type", "oauth"
-                    )
-                    if auth_type == "oauth":
-                        message = (
-                            f"Server '{server_name}' rejected the stored credential "
-                            "(401 Unauthorized) even after a token refresh and retry. "
-                            "The server must be reconnected/re-authorized before this "
-                            "tool can be used."
-                        )
-                        oauth_start_url = (
-                            f"/api/mcp/auth/{quote(server_name, safe='')}/oauth/start"
-                        )
-                    else:
-                        message = (
-                            f"Server '{server_name}' rejected the stored credential "
-                            "(401 Unauthorized) even after a retry. A refreshed "
-                            "credential must be provided for this server before this "
-                            "tool can be used."
-                        )
-                        oauth_start_url = None
-                    raise AuthenticationRequiredException(
-                        server_name=server_name,
-                        auth_type=auth_type,
-                        message=message,
-                        oauth_start_url=oauth_start_url,
+                    raise self._unauthorized_recovery_error(
+                        server_name, retry_exc
                     ) from retry_exc
                 raise
+
+    def _unauthorized_recovery_error(
+        self, server_name: str, retry_exc: BaseException
+    ) -> AuthenticationRequiredException:
+        """Build the model-facing error after an exhausted 401 recovery.
+
+        OAuth servers get the refresh-and-retry wording and the (URL-encoded)
+        reconnect start URL; bearer/api_key/jwt servers have no refresh flow,
+        so the message asks for a fresh credential instead of claiming one was
+        attempted and offers no OAuth URL.
+        """
+        auth_type = self.servers_config.get(server_name, {}).get("auth_type", "oauth")
+        if auth_type == "oauth":
+            message = (
+                f"Server '{server_name}' rejected the stored credential "
+                "(401 Unauthorized) even after a token refresh and retry. "
+                "The server must be reconnected/re-authorized before this "
+                "tool can be used."
+            )
+            oauth_start_url = (
+                f"/api/mcp/auth/{quote(server_name, safe='')}/oauth/start"
+            )
+        else:
+            message = (
+                f"Server '{server_name}' rejected the stored credential "
+                "(401 Unauthorized) even after a retry. A refreshed credential "
+                "must be provided for this server before this tool can be used."
+            )
+            oauth_start_url = None
+        return AuthenticationRequiredException(
+            server_name=server_name,
+            auth_type=auth_type,
+            message=message,
+            oauth_start_url=oauth_start_url,
+        )
 
     async def _recover_user_client_after_unauthorized(
         self, user_email: str, server_name: str, conversation_id: Optional[str]

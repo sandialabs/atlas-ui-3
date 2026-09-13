@@ -502,7 +502,7 @@ class UserClientMixin:
                     "Evicted %d idle user client cache entry(s) for server '%s' "
                     "after token rotation; %d in-use entry(s) left for the "
                     "fingerprint check to rebuild",
-                    len(keys_to_remove), server_name, retained,
+                    len(keys_to_remove), sanitize_for_logging(server_name), retained,
                 )
         await self._close_user_client_entries(removed)
 
