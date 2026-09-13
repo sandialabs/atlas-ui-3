@@ -250,6 +250,19 @@ describe('createWebSocketHandler – agent message handling', () => {
     expect(msg.role).toBe('system')
     expect(msg.agent_mode).toBe(true)
     expect(msg.content).toBe('')
+    // The server's acknowledgement is what arms steering sends and the agent
+    // Stop button -- a downgraded turn never sends agent_start (#849 review).
+    expect(deps.setIsAgentRunning).toHaveBeenCalledWith(true)
+  })
+
+  it('agent_start still works when the run-flag setter is absent (older deps)', () => {
+    const deps = makeDeps()
+    delete deps.setIsAgentRunning
+    const handler = createWebSocketHandler(deps)
+
+    handler({ type: 'agent_update', update_type: 'agent_start' })
+
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
   })
 })
 

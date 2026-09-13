@@ -118,12 +118,10 @@ describe('SettingsPanel agent mode settings', () => {
     expect(screen.getByText('30')).toBeInTheDocument()
   })
 
-  it('clamps a stored max-iterations value above the ceiling and persists the fix (issue #849)', async () => {
+  it('clamps the draft and chip above the ceiling but never rewrites the stored preference (issue #849 review)', async () => {
     localStorage.setItem('chatui-settings', JSON.stringify({ maxIterations: 50 }))
     const updateSettings = vi.fn()
     renderSettingsPanel({
-      // The owner's in-memory copy mirrors the stored value (useSettings
-      // loads chatui-settings on mount).
       settings: { maxIterations: 50 },
       agentMaxStepsLimit: 30,
       agentCeilingConfirmed: true,
@@ -135,14 +133,18 @@ describe('SettingsPanel agent mode settings', () => {
     expect(slider.value).toBe('30')
     expect(screen.getByText('30 / 30')).toBeInTheDocument()
     expect(screen.queryByText('50 / 30')).not.toBeInTheDocument()
-    // The persisted fix routes through the settings owner, so the context
-    // copy and localStorage stay in sync (#849 review).
+    // The clamp is applied where the value is consumed (slider, chip, send
+    // payload). The stored preference itself survives: a persisted write
+    // derived from a config response could be wrong (stale cache, pods
+    // answering with different ceilings mid-rollout) and the server clamps
+    // the payload authoritatively anyway (#849 review).
     await waitFor(() => {
-      expect(updateSettings).toHaveBeenCalledWith({ maxIterations: 30 })
+      expect(updateSettings).not.toHaveBeenCalled()
     })
+    expect(JSON.parse(localStorage.getItem('chatui-settings')).maxIterations).toBe(50)
   })
 
-  it('does not persist the pre-config fallback ceiling into stored settings (issue #849 review)', async () => {
+  it('leaves stored settings untouched before the ceiling is confirmed (issue #849 review)', async () => {
     // Before a live config response confirms the ceiling, a saved 30 must
     // survive untouched: the fallback of 10 (or a stale cache) is not the
     // deployment's real ceiling, and the server clamps early requests itself.
