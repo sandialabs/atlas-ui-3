@@ -24,6 +24,7 @@ const h = vi.hoisted(() => ({
   agentMode: { enabled: true, available: true },
   settings: { maxIterations: 10, llmTemperature: 0.7 },
   agentMaxStepsLimit: 50,
+  agentCeilingConfirmed: true,
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -51,6 +52,7 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
     fileExtraction: {},
     setIsCanvasOpen: vi.fn(),
     agentMaxStepsLimit: h.agentMaxStepsLimit,
+    agentCeilingConfirmed: h.agentCeilingConfirmed,
   }),
 }))
 
@@ -119,6 +121,7 @@ beforeEach(() => {
   h.agentMode = { enabled: true, available: true }
   h.settings = { maxIterations: 10, llmTemperature: 0.7 }
   h.agentMaxStepsLimit = 50
+  h.agentCeilingConfirmed = true
 })
 
 describe('agent_mode wire flag gating (issue #849)', () => {
@@ -157,5 +160,20 @@ describe('agent_max_steps payload ceiling (issue #849)', () => {
 
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.agent_max_steps).toBe(10)
+  })
+
+  it('sends the raw preference before the ceiling is confirmed (issue #849 review)', () => {
+    // A stale cache (or the fallback 10) can sit below the deployment's real
+    // ceiling, and the server can only clamp down: clamping an early turn
+    // would silently shrink the user's intended 30 to 10. The authoritative
+    // server clamp bounds the unclamped value instead.
+    h.agentCeilingConfirmed = false
+    h.agentMaxStepsLimit = 5
+    h.settings = { maxIterations: 30, llmTemperature: 0.7 }
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('do a task') })
+
+    const payload = h.sendMessage.mock.calls[0][0]
+    expect(payload.agent_max_steps).toBe(30)
   })
 })

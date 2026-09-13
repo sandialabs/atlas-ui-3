@@ -15,7 +15,7 @@ import pytest
 from atlas.application.chat.orchestrator import ChatOrchestrator
 from atlas.domain.sessions.models import Session
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
-from atlas.modules.config.settings import configured_agent_max_steps
+from atlas.modules.config.settings import agent_mode_available, configured_agent_max_steps
 
 
 def _make_orchestrator(
@@ -340,6 +340,24 @@ def test_agent_mode_availability_matrix():
         app_settings=SimpleNamespace(feature_agent_mode_available=False)
     )
     assert orch._agent_mode_available() is False
+
+
+def test_shared_availability_predicate_fails_closed():
+    """The WebSocket admission path and the orchestrator share one predicate.
+
+    The helper must fail closed when no settings exist, so a deployment
+    whose settings have not loaded cannot admit agent runs through either
+    path (#849 review). A settings object without the attribute still
+    defaults to allowed: only the absence of settings denies outright.
+    """
+    assert agent_mode_available(None) is False
+    assert agent_mode_available(SimpleNamespace()) is True
+    assert agent_mode_available(
+        SimpleNamespace(feature_agent_mode_available=True)
+    ) is True
+    assert agent_mode_available(
+        SimpleNamespace(feature_agent_mode_available=False)
+    ) is False
 
 
 @pytest.mark.asyncio

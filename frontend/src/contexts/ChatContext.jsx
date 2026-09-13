@@ -672,7 +672,15 @@ export const ChatProvider = ({ children }) => {
 // preference must not leak a live agent_mode even if the hook's inputs drift
 // (issue #849 review).
 agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
-			agent_max_steps: Math.min(settings.maxIterations || agent.agentMaxSteps, config.agentMaxStepsLimit || 10),
+			// The payload clamp only applies once a live config response
+			// confirmed the ceiling: a stale cache (or the fallback 10) can sit
+			// *below* the deployment's real ceiling, and the server can only
+			// clamp down -- an early turn would lose the user's intended
+			// headroom (#849 review). Until then the raw preference goes out
+			// and the authoritative server clamp bounds it.
+			agent_max_steps: config.agentCeilingConfirmed
+				? Math.min(settings.maxIterations || agent.agentMaxSteps, config.agentMaxStepsLimit || 10)
+				: (settings.maxIterations || agent.agentMaxSteps),
 			temperature: settings.llmTemperature || 0.7,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,

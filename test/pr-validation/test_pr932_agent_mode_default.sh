@@ -113,8 +113,10 @@ python3 - <<'PY'
 import re, sys
 src = open("frontend/src/components/Message.jsx").read()
 m = re.search(r"message\.type === 'agent_status'\)(.*?)\n      \}", src, re.S)
-ok = bool(m and "hasContent" in m.group(1) and "aria-label" in m.group(1))
-print("badge-only rendering path present" if ok else "FAIL: badge-only agent_status rendering missing")
+# role="status" announces contents, not aria-label, so the wording must be
+# visually hidden text inside the region (#849 review).
+ok = bool(m and "hasContent" in m.group(1) and 'sr-only' in m.group(1) and "Agent mode started" in m.group(1))
+print("badge-only rendering with an in-region announcement present" if ok else "FAIL: badge-only agent_status rendering missing")
 sys.exit(0 if ok else 1)
 PY
 print_result $? "Message.jsx renders badge-only agent_status rows"
@@ -136,10 +138,12 @@ import sys
 hook = open("frontend/src/hooks/chat/useAgentMode.js").read()
 send = open("frontend/src/contexts/ChatContext.jsx").read()
 orch = open("atlas/application/chat/orchestrator.py").read()
+shared = open("atlas/modules/config/settings.py").read()
 ok = "available && storedEnabled" in hook \
      and "agent.agentModeAvailable && agent.agentModeEnabled" in send \
-     and "_agent_mode_available" in orch and "feature_agent_mode_available" in orch
-print("effective flag gated at the hook, on the wire, and server-side" if ok
+     and "_agent_mode_available" in orch and "agent_mode_available(getattr" in orch \
+     and "feature_agent_mode_available" in shared and "if settings is None:\n        return False" in shared
+print("effective flag gated at the hook, on the wire, and server-side (one shared fail-closed predicate)" if ok
       else "FAIL: availability gating missing")
 sys.exit(0 if ok else 1)
 PY

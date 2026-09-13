@@ -106,6 +106,20 @@ def configured_agent_max_steps(settings) -> int:
     return max(value, 1)
 
 
+def agent_mode_available(settings) -> bool:
+    """Whether the deployment's agent-mode kill switch allows agent runs.
+
+    Fail-closed authority for ``FEATURE_AGENT_MODE_AVAILABLE``: with no
+    settings object nothing proves the switch is on, so agent mode is
+    refused rather than assumed (#849 review). Both consumers -- the chat
+    orchestrator's downgrade path and the WebSocket admission path, which
+    must agree before a run is admitted -- read this one predicate.
+    """
+    if settings is None:
+        return False
+    return bool(getattr(settings, "feature_agent_mode_available", True))
+
+
 class AppSettings(BaseSettings):
     """Main application settings loaded from environment variables."""
 

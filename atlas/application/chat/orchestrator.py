@@ -12,7 +12,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
-from atlas.modules.config.settings import configured_agent_max_steps
+from atlas.modules.config.settings import agent_mode_available, configured_agent_max_steps
 from atlas.modules.mcp_tools.atlas_server import SEARCH_TOOL_NAME, normalize_tool_name
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
@@ -154,15 +154,13 @@ class ChatOrchestrator:
     def _agent_mode_available(self) -> bool:
         """Whether the deployment's agent-mode kill switch allows agent runs.
 
-        Fails closed: with no settings object nothing proves the switch is
-        on, so agent mode is refused rather than assumed (#849 review). A
-        caller that genuinely runs without configuration supplies settings
-        that opt in explicitly.
+        Delegates to the shared fail-closed predicate
+        (``settings.agent_mode_available``) so the WebSocket admission path
+        and this downgrade path cannot drift apart (#849 review). A caller
+        that genuinely runs without configuration supplies settings that opt
+        in explicitly.
         """
-        settings = getattr(self.config_manager, "app_settings", None)
-        if settings is None:
-            return False
-        return bool(getattr(settings, "feature_agent_mode_available", True))
+        return agent_mode_available(getattr(self.config_manager, "app_settings", None))
 
     def _bounded_agent_steps(self, requested: Any) -> int:
         """Clamp the client-supplied step count to the configured maximum.
