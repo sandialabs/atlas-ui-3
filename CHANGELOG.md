@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #933 - 2026-09-13
+- Chat transcript exports (.json and .txt) now open in a new browser tab by default instead of forcing a file download (closes #908); the old download remains as the fallback when the browser blocks the popup tab, and saving is still available from the opened tab (Ctrl+S) or Print / Save as PDF.
+
 ### PR #930 - 2026-09-13
 - **`atlas_search` is only available when the user selected it** (closes #921): selecting data sources no longer implies the built-in search tool (reversing the #862 compromise, which let "use search" prompts invoke `atlas_search` with no tools ticked). A source selection stays the ceiling on what the tool may read; a turn with sources but nothing to read them routes to plain RAG (no tools selected, `only_rag`) or warns the user (sources plus other tools, search tool not ticked). The chat-bar guard that blocked agent-mode sends with no tools selected became a persistent composer warning -- sends go through and the backend downgrades the turn with an in-chat note. The tools tab's Save button is now **Save and Close**: it commits and dismisses the whole panel. Design record: `docs/developer/design-notes/search-only-when-selected-2026-09-13.md`.
 
