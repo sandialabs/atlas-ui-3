@@ -302,13 +302,15 @@ async def test_continuation_provider_error_falls_back_to_synthesis():
 
 
 @pytest.mark.asyncio
-async def test_data_sources_do_not_inject_context_and_offer_the_search_tool():
-    """Selected sources make ``atlas_search`` available; they retrieve nothing.
+async def test_data_sources_neither_inject_context_nor_add_the_search_tool():
+    """Selected sources scope ``atlas_search``; they retrieve nothing themselves.
 
     Tools mode used to route every turn with data sources through
     ``stream_with_rag_and_tools``, which queried the sources and prepended the
-    passages as a system message before the model spoke. Now the ordinary
-    streaming call is made and the model has to ask for a search.
+    passages as a system message before the model spoke. Then the sources also
+    added ``atlas_search`` to the schema (#862), so a "use search" prompt could
+    invoke it without the user ever turning it on (#921). Now the ordinary
+    streaming call is made with exactly the tools the user selected.
     """
     llm = ScriptedToolsLLM(turns=[("No search needed.", None)])
     runner = _runner(llm, _config())
@@ -334,7 +336,7 @@ async def test_data_sources_do_not_inject_context_and_offer_the_search_tool():
     # The model saw the conversation as-is -- no retrieved-context system turn.
     assert llm.seen_messages[0] == [{"role": "user", "content": "what is in the docs?"}]
     requested = runner.tool_manager.get_tools_schema.call_args[0][0]
-    assert requested == ["calc", "atlas_search"]
+    assert requested == ["calc"]
 
 
 @pytest.mark.asyncio

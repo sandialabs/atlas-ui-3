@@ -1,12 +1,12 @@
 /**
- * Guard: Agent mode needs at least one selected tool.
+ * Agent mode with no tools selected: warn, don't block (#921 follow-up).
  *
- * With agent mode on but no tools selected, the agent loop has nothing to call
- * and tool-seeking prompts can drive the model to emit a tool call the provider
- * rejects ("tool_choice is none, but model called a tool"), which surfaces as an
- * empty/failed response. The real ChatProvider must block the send (returning
- * false, no WS frame) and toast the user instead. When a tool IS selected, the
- * send goes through with agent_mode: true.
+ * With agent mode on but no tools selected, the agent loop has nothing to
+ * call. That used to block the send outright; now the send goes through with
+ * agent_mode: true and the backend downgrades the turn to a normal chat with
+ * its own in-chat note, while the composer shows a persistent warning banner
+ * (covered by the ChatArea suite). The real ChatProvider must never swallow
+ * the message.
  *
  * The component suites mock ChatContext, so the real `sendChatMessage` never
  * runs there -- this renders the *real* provider with leaf hooks stubbed.
@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  toastInfo: vi.fn(),
   selectedTools: new Set(),
 }))
 
@@ -31,7 +32,7 @@ vi.mock('../contexts/WSContext', () => ({
 }))
 
 vi.mock('../components/ui/toastContext', () => ({
-  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: vi.fn() }),
+  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: h.toastInfo }),
 }))
 
 vi.mock('../hooks/chat/useChatConfig', () => ({
@@ -113,20 +114,21 @@ beforeEach(() => {
   h.selectedTools = new Set()
 })
 
-describe('Agent mode requires a tool (real ChatProvider)', () => {
-  it('blocks the send and toasts when agent mode is on with no tools', () => {
+describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
+  it('does not block the send when agent mode is on with no tools', () => {
     const { result } = renderChat()
     let ret
     act(() => { ret = result.current.sendChatMessage('do a task') })
 
-    expect(ret).toBe(false)
-    expect(h.sendMessage).not.toHaveBeenCalled()
-    expect(h.toastError).toHaveBeenCalledWith(
-      expect.stringMatching(/agent mode needs at least one tool/i)
-    )
+    expect(ret).toBe(true)
+    expect(h.sendMessage).toHaveBeenCalledTimes(1)
+    expect(h.toastError).not.toHaveBeenCalled()
+    const payload = h.sendMessage.mock.calls[0][0]
+    expect(payload.agent_mode).toBe(true)
+    expect(payload.selected_tools).toEqual([])
   })
 
-  it('allows the send with agent_mode: true once a tool is selected', () => {
+  it('sends the same payload once a tool is selected', () => {
     h.selectedTools = new Set(['server_tool1'])
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('do a task') })

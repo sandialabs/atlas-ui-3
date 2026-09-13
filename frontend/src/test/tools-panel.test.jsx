@@ -124,7 +124,7 @@ describe('ToolsPanel - Tool Selection', () => {
     fireEvent.click(fetchButton)
 
     // Click save button to persist the change
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    const saveButton = screen.getByRole('button', { name: /Save and Close/i })
     fireEvent.click(saveButton)
 
     // Verify addTools was called with correct key
@@ -216,18 +216,15 @@ describe('ToolsPanel - Tool Selection', () => {
       </BrowserRouter>
     )
 
-    // Initially save button should be disabled
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
-    expect(saveButton).toBeDisabled()
+    // Save and Close is always enabled
+    const saveButton = screen.getByRole('button', { name: /Save and Close/i })
+    expect(saveButton).toBeEnabled()
 
     // Find and click the Clear All button
     const clearButton = screen.getByRole('button', { name: 'Clear All' })
     fireEvent.click(clearButton)
 
-    // Save button should now be enabled since we made changes
-    expect(saveButton).not.toBeDisabled()
-    
-    // Click save to persist the changes
+    // Click save to persist the changes (and dismiss the modal)
     fireEvent.click(saveButton)
 
     // Verify removeTools and removePrompts were called with all selected items
@@ -279,7 +276,7 @@ describe('ToolsPanel - Tool Selection', () => {
     fireEvent.click(enableAllButton)
 
     // Click save button to persist the changes
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    const saveButton = screen.getByRole('button', { name: /Save and Close/i })
     fireEvent.click(saveButton)
 
     // Verify all tools were added
@@ -344,7 +341,7 @@ describe('ToolsPanel - Tool Selection', () => {
     fireEvent.click(allOnButton)
 
     // Click save button to persist the changes
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    const saveButton = screen.getByRole('button', { name: /Save and Close/i })
     fireEvent.click(saveButton)
 
     // Verify all tools were removed
@@ -360,7 +357,8 @@ describe('ToolsPanel - Tool Selection', () => {
     ])
   })
 
-  it('should show save button disabled when no changes are made', () => {
+  it('should close a clean standalone modal from Save and Close', () => {
+    const mockOnClose = vi.fn()
     const testTools = [{
       server: 'test_server',
       description: 'Test server',
@@ -383,15 +381,15 @@ describe('ToolsPanel - Tool Selection', () => {
 
     render(
       <BrowserRouter>
-        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+        <ToolsPanel isOpen={true} onClose={mockOnClose} />
       </BrowserRouter>
     )
 
-    // Find the Save Changes button
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
-    
-    // Should be disabled initially
-    expect(saveButton).toBeDisabled()
+    // Nothing staged, so saving is a no-op and the button acts as plain close.
+    const saveButton = screen.getByRole('button', { name: /Save and Close/i })
+    expect(saveButton).toBeEnabled()
+    fireEvent.click(saveButton)
+    expect(mockOnClose).toHaveBeenCalledTimes(1)
   })
 
   it('should enable save button when changes are made', () => {
@@ -422,16 +420,16 @@ describe('ToolsPanel - Tool Selection', () => {
       </BrowserRouter>
     )
 
-    // Initially save button should be disabled
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
-    expect(saveButton).toBeDisabled()
+    // Save and Close is always enabled; staging an edit still leaves it clickable
+    const saveButton = screen.getByRole('button', { name: /Save and Close/i })
+    expect(saveButton).toBeEnabled()
 
     // Click a tool to make a change
     const toolButton = screen.getByRole('button', { name: 'tool1' })
     fireEvent.click(toolButton)
 
-    // Save button should now be enabled
-    expect(saveButton).not.toBeDisabled()
+    // Save button stays enabled
+    expect(saveButton).toBeEnabled()
   })
 
   it('should save changes when save button is clicked', () => {
@@ -471,7 +469,7 @@ describe('ToolsPanel - Tool Selection', () => {
     fireEvent.click(toolButton)
 
     // Click save button
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i })
+    const saveButton = screen.getByRole('button', { name: /Save and Close/i })
     fireEvent.click(saveButton)
 
     // Verify addTools was called with the selected tool
@@ -1081,9 +1079,9 @@ describe('ToolsPanel - Custom Information Display', () => {
 
 /**
  * Embedded mode (issue #839 review follow-ups): the panel is one tab of the
- * combined Tools and Settings panel, so a per-tab save must not dismiss the
- * whole panel, and the still-mounted pending set must not write back keys that
- * have since disappeared.
+ * combined Tools and Settings panel. "Save and Close" commits and dismisses
+ * the whole panel through the parent's save-and-close path; the still-mounted
+ * pending set must not write back keys that have since disappeared.
  */
 describe('ToolsPanel - embedded in the combined panel', () => {
   const testTools = [{
@@ -1127,7 +1125,28 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     vi.clearAllMocks()
   })
 
-  it('does not close the panel when Save Changes is used on the tools tab', () => {
+  it('saves and closes the whole panel from the tools tab', () => {
+    const addTools = vi.fn()
+    setup({ addTools })
+    const onClose = vi.fn()
+    const onSaveAndClose = vi.fn()
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen embedded onClose={onClose} onSaveAndClose={onSaveAndClose} />
+      </BrowserRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
+
+    // The commit ran, and the panel's own onClose is left alone in favor of
+    // the parent's save-and-close path (which asks about a prompt draft).
+    expect(addTools).toHaveBeenCalledWith(['test_server_fetch'])
+    expect(onSaveAndClose).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('falls back to onClose when no save-and-close path is supplied', () => {
     setup()
     const onClose = vi.fn()
     render(
@@ -1137,9 +1156,9 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
 
-    expect(onClose).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('asks before discarding, and does not close, on the tools tab', () => {
@@ -1175,7 +1194,7 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
 
     expect(onClose).toHaveBeenCalled()
   })
@@ -1200,19 +1219,21 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     expect(screen.getByRole('button', { name: 'fetch' })).toBeInTheDocument()
   })
 
-  it('confirms the save in place, since it no longer dismisses anything', () => {
+  it('dismisses via the parent path even when nothing was staged', () => {
     setup()
+    const onSaveAndClose = vi.fn()
     render(
       <BrowserRouter>
-        <ToolsPanel isOpen embedded onClose={vi.fn()} />
+        <ToolsPanel isOpen embedded onClose={vi.fn()} onSaveAndClose={onSaveAndClose} />
       </BrowserRouter>
     )
 
+    // No edit at all: the button is a plain close. There is no in-place
+    // "saved" confirmation any more -- saving always dismisses the panel.
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
 
-    expect(screen.getByRole('status')).toHaveTextContent(/saved/i)
+    expect(onSaveAndClose).toHaveBeenCalledTimes(1)
   })
 
   it('does not add back a selection for a tool that is not in the live list', () => {
@@ -1227,7 +1248,7 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'search' }))
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
 
     expect(addTools).toHaveBeenCalledWith(['test_server_search'])
   })
@@ -1250,7 +1271,7 @@ describe('ToolsPanel - embedded in the combined panel', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'search' }))
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
 
     expect(addTools).toHaveBeenCalledWith(['test_server_search'])
     expect(removeTools).not.toHaveBeenCalled()

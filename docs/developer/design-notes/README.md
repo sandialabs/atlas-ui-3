@@ -1,6 +1,6 @@
 # Design Notes
 
-Last updated: 2026-06-22
+Last updated: 2026-09-13
 
 Point-in-time records of how and why specific features were built. Each is
 dated and reflects the system as of that date — useful background for
@@ -15,6 +15,7 @@ docs that describe how the system works today, see the
 - [Built-in Agent Sleep Tool](agent-sleep-tool-2026-08-18.md) - In-process wait for long-running external work (issue #779)
 - [Built-in ATLAS Tool Consolidation](atlas-tool-consolidation-2026-08-27.md) - canvas, sleep and search merged into one `atlas` server (issue #855)
 - [Search Is an Explicit Tool Call](search-as-an-explicit-tool-2026-08-28.md) - RAG stops injecting itself; the model calls `atlas_search`
+- [Search Only When Selected](search-only-when-selected-2026-09-13.md) - data sources no longer imply the search tool; the tools panel decides (issue #921)
 - [Citations for Tool-Based Search](citations-for-tool-based-search-2026-08-31.md) - citations become data on the message instead of markdown scraped out of the answer
 - [LLM Token Streaming](llm-token-streaming-2026-02-22.md) - Token streaming architecture
 - [Follow-up Question Suggestions](follow-up-suggestions-2026-03-18.md) - Suggested follow-up prompts

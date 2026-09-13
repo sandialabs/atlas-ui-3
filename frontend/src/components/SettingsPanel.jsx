@@ -127,6 +127,22 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     afterCloseRef.current = null
   }, [])
 
+  // The tools tab's "Save and Close" dismisses the whole panel. The commit
+  // that just ran is the reason the close is happening, but the parent's
+  // copy of the tools dirty flag only updates in an effect, so the regular
+  // close guard would read it as still dirty and raise the unsaved-changes
+  // dialog over changes that were just saved. Only the prompt draft still
+  // needs asking about; by the time the user answers that dialog, the tools
+  // flag has settled, so the discard path's fall-through guard sees it clean.
+  const saveToolsAndClose = useCallback(() => {
+    if (promptDirty) {
+      setActiveTab('prompts')
+      setShowPromptDiscard(true)
+      return
+    }
+    finishClose()
+  }, [finishClose, promptDirty])
+
   // Globus auth state
   const {
     authStatus: globusStatus,
@@ -472,6 +488,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             onNavigate={requestClose}
             closeGuardRef={toolsCloseGuardRef}
             onDirtyChange={setToolsDirty}
+            onSaveAndClose={saveToolsAndClose}
           />
         )}
 

@@ -258,7 +258,7 @@ describe('selections changed outside a dirty tools tab', () => {
       </MemoryRouter>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/ }))
 
     // 'search' is the staged addition. 'fetch' arrived from outside and is
     // already saved, so it is neither re-added nor -- the bug -- removed.
@@ -288,7 +288,7 @@ describe('selections changed outside a dirty tools tab', () => {
       </MemoryRouter>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/ }))
 
     expect(addTools).toHaveBeenCalledWith(['test_server_search'])
     expect(removeTools).not.toHaveBeenCalled()

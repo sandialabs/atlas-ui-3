@@ -23,7 +23,6 @@ from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.message_builder import MessageBuilder
 from .preprocessors.prompt_override_service import PromptOverrideService
 from .utilities import event_notifier, file_processor
-from .utilities.search_tool_selection import with_search_tool
 
 logger = logging.getLogger(__name__)
 
@@ -206,55 +205,51 @@ class ChatOrchestrator:
             code="MODEL_ACCESS_DENIED",
         )
 
-    async def _resolve_search_tool(
+    async def _check_data_sources_reachable(
         self,
         selected_tools: Optional[List[str]],
         selected_data_sources: Optional[List[str]],
-    ) -> Optional[List[str]]:
-        """Add the implied ``atlas_search`` tool, or say why it is not there.
+        only_rag: bool = False,
+    ) -> None:
+        """Warn when a turn carries data sources that nothing in it can read.
 
-        A data source selection scopes search and makes the tool available
-        (#862). When the built-in search tool is turned off but general RAG is
-        not -- ``FEATURE_RAG_ENABLED=true`` with
-        ``FEATURE_ATLAS_RAG_TOOLS_ENABLED=false``, a supported combination -- a
-        turn that also has tools selected runs in tools mode, where nothing can
-        read those sources any more. Answering anyway without the user's chosen
-        evidence is exactly the silence this change set out to remove, so the
-        user is told. Returns the tool list to use.
+        ``atlas_search`` is only available when the user actually ticked it
+        (#921): a data source selection scopes what that tool may read, it no
+        longer offers the tool itself. So a turn that selected sources plus
+        other tools but not the search tool runs in tools/agent mode, where
+        nothing reads those sources -- answering without the user's chosen
+        evidence and saying nothing is a silence worth breaking, so the user
+        is told. A turn with no tools at all routes to RAG mode, which reads
+        the sources itself, and so does an ``only_rag`` turn; neither is
+        warned about. ``config_manager`` is None for programmatic callers
+        that never had feature flags to consult, so there is nothing to
+        report to them either.
         """
         if not selected_data_sources:
-            return selected_tools
-
-        resolved = with_search_tool(
-            selected_tools, selected_data_sources, self.config_manager,
+            return
+        if any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in (selected_tools or [])):
+            # The turn names the search tool itself (possibly under its
+            # pre-#855 name from a saved conversation). Its sources are read.
+            return
+        if only_rag or not selected_tools:
+            # Routes to RAG mode, which reads the sources itself.
+            return
+        if self.config_manager is None:
+            return
+        logger.warning(
+            "Data sources selected but the built-in search tool is not; "
+            "this turn will not search them",
         )
-        if any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in resolved):
-            # Either the user selected search themselves (possibly under its
-            # pre-#855 name) or the sources implied it. Nothing to warn about.
-            return resolved
-
-        # No search tool in the turn. That only strands the sources when the
-        # turn is going to run in tools/agent mode; with no tools at all it
-        # routes to RAG mode, which reads them itself. ``config_manager`` is
-        # None for programmatic callers that never had feature flags to consult,
-        # so there is nothing to report to them either.
-        if resolved and self.config_manager is not None:
-            logger.warning(
-                "Data sources selected but the built-in search tool is disabled; "
-                "this turn will not search them",
-            )
-            await self.event_publisher.publish_warning(
-                message=(
-                    "**Your data sources were not searched.** The built-in "
-                    "`atlas_search` tool is turned off "
-                    "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), and searching is now "
-                    "something the model asks for rather than something that "
-                    "happens automatically. Deselect your tools to use plain RAG "
-                    "for this turn, or ask an administrator to enable the "
-                    "built-in search tool."
-                ),
-            )
-        return selected_tools
+        await self.event_publisher.publish_warning(
+            message=(
+                "**Your data sources were not searched.** The built-in "
+                "`atlas_search` tool was not selected for this turn, and "
+                "searching is now something the model asks for rather than "
+                "something that happens automatically. Select `atlas_search` "
+                "to search your sources with the model, or deselect your "
+                "tools to use plain RAG for this turn."
+            ),
+        )
 
     async def execute(
         self,
@@ -479,27 +474,31 @@ class ChatOrchestrator:
                     ),
                 )
 
-        # #862: retrieval is an explicit ``atlas_search`` call, and a data source
-        # selection implies that tool. Resolved HERE, before the agent-mode guard
-        # below -- otherwise "sources selected, no other tool" is downgraded to a
-        # plain chat turn before the tool it implies exists.
-        selected_tools = await self._resolve_search_tool(
-            selected_tools, selected_data_sources,
+        # #921: ``atlas_search`` is only available when the user selected it.
+        # A data source selection no longer implies the tool -- it stays the
+        # ceiling on what that tool may read, and with no other tool selected
+        # the turn routes to RAG mode below, which reads the sources itself.
+        # The reachability check runs before the agent-mode guard so a turn
+        # that *does* have other tools hears the warning whether it then runs
+        # in tools or agent mode.
+        await self._check_data_sources_reachable(
+            selected_tools, selected_data_sources, only_rag=only_rag,
         )
 
         # Agent mode needs at least one tool to act on. With no tools selected
         # the agentic loop has nothing to call, and tool-seeking prompts can
         # drive the model to emit a tool call the provider then rejects
         # ("tool_choice is none, but model called a tool"), which surfaces as an
-        # empty/failed response. Fall back to a normal chat turn and tell the
-        # user instead of failing. The frontend guards this too, but enforcing
-        # it here covers API clients and older frontends.
+        # empty/failed response. Downgrade to a normal turn and tell the user
+        # instead of failing. The frontend shows a warning while composing but
+        # lets the send through, so enforcing it here is what actually keeps
+        # the turn working (it also covers API clients and older frontends).
         if agent_mode and not selected_tools:
             logger.info("Agent mode requested with no tools selected; running as a normal chat turn")
             await self.event_publisher.publish_warning(
                 message=(
                     "**Agent mode needs at least one tool.** No tools were selected, "
-                    "so this message ran as a normal chat. Select one or more tools to use agent mode."
+                    "so this message ran without agent mode. Select one or more tools to use agent mode."
                 ),
             )
             agent_mode = False
