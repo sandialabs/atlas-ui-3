@@ -354,6 +354,22 @@ describe('agent ceiling confirmation (issue #849 review)', () => {
     expect(result.current.agentCeilingConfirmed).toBe(false)
     expect(result.current.agentMaxStepsLimit).toBe(10)
   })
+
+  it('keeps the last confirmed ceiling when a later response omits the field', async () => {
+    // Mixed-version pods during a rolling deploy: the shell response
+    // confirms 30, then a pod without the field answers. That response must
+    // not reset the ceiling to the fallback of 10 -- the always-mounted
+    // settings panel would otherwise treat 10 as authoritative and rewrite a
+    // saved 30 (#849 review).
+    const { result } = renderWithResponses(
+      { ...SHELL_CONFIG, agent_max_steps: 30 },
+      FULL_CONFIG
+    )
+    await waitFor(() => {
+      expect(result.current.agentCeilingConfirmed).toBe(true)
+    })
+    expect(result.current.agentMaxStepsLimit).toBe(30)
+  })
 })
 
 describe('Full Config Reconciliation', () => {

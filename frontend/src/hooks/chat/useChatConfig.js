@@ -154,9 +154,14 @@ export function useChatConfig() {
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
     setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
     setAgentModeAvailable(!!cfg.agent_mode_available)
+    // Only a response carrying a valid ceiling updates it: a mixed-version
+    // pod that omits (or garbles) the field must not reset a confirmed
+    // ceiling to the fallback of 10, nor un-confirm what a previous live
+    // response established (#849 review). Before any confirmation the
+    // initial fallback of 10 stands for display only.
     const maxSteps = Number(cfg.agent_max_steps)
-    setAgentMaxStepsLimit(Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 10)
     if (Number.isFinite(maxSteps) && maxSteps > 0) {
+      setAgentMaxStepsLimit(maxSteps)
       setAgentCeilingConfirmed(true)
     }
     setIsInAdminGroup(!!cfg.is_in_admin_group)
