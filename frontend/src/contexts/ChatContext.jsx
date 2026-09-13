@@ -667,7 +667,11 @@ export const ChatProvider = ({ children }) => {
 			data_sources_auto: dataSourcesAuto,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
-			agent_mode: agent.agentModeEnabled,
+			// Gate the wire flag on availability as well: useAgentMode already derives
+// the effective flag, but this is the transmission boundary, so the default-on
+// preference must not leak a live agent_mode even if the hook's inputs drift
+// (issue #849 review).
+agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			agent_max_steps: Math.min(settings.maxIterations || agent.agentMaxSteps, config.agentMaxStepsLimit || 50),
 			temperature: settings.llmTemperature || 0.7,
 			compliance_level_filter: selections.complianceLevelFilter,

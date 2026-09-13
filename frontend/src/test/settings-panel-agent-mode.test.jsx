@@ -106,4 +106,34 @@ describe('SettingsPanel agent mode settings', () => {
     // Undefined is treated as "on", so the first click turns it off.
     expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
   })
+
+  it('bounds the Max Agent Iterations slider by the admin-configured ceiling (issue #849)', async () => {
+    renderSettingsPanel({ agentMaxStepsLimit: 30 })
+
+    expect(await screen.findByText('Max Agent Iterations')).toBeInTheDocument()
+    const slider = [...document.querySelectorAll('input[type=range]')].find(s => s.max !== '1')
+    expect(slider.max).toBe('30')
+    // Scale labels track the bound instead of the old hardcoded 1/25/50.
+    expect(screen.getByText('15')).toBeInTheDocument()
+    expect(screen.getByText('30')).toBeInTheDocument()
+  })
+
+  it('clamps a stored max-iterations value above the ceiling (issue #849)', async () => {
+    localStorage.setItem('chatui-settings', JSON.stringify({ maxIterations: 50 }))
+    renderSettingsPanel({ agentMaxStepsLimit: 30 })
+
+    expect(await screen.findByText('Max Agent Iterations')).toBeInTheDocument()
+    const slider = [...document.querySelectorAll('input[type=range]')].find(s => s.max !== '1')
+    expect(slider.value).toBe('30')
+    expect(screen.getByText('30 / 30')).toBeInTheDocument()
+    expect(screen.queryByText('50 / 30')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the old hardcoded bound when no ceiling is configured', async () => {
+    renderSettingsPanel({})
+
+    expect(await screen.findByText('Max Agent Iterations')).toBeInTheDocument()
+    const slider = [...document.querySelectorAll('input[type=range]')].find(s => s.max !== '1')
+    expect(slider.max).toBe('50')
+  })
 })

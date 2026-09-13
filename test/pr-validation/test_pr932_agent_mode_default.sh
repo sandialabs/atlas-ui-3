@@ -120,7 +120,7 @@ PY
 print_result $? "Message.jsx renders badge-only agent_status rows"
 
 # ==========================================
-print_header "Check 4: agent mode defaults on, stored preference honored"
+print_header "Check 4: agent mode defaults on, stored preference honored, availability-gated"
 # ==========================================
 python3 - <<'PY'
 import sys
@@ -130,6 +130,18 @@ print("default-on preference found" if ok else "FAIL: agent mode still defaults 
 sys.exit(0 if ok else 1)
 PY
 print_result $? "useAgentMode defaults chatui-agent-mode-enabled to true"
+
+python3 - <<'PY'
+import sys
+hook = open("frontend/src/hooks/chat/useAgentMode.js").read()
+send = open("frontend/src/contexts/ChatContext.jsx").read()
+ok = "available && storedEnabled" in hook \
+     and "agent.agentModeAvailable && agent.agentModeEnabled" in send
+print("effective flag gated on availability at the hook and on the wire" if ok
+      else "FAIL: availability gating missing")
+sys.exit(0 if ok else 1)
+PY
+print_result $? "agent_mode wire flag is gated on feature availability"
 
 grep -q "SAFE_CACHE_FIELDS" frontend/src/hooks/chat/useChatConfig.js && \
   grep -q "'agent_mode_available', 'agent_max_steps'" frontend/src/hooks/chat/useChatConfig.js

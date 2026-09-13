@@ -105,6 +105,21 @@ AGENT_SLEEP_MAX_TURN_SECONDS=7200
 - **Deploys**: a turn parked in a long sleep delays graceful shutdown; expect such turns to be
   killed by a rolling restart.
 
+### Agent Mode Availability and Step Budget
+
+- `FEATURE_AGENT_MODE_AVAILABLE` (default `true`) is the admin kill switch for agent mode in the
+  web UI: when `false`, the toggle is hidden and turns are never sent with `agent_mode` set, even
+  for browsers whose saved preference has agent mode enabled.
+- Agent mode is **on by default** in the web UI (issue #849). A browser that has never made a
+  choice starts enabled; a stored explicit "off" preference is honored, and users can still turn
+  it off. Only browsers with no stored choice see the new default.
+- `AGENT_MAX_STEPS` (default `10`) is the ceiling on loop steps per turn. Client-supplied step
+  counts are clamped to it server-side, and the value is exposed as `agent_max_steps` by
+  `/api/config` and `/api/config/shell` so the web UI's **Max Agent Iterations** slider (Tools and
+  Settings → General) can bound itself to the same ceiling -- the slider's upper end always shows
+  the configured ceiling, and stored user values above it are clamped in the UI and in the request
+  payload.
+
 ### LLM Retry on Transient Failures
 
 High-traffic LLM services can reject calls with rate-limit (429), timeout, or server (5xx) errors.

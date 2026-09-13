@@ -36,6 +36,19 @@ choice is still saved per browser.
 
 ![General tab with the Appearance toggle](screenshots/836-03-general-tab.png)
 
+## Agent mode
+
+Agent mode lets the model chain tool calls on its own until it decides the
+task is done. It is **on by default** (issue #849): a browser that has never
+made a choice starts with it enabled, an explicit "off" choice you made
+earlier is kept, and the header toggle (or Ctrl+Alt+A) still switches it any
+time.
+
+**General → Max Agent Iterations** bounds how many tool steps one agent turn
+may take. The slider's upper end is the ceiling your ATLAS administrator
+configured (`AGENT_MAX_STEPS`), and a saved value above that ceiling is
+clamped to it.
+
 ## Admin tab
 
 Admins get the three most-used dashboard cards inline -- **MCP Configuration &

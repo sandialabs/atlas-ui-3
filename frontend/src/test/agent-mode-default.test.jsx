@@ -1,9 +1,10 @@
 /**
  * Agent mode default-on (issue #849).
  *
- * Covers: agent mode starts enabled when the browser has no stored choice,
- * an explicitly stored "off" preference is honored, and the stored choice
- * wins on every read.
+ * Covers: agent mode starts enabled when the browser has no stored choice, an
+ * explicitly stored "off" preference is honored, the deployment's feature
+ * availability gates the effective flag without overwriting the stored
+ * choice, and the stored choice re-applies when the feature returns.
  */
 import { renderHook, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -38,7 +39,13 @@ describe('useAgentMode default (issue #849)', () => {
     expect(result.current.agentModeEnabled).toBe(false)
   })
 
-  it('still force-disables when the feature becomes unavailable', () => {
+  it('is effectively off when the feature is unavailable from the start', () => {
+    const { result } = renderHook(() => useAgentMode(false))
+    expect(result.current.agentModeEnabled).toBe(false)
+    expect(result.current.agentModeAvailable).toBe(false)
+  })
+
+  it('gates the effective flag without overwriting the stored preference', () => {
     const { result, rerender } = renderHook(({ available }) => useAgentMode(available), {
       initialProps: { available: true },
     })
@@ -48,6 +55,13 @@ describe('useAgentMode default (issue #849)', () => {
       rerender({ available: false })
     })
     expect(result.current.agentModeEnabled).toBe(false)
-    expect(localStorage.getItem('chatui-agent-mode-enabled')).toBe('false')
+    // The stored choice is preserved, so it re-applies when the feature
+    // returns instead of a temporary outage silently turning agent mode off.
+    expect(localStorage.getItem('chatui-agent-mode-enabled')).toBe(null)
+
+    act(() => {
+      rerender({ available: true })
+    })
+    expect(result.current.agentModeEnabled).toBe(true)
   })
 })
