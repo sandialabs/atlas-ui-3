@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #932 - 2026-09-13
+- **Agent mode is on by default and its start banner is gone** (closes #849): the "Agent Mode Started (strategy: agentic, max steps: N)" transcript row is replaced by the small purple "Agent" box alone, and the Agent toggle now defaults to on everywhere for browsers with no stored choice -- an existing explicit off preference is still honored, and the toggle still works. The Max Agent Iterations slider in Tools and Settings is now bounded by the admin-configured `agent_max_steps` (exposed via `/api/config` and `/api/config/shell`) instead of a hardcoded 50, so the slider's upper end matches what the backend actually honors.
+
 ### PR #930 - 2026-09-13
 - **`atlas_search` is only available when the user selected it** (closes #921): selecting data sources no longer implies the built-in search tool (reversing the #862 compromise, which let "use search" prompts invoke `atlas_search` with no tools ticked). A source selection stays the ceiling on what the tool may read; a turn with sources but nothing to read them routes to plain RAG (no tools selected, `only_rag`) or warns the user (sources plus other tools, search tool not ticked). The chat-bar guard that blocked agent-mode sends with no tools selected became a persistent composer warning -- sends go through and the backend downgrades the turn with an in-chat note. The tools tab's Save button is now **Save and Close**: it commits and dismisses the whole panel. Design record: `docs/developer/design-notes/search-only-when-selected-2026-09-13.md`.
 

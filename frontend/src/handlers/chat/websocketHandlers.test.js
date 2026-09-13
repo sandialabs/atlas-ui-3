@@ -233,22 +233,23 @@ describe('createWebSocketHandler – agent message handling', () => {
     expect(maxDeps.setIsAgentRunning).toHaveBeenCalledWith(false)
   })
 
-  it('agent_start adds a status message', () => {
+  it('agent_start adds only the small "Agent" marker (issue #849)', () => {
     const deps = makeDeps()
     const handler = createWebSocketHandler(deps)
 
     handler({
       type: 'agent_update',
       update_type: 'agent_start',
-      strategy: 'react',
-      max_steps: 10
+      strategy: 'agentic',
+      max_steps: 30
     })
 
     expect(deps.addMessage).toHaveBeenCalledTimes(1)
     const msg = deps.addMessage.mock.calls[0][0]
     expect(msg.type).toBe('agent_status')
-    expect(msg.content).toContain('Agent Mode Started')
-    expect(msg.content).toContain('react')
+    expect(msg.role).toBe('system')
+    expect(msg.agent_mode).toBe(true)
+    expect(msg.content).toBe('')
   })
 })
 

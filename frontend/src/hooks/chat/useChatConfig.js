@@ -47,7 +47,7 @@ function readCachedConfig() {
  */
 const SAFE_CACHE_FIELDS = [
   'app_name', 'models', 'features', 'file_extraction', 'file_upload',
-  'banner_enabled', 'agent_mode_available'
+  'banner_enabled', 'agent_mode_available', 'agent_max_steps'
 ]
 
 /**
@@ -121,6 +121,13 @@ export function useChatConfig() {
   const [agentModeAvailable, setAgentModeAvailable] = useState(
     cached.current ? !!cached.current.agent_mode_available : false
   )
+  // Admin-configured ceiling for the agent loop (issue #849): bounds the Max
+  // Agent Iterations slider so its upper end matches what the server will
+  // actually honor. Falls back to the old hardcoded bound until config lands.
+  const [agentMaxStepsLimit, setAgentMaxStepsLimit] = useState(() => {
+    const v = Number(cached.current?.agent_max_steps)
+    return Number.isFinite(v) && v > 0 ? v : 50
+  })
   const [isInAdminGroup, setIsInAdminGroup] = useState(false)
   // Tracks whether we have received at least one config response (cache or network)
   const [configReady, setConfigReady] = useState(!!cached.current)
@@ -140,6 +147,8 @@ export function useChatConfig() {
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
     setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
     setAgentModeAvailable(!!cfg.agent_mode_available)
+    const maxSteps = Number(cfg.agent_max_steps)
+    setAgentMaxStepsLimit(Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 50)
     setIsInAdminGroup(!!cfg.is_in_admin_group)
 
     if (!isShell) {
@@ -266,6 +275,7 @@ export function useChatConfig() {
       }
     },
     agentModeAvailable,
+    agentMaxStepsLimit,
     isInAdminGroup,
     fileExtraction,
     fileUpload,

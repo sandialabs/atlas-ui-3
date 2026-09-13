@@ -73,7 +73,7 @@ describe('Issue #62 – Agent completion duplicate fix', () => {
     expect(deps.setAgentPendingQuestion).toHaveBeenCalledWith(null)
   })
 
-  it('agent_start should still add a status message', () => {
+  it('agent_start adds only the small "Agent" marker (issue #849)', () => {
     const deps = makeDeps()
     const handler = createWebSocketHandler(deps)
 
@@ -88,10 +88,8 @@ describe('Issue #62 – Agent completion duplicate fix', () => {
     const msg = deps.addMessage.mock.calls[0][0]
     expect(msg.type).toBe('agent_status')
     expect(msg.role).toBe('system')
-    expect(msg.content).toContain('Agent Mode Started')
-    expect(msg.content).toContain('agentic')
-    expect(msg.content).toContain('30')
     expect(msg.agent_mode).toBe(true)
+    expect(msg.content).toBe('')
   })
 
   it('agent_max_steps should add a status message', () => {
@@ -306,7 +304,7 @@ describe('WebSocket handler – legacy agent_update wrapping', () => {
     expect(deps.addMessage).toHaveBeenCalledTimes(1)
     const msg = deps.addMessage.mock.calls[0][0]
     expect(msg.type).toBe('agent_status')
-    expect(msg.content).toContain('react')
+    expect(msg.content).toBe('')
   })
 
   it('handles new { type: "agent_update", update_type: "..." } format', () => {

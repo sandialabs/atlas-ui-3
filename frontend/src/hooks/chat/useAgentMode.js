@@ -2,7 +2,10 @@ import { useEffect, useState, useRef } from 'react'
 import { usePersistentState } from './usePersistentState'
 
 export function useAgentMode(available = true) {
-  const [agentModeEnabled, setAgentModeEnabled] = usePersistentState('chatui-agent-mode-enabled', false)
+  // Agent mode is on by default (issue #849). The persisted value wins, so a
+  // user who explicitly turned it off keeps that preference; only a browser
+  // with no stored choice starts enabled.
+  const [agentModeEnabled, setAgentModeEnabled] = usePersistentState('chatui-agent-mode-enabled', true)
   const [agentMaxSteps, setAgentMaxSteps] = usePersistentState('chatui-agent-max-steps', 5)
   const [currentAgentStep, setCurrentAgentStep] = usePersistentState('chatui-agent-current-step', 0)
   const [agentPendingQuestion, setAgentPendingQuestion] = useState(null)
