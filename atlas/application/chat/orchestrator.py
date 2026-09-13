@@ -227,11 +227,13 @@ class ChatOrchestrator:
     ) -> None:
         """Warn when a tools/agent turn carries sources nothing in it can read.
 
-        Called only from the branches that actually run tools -- the final
-        selected-tools list, after authorization filtering -- so what it
-        judges is what the LLM will really see. RAG-mode turns (no tools
-        selected, ``only_rag``) read the sources themselves and are never
-        routed here.
+        Called from the two tool-running branches with that branch's final
+        tool list -- in the tools branch that is *after* authorization
+        filtering, since the ACL can strip ``atlas_search`` and would
+        otherwise strand the sources silently; the agent path does no
+        authorization filtering today, so its selection is already final.
+        RAG-mode turns (no tools selected, ``only_rag``) read the sources
+        themselves and are never routed here.
 
         ``atlas_search`` is only available when the user actually ticked it
         (#921): a data source selection scopes what that tool may read, it no

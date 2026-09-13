@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastInfo: vi.fn(),
   selectedTools: new Set(),
+  ragEnabled: false,
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -39,7 +40,7 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
   useChatConfig: () => ({
     currentModel: 'test-model',
     user: 'tester@example.com',
-    ragServers: [],
+    ragServers: [{ server: 'srv', sources: [{ id: 'src1' }] }],
     configReady: false,
     features: {},
     prompts: [],
@@ -61,7 +62,7 @@ vi.mock('../hooks/chat/useSelections', async (importActual) => {
       activePromptKey: null,
       clearActivePrompt: vi.fn(),
       selectedDataSources: new Set(),
-      ragEnabled: false,
+      ragEnabled: h.ragEnabled,
       toggleRagEnabled: vi.fn(),
       complianceLevelFilter: '',
     }),
@@ -112,6 +113,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   h.sendMessage.mockImplementation(() => true)
   h.selectedTools = new Set()
+  h.ragEnabled = false
 })
 
 describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
@@ -126,6 +128,22 @@ describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.agent_mode).toBe(true)
     expect(payload.selected_tools).toEqual([])
+    // No RAG toggle and no hand-picked sources: the frame must not claim
+    // the source list was expanded on the user's behalf.
+    expect(payload.data_sources_auto).toBe(false)
+  })
+
+  it('marks the source list auto when the RAG toggle expands it', () => {
+    // The RAG toggle on with no source picked sends every reachable id --
+    // those were not hand-picked, and the backend suppresses the per-turn
+    // stranded-sources warning for them (#930 review).
+    h.ragEnabled = true
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('do a task') })
+
+    const payload = h.sendMessage.mock.calls[0][0]
+    expect(payload.selected_data_sources.length).toBeGreaterThan(0)
+    expect(payload.data_sources_auto).toBe(true)
   })
 
   it('sends the same payload once a tool is selected', () => {
