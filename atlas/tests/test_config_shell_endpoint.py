@@ -160,6 +160,13 @@ def test_config_shell_agent_max_steps_matches_full_config():
         assert full_resp.status_code == 200
         assert shell_resp.json()["agent_max_steps"] == 30
         assert full_resp.json()["agent_max_steps"] == 30
+
+        # Degenerate settings still yield a usable ceiling, matching the
+        # orchestrator's clamp (int-or-10, then floored at 1).
+        config_manager.app_settings.agent_max_steps = 0
+        assert client.get("/api/config/shell", headers=headers).json()["agent_max_steps"] == 10
+        config_manager.app_settings.agent_max_steps = -5
+        assert client.get("/api/config/shell", headers=headers).json()["agent_max_steps"] == 1
     finally:
         config_manager.app_settings.agent_max_steps = original_steps
 

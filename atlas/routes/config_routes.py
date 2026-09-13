@@ -177,8 +177,9 @@ async def get_config_shell(
         "models": models_list,
         "user": current_user,
         "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
-        "agent_mode_available": app_settings.agent_mode_available,
-        "agent_max_steps": int(getattr(app_settings, "agent_max_steps", 10) or 10),
+"agent_mode_available": app_settings.agent_mode_available,
+        # Mirrors the orchestrator's clamp: int() with a fallback, floor of 1.
+        "agent_max_steps": max(int(getattr(app_settings, "agent_max_steps", 10) or 10), 1),
         "banner_enabled": app_settings.banner_enabled,
         "features": {
             "workspaces": app_settings.workspaces_effective,
@@ -528,7 +529,7 @@ async def get_config(
         "active_sessions": 0,  # TODO: Implement session counting in ChatService
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
-        "agent_max_steps": int(getattr(app_settings, "agent_max_steps", 10) or 10),  # Ceiling for the agent loop (bounds the Max Agent Iterations slider)
+        "agent_max_steps": max(int(getattr(app_settings, "agent_max_steps", 10) or 10), 1),  # Ceiling for the agent loop (bounds the Max Agent Iterations slider)
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_content": help_content,  # Help page content from help.md
         "tool_approvals": {
