@@ -356,6 +356,8 @@ async def refresh_stored_token(
     config: Dict[str, Any],
     *,
     force: bool = False,
+    expected_previous_fingerprint: Optional[str] = None,
+    mcp_manager: Optional[Any] = None,
 ) -> Optional[StoredToken]:
     """Renew an expired access token from its refresh token.
 
@@ -366,7 +368,17 @@ async def refresh_stored_token(
     With ``force=True`` the provider is contacted even when the stored access
     token still looks valid by the clock -- used after the provider answered
     401 to a tool call, where the credential is retired server-side no matter
-    what ``expires_at`` claims.
+    what ``expires_at`` claims. Pass ``expected_previous_fingerprint`` (the
+    fingerprint of the token that just failed) to de-duplicate concurrent
+    forced refreshes: if the stored token no longer matches, another caller
+    already rotated it and the provider is not contacted a second time --
+    against a rotating provider, a second rotation would retire the credential
+    the first caller is about to retry with.
+
+    ``mcp_manager`` scopes the post-refresh cache eviction to the manager that
+    owns the cached clients. When omitted, the global app-factory singleton is
+    used (correct for the web app; a programmatic ``AtlasClient`` with its own
+    factory should pass its manager so its own caches are invalidated).
     """
     token_storage = get_token_storage()
     existing = token_storage.get_token(user_email, server_name)
@@ -380,44 +392,67 @@ async def refresh_stored_token(
     # report that re-authorization is required.
     async with _lock_for(_refresh_locks, f"{user_email.lower()}|{server_name}"):
         # Another caller may have refreshed while we waited for the lock.
-        # A forced refresh skips this: the whole point is that the cached
-        # record looks valid while the provider has already retired it.
+        # A forced refresh skips this only when the stored token is still the
+        # one that just failed; if it changed, someone already rotated.
+        stored = token_storage.get_token(user_email, server_name)
         if not force:
             current = token_storage.get_valid_token(user_email, server_name)
             if current is not None:
                 return current
+        elif expected_previous_fingerprint is not None:
+            from atlas.modules.mcp_tools.token_storage import token_fingerprint
 
-        existing = token_storage.get_token(user_email, server_name)
-        if existing is None or not existing.refresh_token:
+            if token_fingerprint(stored) != expected_previous_fingerprint:
+                # Rotated under us: hand back whatever is stored now (None if
+                # it is expired -- then the caller reports re-auth needed).
+                return token_storage.get_valid_token(user_email, server_name)
+
+        if stored is None or not stored.refresh_token:
             return None
 
-        refreshed = await _refresh_locked(user_email, server_name, config, existing)
-        if refreshed is not None:
-            # The stored access token just changed. Every cached per-user
-            # client for this (user, server) was built with the previous
-            # token value -- refreshes are keyed per (user, server) while
-            # clients are cached per (user, server, conversation), so a
-            # refresh driven by one cache entry silently retires the
-            # credential inside all the others. Invalidate them all, the
-            # way the re-authorization route already does.
-            await _invalidate_cached_clients(user_email, server_name)
-        return refreshed
+        refreshed = await _refresh_locked(user_email, server_name, config, stored)
+
+    # The stored access token just changed. Every cached per-user client for
+    # this (user, server) was built with the previous token value -- refreshes
+    # are keyed per (user, server) while clients are cached per
+    # (user, server, conversation), so a refresh driven by one cache entry
+    # silently retires the credential inside all the others. Invalidate them
+    # outside the refresh lock: eviction closes clients (bounded, but
+    # potentially several), and that must not block a concurrent refresh or
+    # tool call for the same user/server.
+    if refreshed is not None:
+        await _invalidate_cached_clients(user_email, server_name, mcp_manager)
+    return refreshed
 
 
-async def _invalidate_cached_clients(user_email: str, server_name: str) -> None:
-    """Evict every cached per-user MCP client for a (user, server) pair.
+async def _invalidate_cached_clients(
+    user_email: str,
+    server_name: str,
+    mcp_manager: Optional[Any] = None,
+) -> None:
+    """Evict cached per-user MCP clients for a (user, server) pair.
+
+    Uses the manager's rotation-aware eviction: idle entries are closed, but
+    entries possibly in use are left cached for the fingerprint check to
+    rebuild, so a background refresh never tears down a streaming tool call.
 
     Best-effort and quiet: a refresh must never turn into a failed tool call
     because cache eviction hit an unrelated problem. When no MCPToolManager is
     wired yet (e.g. early startup) there is nothing to evict.
     """
     try:
-        from atlas.infrastructure.app_factory import app_factory
+        if mcp_manager is None:
+            from atlas.infrastructure.app_factory import app_factory
 
-        mcp_manager = app_factory.get_mcp_manager()
+            mcp_manager = app_factory.get_mcp_manager()
         if mcp_manager is None:
             return
-        await mcp_manager._invalidate_user_client(user_email, server_name)
+        invalidate = getattr(
+            mcp_manager, "_invalidate_user_clients_for_rotation", None
+        ) or getattr(mcp_manager, "_invalidate_user_client", None)
+        if invalidate is None:
+            return
+        await invalidate(user_email, server_name)
     except Exception:  # pragma: no cover - eviction must never fail a refresh
         logger.debug(
             "Could not evict cached MCP clients after token refresh for '%s'",

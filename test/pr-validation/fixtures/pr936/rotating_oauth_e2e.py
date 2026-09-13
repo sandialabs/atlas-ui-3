@@ -32,7 +32,7 @@ from starlette.routing import Mount, Route
 USER = "v@example.com"
 SERVER = "rot-server"
 
-MCP_STATE = {"active_token": "seed-access", "unauthorized_seen": 0}
+MCP_STATE = {"active_token": "seed-access", "unauthorized_seen": 0, "unauthorized_posts": 0}
 PROVIDER_STATE = {
     "current_refresh": "seed-refresh",
     "issued": 0,
@@ -84,6 +84,11 @@ class BearerGate:
             expected = f"Bearer {MCP_STATE['active_token']}"
             if auth != expected:
                 MCP_STATE["unauthorized_seen"] += 1
+                if scope.get("method") == "POST":
+                    # POSTs are real MCP traffic (initialize / call); DELETEs
+                    # are session termination, whose 401 with a stale token is
+                    # a harmless teardown artifact.
+                    MCP_STATE["unauthorized_posts"] += 1
                 challenge = Response(
                     status_code=401,
                     headers={
@@ -279,17 +284,24 @@ async def main() -> None:
         rotated = await mcp_oauth_service.refresh_stored_token(USER, SERVER, manager.servers_config[SERVER])
         check("silent refresh rotated the token", rotated is not None and rotated.token_value == "access-v1")
         check("the provider retired the previous token", MCP_STATE["active_token"] == "access-v1")
+        # Entries touched within the in-use window stay cached (a streaming
+        # call elsewhere must not be torn down); they are now fingerprint-stale.
+        stale_entry = manager._user_clients.get((USER, SERVER, "c1"))
         check(
-            "refresh invalidated every cached client for (user, server)",
-            not manager._user_clients,
-            detail=str(list(manager._user_clients)),
+            "in-use cache entries survive the refresh (no mid-call teardown)",
+            stale_entry is not None,
         )
-        unauthorized_before = MCP_STATE["unauthorized_seen"]
+        unauthorized_before = MCP_STATE["unauthorized_posts"]
+        client_before = stale_entry
         r3 = await manager.call_tool(SERVER, "echo", {"text": "after rotation"}, user_email=USER, conversation_id="c1")
         check("call after rotation succeeds", r3 is not None)
         check(
-            "no 401 was needed after rotation (cache rebuilt, not replayed)",
-            MCP_STATE["unauthorized_seen"] == unauthorized_before,
+            "no MCP call was refused after rotation (cache rebuilt, not replayed)",
+            MCP_STATE["unauthorized_posts"] == unauthorized_before,
+        )
+        check(
+            "the cached client was rebuilt with the rotated token",
+            manager._user_clients.get((USER, SERVER, "c1")) is not client_before,
         )
 
         # 3. Provider-side revocation with a valid-by-the-clock stored token.

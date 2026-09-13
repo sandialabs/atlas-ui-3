@@ -69,7 +69,10 @@ def _is_unauthorized_error(exc: BaseException) -> bool:
     The provider answers 401 when the access token presented by the transport
     has expired or been rotated/revoked server-side. The exception chain is
     walked (``__cause__`` / ``__context__``) because FastMCP may re-raise the
-    underlying ``httpx.HTTPStatusError`` from a session task or wrap it.
+    underlying ``httpx.HTTPStatusError`` from a session task or wrap it in a
+    non-httpx exception; both the response status and the canonical exception
+    text are matched, for any exception type in the chain, the way
+    ``_is_session_terminated_error`` does.
     """
     try:
         import httpx
@@ -82,7 +85,7 @@ def _is_unauthorized_error(exc: BaseException) -> bool:
             response = getattr(cur, "response", None)
             if getattr(response, "status_code", None) == 401:
                 return True
-            if "401 unauthorized" in str(cur).lower():
-                return True
+        if "401 unauthorized" in str(cur).lower():
+            return True
         cur = cur.__cause__ or cur.__context__
     return False
