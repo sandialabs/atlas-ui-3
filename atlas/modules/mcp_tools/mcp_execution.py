@@ -37,6 +37,7 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_session_terminated_error,
     _is_task_forbidden_error,
     _is_task_forbidden_result,
+    _is_unauthorized_error,
 )
 from atlas.modules.mcp_tools.sleep_tool import (
     execute_sleep_tool,
@@ -319,6 +320,14 @@ class ExecutionMixin:
         Without ``conversation_id``, a single-use session is opened and closed
         per call (no task-mode support).
 
+        Per-user authenticated servers get one self-healing retry: when the
+        provider answers 401 (the stored credential was rotated or revoked
+        server-side), the cached clients for (user, server) are evicted, a
+        forced token refresh is attempted, and the call is retried once. If
+        the retry is refused again, ``AuthenticationRequiredException`` is
+        raised so callers surface a reconnect prompt instead of a raw
+        transport error.
+
         Args:
             server_name: Name of the MCP server
             tool_name: Name of the tool to call
@@ -331,6 +340,119 @@ class ExecutionMixin:
             conversation_id: If set, use a persistent session for this conversation
             update_cb: Async callback for emitting task lifecycle events to the UI
         """
+        try:
+            return await self._call_tool_once(
+                server_name,
+                tool_name,
+                arguments,
+                progress_handler=progress_handler,
+                elicitation_handler=elicitation_handler,
+                user_email=user_email,
+                meta=meta,
+                conversation_id=conversation_id,
+                update_cb=update_cb,
+            )
+        except Exception as exc:
+            if not (
+                _is_unauthorized_error(exc)
+                and user_email
+                and self._requires_user_auth(server_name)
+            ):
+                raise
+
+            logger.warning(
+                "MCP server '%s' rejected the stored credential with 401 for tool "
+                "'%s'; rebuilding the client and retrying once",
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(tool_name),
+            )
+            await self._recover_user_client_after_unauthorized(user_email, server_name)
+            try:
+                return await self._call_tool_once(
+                    server_name,
+                    tool_name,
+                    arguments,
+                    progress_handler=progress_handler,
+                    elicitation_handler=elicitation_handler,
+                    user_email=user_email,
+                    meta=meta,
+                    conversation_id=conversation_id,
+                    update_cb=update_cb,
+                )
+            except AuthenticationRequiredException:
+                # The retry itself could not even build an authenticated client;
+                # that is already the friendly "reconnect" signal -- pass it on.
+                raise
+            except Exception as retry_exc:
+                if _is_unauthorized_error(retry_exc):
+                    auth_type = self.servers_config.get(server_name, {}).get(
+                        "auth_type", "oauth"
+                    )
+                    raise AuthenticationRequiredException(
+                        server_name=server_name,
+                        auth_type=auth_type,
+                        message=(
+                            f"Server '{server_name}' rejected the stored credential "
+                            "(401 Unauthorized) even after a token refresh and retry. "
+                            "The server must be reconnected/re-authorized before this "
+                            "tool can be used."
+                        ),
+                        oauth_start_url=(
+                            f"/api/mcp/auth/{server_name}/oauth/start"
+                            if auth_type == "oauth"
+                            else None
+                        ),
+                    ) from retry_exc
+                raise
+
+    async def _recover_user_client_after_unauthorized(
+        self, user_email: str, server_name: str
+    ) -> None:
+        """Self-heal a 401 from a per-user-auth MCP server.
+
+        Evicts every cached client for (user, server) -- across all
+        conversations, since a rotated credential invalidates them all -- and
+        attempts a forced OAuth refresh, contacting the provider even when the
+        stored token still looks valid by the clock (it has been retired
+        server-side regardless of ``expires_at``). Best-effort: if neither step
+        produces a new credential, the retry fails and the caller surfaces the
+        reconnect prompt.
+        """
+        try:
+            await self._invalidate_user_client(user_email, server_name)
+        except Exception:
+            logger.debug(
+                "Could not evict cached clients for server '%s' after 401",
+                sanitize_for_logging(server_name),
+                exc_info=True,
+            )
+
+        config = self.servers_config.get(server_name, {})
+        refreshed = await self._refresh_oauth_token(
+            user_email, server_name, config, force=True
+        )
+        if refreshed is None:
+            logger.info(
+                "Token refresh after 401 from MCP server '%s' produced no new "
+                "credential; the retry will re-present the stored token and the "
+                "user may need to re-authorize",
+                sanitize_for_logging(server_name),
+            )
+
+    async def _call_tool_once(
+        self,
+        server_name: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        *,
+        progress_handler: Optional[Any] = None,
+        elicitation_handler: Optional[Any] = None,
+        user_email: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> Any:
+        """One client-selection + tool-call attempt, without 401 recovery."""
         # Determine which client to use
         client = None
 
@@ -782,6 +904,19 @@ class ExecutionMixin:
                 display_config=display_config,
                 meta_data=meta_data
             )
+        except AuthenticationRequiredException as auth_err:
+            # Raised when the user holds no credential at all, and after the
+            # 401 refresh-and-retry is exhausted (call_tool). Forward it so
+            # tool_executor emits the auth_required UI event and a friendly
+            # result instead of embedding a raw transport error/URL.
+            logger.info(
+                "Tool '%s' on server '%s' requires (re-)authorization: %s",
+                sanitize_for_logging(tool_call.name),
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(auth_err.message),
+            )
+            log_metric("tool_error", user_email, tool_name=actual_tool_name)
+            raise
         except Exception as e:
             logger.error(f"Error executing tool {tool_call.name}: {e}")
 

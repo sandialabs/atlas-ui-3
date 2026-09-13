@@ -7,6 +7,7 @@ either. The cache bookkeeping these methods drive lives in
 mcp_user_client_cache.py. Patched globals (Client, StreamableHttpTransport) are
 referenced via the client module to preserve test patch targets.
 """
+import hashlib
 import logging
 import time
 from typing import Dict, Optional
@@ -24,6 +25,20 @@ logger = logging.getLogger(__name__)
 # ``expires_in``. Short, because the only safe assumption about an unbounded
 # downstream credential is that it is about to stop working.
 _DELEGATED_TOKEN_DEFAULT_TTL_SECONDS = 300
+
+
+def _token_fingerprint(token: object) -> Optional[str]:
+    """Short fingerprint of the token value a cached client was built with.
+
+    The token value is baked into the ``Client``/transport at construction;
+    recording only this digest (never the value itself) lets the cache detect
+    that the stored credential has been rotated -- e.g. by a silent OAuth
+    refresh driven from another cache entry -- and rebuild the client.
+    """
+    value = getattr(token, "token_value", None)
+    if not value:
+        return None
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
 
 
 def _client():
@@ -58,13 +73,17 @@ class UserClientMixin:
         auth_type = config.get("auth_type", "none")
         return auth_type in ("oauth", "jwt", "bearer", "api_key", "delegated")
 
-    async def _refresh_oauth_token(self, user_email, server_name, config):
+    async def _refresh_oauth_token(self, user_email, server_name, config, *, force=False):
         """Renew an expired OAuth access token from its refresh token.
 
         Returns the refreshed record, or None when the server is not an oauth
         server, no refresh token is held, or the provider refuses -- all of
         which leave the caller reporting the server as unauthenticated so the
         user is prompted to authorize again.
+
+        With ``force=True`` the provider is contacted even when the stored
+        access token still looks valid by the clock (used after a 401: the
+        credential has been retired server-side regardless of ``expires_at``).
         """
         from atlas.modules.mcp_tools import mcp_oauth_service
 
@@ -73,7 +92,7 @@ class UserClientMixin:
 
         try:
             return await mcp_oauth_service.refresh_stored_token(
-                user_email, server_name, config
+                user_email, server_name, config, force=force
             )
         except Exception as exc:
             # A refresh must never turn into a failed tool call: the fallback
@@ -266,15 +285,30 @@ class UserClientMixin:
                 subtoken_unchanged = (
                     self._wormhole_client_subtokens.get(cache_key) == current_subtoken
                 )
-                if stored_token is not None and subtoken_unchanged:
+                # The token value is baked into the cached client at build time.
+                # A silently rotated token (e.g. a refresh driven by another cache
+                # entry for the same user/server) still passes the validity check
+                # above -- the provider has retired it regardless of the clock --
+                # so also require that the stored credential is the same one this
+                # client was built with.
+                fingerprint_unchanged = self._user_client_token_fingerprints.get(
+                    cache_key
+                ) == _token_fingerprint(stored_token)
+                if stored_token is not None and subtoken_unchanged and fingerprint_unchanged:
                     self._touch_user_client_locked(cache_key)
                     return self._user_clients[cache_key]
                 else:
-                    # Token expired/removed, or the Wormhole subtoken rotated;
+                    # Token expired/removed, the Wormhole subtoken rotated, or
+                    # the stored token was rotated under the cached client;
                     # invalidate the cached client so it is rebuilt below.
                     if stored_token is not None and not subtoken_unchanged:
                         logger.debug(
                             "Wormhole subtoken changed for server '%s'; rebuilding client",
+                            sanitize_for_logging(server_name),
+                        )
+                    elif stored_token is not None and not fingerprint_unchanged:
+                        logger.debug(
+                            "Stored token rotated for server '%s'; rebuilding client",
                             sanitize_for_logging(server_name),
                         )
                     else:
@@ -381,6 +415,9 @@ class UserClientMixin:
                     cached_client = self._user_clients[cache_key]
                 else:
                     self._user_clients[cache_key] = client
+                    self._user_client_token_fingerprints[cache_key] = _token_fingerprint(
+                        stored_token
+                    )
                     if current_subtoken is not None:
                         self._wormhole_client_subtokens[cache_key] = current_subtoken
                     self._touch_user_client_locked(cache_key)

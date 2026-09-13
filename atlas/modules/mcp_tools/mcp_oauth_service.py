@@ -351,13 +351,22 @@ async def complete_authorization(
 
 
 async def refresh_stored_token(
-    user_email: str, server_name: str, config: Dict[str, Any]
+    user_email: str,
+    server_name: str,
+    config: Dict[str, Any],
+    *,
+    force: bool = False,
 ) -> Optional[StoredToken]:
     """Renew an expired access token from its refresh token.
 
     Returns None when there is nothing to refresh or the provider refuses, in
     which case the caller reports the server as needing re-authorization
     rather than failing the tool call with an opaque error.
+
+    With ``force=True`` the provider is contacted even when the stored access
+    token still looks valid by the clock -- used after the provider answered
+    401 to a tool call, where the credential is retired server-side no matter
+    what ``expires_at`` claims.
     """
     token_storage = get_token_storage()
     existing = token_storage.get_token(user_email, server_name)
@@ -371,15 +380,50 @@ async def refresh_stored_token(
     # report that re-authorization is required.
     async with _lock_for(_refresh_locks, f"{user_email.lower()}|{server_name}"):
         # Another caller may have refreshed while we waited for the lock.
-        current = token_storage.get_valid_token(user_email, server_name)
-        if current is not None:
-            return current
+        # A forced refresh skips this: the whole point is that the cached
+        # record looks valid while the provider has already retired it.
+        if not force:
+            current = token_storage.get_valid_token(user_email, server_name)
+            if current is not None:
+                return current
 
         existing = token_storage.get_token(user_email, server_name)
         if existing is None or not existing.refresh_token:
             return None
 
-        return await _refresh_locked(user_email, server_name, config, existing)
+        refreshed = await _refresh_locked(user_email, server_name, config, existing)
+        if refreshed is not None:
+            # The stored access token just changed. Every cached per-user
+            # client for this (user, server) was built with the previous
+            # token value -- refreshes are keyed per (user, server) while
+            # clients are cached per (user, server, conversation), so a
+            # refresh driven by one cache entry silently retires the
+            # credential inside all the others. Invalidate them all, the
+            # way the re-authorization route already does.
+            await _invalidate_cached_clients(user_email, server_name)
+        return refreshed
+
+
+async def _invalidate_cached_clients(user_email: str, server_name: str) -> None:
+    """Evict every cached per-user MCP client for a (user, server) pair.
+
+    Best-effort and quiet: a refresh must never turn into a failed tool call
+    because cache eviction hit an unrelated problem. When no MCPToolManager is
+    wired yet (e.g. early startup) there is nothing to evict.
+    """
+    try:
+        from atlas.infrastructure.app_factory import app_factory
+
+        mcp_manager = app_factory.get_mcp_manager()
+        if mcp_manager is None:
+            return
+        await mcp_manager._invalidate_user_client(user_email, server_name)
+    except Exception:  # pragma: no cover - eviction must never fail a refresh
+        logger.debug(
+            "Could not evict cached MCP clients after token refresh for '%s'",
+            sanitize_for_logging(server_name),
+            exc_info=True,
+        )
 
 
 async def _refresh_locked(

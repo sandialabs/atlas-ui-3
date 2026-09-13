@@ -598,3 +598,106 @@ class TestSilentOAuthRefreshCallSite:
 
         assert result is None
         mock_refresh.assert_awaited_once()
+
+
+class TestTokenRotationInvalidatesCachedClient:
+    """A cached client must be rebuilt when the stored token value rotates.
+
+    Issue #935: a silent OAuth refresh driven by another cache entry stores a
+    new token without touching this client, whose transport still carries the
+    retired credential. The stored record remains "valid" by the clock, so
+    only a fingerprint comparison can detect the rotation.
+    """
+
+    @pytest.fixture
+    def manager(self):
+        import asyncio
+
+        from atlas.modules.mcp_tools.client import MCPToolManager
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = {
+            "test-server": {
+                "auth_type": "bearer",
+                "url": "http://localhost:8080",
+            }
+        }
+        manager._user_clients = {}
+        manager._user_clients_lock = asyncio.Lock()
+        manager._create_log_handler = MagicMock(return_value=None)
+        manager._create_elicitation_handler = MagicMock(return_value=None)
+        manager._create_sampling_handler = MagicMock(return_value=None)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_rotated_token_rebuilds_cached_client(self, manager):
+        token_v1 = MagicMock()
+        token_v1.token_value = "token-v1"
+        token_v2 = MagicMock()
+        token_v2.token_value = "token-v2"
+
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class:
+            storage = MagicMock()
+            # Build with v1; on the next call the rotated v2 record is still
+            # "valid" (within expiry) -- only the value differs. The rebuild
+            # path fetches the record a second time after eviction.
+            storage.get_valid_token.side_effect = [token_v1, token_v2, token_v2]
+            mock_storage.return_value = storage
+            mock_client_class.side_effect = lambda *a, **k: MagicMock()
+
+            first = await manager._get_user_client("test-server", "user@example.com")
+            second = await manager._get_user_client("test-server", "user@example.com")
+
+        assert first is not None
+        assert second is not None
+        assert first is not second
+        assert mock_client_class.call_count == 2
+        # The rebuilt client is constructed with the new credential.
+        assert mock_client_class.call_args_list[1].kwargs["auth"] == "token-v2"
+        cache_key = ("user@example.com", "test-server", None)
+        assert manager._user_clients[cache_key] is second
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_tracks_rotations(self, manager):
+        token_v1 = MagicMock()
+        token_v1.token_value = "token-v1"
+        token_v2 = MagicMock()
+        token_v2.token_value = "token-v2"
+
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class:
+            storage = MagicMock()
+            storage.get_valid_token.side_effect = [token_v1, token_v2, token_v2]
+            mock_storage.return_value = storage
+            mock_client_class.return_value = MagicMock()
+
+            await manager._get_user_client("test-server", "user@example.com")
+            cache_key = ("user@example.com", "test-server", None)
+            assert (
+                manager._user_client_token_fingerprints[cache_key]
+                != manager._user_client_token_fingerprints.get(("other", "x", "y"))
+            )
+            first_fp = manager._user_client_token_fingerprints[cache_key]
+
+            await manager._get_user_client("test-server", "user@example.com")
+            assert manager._user_client_token_fingerprints[cache_key] != first_fp
+
+    @pytest.mark.asyncio
+    async def test_unrotated_token_still_reuses_cache(self, manager):
+        """The fingerprint check must not turn every call into a rebuild."""
+        token = MagicMock()
+        token.token_value = "stable-token"
+
+        with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
+             patch("atlas.modules.mcp_tools.client.Client") as mock_client_class:
+            storage = MagicMock()
+            storage.get_valid_token.return_value = token
+            mock_storage.return_value = storage
+            mock_client_class.return_value = MagicMock()
+
+            first = await manager._get_user_client("test-server", "user@example.com")
+            second = await manager._get_user_client("test-server", "user@example.com")
+
+        assert first is second
+        assert mock_client_class.call_count == 1

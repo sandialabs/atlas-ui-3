@@ -46,6 +46,8 @@ class UserClientCacheMixin:
             self._user_client_close_tasks = set()
         if not hasattr(self, "_wormhole_client_subtokens"):
             self._wormhole_client_subtokens = {}
+        if not hasattr(self, "_user_client_token_fingerprints"):
+            self._user_client_token_fingerprints = {}
 
     def _touch_user_client_locked(self, cache_key: tuple) -> None:
         """Mark a cached per-user client as recently used.
@@ -68,6 +70,7 @@ class UserClientCacheMixin:
             client = self._user_clients.pop(key, None)
             self._user_client_last_used.pop(key, None)
             self._wormhole_client_subtokens.pop(key, None)
+            self._user_client_token_fingerprints.pop(key, None)
             if client is not None:
                 removed.append((key, client))
         return removed
