@@ -15,7 +15,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
-import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText } from '../utils/chatExport'
+import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
@@ -978,8 +978,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		})
 	}, [files])
 
-	const exportData = useCallback((asText) => {
-		if (!messages.length) { alert('No chat history to download'); return }
+	const openTranscriptInTab = useCallback((asText) => {
+		if (!messages.length) { alert('No chat history to open'); return }
 		const ragEnabled = config.features?.rag
 		const ragSourcesDisplay = ragEnabled
 			? ([...selectedDataSources].join(', ') || 'None selected')
@@ -1010,12 +1010,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			})
 			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
 			const blob = new Blob([text], { type: 'text/plain' })
-			const url = URL.createObjectURL(blob)
-			const a = document.createElement('a')
-			a.href = url
 			const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)
-			a.download = `chat-export-${ts}.txt`
-			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+			openBlobInNewTab(blob, `chat-export-${ts}.txt`)
 		} else {
 			const data = {
 				metadata: {
@@ -1036,17 +1032,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				canvasContent: files.canvasContent || null
 			}
 			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-			const url = URL.createObjectURL(blob)
-			const a = document.createElement('a')
-			a.href = url
 			const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)
-			a.download = `chat-export-${ts}.json`
-			document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+			openBlobInNewTab(blob, `chat-export-${ts}.json`)
 		}
 	}, [messages, config.appName, config.user, config.features, config.prompts, currentModel, selectedTools, selectedDataSources, agent.agentModeEnabled, agent.agentMaxSteps, selections.activePromptKey, files.canvasContent, userPrompts.prompts, personas.personas])
 
-	const downloadChat = useCallback(() => exportData(false), [exportData])
-	const downloadChatAsText = useCallback(() => exportData(true), [exportData])
+	const openChat = useCallback(() => openTranscriptInTab(false), [openTranscriptInTab])
+	const openChatAsText = useCallback(() => openTranscriptInTab(true), [openTranscriptInTab])
 
 	// Wrapper for setComplianceLevelFilter that clears incompatible selections
 	const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
@@ -1278,8 +1270,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		stopStreaming,
 		isStreaming,
 		answerAgentQuestion,
-		downloadChat,
-		downloadChatAsText,
+		openChat,
+		openChatAsText,
 		canvasContent: files.canvasContent,
 		setCanvasContent: files.setCanvasContent,
 		canvasFiles: files.canvasFiles,

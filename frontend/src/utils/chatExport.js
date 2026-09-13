@@ -8,6 +8,38 @@
 import { USER_PROMPT_PREFIX, PERSONA_PREFIX } from '../hooks/chat/useSelections'
 import { filterArgumentsForDisplay, processToolResult } from './toolResultUtils'
 
+// Transcript exports open in a new browser tab by default (issue #908): the
+// common flow is reading / copy-pasting the .txt, not saving a file. Saving is
+// still available from the opened tab (Ctrl+S) or Print / Save as PDF.
+//
+// A blob URL must not be revoked while the new tab is still loading it, so the
+// revoke is delayed rather than fired immediately after the open.
+const BLOB_URL_REVOKE_DELAY_MS = 60000
+
+// Open a Blob in a new browser tab, falling back to a file download when the
+// popup is blocked (window.open returns null) or throws. `fallbackDownloadName`
+// names the file for that fallback so the user still gets the transcript
+// either way.
+export function openBlobInNewTab(blob, fallbackDownloadName) {
+  const url = URL.createObjectURL(blob)
+  let opened = null
+  try {
+    opened = window.open(url, '_blank')
+  } catch {
+    // Some setups raise instead of returning null; the fallback below still
+    // gives the user their transcript.
+  }
+  if (!opened) {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fallbackDownloadName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+  setTimeout(() => URL.revokeObjectURL(url), BLOB_URL_REVOKE_DELAY_MS)
+}
+
 // Number of leading lines of the prompt body to include in the export preview.
 const PROMPT_PREVIEW_LINES = 5
 // Hard cap on preview length so a single long line cannot bloat the export.
