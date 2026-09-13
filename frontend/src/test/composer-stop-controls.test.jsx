@@ -4,10 +4,11 @@
  *
  * Agent mode now defaults to on, so a browser with no tools selected sends
  * turns that run as plain chats. The stop/send choice must therefore key on
- * `isAgentRunning` (set at send time to the mode the turn will really run
- * as), not on the persisted `agentModeEnabled` toggle: gating on the toggle
- * left Send enabled during a plain turn's generation, and a second
- * submission could start another untracked task against the same session.
+ * `isAgentRunning` (set when the server acknowledges the loop via
+ * `agent_start`), not on the persisted `agentModeEnabled` toggle: gating on
+ * the toggle left Send enabled during a plain turn's generation, and a
+ * second submission could start another untracked task against the same
+ * session.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'

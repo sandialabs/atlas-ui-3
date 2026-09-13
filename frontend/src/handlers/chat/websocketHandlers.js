@@ -141,6 +141,12 @@ export function createWebSocketHandler(deps) {
           // Issue #849: no strategy/max-steps narration. Keep only the small
           // "Agent" badge so the transcript still marks where the run began.
           addMessage({ role: 'system', content: '', type: 'agent_status', timestamp: new Date().toISOString(), agent_mode: true })
+          // The server has confirmed the turn really is an agent loop: only
+          // now may the composer offer steering sends and the agent Stop
+          // button. A downgraded turn (kill switch, no tools, non-tool model)
+          // never sends agent_start, so its plain-turn handling stays in
+          // charge (#849 review).
+          if (typeof setIsAgentRunning === 'function') setIsAgentRunning(true)
           break
         case 'agent_turn_start': {
           const step = data.step || data.turn || 1
