@@ -259,6 +259,8 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
             <button
               onClick={() => setTranscriptDropdownOpen(!transcriptDropdownOpen)}
               disabled={messages.length === 0}
+              aria-haspopup="menu"
+              aria-expanded={transcriptDropdownOpen}
               className={`p-2 rounded-lg transition-colors ${
                 messages.length === 0 
                   ? 'bg-gray-700 text-gray-500 cursor-not-allowed' 
@@ -270,8 +272,9 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
             </button>
             
             {transcriptDropdownOpen && messages.length > 0 && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
+              <div role="menu" className="absolute right-0 top-full mt-1 w-48 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
                 <button
+                  role="menuitem"
                   onClick={() => {
                     openChat()
                     setTranscriptDropdownOpen(false)
@@ -283,6 +286,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                   Open as JSON
                 </button>
                 <button
+                  role="menuitem"
                   onClick={() => {
                     openChatAsText()
                     setTranscriptDropdownOpen(false)
@@ -294,6 +298,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                   Open as Text
                 </button>
                 <button
+                  role="menuitem"
                   onClick={() => {
                     window.print()
                     setTranscriptDropdownOpen(false)

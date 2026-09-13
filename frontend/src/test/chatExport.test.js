@@ -344,7 +344,9 @@ describe('chatExport.formatToolCallForText', () => {
 // has no blob URL store or window.open, so these stub both and pin the
 // contract: open the blob URL in a new tab, fall back to a file download when
 // the popup is blocked, and revoke the URL only after the tab has had time to
-// load it.
+// load it. Fake timers run for the whole describe: the helper schedules a
+// 60-second revoke timer, and a real one left behind by a test would keep the
+// vitest worker alive and could fire after the mocks are restored.
 describe('chatExport.openBlobInNewTab', () => {
   const originalCreateObjectURL = URL.createObjectURL
   const originalRevokeObjectURL = URL.revokeObjectURL
@@ -356,6 +358,7 @@ describe('chatExport.openBlobInNewTab', () => {
   let windowOpen
 
   beforeEach(() => {
+    vi.useFakeTimers()
     createdAnchors.length = 0
     createObjectURL = vi.fn(() => 'blob:mock-url')
     revokeObjectURL = vi.fn()
@@ -372,11 +375,11 @@ describe('chatExport.openBlobInNewTab', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     URL.createObjectURL = originalCreateObjectURL
     URL.revokeObjectURL = originalRevokeObjectURL
     window.open = originalWindowOpen
     vi.restoreAllMocks()
-    vi.useRealTimers()
     document.body.innerHTML = ''
   })
 
@@ -411,8 +414,18 @@ describe('chatExport.openBlobInNewTab', () => {
     expect(document.body.querySelector('a')).toBeNull()
   })
 
+  it('still falls back to a download when window.open throws instead of returning null', () => {
+    windowOpen.mockImplementation(() => { throw new Error('popup blocked') })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    openBlobInNewTab(new Blob(['x'], { type: 'text/plain' }), 'chat-export-2026.txt')
+
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(createdAnchors).toHaveLength(1)
+    expect(createdAnchors[0].download).toBe('chat-export-2026.txt')
+  })
+
   it('revokes the blob URL after the tab has had time to load it', () => {
-    vi.useFakeTimers()
     windowOpen.mockReturnValue({})
 
     openBlobInNewTab(new Blob(['x'], { type: 'text/plain' }), 'chat-export-2026.txt')

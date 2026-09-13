@@ -128,4 +128,20 @@ describe('header transcript actions (#908)', () => {
     expect(jsonItem.title).toBe('Opens in a new browser tab')
     expect(screen.getByText('Open as Text').title).toBe('Opens in a new browser tab')
   })
+
+  it('exposes the dropdown to assistive tech as a menu', () => {
+    // Review note on #933: the toggle announced nothing about the popup and the
+    // items were opaque buttons. Pin the menu semantics so a refactor does not
+    // silently drop them.
+    renderHeader()
+    const toggle = screen.getByTitle('Open Chat Transcript')
+    expect(toggle.getAttribute('aria-haspopup')).toBe('menu')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('Open as JSON').closest('[role="menu"]')).toBeTruthy()
+    expect(screen.getByText('Open as JSON').getAttribute('role')).toBe('menuitem')
+    expect(screen.getByText('Open as Text').getAttribute('role')).toBe('menuitem')
+  })
 })

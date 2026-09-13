@@ -17,12 +17,19 @@ import { filterArgumentsForDisplay, processToolResult } from './toolResultUtils'
 const BLOB_URL_REVOKE_DELAY_MS = 60000
 
 // Open a Blob in a new browser tab, falling back to a file download when the
-// popup is blocked (window.open returns null). `fallbackDownloadName` names the
-// file for that fallback so the user still gets the transcript either way.
+// popup is blocked (window.open returns null) or throws. `fallbackDownloadName`
+// names the file for that fallback so the user still gets the transcript
+// either way.
 export function openBlobInNewTab(blob, fallbackDownloadName) {
   const url = URL.createObjectURL(blob)
-  const tab = window.open(url, '_blank')
-  if (!tab) {
+  let opened = null
+  try {
+    opened = window.open(url, '_blank')
+  } catch {
+    // Some setups raise instead of returning null; the fallback below still
+    // gives the user their transcript.
+  }
+  if (!opened) {
     const a = document.createElement('a')
     a.href = url
     a.download = fallbackDownloadName
