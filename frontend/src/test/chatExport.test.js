@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   buildPromptInfoByKey,
   resolvePromptInfo,
   buildExportConversation,
   buildPersistedMessage,
   formatToolCallForText,
+  openBlobInNewTab,
 } from '../utils/chatExport'
 
 const PROMPTS_CONFIG = [
@@ -336,5 +337,90 @@ describe('chatExport.formatToolCallForText', () => {
     })
     expect(block).toContain('hidden for display')
     expect(block).not.toContain('x'.repeat(500))
+  })
+})
+
+// Issue #908: transcript exports open in a new browser tab by default. jsdom
+// has no blob URL store or window.open, so these stub both and pin the
+// contract: open the blob URL in a new tab, fall back to a file download when
+// the popup is blocked, and revoke the URL only after the tab has had time to
+// load it.
+describe('chatExport.openBlobInNewTab', () => {
+  const originalCreateObjectURL = URL.createObjectURL
+  const originalRevokeObjectURL = URL.revokeObjectURL
+  const originalWindowOpen = window.open
+
+  const createdAnchors = []
+  let createObjectURL
+  let revokeObjectURL
+  let windowOpen
+
+  beforeEach(() => {
+    createdAnchors.length = 0
+    createObjectURL = vi.fn(() => 'blob:mock-url')
+    revokeObjectURL = vi.fn()
+    windowOpen = vi.fn()
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
+    window.open = windowOpen
+    const nativeCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag, options) => {
+      const el = nativeCreateElement(tag, options)
+      if (tag === 'a') createdAnchors.push(el)
+      return el
+    })
+  })
+
+  afterEach(() => {
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+    window.open = originalWindowOpen
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+    document.body.innerHTML = ''
+  })
+
+  it('opens a new tab on the blob URL and does not revoke immediately', () => {
+    const blob = new Blob(['hello'], { type: 'text/plain' })
+    windowOpen.mockReturnValue({})
+
+    openBlobInNewTab(blob, 'chat-export-2026.txt')
+
+    expect(createObjectURL).toHaveBeenCalledWith(blob)
+    expect(windowOpen).toHaveBeenCalledTimes(1)
+    expect(windowOpen).toHaveBeenCalledWith('blob:mock-url', '_blank')
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+    // No download anchor is created when the tab opened.
+    expect(createdAnchors).toHaveLength(0)
+  })
+
+  it('falls back to a download with the given filename when the popup is blocked', () => {
+    windowOpen.mockReturnValue(null)
+    // jsdom has no navigation engine, so the fallback anchor's click would only
+    // print a "Not implemented" warning; intercept it and assert on the call.
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    openBlobInNewTab(new Blob(['{}'], { type: 'application/json' }), 'chat-export-2026.json')
+
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(createdAnchors).toHaveLength(1)
+    const a = createdAnchors[0]
+    expect(a.download).toBe('chat-export-2026.json')
+    expect(a.href).toContain('blob:mock-url')
+    // The temporary anchor is cleaned up out of the DOM after the click.
+    expect(document.body.querySelector('a')).toBeNull()
+  })
+
+  it('revokes the blob URL after the tab has had time to load it', () => {
+    vi.useFakeTimers()
+    windowOpen.mockReturnValue({})
+
+    openBlobInNewTab(new Blob(['x'], { type: 'text/plain' }), 'chat-export-2026.txt')
+
+    vi.advanceTimersByTime(59999)
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
   })
 })

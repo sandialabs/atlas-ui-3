@@ -4,7 +4,7 @@ import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import WorkspaceSelector from './WorkspaceSelector'
-import { Database, Wrench, Bot, Download, Plus, CircleHelp, Shield, FolderOpen, Monitor, Menu, X, PanelLeft, HardDrive, Cloud, Printer, Terminal } from 'lucide-react'
+import { Database, Wrench, Bot, ExternalLink, FileText, Plus, CircleHelp, Shield, FolderOpen, Monitor, Menu, X, PanelLeft, HardDrive, Cloud, Printer, Terminal } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useElementWidth } from '../hooks/useElementWidth'
 import { useToast } from './ui/toastContext'
@@ -58,8 +58,8 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
     setAgentModeEnabled,
     saveMode,
     setSaveMode,
-    downloadChat,
-    downloadChatAsText,
+    openChat,
+    openChatAsText,
     messages,
     clearChat,
     features,
@@ -70,7 +70,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
   const { complianceLevels } = useMarketplace()
   const { connectionStatus, isConnected } = useWS()
   const toast = useToast()
-  const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false)
+  const [transcriptDropdownOpen, setTranscriptDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   // The desktop cluster is gated on the header's own width, not the viewport's:
   // the header sits beside a 256px sidebar, so a viewport query would reveal the
@@ -93,7 +93,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
   // Close dropdowns when mobile menu opens
   useEffect(() => {
     if (mobileMenuOpen) {
-      setDownloadDropdownOpen(false)
+      setTranscriptDropdownOpen(false)
     }
   }, [mobileMenuOpen])
 
@@ -254,45 +254,49 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
             {user}
           </div>
 
-          {/* Download Chat Button */}
+          {/* Open Chat Transcript Button */}
           <div className="relative">
             <button
-              onClick={() => setDownloadDropdownOpen(!downloadDropdownOpen)}
+              onClick={() => setTranscriptDropdownOpen(!transcriptDropdownOpen)}
               disabled={messages.length === 0}
               className={`p-2 rounded-lg transition-colors ${
                 messages.length === 0 
                   ? 'bg-gray-700 text-gray-500 cursor-not-allowed' 
                   : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
               }`}
-              title="Download Chat History"
+              title="Open Chat Transcript"
             >
-              <Download className="w-5 h-5" />
+              <FileText className="w-5 h-5" />
             </button>
             
-            {downloadDropdownOpen && messages.length > 0 && (
+            {transcriptDropdownOpen && messages.length > 0 && (
               <div className="absolute right-0 top-full mt-1 w-48 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
                 <button
                   onClick={() => {
-                    downloadChat()
-                    setDownloadDropdownOpen(false)
+                    openChat()
+                    setTranscriptDropdownOpen(false)
                   }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg"
+                  title="Opens in a new browser tab"
+                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg flex items-center gap-2"
                 >
-                  Download as JSON
+                  <ExternalLink className="w-4 h-4" />
+                  Open as JSON
                 </button>
                 <button
                   onClick={() => {
-                    downloadChatAsText()
-                    setDownloadDropdownOpen(false)
+                    openChatAsText()
+                    setTranscriptDropdownOpen(false)
                   }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
+                  title="Opens in a new browser tab"
+                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
                 >
-                  Download as Text
+                  <ExternalLink className="w-4 h-4" />
+                  Open as Text
                 </button>
                 <button
                   onClick={() => {
                     window.print()
-                    setDownloadDropdownOpen(false)
+                    setTranscriptDropdownOpen(false)
                   }}
                   className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 last:rounded-b-lg flex items-center gap-2"
                 >
@@ -430,37 +434,39 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                 User: {user}
               </div>
 
-              {/* Download Chat */}
+              {/* Open Chat Transcript */}
               <button
                 onClick={() => {
-                  downloadChat()
+                  openChat()
                   setMobileMenuOpen(false)
                 }}
                 disabled={messages.length === 0}
+                title="Opens in a new browser tab"
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                   messages.length === 0
                     ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                     : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
                 }`}
               >
-                <Download className="w-5 h-5" />
-                <span>Download as JSON</span>
+                <ExternalLink className="w-5 h-5" />
+                <span>Open as JSON</span>
               </button>
 
               <button
                 onClick={() => {
-                  downloadChatAsText()
+                  openChatAsText()
                   setMobileMenuOpen(false)
                 }}
                 disabled={messages.length === 0}
+                title="Opens in a new browser tab"
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                   messages.length === 0
                     ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                     : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
                 }`}
               >
-                <Download className="w-5 h-5" />
-                <span>Download as Text</span>
+                <ExternalLink className="w-5 h-5" />
+                <span>Open as Text</span>
               </button>
 
               <button
@@ -612,10 +618,10 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
       )}
 
       {/* Close download dropdown when clicking outside */}
-      {downloadDropdownOpen && (
+      {transcriptDropdownOpen && (
         <div
           className="fixed inset-0 z-40"
-          onClick={() => setDownloadDropdownOpen(false)}
+          onClick={() => setTranscriptDropdownOpen(false)}
         />
       )}
 
