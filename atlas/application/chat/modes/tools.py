@@ -27,8 +27,8 @@ from ..utilities import error_handler, event_notifier, tool_executor
 from ..utilities.agent_digest import build_tool_digest
 from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.dropped_calls import publish_dropped_call_warning
-from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
+from ..utilities.tool_selection import normalize_selected_tools
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from .streaming_helpers import stream_and_accumulate
 
@@ -113,12 +113,13 @@ class ToolsModeRunner:
         # it starts so the tool digest (issue #798) covers only this turn.
         turn_start_index = len(session.history.messages)
 
-        # Resolve tool schemas. Selected data sources make ``atlas_search``
-        # available rather than running retrieval up front -- the model has to
-        # call the tool, and the user sees the call.
+        # Resolve tool schemas from the user's selection only (#921): selected
+        # data sources scope what ``atlas_search`` may read, they never add
+        # the tool or run retrieval up front -- the model has to call the
+        # tools the user actually ticked.
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
-            with_search_tool(selected_tools, selected_data_sources, self.config_manager),
+            normalize_selected_tools(selected_tools),
             user_email,
         )
 
@@ -267,7 +268,7 @@ class ToolsModeRunner:
 
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
-            with_search_tool(selected_tools, selected_data_sources, self.config_manager),
+            normalize_selected_tools(selected_tools),
             user_email,
         )
 

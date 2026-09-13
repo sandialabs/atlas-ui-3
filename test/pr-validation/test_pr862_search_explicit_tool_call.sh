@@ -59,6 +59,10 @@ print_result $? "call_with_rag / stream_with_rag are untouched"
 # ==========================================
 print_header "Check 3: the agent loop makes a plain tools call with sources selected"
 # ==========================================
+# Check 3 and 4 were updated by PR #930 (issue #921): a data source selection
+# no longer implies atlas_search, so "atlas_search offered" below became "only
+# the user's selection is offered", and the orchestrator's resolve step became
+# the reachability warning.
 python3 -c "
 import asyncio
 from types import SimpleNamespace
@@ -80,7 +84,7 @@ class LLM:
         raise AssertionError('the silent RAG path was used')
 
 tm = MagicMock()
-tm.get_tools_schema = MagicMock(side_effect=lambda names: [
+tm.get_tools_schema = MagicMock(side_effect=lambda names, *a, **kw: [
     {'type': 'function', 'function': {'name': n, 'parameters': {}}} for n in names
 ])
 
@@ -104,13 +108,13 @@ asyncio.run(main())
 assert seen['messages'] == [{'role': 'user', 'content': 'what is in the docs?'}], \
     f'context was injected: {seen[\"messages\"]}'
 names = [t['function']['name'] for t in seen['tools']]
-assert names == ['calc', 'atlas_search'], names
-print('plain tools call; atlas_search offered; nothing injected')
+assert names == ['calc'], names
+print('plain tools call; only the user-selected tool was offered; nothing injected')
 " 2>&1 | tail -3
-print_result ${PIPESTATUS[0]} "agent mode: no pre-injection, atlas_search offered"
+print_result ${PIPESTATUS[0]} "agent mode: no pre-injection, no implied atlas_search"
 
 # ==========================================
-print_header "Check 4: the implied tool is resolved before the agent-mode guard"
+print_header "Check 4: sources nothing can read warn; auto-expanded sources stay silent"
 # ==========================================
 python3 -c "
 import asyncio
@@ -118,32 +122,33 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from atlas.application.chat.orchestrator import ChatOrchestrator
 
-def orch(tools_flag):
+def orch(rag=True, tools=True):
     o = ChatOrchestrator.__new__(ChatOrchestrator)
     o.config_manager = SimpleNamespace(app_settings=SimpleNamespace(
-        feature_rag_enabled=True, feature_atlas_rag_tools_enabled=tools_flag))
+        feature_rag_enabled=rag, feature_atlas_rag_tools_enabled=tools))
     o.event_publisher = AsyncMock()
     return o
 
 async def main():
-    o = orch(True)
-    resolved = await o._resolve_search_tool(None, ['srv:docs'])
-    assert resolved == ['atlas_search'], resolved
-    o.event_publisher.publish_warning.assert_not_awaited()
-    print('sources-only agent turn keeps a tool to act on')
-
-    # Search disabled + tools selected: warn, do not silently skip the evidence.
-    o2 = orch(False)
-    resolved = await o2._resolve_search_tool(['calc'], ['srv:docs'])
-    assert resolved == ['calc'], resolved
-    o2.event_publisher.publish_warning.assert_awaited_once()
-    msg = o2.event_publisher.publish_warning.await_args.kwargs['message']
+    # Sources + tools without the search tool: warn, do not silently skip the
+    # evidence (since #930 this is the ordinary case -- the tool was not ticked).
+    o = orch()
+    await o._check_data_sources_reachable(['calc'], ['srv:docs'])
+    o.event_publisher.publish_warning.assert_awaited_once()
+    msg = o.event_publisher.publish_warning.await_args.kwargs['message']
     assert 'were not searched' in msg, msg
-    print('disabled search tool warns instead of answering silently')
+    print('unreached sources warn instead of answering silently')
+
+    # Sources the client auto-expanded (RAG toggle on, none picked) stay
+    # silent; the turn carries no deliberate selection to warn about.
+    o2 = orch()
+    await o2._check_data_sources_reachable(['calc'], ['srv:docs'], sources_auto=True)
+    o2.event_publisher.publish_warning.assert_not_awaited()
+    print('auto-expanded sources stay silent')
 
 asyncio.run(main())
 " 2>&1 | tail -3
-print_result ${PIPESTATUS[0]} "orchestrator resolves the implied tool and warns when it cannot"
+print_result ${PIPESTATUS[0]} "orchestrator warns when the sources are stranded"
 
 # ==========================================
 print_header "Check 5: atlas_search executes and returns passages as a tool result"

@@ -596,25 +596,16 @@ export const ChatProvider = ({ children }) => {
 			toast.error('Not connected. Waiting to reconnect before sending.')
 			return false
 		}
-		// Agent mode needs at least one tool to act on. Block the send (rather than
-		// silently degrading to a normal chat) so the user makes an explicit
-		// choice -- otherwise the agent loop has nothing to call and the model can
-		// emit tool calls the provider rejects. The backend enforces the same
-		// guard for non-UI clients.
+		// Agent mode with no tools selected is allowed but warned about
+		// (issue #921 follow-up): the composer shows a persistent warning
+		// banner, and the backend downgrades the turn to a normal chat with
+		// its own in-chat note. Nothing to call is not worth blocking the
+		// send over -- the user keeps their typed message either way.
+		//
 		// A fine-tune correction (issue #622) narrows the turn to exactly one tool
-		// via selectedToolsOverride, so honor that list for the agent-mode guard and
-		// the outgoing payload instead of the persisted selection.
+		// via selectedToolsOverride, so honor that list for the outgoing payload
+		// instead of the persisted selection.
 		const toolsToSend = selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools]
-		// Selected data sources imply `atlas_search` (#862): the backend adds it to
-		// the schema, so such a turn does have a tool to act on and must not be
-		// blocked here -- the guard exists for turns with nothing to call at all.
-		if (
-			agent.agentModeAvailable && agent.agentModeEnabled &&
-			toolsToSend.length === 0 && selectedDataSources.size === 0
-		) {
-			toast.error('Agent mode needs at least one tool selected. Choose a tool or turn off Agent mode.')
-			return false
-		}
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
@@ -631,6 +622,10 @@ export const ChatProvider = ({ children }) => {
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
+		// When the RAG toggle alone expanded the list to "everything I can
+		// reach", the sources were not hand-picked -- the backend must not
+		// warn per turn that they were not searched (#930 review).
+		const dataSourcesAuto = ragActivated && !hasSelectedSources
 
 		// A user-authored custom prompt (issue #153) replaces the default system
 		// prompt and is sent as custom_system_prompt — never as an MCP prompt.
@@ -669,6 +664,7 @@ export const ChatProvider = ({ children }) => {
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
+			data_sources_auto: dataSourcesAuto,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
 			agent_mode: agent.agentModeEnabled,
@@ -742,9 +738,11 @@ export const ChatProvider = ({ children }) => {
 		setIsSynthesizing(false)
 		// Drive the agent Stop button off a dedicated run flag rather than
 		// isThinking, which the native agentic loop clears as soon as the first
-		// token streams. Only true in agent mode; the terminal agent events clear
-		// it (websocketHandlers).
-		setIsAgentRunning(agent.agentModeEnabled)
+		// token streams. Only true when the turn will really run as an agent
+		// turn: unavailable agent mode or no tools selected means the backend
+		// downgrades this to a normal turn, and the composer must offer normal
+		// stop handling, not agent stop (#921 follow-up review).
+		setIsAgentRunning(agent.agentModeAvailable && agent.agentModeEnabled && toolsToSend.length > 0)
 		return true
 	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore])
 

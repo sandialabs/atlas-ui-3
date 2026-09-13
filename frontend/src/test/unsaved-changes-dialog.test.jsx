@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
 import { useChat } from '../contexts/ChatContext'
@@ -178,10 +178,10 @@ describe('ToolsPanel - Unsaved Changes Dialog', () => {
       expect(screen.getByText('Unsaved Changes')).toBeInTheDocument()
     })
 
-    // Click Save Changes in the dialog (not the main panel)
-    const allSaveButtons = screen.getAllByText('Save Changes')
-    // The dialog button should be the second one (index 1)
-    const dialogSaveButton = allSaveButtons[1]
+    // Click Save Changes in the dialog (not the main panel, whose footer button
+    // is "Save and Close")
+    const dialog = screen.getByRole('dialog')
+    const dialogSaveButton = within(dialog).getByRole('button', { name: /Save Changes/i })
     fireEvent.click(dialogSaveButton)
 
     // Should close the panel

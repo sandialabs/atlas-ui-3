@@ -25,7 +25,7 @@ remembers the tab you were last on for the rest of the session.
 
 ![Tools and Integrations tab](screenshots/836-02-tools-tab.png)
 
-Tool selections are still staged: change what is enabled, then **Save Changes**.
+Tool selections are still staged: change what is enabled, then **Save and Close**.
 Switching tabs keeps pending selections, and closing the panel with unsaved
 selections still raises the save/discard prompt.
 
@@ -100,7 +100,16 @@ the same `DataSourcesSelector` component. Dataset names wrap instead of being
 clipped, so a long name (or one with a suffix appended) stays readable.
 
 Data source changes apply as soon as you make them, unlike tool and prompt
-checkboxes, which are staged until you press **Save Changes**.
+checkboxes, which are staged until you press **Save and Close**.
+
+### The search tool is selected, not implied
+
+Selecting data sources does not by itself turn on the built-in `atlas_search`
+tool. Tick `atlas_search` in the tools list to have the model call it; with
+no tools ticked, a turn with sources selected runs as plain RAG and reads
+them itself. If you select sources together with other tools but leave
+`atlas_search` unticked, nothing in that turn can read the sources and Atlas
+says so.
 
 ## Top bar sizing
 
