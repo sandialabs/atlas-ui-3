@@ -70,6 +70,7 @@ const ChatArea = () => {
     selectedTools,
     toggleTool,
     sessionFiles,
+    agentModeAvailable,
     agentModeEnabled,
     currentAgentStep,
     agentPendingQuestion,
@@ -971,8 +972,10 @@ const ChatArea = () => {
 
           {/* Warning: agent mode on but nothing for the loop to act on. Sending
               is still allowed -- the backend downgrades the turn to a normal
-              chat and says so in the transcript (#921 follow-up). */}
-          {agentModeEnabled && selectedTools.size === 0 && (
+              chat and says so in the transcript (#921 follow-up). Gated on
+              availability too: the enabled flag is persisted and can outlive
+              a config where the feature is off. */}
+          {agentModeAvailable && agentModeEnabled && selectedTools.size === 0 && (
             <div
               className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm"
               role="status"

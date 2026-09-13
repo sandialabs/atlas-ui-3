@@ -733,9 +733,11 @@ export const ChatProvider = ({ children }) => {
 		setIsSynthesizing(false)
 		// Drive the agent Stop button off a dedicated run flag rather than
 		// isThinking, which the native agentic loop clears as soon as the first
-		// token streams. Only true in agent mode; the terminal agent events clear
-		// it (websocketHandlers).
-		setIsAgentRunning(agent.agentModeEnabled)
+		// token streams. Only true when the turn will really run as an agent
+		// turn: unavailable agent mode or no tools selected means the backend
+		// downgrades this to a normal turn, and the composer must offer normal
+		// stop handling, not agent stop (#921 follow-up review).
+		setIsAgentRunning(agent.agentModeAvailable && agent.agentModeEnabled && toolsToSend.length > 0)
 		return true
 	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore])
 

@@ -53,6 +53,23 @@ async def test_a_selected_search_tool_satisfies_the_sources():
 
 
 @pytest.mark.asyncio
+async def test_a_search_tool_named_while_the_flags_are_off_still_warns():
+    """A named search tool that cannot reach the schema strands the sources.
+
+    ``FEATURE_ATLAS_RAG_TOOLS_ENABLED`` off keeps ``atlas_search`` out of the
+    LLM schema even when the user ticked it, so a tools turn with sources is
+    just as stranded as one that never named the tool.
+    """
+    orch = _orchestrator(_config(rag=False))
+    await orch._check_data_sources_reachable(["atlas_search"], ["srv:src"])
+    orch.event_publisher.publish_warning.assert_awaited_once()
+
+    orch = _orchestrator(_config(tools=False))
+    await orch._check_data_sources_reachable(["atlas_search"], ["srv:src"])
+    orch.event_publisher.publish_warning.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_a_legacy_search_tool_name_satisfies_the_sources():
     """A saved conversation still names the tool ``atlas_rag_query`` (pre-#855)."""
     orch = _orchestrator(_config())

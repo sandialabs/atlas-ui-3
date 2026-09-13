@@ -205,6 +205,20 @@ class ChatOrchestrator:
             code="MODEL_ACCESS_DENIED",
         )
 
+    def _builtin_search_flags_on(self) -> bool:
+        """True when both RAG and the built-in ATLAS RAG tools are turned on.
+
+        A selected ``atlas_search`` only reaches the LLM schema when these
+        flags are on, so a turn that named the tool under flags-off is just as
+        stranded as one that never named it.
+        """
+        settings = getattr(self.config_manager, "app_settings", None)
+        return bool(
+            settings
+            and getattr(settings, "feature_rag_enabled", False)
+            and getattr(settings, "feature_atlas_rag_tools_enabled", False)
+        )
+
     async def _check_data_sources_reachable(
         self,
         selected_tools: Optional[List[str]],
@@ -227,14 +241,16 @@ class ChatOrchestrator:
         """
         if not selected_data_sources:
             return
-        if any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in (selected_tools or [])):
-            # The turn names the search tool itself (possibly under its
-            # pre-#855 name from a saved conversation). Its sources are read.
-            return
         if only_rag or not selected_tools:
             # Routes to RAG mode, which reads the sources itself.
             return
         if self.config_manager is None:
+            return
+        named = any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in selected_tools)
+        if named and self._builtin_search_flags_on():
+            # The turn names the search tool (possibly under its pre-#855
+            # name from a saved conversation) and the flags let it through
+            # to the schema. Its sources are read.
             return
         logger.warning(
             "Data sources selected but the built-in search tool is not; "
@@ -243,11 +259,13 @@ class ChatOrchestrator:
         await self.event_publisher.publish_warning(
             message=(
                 "**Your data sources were not searched.** The built-in "
-                "`atlas_search` tool was not selected for this turn, and "
-                "searching is now something the model asks for rather than "
-                "something that happens automatically. Select `atlas_search` "
-                "to search your sources with the model, or deselect your "
-                "tools to use plain RAG for this turn."
+                "`atlas_search` tool did not run for this turn -- it was "
+                "not selected, or it is turned off "
+                "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`). Searching is now "
+                "something the model asks for rather than something that "
+                "happens automatically. Select `atlas_search` to search "
+                "your sources with the model, or deselect your tools to "
+                "use plain RAG for this turn."
             ),
         )
 

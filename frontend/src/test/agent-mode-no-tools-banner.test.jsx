@@ -36,6 +36,7 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     toggleTool: vi.fn(),
     togglePrompt: vi.fn(),
     sessionFiles: { files: [], total_files: 0, categories: {} },
+    agentModeAvailable: true,
     agentModeEnabled: true,
     agentPendingQuestion: null,
     setAgentPendingQuestion: vi.fn(),
@@ -77,6 +78,16 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
 
   it('stays quiet when agent mode is off', () => {
     useChat.mockReturnValue(chatContext({ agentModeEnabled: false }))
+    renderChat()
+
+    expect(screen.queryByTestId('agent-mode-no-tools-banner')).not.toBeInTheDocument()
+  })
+
+  it('stays quiet when agent mode is enabled but not available', () => {
+    // The enabled flag is persisted and can outlive a config where the
+    // feature is off; the warning must not show for a feature the user
+    // cannot actually use.
+    useChat.mockReturnValue(chatContext({ agentModeAvailable: false }))
     renderChat()
 
     expect(screen.queryByTestId('agent-mode-no-tools-banner')).not.toBeInTheDocument()
