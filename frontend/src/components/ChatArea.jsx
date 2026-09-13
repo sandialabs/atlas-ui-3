@@ -264,6 +264,16 @@ const ChatArea = () => {
     const message = inputValue.trim()
     if (!message || !currentModel || !isConnected) return
 
+    // A turn that entered as a plain chat is still generating: refuse a
+    // second submission rather than starting another untracked task against
+    // the same session (responses and history writes would interleave, #849
+    // review). An agent run is exempt -- a send while the loop runs is a
+    // steering message (issue #824), not a new turn.
+    if ((isThinking || isStreaming) && !isAgentRunning) {
+      toast.error('Wait for the current response to finish before sending.')
+      return
+    }
+
     try {
       // Process @file references in the message
       const processedFiles = await processFileReferences(message)
@@ -1217,7 +1227,16 @@ const ChatArea = () => {
                 </div>
               )}
             </div>
-            {(isThinking || isStreaming) && !agentModeEnabled && !isAgentRunning ? (
+            {/* Same turn-shape gate as the agent Stop button above: a turn
+                that entered as an agent run (isAgentRunning) keeps Send up so
+                the next message steers the loop (#824), and one that entered
+                as a plain turn gets Stop-streaming. Keyed on the mode the
+                turn actually entered -- NOT the live agentModeEnabled toggle:
+                with agent mode defaulting on, a no-tools turn runs as a plain
+                chat, and gating on the toggle here used to leave Send enabled
+                during generation, so a second submission could start another
+                untracked task against the same session (#849 review). */}
+            {(isThinking || isStreaming) && !isAgentRunning ? (
               <button
                 type="button"
                 onClick={stopStreaming}

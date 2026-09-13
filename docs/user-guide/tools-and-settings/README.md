@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-09-04
+Last updated: 2026-09-13
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -35,6 +35,19 @@ The theme toggle moved off the top bar into **General → Appearance**. The
 choice is still saved per browser.
 
 ![General tab with the Appearance toggle](screenshots/836-03-general-tab.png)
+
+## Agent mode
+
+Agent mode lets the model chain tool calls on its own until it decides the
+task is done. It is **on by default** (issue #849): a browser that has never
+made a choice starts with it enabled, an explicit "off" choice you made
+earlier is kept, and the header toggle (or Ctrl+Alt+A) still switches it any
+time.
+
+**General → Max Agent Iterations** bounds how many tool steps one agent turn
+may take. The slider's upper end is the ceiling your ATLAS administrator
+configured (`AGENT_MAX_STEPS`), and a saved value above that ceiling is
+clamped to it.
 
 ## Admin tab
 

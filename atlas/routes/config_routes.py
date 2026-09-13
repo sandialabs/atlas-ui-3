@@ -10,6 +10,7 @@ from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 from atlas.routes.files_routes import get_file_upload_limit_config
+from atlas.modules.config.settings import configured_agent_max_steps
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
     ATLAS_SERVER_NAME,
@@ -177,7 +178,9 @@ async def get_config_shell(
         "models": models_list,
         "user": current_user,
         "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
-        "agent_mode_available": app_settings.agent_mode_available,
+"agent_mode_available": app_settings.agent_mode_available,
+        # Mirrors the orchestrator's clamp: int() with a fallback, floor of 1.
+        "agent_max_steps": configured_agent_max_steps(app_settings),
         "banner_enabled": app_settings.banner_enabled,
         "features": {
             "workspaces": app_settings.workspaces_effective,
@@ -527,6 +530,7 @@ async def get_config(
         "active_sessions": 0,  # TODO: Implement session counting in ChatService
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
+        "agent_max_steps": configured_agent_max_steps(app_settings),  # Ceiling for the agent loop (bounds the Max Agent Iterations slider)
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_content": help_content,  # Help page content from help.md
         "tool_approvals": {

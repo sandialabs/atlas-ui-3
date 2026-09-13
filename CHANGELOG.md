@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #932 - 2026-09-13
+- **Agent mode is on by default and its start banner is gone** (closes #849): the "Agent Mode Started (strategy: agentic, max steps: N)" transcript row is replaced by the small purple "Agent" box alone, and the Agent toggle now defaults to on everywhere for browsers with no stored choice -- an existing explicit off preference is still honored, and the toggle still works. The Max Agent Iterations slider in Tools and Settings is now bounded by the admin-configured `agent_max_steps` (exposed via `/api/config` and `/api/config/shell`) instead of a hardcoded 50, so the slider's upper end matches what the backend actually honors.
+
 ### PR #933 - 2026-09-13
 - Chat transcript exports (.json and .txt) now open in a new browser tab by default instead of forcing a file download (closes #908); the old download remains as the fallback when the browser blocks the popup tab, and saving is still available from the opened tab (Ctrl+S) or Print / Save as PDF.
 

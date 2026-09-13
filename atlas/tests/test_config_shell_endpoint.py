@@ -22,6 +22,7 @@ def test_config_shell_endpoint_returns_200():
     assert "user" in data
     assert "features" in data
     assert "agent_mode_available" in data
+    assert "agent_max_steps" in data
     assert "is_in_admin_group" in data
     assert "file_upload" in data
     assert "file_extraction" in data
@@ -140,6 +141,34 @@ def test_config_shell_file_upload_matches_full_config():
     assert shell_resp.status_code == 200
     assert full_resp.status_code == 200
     assert shell_resp.json()["file_upload"] == full_resp.json()["file_upload"]
+
+
+def test_config_shell_agent_max_steps_matches_full_config():
+    """The agent loop ceiling from /api/config/shell should match /api/config."""
+    config_manager = app_factory.get_config_manager()
+    original_steps = config_manager.app_settings.agent_max_steps
+
+    try:
+        config_manager.app_settings.agent_max_steps = 30
+        client = TestClient(app)
+        headers = {"X-User-Email": config_manager.app_settings.test_user}
+
+        shell_resp = client.get("/api/config/shell", headers=headers)
+        full_resp = client.get("/api/config", headers=headers)
+
+        assert shell_resp.status_code == 200
+        assert full_resp.status_code == 200
+        assert shell_resp.json()["agent_max_steps"] == 30
+        assert full_resp.json()["agent_max_steps"] == 30
+
+        # Degenerate settings still yield a usable ceiling, matching the
+        # orchestrator's clamp (int-or-10, then floored at 1).
+        config_manager.app_settings.agent_max_steps = 0
+        assert client.get("/api/config/shell", headers=headers).json()["agent_max_steps"] == 10
+        config_manager.app_settings.agent_max_steps = -5
+        assert client.get("/api/config/shell", headers=headers).json()["agent_max_steps"] == 1
+    finally:
+        config_manager.app_settings.agent_max_steps = original_steps
 
 
 def test_config_shell_file_upload_uses_env_setting():

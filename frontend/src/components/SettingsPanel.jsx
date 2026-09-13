@@ -62,7 +62,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   const [hasChanges, setHasChanges] = useState(false)
 
   // Also get live settings from ChatContext for always-in-sync fields
-  const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable, isInAdminGroup } = useChat()
+  const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable, isInAdminGroup, agentMaxStepsLimit, agentCeilingConfirmed } = useChat()
+  // Admin-configured ceiling for the agent loop (issue #849); keeps the
+  // slider's upper bound aligned with what the backend will actually honor.
+  // Server default (10) until config lands.
+  const maxStepsLimit = Number(agentMaxStepsLimit) > 0 ? Number(agentMaxStepsLimit) : 10
   const customPromptsEnabled = !!features?.custom_prompts
   const toolsEnabled = !!features?.tools
   const ragEnabled = !!features?.rag
@@ -285,6 +289,27 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // A stored max-iterations value above the admin-configured ceiling is
+  // clamped so the slider and the value chip never advertise a step count
+  // the backend would just clamp away (issue #849). Two guards keep that
+  // clamp from destroying data (#849 review):
+  // - It waits for a live config response (`agentCeilingConfirmed`): the
+  //   pre-config fallback of 10 -- or a stale cache -- must never be
+  //   persisted, or a saved 30 would be silently rewritten on a deployment
+  //   whose real ceiling is 30 or higher. The server safely clamps early
+  //   requests itself, so the wait costs nothing.
+  // - The persisted write goes through the settings owner
+  //   (`updateSettings`) instead of a direct localStorage edit, so the
+  //   context copy stays in sync and a later full write from useSettings
+  //   cannot resurrect the un-clamped value.
+  useEffect(() => {
+    if (!agentCeilingConfirmed) return
+    setSettings(prev => (prev.maxIterations > maxStepsLimit ? { ...prev, maxIterations: maxStepsLimit } : prev))
+    if ((ctxSettings?.maxIterations ?? 0) > maxStepsLimit) {
+      updateCtxSettings({ maxIterations: maxStepsLimit })
+    }
+  }, [agentCeilingConfirmed, maxStepsLimit, ctxSettings?.maxIterations]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Save settings to localStorage whenever they change
   const saveSettings = (newSettings) => {
     localStorage.setItem('chatui-settings', JSON.stringify(newSettings))
@@ -303,8 +328,15 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   }
 
   const handleReset = () => {
-    setSettings(defaultSettings)
-    saveSettings(defaultSettings)
+    // The reset defaults must also respect the admin ceiling (issue #849) --
+    // but only once a live response has established it: a reset during the
+    // pre-config window must not write a lower default than the same click
+    // produces a moment later (#849 review).
+    const defaults = agentCeilingConfirmed
+      ? { ...defaultSettings, maxIterations: Math.min(defaultSettings.maxIterations, maxStepsLimit) }
+      : { ...defaultSettings }
+    setSettings(defaults)
+    saveSettings(defaults)
   }
 
   // Reverting General is deferred behind the close: a later guard can abort the
@@ -626,29 +658,40 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 <div className="flex items-center justify-between">
                   <label className="text-gray-50 font-medium">Max Agent Iterations</label>
                   <span className="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
-                    {settings.maxIterations}
+                    {Math.min(settings.maxIterations, maxStepsLimit)} / {maxStepsLimit}
                   </span>
                 </div>
-                <div className="space-y-2">
-                  <input
-                    type="range"
-                    min="1"
-                    max="50"
-                    step="1"
-                    value={settings.maxIterations}
-                    onChange={(e) => handleSettingChange('maxIterations', parseInt(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-                  />
-                  <div className="flex justify-between text-xs text-gray-400">
-                    <span>1</span>
-                    <span>25</span>
-                    <span>50</span>
-                  </div>
+                {maxStepsLimit === 1 ? (
+                  // A ceiling of 1 (reachable: the server floors a misconfigured
+                  // AGENT_MAX_STEPS at 1) leaves nothing to slide, so the inert
+                  // control and its colliding "1 1 1" scale become static copy.
                   <p className="text-sm text-gray-400">
-                    Maximum number of iterations an agent can perform when solving complex tasks. 
-                    Higher values allow for more thorough problem solving but may take longer.
+                    This deployment caps agent runs at a single iteration.
                   </p>
-                </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="range"
+                      min="1"
+                      max={maxStepsLimit}
+                      step="1"
+                      value={Math.min(settings.maxIterations, maxStepsLimit)}
+                      onChange={(e) => handleSettingChange('maxIterations', Math.min(parseInt(e.target.value), maxStepsLimit))}
+                      className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+                    />
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <span>1</span>
+                      {/* The midpoint drops out when it would collide with an
+                          endpoint (ceilings of 1 or 2). */}
+                      {maxStepsLimit > 2 && <span>{Math.round(maxStepsLimit / 2)}</span>}
+                      <span>{maxStepsLimit}</span>
+                    </div>
+                  </div>
+                )}
+                <p className="text-sm text-gray-400">
+                  Maximum number of iterations an agent can perform when solving complex tasks.
+                  Higher values allow for more thorough problem solving but may take longer.
+                </p>
               </div>
             </>
           )}

@@ -47,7 +47,7 @@ function readCachedConfig() {
  */
 const SAFE_CACHE_FIELDS = [
   'app_name', 'models', 'features', 'file_extraction', 'file_upload',
-  'banner_enabled', 'agent_mode_available'
+  'banner_enabled', 'agent_mode_available', 'agent_max_steps'
 ]
 
 /**
@@ -121,6 +121,20 @@ export function useChatConfig() {
   const [agentModeAvailable, setAgentModeAvailable] = useState(
     cached.current ? !!cached.current.agent_mode_available : false
   )
+  // Admin-configured ceiling for the agent loop (issue #849): bounds the Max
+  // Agent Iterations slider so its upper end matches what the server will
+  // actually honor. Falls back to the server's default AGENT_MAX_STEPS until
+  // config lands, so a pre-config choice is already within the real ceiling.
+  const [agentMaxStepsLimit, setAgentMaxStepsLimit] = useState(() => {
+    const v = Number(cached.current?.agent_max_steps)
+    return Number.isFinite(v) && v > 0 ? v : 10
+  })
+  // Whether a live config response (not the cache) has supplied a valid
+  // agent_max_steps ceiling. A cached value alone must not count: an old
+  // cache predates the field entirely, and a stale cache can disagree with a
+  // changed AGENT_MAX_STEPS, so consumers must not persist anything derived
+  // from the ceiling until a current response confirms it (#849 review).
+  const [agentCeilingConfirmed, setAgentCeilingConfirmed] = useState(false)
   const [isInAdminGroup, setIsInAdminGroup] = useState(false)
   // Tracks whether we have received at least one config response (cache or network)
   const [configReady, setConfigReady] = useState(!!cached.current)
@@ -140,6 +154,16 @@ export function useChatConfig() {
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
     setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
     setAgentModeAvailable(!!cfg.agent_mode_available)
+    // Only a response carrying a valid ceiling updates it: a mixed-version
+    // pod that omits (or garbles) the field must not reset a confirmed
+    // ceiling to the fallback of 10, nor un-confirm what a previous live
+    // response established (#849 review). Before any confirmation the
+    // initial fallback of 10 stands for display only.
+    const maxSteps = Number(cfg.agent_max_steps)
+    if (Number.isFinite(maxSteps) && maxSteps > 0) {
+      setAgentMaxStepsLimit(maxSteps)
+      setAgentCeilingConfirmed(true)
+    }
     setIsInAdminGroup(!!cfg.is_in_admin_group)
 
     if (!isShell) {
@@ -266,6 +290,8 @@ export function useChatConfig() {
       }
     },
     agentModeAvailable,
+    agentMaxStepsLimit,
+    agentCeilingConfirmed,
     isInAdminGroup,
     fileExtraction,
     fileUpload,

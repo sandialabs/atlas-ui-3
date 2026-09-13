@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { CONFIG_CACHE_KEY } from '../hooks/chat/useChatConfig'
+import { renderHook, waitFor } from '@testing-library/react'
+import { useChatConfig, CONFIG_CACHE_KEY } from '../hooks/chat/useChatConfig'
 
 // Sample full config response
 const FULL_CONFIG = {
@@ -245,6 +246,129 @@ describe('Shell Config Application', () => {
 
     expect(models).toHaveLength(2)
     expect(models[0].name).toBe('gpt-4o')
+  })
+})
+
+describe('agentMaxStepsLimit parsing (issue #849)', () => {
+  let storage = {}
+
+  beforeEach(() => {
+    storage = {}
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key) => storage[key] ?? null),
+      setItem: vi.fn((key, value) => { storage[key] = value }),
+      removeItem: vi.fn((key) => { delete storage[key] })
+    })
+    // A never-resolving fetch keeps the mount-time config fetch from
+    // overwriting the cache-derived value under test.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const renderWithCache = (cacheValue) => {
+    if (cacheValue !== undefined) {
+      storage[CONFIG_CACHE_KEY] = JSON.stringify({ ...FULL_CONFIG, agent_max_steps: cacheValue })
+    }
+    return renderHook(() => useChatConfig())
+  }
+
+  it('uses a valid cached ceiling', () => {
+    const { result } = renderWithCache(30)
+    expect(result.current.agentMaxStepsLimit).toBe(30)
+  })
+
+  it.each([
+    ['missing (no cache)', undefined],
+    ['null', null],
+    ['zero', 0],
+    ['negative', -5],
+    ['non-numeric string', 'abc'],
+  ])('falls back to the server default for %s', (_label, value) => {
+    const { result } = renderWithCache(value)
+    expect(result.current.agentMaxStepsLimit).toBe(10)
+  })
+})
+
+describe('agent ceiling confirmation (issue #849 review)', () => {
+  let storage = {}
+
+  beforeEach(() => {
+    storage = {}
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key) => storage[key] ?? null),
+      setItem: vi.fn((key, value) => { storage[key] = value }),
+      removeItem: vi.fn((key) => { delete storage[key] })
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const renderWithResponses = (shell, full) => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.includes('/api/config/shell')) {
+        return shell
+          ? Promise.resolve({ ok: true, json: () => Promise.resolve(shell) })
+          : Promise.resolve({ ok: false, status: 500 })
+      }
+      return full
+        ? Promise.resolve({ ok: true, json: () => Promise.resolve(full) })
+        : Promise.reject(new Error('config fetch failed'))
+    }))
+    return renderHook(() => useChatConfig())
+  }
+
+  it('does not treat the cache alone as a confirmed ceiling', () => {
+    // A cache can predate the agent_max_steps field or disagree with a
+    // changed AGENT_MAX_STEPS, so only a live response confirms it.
+    storage[CONFIG_CACHE_KEY] = JSON.stringify({ ...FULL_CONFIG, agent_max_steps: 30 })
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+
+    const { result } = renderHook(() => useChatConfig())
+    expect(result.current.agentMaxStepsLimit).toBe(30)
+    expect(result.current.agentCeilingConfirmed).toBe(false)
+  })
+
+  it('confirms the ceiling once a live response supplies a valid value', async () => {
+    const { result } = renderWithResponses(
+      { ...SHELL_CONFIG, agent_max_steps: 30 },
+      { ...FULL_CONFIG, agent_max_steps: 30 }
+    )
+    await waitFor(() => {
+      expect(result.current.agentCeilingConfirmed).toBe(true)
+    })
+    expect(result.current.agentMaxStepsLimit).toBe(30)
+  })
+
+  it('stays unconfirmed when the live responses omit the field', async () => {
+    // e.g. an older backend that does not publish the ceiling yet: nothing
+    // downstream may persist a clamp against the unknown ceiling.
+    const { result } = renderWithResponses(SHELL_CONFIG, FULL_CONFIG)
+    await waitFor(() => {
+      expect(result.current.configReady).toBe(true)
+    })
+    expect(result.current.agentCeilingConfirmed).toBe(false)
+    expect(result.current.agentMaxStepsLimit).toBe(10)
+  })
+
+  it('keeps the last confirmed ceiling when a later response omits the field', async () => {
+    // Mixed-version pods during a rolling deploy: the shell response
+    // confirms 30, then a pod without the field answers. That response must
+    // not reset the ceiling to the fallback of 10 -- the always-mounted
+    // settings panel would otherwise treat 10 as authoritative and rewrite a
+    // saved 30 (#849 review).
+    const { result } = renderWithResponses(
+      { ...SHELL_CONFIG, agent_max_steps: 30 },
+      FULL_CONFIG
+    )
+    await waitFor(() => {
+      expect(result.current.agentCeilingConfirmed).toBe(true)
+    })
+    expect(result.current.agentMaxStepsLimit).toBe(30)
   })
 })
 

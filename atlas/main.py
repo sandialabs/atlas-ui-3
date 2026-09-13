@@ -79,6 +79,7 @@ from atlas.domain.errors import (
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
+from atlas.modules.config.settings import agent_mode_available
 from atlas.routes.admin_routes import admin_router
 from atlas.routes.agent_portal_availability import load_agent_portal_router
 
@@ -91,16 +92,18 @@ from atlas.routes.files_routes import (
     find_oversized_inline_file,
     get_file_upload_limit_config,
     mcp_files_router,
+)
+from atlas.routes.files_routes import (
     router as files_router,
 )
 from atlas.routes.globus_auth_routes import api_router as globus_api_router
 from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
-from atlas.routes.persona_routes import router as persona_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.oidc_auth_routes import api_router as oidc_api_router
 from atlas.routes.oidc_auth_routes import browser_router as oidc_browser_router
+from atlas.routes.persona_routes import router as persona_router
 from atlas.routes.suggestion_routes import suggestion_router
 from atlas.routes.telemetry_routes import telemetry_router
 from atlas.routes.user_prompt_routes import router as user_prompt_router
@@ -1190,7 +1193,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 # conversation_id is recorded so a later steer that arrives for
                 # a different conversation (after a restore/reset) starts a
                 # fresh turn instead of injecting into the old one's context.
-                is_agent_turn = bool(data.get("agent_mode", False))
+                # Normalize the wire flag against the deployment's kill switch BEFORE the
+                # turn is classified and admitted (#849 review): a stale client
+                # cache may still send agent_mode=true after an admin disabled
+                # the feature, and that turn must not buy background-run
+                # semantics (run quota, conversation lock) the orchestrator
+                # would only downgrade to a plain tools turn. The flag stays
+                # in `data` untouched, so the orchestrator still downgrades
+                # with its in-chat note when the two disagree.
+                is_agent_turn = bool(data.get("agent_mode", False)) and agent_mode_available(
+                    getattr(config_manager, "app_settings", None)
+                )
                 steering_channel = SteeringChannel() if is_agent_turn else None
 
                 # Issue #884: decide whether this turn is a *tracked run* --

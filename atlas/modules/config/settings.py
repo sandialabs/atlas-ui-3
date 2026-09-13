@@ -90,6 +90,36 @@ def build_db_url_from_parts(
     return f"{db_driver}://{user_part}{host_part}{port_part}{name_part}"
 
 
+def configured_agent_max_steps(settings) -> int:
+    """Return the agent loop step ceiling with the orchestrator's coercion.
+
+    One authority for ``agent_max_steps``: int() with a fallback of 10 for
+    missing/non-numeric values, floored at 1 -- the same clamp
+    ``ChatOrchestrator._bounded_agent_steps`` applies to chat requests, so the
+    value exposed by the config endpoints always matches what a turn will
+    actually honor.
+    """
+    try:
+        value = int(getattr(settings, "agent_max_steps", 10) or 10)
+    except (TypeError, ValueError):
+        value = 10
+    return max(value, 1)
+
+
+def agent_mode_available(settings) -> bool:
+    """Whether the deployment's agent-mode kill switch allows agent runs.
+
+    Fail-closed authority for ``FEATURE_AGENT_MODE_AVAILABLE``: with no
+    settings object nothing proves the switch is on, so agent mode is
+    refused rather than assumed (#849 review). Both consumers -- the chat
+    orchestrator's downgrade path and the WebSocket admission path, which
+    must agree before a run is admitted -- read this one predicate.
+    """
+    if settings is None:
+        return False
+    return bool(getattr(settings, "feature_agent_mode_available", True))
+
+
 class AppSettings(BaseSettings):
     """Main application settings loaded from environment variables."""
 
