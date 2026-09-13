@@ -41,8 +41,15 @@ describe('Message agent_status rendering (issue #849)', () => {
 
   it('renders only the small Agent box when the marker has no text', () => {
     render(<Message message={{ ...baseMessage, content: '' }} onRewind={null} userIndex={null} />)
-    // The row is announced to screen readers via role="status" + its name.
-    expect(screen.getByRole('status', { name: 'Agent mode started' })).toBeInTheDocument()
+    // The row is announced to screen readers via role="status". Its name
+    // comes from its *contents* (role="status" ignores aria-label), so the
+    // "Agent mode started" wording must be inside the region as visually
+    // hidden text (#849 review).
+    const row = screen.getByRole('status')
+    expect(row).toBeInTheDocument()
+    const hidden = row.querySelector('.sr-only')
+    expect(hidden).not.toBeNull()
+    expect(hidden).toHaveTextContent('Agent mode started')
     expect(screen.getByText('Agent')).toBeInTheDocument()
     expect(screen.queryByText(/Agent Mode Started/)).not.toBeInTheDocument()
   })

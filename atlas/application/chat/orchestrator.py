@@ -152,10 +152,16 @@ class ChatOrchestrator:
             return True
 
     def _agent_mode_available(self) -> bool:
-        """Whether the deployment's agent-mode kill switch allows agent runs."""
+        """Whether the deployment's agent-mode kill switch allows agent runs.
+
+        Fails closed: with no settings object nothing proves the switch is
+        on, so agent mode is refused rather than assumed (#849 review). A
+        caller that genuinely runs without configuration supplies settings
+        that opt in explicitly.
+        """
         settings = getattr(self.config_manager, "app_settings", None)
         if settings is None:
-            return True
+            return False
         return bool(getattr(settings, "feature_agent_mode_available", True))
 
     def _bounded_agent_steps(self, requested: Any) -> int:

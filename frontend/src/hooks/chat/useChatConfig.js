@@ -129,6 +129,12 @@ export function useChatConfig() {
     const v = Number(cached.current?.agent_max_steps)
     return Number.isFinite(v) && v > 0 ? v : 10
   })
+  // Whether a live config response (not the cache) has supplied a valid
+  // agent_max_steps ceiling. A cached value alone must not count: an old
+  // cache predates the field entirely, and a stale cache can disagree with a
+  // changed AGENT_MAX_STEPS, so consumers must not persist anything derived
+  // from the ceiling until a current response confirms it (#849 review).
+  const [agentCeilingConfirmed, setAgentCeilingConfirmed] = useState(false)
   const [isInAdminGroup, setIsInAdminGroup] = useState(false)
   // Tracks whether we have received at least one config response (cache or network)
   const [configReady, setConfigReady] = useState(!!cached.current)
@@ -150,6 +156,9 @@ export function useChatConfig() {
     setAgentModeAvailable(!!cfg.agent_mode_available)
     const maxSteps = Number(cfg.agent_max_steps)
     setAgentMaxStepsLimit(Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 10)
+    if (Number.isFinite(maxSteps) && maxSteps > 0) {
+      setAgentCeilingConfirmed(true)
+    }
     setIsInAdminGroup(!!cfg.is_in_admin_group)
 
     if (!isShell) {
@@ -277,6 +286,7 @@ export function useChatConfig() {
     },
     agentModeAvailable,
     agentMaxStepsLimit,
+    agentCeilingConfirmed,
     isInAdminGroup,
     fileExtraction,
     fileUpload,

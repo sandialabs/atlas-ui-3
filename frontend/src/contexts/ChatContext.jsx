@@ -1245,6 +1245,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setAgentMaxSteps: agent.setAgentMaxSteps,
 		agentModeAvailable: agent.agentModeAvailable,
 		agentMaxStepsLimit: config.agentMaxStepsLimit,
+		// True only once a live config response confirmed the ceiling; the
+		// cache alone must not drive persisted clamps (#849 review).
+		agentCeilingConfirmed: config.agentCeilingConfirmed,
 		currentAgentStep: agent.currentAgentStep,
 		agentPendingQuestion: agent.agentPendingQuestion,
 		setAgentPendingQuestion: agent.setAgentPendingQuestion,

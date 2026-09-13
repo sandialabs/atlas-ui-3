@@ -541,19 +541,21 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       if (message.type === 'agent_status') {
         // Issue #849: the run-start marker arrives with no text, so render
         // just the small "Agent" box; other agent_status rows keep their copy.
-        // role="status" keeps the start of an agent run announced to screen
-        // readers now that the row carries no text.
+        // role="status" announces the row's *contents*, not its aria-label,
+        // so the "Agent mode started" wording lives in a visually hidden
+        // span inside the live region (#849 review).
         const hasContent = Boolean(message.content)
         return (
           <div
             className="flex items-center gap-2 text-sm"
             role={hasContent ? undefined : 'status'}
-            aria-label={hasContent ? undefined : 'Agent mode started'}
           >
             <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-600 text-white uppercase flex-shrink-0">
               Agent
             </span>
-            {hasContent && <span className="text-purple-300 min-w-0 break-words">{message.content}</span>}
+            {hasContent
+              ? <span className="text-purple-300 min-w-0 break-words">{message.content}</span>
+              : <span className="sr-only">Agent mode started</span>}
           </div>
         )
       }
