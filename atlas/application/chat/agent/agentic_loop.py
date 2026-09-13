@@ -30,8 +30,8 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
 from ..utilities.dropped_calls import publish_dropped_call_warning
-from ..utilities.search_tool_selection import with_search_tool
 from ..utilities.tool_history import ToolCallRecorder
+from ..utilities.tool_selection import normalize_selected_tools
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .steering import SteeringChannel
@@ -129,12 +129,11 @@ class AgenticLoop(AgentLoopProtocol):
             payload={"max_steps": max_steps, "strategy": "agentic"},
         ))
 
-        # Selecting data sources makes ``atlas_search`` available; it never
-        # runs retrieval on its own. The model decides whether to call it, and
-        # the call shows up in the UI like any other tool.
-        effective_tools = with_search_tool(
-            selected_tools, data_sources, self.config_manager,
-        )
+        # Retrieval is an explicit ``atlas_search`` call (#921): data sources
+        # scope what that tool may read, they never add it to the schema and
+        # they never run retrieval on their own. The model decides whether to
+        # call it, and the call shows up in the UI like any other tool.
+        effective_tools = normalize_selected_tools(selected_tools)
 
         tools_schema: List[Dict[str, Any]] = []
         if effective_tools and self.tool_manager:

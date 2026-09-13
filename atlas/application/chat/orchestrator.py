@@ -23,7 +23,6 @@ from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.message_builder import MessageBuilder
 from .preprocessors.prompt_override_service import PromptOverrideService
 from .utilities import event_notifier, file_processor
-from .utilities.search_tool_selection import with_search_tool
 
 logger = logging.getLogger(__name__)
 
@@ -206,55 +205,75 @@ class ChatOrchestrator:
             code="MODEL_ACCESS_DENIED",
         )
 
-    async def _resolve_search_tool(
+    def _builtin_search_flags_on(self) -> bool:
+        """True when both RAG and the built-in ATLAS RAG tools are turned on.
+
+        A selected ``atlas_search`` only reaches the LLM schema when these
+        flags are on, so a turn that named the tool under flags-off is just as
+        stranded as one that never named it.
+        """
+        settings = getattr(self.config_manager, "app_settings", None)
+        return bool(
+            settings
+            and getattr(settings, "feature_rag_enabled", False)
+            and getattr(settings, "feature_atlas_rag_tools_enabled", False)
+        )
+
+    async def _check_data_sources_reachable(
         self,
         selected_tools: Optional[List[str]],
         selected_data_sources: Optional[List[str]],
-    ) -> Optional[List[str]]:
-        """Add the implied ``atlas_search`` tool, or say why it is not there.
+        sources_auto: bool = False,
+    ) -> None:
+        """Warn when a tools/agent turn carries sources nothing in it can read.
 
-        A data source selection scopes search and makes the tool available
-        (#862). When the built-in search tool is turned off but general RAG is
-        not -- ``FEATURE_RAG_ENABLED=true`` with
-        ``FEATURE_ATLAS_RAG_TOOLS_ENABLED=false``, a supported combination -- a
-        turn that also has tools selected runs in tools mode, where nothing can
-        read those sources any more. Answering anyway without the user's chosen
-        evidence is exactly the silence this change set out to remove, so the
-        user is told. Returns the tool list to use.
+        Called from the two tool-running branches with that branch's final
+        tool list -- in the tools branch that is *after* authorization
+        filtering, since the ACL can strip ``atlas_search`` and would
+        otherwise strand the sources silently; the agent path does no
+        authorization filtering today, so its selection is already final.
+        RAG-mode turns (no tools selected, ``only_rag``) read the sources
+        themselves and are never routed here.
+
+        ``atlas_search`` is only available when the user actually ticked it
+        (#921): a data source selection scopes what that tool may read, it no
+        longer offers the tool itself. A turn that selected sources plus
+        other tools but not the search tool runs with nothing that reads
+        those sources -- answering without the user's chosen evidence and
+        saying nothing is a silence worth breaking, so the user is told.
+        A search tool named under flags-off is just as stranded, so it warns
+        the same way. ``sources_auto`` marks sources the client expanded on
+        its own (RAG toggle on, none picked): those were never deliberately
+        chosen, so they stay silent. ``config_manager`` is None for
+        programmatic callers that never had feature flags to consult, so
+        there is nothing to report to them either.
         """
-        if not selected_data_sources:
-            return selected_tools
-
-        resolved = with_search_tool(
-            selected_tools, selected_data_sources, self.config_manager,
+        if not selected_data_sources or sources_auto:
+            return
+        if self.config_manager is None:
+            return
+        named = any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in (selected_tools or []))
+        if named and self._builtin_search_flags_on():
+            # The turn names the search tool (possibly under its pre-#855
+            # name from a saved conversation) and the flags let it through
+            # to the schema. Its sources are read.
+            return
+        logger.warning(
+            "Data sources selected but the built-in search tool is not; "
+            "this turn will not search them",
         )
-        if any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in resolved):
-            # Either the user selected search themselves (possibly under its
-            # pre-#855 name) or the sources implied it. Nothing to warn about.
-            return resolved
-
-        # No search tool in the turn. That only strands the sources when the
-        # turn is going to run in tools/agent mode; with no tools at all it
-        # routes to RAG mode, which reads them itself. ``config_manager`` is
-        # None for programmatic callers that never had feature flags to consult,
-        # so there is nothing to report to them either.
-        if resolved and self.config_manager is not None:
-            logger.warning(
-                "Data sources selected but the built-in search tool is disabled; "
-                "this turn will not search them",
-            )
-            await self.event_publisher.publish_warning(
-                message=(
-                    "**Your data sources were not searched.** The built-in "
-                    "`atlas_search` tool is turned off "
-                    "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), and searching is now "
-                    "something the model asks for rather than something that "
-                    "happens automatically. Deselect your tools to use plain RAG "
-                    "for this turn, or ask an administrator to enable the "
-                    "built-in search tool."
-                ),
-            )
-        return selected_tools
+        await self.event_publisher.publish_warning(
+            message=(
+                "**Your data sources were not searched.** The built-in "
+                "`atlas_search` tool did not run for this turn -- it was "
+                "not selected, or it is turned off "
+                "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`). Searching is now "
+                "something the model asks for rather than something that "
+                "happens automatically. Select `atlas_search` to search "
+                "your sources with the model, or deselect your tools to "
+                "use plain RAG for this turn."
+            ),
+        )
 
     async def execute(
         self,
@@ -266,6 +285,7 @@ class ChatOrchestrator:
         selected_prompts: Optional[List[str]] = None,
         selected_data_sources: Optional[List[str]] = None,
         only_rag: bool = False,
+        data_sources_auto: bool = False,
         agent_mode: bool = False,
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
@@ -285,6 +305,10 @@ class ChatOrchestrator:
             selected_prompts: Optional list of MCP prompts
             selected_data_sources: Optional list of data sources
             only_rag: Whether to use only RAG (no tools)
+            data_sources_auto: True when the client expanded the source list
+                on its own (RAG toggle on, none hand-picked); such sources
+                were never deliberately chosen, so a stranded-sources warning
+                would fire on every turn and is suppressed
             agent_mode: Whether to use agent mode
             temperature: LLM temperature
             files: Optional files to attach
@@ -479,33 +503,37 @@ class ChatOrchestrator:
                     ),
                 )
 
-        # #862: retrieval is an explicit ``atlas_search`` call, and a data source
-        # selection implies that tool. Resolved HERE, before the agent-mode guard
-        # below -- otherwise "sources selected, no other tool" is downgraded to a
-        # plain chat turn before the tool it implies exists.
-        selected_tools = await self._resolve_search_tool(
-            selected_tools, selected_data_sources,
-        )
+        # #921: ``atlas_search`` is only available when the user selected it.
+        # A data source selection no longer implies the tool -- it stays the
+        # ceiling on what that tool may read, and with no other tool selected
+        # the turn routes to RAG mode below, which reads the sources itself.
+        # The reachability check runs inside the tool-running branches below,
+        # after authorization filtering, so it judges the tool list the LLM
+        # will actually see.
 
         # Agent mode needs at least one tool to act on. With no tools selected
         # the agentic loop has nothing to call, and tool-seeking prompts can
         # drive the model to emit a tool call the provider then rejects
         # ("tool_choice is none, but model called a tool"), which surfaces as an
-        # empty/failed response. Fall back to a normal chat turn and tell the
-        # user instead of failing. The frontend guards this too, but enforcing
-        # it here covers API clients and older frontends.
+        # empty/failed response. Downgrade to a normal turn and tell the user
+        # instead of failing. The frontend shows a warning while composing but
+        # lets the send through, so enforcing it here is what actually keeps
+        # the turn working (it also covers API clients and older frontends).
         if agent_mode and not selected_tools:
             logger.info("Agent mode requested with no tools selected; running as a normal chat turn")
             await self.event_publisher.publish_warning(
                 message=(
                     "**Agent mode needs at least one tool.** No tools were selected, "
-                    "so this message ran as a normal chat. Select one or more tools to use agent mode."
+                    "so this message ran without agent mode. Select one or more tools to use agent mode."
                 ),
             )
             agent_mode = False
 
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:
+            await self._check_data_sources_reachable(
+                selected_tools, selected_data_sources, sources_auto=data_sources_auto,
+            )
             return await self.agent_mode.run(
                 session=session,
                 model=model,
@@ -522,6 +550,12 @@ class ChatOrchestrator:
             selected_tools = await self.tool_authorization.filter_authorized_tools(
                 selected_tools=selected_tools,
                 user_email=user_email
+            )
+            # After filtering: authorization can strip ``atlas_search`` (the
+            # user's groups may not include the built-in atlas server), which
+            # would strand the sources silently if the check ran any earlier.
+            await self._check_data_sources_reachable(
+                selected_tools, selected_data_sources, sources_auto=data_sources_auto,
             )
             return await self.tools_mode.run_streaming(
                 session=session,

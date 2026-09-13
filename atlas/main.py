@@ -1346,6 +1346,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             selected_prompts=data.get("selected_prompts"),
                             selected_data_sources=data.get("selected_data_sources"),
                             only_rag=data.get("only_rag", False),
+                            # The client expanded the source list itself (RAG
+                            # toggle on, none hand-picked): such sources were
+                            # never deliberately chosen, so a stranded-sources
+                            # warning would fire on every turn (#930 review).
+                            data_sources_auto=data.get("data_sources_auto", False),
                             user_email=user_email,  # Use authenticated user from connection
                             agent_mode=data.get("agent_mode", False),
                             agent_max_steps=data.get("agent_max_steps", 10),

@@ -718,7 +718,8 @@ class TestAgenticLoopSearchIsATool:
     every source and injected the passages as a system message. The user saw no
     search, and the model never chose one. Now the loop makes the same normal
     tools call it makes without sources, and the model has to call
-    ``atlas_search`` for anything to be retrieved.
+    ``atlas_search`` for anything to be retrieved. Since #921 the tool is only
+    in the schema when the user selected it -- sources never add it.
     """
 
     @pytest.mark.asyncio
@@ -751,8 +752,14 @@ class TestAgenticLoopSearchIsATool:
         assert calls[0] == [{"role": "user", "content": "Search with RAG"}]
 
     @pytest.mark.asyncio
-    async def test_selected_sources_offer_the_search_tool(self):
-        """A user who picks a source but not the tool still gets to search."""
+    async def test_selected_sources_do_not_add_the_search_tool(self):
+        """Sources scope the tool; they never add it (#921).
+
+        ``atlas_search`` is used only when the user ticked it. A turn that
+        picked sources plus another tool must not grow an ``atlas_search`` the
+        user never turned on -- that is exactly how a prompt like "use search"
+        ended up calling the built-in tool over the user's own search provider.
+        """
         tool_mgr = _make_tool_manager({"tool1": "r"})
         events, handler = _collect_events()
         config = SimpleNamespace(app_settings=SimpleNamespace(
@@ -771,7 +778,7 @@ class TestAgenticLoopSearchIsATool:
         )
 
         requested = tool_mgr.get_tools_schema.call_args[0][0]
-        assert requested == ["tool1", "atlas_search"]
+        assert requested == ["tool1"]
 
     @pytest.mark.asyncio
     async def test_no_sources_means_no_implicit_search_tool(self):

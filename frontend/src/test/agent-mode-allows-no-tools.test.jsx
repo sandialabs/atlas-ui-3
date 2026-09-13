@@ -1,12 +1,12 @@
 /**
- * Guard: Agent mode needs at least one selected tool.
+ * Agent mode with no tools selected: warn, don't block (#921 follow-up).
  *
- * With agent mode on but no tools selected, the agent loop has nothing to call
- * and tool-seeking prompts can drive the model to emit a tool call the provider
- * rejects ("tool_choice is none, but model called a tool"), which surfaces as an
- * empty/failed response. The real ChatProvider must block the send (returning
- * false, no WS frame) and toast the user instead. When a tool IS selected, the
- * send goes through with agent_mode: true.
+ * With agent mode on but no tools selected, the agent loop has nothing to
+ * call. That used to block the send outright; now the send goes through with
+ * agent_mode: true and the backend downgrades the turn to a normal chat with
+ * its own in-chat note, while the composer shows a persistent warning banner
+ * (covered by the ChatArea suite). The real ChatProvider must never swallow
+ * the message.
  *
  * The component suites mock ChatContext, so the real `sendChatMessage` never
  * runs there -- this renders the *real* provider with leaf hooks stubbed.
@@ -19,7 +19,9 @@ const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  toastInfo: vi.fn(),
   selectedTools: new Set(),
+  ragEnabled: false,
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -31,14 +33,14 @@ vi.mock('../contexts/WSContext', () => ({
 }))
 
 vi.mock('../components/ui/toastContext', () => ({
-  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: vi.fn() }),
+  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: h.toastInfo }),
 }))
 
 vi.mock('../hooks/chat/useChatConfig', () => ({
   useChatConfig: () => ({
     currentModel: 'test-model',
     user: 'tester@example.com',
-    ragServers: [],
+    ragServers: [{ server: 'srv', sources: [{ id: 'src1' }] }],
     configReady: false,
     features: {},
     prompts: [],
@@ -60,7 +62,7 @@ vi.mock('../hooks/chat/useSelections', async (importActual) => {
       activePromptKey: null,
       clearActivePrompt: vi.fn(),
       selectedDataSources: new Set(),
-      ragEnabled: false,
+      ragEnabled: h.ragEnabled,
       toggleRagEnabled: vi.fn(),
       complianceLevelFilter: '',
     }),
@@ -111,22 +113,40 @@ beforeEach(() => {
   vi.clearAllMocks()
   h.sendMessage.mockImplementation(() => true)
   h.selectedTools = new Set()
+  h.ragEnabled = false
 })
 
-describe('Agent mode requires a tool (real ChatProvider)', () => {
-  it('blocks the send and toasts when agent mode is on with no tools', () => {
+describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
+  it('does not block the send when agent mode is on with no tools', () => {
     const { result } = renderChat()
     let ret
     act(() => { ret = result.current.sendChatMessage('do a task') })
 
-    expect(ret).toBe(false)
-    expect(h.sendMessage).not.toHaveBeenCalled()
-    expect(h.toastError).toHaveBeenCalledWith(
-      expect.stringMatching(/agent mode needs at least one tool/i)
-    )
+    expect(ret).toBe(true)
+    expect(h.sendMessage).toHaveBeenCalledTimes(1)
+    expect(h.toastError).not.toHaveBeenCalled()
+    const payload = h.sendMessage.mock.calls[0][0]
+    expect(payload.agent_mode).toBe(true)
+    expect(payload.selected_tools).toEqual([])
+    // No RAG toggle and no hand-picked sources: the frame must not claim
+    // the source list was expanded on the user's behalf.
+    expect(payload.data_sources_auto).toBe(false)
   })
 
-  it('allows the send with agent_mode: true once a tool is selected', () => {
+  it('marks the source list auto when the RAG toggle expands it', () => {
+    // The RAG toggle on with no source picked sends every reachable id --
+    // those were not hand-picked, and the backend suppresses the per-turn
+    // stranded-sources warning for them (#930 review).
+    h.ragEnabled = true
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('do a task') })
+
+    const payload = h.sendMessage.mock.calls[0][0]
+    expect(payload.selected_data_sources.length).toBeGreaterThan(0)
+    expect(payload.data_sources_auto).toBe(true)
+  })
+
+  it('sends the same payload once a tool is selected', () => {
     h.selectedTools = new Set(['server_tool1'])
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('do a task') })

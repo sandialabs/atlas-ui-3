@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench, WifiOff } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench, WifiOff, Sparkles } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
@@ -70,6 +70,7 @@ const ChatArea = () => {
     selectedTools,
     toggleTool,
     sessionFiles,
+    agentModeAvailable,
     agentModeEnabled,
     currentAgentStep,
     agentPendingQuestion,
@@ -965,6 +966,24 @@ const ChatArea = () => {
               <Wrench className="w-4 h-4 flex-shrink-0" />
               <span>
                 <strong>{currentModel}</strong> does not support tool/function calling. Selected tools will be ignored. Switch to a tool-capable model to use tools.
+              </span>
+            </div>
+          )}
+
+          {/* Warning: agent mode on but nothing for the loop to act on. Sending
+              is still allowed -- the backend downgrades the turn to a normal
+              chat and says so in the transcript (#921 follow-up). Gated on
+              availability too: the enabled flag is persisted and can outlive
+              a config where the feature is off. */}
+          {agentModeAvailable && agentModeEnabled && selectedTools.size === 0 && (
+            <div
+              className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm"
+              role="status"
+              data-testid="agent-mode-no-tools-banner"
+            >
+              <Sparkles className="w-4 h-4 flex-shrink-0" />
+              <span>
+                Agent Mode is on, but no tools are selected. Messages will run as normal chat until you select a tool.
               </span>
             </div>
           )}

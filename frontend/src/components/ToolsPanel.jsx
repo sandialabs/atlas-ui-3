@@ -56,7 +56,9 @@ const TRUNCATION_MESSAGE = 'This description has been truncated. Showing start a
  * (issue #836) as a tab: the parent supplies the modal chrome, keeps this
  * mounted across tab switches (`active` toggles visibility so pending
  * selections survive), and routes its own close attempts through
- * `closeGuardRef` so unsaved tool changes still prompt.
+ * `closeGuardRef` so unsaved tool changes still prompt. The footer's
+ * "Save and Close" commits the staged selections and then dismisses the whole
+ * panel in both modes.
  */
 // The OAuth routes redirect back with a machine-readable code. Each one is
 // turned into a sentence that says whether retrying is worth it or whether an
@@ -125,7 +127,7 @@ const describeOAuthError = (code) =>
   OAUTH_ERROR_MESSAGES[code] ||
   'The sign-in failed. Please try again, and tell an administrator if it keeps happening.'
 
-const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null, onNavigate = null }) => {
+const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGuardRef = null, onDirtyChange = null, onNavigate = null, onSaveAndClose = null }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTools, setExpandedTools] = useState(new Set())
   const [expandedPrompts, setExpandedPrompts] = useState(new Set())
@@ -161,9 +163,6 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // The dialog is raised by two different things: a close attempt (save /
   // discard / cancel) and the embedded Cancel button, which only discards.
   const [discardOnly, setDiscardOnly] = useState(false)
-  // Transient "Saved" confirmation for the embedded (tab) save, which no longer
-  // dismisses anything.
-  const [justSaved, setJustSaved] = useState(false)
 
   // Auth status state
   const [tokenModalServer, setTokenModalServer] = useState(null)
@@ -361,18 +360,20 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     setHasChanges(false)
   }
 
-  // Save handler. Standalone this is the modal's "save and close"; embedded it
-  // is one tab's save, so it commits and stays -- dismissing the combined panel
-  // from here would also exit Prompts, General, User Info and Admin.
+  // Save handler. "Save and Close" commits the staged selections and then
+  // dismisses. Standalone that closes this modal. Embedded it dismisses the
+  // whole combined panel via onSaveAndClose, which still asks about an
+  // unsaved prompt draft elsewhere -- the tools guard is skipped because the
+  // commit that just ran is the reason the panel is closing (the parent's
+  // copy of the dirty flag only updates in an effect, so the regular guard
+  // would read it as still dirty and ask about changes that were just saved).
   const handleSave = () => {
     commitChanges()
-    if (!embedded) {
-      onClose()
+    if (embedded) {
+      (onSaveAndClose || onClose)()
       return
     }
-    // Embedded the panel stays put, so the only feedback would be the button
-    // greying out. Say it saved instead.
-    setJustSaved(true)
+    onClose()
   }
 
   // Cancel handler - reverts pending changes. Standalone it is the modal's
@@ -461,17 +462,6 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     closeCancelledRef.current = null
     onCancelled?.()
   }
-
-  useEffect(() => {
-    if (!justSaved) return undefined
-    const timer = setTimeout(() => setJustSaved(false), 2500)
-    return () => clearTimeout(timer)
-  }, [justSaved])
-
-  // Any further edit clears the confirmation.
-  useEffect(() => {
-    if (hasChanges) setJustSaved(false)
-  }, [hasChanges])
 
   // Let an embedding parent know whether there are unsaved selections.
   useEffect(() => {
@@ -1318,12 +1308,6 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
         
         {/* Footer with Save/Cancel buttons */}
         <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-gray-700 flex-shrink-0">
-          {justSaved && (
-            <span role="status" className="flex items-center gap-1.5 text-sm text-green-400 mr-auto">
-              <ShieldCheck className="w-4 h-4" />
-              Tool selections saved
-            </span>
-          )}
           <button
             onClick={handleCancel}
             disabled={embedded && !hasChanges}
@@ -1337,15 +1321,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           </button>
           <button
             onClick={handleSave}
-            disabled={!hasChanges}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
-              hasChanges
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-            }`}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium bg-blue-600 hover:bg-blue-700 text-white"
           >
             <Save className="w-4 h-4" />
-            Save Changes
+            Save and Close
           </button>
         </div>
     </>

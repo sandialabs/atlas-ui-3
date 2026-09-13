@@ -250,7 +250,7 @@ When enabled: `/api/config` includes model/server `compliance_level`, `domain/ra
 ## Key APIs
 
 ### WebSocket (`/ws`)
-**Client:** `chat`, `download_file`, `reset_session`, `attach_file`
+**Client:** `chat` (carries `selected_tools`, `selected_data_sources`, and `data_sources_auto` -- true when the client expanded the source list itself, i.e. RAG toggle on with none hand-picked, which suppresses the backend's stranded-sources warning), `download_file`, `reset_session`, `attach_file`
 **Server:** `token_stream`, `tool_use`, `tool_start`/`tool_progress`/`tool_complete` (status: `calling`->`in_progress`->`completed`/`failed`), `canvas_content`, `intermediate_update`, `conversation_saved` (carries `conversation_id`)
 
 ### REST
