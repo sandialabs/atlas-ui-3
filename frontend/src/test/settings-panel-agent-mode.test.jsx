@@ -118,7 +118,7 @@ describe('SettingsPanel agent mode settings', () => {
     expect(screen.getByText('30')).toBeInTheDocument()
   })
 
-  it('clamps the draft and chip above the ceiling but never rewrites the stored preference (issue #849 review)', async () => {
+  it('clamps the chip and slider above the ceiling but never touches the stored preference or draft (issue #849 review)', async () => {
     localStorage.setItem('chatui-settings', JSON.stringify({ maxIterations: 50 }))
     const updateSettings = vi.fn()
     renderSettingsPanel({
@@ -134,10 +134,10 @@ describe('SettingsPanel agent mode settings', () => {
     expect(screen.getByText('30 / 30')).toBeInTheDocument()
     expect(screen.queryByText('50 / 30')).not.toBeInTheDocument()
     // The clamp is applied where the value is consumed (slider, chip, send
-    // payload). The stored preference itself survives: a persisted write
-    // derived from a config response could be wrong (stale cache, pods
-    // answering with different ceilings mid-rollout) and the server clamps
-    // the payload authoritatively anyway (#849 review).
+    // payload). Neither the stored preference nor the in-memory draft is
+    // rewritten, so a Save of unrelated settings cannot persist a
+    // config-derived value (#849 review); the server clamps the payload
+    // authoritatively.
     await waitFor(() => {
       expect(updateSettings).not.toHaveBeenCalled()
     })

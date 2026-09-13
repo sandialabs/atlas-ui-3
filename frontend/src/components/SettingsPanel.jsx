@@ -289,18 +289,13 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // A stored max-iterations value above the admin-configured ceiling is
-  // clamped where it is *consumed* -- the slider, the value chip here, and
-  // the send payload (ChatContext, once a live response confirmed the
-  // ceiling). The stored preference itself is deliberately left unclamped:
-  // any persisted write derived from a config response can destroy data
-  // when the value the response carried is wrong (a stale cache, or pods
-  // answering with different AGENT_MAX_STEPS mid-rollout), and the server
-  // clamps the payload authoritatively anyway (#849 review).
-  useEffect(() => {
-    if (!agentCeilingConfirmed) return
-    setSettings(prev => (prev.maxIterations > maxStepsLimit ? { ...prev, maxIterations: maxStepsLimit } : prev))
-  }, [agentCeilingConfirmed, maxStepsLimit])
+  // The stored max-iterations preference is retained unclamped (#849 review):
+  // it is clamped only where the value is consumed -- the value chip and the
+  // slider below (Math.min) and the send payload in ChatContext once a live
+  // config response confirmed the ceiling. No state-mutating effect derives
+  // anything from the response here, so a Save of unrelated settings can
+  // never persist a config-derived rewrite of the saved number, and the
+  // server clamps the payload authoritatively anyway.
 
   // Save settings to localStorage whenever they change
   const saveSettings = (newSettings) => {
