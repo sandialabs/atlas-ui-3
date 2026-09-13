@@ -10,6 +10,7 @@ import json
 import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
@@ -37,6 +38,7 @@ from atlas.modules.mcp_tools.mcp_errors import (
     _is_session_terminated_error,
     _is_task_forbidden_error,
     _is_task_forbidden_result,
+    _is_unauthorized_error,
 )
 from atlas.modules.mcp_tools.sleep_tool import (
     execute_sleep_tool,
@@ -319,6 +321,14 @@ class ExecutionMixin:
         Without ``conversation_id``, a single-use session is opened and closed
         per call (no task-mode support).
 
+        Per-user authenticated servers get one self-healing retry: when the
+        provider answers 401 (the stored credential was rotated or revoked
+        server-side), the cached clients for (user, server) are evicted, a
+        forced token refresh is attempted, and the call is retried once. If
+        the retry is refused again, ``AuthenticationRequiredException`` is
+        raised so callers surface a reconnect prompt instead of a raw
+        transport error.
+
         Args:
             server_name: Name of the MCP server
             tool_name: Name of the tool to call
@@ -331,6 +341,177 @@ class ExecutionMixin:
             conversation_id: If set, use a persistent session for this conversation
             update_cb: Async callback for emitting task lifecycle events to the UI
         """
+        try:
+            return await self._call_tool_once(
+                server_name,
+                tool_name,
+                arguments,
+                progress_handler=progress_handler,
+                elicitation_handler=elicitation_handler,
+                user_email=user_email,
+                meta=meta,
+                conversation_id=conversation_id,
+                update_cb=update_cb,
+            )
+        except Exception as exc:
+            if not (
+                _is_unauthorized_error(exc)
+                and user_email
+                and self._requires_user_auth(server_name)
+            ):
+                raise
+
+            logger.warning(
+                "MCP server '%s' rejected the stored credential with 401 for tool "
+                "'%s'; rebuilding the client and retrying once",
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(tool_name),
+            )
+            await self._recover_user_client_after_unauthorized(
+                user_email, server_name, conversation_id
+            )
+            try:
+                return await self._call_tool_once(
+                    server_name,
+                    tool_name,
+                    arguments,
+                    progress_handler=progress_handler,
+                    elicitation_handler=elicitation_handler,
+                    user_email=user_email,
+                    meta=meta,
+                    conversation_id=conversation_id,
+                    update_cb=update_cb,
+                )
+            except (AuthenticationRequiredException,) as retry_auth:
+                # The retry could not even build an authenticated client (the
+                # forced refresh refused and the stored token is expired).
+                # Give it the same 401-specific reconnect message as a refused
+                # retry instead of the generic no-token signal.
+                raise self._unauthorized_recovery_error(
+                    server_name, retry_auth
+                ) from retry_auth
+            except Exception as retry_exc:
+                if _is_unauthorized_error(retry_exc):
+                    raise self._unauthorized_recovery_error(
+                        server_name, retry_exc
+                    ) from retry_exc
+                raise
+
+    def _unauthorized_recovery_error(
+        self, server_name: str, retry_exc: BaseException
+    ) -> AuthenticationRequiredException:
+        """Build the model-facing error after an exhausted 401 recovery.
+
+        OAuth servers get the refresh-and-retry wording and the (URL-encoded)
+        reconnect start URL; bearer/api_key/jwt servers have no refresh flow,
+        so the message asks for a fresh credential instead of claiming one was
+        attempted and offers no OAuth URL.
+        """
+        auth_type = self.servers_config.get(server_name, {}).get("auth_type", "oauth")
+        if auth_type == "oauth":
+            message = (
+                f"Server '{server_name}' rejected the stored credential "
+                "(401 Unauthorized) even after a token refresh and retry. "
+                "The server must be reconnected/re-authorized before this "
+                "tool can be used."
+            )
+            oauth_start_url = (
+                f"/api/mcp/auth/{quote(server_name, safe='')}/oauth/start"
+            )
+        else:
+            message = (
+                f"Server '{server_name}' rejected the stored credential "
+                "(401 Unauthorized) even after a retry. A refreshed credential "
+                "must be provided for this server before this tool can be used."
+            )
+            oauth_start_url = None
+        return AuthenticationRequiredException(
+            server_name=server_name,
+            auth_type=auth_type,
+            message=message,
+            oauth_start_url=oauth_start_url,
+        )
+
+    async def _recover_user_client_after_unauthorized(
+        self, user_email: str, server_name: str, conversation_id: Optional[str]
+    ) -> None:
+        """Self-heal a 401 from a per-user-auth MCP server.
+
+        Three targeted steps, in order:
+
+        1. Release this conversation's session -- the provider just rejected
+           the credential it was opened with, so the retry must not reuse it.
+        2. Evict *idle* cached clients for (user, server). Entries possibly in
+           use on other conversations stay cached; the fingerprint check
+           rebuilds them on their next acquisition, so a streaming call
+           elsewhere is never torn down mid-flight.
+        3. Attempt a forced OAuth refresh, contacting the provider even when
+           the stored token still looks valid by the clock (it has been
+           retired server-side regardless of ``expires_at``). The failing
+           token's fingerprint is passed along so concurrent 401s share one
+           rotation instead of each forcing another (a second rotation would
+           retire the credential the first caller retries with).
+
+        If the forced refresh produces no new credential the retry re-presents
+        the stored token; when that token is expired the rebuild path will
+        contact the provider once more with the (already refused) refresh
+        token, refuse again, and surface the reconnect prompt -- one extra
+        refused call, never a further rotation.
+        """
+        from atlas.modules.mcp_tools.token_storage import get_token_storage, token_fingerprint
+
+        failing_fingerprint = token_fingerprint(
+            get_token_storage().get_token(user_email, server_name)
+        )
+
+        if conversation_id:
+            try:
+                await self._session_manager.release(
+                    conversation_id, server_name, user_email=user_email
+                )
+            except Exception:
+                logger.debug(
+                    "Could not release dead session for server '%s' after 401",
+                    sanitize_for_logging(server_name),
+                    exc_info=True,
+                )
+
+        try:
+            await self._invalidate_user_clients_for_rotation(user_email, server_name)
+        except Exception:
+            logger.debug(
+                "Could not evict cached clients for server '%s' after 401",
+                sanitize_for_logging(server_name),
+                exc_info=True,
+            )
+
+        config = self.servers_config.get(server_name, {})
+        refreshed = await self._refresh_oauth_token(
+            user_email, server_name, config,
+            force=True, expected_previous_fingerprint=failing_fingerprint,
+        )
+        if refreshed is None:
+            logger.info(
+                "Token refresh after 401 from MCP server '%s' produced no new "
+                "credential; the retry will re-present the stored token and the "
+                "user may need to re-authorize",
+                sanitize_for_logging(server_name),
+            )
+
+    async def _call_tool_once(
+        self,
+        server_name: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        *,
+        progress_handler: Optional[Any] = None,
+        elicitation_handler: Optional[Any] = None,
+        user_email: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> Any:
+        """One client-selection + tool-call attempt, without 401 recovery."""
         # Determine which client to use
         client = None
 
@@ -782,6 +963,19 @@ class ExecutionMixin:
                 display_config=display_config,
                 meta_data=meta_data
             )
+        except AuthenticationRequiredException as auth_err:
+            # Raised when the user holds no credential at all, and after the
+            # 401 refresh-and-retry is exhausted (call_tool). Forward it so
+            # tool_executor emits the auth_required UI event and a friendly
+            # result instead of embedding a raw transport error/URL.
+            logger.info(
+                "Tool '%s' on server '%s' requires (re-)authorization: %s",
+                sanitize_for_logging(tool_call.name),
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(auth_err.message),
+            )
+            log_metric("tool_error", user_email, tool_name=actual_tool_name)
+            raise
         except Exception as e:
             logger.error(f"Error executing tool {tool_call.name}: {e}")
 
@@ -820,10 +1014,31 @@ class ExecutionMixin:
         tool_calls: List[ToolCall],
         context: Optional[Dict[str, Any]] = None
     ) -> List[ToolResult]:
-        """Execute multiple tool calls."""
+        """Execute multiple tool calls.
+
+        ``AuthenticationRequiredException`` (raised after an exhausted 401
+        retry) is converted to a failed ``ToolResult`` here so the documented
+        ``List[ToolResult]`` contract holds for batch callers; the single-call
+        ``execute_tool`` path still raises so tool_executor can emit the
+        auth_required UI event.
+        """
         results = []
         for tool_call in tool_calls:
-            result = await self.execute_tool(tool_call, context)
+            try:
+                result = await self.execute_tool(tool_call, context)
+            except AuthenticationRequiredException as auth_err:
+                result = ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=f"Authentication required: {auth_err.message}",
+                    success=False,
+                    error=auth_err.message,
+                    meta_data={
+                        "auth_required": True,
+                        "server_name": auth_err.server_name,
+                        "auth_type": auth_err.auth_type,
+                        "oauth_start_url": auth_err.oauth_start_url,
+                    },
+                )
             results.append(result)
         return results
 

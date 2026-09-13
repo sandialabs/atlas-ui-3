@@ -21,6 +21,7 @@ Updated: 2025-01-21
 """
 
 import base64
+import hashlib
 import json
 import logging
 import threading
@@ -132,6 +133,25 @@ class AuthenticationRequiredException(Exception):
             "message": self.message,
             "oauth_start_url": self.oauth_start_url,
         }
+
+
+def token_fingerprint(token: object) -> Optional[str]:
+    """Short fingerprint of a stored token's value, or ``None`` if it is empty.
+
+    The token value is baked into a FastMCP ``Client``/transport at
+    construction. Recording only this digest -- never the value itself -- lets
+    a client cache detect that the stored credential was rotated (e.g. by a
+    silent OAuth refresh driven from another cache entry) and rebuild.
+
+    An empty/absent value yields ``None`` so callers fail closed: a missing or
+    empty credential must never compare "unchanged" against a recorded
+    fingerprint.
+    """
+    value = getattr(token, "token_value", token)
+    if not value:
+        return None
+    digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+    return digest[:16]
 
 
 def _make_token_key(user_email: str, server_name: str) -> str:

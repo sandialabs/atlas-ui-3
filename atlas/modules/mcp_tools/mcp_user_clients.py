@@ -17,6 +17,7 @@ from fastmcp import Client
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 from atlas.modules.config.config_manager import resolve_env_var
+from atlas.modules.mcp_tools.token_storage import token_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +59,19 @@ class UserClientMixin:
         auth_type = config.get("auth_type", "none")
         return auth_type in ("oauth", "jwt", "bearer", "api_key", "delegated")
 
-    async def _refresh_oauth_token(self, user_email, server_name, config):
+    async def _refresh_oauth_token(self, user_email, server_name, config, *, force=False, expected_previous_fingerprint=None):
         """Renew an expired OAuth access token from its refresh token.
 
         Returns the refreshed record, or None when the server is not an oauth
         server, no refresh token is held, or the provider refuses -- all of
         which leave the caller reporting the server as unauthenticated so the
         user is prompted to authorize again.
+
+        With ``force=True`` the provider is contacted even when the stored
+        access token still looks valid by the clock (used after a 401: the
+        credential has been retired server-side regardless of ``expires_at``).
+        ``expected_previous_fingerprint`` de-duplicates concurrent forced
+        refreshes; see :func:`refresh_stored_token`.
         """
         from atlas.modules.mcp_tools import mcp_oauth_service
 
@@ -73,7 +80,10 @@ class UserClientMixin:
 
         try:
             return await mcp_oauth_service.refresh_stored_token(
-                user_email, server_name, config
+                user_email, server_name, config,
+                force=force,
+                expected_previous_fingerprint=expected_previous_fingerprint,
+                mcp_manager=self,
             )
         except Exception as exc:
             # A refresh must never turn into a failed tool call: the fallback
@@ -266,15 +276,34 @@ class UserClientMixin:
                 subtoken_unchanged = (
                     self._wormhole_client_subtokens.get(cache_key) == current_subtoken
                 )
-                if stored_token is not None and subtoken_unchanged:
+                # The token value is baked into the cached client at build time.
+                # A silently rotated token (e.g. a refresh driven by another cache
+                # entry for the same user/server) still passes the validity check
+                # above -- the provider has retired it regardless of the clock --
+                # so also require that the stored credential is the same one this
+                # client was built with. Fails closed: an entry with no recorded
+                # fingerprint, or a stored token with an empty value, forces a
+                # rebuild rather than comparing None == None.
+                recorded_fingerprint = self._user_client_token_fingerprints.get(cache_key)
+                fingerprint_unchanged = (
+                    recorded_fingerprint is not None
+                    and recorded_fingerprint == token_fingerprint(stored_token)
+                )
+                if stored_token is not None and subtoken_unchanged and fingerprint_unchanged:
                     self._touch_user_client_locked(cache_key)
                     return self._user_clients[cache_key]
                 else:
-                    # Token expired/removed, or the Wormhole subtoken rotated;
+                    # Token expired/removed, the Wormhole subtoken rotated, or
+                    # the stored token was rotated under the cached client;
                     # invalidate the cached client so it is rebuilt below.
                     if stored_token is not None and not subtoken_unchanged:
                         logger.debug(
                             "Wormhole subtoken changed for server '%s'; rebuilding client",
+                            sanitize_for_logging(server_name),
+                        )
+                    elif stored_token is not None and not fingerprint_unchanged:
+                        logger.debug(
+                            "Stored token rotated for server '%s'; rebuilding client",
                             sanitize_for_logging(server_name),
                         )
                     else:
@@ -381,6 +410,9 @@ class UserClientMixin:
                     cached_client = self._user_clients[cache_key]
                 else:
                     self._user_clients[cache_key] = client
+                    self._user_client_token_fingerprints[cache_key] = token_fingerprint(
+                        stored_token
+                    )
                     if current_subtoken is not None:
                         self._wormhole_client_subtokens[cache_key] = current_subtoken
                     self._touch_user_client_locked(cache_key)
@@ -433,6 +465,46 @@ class UserClientMixin:
         await self._session_manager.release_sessions_for_user_server(
             user_lc, server_name
         )
+
+    async def _invalidate_user_clients_for_rotation(self, user_email: str, server_name: str) -> None:
+        """Evict cached clients for (user, server) without tearing down in-flight calls.
+
+        Used when a stored token was rotated (silent refresh or 401 recovery),
+        which invalidates every cached client for the pair but must not kill
+        tool calls that are streaming right now on other conversations.
+
+        Entries idle beyond ``_user_client_cache_in_use_window_seconds`` (the
+        same window the LRU enforcer uses) are popped and closed. Entries
+        touched recently -- i.e. possibly in use -- stay cached; their baked-in
+        credential is stale, and the fingerprint check in ``_get_user_client``
+        rebuilds them on their next acquisition, so they never get *reused*.
+        Orphaned-session cleanup is intentionally skipped for retained entries:
+        their sessions belong to live calls.
+        """
+        user_lc = normalize_user_email(user_email)
+        now = time.monotonic()
+        in_use_window = getattr(self, "_user_client_cache_in_use_window_seconds", 60)
+        async with self._user_clients_lock:
+            self._ensure_user_client_cache_state()
+            keys_to_remove = [
+                k for k in self._user_clients
+                if k[0] == user_lc
+                and k[1] == server_name
+                and (now - self._user_client_last_used.get(k, 0.0)) > in_use_window
+            ]
+            removed = self._pop_user_client_entries_locked(keys_to_remove)
+            retained = len([
+                k for k in self._user_clients
+                if k[0] == user_lc and k[1] == server_name
+            ])
+            if keys_to_remove:
+                logger.debug(
+                    "Evicted %d idle user client cache entry(s) for server '%s' "
+                    "after token rotation; %d in-use entry(s) left for the "
+                    "fingerprint check to rebuild",
+                    len(keys_to_remove), sanitize_for_logging(server_name), retained,
+                )
+        await self._close_user_client_entries(removed)
 
     async def _get_or_create_user_http_client(
         self,

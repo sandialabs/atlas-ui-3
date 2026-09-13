@@ -822,6 +822,15 @@ async def execute_single_tool(
                     "oauth_start_url": auth_err.oauth_start_url,
                     "message": auth_err.message,
                 })
+                # The live UI has no auth_required handler (the event targets
+                # the reconnect flow), so also emit the terminal tool_error it
+                # does handle -- otherwise the tool row spins in "calling"
+                # forever. The persistence recorder treats both as terminal
+                # for the same tool_call_id, so this does not duplicate the
+                # persisted row.
+                await event_notifier.notify_tool_error(
+                    tool_call, f"Authentication required: {auth_err.message}", update_callback
+                )
 
             # Return error result with auth info
             return _finalize_span(ToolResult(

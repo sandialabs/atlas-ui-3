@@ -238,6 +238,35 @@ class TestToolCallRecorder:
         assert messages[0].metadata["status"] == "failed"
         assert messages[0].metadata["result"] == "Authentication required: token expired"
 
+    def test_auth_required_followed_by_tool_error_stays_one_row(self):
+        # PR #936: the executor emits auth_required AND a terminal tool_error
+        # (the live UI only handles tool_error). Both land on the same
+        # tool_call_id, so the persisted row must stay a single failed row.
+        recorder = ToolCallRecorder(None)
+
+        async def play():
+            await recorder({
+                "type": "tool_start", "tool_call_id": "tc1",
+                "tool_name": "corp_search", "server_name": "corp",
+                "arguments": {"q": "x"},
+            })
+            await recorder({
+                "type": "auth_required", "tool_call_id": "tc1",
+                "tool_name": "corp_search", "server_name": "corp",
+                "message": "Authentication required: rejected credential",
+            })
+            await recorder({
+                "type": "tool_error", "tool_call_id": "tc1",
+                "tool_name": "corp_search",
+                "error": "Authentication required: rejected credential",
+            })
+
+        _run(play())
+
+        messages = recorder.messages()
+        assert len(messages) == 1
+        assert messages[0].metadata["status"] == "failed"
+
     def test_flush_appends_then_clears(self):
         recorder = ToolCallRecorder(None)
 

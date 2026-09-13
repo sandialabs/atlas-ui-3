@@ -25,8 +25,8 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport  # noqa: F401
 
 from atlas.modules.config import config_manager
-from atlas.modules.mcp_tools.mcp_connection import ConnectionMixin
 from atlas.modules.mcp_tools.atlas_server import RESERVED_SERVER_NAMES
+from atlas.modules.mcp_tools.mcp_connection import ConnectionMixin
 from atlas.modules.mcp_tools.mcp_discovery import DiscoveryMixin
 from atlas.modules.mcp_tools.mcp_errors import _is_session_terminated_error
 from atlas.modules.mcp_tools.mcp_execution import ExecutionMixin

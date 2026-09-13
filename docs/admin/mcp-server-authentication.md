@@ -167,6 +167,23 @@ loopback address is accepted for local development).
 6. Later tool calls use the access token. When it expires, Atlas refreshes it
    silently from the refresh token; only if that fails is the user asked to
    authorize again.
+   - Rotation-aware client cache: every cached per-user client records a
+     fingerprint of the token value it was built with. When a silent refresh
+     (from any cache entry, including the conversationless discovery sweep)
+     stores a new token, cached clients for that user/server are invalidated:
+     idle entries are closed immediately, while entries possibly in use are
+     left cached for their next acquisition to rebuild via the fingerprint
+     check -- so a background refresh never tears down a streaming tool call,
+     and no cached client ever gets *reused* with a rotated credential.
+   - 401 self-healing: if a provider retires a credential server-side (the
+     stored token still looks valid by the clock but the server answers 401),
+     tool execution releases the dead session, evicts idle cached clients,
+     attempts a forced token refresh (contacting the provider even when the
+     stored token still looks valid), and retries the call once. Concurrent
+     401s share a single rotation via the failing token's fingerprint. If the
+     retry is refused too, the model receives a clear "re-authorize the
+     server" message (and, for OAuth servers, the UI gets the reconnect
+     prompt) instead of a raw upstream transport error.
 7. Disconnecting removes the stored tokens, invalidates cached clients, and
    revokes at the provider's `revocation_endpoint` when one is advertised.
 
