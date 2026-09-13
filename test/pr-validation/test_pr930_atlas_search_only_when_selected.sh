@@ -164,12 +164,17 @@ async def main():
     assert 'were not searched' in msg and 'atlas_search' in msg, msg
     print('sources + tools without the search tool warn')
 
+    # Auto-expanded sources (RAG toggle on, none hand-picked) stay silent,
+    # and so do programmatic callers.
     o2 = orch()
-    await o2._check_data_sources_reachable(None, ['srv:docs'])
-    await o2._check_data_sources_reachable(['calc'], ['srv:docs'], only_rag=True)
-    await o2._check_data_sources_reachable(['atlas_rag_query'], ['srv:docs'])
+    await o2._check_data_sources_reachable(['calc'], ['srv:docs'], sources_auto=True)
     o2.event_publisher.publish_warning.assert_not_awaited()
-    print('RAG-mode routes (no tools, only_rag) and legacy names stay silent')
+    o3 = ChatOrchestrator.__new__(ChatOrchestrator)
+    o3.config_manager = None
+    o3.event_publisher = AsyncMock()
+    await o3._check_data_sources_reachable(['calc'], ['srv:docs'])
+    o3.event_publisher.publish_warning.assert_not_awaited()
+    print('auto-expanded sources and programmatic callers stay silent')
 
 asyncio.run(main())
 PY

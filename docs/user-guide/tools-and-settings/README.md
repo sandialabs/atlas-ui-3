@@ -25,7 +25,7 @@ remembers the tab you were last on for the rest of the session.
 
 ![Tools and Integrations tab](screenshots/836-02-tools-tab.png)
 
-Tool selections are still staged: change what is enabled, then **Save Changes**.
+Tool selections are still staged: change what is enabled, then **Save and Close**.
 Switching tabs keeps pending selections, and closing the panel with unsaved
 selections still raises the save/discard prompt.
 

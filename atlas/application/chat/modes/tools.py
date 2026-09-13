@@ -28,6 +28,7 @@ from ..utilities.agent_digest import build_tool_digest
 from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
+from ..utilities.tool_selection import normalize_selected_tools
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from .streaming_helpers import stream_and_accumulate
 
@@ -118,7 +119,7 @@ class ToolsModeRunner:
         # tools the user actually ticked.
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
-            [t for t in (selected_tools or []) if isinstance(t, str)],
+            normalize_selected_tools(selected_tools),
             user_email,
         )
 
@@ -267,7 +268,7 @@ class ToolsModeRunner:
 
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
-            [t for t in (selected_tools or []) if isinstance(t, str)],
+            normalize_selected_tools(selected_tools),
             user_email,
         )
 

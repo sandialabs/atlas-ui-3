@@ -223,30 +223,34 @@ class ChatOrchestrator:
         self,
         selected_tools: Optional[List[str]],
         selected_data_sources: Optional[List[str]],
-        only_rag: bool = False,
+        sources_auto: bool = False,
     ) -> None:
-        """Warn when a turn carries data sources that nothing in it can read.
+        """Warn when a tools/agent turn carries sources nothing in it can read.
+
+        Called only from the branches that actually run tools -- the final
+        selected-tools list, after authorization filtering -- so what it
+        judges is what the LLM will really see. RAG-mode turns (no tools
+        selected, ``only_rag``) read the sources themselves and are never
+        routed here.
 
         ``atlas_search`` is only available when the user actually ticked it
         (#921): a data source selection scopes what that tool may read, it no
-        longer offers the tool itself. So a turn that selected sources plus
-        other tools but not the search tool runs in tools/agent mode, where
-        nothing reads those sources -- answering without the user's chosen
-        evidence and saying nothing is a silence worth breaking, so the user
-        is told. A turn with no tools at all routes to RAG mode, which reads
-        the sources itself, and so does an ``only_rag`` turn; neither is
-        warned about. ``config_manager`` is None for programmatic callers
-        that never had feature flags to consult, so there is nothing to
-        report to them either.
+        longer offers the tool itself. A turn that selected sources plus
+        other tools but not the search tool runs with nothing that reads
+        those sources -- answering without the user's chosen evidence and
+        saying nothing is a silence worth breaking, so the user is told.
+        A search tool named under flags-off is just as stranded, so it warns
+        the same way. ``sources_auto`` marks sources the client expanded on
+        its own (RAG toggle on, none picked): those were never deliberately
+        chosen, so they stay silent. ``config_manager`` is None for
+        programmatic callers that never had feature flags to consult, so
+        there is nothing to report to them either.
         """
-        if not selected_data_sources:
-            return
-        if only_rag or not selected_tools:
-            # Routes to RAG mode, which reads the sources itself.
+        if not selected_data_sources or sources_auto:
             return
         if self.config_manager is None:
             return
-        named = any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in selected_tools)
+        named = any(normalize_tool_name(t) == SEARCH_TOOL_NAME for t in (selected_tools or []))
         if named and self._builtin_search_flags_on():
             # The turn names the search tool (possibly under its pre-#855
             # name from a saved conversation) and the flags let it through
@@ -279,6 +283,7 @@ class ChatOrchestrator:
         selected_prompts: Optional[List[str]] = None,
         selected_data_sources: Optional[List[str]] = None,
         only_rag: bool = False,
+        data_sources_auto: bool = False,
         agent_mode: bool = False,
         temperature: float = 0.7,
         files: Optional[Dict[str, Any]] = None,
@@ -298,6 +303,10 @@ class ChatOrchestrator:
             selected_prompts: Optional list of MCP prompts
             selected_data_sources: Optional list of data sources
             only_rag: Whether to use only RAG (no tools)
+            data_sources_auto: True when the client expanded the source list
+                on its own (RAG toggle on, none hand-picked); such sources
+                were never deliberately chosen, so a stranded-sources warning
+                would fire on every turn and is suppressed
             agent_mode: Whether to use agent mode
             temperature: LLM temperature
             files: Optional files to attach
@@ -496,12 +505,9 @@ class ChatOrchestrator:
         # A data source selection no longer implies the tool -- it stays the
         # ceiling on what that tool may read, and with no other tool selected
         # the turn routes to RAG mode below, which reads the sources itself.
-        # The reachability check runs before the agent-mode guard so a turn
-        # that *does* have other tools hears the warning whether it then runs
-        # in tools or agent mode.
-        await self._check_data_sources_reachable(
-            selected_tools, selected_data_sources, only_rag=only_rag,
-        )
+        # The reachability check runs inside the tool-running branches below,
+        # after authorization filtering, so it judges the tool list the LLM
+        # will actually see.
 
         # Agent mode needs at least one tool to act on. With no tools selected
         # the agentic loop has nothing to call, and tool-seeking prompts can
@@ -523,6 +529,9 @@ class ChatOrchestrator:
 
         # Route to appropriate mode (always streaming)
         if agent_mode and self.agent_mode:
+            await self._check_data_sources_reachable(
+                selected_tools, selected_data_sources, sources_auto=data_sources_auto,
+            )
             return await self.agent_mode.run(
                 session=session,
                 model=model,
@@ -539,6 +548,12 @@ class ChatOrchestrator:
             selected_tools = await self.tool_authorization.filter_authorized_tools(
                 selected_tools=selected_tools,
                 user_email=user_email
+            )
+            # After filtering: authorization can strip ``atlas_search`` (the
+            # user's groups may not include the built-in atlas server), which
+            # would strand the sources silently if the check ran any earlier.
+            await self._check_data_sources_reachable(
+                selected_tools, selected_data_sources, sources_auto=data_sources_auto,
             )
             return await self.tools_mode.run_streaming(
                 session=session,

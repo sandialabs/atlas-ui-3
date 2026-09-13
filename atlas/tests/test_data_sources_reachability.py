@@ -2,10 +2,11 @@
 
 ``atlas_search`` is only available when the user actually ticked it (#921): a
 data source selection scopes what that tool may read, it no longer offers the
-tool itself. A turn that selects sources plus other tools but not the search
-tool runs in tools/agent mode, where nothing reads those sources, so the
-orchestrator warns. A turn with no tools at all routes to RAG mode, which
-reads the sources itself, and is never warned about.
+tool itself. The reachability check runs inside the tool-running branches of
+the orchestrator (agent branch; tools branch after authorization filtering),
+so it judges the tool list the LLM will really see. A turn that runs tools
+with sources nothing can read warns; RAG-mode turns (no tools, ``only_rag``)
+read the sources themselves and never reach the check.
 """
 
 from types import SimpleNamespace
@@ -80,14 +81,19 @@ async def test_a_legacy_search_tool_name_satisfies_the_sources():
 
 
 @pytest.mark.asyncio
-async def test_no_tools_routes_to_rag_mode_and_is_never_warned_about():
-    """Sources with no tools reach RAG mode, which reads them itself."""
-    orch = _orchestrator(_config())
+async def test_auto_expanded_sources_are_never_warned_about():
+    """Sources the client expanded on its own were never deliberately chosen.
 
-    await orch._check_data_sources_reachable(None, ["srv:src"])
-    await orch._check_data_sources_reachable([], ["srv:src"])
+    With the RAG toggle on and no source picked, the client sends every
+    reachable source id -- the user did not select anything, so warning that
+    "your data sources were not searched" on every tools turn is noise.
+    """
+    for sources, auto in ((["srv:src"], True), (None, True), ([], True)):
+        orch = _orchestrator(_config())
 
-    orch.event_publisher.publish_warning.assert_not_awaited()
+        await orch._check_data_sources_reachable(["a_tool"], sources, sources_auto=auto)
+
+        orch.event_publisher.publish_warning.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -101,16 +107,6 @@ async def test_no_sources_changes_nothing():
 
 
 @pytest.mark.asyncio
-async def test_only_rag_turns_read_their_sources_themselves():
-    """``only_rag`` bypasses tools mode, so the sources are still read."""
-    orch = _orchestrator(_config())
-
-    await orch._check_data_sources_reachable(["a_tool"], ["srv:src"], only_rag=True)
-
-    orch.event_publisher.publish_warning.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_no_config_manager_means_nothing_to_report():
     """Programmatic callers never had feature flags to consult."""
     orch = _orchestrator(None)
@@ -118,19 +114,3 @@ async def test_no_config_manager_means_nothing_to_report():
     await orch._check_data_sources_reachable(["a_tool"], ["srv:src"])
 
     orch.event_publisher.publish_warning.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_flags_do_not_change_the_warning():
-    """The warning is about the turn, not the feature flags.
-
-    ``FEATURE_ATLAS_RAG_TOOLS_ENABLED`` off is one reason the search tool can
-    be missing, but after #921 the ordinary reason is that the user did not
-    tick it -- and both strand the sources in tools/agent mode the same way.
-    """
-    for config in (_config(rag=False), _config(tools=False), _config(rag=False, tools=False)):
-        orch = _orchestrator(config)
-
-        await orch._check_data_sources_reachable(["a_tool"], ["srv:src"])
-
-        orch.event_publisher.publish_warning.assert_awaited_once()

@@ -114,7 +114,7 @@ print('plain tools call; only the user-selected tool was offered; nothing inject
 print_result ${PIPESTATUS[0]} "agent mode: no pre-injection, no implied atlas_search"
 
 # ==========================================
-print_header "Check 4: sources nothing can read warn; RAG-mode routes stay silent"
+print_header "Check 4: sources nothing can read warn; auto-expanded sources stay silent"
 # ==========================================
 python3 -c "
 import asyncio
@@ -139,12 +139,12 @@ async def main():
     assert 'were not searched' in msg, msg
     print('unreached sources warn instead of answering silently')
 
-    # No tools / only_rag: the turn routes to RAG mode, which reads them.
+    # Sources the client auto-expanded (RAG toggle on, none picked) stay
+    # silent; the turn carries no deliberate selection to warn about.
     o2 = orch()
-    await o2._check_data_sources_reachable(None, ['srv:docs'])
-    await o2._check_data_sources_reachable(['calc'], ['srv:docs'], only_rag=True)
+    await o2._check_data_sources_reachable(['calc'], ['srv:docs'], sources_auto=True)
     o2.event_publisher.publish_warning.assert_not_awaited()
-    print('RAG-mode routes stay silent')
+    print('auto-expanded sources stay silent')
 
 asyncio.run(main())
 " 2>&1 | tail -3

@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useGlobusAuth } from '../hooks/useGlobusAuth'
+import { useToast } from './ui/toastContext'
 import PromptManager from './PromptManager'
 import ToolsPanel from './ToolsPanel'
 import DataSourcesSelector from './DataSourcesSelector'
@@ -30,6 +31,7 @@ const TABS = [
  * instead of separate top-bar entry points.
  */
 const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null, onPromptIntentConsumed = null }) => {
+  const toast = useToast()
   // Tools open first when available -- it is what the wrench button reads as.
   // The effect below falls back to the first visible tab when it is not.
   const [activeTab, setActiveTab] = useState('tools')
@@ -136,12 +138,16 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // flag has settled, so the discard path's fall-through guard sees it clean.
   const saveToolsAndClose = useCallback(() => {
     if (promptDirty) {
+      // The commit already happened, and this branch may leave the panel
+      // open (if the user keeps editing the prompt) -- the in-place "saved"
+      // confirmation the footer used to show is gone, so say it here.
+      toast.info('Tool selections saved.')
       setActiveTab('prompts')
       setShowPromptDiscard(true)
       return
     }
     finishClose()
-  }, [finishClose, promptDirty])
+  }, [finishClose, promptDirty, toast])
 
   // Globus auth state
   const {

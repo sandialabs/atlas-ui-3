@@ -31,6 +31,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 from ..utilities import error_handler, tool_executor
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
+from ..utilities.tool_selection import normalize_selected_tools
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .steering import SteeringChannel
@@ -132,7 +133,7 @@ class AgenticLoop(AgentLoopProtocol):
         # scope what that tool may read, they never add it to the schema and
         # they never run retrieval on their own. The model decides whether to
         # call it, and the call shows up in the UI like any other tool.
-        effective_tools = [t for t in (selected_tools or []) if isinstance(t, str)]
+        effective_tools = normalize_selected_tools(selected_tools)
 
         tools_schema: List[Dict[str, Any]] = []
         if effective_tools and self.tool_manager:

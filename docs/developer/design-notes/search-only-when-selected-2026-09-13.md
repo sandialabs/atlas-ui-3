@@ -35,18 +35,24 @@ covers both halves of "sources without the search tool":
 - **Agent mode with no tools** is downgraded to that same RAG turn, with the
   existing "agent mode needs at least one tool" note.
 - **`only_rag` turns** bypass tools mode and likewise read their sources.
+- **Sources the client expanded on its own** (RAG toggle on, none hand-picked
+  -- the client sends every reachable source id) were never deliberately
+  chosen, so they carry `data_sources_auto` and stay silent; warning on
+  every such turn would be noise (#930 review).
 
-The one genuinely stranded case is *sources plus other tools, search tool not
-ticked*: tools/agent mode runs the ticked tools and nothing reads the
-sources. `ChatOrchestrator._check_data_sources_reachable` (formerly
-`_resolve_search_tool`, which no longer resolves anything) publishes a
-warning naming the way out -- select `atlas_search`, or deselect the tools to
-fall through to plain RAG. The warning is about the *turn*, not the feature
-flags: since #921 the ordinary reason the search tool is missing is that the
-user did not tick it, and a flag being off (`FEATURE_ATLAS_RAG_TOOLS_ENABLED`)
-strands the sources the same way. A turn that names the tool under either its
-current or its pre-#855 name (`atlas_rag_query`, what replayed conversations
-carry) is never warned about.
+The one genuinely stranded case is *sources plus other tools, search tool
+not ticked*: tools/agent mode runs the ticked tools and nothing reads the
+sources. The orchestrator's reachability check runs inside the two
+tool-running branches -- in the tools branch *after* authorization
+filtering, since stripping `atlas_search` there would otherwise strand the
+sources silently -- and publishes a warning naming the way out: select
+`atlas_search`, or deselect the tools to fall through to plain RAG. The
+warning is about the *turn*, not the feature flags: since #921 the ordinary
+reason the search tool is missing is that the user did not tick it, and a
+flag being off (`FEATURE_ATLAS_RAG_TOOLS_ENABLED`) -- including a turn that
+*named* the tool -- strands the sources the same way. A turn that names the
+tool under either its current or its pre-#855 name (`atlas_rag_query`, what
+replayed conversations carry) with the flags on is never warned about.
 
 ## Frontend
 
@@ -66,7 +72,7 @@ that pinned the implication were inverted:
 `test_agentic_loop.py::TestAgenticLoopSearchIsATool` and
 `test_tools_mode_iteration.py` now assert the model saw exactly the user's
 selection, and `test_data_sources_reachability.py` pins the warning (and its
-silences: no tools, `only_rag`, legacy tool name, no config).
+silences: auto-expanded sources, legacy tool name, flags off, no config).
 
 ## Compatibility
 

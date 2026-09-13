@@ -622,6 +622,10 @@ export const ChatProvider = ({ children }) => {
 		const dataSourcesToSend = ragActivated
 			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
 			: []
+		// When the RAG toggle alone expanded the list to "everything I can
+		// reach", the sources were not hand-picked -- the backend must not
+		// warn per turn that they were not searched (#930 review).
+		const dataSourcesAuto = ragActivated && !hasSelectedSources
 
 		// A user-authored custom prompt (issue #153) replaces the default system
 		// prompt and is sent as custom_system_prompt — never as an MCP prompt.
@@ -660,6 +664,7 @@ export const ChatProvider = ({ children }) => {
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
+			data_sources_auto: dataSourcesAuto,
 			user: config.user,
 			files: { ...extraFiles, ...tagged },
 			agent_mode: agent.agentModeEnabled,
