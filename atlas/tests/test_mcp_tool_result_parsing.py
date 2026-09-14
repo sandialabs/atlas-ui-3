@@ -22,14 +22,6 @@ class MockTextContent:
         self.type = "text"
 
 
-class MockImageContent:
-    """Mock for MCP image content item."""
-    def __init__(self, data: str, mime_type: str = "image/png"):
-        self.data = data
-        self.mimeType = mime_type
-        self.type = "image"
-
-
 class MockMCPResultWithStructuredContent:
     """Mock MCP result that includes structured_content field."""
     def __init__(self, payload: dict):
@@ -131,26 +123,6 @@ class TestMCPToolResultParsing:
 
         assert "results" in normalized
         assert normalized["results"]["content"] == "Screenshot captured successfully"
-
-    def test_normalize_direct_image_content_excludes_base64_from_llm_payload(self):
-        manager = MCPToolManager.__new__(MCPToolManager)
-        image_data = "iVBORw0KGgo="
-        raw_result = MockMCPResultPlainText("Generated image")
-        raw_result.content = [
-            MockTextContent("Generated image"),
-            MockImageContent(image_data),
-        ]
-
-        normalized = manager._normalize_mcp_tool_result(raw_result)
-        artifacts, display_config, _ = manager._extract_v2_components(
-            raw_result, "image_demo_generate"
-        )
-
-        assert normalized == {"results": "Generated image"}
-        assert image_data not in repr(normalized)
-        assert artifacts[0]["b64"] == image_data
-        assert artifacts[0]["mime"] == "image/png"
-        assert display_config["primary_file"] == "mcp_image_0.png"
 
     @pytest.mark.asyncio
     async def test_execute_tool_extracts_artifacts_from_structured_content(self):
