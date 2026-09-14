@@ -358,7 +358,7 @@ async def test_the_handle_comes_back_before_the_child_finishes():
     await asyncio.wait_for(service.started.wait(), timeout=1)
     # Still working: the call returned a handle, not an answer.
     assert not service.release.is_set()
-    assert handle["status"] == RunStatus.QUEUED.value
+    assert handle["status"] == RunStatus.RUNNING.value
     assert handle["conversation_id"] and handle["run_id"]
     assert handle["data_sources"] == ["docs:handbook"]
     service.release.set()
@@ -382,6 +382,34 @@ async def test_child_events_carry_the_childs_own_identity():
     assert frames
     assert frames[0]["run_id"] == handle["run_id"]
     assert frames[0]["conversation_id"] == handle["conversation_id"]
+
+
+@pytest.mark.asyncio
+async def test_a_child_approval_is_replayable_from_its_run_record():
+    registry = _install_registry()
+    factory = _Factory(lambda c: _ChatService(c))
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        {"user_email": "user@example.com"},
+        factory=factory,
+    )
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    await service.connection.send_json(
+        {"type": "tool_approval_request", "tool_call_id": "call-1"}
+    )
+
+    record = registry.get(handle["run_id"])
+    assert record.status is RunStatus.WAITING_FOR_INPUT
+    assert registry.pending_requests_for_conversation(
+        handle["conversation_id"], "user@example.com"
+    ) == [{
+        "type": "tool_approval_request",
+        "tool_call_id": "call-1",
+        "run_id": handle["run_id"],
+        "conversation_id": handle["conversation_id"],
+    }]
+    service.release.set()
 
 
 @pytest.mark.asyncio
@@ -595,8 +623,9 @@ def test_a_finished_parent_is_not_reaped_while_a_child_is_still_running():
     )
     registry.set_status(parent.run_id, RunStatus.COMPLETED)
 
-    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
     import time as _time
+
+    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
 
     assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 0
     assert registry.get(parent.run_id) is not None
@@ -623,9 +652,55 @@ async def test_the_wall_clock_backstop_stops_the_childrens_runs_too():
     stopped = registry.enforce_wall_clock(60)
 
     assert stopped == [parent.run_id]
-    assert registry.get(child.run_id).status is RunStatus.CANCELLED
+    assert registry.get(child.run_id).status is RunStatus.FAILED
     with pytest.raises(asyncio.CancelledError):
         await child_task
+
+
+@pytest.mark.asyncio
+async def test_wall_clock_cascade_reaches_live_grandchildren_through_terminal_children():
+    registry = RunRegistry()
+    parent = registry.start(conversation_id="c1", user_email="u@example.com")
+    child = registry.start(
+        conversation_id="c2", user_email="u@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    grandchild = registry.start(
+        conversation_id="c3", user_email="u@example.com", parent_run_id=child.run_id, depth=2
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+
+    async def _forever():
+        await asyncio.Event().wait()
+
+    grandchild_task = asyncio.ensure_future(_forever())
+    registry.attach_task(grandchild.run_id, grandchild_task)
+    parent.created_at -= 10_000
+
+    assert registry.enforce_wall_clock(60) == [parent.run_id]
+    assert registry.get(grandchild.run_id).status is RunStatus.FAILED
+    with pytest.raises(asyncio.CancelledError):
+        await grandchild_task
+
+
+@pytest.mark.asyncio
+async def test_a_child_error_response_marks_the_run_failed():
+    registry = _install_registry()
+
+    class _FailingService(_ChatService):
+        async def handle_chat_message(self, **kwargs):
+            return {"type": "error", "message": "child failed"}
+
+    factory = _Factory(lambda c: _FailingService(c))
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        {"user_email": "user@example.com"},
+        factory=factory,
+    )
+    await asyncio.wait_for(registry.get(handle["run_id"]).task, timeout=1)
+
+    record = registry.get(handle["run_id"])
+    assert record.status is RunStatus.FAILED
+    assert record.error == "child failed"
 
 
 @pytest.mark.asyncio
@@ -751,8 +826,9 @@ def test_a_terminal_child_does_not_hide_a_running_grandchild():
     registry.set_status(child.run_id, RunStatus.COMPLETED)
 
     # The finished middle run must not be reaped out from under its live child.
-    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
     import time as _time
+
+    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
 
     assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 0
 

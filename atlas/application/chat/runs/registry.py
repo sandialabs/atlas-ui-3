@@ -178,6 +178,7 @@ class RunRegistry:
     def __init__(self, max_concurrent_runs_per_user: int = 5):
         self._max_concurrent = max_concurrent_runs_per_user
         self._runs: Dict[str, RunRecord] = {}
+        self._children: Dict[str, List[str]] = {}
         self._listeners: Dict[str, List[Callable[[RunRecord], None]]] = {}
 
     # ------------------------------------------------------------------
@@ -240,9 +241,10 @@ class RunRegistry:
         if not run_id:
             return []
         return [
-            r
-            for r in self._runs.values()
-            if r.parent_run_id == run_id and (include_terminal or not r.is_terminal)
+            self._runs[child_id]
+            for child_id in self._children.get(run_id, [])
+            if child_id in self._runs
+            and (include_terminal or not self._runs[child_id].is_terminal)
         ]
 
     def active_for_user(self, user_email: str) -> List[RunRecord]:
@@ -316,6 +318,8 @@ class RunRegistry:
             depth=max(0, int(depth or 0)),
         )
         self._runs[record.run_id] = record
+        if record.parent_run_id:
+            self._children.setdefault(record.parent_run_id, []).append(record.run_id)
         logger.info(
             "Run %s started for conversation %s (active runs for user: %d)",
             record.run_id,
@@ -393,7 +397,14 @@ class RunRegistry:
         record.updated_at = time.time()
         self._notify(record)
 
-    def cancel(self, run_id: str, user_email: str) -> bool:
+    def cancel(
+        self,
+        run_id: str,
+        user_email: str,
+        *,
+        status: RunStatus = RunStatus.CANCELLED,
+        error: Optional[str] = None,
+    ) -> bool:
         """Cancel one run, addressed by id and checked for ownership.
 
         Returns whether a live run was actually cancelled, so the transport can
@@ -421,14 +432,14 @@ class RunRegistry:
         # whole branch from the stop. Cancelling a terminal record is a no-op
         # beyond its own cascade.
         for child in self.children_of(run_id, include_terminal=True):
-            cascaded = self.cancel(child.run_id, user_email) or cascaded
+            cascaded = self.cancel(child.run_id, user_email, status=status, error=error) or cascaded
         if record.is_terminal:
             return cascaded
         task = record.task
         # Mark first: the cancellation propagates asynchronously, and the run
         # must never be observable as still running once the user has stopped
         # it.
-        self.set_status(run_id, RunStatus.CANCELLED)
+        self.set_status(run_id, status, error=error)
         if task is not None and not task.done():
             task.cancel()
             return True
@@ -442,7 +453,16 @@ class RunRegistry:
         return count
 
     def remove(self, run_id: str) -> None:
-        self._runs.pop(run_id, None)
+        record = self._runs.pop(run_id, None)
+        if record is None:
+            return
+        if record.parent_run_id:
+            siblings = self._children.get(record.parent_run_id, [])
+            if run_id in siblings:
+                siblings.remove(run_id)
+            if not siblings:
+                self._children.pop(record.parent_run_id, None)
+        self._children.pop(run_id, None)
 
     def reap_terminal(self, now: Optional[float] = None) -> int:
         """Drop terminal runs past the retention window, and trim the excess.
@@ -465,7 +485,7 @@ class RunRegistry:
                 continue
             ended = record.ended_at or record.updated_at
             if now - ended > TERMINAL_RETENTION_SECONDS:
-                del self._runs[run_id]
+                self.remove(run_id)
                 removed += 1
             else:
                 per_user_terminal.setdefault(record.user_email, []).append(record)
@@ -475,7 +495,7 @@ class RunRegistry:
                 continue
             records.sort(key=lambda r: r.ended_at or r.updated_at)
             for record in records[: len(records) - MAX_RETAINED_TERMINAL_RUNS_PER_USER]:
-                self._runs.pop(record.run_id, None)
+                self.remove(record.run_id)
                 removed += 1
 
         return removed
@@ -507,6 +527,8 @@ class RunRegistry:
         now = time.time() if now is None else now
         expired: List[str] = []
         for record in list(self.active_for_user_all()):
+            if record.is_terminal:
+                continue
             if now - record.created_at <= max_seconds:
                 continue
             logger.warning(
@@ -517,13 +539,15 @@ class RunRegistry:
             task = record.task
             # Same cascade as an explicit stop (#925): a parent that hit the
             # wall clock must not leave its sub-conversations running.
-            for child in self.children_of(record.run_id):
-                self.cancel(child.run_id, child.user_email)
-            self.set_status(
-                record.run_id,
-                RunStatus.FAILED,
-                error="This run exceeded the maximum allowed run time and was stopped.",
-            )
+            timeout_error = "This run exceeded the maximum allowed run time and was stopped."
+            for child in self.children_of(record.run_id, include_terminal=True):
+                self.cancel(
+                    child.run_id,
+                    child.user_email,
+                    status=RunStatus.FAILED,
+                    error=timeout_error,
+                )
+            self.set_status(record.run_id, RunStatus.FAILED, error=timeout_error)
             if task is not None and not task.done():
                 task.cancel()
             expired.append(record.run_id)

@@ -210,7 +210,11 @@ def _check_limits(
         # run the user has in flight: without it the per-run cap would be
         # vacuous for exactly the turns that are not otherwise bounded.
         in_flight = len(
-            [r for r in registry.active_for_user(user_email) if r.depth > 0]
+            [
+                r
+                for r in registry.active_for_user(user_email)
+                if r.parent_run_id is None and r.depth > 0
+            ]
         )
     if in_flight >= max_children:
         raise LaunchRefused(
@@ -261,10 +265,24 @@ class _ChildConnection:
         self._run_id = run_id
 
     async def send_json(self, data: Dict[str, Any]) -> None:
-        if self._update_callback is None:
-            return
         try:
-            await self._update_callback(tag_event(data, self._run_id, self._conversation_id))
+            tagged = tag_event(data, self._run_id, self._conversation_id)
+            if isinstance(tagged, dict):
+                event_type = tagged.get("type")
+                registry = get_run_registry()
+                record = registry.get(self._run_id)
+                if event_type in {"tool_approval_request", "elicitation_request"}:
+                    registry.set_status(
+                        self._run_id,
+                        RunStatus.WAITING_FOR_INPUT,
+                        waiting_on=event_type,
+                    )
+                    registry.set_pending_request(self._run_id, tagged)
+                elif event_type in {"tool_complete", "tool_error", "tool_interrupted", "tool_result"}:
+                    if record is not None and record.status is RunStatus.WAITING_FOR_INPUT:
+                        registry.set_status(self._run_id, RunStatus.RUNNING)
+            if self._update_callback is not None:
+                await self._update_callback(tagged)
         except Exception:
             # A dead socket must not kill the run: the child's transcript is
             # persisted either way, and that is where the user reads it.
@@ -304,6 +322,40 @@ def _admin_gated_tools(tools: List[str], config_manager: Any) -> List[str]:
     return gated
 
 
+async def resolve_child_data_sources(
+    factory: Any,
+    selected: List[str],
+    user_email: str,
+    compliance_level: Any,
+) -> List[str]:
+    unified_rag = getattr(factory, "get_unified_rag_service", lambda: None)()
+    rag_mcp = getattr(factory, "get_rag_mcp_service", lambda: None)()
+    if unified_rag is None and rag_mcp is None:
+        return selected
+    authorized: set[str] = set()
+    if unified_rag is not None:
+        for server in await unified_rag.discover_data_sources(
+            user_email, user_compliance_level=compliance_level
+        ):
+            server_name = server.get("server", "")
+            authorized.update(
+                f"{server_name}:{source.get('id', '')}"
+                for source in server.get("sources", [])
+                if server_name and source.get("id")
+            )
+    if rag_mcp is not None:
+        for server in await rag_mcp.discover_servers(
+            user_email, user_compliance_level=compliance_level
+        ):
+            server_name = server.get("server", "")
+            authorized.update(
+                f"{server_name}:{source.get('id', '')}"
+                for source in server.get("sources", [])
+                if server_name and source.get("id")
+            )
+    return [source for source in selected if source in authorized]
+
+
 async def _run_child(
     *,
     chat_service: Any,
@@ -322,7 +374,7 @@ async def _run_child(
     outcome = RunStatus.COMPLETED
     error: Optional[str] = None
     try:
-        await chat_service.handle_chat_message(
+        response = await chat_service.handle_chat_message(
             session_id=record.session_id,
             content=prompt,
             model=model,
@@ -341,6 +393,9 @@ async def _run_child(
             compliance_level=compliance_level,
             incognito=False,
         )
+        if isinstance(response, dict) and response.get("type") == "error":
+            outcome = RunStatus.FAILED
+            error = str(response.get("message") or "Sub-conversation turn failed.")
     except asyncio.CancelledError:
         outcome = RunStatus.CANCELLED
         raise
@@ -438,14 +493,20 @@ async def launch_sub_conversation(
     # has pinned to mandatory approval are exempt: those keep prompting inside
     # the child, which pauses it until the user opens that conversation.
     admin_gated = _admin_gated_tools(tools, config_manager)
-    if not admin_gated:
-        _preapprove_child_tools(chat_service)
+    if not admin_gated and not _preapprove_child_tools(chat_service):
+        logger.warning("Could not pre-approve tools for launched run")
     # RAG selections only travel when the workspace has RAG switched on; a
     # workspace that keeps a source list but has retrieval off means "not now".
     data_sources = (
         list(workspace_config.get("selected_data_sources") or [])
         if workspace_config.get("rag_enabled")
         else []
+    )
+    data_sources = await resolve_child_data_sources(
+        factory,
+        data_sources,
+        user_email,
+        (context or {}).get("compliance_level"),
     )
 
     # Admission is check-then-insert, and it must be atomic: several
@@ -497,7 +558,7 @@ async def launch_sub_conversation(
     return {
         "run_id": record.run_id,
         "conversation_id": conversation_id,
-        "status": RunStatus.QUEUED.value,
+        "status": record.status.value,
         "workspace": workspace.get("name"),
         "model": model_name,
         "tools": tools,
