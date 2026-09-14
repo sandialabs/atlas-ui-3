@@ -31,6 +31,11 @@ class AgentContext:
     # transcript. Typed loosely to keep the domain register out of the loop's
     # import graph.
     citation_register: Optional[Any] = None
+    # Whether this turn's transcript stays off the server (incognito or local
+    # save mode). Carried so tools that would themselves persist something can
+    # honour it -- ``atlas_launch`` refuses to start a sub-conversation, whose
+    # transcript is saved by definition (#925).
+    incognito: bool = False
 
 
 @dataclass

@@ -332,6 +332,9 @@ class AgenticLoop(AgentLoopProtocol):
                     # Trusted compliance level so RAG tools enforce the boundary;
                     # the model cannot set or change this.
                     "compliance_level": context.compliance_level,
+                    # Off-the-server turns: atlas_launch refuses to start a
+                    # sub-conversation that would persist one (#925).
+                    "incognito": context.incognito,
                     # Required so MCP tool calls reuse a persistent session via
                     # MCPSessionManager. Without it, call_tool() falls back to a
                     # single-use session per call and stateful MCP servers raise

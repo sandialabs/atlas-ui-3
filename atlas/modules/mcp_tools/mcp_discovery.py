@@ -19,6 +19,7 @@ from .atlas_server import (
     LEGACY_SERVER_NAMES,
     atlas_tool_schemas,
     is_atlas_tool,
+    launch_tool_enabled,
     normalize_tool_name,
 )
 from .sleep_tool import sleep_tool_enabled
@@ -118,7 +119,7 @@ def _client():
 
 
 def _atlas_tool_flags() -> tuple:
-    """(sleep_enabled, search_enabled) for the built-in ``atlas`` server.
+    """(sleep_enabled, search_enabled, launch_enabled) for the built-in ``atlas`` server.
 
     Read defensively: discovery runs in contexts (tests, CLI) where the config
     manager may not be wired up, and a missing setting must not take the whole
@@ -128,7 +129,7 @@ def _atlas_tool_flags() -> tuple:
         settings = _client().config_manager.app_settings
     except Exception:
         logger.warning("Could not read app settings; omitting gated atlas tools")
-        return False, False
+        return False, False, False
     try:
         sleep_enabled = sleep_tool_enabled(settings)
     except Exception:
@@ -137,7 +138,8 @@ def _atlas_tool_flags() -> tuple:
         getattr(settings, "feature_rag_enabled", False)
         and getattr(settings, "feature_atlas_rag_tools_enabled", False)
     )
-    return sleep_enabled, search_enabled
+    launch_enabled = launch_tool_enabled(settings)
+    return sleep_enabled, search_enabled, launch_enabled
 
 
 def _build_tool_index(available_tools) -> Dict[str, Dict[str, Any]]:
@@ -470,7 +472,7 @@ class DiscoveryMixin:
         tools_schema = []
         server_tool_mapping = {}
 
-        sleep_enabled, search_enabled = _atlas_tool_flags()
+        sleep_enabled, search_enabled, launch_enabled = _atlas_tool_flags()
         emitted_atlas = set()
         for server_name in server_names:
             # The built-in ``atlas`` server (and the pseudo-servers it replaced)
@@ -479,6 +481,7 @@ class DiscoveryMixin:
                     list(ATLAS_TOOL_NAMES),
                     sleep_enabled=sleep_enabled,
                     search_enabled=search_enabled,
+                    launch_enabled=launch_enabled,
                 ):
                     full_name = schema["function"]["name"]
                     if full_name in emitted_atlas:
@@ -695,7 +698,7 @@ class DiscoveryMixin:
         matched = []
         missing = []
         withheld = []
-        sleep_enabled, search_enabled = _atlas_tool_flags()
+        sleep_enabled, search_enabled, launch_enabled = _atlas_tool_flags()
         seen_atlas = set()
         for requested in tool_names:
             normalized = normalize_tool_name(requested)
@@ -707,6 +710,7 @@ class DiscoveryMixin:
                     [normalized],
                     sleep_enabled=sleep_enabled,
                     search_enabled=search_enabled,
+                    launch_enabled=launch_enabled,
                 ))
                 continue
             entry = index.get(requested)

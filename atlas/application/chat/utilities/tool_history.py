@@ -30,6 +30,7 @@ import logging
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from atlas.application.chat.runs.context import get_current_run
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
 from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 
@@ -77,12 +78,26 @@ class ToolCallRecorder:
 
     def __init__(self, inner: Optional[UpdateCallback]):
         self._inner = inner
+        # The run this recorder belongs to, captured at construction. Since
+        # issue #925 a turn's callback can carry frames that are not this
+        # turn's: a sub-conversation launched by ``atlas_launch`` emits over
+        # the same socket, tagged with its own run. Those rows belong in the
+        # child's transcript, and persisting them here would splice a
+        # sub-conversation's tool calls into its parent's saved history.
+        context = get_current_run()
+        self._run_id = context.run_id if context else None
+
         # Keyed by tool_call_id, insertion-ordered so persisted rows match the
         # order the tools were invoked in this turn.
         self._calls: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         # Payloads queued by a mark_incomplete flush, drained by
         # notify_incomplete() once the history write is done.
         self._interrupted_notices: List[Dict[str, Any]] = []
+
+    @property
+    def inner(self) -> Optional[UpdateCallback]:
+        """The callback this recorder wraps, for callers needing raw delivery."""
+        return self._inner
 
     async def __call__(self, payload: Dict[str, Any]) -> None:
         # Record defensively: a malformed payload must never break the actual
@@ -98,6 +113,10 @@ class ToolCallRecorder:
             await self._inner(payload)
 
     def _record(self, payload: Dict[str, Any]) -> None:
+        payload_run_id = payload.get("run_id")
+        if payload_run_id is not None and payload_run_id != self._run_id:
+            # Another run's event passing through this turn's callback (#925).
+            return
         event_type = payload.get("type")
         tool_call_id = payload.get("tool_call_id")
         if not tool_call_id or event_type not in (

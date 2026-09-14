@@ -130,6 +130,12 @@ class RunRecord:
     # Free-form label for what the run is waiting on (e.g. "tool_approval"),
     # surfaced to the client alongside WAITING_FOR_INPUT.
     waiting_on: Optional[str] = None
+    # Set when this run was started by ``atlas_launch`` from another run
+    # (issue #925). ``parent_run_id`` is what makes stopping a parent stop its
+    # children, and ``depth`` is what bounds recursion: a launched run is one
+    # deeper than the run that launched it.
+    parent_run_id: Optional[str] = None
+    depth: int = 0
     # The exact frame that asked for input, kept so it can be re-sent.
     # A request emitted while the user was looking at another conversation (or
     # had the browser closed) is otherwise gone: the client dropped it, and the
@@ -154,6 +160,8 @@ class RunRecord:
             "ended_at": self.ended_at,
             "error": self.error,
             "detached": self.detached,
+            "parent_run_id": self.parent_run_id,
+            "depth": self.depth,
         }
 
 
@@ -170,6 +178,7 @@ class RunRegistry:
     def __init__(self, max_concurrent_runs_per_user: int = 5):
         self._max_concurrent = max_concurrent_runs_per_user
         self._runs: Dict[str, RunRecord] = {}
+        self._children: Dict[str, List[str]] = {}
         self._listeners: Dict[str, List[Callable[[RunRecord], None]]] = {}
 
     # ------------------------------------------------------------------
@@ -223,6 +232,21 @@ class RunRegistry:
                 return record
         return None
 
+    def children_of(self, run_id: Optional[str], *, include_terminal: bool = False) -> List[RunRecord]:
+        """Runs launched by ``run_id`` (issue #925).
+
+        Direct children only; the cascade in :meth:`cancel` walks the tree one
+        level at a time, so a grandchild is reached through its own parent.
+        """
+        if not run_id:
+            return []
+        return [
+            self._runs[child_id]
+            for child_id in self._children.get(run_id, [])
+            if child_id in self._runs
+            and (include_terminal or not self._runs[child_id].is_terminal)
+        ]
+
     def active_for_user(self, user_email: str) -> List[RunRecord]:
         return [
             r
@@ -262,6 +286,8 @@ class RunRegistry:
         user_email: str,
         session_id: Optional[UUID] = None,
         steering: Optional[Any] = None,
+        parent_run_id: Optional[str] = None,
+        depth: int = 0,
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
 
@@ -288,8 +314,12 @@ class RunRegistry:
             # never write through the same history object.
             session_id=session_id or uuid4(),
             steering=steering,
+            parent_run_id=parent_run_id,
+            depth=max(0, int(depth or 0)),
         )
         self._runs[record.run_id] = record
+        if record.parent_run_id:
+            self._children.setdefault(record.parent_run_id, []).append(record.run_id)
         logger.info(
             "Run %s started for conversation %s (active runs for user: %d)",
             record.run_id,
@@ -367,7 +397,14 @@ class RunRegistry:
         record.updated_at = time.time()
         self._notify(record)
 
-    def cancel(self, run_id: str, user_email: str) -> bool:
+    def cancel(
+        self,
+        run_id: str,
+        user_email: str,
+        *,
+        status: RunStatus = RunStatus.CANCELLED,
+        error: Optional[str] = None,
+    ) -> bool:
         """Cancel one run, addressed by id and checked for ownership.
 
         Returns whether a live run was actually cancelled, so the transport can
@@ -375,13 +412,34 @@ class RunRegistry:
         client believed was live but had already finished).
         """
         record = self.get_for_user(run_id, user_email)
-        if record is None or record.is_terminal:
+        if record is None:
             return False
+        # Stopping a parent stops the sub-conversations it launched (#925).
+        # Children run in their own tasks, so cancelling the parent's task
+        # alone would leave them working -- and billing -- with nobody
+        # watching.
+        #
+        # This is deliberately *above* the terminal check. ``atlas_launch``
+        # returns a handle rather than an answer, so the parent turn normally
+        # finishes while its children are still working: by the time a user
+        # stops the conversation, the parent run is usually already terminal.
+        # Cascading only for a live parent would make "stopping a conversation
+        # stops the ones it launched" true in the rare case and false in the
+        # common one.
+        cascaded = False
+        # ``include_terminal=True``: a child that has already finished may still
+        # have running children of its own, and skipping it would hide that
+        # whole branch from the stop. Cancelling a terminal record is a no-op
+        # beyond its own cascade.
+        for child in self.children_of(run_id, include_terminal=True):
+            cascaded = self.cancel(child.run_id, user_email, status=status, error=error) or cascaded
+        if record.is_terminal:
+            return cascaded
         task = record.task
         # Mark first: the cancellation propagates asynchronously, and the run
         # must never be observable as still running once the user has stopped
         # it.
-        self.set_status(run_id, RunStatus.CANCELLED)
+        self.set_status(run_id, status, error=error)
         if task is not None and not task.done():
             task.cancel()
             return True
@@ -395,7 +453,16 @@ class RunRegistry:
         return count
 
     def remove(self, run_id: str) -> None:
-        self._runs.pop(run_id, None)
+        record = self._runs.pop(run_id, None)
+        if record is None:
+            return
+        if record.parent_run_id:
+            siblings = self._children.get(record.parent_run_id, [])
+            if run_id in siblings:
+                siblings.remove(run_id)
+            if not siblings:
+                self._children.pop(record.parent_run_id, None)
+        self._children.pop(run_id, None)
 
     def reap_terminal(self, now: Optional[float] = None) -> int:
         """Drop terminal runs past the retention window, and trim the excess.
@@ -409,9 +476,16 @@ class RunRegistry:
         for run_id, record in list(self._runs.items()):
             if not record.is_terminal:
                 continue
+            if self._has_live_descendants(run_id):
+                # A finished parent whose sub-conversations are still running
+                # must outlive them (#925): reaping it now would orphan the
+                # subtree, and a later stop addressed at the parent would find
+                # no record and cascade to nothing. Descendants, not just direct
+                # children -- a finished child can itself have a live one.
+                continue
             ended = record.ended_at or record.updated_at
             if now - ended > TERMINAL_RETENTION_SECONDS:
-                del self._runs[run_id]
+                self.remove(run_id)
                 removed += 1
             else:
                 per_user_terminal.setdefault(record.user_email, []).append(record)
@@ -421,10 +495,21 @@ class RunRegistry:
                 continue
             records.sort(key=lambda r: r.ended_at or r.updated_at)
             for record in records[: len(records) - MAX_RETAINED_TERMINAL_RUNS_PER_USER]:
-                self._runs.pop(record.run_id, None)
+                self.remove(record.run_id)
                 removed += 1
 
         return removed
+
+    def _has_live_descendants(self, run_id: str, _depth: int = 0) -> bool:
+        """Whether anything below ``run_id`` in the launch tree is still running."""
+        if _depth > 10:  # pragma: no cover - depth is capped far below this
+            return False
+        for child in self.children_of(run_id, include_terminal=True):
+            if not child.is_terminal:
+                return True
+            if self._has_live_descendants(child.run_id, _depth + 1):
+                return True
+        return False
 
     def enforce_wall_clock(self, max_seconds: float, now: Optional[float] = None) -> List[str]:
         """Stop non-terminal runs that have exceeded the wall-clock budget.
@@ -442,6 +527,8 @@ class RunRegistry:
         now = time.time() if now is None else now
         expired: List[str] = []
         for record in list(self.active_for_user_all()):
+            if record.is_terminal:
+                continue
             if now - record.created_at <= max_seconds:
                 continue
             logger.warning(
@@ -450,11 +537,17 @@ class RunRegistry:
                 max_seconds,
             )
             task = record.task
-            self.set_status(
-                record.run_id,
-                RunStatus.FAILED,
-                error="This run exceeded the maximum allowed run time and was stopped.",
-            )
+            # Same cascade as an explicit stop (#925): a parent that hit the
+            # wall clock must not leave its sub-conversations running.
+            timeout_error = "This run exceeded the maximum allowed run time and was stopped."
+            for child in self.children_of(record.run_id, include_terminal=True):
+                self.cancel(
+                    child.run_id,
+                    child.user_email,
+                    status=RunStatus.FAILED,
+                    error=timeout_error,
+                )
+            self.set_status(record.run_id, RunStatus.FAILED, error=timeout_error)
             if task is not None and not task.done():
                 task.cancel()
             expired.append(record.run_id)

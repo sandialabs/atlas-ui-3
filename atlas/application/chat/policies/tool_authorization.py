@@ -7,7 +7,9 @@ from atlas.core.auth import is_user_in_group
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
+    LAUNCH_TOOL_NAME,
     SEARCH_TOOL_NAME,
+    launch_tool_enabled,
     normalize_tool_name,
 )
 from atlas.modules.mcp_tools.atlas_server import (
@@ -83,6 +85,10 @@ class ToolAuthorizationService:
                     continue
                 if resolved == ATLAS_SLEEP_TOOL_NAME:
                     if sleep_tool_enabled(getattr(self.config_manager, "app_settings", None)):
+                        filtered_tools.append(tool)
+                    continue
+                if resolved == LAUNCH_TOOL_NAME:
+                    if launch_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue
                 if resolved in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME):

@@ -105,6 +105,45 @@ AGENT_SLEEP_MAX_TURN_SECONDS=7200
 - **Deploys**: a turn parked in a long sleep delays graceful shutdown; expect such turns to be
   killed by a rolling restart.
 
+### Sub-Conversations (`atlas_launch`)
+
+A conversation can start other conversations through the built-in `atlas_launch` tool, ATLAS's
+equivalent of subagents (issue #925). The model supplies a `workspace`, a `model` and a
+`prompt`; the call returns the new conversation's id immediately and does not wait for it to
+finish. The child's transcript is its own conversation in the user's history.
+
+```bash
+# Expose the atlas_launch tool (default: false). Only effective when chat history and
+# agent mode are also enabled, since a launched run is a background run.
+FEATURE_ATLAS_LAUNCH_ENABLED=false
+
+# How deep sub-conversations may nest (default: 2). A user-started run is depth 0, the
+# sub-conversation it launches is depth 1; a launch past this depth is refused.
+ATLAS_LAUNCH_MAX_DEPTH=2
+
+# How many sub-conversations one run may have in flight at once (default: 3).
+ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
+```
+
+- **The workspace is the capability boundary.** The child gets that workspace's tools and data
+  sources and nothing else, and cannot reach another user's workspaces at all. The tool list is
+  re-filtered through the caller's ACLs at launch time; the data sources are authorized per
+  source by group (and compliance level) when the child actually queries them, exactly as they
+  are for a turn the user runs themselves. Either way a workspace cannot widen what its owner
+  can already reach.
+- **`MAX_CONCURRENT_RUNS_PER_USER` still applies** on top of the caps above, so this feature
+  does not raise a user's ceiling on concurrent runs.
+- **Stopping a conversation stops the ones it launched**, including deeper descendants, and the
+  same cascade applies when a run is stopped by `MAX_RUN_WALL_CLOCK_SECONDS`.
+- **Tool approval**: approving the `atlas_launch` call is the approval for the sub-conversation's
+  own tool calls - nothing else could answer them, since approvals are answered by the browser
+  looking at that conversation and a launched run is not in the history list until it first
+  saves. Tools an admin has pinned to mandatory approval (`FORCE_TOOL_APPROVAL_GLOBALLY` or
+  per-tool config) are exempt: they still prompt inside the sub-conversation, which pauses until
+  the user opens it. Keep such tools out of workspaces you expect to hand off.
+- **Cost**: every launched run is a full agent run on the model it names. Raising the caps
+  raises the worst-case spend of a single user message multiplicatively.
+
 ### Agent Mode Availability and Step Budget
 
 - `FEATURE_AGENT_MODE_AVAILABLE` (default `true`) is the admin kill switch for agent mode in the
