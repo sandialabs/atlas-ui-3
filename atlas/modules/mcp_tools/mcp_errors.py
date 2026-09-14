@@ -80,10 +80,9 @@ def _is_unauthorized_error(exc: BaseException) -> bool:
 
     cur: Optional[BaseException] = exc
     while cur is not None:
-        response = getattr(cur, "response", None)
-        if isinstance(cur, httpx.HTTPStatusError) and getattr(response, "status_code", None) == 401:
-            return True
-        if getattr(response, "status_code", None) == 401:
-            return True
+        if isinstance(cur, httpx.HTTPStatusError):
+            response = getattr(cur, "response", None)
+            if getattr(response, "status_code", None) == 401:
+                return True
         cur = cur.__cause__ or cur.__context__
     return False

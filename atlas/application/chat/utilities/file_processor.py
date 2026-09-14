@@ -243,6 +243,35 @@ async def _rehydrate_vision_images(
     return warnings
 
 
+def _enforce_vision_inline_limits(
+    session_files_ctx: Dict[str, Dict[str, Any]],
+    priority_names: List[str],
+) -> List[str]:
+    historical_names = [
+        name for name in reversed(session_files_ctx)
+        if name not in priority_names and session_files_ctx[name].get("image_b64")
+    ]
+    demoted = []
+    vision_count = 0
+    total_inline_b64 = 0
+    for name in priority_names + historical_names:
+        ref = session_files_ctx[name]
+        image_b64 = ref.get("image_b64")
+        if not image_b64:
+            continue
+        if (
+            vision_count >= _MAX_VISION_IMAGES_PER_REQUEST
+            or total_inline_b64 + len(image_b64) > _MAX_TOTAL_INLINE_B64_BYTES
+        ):
+            demoted.append(name)
+            ref.pop("image_b64", None)
+            ref.pop("image_mime_type", None)
+            continue
+        vision_count += 1
+        total_inline_b64 += len(image_b64)
+    return demoted
+
+
 async def handle_session_files(
     session_context: Dict[str, Any],
     user_email: Optional[str],
@@ -285,17 +314,27 @@ async def handle_session_files(
 
     if not files_map or not file_manager or not user_email:
         if model_supports_vision and file_manager and user_email:
+            retained_names = [
+                name for name, ref in session_files_ctx.items() if ref.get("image_b64")
+            ]
             rehydration_warnings = await _rehydrate_vision_images(
                 session_files_ctx,
                 user_email,
                 file_manager,
                 set(),
-                _MAX_VISION_IMAGES_PER_REQUEST,
+                _MAX_VISION_IMAGES_PER_REQUEST - len(retained_names),
+                sum(
+                    len(ref.get("image_b64", ""))
+                    for ref in session_files_ctx.values()
+                ),
             )
-            if rehydration_warnings:
+            demoted_names = _enforce_vision_inline_limits(
+                session_files_ctx, retained_names
+            )
+            if rehydration_warnings or demoted_names:
                 await _publish_warning(
                     "Some stored images could not be included in this request: "
-                    + ", ".join(rehydration_warnings),
+                    + ", ".join(rehydration_warnings + demoted_names),
                     event_publisher,
                     update_callback,
                 )
@@ -520,33 +559,20 @@ async def handle_session_files(
                     update_callback,
                 )
 
-        # Enforce per-request vision image count and aggregate payload limits.
         if model_supports_vision:
             uploaded_names = [
                 name for name in files_map if session_files_ctx.get(name, {}).get("image_b64")
             ]
-            historical_names = [
-                name for name in reversed(session_files_ctx)
-                if name not in uploaded_names and session_files_ctx[name].get("image_b64")
-            ]
-            vision_count = 0
-            total_inline_b64 = 0
-            for name in uploaded_names + historical_names:
-                ref = session_files_ctx[name]
-                image_b64 = ref.get("image_b64")
-                if (
-                    vision_count >= _MAX_VISION_IMAGES_PER_REQUEST
-                    or total_inline_b64 + len(image_b64) > _MAX_TOTAL_INLINE_B64_BYTES
-                ):
-                    logger.warning(
-                        "Demoting vision image %s from inline input due to request limits",
-                        name,
-                    )
-                    ref.pop("image_b64", None)
-                    ref.pop("image_mime_type", None)
-                    continue
-                vision_count += 1
-                total_inline_b64 += len(image_b64)
+            demoted_names = _enforce_vision_inline_limits(
+                session_files_ctx, uploaded_names
+            )
+            if demoted_names:
+                await _publish_warning(
+                    "Some images were not included in this request: "
+                    + ", ".join(demoted_names),
+                    event_publisher,
+                    update_callback,
+                )
 
         # Enforce per-request PDF limits now that every upload is processed.
         # Two guards, oldest-first preserved (insertion order):

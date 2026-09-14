@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
+from atlas.core.user_identity import normalize_user_email
 from atlas.domain.chat.citation_register import (
     CITATION_REGISTER_KEY,
     CitationRegister,
@@ -460,7 +461,7 @@ class ExecutionMixin:
         """
         from atlas.modules.mcp_tools.token_storage import get_token_storage, token_fingerprint
 
-        cache_key = (user_email.strip().lower(), server_name, conversation_id)
+        cache_key = (normalize_user_email(user_email), server_name, conversation_id)
         self._ensure_user_client_cache_state()
         failing_fingerprint = self._user_client_token_fingerprints.get(cache_key)
         if failing_fingerprint is None:
