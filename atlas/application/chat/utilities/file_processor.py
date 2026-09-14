@@ -201,18 +201,41 @@ async def handle_session_files(
     Returns:
         Updated session context with file references
     """
-    # Always clear stale vision/PDF data from prior turns, even when no
-    # new files are being uploaded.  Without this, old attachments silently
-    # reattach on every subsequent message in the session.
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
-    for existing_ref in session_files_ctx.values():
+    for filename, existing_ref in session_files_ctx.items():
         existing_ref.pop("image_b64", None)
         existing_ref.pop("image_mime_type", None)
         existing_ref.pop("pdf_b64", None)
         existing_ref.pop("pdf_mime_type", None)
+        if (
+            model_supports_vision
+            and file_manager
+            and user_email
+            and existing_ref.get("content_type") in _VISION_IMAGE_MIME_TYPES
+            and existing_ref.get("key")
+        ):
+            image_b64 = await file_manager.get_file_content(
+                user_email=user_email,
+                filename=filename,
+                s3_key=existing_ref["key"],
+            )
+            if image_b64 and len(image_b64) <= _MAX_VISION_IMAGE_B64_BYTES:
+                normalized = _normalize_vision_image_for_llm(
+                    filename, image_b64, existing_ref["content_type"]
+                )
+                if normalized is not None and len(normalized[0]) <= _MAX_VISION_IMAGE_B64_BYTES:
+                    existing_ref["image_b64"], existing_ref["image_mime_type"] = normalized
 
     if not files_map or not file_manager or not user_email:
+        if model_supports_vision:
+            vision_count = 0
+            for ref in session_files_ctx.values():
+                if ref.get("image_b64"):
+                    vision_count += 1
+                    if vision_count > _MAX_VISION_IMAGES_PER_REQUEST:
+                        ref.pop("image_b64", None)
+                        ref.pop("image_mime_type", None)
         return updated_context
 
     # Get content extractor
