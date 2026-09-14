@@ -275,6 +275,7 @@ async def _run_child(
     data_sources: List[str],
     workspace_id: Optional[str],
     user_email: str,
+    compliance_level: Any,
     registry: Any,
 ) -> None:
     """The child run's task body: bind identity, chat, record the outcome."""
@@ -294,6 +295,11 @@ async def _run_child(
             update_callback=chat_service.connection.send_json,
             conversation_id=record.conversation_id,
             workspace_id=workspace_id,
+            # The parent turn's compliance level travels with the child, so a
+            # sub-conversation is never *less* restricted than the turn that
+            # asked for it. It is server-side state, not a tool argument, so
+            # the model cannot raise or drop it by choosing what to pass.
+            compliance_level=compliance_level,
             incognito=False,
         )
     except asyncio.CancelledError:
@@ -408,6 +414,7 @@ async def launch_sub_conversation(
             data_sources=data_sources,
             workspace_id=workspace.get("id"),
             user_email=user_email,
+            compliance_level=(context or {}).get("compliance_level"),
             registry=registry,
         )
     )

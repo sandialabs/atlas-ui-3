@@ -494,3 +494,18 @@ async def test_an_untracked_turn_is_still_bounded_in_fan_out():
         )
     for service in factory.services:
         service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_the_parents_compliance_level_travels_to_the_child():
+    """A sub-conversation is never less restricted than the turn that asked for it."""
+    factory = _Factory(lambda c: _ChatService(c))
+    await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        {"user_email": "user@example.com", "compliance_level": "restricted"},
+        factory=factory,
+    )
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    assert service.calls[0]["compliance_level"] == "restricted"
+    service.release.set()
