@@ -748,13 +748,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		})
 		setIsThinking(true)
 		setIsSynthesizing(false)
-		// Drive the agent Stop button off a dedicated run flag rather than
-		// isThinking, which the native agentic loop clears as soon as the first
-		// token streams. Only true when the turn will really run as an agent
-		// turn: unavailable agent mode or no tools selected means the backend
-		// downgrades this to a normal turn, and the composer must offer normal
-		// stop handling, not agent stop (#921 follow-up review).
-		setIsAgentRunning(agent.agentModeAvailable && agent.agentModeEnabled && toolsToSend.length > 0)
+		// The agent-run flag is deliberately untouched here. It is armed only
+		// by the server's `agent_start` acknowledgement and cleared on
+		// terminal events, so a fresh turn starts from the previous run's
+		// settled state -- and a send into an already acknowledged run is
+		// steering (issue #824): the server queues it into the live channel
+		// without another `agent_start`, so clearing the flag would drop the
+		// agent Stop button and block further steering mid-run (#849 review).
 		return true
 	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore])
 

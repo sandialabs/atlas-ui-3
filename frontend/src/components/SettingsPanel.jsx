@@ -289,26 +289,13 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // A stored max-iterations value above the admin-configured ceiling is
-  // clamped so the slider and the value chip never advertise a step count
-  // the backend would just clamp away (issue #849). Two guards keep that
-  // clamp from destroying data (#849 review):
-  // - It waits for a live config response (`agentCeilingConfirmed`): the
-  //   pre-config fallback of 10 -- or a stale cache -- must never be
-  //   persisted, or a saved 30 would be silently rewritten on a deployment
-  //   whose real ceiling is 30 or higher. The server safely clamps early
-  //   requests itself, so the wait costs nothing.
-  // - The persisted write goes through the settings owner
-  //   (`updateSettings`) instead of a direct localStorage edit, so the
-  //   context copy stays in sync and a later full write from useSettings
-  //   cannot resurrect the un-clamped value.
-  useEffect(() => {
-    if (!agentCeilingConfirmed) return
-    setSettings(prev => (prev.maxIterations > maxStepsLimit ? { ...prev, maxIterations: maxStepsLimit } : prev))
-    if ((ctxSettings?.maxIterations ?? 0) > maxStepsLimit) {
-      updateCtxSettings({ maxIterations: maxStepsLimit })
-    }
-  }, [agentCeilingConfirmed, maxStepsLimit, ctxSettings?.maxIterations]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The stored max-iterations preference is retained unclamped (#849 review):
+  // it is clamped only where the value is consumed -- the value chip and the
+  // slider below (Math.min) and the send payload in ChatContext once a live
+  // config response confirmed the ceiling. No state-mutating effect derives
+  // anything from the response here, so a Save of unrelated settings can
+  // never persist a config-derived rewrite of the saved number, and the
+  // server clamps the payload authoritatively anyway.
 
   // Save settings to localStorage whenever they change
   const saveSettings = (newSettings) => {
