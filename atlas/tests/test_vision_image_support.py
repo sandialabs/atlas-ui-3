@@ -9,6 +9,7 @@ Verifies that:
 
 import base64
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -559,3 +560,70 @@ class TestStaleVisionImageCleanup:
 
         user_message = [message for message in messages if message.get("role") == "user"][-1]
         assert any(block.get("type") == "image_url" for block in user_message["content"])
+
+    @pytest.mark.asyncio
+    async def test_unreadable_stored_image_does_not_abort_rehydration(self):
+        b64 = _png_b64()
+        context = {
+            "files": {
+                "unreadable.png": {
+                    "key": "bad",
+                    "content_type": "image/png",
+                    "source": "user",
+                },
+                "readable.png": {
+                    "key": "good",
+                    "content_type": "image/png",
+                    "source": "user",
+                },
+            }
+        }
+        fm = _make_file_manager()
+
+        async def get_file_content(**kwargs):
+            if kwargs["s3_key"] == "bad":
+                raise RuntimeError("missing")
+            return b64
+
+        fm.get_file_content = AsyncMock(side_effect=get_file_content)
+
+        result = await handle_session_files(
+            session_context=context,
+            user_email="u@example.com",
+            files_map=None,
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+
+        assert "image_b64" not in result["files"]["unreadable.png"]
+        assert result["files"]["readable.png"]["image_b64"] == b64
+
+    @pytest.mark.asyncio
+    async def test_rehydration_keeps_newest_images_at_limit(self):
+        b64 = _png_b64()
+        context = {
+            "files": {
+                f"image_{index}.png": {
+                    "key": f"key-{index}",
+                    "content_type": "image/png",
+                    "source": "user",
+                }
+                for index in range(_MAX_VISION_IMAGES_PER_REQUEST + 1)
+            }
+        }
+        fm = _make_file_manager()
+        fm.get_file_content = AsyncMock(return_value=b64)
+
+        result = await handle_session_files(
+            session_context=context,
+            user_email="u@example.com",
+            files_map=None,
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+
+        assert "image_b64" not in result["files"]["image_0.png"]
+        assert all(
+            result["files"][f"image_{index}.png"].get("image_b64") == b64
+            for index in range(1, _MAX_VISION_IMAGES_PER_REQUEST + 1)
+        )

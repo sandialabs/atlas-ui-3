@@ -490,6 +490,7 @@ class UserClientMixin:
                 k for k in self._user_clients
                 if k[0] == user_lc
                 and k[1] == server_name
+                and self._user_client_active_calls.get(k, 0) == 0
                 and (now - self._user_client_last_used.get(k, 0.0)) > in_use_window
             ]
             removed = self._pop_user_client_entries_locked(keys_to_remove)

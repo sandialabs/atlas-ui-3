@@ -70,9 +70,8 @@ def _is_unauthorized_error(exc: BaseException) -> bool:
     has expired or been rotated/revoked server-side. The exception chain is
     walked (``__cause__`` / ``__context__``) because FastMCP may re-raise the
     underlying ``httpx.HTTPStatusError`` from a session task or wrap it in a
-    non-httpx exception; both the response status and the canonical exception
-    text are matched, for any exception type in the chain, the way
-    ``_is_session_terminated_error`` does.
+    non-httpx exception; the response status is matched for any exception type
+    in the chain.
     """
     try:
         import httpx
@@ -81,11 +80,10 @@ def _is_unauthorized_error(exc: BaseException) -> bool:
 
     cur: Optional[BaseException] = exc
     while cur is not None:
-        if isinstance(cur, httpx.HTTPStatusError):
-            response = getattr(cur, "response", None)
-            if getattr(response, "status_code", None) == 401:
-                return True
-        if "401 unauthorized" in str(cur).lower():
+        response = getattr(cur, "response", None)
+        if isinstance(cur, httpx.HTTPStatusError) and getattr(response, "status_code", None) == 401:
+            return True
+        if getattr(response, "status_code", None) == 401:
             return True
         cur = cur.__cause__ or cur.__context__
     return False

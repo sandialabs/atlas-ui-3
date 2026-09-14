@@ -297,11 +297,11 @@ class TestUnauthorizedErrorDetection:
         wrapped.__cause__ = _http_401()
         assert _is_unauthorized_error(wrapped) is True
 
-    def test_non_httpx_wrapper_with_401_text(self):
+    def test_tool_result_text_is_not_transport_401(self):
         wrapped = RuntimeError(
-            "Client error '401 Unauthorized' for url 'https://upstream.example/mcp'"
+            "tool result: Client error '401 Unauthorized' for requested resource"
         )
-        assert _is_unauthorized_error(wrapped) is True
+        assert _is_unauthorized_error(wrapped) is False
 
     def test_non_401_status(self):
         request = httpx.Request("POST", "https://upstream.example/mcp")
