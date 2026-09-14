@@ -441,3 +441,31 @@ async def test_missing_arguments_are_refused_by_name():
             {"user_email": "user@example.com"},
             factory=factory,
         )
+
+
+@pytest.mark.asyncio
+async def test_the_model_is_not_offered_launch_when_the_deployment_disables_it(monkeypatch):
+    """The schema path gates the tool, not just execution.
+
+    Agent mode reaches the loop without ACL filtering, so a tool left in the
+    schema costs a step before execution can refuse it -- and, worse, tells the
+    model a capability exists that the deployment has switched off.
+    """
+    from atlas.modules.mcp_tools import mcp_discovery
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    monkeypatch.setattr(
+        mcp_discovery,
+        "_atlas_tool_flags",
+        lambda: (True, True, False),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    schema = manager.get_tools_for_servers(["atlas"])
+    assert LAUNCH_TOOL_NAME not in [s["function"]["name"] for s in schema["tools"]]
+    assert manager.get_tools_schema([LAUNCH_TOOL_NAME]) == []
+
+    monkeypatch.setattr(mcp_discovery, "_atlas_tool_flags", lambda: (True, True, True))
+    assert [s["function"]["name"] for s in manager.get_tools_schema([LAUNCH_TOOL_NAME])] == [
+        LAUNCH_TOOL_NAME
+    ]
