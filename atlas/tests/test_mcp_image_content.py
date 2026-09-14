@@ -210,6 +210,23 @@ class TestImageContentHandling:
             assert "results" in content_dict
             assert text in content_dict["results"]
 
+    def test_normalize_mixed_image_content_excludes_base64_from_llm_payload(self):
+        manager = MCPToolManager.__new__(MCPToolManager)
+        image_data = "iVBORw0KGgo="
+        raw_result = MockMCPResultWithMixedContent("Generated image", image_data)
+
+        normalized = manager._normalize_mcp_tool_result(raw_result)
+        artifacts, display_config, _ = manager._extract_v2_components(
+            raw_result, "image_demo_generate"
+        )
+
+        assert normalized == {"results": "Generated image"}
+        assert image_data not in repr(normalized)
+        assert len(artifacts) == 1
+        assert artifacts[0]["b64"] == image_data
+        assert artifacts[0]["mime"] == "image/png"
+        assert display_config["primary_file"] == "mcp_image_0.png"
+
     @pytest.mark.asyncio
     async def test_no_image_content(self):
         """Test that non-image content doesn't create artifacts."""
