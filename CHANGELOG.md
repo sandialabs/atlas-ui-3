@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #937 - 2026-09-14
+- Uploaded vision images are rehydrated from storage on follow-up and resubmitted turns so vision-capable models continue receiving the image.
+
 ### PR #936 - 2026-09-13
 - Cached per-user MCP clients no longer keep presenting an OAuth token the provider has already rotated away (closes #935): each cache entry records a fingerprint of the token it was built with, `refresh_stored_token` now evicts cached clients for the (user, server) pair -- idle entries immediately, in-use entries via the fingerprint check on their next use, so streaming calls are never torn down -- and a 401 from a per-user-auth tool call triggers one evict-refresh-retry cycle (concurrent 401s share a single rotation) before surfacing a friendly "re-authorize the server" error instead of the raw upstream transport error.
 
