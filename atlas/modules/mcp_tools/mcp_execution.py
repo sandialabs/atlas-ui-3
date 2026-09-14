@@ -491,7 +491,16 @@ class ExecutionMixin:
 
         config = self.servers_config.get(server_name, {})
         if config.get("auth_type") == "delegated":
-            refreshed = await self._mint_delegated_token(user_email, server_name, config)
+            current_token = get_token_storage().get_token(user_email, server_name)
+            if (
+                failing_fingerprint is not None
+                and token_fingerprint(current_token) != failing_fingerprint
+            ):
+                refreshed = get_token_storage().get_valid_token(user_email, server_name)
+            else:
+                refreshed = await self._mint_delegated_token(
+                    user_email, server_name, config
+                )
         else:
             refreshed = await self._refresh_oauth_token(
                 user_email, server_name, config,

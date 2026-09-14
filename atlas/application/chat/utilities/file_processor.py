@@ -7,6 +7,7 @@ chat sessions, including user uploads and tool-generated artifacts.
 
 import asyncio
 import base64
+import hashlib
 import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
@@ -177,12 +178,18 @@ async def _rehydrate_vision_images(
     excluded_filenames: set[str],
     available_slots: int,
     initial_inline_b64: int = 0,
-) -> None:
+) -> List[str]:
     candidates = [
         (filename, file_ref)
         for filename, file_ref in reversed(list(session_files_ctx.items()))
         if (
             filename not in excluded_filenames
+            and (
+                not file_ref.get("image_b64")
+                or file_ref.get("image_source_key") != file_ref.get("key")
+                or hashlib.sha256(file_ref["image_b64"].encode()).hexdigest()
+                != file_ref.get("image_content_hash")
+            )
             and file_ref.get("source") == "user"
             and file_ref.get("content_type") in _VISION_IMAGE_MIME_TYPES
             and file_ref.get("key")
@@ -198,8 +205,11 @@ async def _rehydrate_vision_images(
             )
             if not image_b64 or len(image_b64) > _MAX_VISION_IMAGE_B64_BYTES:
                 return filename, None
-            normalized = _normalize_vision_image_for_llm(
-                filename, image_b64, file_ref["content_type"]
+            normalized = await asyncio.to_thread(
+                _normalize_vision_image_for_llm,
+                filename,
+                image_b64,
+                file_ref["content_type"],
             )
             if normalized is None or len(normalized[0]) > _MAX_VISION_IMAGE_B64_BYTES:
                 return filename, None
@@ -208,6 +218,7 @@ async def _rehydrate_vision_images(
             logger.warning("Failed to rehydrate vision image %s", filename, exc_info=True)
             return filename, None
 
+    warnings = []
     total_inline_b64 = initial_inline_b64
     results = await asyncio.gather(
         *(load_image(filename, file_ref) for filename, file_ref in candidates),
@@ -217,10 +228,19 @@ async def _rehydrate_vision_images(
         if isinstance(result, BaseException):
             continue
         filename, normalized = result
-        if normalized is not None and total_inline_b64 + len(normalized[0]) <= _MAX_TOTAL_INLINE_B64_BYTES:
+        if normalized is None:
+            warnings.append(filename)
+        elif total_inline_b64 + len(normalized[0]) <= _MAX_TOTAL_INLINE_B64_BYTES:
             session_files_ctx[filename]["image_b64"] = normalized[0]
             session_files_ctx[filename]["image_mime_type"] = normalized[1]
+            session_files_ctx[filename]["image_source_key"] = session_files_ctx[filename]["key"]
+            session_files_ctx[filename]["image_content_hash"] = hashlib.sha256(
+                normalized[0].encode()
+            ).hexdigest()
             total_inline_b64 += len(normalized[0])
+        else:
+            warnings.append(filename)
+    return warnings
 
 
 async def handle_session_files(
@@ -257,20 +277,28 @@ async def handle_session_files(
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
     for existing_ref in session_files_ctx.values():
-        existing_ref.pop("image_b64", None)
-        existing_ref.pop("image_mime_type", None)
+        if existing_ref.get("image_source_key") != existing_ref.get("key"):
+            existing_ref.pop("image_b64", None)
+            existing_ref.pop("image_mime_type", None)
         existing_ref.pop("pdf_b64", None)
         existing_ref.pop("pdf_mime_type", None)
 
     if not files_map or not file_manager or not user_email:
         if model_supports_vision and file_manager and user_email:
-            await _rehydrate_vision_images(
+            rehydration_warnings = await _rehydrate_vision_images(
                 session_files_ctx,
                 user_email,
                 file_manager,
                 set(),
                 _MAX_VISION_IMAGES_PER_REQUEST,
             )
+            if rehydration_warnings:
+                await _publish_warning(
+                    "Some stored images could not be included in this request: "
+                    + ", ".join(rehydration_warnings),
+                    event_publisher,
+                    update_callback,
+                )
         return updated_context
 
     # Get content extractor
@@ -365,6 +393,10 @@ async def handle_session_files(
                             else:
                                 file_ref["image_b64"] = normalized_b64
                                 file_ref["image_mime_type"] = normalized_mime_type
+                                file_ref["image_source_key"] = file_ref["key"]
+                                file_ref["image_content_hash"] = hashlib.sha256(
+                                    normalized_b64.encode()
+                                ).hexdigest()
                                 logger.debug(
                                     "Stored vision image data for %s (%s, %d bytes base64)",
                                     filename,
@@ -469,18 +501,24 @@ async def handle_session_files(
             current_vision_count = sum(
                 1 for filename in files_map if session_files_ctx.get(filename, {}).get("image_b64")
             )
-            await _rehydrate_vision_images(
+            rehydration_warnings = await _rehydrate_vision_images(
                 session_files_ctx,
                 user_email,
                 file_manager,
-                set(files_map),
+                set(uploaded_refs),
                 _MAX_VISION_IMAGES_PER_REQUEST - current_vision_count,
                 sum(
-                    len(ref["image_b64"])
+                    len(ref.get("image_b64", "")) + len(ref.get("pdf_b64", ""))
                     for ref in session_files_ctx.values()
-                    if ref.get("image_b64")
                 ),
             )
+            if rehydration_warnings:
+                await _publish_warning(
+                    "Some stored images could not be included in this request: "
+                    + ", ".join(rehydration_warnings),
+                    event_publisher,
+                    update_callback,
+                )
 
         # Enforce per-request vision image count and aggregate payload limits.
         if model_supports_vision:
