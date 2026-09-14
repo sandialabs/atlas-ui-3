@@ -7,6 +7,7 @@ chat sessions, including user uploads and tool-generated artifacts.
 
 import asyncio
 import base64
+import hashlib
 import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
@@ -170,6 +171,78 @@ def _normalize_vision_image_for_llm(filename: str, image_b64: str, mime_type: st
     return image_b64, mime_type
 
 
+async def _rehydrate_vision_images(
+    session_files_ctx: Dict[str, Dict[str, Any]],
+    user_email: str,
+    file_manager,
+    excluded_filenames: set[str],
+    available_slots: int,
+    initial_inline_b64: int = 0,
+) -> List[str]:
+    candidates = [
+        (filename, file_ref)
+        for filename, file_ref in reversed(list(session_files_ctx.items()))
+        if (
+            filename not in excluded_filenames
+            and (
+                not file_ref.get("image_b64")
+                or file_ref.get("image_source_key") != file_ref.get("key")
+                or hashlib.sha256(file_ref["image_b64"].encode()).hexdigest()
+                != file_ref.get("image_content_hash")
+            )
+            and file_ref.get("source") == "user"
+            and file_ref.get("content_type") in _VISION_IMAGE_MIME_TYPES
+            and file_ref.get("key")
+        )
+    ][:max(0, available_slots)]
+
+    async def load_image(filename: str, file_ref: Dict[str, Any]):
+        try:
+            image_b64 = await file_manager.get_file_content(
+                user_email=user_email,
+                filename=filename,
+                s3_key=file_ref["key"],
+            )
+            if not image_b64 or len(image_b64) > _MAX_VISION_IMAGE_B64_BYTES:
+                return filename, None
+            normalized = await asyncio.to_thread(
+                _normalize_vision_image_for_llm,
+                filename,
+                image_b64,
+                file_ref["content_type"],
+            )
+            if normalized is None or len(normalized[0]) > _MAX_VISION_IMAGE_B64_BYTES:
+                return filename, None
+            return filename, normalized
+        except Exception:
+            logger.warning("Failed to rehydrate vision image %s", filename, exc_info=True)
+            return filename, None
+
+    warnings = []
+    total_inline_b64 = initial_inline_b64
+    results = await asyncio.gather(
+        *(load_image(filename, file_ref) for filename, file_ref in candidates),
+        return_exceptions=True,
+    )
+    for result in results:
+        if isinstance(result, BaseException):
+            continue
+        filename, normalized = result
+        if normalized is None:
+            warnings.append(filename)
+        elif total_inline_b64 + len(normalized[0]) <= _MAX_TOTAL_INLINE_B64_BYTES:
+            session_files_ctx[filename]["image_b64"] = normalized[0]
+            session_files_ctx[filename]["image_mime_type"] = normalized[1]
+            session_files_ctx[filename]["image_source_key"] = session_files_ctx[filename]["key"]
+            session_files_ctx[filename]["image_content_hash"] = hashlib.sha256(
+                normalized[0].encode()
+            ).hexdigest()
+            total_inline_b64 += len(normalized[0])
+        else:
+            warnings.append(filename)
+    return warnings
+
+
 async def handle_session_files(
     session_context: Dict[str, Any],
     user_email: Optional[str],
@@ -201,18 +274,31 @@ async def handle_session_files(
     Returns:
         Updated session context with file references
     """
-    # Always clear stale vision/PDF data from prior turns, even when no
-    # new files are being uploaded.  Without this, old attachments silently
-    # reattach on every subsequent message in the session.
     updated_context = dict(session_context)
     session_files_ctx = updated_context.setdefault("files", {})
     for existing_ref in session_files_ctx.values():
-        existing_ref.pop("image_b64", None)
-        existing_ref.pop("image_mime_type", None)
+        if existing_ref.get("image_source_key") != existing_ref.get("key"):
+            existing_ref.pop("image_b64", None)
+            existing_ref.pop("image_mime_type", None)
         existing_ref.pop("pdf_b64", None)
         existing_ref.pop("pdf_mime_type", None)
 
     if not files_map or not file_manager or not user_email:
+        if model_supports_vision and file_manager and user_email:
+            rehydration_warnings = await _rehydrate_vision_images(
+                session_files_ctx,
+                user_email,
+                file_manager,
+                set(),
+                _MAX_VISION_IMAGES_PER_REQUEST,
+            )
+            if rehydration_warnings:
+                await _publish_warning(
+                    "Some stored images could not be included in this request: "
+                    + ", ".join(rehydration_warnings),
+                    event_publisher,
+                    update_callback,
+                )
         return updated_context
 
     # Get content extractor
@@ -307,6 +393,10 @@ async def handle_session_files(
                             else:
                                 file_ref["image_b64"] = normalized_b64
                                 file_ref["image_mime_type"] = normalized_mime_type
+                                file_ref["image_source_key"] = file_ref["key"]
+                                file_ref["image_content_hash"] = hashlib.sha256(
+                                    normalized_b64.encode()
+                                ).hexdigest()
                                 logger.debug(
                                     "Stored vision image data for %s (%s, %d bytes base64)",
                                     filename,
@@ -407,21 +497,56 @@ async def handle_session_files(
             except Exception as e:
                 logger.error(f"Failed uploading user file {filename}: {e}")
 
-        # Enforce per-request vision image count limit.  Keep the first N
-        # (by insertion order) and demote the rest to text-manifest entries.
+        if model_supports_vision and file_manager and user_email:
+            current_vision_count = sum(
+                1 for filename in files_map if session_files_ctx.get(filename, {}).get("image_b64")
+            )
+            rehydration_warnings = await _rehydrate_vision_images(
+                session_files_ctx,
+                user_email,
+                file_manager,
+                set(uploaded_refs),
+                _MAX_VISION_IMAGES_PER_REQUEST - current_vision_count,
+                sum(
+                    len(ref.get("image_b64", "")) + len(ref.get("pdf_b64", ""))
+                    for ref in session_files_ctx.values()
+                ),
+            )
+            if rehydration_warnings:
+                await _publish_warning(
+                    "Some stored images could not be included in this request: "
+                    + ", ".join(rehydration_warnings),
+                    event_publisher,
+                    update_callback,
+                )
+
+        # Enforce per-request vision image count and aggregate payload limits.
         if model_supports_vision:
+            uploaded_names = [
+                name for name in files_map if session_files_ctx.get(name, {}).get("image_b64")
+            ]
+            historical_names = [
+                name for name in reversed(session_files_ctx)
+                if name not in uploaded_names and session_files_ctx[name].get("image_b64")
+            ]
             vision_count = 0
-            for name, ref in session_files_ctx.items():
-                if ref.get("image_b64"):
-                    vision_count += 1
-                    if vision_count > _MAX_VISION_IMAGES_PER_REQUEST:
-                        logger.warning(
-                            "Vision image count limit (%d) reached — "
-                            "demoting %s to text manifest entry",
-                            _MAX_VISION_IMAGES_PER_REQUEST, name,
-                        )
-                        ref.pop("image_b64", None)
-                        ref.pop("image_mime_type", None)
+            total_inline_b64 = 0
+            for name in uploaded_names + historical_names:
+                ref = session_files_ctx[name]
+                image_b64 = ref.get("image_b64")
+                if (
+                    vision_count >= _MAX_VISION_IMAGES_PER_REQUEST
+                    or total_inline_b64 + len(image_b64) > _MAX_TOTAL_INLINE_B64_BYTES
+                ):
+                    logger.warning(
+                        "Demoting vision image %s from inline input due to request limits",
+                        name,
+                    )
+                    ref.pop("image_b64", None)
+                    ref.pop("image_mime_type", None)
+                    continue
+                vision_count += 1
+                total_inline_b64 += len(image_b64)
 
         # Enforce per-request PDF limits now that every upload is processed.
         # Two guards, oldest-first preserved (insertion order):

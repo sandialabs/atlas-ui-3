@@ -48,6 +48,20 @@ class UserClientCacheMixin:
             self._wormhole_client_subtokens = {}
         if not hasattr(self, "_user_client_token_fingerprints"):
             self._user_client_token_fingerprints = {}
+        if not hasattr(self, "_user_client_active_calls"):
+            self._user_client_active_calls = {}
+
+    def _begin_user_client_call(self, cache_key: tuple) -> None:
+        self._ensure_user_client_cache_state()
+        self._user_client_active_calls[cache_key] = self._user_client_active_calls.get(cache_key, 0) + 1
+
+    def _end_user_client_call(self, cache_key: tuple) -> None:
+        self._ensure_user_client_cache_state()
+        active = self._user_client_active_calls.get(cache_key, 0) - 1
+        if active > 0:
+            self._user_client_active_calls[cache_key] = active
+        else:
+            self._user_client_active_calls.pop(cache_key, None)
 
     def _touch_user_client_locked(self, cache_key: tuple) -> None:
         """Mark a cached per-user client as recently used.

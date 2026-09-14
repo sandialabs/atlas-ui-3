@@ -460,11 +460,15 @@ class ExecutionMixin:
         """
         from atlas.modules.mcp_tools.token_storage import get_token_storage, token_fingerprint
 
-        failing_fingerprint = token_fingerprint(
-            get_token_storage().get_token(user_email, server_name)
-        )
+        cache_key = (user_email.strip().lower(), server_name, conversation_id)
+        self._ensure_user_client_cache_state()
+        failing_fingerprint = self._user_client_token_fingerprints.get(cache_key)
+        if failing_fingerprint is None:
+            failing_fingerprint = token_fingerprint(
+                get_token_storage().get_token(user_email, server_name)
+            )
 
-        if conversation_id:
+        if conversation_id and self._user_client_active_calls.get(cache_key, 0) == 0:
             try:
                 await self._session_manager.release(
                     conversation_id, server_name, user_email=user_email
@@ -486,10 +490,22 @@ class ExecutionMixin:
             )
 
         config = self.servers_config.get(server_name, {})
-        refreshed = await self._refresh_oauth_token(
-            user_email, server_name, config,
-            force=True, expected_previous_fingerprint=failing_fingerprint,
-        )
+        if config.get("auth_type") == "delegated":
+            current_token = get_token_storage().get_token(user_email, server_name)
+            if (
+                failing_fingerprint is not None
+                and token_fingerprint(current_token) != failing_fingerprint
+            ):
+                refreshed = get_token_storage().get_valid_token(user_email, server_name)
+            else:
+                refreshed = await self._mint_delegated_token(
+                    user_email, server_name, config
+                )
+        else:
+            refreshed = await self._refresh_oauth_token(
+                user_email, server_name, config,
+                force=True, expected_previous_fingerprint=failing_fingerprint,
+            )
         if refreshed is None:
             logger.info(
                 "Token refresh after 401 from MCP server '%s' produced no new "
@@ -499,6 +515,40 @@ class ExecutionMixin:
             )
 
     async def _call_tool_once(
+        self,
+        server_name: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        *,
+        progress_handler: Optional[Any] = None,
+        elicitation_handler: Optional[Any] = None,
+        user_email: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> Any:
+        cache_key = (
+            user_email.strip().lower() if user_email else "",
+            server_name,
+            conversation_id,
+        )
+        self._begin_user_client_call(cache_key)
+        try:
+            return await self._call_tool_once_impl(
+                server_name,
+                tool_name,
+                arguments,
+                progress_handler=progress_handler,
+                elicitation_handler=elicitation_handler,
+                user_email=user_email,
+                meta=meta,
+                conversation_id=conversation_id,
+                update_cb=update_cb,
+            )
+        finally:
+            self._end_user_client_call(cache_key)
+
+    async def _call_tool_once_impl(
         self,
         server_name: str,
         tool_name: str,

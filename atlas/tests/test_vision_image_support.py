@@ -9,6 +9,7 @@ Verifies that:
 
 import base64
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -504,30 +505,125 @@ class TestStaleVisionImageCleanup:
         assert new_ref.get("image_b64") == b64
 
     @pytest.mark.asyncio
-    async def test_stale_images_cleared_even_without_new_files(self):
-        """Critical: when no new files are uploaded (files_map=None), stale
-        vision data must still be cleaned up so old images don't reattach."""
-        prior_context = {
-            "files": {
-                "old_photo.png": {
-                    "key": "some-key",
-                    "content_type": "image/png",
-                    "size": 100,
-                    "source": "user",
-                    "extract_mode": "none",
-                    "image_b64": "OLD_DATA",
-                    "image_mime_type": "image/png",
-                }
-            }
-        }
+    async def test_prior_turn_image_is_rehydrated_without_new_files(self):
+        fm = _make_file_manager()
+        b64 = _png_b64()
+        prior_context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"old_photo.png": {"content": b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        prior_ref = prior_context["files"]["old_photo.png"]
+        prior_ref["image_b64"] = "STALE_DATA"
+
         context = await handle_session_files(
             session_context=prior_context,
             user_email="u@example.com",
             files_map=None,
-            file_manager=_make_file_manager(),
+            file_manager=fm,
             model_supports_vision=True,
         )
-        old_ref = context["files"]["old_photo.png"]
-        assert "image_b64" not in old_ref, \
-            "Stale vision data must be cleared even when files_map is None"
-        assert "image_mime_type" not in old_ref
+
+        restored_ref = context["files"]["old_photo.png"]
+        assert restored_ref["image_b64"] == b64
+        assert restored_ref["image_mime_type"] == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_rehydrated_image_is_attached_to_follow_up_message(self):
+        fm = _make_file_manager()
+        b64 = _png_b64()
+        context = await handle_session_files(
+            session_context={},
+            user_email="u@example.com",
+            files_map={"photo.png": {"content": b64, "extractMode": "none"}},
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+        context = await handle_session_files(
+            session_context=context,
+            user_email="u@example.com",
+            files_map=None,
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+
+        session = _make_session()
+        session.context = context
+        session.history.add_message(Message(role=MessageRole.USER, content="What is in it?"))
+        messages = await MessageBuilder().build_messages(
+            session=session,
+            include_system_prompt=False,
+            model_supports_vision=True,
+        )
+
+        user_message = [message for message in messages if message.get("role") == "user"][-1]
+        assert any(block.get("type") == "image_url" for block in user_message["content"])
+
+    @pytest.mark.asyncio
+    async def test_unreadable_stored_image_does_not_abort_rehydration(self):
+        b64 = _png_b64()
+        context = {
+            "files": {
+                "unreadable.png": {
+                    "key": "bad",
+                    "content_type": "image/png",
+                    "source": "user",
+                },
+                "readable.png": {
+                    "key": "good",
+                    "content_type": "image/png",
+                    "source": "user",
+                },
+            }
+        }
+        fm = _make_file_manager()
+
+        async def get_file_content(**kwargs):
+            if kwargs["s3_key"] == "bad":
+                raise RuntimeError("missing")
+            return b64
+
+        fm.get_file_content = AsyncMock(side_effect=get_file_content)
+
+        result = await handle_session_files(
+            session_context=context,
+            user_email="u@example.com",
+            files_map=None,
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+
+        assert "image_b64" not in result["files"]["unreadable.png"]
+        assert result["files"]["readable.png"]["image_b64"] == b64
+
+    @pytest.mark.asyncio
+    async def test_rehydration_keeps_newest_images_at_limit(self):
+        b64 = _png_b64()
+        context = {
+            "files": {
+                f"image_{index}.png": {
+                    "key": f"key-{index}",
+                    "content_type": "image/png",
+                    "source": "user",
+                }
+                for index in range(_MAX_VISION_IMAGES_PER_REQUEST + 1)
+            }
+        }
+        fm = _make_file_manager()
+        fm.get_file_content = AsyncMock(return_value=b64)
+
+        result = await handle_session_files(
+            session_context=context,
+            user_email="u@example.com",
+            files_map=None,
+            file_manager=fm,
+            model_supports_vision=True,
+        )
+
+        assert "image_b64" not in result["files"]["image_0.png"]
+        assert all(
+            result["files"][f"image_{index}.png"].get("image_b64") == b64
+            for index in range(1, _MAX_VISION_IMAGES_PER_REQUEST + 1)
+        )
