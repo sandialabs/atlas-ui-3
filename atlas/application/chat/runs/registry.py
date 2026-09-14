@@ -130,6 +130,12 @@ class RunRecord:
     # Free-form label for what the run is waiting on (e.g. "tool_approval"),
     # surfaced to the client alongside WAITING_FOR_INPUT.
     waiting_on: Optional[str] = None
+    # Set when this run was started by ``atlas_launch`` from another run
+    # (issue #925). ``parent_run_id`` is what makes stopping a parent stop its
+    # children, and ``depth`` is what bounds recursion: a launched run is one
+    # deeper than the run that launched it.
+    parent_run_id: Optional[str] = None
+    depth: int = 0
     # The exact frame that asked for input, kept so it can be re-sent.
     # A request emitted while the user was looking at another conversation (or
     # had the browser closed) is otherwise gone: the client dropped it, and the
@@ -154,6 +160,8 @@ class RunRecord:
             "ended_at": self.ended_at,
             "error": self.error,
             "detached": self.detached,
+            "parent_run_id": self.parent_run_id,
+            "depth": self.depth,
         }
 
 
@@ -223,6 +231,20 @@ class RunRegistry:
                 return record
         return None
 
+    def children_of(self, run_id: Optional[str], *, include_terminal: bool = False) -> List[RunRecord]:
+        """Runs launched by ``run_id`` (issue #925).
+
+        Direct children only; the cascade in :meth:`cancel` walks the tree one
+        level at a time, so a grandchild is reached through its own parent.
+        """
+        if not run_id:
+            return []
+        return [
+            r
+            for r in self._runs.values()
+            if r.parent_run_id == run_id and (include_terminal or not r.is_terminal)
+        ]
+
     def active_for_user(self, user_email: str) -> List[RunRecord]:
         return [
             r
@@ -262,6 +284,8 @@ class RunRegistry:
         user_email: str,
         session_id: Optional[UUID] = None,
         steering: Optional[Any] = None,
+        parent_run_id: Optional[str] = None,
+        depth: int = 0,
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
 
@@ -288,6 +312,8 @@ class RunRegistry:
             # never write through the same history object.
             session_id=session_id or uuid4(),
             steering=steering,
+            parent_run_id=parent_run_id,
+            depth=max(0, int(depth or 0)),
         )
         self._runs[record.run_id] = record
         logger.info(
@@ -377,6 +403,13 @@ class RunRegistry:
         record = self.get_for_user(run_id, user_email)
         if record is None or record.is_terminal:
             return False
+        # Stopping a parent stops the sub-conversations it launched (#925).
+        # Children run in their own tasks, so cancelling the parent's task
+        # alone would leave them working -- and billing -- with nobody
+        # watching. Cancel them first: a child that outlived the cancel of its
+        # parent by even a moment could still emit into the transcript.
+        for child in self.children_of(run_id):
+            self.cancel(child.run_id, user_email)
         task = record.task
         # Mark first: the cancellation propagates asynchronously, and the run
         # must never be observable as still running once the user has stopped
@@ -450,6 +483,10 @@ class RunRegistry:
                 max_seconds,
             )
             task = record.task
+            # Same cascade as an explicit stop (#925): a parent that hit the
+            # wall clock must not leave its sub-conversations running.
+            for child in self.children_of(record.run_id):
+                self.cancel(child.run_id, child.user_email)
             self.set_status(
                 record.run_id,
                 RunStatus.FAILED,

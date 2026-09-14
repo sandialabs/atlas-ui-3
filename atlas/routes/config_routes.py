@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 
+from atlas.application.chat.runs.launcher import launch_tool_enabled
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
@@ -16,6 +17,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     ATLAS_TOOL_SCHEMAS,
     DISCOVER_TOOL_NAME,
+    LAUNCH_TOOL_NAME,
     SEARCH_TOOL_NAME,
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
@@ -53,7 +55,9 @@ def _search_config_paths(config_manager, filename):
         ]
 
 
-def _atlas_tools_info(*, sleep_enabled: bool, search_enabled: bool) -> dict:
+def _atlas_tools_info(
+    *, sleep_enabled: bool, search_enabled: bool, launch_enabled: bool = False
+) -> dict:
     """Build the consolidated built-in ``atlas`` server entry for the tools panel.
 
     Canvas, sleep, search and source discovery used to be three separate
@@ -67,6 +71,8 @@ def _atlas_tools_info(*, sleep_enabled: bool, search_enabled: bool) -> dict:
         if full_name == ATLAS_SLEEP_TOOL_NAME and not sleep_enabled:
             continue
         if full_name in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
+            continue
+        if full_name == LAUNCH_TOOL_NAME and not launch_enabled:
             continue
         function = schema["function"]
         tool_name = full_name.removeprefix(f"{ATLAS_SERVER_NAME}_")
@@ -275,6 +281,7 @@ async def get_config(
             and app_settings.feature_atlas_rag_tools_enabled
         )
         atlas_sleep_enabled = sleep_tool_enabled(app_settings)
+        atlas_launch_enabled = launch_tool_enabled(app_settings)
 
         # Servers that gate tools/list behind authorization discovered nothing
         # at startup, when no user was logged in. Now that there is a user with
@@ -307,6 +314,7 @@ async def get_config(
                 tools_info.append(_atlas_tools_info(
                     sleep_enabled=atlas_sleep_enabled,
                     search_enabled=atlas_search_enabled,
+                    launch_enabled=atlas_launch_enabled,
                 ))
             else:
                 # Config comes from mcp.json rather than the discovery result,

@@ -7,7 +7,8 @@ panel as its own server with one or two tools, which made a short list of
 built-ins look like a crowd of servers.
 
 They are now a single server, ``atlas``, exposing ``atlas_canvas``,
-``atlas_sleep``, ``atlas_search`` and ``atlas_discover_sources``. The old fully-qualified names are still
+``atlas_sleep``, ``atlas_search``, ``atlas_discover_sources`` and
+``atlas_launch``. The old fully-qualified names are still
 accepted -- persisted tool selections, saved conversations and non-UI clients
 all carry them -- and are normalized to the new names at the edges via
 ``normalize_tool_name``.
@@ -22,6 +23,13 @@ stay outside the authorization boundary. They are honoured by v2 RAG sources
 (mapped onto the ``search_kwargs`` block of the ATLAS RAG v2 contract) and
 ignored by v1 sources, whose request body has no equivalent fields.
 
+``atlas_launch`` (issue #925) starts a sub-conversation -- ATLAS's own
+subagents -- and returns a handle to it rather than waiting for its answer. Its
+three inputs are a ``workspace`` (which carries the child's tools *and* data
+sources, so the capability surface is something the user configured), a
+``model`` and a ``prompt``. The work of admitting, bounding and running one
+lives in ``atlas.application.chat.runs.launcher``; only the schema is here.
+
 ``atlas_discover_sources`` lists the sources the user can actually reach, so a
 model can say which corpus an answer came from -- or tell the user that the
 thing they asked about is not in any source they have access to.
@@ -35,12 +43,14 @@ CANVAS_TOOL_NAME = "atlas_canvas"
 SLEEP_TOOL_NAME = "atlas_sleep"
 SEARCH_TOOL_NAME = "atlas_search"
 DISCOVER_TOOL_NAME = "atlas_discover_sources"
+LAUNCH_TOOL_NAME = "atlas_launch"
 
 ATLAS_TOOL_NAMES = (
     CANVAS_TOOL_NAME,
     SLEEP_TOOL_NAME,
     SEARCH_TOOL_NAME,
     DISCOVER_TOOL_NAME,
+    LAUNCH_TOOL_NAME,
 )
 
 # Pre-#855 fully-qualified names -> consolidated names.
@@ -100,6 +110,20 @@ DISCOVER_TOOL_DESCRIPTION = (
     "to tell the user that what they are asking about is not in any source "
     "they can reach. Takes no arguments; searching does not require calling "
     "this first."
+)
+
+LAUNCH_TOOL_DESCRIPTION = (
+    "Start a sub-conversation that works on a task on its own, and return a "
+    "handle to it immediately -- this tool does not wait for the result. Give "
+    "it a 'workspace' (one of the caller's saved workspaces, which decides "
+    "which tools and data sources the sub-conversation may use), a 'model' to "
+    "run it on, and the 'prompt' describing the task. Use it to fan work out: "
+    "several independent investigations at once, or a long job on a cheaper "
+    "model while this conversation continues. The sub-conversation appears in "
+    "the user's history under its own conversation id, which is returned along "
+    "with a run id; tell the user where to find it. It runs as the same user "
+    "and can never reach a tool, model or data source that user could not "
+    "reach themselves. Stopping this conversation stops the ones it launched."
 )
 
 # Retrieval effort. These are deliberately words, not numbers: the model is
@@ -230,17 +254,56 @@ DISCOVER_TOOL_SCHEMA = {
     },
 }
 
+LAUNCH_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": LAUNCH_TOOL_NAME,
+        "description": LAUNCH_TOOL_DESCRIPTION,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workspace": {
+                    "type": "string",
+                    "description": (
+                        "Name (or id) of one of the caller's saved workspaces. "
+                        "The workspace carries the tools and data sources the "
+                        "sub-conversation is allowed to use; it cannot widen "
+                        "what the user can already reach."
+                    ),
+                },
+                "model": {
+                    "type": "string",
+                    "description": (
+                        "Which configured model the sub-conversation runs on, "
+                        "spelled exactly as it appears in the model list."
+                    ),
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "The task for the sub-conversation. It starts with no "
+                        "memory of this conversation, so state the task in "
+                        "full, including any context it needs."
+                    ),
+                },
+            },
+            "required": ["workspace", "model", "prompt"],
+        },
+    },
+}
+
 ATLAS_TOOL_SCHEMAS = {
     CANVAS_TOOL_NAME: CANVAS_TOOL_SCHEMA,
     SLEEP_TOOL_NAME: SLEEP_TOOL_SCHEMA,
     SEARCH_TOOL_NAME: SEARCH_TOOL_SCHEMA,
     DISCOVER_TOOL_NAME: DISCOVER_TOOL_SCHEMA,
+    LAUNCH_TOOL_NAME: LAUNCH_TOOL_SCHEMA,
 }
 
 ATLAS_SERVER_DESCRIPTION = (
     "Built-in ATLAS tools: render final content in the canvas panel, wait "
-    "between agent steps, search the selected data sources and list which "
-    "sources are available. These run "
+    "between agent steps, search the selected data sources, list which "
+    "sources are available and launch sub-conversations. These run "
     "inside ATLAS rather than on an MCP server."
 )
 
@@ -282,6 +345,7 @@ def atlas_tool_schemas(
     *,
     sleep_enabled: bool = True,
     search_enabled: bool = True,
+    launch_enabled: bool = True,
 ) -> List[Dict[str, Any]]:
     """Schemas for the requested built-ins, minus any that are switched off.
 
@@ -294,6 +358,8 @@ def atlas_tool_schemas(
         if requested == SLEEP_TOOL_NAME and not sleep_enabled:
             continue
         if requested in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
+            continue
+        if requested == LAUNCH_TOOL_NAME and not launch_enabled:
             continue
         schema = ATLAS_TOOL_SCHEMAS.get(requested)
         if schema is not None:
