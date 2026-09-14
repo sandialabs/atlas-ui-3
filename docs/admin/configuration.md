@@ -135,6 +135,12 @@ ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
   does not raise a user's ceiling on concurrent runs.
 - **Stopping a conversation stops the ones it launched**, including deeper descendants, and the
   same cascade applies when a run is stopped by `MAX_RUN_WALL_CLOCK_SECONDS`.
+- **Tool approval**: approving the `atlas_launch` call is the approval for the sub-conversation's
+  own tool calls - nothing else could answer them, since approvals are answered by the browser
+  looking at that conversation and a launched run is not in the history list until it first
+  saves. Tools an admin has pinned to mandatory approval (`FORCE_TOOL_APPROVAL_GLOBALLY` or
+  per-tool config) are exempt: they still prompt inside the sub-conversation, which pauses until
+  the user opens it. Keep such tools out of workspaces you expect to hand off.
 - **Cost**: every launched run is a full agent run on the model it names. Raising the caps
   raises the worst-case spend of a single user message multiplicatively.
 

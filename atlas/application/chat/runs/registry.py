@@ -416,7 +416,11 @@ class RunRegistry:
         # stops the ones it launched" true in the rare case and false in the
         # common one.
         cascaded = False
-        for child in self.children_of(run_id):
+        # ``include_terminal=True``: a child that has already finished may still
+        # have running children of its own, and skipping it would hide that
+        # whole branch from the stop. Cancelling a terminal record is a no-op
+        # beyond its own cascade.
+        for child in self.children_of(run_id, include_terminal=True):
             cascaded = self.cancel(child.run_id, user_email) or cascaded
         if record.is_terminal:
             return cascaded
@@ -452,11 +456,12 @@ class RunRegistry:
         for run_id, record in list(self._runs.items()):
             if not record.is_terminal:
                 continue
-            if self.children_of(run_id):
+            if self._has_live_descendants(run_id):
                 # A finished parent whose sub-conversations are still running
                 # must outlive them (#925): reaping it now would orphan the
                 # subtree, and a later stop addressed at the parent would find
-                # no record and cascade to nothing.
+                # no record and cascade to nothing. Descendants, not just direct
+                # children -- a finished child can itself have a live one.
                 continue
             ended = record.ended_at or record.updated_at
             if now - ended > TERMINAL_RETENTION_SECONDS:
@@ -474,6 +479,17 @@ class RunRegistry:
                 removed += 1
 
         return removed
+
+    def _has_live_descendants(self, run_id: str, _depth: int = 0) -> bool:
+        """Whether anything below ``run_id`` in the launch tree is still running."""
+        if _depth > 10:  # pragma: no cover - depth is capped far below this
+            return False
+        for child in self.children_of(run_id, include_terminal=True):
+            if not child.is_terminal:
+                return True
+            if self._has_live_descendants(child.run_id, _depth + 1):
+                return True
+        return False
 
     def enforce_wall_clock(self, max_seconds: float, now: Optional[float] = None) -> List[str]:
         """Stop non-terminal runs that have exceeded the wall-clock budget.

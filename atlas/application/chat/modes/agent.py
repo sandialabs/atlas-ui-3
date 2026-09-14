@@ -152,6 +152,8 @@ class AgentModeRunner:
             conversation_id=session.context.get("conversation_id", str(session.id)),
             # Trusted compliance level stashed on the session by ChatService.
             compliance_level=session.context.get("compliance_level"),
+            # Stashed on the session by ChatService for this turn (#925).
+            incognito=bool(session.context.get("incognito", False)),
             # One register per turn, seeded from the numbers this conversation
             # has already used so ``[3]`` means one document for the whole
             # transcript (issue #874). Owned here, not by the loop: an

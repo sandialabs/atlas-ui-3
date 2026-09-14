@@ -139,6 +139,11 @@ conversation's id back rather than waiting for an answer, so open it from the
 history list to follow along. Stopping the conversation that launched them stops
 the sub-conversations too.
 
+Approving the launch approves the sub-conversation's own tool calls, so it can
+work without stopping to ask you again - except for tools your administrator has
+made always-approve, which still prompt inside the sub-conversation and pause it
+until you open that conversation and answer.
+
 A sub-conversation can never use a tool, model or data source you could not use
 yourself, and how deep they may nest and how many may run at once are limits
 your administrator sets.

@@ -176,7 +176,12 @@ def _parent_run_identity(registry: Any, run_context: Any) -> Tuple[Optional[str]
         return None, 0
     record = registry.get(run_context.run_id)
     if record is None:
-        return run_context.run_id, 0
+        # A run id the registry has never seen (or has already reaped) is not a
+        # parent: hanging children off it would make ``children_of`` answer
+        # "none" forever, so the fan-out cap would never bite and a stop on the
+        # parent would cascade to nothing. Treat it as untracked, which is the
+        # branch that counts the user's launched runs instead.
+        return None, 0
     return record.run_id, record.depth
 
 
@@ -210,8 +215,8 @@ def _check_limits(
     if in_flight >= max_children:
         raise LaunchRefused(
             f"There are already {in_flight} sub-conversations running for you "
-            f"(the limit is {max_children} per conversation). Wait for one to "
-            "finish before launching another."
+            f"(the limit is {max_children} at a time). Wait for one to finish "
+            "before launching another."
         )
 
 
@@ -225,13 +230,12 @@ def _raw_transport(update_callback: Any) -> Any:
     through it. The recorder also drops foreign ``run_id``s as a second line of
     defence; this is the first.
     """
-    seen = 0
-    while update_callback is not None and seen < 5:
-        inner = getattr(update_callback, "inner", None)
-        if inner is None:
-            break
-        update_callback = inner
-        seen += 1
+    from atlas.application.chat.utilities.tool_history import ToolCallRecorder
+
+    # Unwrap the recorder specifically, not "anything with an .inner": another
+    # wrapper in the chain may be doing work the child's frames still need.
+    while isinstance(update_callback, ToolCallRecorder):
+        update_callback = update_callback.inner
     return update_callback
 
 
@@ -274,6 +278,30 @@ class _ChildConnection:
 
     async def close(self) -> None:  # pragma: no cover - no-op
         return None
+
+
+def _preapprove_child_tools(chat_service: Any) -> bool:
+    """Mark the child's agent loop as already approved. Returns whether it took."""
+    factory = getattr(getattr(chat_service, "agent_mode", None), "agent_loop_factory", None)
+    if factory is None:
+        return False
+    factory.skip_approval = True
+    return True
+
+
+def _admin_gated_tools(tools: List[str], config_manager: Any) -> List[str]:
+    """Which of the child's tools an admin has made non-auto-approvable."""
+    from atlas.application.chat.utilities.tool_executor import requires_approval
+
+    gated: List[str] = []
+    for tool in tools:
+        try:
+            _needs, _edit, admin_required = requires_approval(tool, config_manager)
+        except Exception:  # pragma: no cover - defensive: unknown tool name
+            admin_required = True
+        if admin_required:
+            gated.append(tool)
+    return gated
 
 
 async def _run_child(
@@ -401,6 +429,17 @@ async def launch_sub_conversation(
     )
     chat_service = factory.create_chat_service(connection=connection)
     tools = await resolve_child_tools(chat_service, workspace_config, user_email)
+    # Who answers the child's tool approvals? Nobody, unless somebody is
+    # looking at the child's conversation -- and it is not in the user's
+    # history until its first save, so a launched run would pause on its first
+    # tool call with no way to answer. The approval that covers the child is
+    # the one the user already gave (or auto-gave) for *this* ``atlas_launch``
+    # call, which named the workspace, the model and the task. Tools an admin
+    # has pinned to mandatory approval are exempt: those keep prompting inside
+    # the child, which pauses it until the user opens that conversation.
+    admin_gated = _admin_gated_tools(tools, config_manager)
+    if not admin_gated:
+        _preapprove_child_tools(chat_service)
     # RAG selections only travel when the workspace has RAG switched on; a
     # workspace that keeps a source list but has retrieval off means "not now".
     data_sources = (
@@ -465,6 +504,9 @@ async def launch_sub_conversation(
         "data_sources": data_sources,
         "depth": record.depth,
         "parent_run_id": parent_run_id,
+        # Non-empty means the sub-conversation will stop and wait for the user
+        # on those tools; the model should say so rather than promise a result.
+        "tools_needing_approval": admin_gated,
     }
 
 
@@ -503,7 +545,14 @@ async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]])
         f"(run {handle['run_id']}) on model {handle['model']} under workspace "
         f"'{handle['workspace']}'. It is running now; this call did not wait "
         "for it. Its transcript is a separate conversation in the user's "
-        "history.\n" + json.dumps(handle)
+        "history.\n"
+        + (
+            "It will pause for approval on these tools until the user opens "
+            f"that conversation: {', '.join(handle['tools_needing_approval'])}.\n"
+            if handle["tools_needing_approval"]
+            else ""
+        )
+        + json.dumps(handle)
     )
     return ToolResult(
         tool_call_id=getattr(tool_call, "id", None),

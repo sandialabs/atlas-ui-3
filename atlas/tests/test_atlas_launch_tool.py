@@ -66,6 +66,10 @@ class _ChatService:
             filter_authorized_tools=self._filter
         )
         self._authorized = list(authorized)
+        # Mirrors the real ChatService shape the launcher pre-approves through.
+        self.agent_mode = SimpleNamespace(
+            agent_loop_factory=SimpleNamespace(skip_approval=False)
+        )
         self.started = asyncio.Event()
         self.release = asyncio.Event()
 
@@ -688,3 +692,168 @@ def test_the_recorder_drops_events_tagged_with_another_run():
         }
     )
     assert len(recorder.messages()) == 1
+
+
+def test_agent_mode_carries_the_turns_incognito_flag_to_its_tools():
+    """The refusal above is only reachable if agent mode forwards the flag.
+
+    Agent mode builds its own tool session_context rather than spreading the
+    session's, so a flag added for tools has to be added here too -- this is
+    the wiring that makes the incognito refusal real in the app rather than
+    only in a unit test.
+    """
+    import inspect
+
+    from atlas.application.chat.agent import agentic_loop
+    from atlas.application.chat.agent.protocols import AgentContext
+    from atlas.application.chat.modes import agent as agent_mode
+
+    assert "incognito" in AgentContext.__dataclass_fields__
+    assert '"incognito": context.incognito' in inspect.getsource(agentic_loop)
+    assert 'incognito=bool(session.context.get("incognito"' in inspect.getsource(agent_mode)
+
+
+@pytest.mark.asyncio
+async def test_a_run_id_the_registry_never_saw_is_treated_as_untracked():
+    """Otherwise children hang off a phantom parent and no cap ever bites."""
+    factory = _Factory(
+        lambda c: _ChatService(c), settings=_settings(atlas_launch_max_children_per_run=1)
+    )
+    _install_registry()
+    set_current_run("a-run-nobody-registered", "conv-ghost")
+
+    first = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "first"},
+        {"user_email": "user@example.com"},
+        factory=factory,
+    )
+    assert first["parent_run_id"] is None
+
+    with pytest.raises(LaunchRefused, match="limit is 1"):
+        await launch_sub_conversation(
+            {"workspace": "Research", "model": "gpt-4o", "prompt": "second"},
+            {"user_email": "user@example.com"},
+            factory=factory,
+        )
+    for service in factory.services:
+        service.release.set()
+
+
+def test_a_terminal_child_does_not_hide_a_running_grandchild():
+    registry = RunRegistry()
+    parent = registry.start(conversation_id="c1", user_email="u@example.com")
+    child = registry.start(
+        conversation_id="c2", user_email="u@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    grandchild = registry.start(
+        conversation_id="c3", user_email="u@example.com", parent_run_id=child.run_id, depth=2
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+
+    # The finished middle run must not be reaped out from under its live child.
+    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
+    import time as _time
+
+    assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 0
+
+    registry.cancel(parent.run_id, "u@example.com")
+    assert registry.get(grandchild.run_id).status is RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_the_three_launch_gates_agree_on_the_same_flag():
+    """Schema, tool authorization and execution must switch together."""
+    from atlas.application.chat.policies.tool_authorization import ToolAuthorizationService
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    for enabled in (True, False):
+        settings = _settings(feature_atlas_launch_enabled=enabled)
+        config_manager = SimpleNamespace(app_settings=settings)
+        service = ToolAuthorizationService(
+            tool_manager=manager, config_manager=config_manager
+        )
+
+        assert launch_tool_enabled(settings) is enabled
+        # Schema gate.
+        offered = [
+            s["function"]["name"]
+            for s in atlas_tool_schemas([LAUNCH_TOOL_NAME], launch_enabled=enabled)
+        ]
+        assert offered == ([LAUNCH_TOOL_NAME] if enabled else [])
+        # Authorization gate.
+        allowed = await service.filter_authorized_tools(
+            [LAUNCH_TOOL_NAME], "user@example.com"
+        )
+        assert allowed == ([LAUNCH_TOOL_NAME] if enabled else [])
+
+
+@pytest.mark.asyncio
+async def test_execution_refuses_the_tool_when_the_deployment_disables_it(monkeypatch):
+    """A saved conversation can still name a tool the deployment switched off."""
+    from atlas.modules.mcp_tools import mcp_execution
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    monkeypatch.setattr(
+        mcp_execution,
+        "_client",
+        lambda: SimpleNamespace(
+            config_manager=SimpleNamespace(
+                app_settings=_settings(feature_atlas_launch_enabled=False)
+            )
+        ),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-1",
+            name=LAUNCH_TOOL_NAME,
+            arguments={"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        ),
+        {"user_email": "user@example.com"},
+    )
+
+    assert result.success is False
+    assert "disabled" in result.content
+
+
+@pytest.mark.asyncio
+async def test_the_launch_call_is_the_approval_for_the_childs_own_tools(monkeypatch):
+    """Nobody is watching the child's conversation to answer an approval."""
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.requires_approval",
+        lambda name, cfg: (True, True, False),
+    )
+    factory = _Factory(lambda c: _ChatService(c))
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        {"user_email": "user@example.com"},
+        factory=factory,
+    )
+
+    assert handle["tools_needing_approval"] == []
+    assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is True
+    for service in factory.services:
+        service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_an_admin_mandated_tool_still_prompts_inside_the_child(monkeypatch):
+    """Launching cannot wave away an approval the admin made mandatory."""
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.requires_approval",
+        lambda name, cfg: (True, True, True),
+    )
+    factory = _Factory(lambda c: _ChatService(c))
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        {"user_email": "user@example.com"},
+        factory=factory,
+    )
+
+    assert handle["tools_needing_approval"] == ["math_add"]
+    assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is False
+    for service in factory.services:
+        service.release.set()

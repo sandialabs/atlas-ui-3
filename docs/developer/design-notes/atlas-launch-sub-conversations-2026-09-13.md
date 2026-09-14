@@ -16,6 +16,23 @@ A fifth built-in tool on the `atlas` server, `atlas_launch`, lets a conversation
 The call returns a **handle** -- the child's `run_id` and `conversation_id` -- as soon as the
 run is admitted, and never waits for the answer.
 
+## What it looks like running
+
+The tool appears in the built-in `atlas` server alongside canvas, sleep and search, and is
+selectable like any other tool:
+
+![The atlas server in the tools panel, with launch selectable](../../readme_img/atlas-launch-tools-panel.png)
+
+The launching conversation gets the handle back immediately -- the call does not wait for the
+sub-conversation's answer:
+
+![A conversation showing the JSON handle returned by atlas_launch](../../readme_img/atlas-launch-parent-handle.png)
+
+The sub-conversation is its own conversation in history, with its own transcript, its own tool
+rows and the workspace it ran under:
+
+![The launched sub-conversation, with its calculator tool call and its answer](../../readme_img/atlas-launch-child-conversation.png)
+
 ## Why a handle and not the answer
 
 Blocking would have been simpler for the model to use, and it was the open question on the
@@ -72,6 +89,20 @@ parent is not reaped while it still has live children. The wall-clock backstop c
 a parent stopped for exceeding its budget must not leave sub-conversations running with nobody
 watching.
 
+**Tool approval.** Running the feature in the app surfaced the question the unit tests
+could not: *who answers the child's tool approvals?* Approval is enforced server-side on every
+tool call, and the only thing that answers one is a browser looking at that conversation --
+the auto-approve setting is a client behaviour, not a server one. A launched run is not in the
+user's history until its first save, so it would pause on its first tool call with nobody able
+to answer, forever.
+
+The approval that covers the child is therefore the one the user already gave for the
+`atlas_launch` call itself: that call goes through the normal gate and names the workspace, the
+model and the task. A child whose tools are all user-level runs pre-approved. Tools an admin has
+pinned to mandatory approval (`FORCE_TOOL_APPROVAL_GLOBALLY`, per-tool config) are exempt --
+they keep prompting inside the child, and the handle returns them in `tools_needing_approval`
+so the model can tell the user the run will wait for them.
+
 **Feature gate.** `FEATURE_ATLAS_LAUNCH_ENABLED` is off by default, and is only effective with
 chat history and agent mode also on -- a launched run *is* a background run, and needs the same
 ground. The gate is enforced in three places, matching how the other built-ins are handled:
@@ -80,9 +111,11 @@ a non-UI client can still name a tool the deployment has since switched off).
 
 ## Known edges
 
-- A child that requests tool approval surfaces the request over the parent's socket tagged as
-  the child's conversation. The approval manager is keyed by tool call id, so the response
-  routes back to the child even though it holds its own ChatService.
+- A child paused on an admin-mandated approval is not reachable until its conversation is saved
+  and opened; the request itself replays correctly once it is (the approval manager is keyed by
+  tool call id, so the answer routes back even though the child holds its own ChatService).
+  Surfacing a running sub-conversation in the history list before its first save is the obvious
+  follow-up.
 - The child sends *past* the parent turn's `ToolCallRecorder` (which would otherwise persist
   the child's tool rows into the parent's transcript); the recorder also drops frames tagged
   with a run that is not its own, as defence in depth.
