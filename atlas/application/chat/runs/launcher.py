@@ -194,6 +194,7 @@ def _check_limits(
     app_settings: Any,
     parent_run_id: Optional[str],
     parent_depth: int,
+    user_email: str,
 ) -> None:
     max_depth = max(1, int(getattr(app_settings, "atlas_launch_max_depth", 2) or 2))
     if parent_depth + 1 > max_depth:
@@ -205,7 +206,16 @@ def _check_limits(
     max_children = max(
         1, int(getattr(app_settings, "atlas_launch_max_children_per_run", 3) or 3)
     )
-    in_flight = len(registry.children_of(parent_run_id)) if parent_run_id else 0
+    if parent_run_id:
+        in_flight = len(registry.children_of(parent_run_id))
+    else:
+        # An untracked turn has no parent record to hang children off, so
+        # "children of this run" cannot be counted. Fall back to every launched
+        # run the user has in flight: without it the per-run cap would be
+        # vacuous for exactly the turns that are not otherwise bounded.
+        in_flight = len(
+            [r for r in registry.active_for_user(user_email) if r.depth > 0]
+        )
     if in_flight >= max_children:
         raise LaunchRefused(
             f"This conversation already has {in_flight} sub-conversations running "
@@ -354,7 +364,7 @@ async def launch_sub_conversation(
     from atlas.application.chat.runs.context import get_current_run
 
     parent_run_id, parent_depth = _parent_run_identity(registry, get_current_run())
-    _check_limits(registry, app_settings, parent_run_id, parent_depth)
+    _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
 
     workspace_config = workspace.get("config") or {}
     conversation_id = str(uuid4())

@@ -469,3 +469,28 @@ async def test_the_model_is_not_offered_launch_when_the_deployment_disables_it(m
     assert [s["function"]["name"] for s in manager.get_tools_schema([LAUNCH_TOOL_NAME])] == [
         LAUNCH_TOOL_NAME
     ]
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_turn_is_still_bounded_in_fan_out():
+    """No parent record means no children to count; fall back to the user's."""
+    factory = _Factory(
+        lambda c: _ChatService(c), settings=_settings(atlas_launch_max_children_per_run=1)
+    )
+    _install_registry()
+
+    first = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "first"},
+        {"user_email": "user@example.com"},
+        factory=factory,
+    )
+    assert first["parent_run_id"] is None
+
+    with pytest.raises(LaunchRefused, match="limit is 1"):
+        await launch_sub_conversation(
+            {"workspace": "Research", "model": "gpt-4o", "prompt": "second"},
+            {"user_email": "user@example.com"},
+            factory=factory,
+        )
+    for service in factory.services:
+        service.release.set()
