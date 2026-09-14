@@ -5,7 +5,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 
-from atlas.application.chat.runs.launcher import launch_tool_enabled
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
@@ -19,6 +18,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     DISCOVER_TOOL_NAME,
     LAUNCH_TOOL_NAME,
     SEARCH_TOOL_NAME,
+    launch_tool_enabled,
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
 from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled

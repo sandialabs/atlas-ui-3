@@ -121,9 +121,9 @@ LAUNCH_TOOL_DESCRIPTION = (
     "several independent investigations at once, or a long job on a cheaper "
     "model while this conversation continues. The sub-conversation appears in "
     "the user's history under its own conversation id, which is returned along "
-    "with a run id; tell the user where to find it. It runs as the same user "
-    "and can never reach a tool, model or data source that user could not "
-    "reach themselves. Stopping this conversation stops the ones it launched."
+    "with a run id; tell the user where to find it. It runs as the same user, "
+    "so every tool, model and data source it touches is checked against that "
+    "user's own access. Stopping this conversation stops the ones it launched."
 )
 
 # Retrieval effort. These are deliberately words, not numbers: the model is
@@ -308,6 +308,28 @@ ATLAS_SERVER_DESCRIPTION = (
 )
 
 
+def launch_tool_enabled(app_settings: Any) -> bool:
+    """Whether ``atlas_launch`` is usable in this deployment.
+
+    Lives beside the tool definition, like ``sleep_tool_enabled`` does for the
+    wait, so the schema builder, tool authorization and the config payload can
+    all read the same gate without importing the chat layer (which would be a
+    cycle, and was previously dodged with function-local imports).
+
+    Three flags, not one: a launched run *is* a background run, so it needs the
+    same ground as one. Without chat history there is no conversation for the
+    child's transcript to live in, and without agent mode the child would be a
+    single completion that could not use the workspace's tools at all.
+    """
+    if app_settings is None:
+        return False
+    return bool(
+        getattr(app_settings, "feature_atlas_launch_enabled", False)
+        and getattr(app_settings, "feature_chat_history_enabled", False)
+        and getattr(app_settings, "feature_agent_mode_available", False)
+    )
+
+
 def normalize_tool_name(tool_name: Any) -> Any:
     """Map a pre-#855 built-in tool name onto its consolidated name.
 
@@ -345,7 +367,7 @@ def atlas_tool_schemas(
     *,
     sleep_enabled: bool = True,
     search_enabled: bool = True,
-    launch_enabled: bool = True,
+    launch_enabled: bool = False,
 ) -> List[Dict[str, Any]]:
     """Schemas for the requested built-ins, minus any that are switched off.
 

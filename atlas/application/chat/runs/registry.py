@@ -401,15 +401,25 @@ class RunRegistry:
         client believed was live but had already finished).
         """
         record = self.get_for_user(run_id, user_email)
-        if record is None or record.is_terminal:
+        if record is None:
             return False
         # Stopping a parent stops the sub-conversations it launched (#925).
         # Children run in their own tasks, so cancelling the parent's task
         # alone would leave them working -- and billing -- with nobody
-        # watching. Cancel them first: a child that outlived the cancel of its
-        # parent by even a moment could still emit into the transcript.
+        # watching.
+        #
+        # This is deliberately *above* the terminal check. ``atlas_launch``
+        # returns a handle rather than an answer, so the parent turn normally
+        # finishes while its children are still working: by the time a user
+        # stops the conversation, the parent run is usually already terminal.
+        # Cascading only for a live parent would make "stopping a conversation
+        # stops the ones it launched" true in the rare case and false in the
+        # common one.
+        cascaded = False
         for child in self.children_of(run_id):
-            self.cancel(child.run_id, user_email)
+            cascaded = self.cancel(child.run_id, user_email) or cascaded
+        if record.is_terminal:
+            return cascaded
         task = record.task
         # Mark first: the cancellation propagates asynchronously, and the run
         # must never be observable as still running once the user has stopped
@@ -441,6 +451,12 @@ class RunRegistry:
 
         for run_id, record in list(self._runs.items()):
             if not record.is_terminal:
+                continue
+            if self.children_of(run_id):
+                # A finished parent whose sub-conversations are still running
+                # must outlive them (#925): reaping it now would orphan the
+                # subtree, and a later stop addressed at the parent would find
+                # no record and cascade to nothing.
                 continue
             ended = record.ended_at or record.updated_at
             if now - ended > TERMINAL_RETENTION_SECONDS:

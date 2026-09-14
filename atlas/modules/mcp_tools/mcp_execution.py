@@ -25,6 +25,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     DISCOVER_TOOL_NAME,
     LAUNCH_TOOL_NAME,
     SEARCH_TOOL_NAME,
+    launch_tool_enabled,
     normalize_tool_name,
     search_kwargs_for,
 )
@@ -817,10 +818,8 @@ class ExecutionMixin:
             # Gated at execution as well as in the schema, like the other
             # built-ins: a saved conversation or a non-UI client can still name
             # a tool the deployment has since switched off.
-            from atlas.application.chat.runs.launcher import (
-                execute_launch_tool,
-                launch_tool_enabled,
-            )
+            from atlas.application.chat.runs.launcher import execute_launch_tool
+
             app_settings = _client().config_manager.app_settings
             if not launch_tool_enabled(app_settings):
                 error_msg = (

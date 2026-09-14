@@ -727,6 +727,10 @@ async def execute_single_tool(
                     # the session (not tool arguments), so a model cannot change
                     # or remove it.
                     "compliance_level": session_context.get("compliance_level"),
+                    # Whether this turn's transcript is kept off the server.
+                    # atlas_launch refuses to start a sub-conversation from an
+                    # incognito turn, since the child would persist one (#925).
+                    "incognito": session_context.get("incognito", False),
                     # pass update callback so MCP client can emit progress
                     "update_callback": update_callback,
                     # Per-turn scratchpad (agent mode only) that the built-in

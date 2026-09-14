@@ -19,6 +19,7 @@ from .atlas_server import (
     LEGACY_SERVER_NAMES,
     atlas_tool_schemas,
     is_atlas_tool,
+    launch_tool_enabled,
     normalize_tool_name,
 )
 from .sleep_tool import sleep_tool_enabled
@@ -137,12 +138,7 @@ def _atlas_tool_flags() -> tuple:
         getattr(settings, "feature_rag_enabled", False)
         and getattr(settings, "feature_atlas_rag_tools_enabled", False)
     )
-    try:
-        from atlas.application.chat.runs.launcher import launch_tool_enabled
-
-        launch_enabled = launch_tool_enabled(settings)
-    except Exception:
-        launch_enabled = False
+    launch_enabled = launch_tool_enabled(settings)
     return sleep_enabled, search_enabled, launch_enabled
 
 

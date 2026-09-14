@@ -52,7 +52,11 @@ conversation. A launched run is just another entry in that registry:
 - The workspace's stored tool list is re-filtered through the caller's ACLs **at launch time**.
   A workspace is a saved bookmark and the ACLs behind it move; trusting the stored list would
   let a workspace saved last month resurrect a tool the user has since lost.
-- Data sources travel only when the workspace has RAG switched on.
+- Data sources travel only when the workspace has RAG switched on, and are authorized per
+  source (group membership, compliance level) by the RAG service when the child queries them --
+  the same enforcement a turn the user runs themselves goes through.
+- A launch from an incognito or local-save turn is refused: the child persists its own
+  transcript, which is the one thing that turn asked not to happen.
 
 **Limits.** `ATLAS_LAUNCH_MAX_DEPTH` (default 2) bounds recursion -- a user-started run is
 depth 0, the child it launches is depth 1. `ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN` (default 3)
@@ -60,7 +64,11 @@ bounds fan-out per run. `MAX_CONCURRENT_RUNS_PER_USER` still applies underneath,
 per-user ceiling on concurrent runs is unchanged by this feature.
 
 **Cancellation.** `RunRegistry.cancel` now cascades to a run's children, one level at a time,
-so stopping a parent stops the tree beneath it. The wall-clock backstop cascades the same way:
+so stopping a parent stops the tree beneath it. The cascade runs *before* the "already
+terminal" check, because a handle-returning launch means the parent turn normally finishes
+while its children are still working -- cascading only for a live parent would make the
+guarantee true in the rare case and false in the common one. For the same reason a finished
+parent is not reaped while it still has live children. The wall-clock backstop cascades the same way:
 a parent stopped for exceeding its budget must not leave sub-conversations running with nobody
 watching.
 
@@ -73,7 +81,11 @@ a non-UI client can still name a tool the deployment has since switched off).
 ## Known edges
 
 - A child that requests tool approval surfaces the request over the parent's socket tagged as
-  the child's conversation, and is answered there like any other background run's approval.
+  the child's conversation. The approval manager is keyed by tool call id, so the response
+  routes back to the child even though it holds its own ChatService.
+- The child sends *past* the parent turn's `ToolCallRecorder` (which would otherwise persist
+  the child's tool rows into the parent's transcript); the recorder also drops frames tagged
+  with a run that is not its own, as defence in depth.
 - A launch from an *untracked* turn (history off for that turn) is admitted as depth 0 with no
   parent record, so there is nothing for a parent cancel to cascade from. The returned handle
   says so via a null `parent_run_id`.

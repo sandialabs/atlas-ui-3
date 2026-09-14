@@ -9,6 +9,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     DISCOVER_TOOL_NAME,
     LAUNCH_TOOL_NAME,
     SEARCH_TOOL_NAME,
+    launch_tool_enabled,
     normalize_tool_name,
 )
 from atlas.modules.mcp_tools.atlas_server import (
@@ -87,7 +88,6 @@ class ToolAuthorizationService:
                         filtered_tools.append(tool)
                     continue
                 if resolved == LAUNCH_TOOL_NAME:
-                    from atlas.application.chat.runs.launcher import launch_tool_enabled
                     if launch_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue

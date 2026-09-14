@@ -509,3 +509,182 @@ async def test_the_parents_compliance_level_travels_to_the_child():
     await asyncio.wait_for(service.started.wait(), timeout=1)
     assert service.calls[0]["compliance_level"] == "restricted"
     service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_launch_from_an_incognito_turn_is_refused():
+    """The child persists a transcript; an incognito turn asked for none."""
+    factory = _Factory(lambda c: _ChatService(c))
+    with pytest.raises(LaunchRefused, match="incognito"):
+        await launch_sub_conversation(
+            {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+            {"user_email": "user@example.com", "incognito": True},
+            factory=factory,
+        )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_launches_in_one_step_cannot_both_pass_a_cap_of_one():
+    """Admission is check-and-insert with no await between the two."""
+    factory = _Factory(
+        lambda c: _ChatService(c), settings=_settings(atlas_launch_max_children_per_run=1)
+    )
+    _install_registry()
+
+    results = await asyncio.gather(
+        *[
+            launch_sub_conversation(
+                {"workspace": "Research", "model": "gpt-4o", "prompt": f"task {i}"},
+                {"user_email": "user@example.com"},
+                factory=factory,
+            )
+            for i in range(4)
+        ],
+        return_exceptions=True,
+    )
+    admitted = [r for r in results if not isinstance(r, Exception)]
+    refused = [r for r in results if isinstance(r, LaunchRefused)]
+
+    assert len(admitted) == 1
+    assert len(refused) == 3
+    for service in factory.services:
+        service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_stopping_a_finished_parent_still_cancels_a_running_child():
+    """The common case: the parent turn ends while the child keeps working."""
+    registry = _install_registry()
+    factory = _Factory(lambda c: _ChatService(c))
+    parent = registry.start(conversation_id="conv-parent", user_email="user@example.com")
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        {"user_email": "user@example.com"},
+        factory=factory,
+    )
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+
+    # The parent's turn finishes; the handle-returning launch means the child
+    # is still working.
+    registry.set_status(parent.run_id, RunStatus.COMPLETED)
+    child = registry.get(handle["run_id"])
+    assert not child.is_terminal
+    # Held before the cancel: reaching a terminal status clears the record's
+    # task reference.
+    child_task = child.task
+
+    assert registry.cancel(parent.run_id, "user@example.com") is True
+    assert registry.get(handle["run_id"]).status is RunStatus.CANCELLED
+    # The child's real task was cancelled, not just its record.
+    with pytest.raises(asyncio.CancelledError):
+        await child_task
+
+
+def test_a_finished_parent_is_not_reaped_while_a_child_is_still_running():
+    registry = RunRegistry()
+    parent = registry.start(conversation_id="c1", user_email="u@example.com")
+    child = registry.start(
+        conversation_id="c2", user_email="u@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(parent.run_id, RunStatus.COMPLETED)
+
+    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
+    import time as _time
+
+    assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 0
+    assert registry.get(parent.run_id) is not None
+
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_wall_clock_backstop_stops_the_childrens_runs_too():
+    registry = RunRegistry()
+    parent = registry.start(conversation_id="c1", user_email="u@example.com")
+    child = registry.start(
+        conversation_id="c2", user_email="u@example.com", parent_run_id=parent.run_id, depth=1
+    )
+
+    async def _forever():
+        await asyncio.Event().wait()
+
+    child_task = asyncio.ensure_future(_forever())
+    registry.attach_task(child.run_id, child_task)
+    parent.created_at -= 10_000
+
+    stopped = registry.enforce_wall_clock(60)
+
+    assert stopped == [parent.run_id]
+    assert registry.get(child.run_id).status is RunStatus.CANCELLED
+    with pytest.raises(asyncio.CancelledError):
+        await child_task
+
+
+@pytest.mark.asyncio
+async def test_a_childs_tool_rows_are_not_recorded_into_the_parents_history():
+    """The child sends past the parent's recorder, and the recorder drops strays."""
+    from atlas.application.chat.utilities.tool_history import ToolCallRecorder
+
+    delivered = []
+
+    async def _transport(frame):
+        delivered.append(frame)
+
+    set_current_run("parent-run", "conv-parent")
+    recorder = ToolCallRecorder(_transport)
+    clear_current_run()
+
+    factory = _Factory(lambda c: _ChatService(c))
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        {"user_email": "user@example.com", "update_callback": recorder},
+        factory=factory,
+    )
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+
+    # A tool row emitted by the child, as the executor would send it.
+    await service.connection.send_json(
+        {
+            "type": "tool_start",
+            "tool_call_id": "child-call-1",
+            "tool_name": "math_add",
+            "arguments": {"a": 1},
+        }
+    )
+    service.release.set()
+
+    assert recorder.messages() == []
+    assert [f["run_id"] for f in delivered] == [handle["run_id"], handle["run_id"]]
+
+
+def test_the_recorder_drops_events_tagged_with_another_run():
+    from atlas.application.chat.utilities.tool_history import ToolCallRecorder
+
+    set_current_run("parent-run", "conv-parent")
+    recorder = ToolCallRecorder(None)
+    clear_current_run()
+
+    recorder._record(
+        {
+            "type": "tool_start",
+            "tool_call_id": "x",
+            "tool_name": "math_add",
+            "run_id": "some-other-run",
+        }
+    )
+    assert recorder.messages() == []
+
+    recorder._record(
+        {
+            "type": "tool_start",
+            "tool_call_id": "y",
+            "tool_name": "math_add",
+            "run_id": "parent-run",
+        }
+    )
+    assert len(recorder.messages()) == 1

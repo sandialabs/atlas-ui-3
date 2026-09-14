@@ -126,9 +126,11 @@ ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
 ```
 
 - **The workspace is the capability boundary.** The child gets that workspace's tools and data
-  sources and nothing else, re-checked against the caller's own ACLs at launch time - a
-  workspace cannot widen what its owner can already reach, and cannot reach another user's
-  workspaces at all.
+  sources and nothing else, and cannot reach another user's workspaces at all. The tool list is
+  re-filtered through the caller's ACLs at launch time; the data sources are authorized per
+  source by group (and compliance level) when the child actually queries them, exactly as they
+  are for a turn the user runs themselves. Either way a workspace cannot widen what its owner
+  can already reach.
 - **`MAX_CONCURRENT_RUNS_PER_USER` still applies** on top of the caps above, so this feature
   does not raise a user's ceiling on concurrent runs.
 - **Stopping a conversation stops the ones it launched**, including deeper descendants, and the

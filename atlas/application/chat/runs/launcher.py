@@ -48,6 +48,14 @@ from atlas.application.chat.runs.registry import (
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.domain.messages.models import ToolResult
+from atlas.modules.mcp_tools.atlas_server import launch_tool_enabled
+
+__all__ = [
+    "LaunchRefused",
+    "execute_launch_tool",
+    "launch_sub_conversation",
+    "launch_tool_enabled",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -68,23 +76,6 @@ class LaunchRefused(Exception):
     concurrency cap -- because the model's next move depends on knowing which,
     and the text is written to be actionable rather than apologetic.
     """
-
-
-def launch_tool_enabled(app_settings: Any) -> bool:
-    """Whether ``atlas_launch`` is usable in this deployment.
-
-    Three flags, not one: a launched run *is* a background run, so it needs the
-    same ground as one. Without chat history there is no conversation for the
-    child's transcript to live in, and without agent mode the child would be a
-    single completion that could not use the workspace's tools at all.
-    """
-    if app_settings is None:
-        return False
-    return bool(
-        getattr(app_settings, "feature_atlas_launch_enabled", False)
-        and getattr(app_settings, "feature_chat_history_enabled", False)
-        and getattr(app_settings, "feature_agent_mode_available", False)
-    )
 
 
 def _require_text(arguments: Dict[str, Any], key: str) -> str:
@@ -218,10 +209,30 @@ def _check_limits(
         )
     if in_flight >= max_children:
         raise LaunchRefused(
-            f"This conversation already has {in_flight} sub-conversations running "
-            f"(the limit is {max_children}). Wait for one to finish before "
-            "launching another."
+            f"There are already {in_flight} sub-conversations running for you "
+            f"(the limit is {max_children} per conversation). Wait for one to "
+            "finish before launching another."
         )
+
+
+def _raw_transport(update_callback: Any) -> Any:
+    """Unwrap the turn's callback down to the socket send.
+
+    In agent mode the callback handed to a tool is the parent turn's
+    ``ToolCallRecorder``, which persists every ``tool_start`` / ``tool_complete``
+    it sees into *that turn's* conversation history. A child's tool rows belong
+    in the child's transcript, so the child sends past the recorder rather than
+    through it. The recorder also drops foreign ``run_id``s as a second line of
+    defence; this is the first.
+    """
+    seen = 0
+    while update_callback is not None and seen < 5:
+        inner = getattr(update_callback, "inner", None)
+        if inner is None:
+            break
+        update_callback = inner
+        seen += 1
+    return update_callback
 
 
 class _ChildConnection:
@@ -237,7 +248,7 @@ class _ChildConnection:
     """
 
     def __init__(self, update_callback, run_id: str, conversation_id: str):
-        self._update_callback = update_callback
+        self._update_callback = _raw_transport(update_callback)
         self._run_id = run_id
         self._conversation_id = conversation_id
 
@@ -348,6 +359,18 @@ async def launch_sub_conversation(
         # closed rather than launching an unattributed run.
         raise LaunchRefused("Sub-conversations require an authenticated user.")
 
+    if (context or {}).get("incognito"):
+        # A launched run is a background run: its whole point is a transcript
+        # the user can reopen. Starting one from an incognito or local-save
+        # turn would write the prompt and the child's entire transcript to
+        # durable history, which is the one thing that turn asked not to
+        # happen. Refuse rather than quietly persisting it.
+        raise LaunchRefused(
+            "Sub-conversations cannot be started from an incognito or "
+            "local-save conversation, because the sub-conversation's "
+            "transcript has to be saved on the server to be readable."
+        )
+
     workspace_name = _require_text(arguments, "workspace")
     model_name = _require_text(arguments, "model")
     prompt = _require_text(arguments, "prompt")
@@ -370,7 +393,6 @@ async def launch_sub_conversation(
     from atlas.application.chat.runs.context import get_current_run
 
     parent_run_id, parent_depth = _parent_run_identity(registry, get_current_run())
-    _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
 
     workspace_config = workspace.get("config") or {}
     conversation_id = str(uuid4())
@@ -387,9 +409,13 @@ async def launch_sub_conversation(
         else []
     )
 
-    registry.set_max_concurrent_runs_per_user(
-        getattr(app_settings, "max_concurrent_runs_per_user", 5)
-    )
+    # Admission is check-then-insert, and it must be atomic: several
+    # ``atlas_launch`` calls in one agent step run concurrently, and a check
+    # separated from the insert by an await would let all of them pass a cap of
+    # one. Everything from here to ``start`` is synchronous, which on a single
+    # event loop is exactly that atomicity -- so no await may be introduced
+    # between these two lines.
+    _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
     try:
         record = registry.start(
             conversation_id=conversation_id,

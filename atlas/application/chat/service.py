@@ -343,6 +343,10 @@ class ChatService:
         # runs, makes the policy immune to that race (issue #755).
         turn_is_incognito = session_id in self._incognito_sessions
         turn_save_floor = self._incognito_save_floor.get(session_id, 0)
+        # Carried on the session so it reaches the tool execution context,
+        # where atlas_launch needs it: a sub-conversation persists its own
+        # transcript, which an incognito turn must not start (#925).
+        session.context["incognito"] = turn_is_incognito
 
         # Rewind / edit-and-resubmit is the one turn that legitimately ends with
         # fewer messages than are stored: it drops the edited prompt and
