@@ -571,6 +571,83 @@ async def launch_sub_conversation(
     }
 
 
+def _scoped_children(context: Optional[Dict[str, Any]]) -> List[Any]:
+    from atlas.application.chat.runs.context import get_current_run
+
+    user_email = (context or {}).get("user_email")
+    current = get_current_run()
+    if not user_email or current is None:
+        return []
+    registry = get_run_registry()
+    return [
+        record
+        for record in registry.children_of(current.run_id, include_terminal=True)
+        if record.user_email == user_email
+    ]
+
+
+def get_child_runs(context: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [record.to_public_dict() for record in _scoped_children(context)]
+
+
+def get_child_result(run_id: Any, context: Optional[Dict[str, Any]], factory: Any = None) -> Dict[str, Any]:
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise LaunchRefused("'run_id' is required and must be a non-empty string.")
+    children = {record.run_id: record for record in _scoped_children(context)}
+    record = children.get(run_id)
+    if record is None:
+        raise LaunchRefused("That run is not a sub-conversation of this conversation.")
+
+    result: Dict[str, Any] = {
+        "run_id": record.run_id,
+        "conversation_id": record.conversation_id,
+        "status": record.status.value,
+        "error": record.error,
+        "waiting_on": record.waiting_on,
+        "result": None,
+    }
+    if not record.is_terminal or record.status is not RunStatus.COMPLETED:
+        return result
+
+    if factory is None:
+        from atlas.infrastructure.app_factory import app_factory as factory
+    repository = getattr(factory, "conversation_repository", None)
+    if repository is None:
+        return result
+    conversation = repository.get_conversation(record.conversation_id, record.user_email)
+    if conversation:
+        for message in reversed(conversation.get("messages", [])):
+            if message.get("role") == "assistant" and message.get("content"):
+                result["result"] = message["content"]
+                break
+    return result
+
+
+async def execute_observation_tool(tool_call: Any, context: Optional[Dict[str, Any]]) -> ToolResult:
+    name = getattr(tool_call, "function", None)
+    name = getattr(name, "name", None) or getattr(tool_call, "name", "")
+    arguments = getattr(tool_call, "arguments", None) or {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+    try:
+        if name == "atlas_get_runs":
+            payload = {"runs": get_child_runs(context)}
+        else:
+            payload = get_child_result(arguments.get("run_id"), context)
+    except LaunchRefused as error:
+        return ToolResult(
+            tool_call_id=getattr(tool_call, "id", None),
+            content=str(error),
+            success=False,
+            error=str(error),
+        )
+    return ToolResult(
+        tool_call_id=getattr(tool_call, "id", None),
+        content=json.dumps(payload),
+        success=True,
+    )
+
+
 async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]]) -> ToolResult:
     """``atlas_launch`` as the tool manager calls it.
 
