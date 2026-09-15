@@ -10,6 +10,7 @@ from typing import Dict, Optional, Tuple
 import httpx
 import jwt
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
@@ -91,8 +92,8 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         logger.warning(
             "Authorization bypass active: granting group '%s' to user '%s' "
             "via SKIP_AUTHORIZATION_CHECKS (DEBUG_MODE=true, dev-only).",
-            group_id,
-            user_id,
+            sanitize_for_logging(group_id),
+            sanitize_for_logging(user_id),
         )
         return True
 
@@ -132,14 +133,14 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
             logger.warning(
                 "Admin override: granting admin group '%s' to user '%s' via "
                 "ADMIN_USERS, bypassing the configured authorization service.",
-                group_id,
-                user_id,
+                sanitize_for_logging(group_id),
+                sanitize_for_logging(user_id),
             )
         else:
             logger.info(
                 "Granting admin group '%s' to user '%s' via ADMIN_USERS.",
-                group_id,
-                user_id,
+                sanitize_for_logging(group_id),
+                sanitize_for_logging(user_id),
             )
         return True
 

@@ -568,6 +568,55 @@ async def test_admin_override_is_logged_as_an_audit_signal(monkeypatch, caplog):
     assert caplog.text == ""
 
 
+@pytest.mark.asyncio
+async def test_authorization_log_lines_are_sanitized(monkeypatch, caplog):
+    """Identity and group reach the audit lines as untrusted input (an IdP
+    header and hand-edited config), so a forged newline must not be able to
+    write a second, fake log entry (CodeQL py/log-injection on PR #946).
+
+    The bypass warning is the sharp case: it logs whatever it was handed,
+    with no matching in between to constrain the value. On the ADMIN_USERS
+    path this is defence in depth -- normalization only strips the edges, so
+    an interior newline fails to match the allowlist in the first place.
+    """
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    _disable_external_authorizer(monkeypatch)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    forged = "mallory@example.org\nWARNING:atlas.core.auth:granted to alice"
+    with caplog.at_level(logging.WARNING, logger="atlas.core.auth"):
+        assert await is_user_in_group(forged, "admin\ninjected") is True
+
+    assert "\n" not in caplog.records[0].getMessage()
+    assert "mallory@example.org" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_admin_override_does_not_match_a_forged_identity(monkeypatch):
+    """Normalization strips only the edges, so an identity with an interior
+    newline is not the allowlisted identity and gets nothing."""
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    patcher, _client = _patched_authorizer(False)
+    with patcher:
+        assert await is_user_in_group("alice@example.org\nmallory", "admin") is False
+        # Padding alone is still tolerated, as documented.
+        assert await is_user_in_group("  Alice@Example.ORG  ", "admin") is True
+
+
 def test_warns_when_admin_users_is_live_alongside_an_authorizer(monkeypatch, caplog):
     """Entries that were inert before issue #945 become live admin grants on
     the restart that picks up this version. That should not be silent."""
