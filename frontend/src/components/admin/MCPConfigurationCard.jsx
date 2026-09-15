@@ -257,10 +257,11 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
                       ? 'bg-yellow-900/40 text-yellow-300 border border-yellow-700/60'
                       : 'bg-red-900/40 text-red-300 border border-red-700/60'
                   }`}
-                  title={info?.auth_required ? 'OAuth authentication required' : (info?.error || 'Failed to connect')}
+                  title={info?.error || (info?.auth_required ? 'OAuth authentication required' : 'Failed to connect')}
                 >
-                  {info?.auth_required ? `${name} (OAuth auth required)` : name}
-                  {info?.attempt_count > 1 ? ` (${info.attempt_count} attempts)` : ''}
+                  {info?.auth_required
+                    ? `${name} (OAuth auth required)`
+                    : `${name}${info?.attempt_count > 1 ? ` (${info.attempt_count} attempts)` : ''}`}
                 </span>
               ))}
             </div>

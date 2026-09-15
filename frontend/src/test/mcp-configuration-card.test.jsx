@@ -80,6 +80,35 @@ describe('MCPConfigurationCard', () => {
       })).toBeNull()
     })
 
+    it('labels OAuth authentication requirements separately from failures', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          configured_servers: ['oauth-server', 'unreachable-server'],
+          connected_servers: [],
+          failed_servers: {
+            'oauth-server': { auth_required: true, error: '401 Unauthorized', attempt_count: 3 },
+            'unreachable-server': { auth_required: false, error: 'connection refused' },
+          },
+        }),
+      })
+
+      await act(async () => {
+        render(
+          <MCPConfigurationCard
+            openModal={openModal}
+            addNotification={addNotification}
+            systemStatus={systemStatus}
+          />,
+        )
+        await vi.advanceTimersByTimeAsync(0)
+      })
+
+      expect(screen.getByText('oauth-server (OAuth auth required)')).toBeInTheDocument()
+      expect(screen.getByText('unreachable-server')).toBeInTheDocument()
+      expect(screen.getByText('Unavailable servers (2)')).toBeInTheDocument()
+    })
+
     it('opens a combined MCP Details modal with config and status', async () => {
       global.fetch.mockResolvedValueOnce({
         ok: true,

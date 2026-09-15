@@ -6,6 +6,7 @@ Provides admin-only endpoints for: banners, configuration files, logs, and (comm
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -158,9 +159,9 @@ def _log_base_dir() -> Path:
 def _is_oauth_authentication_failure(server_config: Dict[str, Any], error: str) -> bool:
     if server_config.get("auth_type") != "oauth":
         return False
-    normalized_error = error.lower()
+    normalized_error = str(error or "").lower()
     return (
-        "401" in normalized_error
+        re.search(r"\b401\b", normalized_error) is not None
         or "unauthorized" in normalized_error
         or "authentication required" in normalized_error
         or "authentication failed" in normalized_error
