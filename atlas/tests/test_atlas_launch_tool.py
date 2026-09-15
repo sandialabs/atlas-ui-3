@@ -1008,6 +1008,21 @@ def test_parent_can_list_only_its_direct_children():
     assert other.run_id not in [run["run_id"] for run in runs]
 
 
+def test_parent_can_list_children_from_a_later_turn_in_the_same_conversation():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(parent.run_id, RunStatus.COMPLETED)
+    later_turn = registry.start(conversation_id="parent", user_email="user@example.com")
+    set_current_run(later_turn.run_id, later_turn.conversation_id)
+
+    runs = get_child_runs({"user_email": "user@example.com"})
+
+    assert [run["run_id"] for run in runs] == [child.run_id]
+
+
 @pytest.mark.asyncio
 async def test_result_returns_persisted_assistant_content_only_for_a_child():
     registry = _install_registry()
@@ -1025,6 +1040,33 @@ async def test_result_returns_persisted_assistant_content_only_for_a_child():
                     {"role": "user", "content": "task"},
                     {"role": "assistant", "content": "answer"},
                 ]
+            }
+        )
+    )
+
+    result = await get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
+
+    assert result["status"] == "completed"
+    assert result["result"] == "answer"
+    assert result["result_status"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_result_reads_a_child_from_a_later_turn_in_the_same_conversation():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(parent.run_id, RunStatus.COMPLETED)
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    later_turn = registry.start(conversation_id="parent", user_email="user@example.com")
+    set_current_run(later_turn.run_id, later_turn.conversation_id)
+
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: {
+                "messages": [{"role": "assistant", "content": "answer"}]
             }
         )
     )

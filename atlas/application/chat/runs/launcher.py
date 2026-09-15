@@ -480,7 +480,8 @@ async def launch_sub_conversation(
     registry = get_run_registry()
     from atlas.application.chat.runs.context import get_current_run
 
-    parent_run_id, parent_depth = _parent_run_identity(registry, get_current_run())
+    run_context = get_current_run()
+    parent_run_id, parent_depth = _parent_run_identity(registry, run_context)
 
     workspace_config = workspace.get("config") or {}
     conversation_id = str(uuid4())
@@ -526,6 +527,7 @@ async def launch_sub_conversation(
             conversation_id=conversation_id,
             user_email=user_email,
             parent_run_id=parent_run_id,
+            parent_conversation_id=getattr(run_context, "conversation_id", None),
             depth=parent_depth + 1,
         )
     except (ConcurrencyLimitError, ConversationBusyError) as e:
@@ -584,9 +586,12 @@ def _scoped_children(context: Optional[Dict[str, Any]]) -> List[Any]:
     if not user_email or current is None:
         return []
     registry = get_run_registry()
+    registry.reap_terminal()
     return [
         record
-        for record in registry.children_of(current.run_id, include_terminal=True)
+        for record in registry.children_of_conversation(
+            current.conversation_id, include_terminal=True
+        )
         if record.user_email == user_email
     ]
 

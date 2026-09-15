@@ -113,8 +113,8 @@ a non-UI client can still name a tool the deployment has since switched off).
 
 When the launch feature is enabled, the parent also receives two non-blocking tools:
 
-- `atlas_get_runs` lists only direct children of the current run. Each entry includes `run_id`, `conversation_id`, `status`, timestamps, `waiting_on`, and any terminal error.
-- `atlas_result` accepts a child `run_id` and returns its status immediately. A completed child includes the last assistant message when readable; running, waiting, failed, and cancelled children do not block. Results are scoped to the current user's direct children, and guessed or foreign IDs are refused.
+- `atlas_get_runs` lists only direct children launched by the current conversation, even if they were started by an earlier turn. Each entry includes `run_id`, `conversation_id`, `status`, timestamps, `waiting_on`, and any terminal error.
+- `atlas_result` accepts a child `run_id` and returns its status immediately. A completed child includes the last assistant message when readable; running, waiting, failed, and cancelled children do not block. Results are scoped to the current user's direct children for that conversation, and guessed or foreign IDs are refused.
 
 Statuses are `queued`, `running`, `waiting_for_input`, `completed`, `failed`, and `cancelled`. The tools share `FEATURE_ATLAS_LAUNCH_ENABLED` with `atlas_launch`, and are omitted from schemas and authorization when the feature is off.
 
