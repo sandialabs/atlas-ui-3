@@ -49,14 +49,21 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
        refuses to start if ``AUTH_GROUP_CHECK_URL`` is also set, or if the flag
        is on outside debug mode / a development environment -- so the bypass can
        only ever override the mock table below, never a real authorization service.
-    2. External endpoint: when ``AUTH_GROUP_CHECK_URL`` and ``AUTH_GROUP_CHECK_API_KEY``
+    2. Explicit admin override: an identity listed in ``ADMIN_USERS`` satisfies a
+       check against ``ADMIN_GROUP``, whether or not an external authorizer is
+       configured. Admin access is therefore granted when *either* the static
+       override lists the user *or* the normal membership check below says the
+       user is in ``ADMIN_GROUP`` (issue #945). It only ever grants, and only
+       for the configured admin group.
+    3. External endpoint: when ``AUTH_GROUP_CHECK_URL`` and ``AUTH_GROUP_CHECK_API_KEY``
        are configured, query the HTTP authorization service for membership. A real
-       authorization service is authoritative: the static config below is not
-       consulted as an additional grant when an endpoint is configured.
-    3. Static config: ``ADMIN_USERS`` and ``AUTH_STATIC_GROUPS`` grant membership
+       authorization service remains authoritative for every group: the static
+       table below is not consulted as an additional grant when an endpoint is
+       configured.
+    4. Static config: ``AUTH_STATIC_GROUPS`` grants explicit static membership
        without an external service, in production mode as well as debug. Matching
        is case-insensitive and whitespace-tolerant.
-    4. Mock table (fallback for local development): everyone is in the ``users``
+    5. Mock table (fallback for local development): everyone is in the ``users``
        group; the debug-only mock table grants admin to the configured test users.
 
     Args:
@@ -89,6 +96,30 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         )
         return True
 
+    # Group names arrive from hand-edited config (the `groups` lists on MCP
+    # servers and models) and identities from IdP claims, so casing and stray
+    # whitespace are noise on both.
+    normalized_group = (group_id or "").strip().lower()
+    normalized_user = (user_id or "").strip().lower()
+
+    # Explicit admin override (ADMIN_USERS), checked before the external
+    # authorizer rather than after it. Operators need two independent ways to
+    # reach admin: a small static allowlist they control in their own config,
+    # and dynamic membership in ADMIN_GROUP resolved by whatever group logic
+    # the deployment already runs. Either one grants admin (issue #945).
+    #
+    # This deliberately differs from the AUTH_STATIC_GROUPS table below, which
+    # still yields to a configured authorizer: ADMIN_USERS is the emergency
+    # path that must keep working when the authorization service is the thing
+    # that broke, and it is scoped to the admin group and to identities the
+    # operator typed out by hand.
+    if (
+        normalized_group
+        and normalized_group == (app_settings.admin_group or "").strip().lower()
+        and normalized_user in app_settings.admin_user_set
+    ):
+        return True
+
     auth_url = app_settings.auth_group_check_url
     api_key = app_settings.auth_group_check_api_key
 
@@ -109,18 +140,13 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
             logger.error(f"Error during external auth check: {e}", exc_info=True)
             return False
     else:
-        # Statically configured membership (ADMIN_USERS / AUTH_STATIC_GROUPS).
-        # Checked before the ``users`` short-circuit and the mock table, and --
-        # unlike the mock table -- available outside debug mode. Without it, a
-        # deployment with no external authorizer has no way to make anyone an
-        # admin or to scope an MCP server to a subset of users (issue #910).
+        # Statically configured membership (AUTH_STATIC_GROUPS, plus the
+        # ADMIN_USERS entry it is unioned with). Checked before the ``users``
+        # short-circuit and the mock table, and -- unlike the mock table --
+        # available outside debug mode. Without it, a deployment with no
+        # external authorizer has no way to make anyone an admin or to scope an
+        # MCP server to a subset of users (issue #910).
         #
-        # Group names arrive from hand-edited config (the `groups` lists on
-        # MCP servers and models) and identities from IdP claims, so casing
-        # and stray whitespace are noise everywhere below -- not only in the
-        # static table.
-        normalized_group = (group_id or "").strip().lower()
-
         # Gated on ``auth_url`` alone, not on the ``auth_url and api_key`` pair
         # that selects the branch above: a deployment that configures an
         # endpoint but whose API key is missing (a failed secret injection, a
@@ -130,7 +156,7 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # the endpoint authoritative.
         if not auth_url:
             static_members = app_settings.static_group_members.get(normalized_group)
-            if static_members and (user_id or "").strip().lower() in static_members:
+            if static_members and normalized_user in static_members:
                 return True
 
         # Everybody is in the users group by default

@@ -373,12 +373,18 @@ async def test_static_groups_scope_arbitrary_groups_in_production_mode(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_external_authorizer_wins_over_static_config(monkeypatch):
-    """A real authorization service stays authoritative: static config must not
-    add grants behind its back."""
+async def test_external_authorizer_wins_over_static_group_table(monkeypatch):
+    """A real authorization service stays authoritative for the static table:
+    an ``AUTH_STATIC_GROUPS`` entry must not add grants behind its back.
+
+    ``ADMIN_USERS`` is the one documented exception, covered separately below.
+    """
     monkeypatch.setenv("DEBUG_MODE", "false")
     monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
-    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    monkeypatch.setenv(
+        "AUTH_STATIC_GROUPS", "admin:alice@example.org;mcp_advanced:alice@example.org"
+    )
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
     config_manager.reload_configs()
@@ -388,6 +394,133 @@ async def test_external_authorizer_wins_over_static_config(monkeypatch):
     patcher, _client = _patched_authorizer(False)
     with patcher:
         assert await is_user_in_group("alice@example.org", "admin") is False
+        assert await is_user_in_group("alice@example.org", "mcp_advanced") is False
+
+
+# ---------------------------------------------------------------------------
+# Admin via ADMIN_USERS *or* dynamic ADMIN_GROUP membership (issue #945)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_admin_group_membership_is_resolved_dynamically(monkeypatch):
+    """The operator intent in issue #945: name an admin group and let the
+    existing membership mechanism answer, with no static enumeration at all."""
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    admin_group = config_manager.app_settings.admin_group
+
+    patcher, _client = _patched_authorizer(True)
+    with patcher:
+        assert await is_user_in_group("dynamic@example.org", admin_group) is True
+
+    patcher, _client = _patched_authorizer(False)
+    with patcher:
+        assert await is_user_in_group("dynamic@example.org", admin_group) is False
+
+
+@pytest.mark.asyncio
+async def test_admin_users_grants_admin_even_with_external_authorizer(monkeypatch):
+    """``ADMIN_USERS`` is an explicit admin override, not a fallback.
+
+    Its whole purpose is to be the allowlist that still works when the
+    authorization service is the thing that broke, so it is honoured alongside
+    a configured ``AUTH_GROUP_CHECK_URL`` -- and only for the configured admin
+    group, and only ever as a grant.
+    """
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.setenv("ADMIN_GROUP", "atlas_admins")
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    patcher, _client = _patched_authorizer(False)
+    with patcher:
+        # Listed identity: granted despite the authorizer's denial.
+        assert await is_user_in_group("alice@example.org", "atlas_admins") is True
+        assert await is_user_in_group(" ALICE@Example.ORG ", " Atlas_Admins ") is True
+        # Unlisted identity: the authorizer's denial stands.
+        assert await is_user_in_group("mallory@example.org", "atlas_admins") is False
+        # The override is scoped to the admin group, not to every group.
+        assert await is_user_in_group("alice@example.org", "mcp_advanced") is False
+
+
+@pytest.mark.asyncio
+async def test_admin_users_and_dynamic_membership_are_independent(monkeypatch):
+    """Either source alone suffices: a dynamic member who is not on the static
+    list is still an admin."""
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.setenv("ADMIN_GROUP", "atlas_admins")
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    patcher, _client = _patched_authorizer(True)
+    with patcher:
+        assert await is_user_in_group("bob@example.org", "atlas_admins") is True
+
+
+@pytest.mark.asyncio
+async def test_admin_users_override_survives_a_broken_authorizer(monkeypatch):
+    """The emergency case: the authorization service is unreachable. Every
+    other group fails closed; the hand-written admin allowlist still works."""
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    import httpx
+
+    client = MagicMock()
+    client.post = AsyncMock(side_effect=httpx.RequestError("connection refused"))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("atlas.core.auth.httpx.AsyncClient", return_value=client):
+        assert await is_user_in_group("alice@example.org", "admin") is True
+        assert await is_user_in_group("mallory@example.org", "admin") is False
+        assert await is_user_in_group("alice@example.org", "mcp_advanced") is False
+
+
+def test_admin_user_set_is_normalized_and_separate_from_static_table(monkeypatch):
+    """``ADMIN_USERS`` is exposed on its own because it is consulted under
+    different rules than the ``AUTH_STATIC_GROUPS`` table."""
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+
+    settings = AppSettings(
+        debug_mode=False,
+        admin_group="atlas_admins",
+        ADMIN_USERS=" Alice@Example.ORG , ,bob@example.org ",
+        AUTH_STATIC_GROUPS="mcp_advanced:dev@example.org",
+    )
+
+    assert settings.admin_user_set == frozenset({"alice@example.org", "bob@example.org"})
+    assert settings.static_group_members["mcp_advanced"] == frozenset({"dev@example.org"})
+    # Still unioned into the static table, so the no-authorizer path and the
+    # startup warning keep seeing it.
+    assert settings.static_group_members["atlas_admins"] == frozenset(
+        {"alice@example.org", "bob@example.org"}
+    )
 
 
 def test_warns_when_no_authorization_source_is_configured(monkeypatch, caplog):
@@ -424,14 +557,16 @@ async def test_static_config_ignored_when_authorizer_url_set_without_api_key(mon
 
     ``AUTH_GROUP_CHECK_URL`` without ``AUTH_GROUP_CHECK_API_KEY`` -- a failed
     secret injection, a misspelled variable -- does not take the external
-    branch. If static config were consulted there, a listed admin would keep
-    admin exactly while the authoritative service is unreachable, which is the
-    opposite of what "the endpoint is authoritative" promises.
+    branch. If the static table were consulted there, a statically mapped admin
+    would keep admin exactly while the authoritative service is unreachable,
+    which is the opposite of what "the endpoint is authoritative" promises.
+    ``ADMIN_USERS`` is deliberately exempt (issue #945) and is covered above.
     """
     monkeypatch.setenv("DEBUG_MODE", "false")
     monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
-    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    monkeypatch.setenv("AUTH_STATIC_GROUPS", "admin:alice@example.org")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
     monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
     config_manager.reload_configs()

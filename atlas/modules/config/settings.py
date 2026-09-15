@@ -10,6 +10,17 @@ from pydantic_settings import BaseSettings
 logger = logging.getLogger(__name__)
 
 
+def parse_identity_list(raw: str) -> FrozenSet[str]:
+    """Normalize a comma-separated identity list into a lookup set.
+
+    Identities arrive from IdP claims and hand-edited config, so casing and
+    stray whitespace carry no meaning; empty items are dropped.
+    """
+    cleaned = {item.strip().lower() for item in (raw or "").split(",")}
+    cleaned.discard("")
+    return frozenset(cleaned)
+
+
 def parse_static_groups(
     static_groups: str,
     admin_users: str = "",
@@ -50,7 +61,10 @@ def parse_static_groups(
         if ":" not in entry:
             logger.warning(
                 "Ignoring malformed AUTH_STATIC_GROUPS entry (expected "
-                "'group:user1,user2'): %r",
+                "'group:user1,user2'): %r. AUTH_STATIC_GROUPS only declares "
+                "explicit static memberships; to name an admin group whose "
+                "membership is resolved dynamically, set ADMIN_GROUP instead "
+                "(and ADMIN_USERS for a static admin override list).",
                 entry,
             )
             continue
@@ -385,8 +399,10 @@ class AppSettings(BaseSettings):
         default="",
         validation_alias="ADMIN_USERS",
         description=(
-            "Comma-separated identities granted ADMIN_GROUP without an external "
-            "authorization service. Sugar for a single AUTH_STATIC_GROUPS entry."
+            "Comma-separated identities always granted ADMIN_GROUP. Acts as a "
+            "static admin override that is honoured even when "
+            "AUTH_GROUP_CHECK_URL is configured, so a deployment keeps an "
+            "emergency admin allowlist alongside dynamic ADMIN_GROUP membership."
         ),
     )
     auth_static_groups: str = Field(
@@ -1107,6 +1123,7 @@ class AppSettings(BaseSettings):
         return self
 
     _static_group_members_cache: Optional[Dict[str, FrozenSet[str]]] = PrivateAttr(default=None)
+    _admin_user_set_cache: Optional[FrozenSet[str]] = PrivateAttr(default=None)
 
     @property
     def static_group_members(self) -> Dict[str, FrozenSet[str]]:
@@ -1122,6 +1139,20 @@ class AppSettings(BaseSettings):
                 self.auth_static_groups, self.admin_users, self.admin_group
             )
         return self._static_group_members_cache
+
+    @property
+    def admin_user_set(self) -> FrozenSet[str]:
+        """``ADMIN_USERS`` as a normalized set, cached like the static table.
+
+        Kept separate from :attr:`static_group_members` because the two are
+        consulted under different rules: an ``AUTH_STATIC_GROUPS`` entry naming
+        the admin group is ordinary static membership and yields to a
+        configured external authorizer, while ``ADMIN_USERS`` is an explicit
+        admin override that is honoured either way.
+        """
+        if self._admin_user_set_cache is None:
+            self._admin_user_set_cache = parse_identity_list(self.admin_users)
+        return self._admin_user_set_cache
 
     model_config = {
         "env_file": "../.env",
