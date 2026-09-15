@@ -855,18 +855,15 @@ async def test_the_three_launch_gates_agree_on_the_same_flag():
             tool_manager=manager, config_manager=config_manager
         )
 
+        gated_names = [LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME]
         assert launch_tool_enabled(settings) is enabled
-        # Schema gate.
         offered = [
             s["function"]["name"]
-            for s in atlas_tool_schemas([LAUNCH_TOOL_NAME], launch_enabled=enabled)
+            for s in atlas_tool_schemas(gated_names, launch_enabled=enabled)
         ]
-        assert offered == ([LAUNCH_TOOL_NAME] if enabled else [])
-        # Authorization gate.
-        allowed = await service.filter_authorized_tools(
-            [LAUNCH_TOOL_NAME], "user@example.com"
-        )
-        assert allowed == ([LAUNCH_TOOL_NAME] if enabled else [])
+        assert offered == (gated_names if enabled else [])
+        allowed = await service.filter_authorized_tools(gated_names, "user@example.com")
+        assert allowed == (gated_names if enabled else [])
 
 
 @pytest.mark.asyncio
@@ -1036,6 +1033,7 @@ async def test_result_returns_persisted_assistant_content_only_for_a_child():
 
     assert result["status"] == "completed"
     assert result["result"] == "answer"
+    assert result["result_status"] == "available"
 
 
 @pytest.mark.parametrize(
@@ -1075,3 +1073,53 @@ async def test_result_rejects_unknown_and_foreign_run_ids():
         await get_child_result(foreign.run_id, {"user_email": "user@example.com"})
     with pytest.raises(LaunchRefused):
         await get_child_result("missing", {"user_email": "user@example.com"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "conversation,expected",
+    [
+        (None, "unavailable"),
+        ({"messages": []}, "empty"),
+    ],
+)
+async def test_result_status_distinguishes_unavailable_and_empty(conversation, expected):
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    set_current_run(parent.run_id, parent.conversation_id)
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: conversation
+        )
+    )
+
+    result = await get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
+
+    assert result["result_status"] == expected
+
+
+@pytest.mark.asyncio
+async def test_result_status_distinguishes_unreadable_repository():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    def _fail(*args):
+        raise RuntimeError("db unavailable")
+
+    result = await get_child_result(
+        child.run_id,
+        {"user_email": "user@example.com"},
+        SimpleNamespace(conversation_repository=SimpleNamespace(get_conversation=_fail)),
+    )
+
+    assert result["result_status"] == "unreadable"
+    assert result["result_error"]

@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 # A prompt long enough to be a document is not a task description; the child
 # has its own context window and its own history to fill.
 MAX_PROMPT_CHARS = 20000
+MAX_RESULT_CHARS = 20000
 
 # Agent steps a launched run is allowed. Deliberately the same order as the
 # default interactive budget: a sub-conversation is a peer of a normal agent
@@ -583,7 +584,6 @@ def _scoped_children(context: Optional[Dict[str, Any]]) -> List[Any]:
     if not user_email or current is None:
         return []
     registry = get_run_registry()
-    registry.reap_terminal()
     return [
         record
         for record in registry.children_of(current.run_id, include_terminal=True)
@@ -642,8 +642,14 @@ async def get_child_result(
         result["result_status"] = "empty"
         return result
     content = assistant_messages[-1].get("content")
-    result["result"] = content if isinstance(content, str) else json.dumps(content)
-    result["result_status"] = "available"
+    normalized = content if isinstance(content, str) else json.dumps(content)
+    if len(normalized) > MAX_RESULT_CHARS:
+        result["result"] = normalized[:MAX_RESULT_CHARS]
+        result["result_status"] = "available_truncated"
+        result["result_error"] = "The result was truncated to the maximum return size."
+    else:
+        result["result"] = normalized
+        result["result_status"] = "available"
     return result
 
 

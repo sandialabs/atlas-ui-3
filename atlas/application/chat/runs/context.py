@@ -21,6 +21,8 @@ from contextvars import ContextVar
 from logging import getLogger
 from typing import NamedTuple, Optional, TypeVar
 
+from atlas.core.log_sanitizer import sanitize_for_logging
+
 logger = getLogger(__name__)
 T = TypeVar("T")
 
@@ -87,7 +89,11 @@ def tag_event(
     if not isinstance(data, dict):
         return data
     if "run_id" in data and data["run_id"] != run_id:
-        logger.warning("Event run_id %s disagrees with ambient run_id %s", data["run_id"], run_id)
+        logger.debug(
+            "Event run_id %s overrides ambient run_id %s",
+            sanitize_for_logging(str(data["run_id"])),
+            sanitize_for_logging(run_id),
+        )
     if "conversation_id" in data and data["conversation_id"] != conversation_id:
         logger.debug(
             "Event conversation_id %s overrides ambient conversation_id %s",

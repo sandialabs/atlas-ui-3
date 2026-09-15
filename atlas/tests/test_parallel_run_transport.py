@@ -58,6 +58,7 @@ def test_producer_supplied_conversation_id_wins(caplog):
 
 
 def test_producer_supplied_run_id_mismatch_is_logged(caplog):
+    caplog.set_level("DEBUG")
     tag_run_event(
         {"type": "token_stream", "run_id": "run-real"}, "run-envelope", "conv-1"
     )
