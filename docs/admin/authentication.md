@@ -1,6 +1,6 @@
 # Authentication & Authorization
 
-Last updated: 2026-09-04
+Last updated: 2026-09-15
 
 This page describes Atlas's **default** authentication mode: the application
 operates behind a reverse proxy and trusts an identity header injected by an
