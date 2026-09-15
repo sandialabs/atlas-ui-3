@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #942 - 2026-09-14
+### PR #943 - 2026-09-14
 - **Launched sub-conversation observation** (closes #941 and #926): add scoped `atlas_get_runs` and `atlas_result` tools for non-blocking status and result retrieval, and harden run-event tagging type preservation, mismatch diagnostics, and copy semantics.
 
 ### PR #939 - 2026-09-13
