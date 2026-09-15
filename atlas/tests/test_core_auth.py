@@ -555,8 +555,9 @@ async def test_admin_override_is_logged_as_an_audit_signal(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="atlas.core.auth"), patcher:
         assert await is_user_in_group("alice@example.org", "admin") is True
 
-    assert "ADMIN_USERS" in caplog.text
-    assert "alice@example.org" in caplog.text
+    auth_records = [r for r in caplog.records if r.name == "atlas.core.auth"]
+    assert any("ADMIN_USERS" in r.getMessage() for r in auth_records)
+    assert any("alice@example.org" in r.getMessage() for r in auth_records)
 
     # With no authorizer to override, this is simply how admins are configured;
     # warning on every admin request would train operators to ignore the line.
@@ -567,7 +568,9 @@ async def test_admin_override_is_logged_as_an_audit_signal(monkeypatch, caplog):
     _reset_admin_override_log_for_tests()
     with caplog.at_level(logging.WARNING, logger="atlas.core.auth"):
         assert await is_user_in_group("alice@example.org", "admin") is True
-    assert caplog.text == ""
+    # Scoped to this logger: caplog collects propagated records from every
+    # logger, so settings' own startup warnings would fail this spuriously.
+    assert [r for r in caplog.records if r.name == "atlas.core.auth"] == []
 
 
 @pytest.mark.asyncio
@@ -599,6 +602,59 @@ async def test_admin_override_audit_line_is_throttled(monkeypatch, caplog):
     assert len(override_lines) == 2
     assert any("alice@example.org" in r.getMessage() for r in override_lines)
     assert any("bob@example.org" in r.getMessage() for r in override_lines)
+
+
+@pytest.mark.asyncio
+async def test_override_warning_is_not_swallowed_when_an_authorizer_appears(monkeypatch, caplog):
+    """The throttle keys on severity too: a deployment that adds an authorizer
+    partway through a TTL must still get the warning for grants that now
+    override it, rather than inheriting the info-level entry cached before."""
+    _production_static_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import _reset_admin_override_log_for_tests, is_user_in_group
+
+    _reset_admin_override_log_for_tests()
+    # No authorizer: info only, nothing at WARNING.
+    with caplog.at_level(logging.WARNING, logger="atlas.core.auth"):
+        assert await is_user_in_group("alice@example.org", "admin") is True
+    assert [r for r in caplog.records if r.name == "atlas.core.auth"] == []
+
+    # Same identity and group, now with an authorizer configured.
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+    caplog.clear()
+
+    patcher, _client = _patched_authorizer(False)
+    with caplog.at_level(logging.WARNING, logger="atlas.core.auth"), patcher:
+        assert await is_user_in_group("alice@example.org", "admin") is True
+
+    auth_records = [r for r in caplog.records if r.name == "atlas.core.auth"]
+    assert any("bypassing the configured authorization service" in r.getMessage()
+               for r in auth_records)
+
+
+@pytest.mark.asyncio
+async def test_blank_group_is_never_granted_in_debug_mode(monkeypatch):
+    """An empty ADMIN_GROUP would put "" in every mock user's group list,
+    making a blank group name -- an MCP server with ``groups: [""]`` -- a
+    group everybody is in."""
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
+    monkeypatch.setenv("ADMIN_GROUP", "")
+    _disable_external_authorizer(monkeypatch)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    for blank in ("", "   ", None):
+        assert await is_user_in_group("test@test.com", blank) is False
+        assert await is_user_in_group("admin@example.com", blank) is False
 
 
 @pytest.mark.asyncio
@@ -642,8 +698,10 @@ async def test_authorization_log_lines_are_sanitized(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="atlas.core.auth"):
         assert await is_user_in_group(forged, "admin\ninjected") is True
 
-    assert "\n" not in caplog.records[0].getMessage()
-    assert "mallory@example.org" in caplog.text
+    auth_records = [r for r in caplog.records if r.name == "atlas.core.auth"]
+    assert auth_records
+    assert all("\n" not in r.getMessage() for r in auth_records)
+    assert any("mallory@example.org" in r.getMessage() for r in auth_records)
 
 
 @pytest.mark.asyncio

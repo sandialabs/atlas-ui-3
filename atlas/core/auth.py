@@ -35,16 +35,22 @@ _ALB_CACHE_MAX_ENTRIES = 256
 # table is bounded by that list; the ceiling is belt-and-braces.
 _ADMIN_OVERRIDE_LOG_TTL = timedelta(hours=1)
 _ADMIN_OVERRIDE_LOG_MAX_ENTRIES = 256
-_admin_override_logged: Dict[Tuple[str, str], datetime] = {}
+_admin_override_logged: Dict[Tuple[str, str, bool], datetime] = {}
 
 
-def _should_log_admin_override(user: str, group: str) -> bool:
-    """Whether to emit the ADMIN_USERS audit line for this (user, group) now."""
+def _should_log_admin_override(user: str, group: str, overrides_authorizer: bool) -> bool:
+    """Whether to emit the ADMIN_USERS audit line for this grant now.
+
+    ``overrides_authorizer`` is part of the key, not just the message: the two
+    cases log at different severities, and an authorizer configured partway
+    through a TTL would otherwise have its first warnings swallowed by an
+    info-level entry cached before it existed.
+    """
     now = datetime.utcnow()
     for key in [k for k, exp in _admin_override_logged.items() if exp <= now]:
         _admin_override_logged.pop(key, None)
 
-    cache_key = (user, group)
+    cache_key = (user, group, overrides_authorizer)
     if cache_key in _admin_override_logged:
         return False
 
@@ -166,7 +172,9 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # overrides an authorizer -- on a deployment with no authorizer this
         # is the ordinary way admins are configured, and warning on every
         # admin request would train operators to ignore the line.
-        if not _should_log_admin_override(normalized_user, normalized_group):
+        if not _should_log_admin_override(
+            normalized_user, normalized_group, bool(auth_url)
+        ):
             return True
         if auth_url:
             logger.warning(
@@ -224,6 +232,16 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
             return True
         # Mock group membership is only available in debug mode
         if not app_settings.debug_mode:
+            return False
+
+        # A blank identity or group is never a grant. Both are reachable from
+        # config: an empty ADMIN_TEST_USER/TEST_USER would key the mock table
+        # on "", and an empty ADMIN_GROUP would put "" in every mock user's
+        # group list -- making a blank group name (an MCP server declaring
+        # `groups: [""]`) one that everybody is in. The identity guard matters
+        # most: a request arriving with no identity at all is exactly the
+        # shape that would otherwise land on the empty key.
+        if not normalized_user or not normalized_group:
             return False
         # Allow configured test user to access admin group in debug mode.
         # Compared normalized, like every other branch: the documented

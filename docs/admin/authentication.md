@@ -296,6 +296,13 @@ ADMIN_USERS=alice@example.org,bob@example.org
 
 Because it is a break-glass path, a grant that actually overrides the authorization service is logged as a warning naming the identity, the group, and `ADMIN_USERS` as the source — so after an incident an override grant is distinguishable from real group membership. The line is throttled to once per identity and group per hour, since admin-gated routes are polled and a line per request would bury the signal. (With no authorizer configured, `ADMIN_USERS` is simply how admins are set up, and it logs at info level instead.)
 
+What the two signals look like — the startup line, and a grant that overrode the authorization service:
+
+```
+WARNING  atlas.modules.config.settings  ADMIN_USERS is set alongside AUTH_GROUP_CHECK_URL: 2 identity/ies now hold admin ('admin') regardless of what the authorization service answers. Before issue #945 these entries were inert while an authorizer was configured -- review the list and remove anyone who should no longer have break-glass admin.
+WARNING  atlas.core.auth  Admin override: granting admin group 'admin' to user 'alice@example.org' via ADMIN_USERS, bypassing the configured authorization service.
+```
+
 > **Upgrading:** before this change, `ADMIN_USERS` was inert whenever `AUTH_GROUP_CHECK_URL` was configured. If your deployment sets both, those entries are now live admin grants — review the list and remove anyone, de-provisioned staff especially, who should no longer hold break-glass admin. Atlas logs a startup warning whenever both are set.
 
 
