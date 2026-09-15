@@ -155,6 +155,18 @@ def _log_base_dir() -> Path:
     return _project_root() / "logs"
 
 
+def _is_oauth_authentication_failure(server_config: Dict[str, Any], error: str) -> bool:
+    if server_config.get("auth_type") != "oauth":
+        return False
+    normalized_error = error.lower()
+    return (
+        "401" in normalized_error
+        or "unauthorized" in normalized_error
+        or "authentication required" in normalized_error
+        or "authentication failed" in normalized_error
+    )
+
+
 def _locate_log_file() -> Path:
     """Locate the log file (standardized on project_root/logs with optional override).
 
@@ -407,6 +419,9 @@ async def get_mcp_status(admin_user: str = Depends(require_admin)):
 
             failed_servers_with_timing[server_name] = {
                 **failure_info,
+                "auth_required": _is_oauth_authentication_failure(
+                    mcp.servers_config.get(server_name, {}), failure_info.get("error", "")
+                ),
                 "backoff_delay": backoff_delay,
                 "next_retry_in_seconds": next_retry_in,
             }
