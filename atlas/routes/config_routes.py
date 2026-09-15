@@ -16,7 +16,9 @@ from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     ATLAS_TOOL_SCHEMAS,
     DISCOVER_TOOL_NAME,
+    GET_RUNS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
+    RESULT_TOOL_NAME,
     SEARCH_TOOL_NAME,
     launch_tool_enabled,
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
@@ -72,7 +74,7 @@ def _atlas_tools_info(
             continue
         if full_name in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
             continue
-        if full_name == LAUNCH_TOOL_NAME and not launch_enabled:
+        if full_name in (LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME) and not launch_enabled:
             continue
         function = schema["function"]
         tool_name = full_name.removeprefix(f"{ATLAS_SERVER_NAME}_")

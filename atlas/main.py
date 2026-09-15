@@ -30,7 +30,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional, TypeVar
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -165,7 +165,10 @@ _TOOL_SETTLED_EVENTS = frozenset(
 )
 
 
-def tag_run_event(message: Any, run_id: str, conversation_id: str) -> Any:
+T = TypeVar("T")
+
+
+def tag_run_event(message: T, run_id: str, conversation_id: str) -> T:
     """Stamp an outbound event with the run that produced it (issue #884).
 
     Delegates to the single tagging authority (issue #915); copies because the

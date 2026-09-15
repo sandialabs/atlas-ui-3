@@ -16,6 +16,8 @@ from atlas.application.chat.runs.context import clear_current_run, set_current_r
 from atlas.application.chat.runs.launcher import (
     LaunchRefused,
     execute_launch_tool,
+    get_child_result,
+    get_child_runs,
     launch_sub_conversation,
     launch_tool_enabled,
     resolve_workspace,
@@ -933,3 +935,83 @@ async def test_an_admin_mandated_tool_still_prompts_inside_the_child(monkeypatch
     assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is False
     for service in factory.services:
         service.release.set()
+
+
+def test_parent_can_list_only_its_direct_children():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    other = registry.start(
+        conversation_id="other", user_email="user@example.com", parent_run_id="other-parent", depth=1
+    )
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    runs = get_child_runs({"user_email": "user@example.com"})
+
+    assert [run["run_id"] for run in runs] == [child.run_id]
+    assert other.run_id not in [run["run_id"] for run in runs]
+
+
+def test_result_returns_persisted_assistant_content_only_for_a_child():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: {
+                "messages": [
+                    {"role": "user", "content": "task"},
+                    {"role": "assistant", "content": "answer"},
+                ]
+            }
+        )
+    )
+
+    result = get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
+
+    assert result["status"] == "completed"
+    assert result["result"] == "answer"
+
+
+@pytest.mark.parametrize(
+    "status",
+    [RunStatus.RUNNING, RunStatus.WAITING_FOR_INPUT, RunStatus.FAILED, RunStatus.CANCELLED],
+)
+def test_result_reports_non_completed_status_without_loading_history(status):
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, status)
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    result = get_child_result(
+        child.run_id,
+        {"user_email": "user@example.com"},
+        SimpleNamespace(conversation_repository=None),
+    )
+
+    assert result["status"] == status.value
+    assert result["result"] is None
+
+
+def test_result_rejects_unknown_and_foreign_run_ids():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    foreign = registry.start(
+        conversation_id="foreign", user_email="other@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    with pytest.raises(LaunchRefused):
+        get_child_result(foreign.run_id, {"user_email": "user@example.com"})
+    with pytest.raises(LaunchRefused):
+        get_child_result("missing", {"user_email": "user@example.com"})

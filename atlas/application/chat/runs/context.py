@@ -18,7 +18,11 @@ adapter stamps outgoing frames from it.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import Any, NamedTuple, Optional
+from logging import getLogger
+from typing import NamedTuple, Optional, TypeVar
+
+logger = getLogger(__name__)
+T = TypeVar("T")
 
 
 class RunContext(NamedTuple):
@@ -49,12 +53,12 @@ def clear_current_run() -> None:
 
 
 def tag_event(
-    data: Any,
+    data: T,
     run_id: str,
     conversation_id: str,
     *,
     copy: bool = True,
-) -> Any:
+) -> T:
     """Stamp an outbound event with the run that produced it (issue #884).
 
     The single authority for the tagging rule; every caller goes through here
@@ -82,13 +86,21 @@ def tag_event(
     """
     if not isinstance(data, dict):
         return data
+    if "run_id" in data and data["run_id"] != run_id:
+        logger.warning("Event run_id %s disagrees with ambient run_id %s", data["run_id"], run_id)
+    if "conversation_id" in data and data["conversation_id"] != conversation_id:
+        logger.warning(
+            "Event conversation_id %s disagrees with ambient conversation_id %s",
+            data["conversation_id"],
+            conversation_id,
+        )
     tagged = dict(data) if copy else data
     tagged.setdefault("run_id", run_id)
     tagged.setdefault("conversation_id", conversation_id)
     return tagged
 
 
-def stamp_with_current_run(data: Any) -> Any:
+def stamp_with_current_run(data: T) -> T:
     """Add run_id/conversation_id to an outgoing frame, if a run is executing.
 
     Resolves the ambient run and delegates the stamping rule to

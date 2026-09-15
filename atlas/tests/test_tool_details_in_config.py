@@ -146,6 +146,14 @@ def test_atlas_pseudo_server_has_tools_panel_info():
         assert "_atlas_user" not in tool["inputSchema"].get("properties", {})
 
 
+def test_atlas_pseudo_server_includes_observation_tools_when_launch_is_enabled():
+    tools_info = _atlas_tools_info(
+        sleep_enabled=True, search_enabled=True, launch_enabled=True
+    )
+
+    assert {"launch", "get_runs", "result"} <= set(tools_info["tools"])
+
+
 def test_atlas_pseudo_server_drops_disabled_tools():
     """Gated built-ins drop out of the tool list; the server itself stays."""
     tools_info = _atlas_tools_info(sleep_enabled=False, search_enabled=False)
