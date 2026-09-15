@@ -227,21 +227,25 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
             if static_members and normalized_user in static_members:
                 return True
 
+        # A blank identity or group is never a grant, and this sits above the
+        # ``users`` short-circuit deliberately: without it an identity-less
+        # request is "in users", which is the group most features check. Routes
+        # authenticate before asking, so this is defence in depth rather than
+        # the control -- but "nobody" should not be a member of anything.
+        #
+        # Both blanks are also reachable from config: an empty
+        # ADMIN_TEST_USER/TEST_USER would key the debug mock table on "", and
+        # an empty ADMIN_GROUP would put "" in every mock user's group list,
+        # making a blank group name (an MCP server declaring `groups: [""]`)
+        # one that everybody is in.
+        if not normalized_user or not normalized_group:
+            return False
+
         # Everybody is in the users group by default
         if normalized_group == "users":
             return True
         # Mock group membership is only available in debug mode
         if not app_settings.debug_mode:
-            return False
-
-        # A blank identity or group is never a grant. Both are reachable from
-        # config: an empty ADMIN_TEST_USER/TEST_USER would key the mock table
-        # on "", and an empty ADMIN_GROUP would put "" in every mock user's
-        # group list -- making a blank group name (an MCP server declaring
-        # `groups: [""]`) one that everybody is in. The identity guard matters
-        # most: a request arriving with no identity at all is exactly the
-        # shape that would otherwise land on the empty key.
-        if not normalized_user or not normalized_group:
             return False
         # Allow configured test user to access admin group in debug mode.
         # Compared normalized, like every other branch: the documented
@@ -270,8 +274,6 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # "", handing admin to a blank or missing identity -- the one input an
         # unauthenticated request is most likely to arrive with.
         mock_groups.pop("", None)
-        if not normalized_user:
-            return False
         user_groups = mock_groups.get(normalized_user, [])
         return normalized_group in user_groups
 

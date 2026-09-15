@@ -15,6 +15,8 @@
 # - AUTH_STATIC_GROUPS keeps its explicit 'group:user1,user2' syntax: a bare
 #   group name is skipped with a warning naming ADMIN_GROUP, and a static
 #   mapping still yields to a configured authorizer.
+# - Blank identities and groups are denied everywhere, including the `users`
+#   short-circuit; the override audit line is throttled per identity.
 # - Backend auth unit suite passes.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -255,7 +257,77 @@ stop_authorizer
 unset AUTH_GROUP_CHECK_URL
 
 # ==========================================
-print_header "7. Backend auth unit suite"
+print_header "7. Blank identities and groups are never granted"
+# ==========================================
+RESULT=$(
+    DEBUG_MODE=true FEATURE_AGENT_PORTAL_ENABLED=false \
+    ADMIN_GROUP=atlas_admins ADMIN_USERS= AUTH_STATIC_GROUPS= \
+    ADMIN_TEST_USER= TEST_USER= \
+    python3 - <<'PYBLANK' 2>/dev/null | tail -1
+import asyncio, logging
+logging.disable(logging.CRITICAL)
+from atlas.core.auth import is_user_in_group
+
+
+async def main():
+    results = []
+    for blank in ("", "   ", None):
+        for group in ("atlas_admins", "users", "mcp_advanced"):
+            results.append(await is_user_in_group(blank, group))
+        results.append(await is_user_in_group("test@test.com", blank))
+    return results
+
+
+print("any_granted=" + str(any(asyncio.run(main()))))
+PYBLANK
+)
+echo "  $RESULT"
+[ "$RESULT" = "any_granted=False" ]
+print_result $? "A blank identity or group is denied everywhere, including 'users'"
+
+# ==========================================
+print_header "8. The override audit line is throttled"
+# ==========================================
+start_authorizer false
+RESULT=$(
+    set -a
+    # shellcheck disable=SC1090
+    source "$FIXTURES_DIR/.env.override"
+    set +a
+    python3 - <<'PYTHROTTLE' 2>/dev/null | tail -1
+import asyncio, logging
+from atlas.core.auth import is_user_in_group
+
+records = []
+
+
+class _Collect(logging.Handler):
+    def emit(self, record):
+        records.append(record.getMessage())
+
+
+log = logging.getLogger("atlas.core.auth")
+log.addHandler(_Collect())
+log.setLevel(logging.WARNING)
+
+
+async def main():
+    for _ in range(5):
+        assert await is_user_in_group("alice@example.org", "atlas_admins") is True
+
+
+asyncio.run(main())
+print("override_lines=" + str(len([r for r in records if "ADMIN_USERS" in r])))
+PYTHROTTLE
+)
+echo "  five authorization checks -> $RESULT"
+[ "$RESULT" = "override_lines=1" ]
+print_result $? "Five checks for one identity produce one audit line, not five"
+stop_authorizer
+unset AUTH_GROUP_CHECK_URL
+
+# ==========================================
+print_header "9. Backend auth unit suite"
 # ==========================================
 # Capture pytest's own status, not tail's: `pytest | tail` would report PASSED
 # even if every test failed.
