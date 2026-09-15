@@ -113,15 +113,35 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
     # path that must keep working when the authorization service is the thing
     # that broke, and it is scoped to the admin group and to identities the
     # operator typed out by hand.
+    auth_url = app_settings.auth_group_check_url
+    api_key = app_settings.auth_group_check_api_key
+
     if (
         normalized_group
         and normalized_group == (app_settings.admin_group or "").strip().lower()
         and normalized_user in app_settings.admin_user_set
     ):
+        # Audit signal, for the same reason the SKIP_AUTHORIZATION_CHECKS
+        # bypass above logs one: after an incident, an admin action taken via
+        # the break-glass list has to be distinguishable from one backed by
+        # real group membership. It is a warning only when it actually
+        # overrides an authorizer -- on a deployment with no authorizer this
+        # is the ordinary way admins are configured, and warning on every
+        # admin request would train operators to ignore the line.
+        if auth_url:
+            logger.warning(
+                "Admin override: granting admin group '%s' to user '%s' via "
+                "ADMIN_USERS, bypassing the configured authorization service.",
+                group_id,
+                user_id,
+            )
+        else:
+            logger.info(
+                "Granting admin group '%s' to user '%s' via ADMIN_USERS.",
+                group_id,
+                user_id,
+            )
         return True
-
-    auth_url = app_settings.auth_group_check_url
-    api_key = app_settings.auth_group_check_api_key
 
     if auth_url and api_key:
         # Use the external HTTP endpoint for authorization
@@ -165,9 +185,12 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # Mock group membership is only available in debug mode
         if not app_settings.debug_mode:
             return False
-        # Allow configured test user to access admin group in debug mode
-        if (user_id == app_settings.test_user and
-                group_id == app_settings.admin_group):
+        # Allow configured test user to access admin group in debug mode.
+        # Compared normalized, like every other branch: the documented
+        # case/whitespace tolerance should not stop at the static table.
+        normalized_admin_group = (app_settings.admin_group or "").strip().lower()
+        if (normalized_user == (app_settings.test_user or "").strip().lower()
+                and normalized_group == normalized_admin_group):
             return True
 
         # The admin entries use the *configured* admin group rather than a
@@ -177,14 +200,14 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # configured ADMIN_TEST_USER was granted a group nothing checks, so
         # debug-mode admin routes were unreachable for that identity.
         mock_groups = {
-            "test@test.com": ["users", "mcp_basic", app_settings.admin_group],
+            "test@test.com": ["users", "mcp_basic", normalized_admin_group],
             "user@example.com": ["users", "mcp_basic"],
-            app_settings.admin_test_user: [
-                app_settings.admin_group, "users", "mcp_basic", "mcp_advanced"
+            (app_settings.admin_test_user or "").strip().lower(): [
+                normalized_admin_group, "users", "mcp_basic", "mcp_advanced"
             ],
         }
-        user_groups = mock_groups.get(user_id, [])
-        return group_id in user_groups
+        user_groups = mock_groups.get(normalized_user, [])
+        return normalized_group in user_groups
 
 
 def _get_alb_public_key(kid: str, aws_region: str) -> Optional[str]:

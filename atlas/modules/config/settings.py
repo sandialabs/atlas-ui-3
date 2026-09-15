@@ -1122,6 +1122,29 @@ class AppSettings(BaseSettings):
             )
         return self
 
+    @model_validator(mode='after')
+    def warn_when_admin_users_overrides_an_authorizer(self):
+        """Warn when ``ADMIN_USERS`` is live alongside an external authorizer.
+
+        ``ADMIN_USERS`` used to be inert whenever ``AUTH_GROUP_CHECK_URL`` was
+        configured, so a deployment running both may be carrying entries nobody
+        has looked at in a long time -- including de-provisioned staff. Since
+        issue #945 those entries grant admin, and they do so *over* the
+        authorization service's answer. That is intended, but it should not
+        happen silently on the restart that picks up the new version.
+        """
+        if self.auth_group_check_url and self.admin_user_set:
+            logger.warning(
+                "ADMIN_USERS is set alongside AUTH_GROUP_CHECK_URL: %d identity/ies "
+                "now hold admin ('%s') regardless of what the authorization service "
+                "answers. Before issue #945 these entries were inert while an "
+                "authorizer was configured -- review the list and remove anyone who "
+                "should no longer have break-glass admin.",
+                len(self.admin_user_set),
+                self.admin_group,
+            )
+        return self
+
     _static_group_members_cache: Optional[Dict[str, FrozenSet[str]]] = PrivateAttr(default=None)
     _admin_user_set_cache: Optional[FrozenSet[str]] = PrivateAttr(default=None)
 

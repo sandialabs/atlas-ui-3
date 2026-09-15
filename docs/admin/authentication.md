@@ -294,6 +294,11 @@ ADMIN_USERS=alice@example.org,bob@example.org
 
 `ADMIN_USERS` is an **override, not a fallback**: it is honoured even when `AUTH_GROUP_CHECK_URL` is configured, and even when that endpoint denies, errors, or is unreachable. This is deliberate — it is the emergency path that has to keep working when the authorization service is the thing that broke. It only ever *grants*, it applies only to the configured `ADMIN_GROUP`, and it has no effect on any other group.
 
+Because it is a break-glass path, each grant that actually overrides the authorization service is logged as a warning naming the identity, the group, and `ADMIN_USERS` as the source — so after an incident an override grant is distinguishable from real group membership. (With no authorizer configured, `ADMIN_USERS` is simply how admins are set up, and it logs at info level instead.)
+
+> **Upgrading:** before this change, `ADMIN_USERS` was inert whenever `AUTH_GROUP_CHECK_URL` was configured. If your deployment sets both, those entries are now live admin grants — review the list and remove anyone, de-provisioned staff especially, who should no longer hold break-glass admin. Atlas logs a startup warning whenever both are set.
+
+
 The three mechanisms are distinct:
 
 | Setting | What it is | Honoured when an external authorizer is configured? |
@@ -302,7 +307,7 @@ The three mechanisms are distinct:
 | `ADMIN_USERS` | Static admin **override list** | Yes — grants admin regardless of the authorizer's answer |
 | `AUTH_STATIC_GROUPS` | Explicit **static membership mappings** (`group:user1,user2`) | No — the authorizer stays authoritative |
 
-### Static Configuration: `ADMIN_USERS` / `AUTH_STATIC_GROUPS`
+### Static Configuration Without an Authorization Service
 
 For deployments that do not run an authorization service, group membership can be configured statically. This is consulted **after** `AUTH_GROUP_CHECK_URL` and **before** the debug-only mock table, and — unlike the mock table — it works with `DEBUG_MODE=false`.
 

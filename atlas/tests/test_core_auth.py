@@ -157,6 +157,12 @@ def _external_authorizer_env(monkeypatch, *, debug_mode: str = "false"):
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", _AUTHORIZER_URL)
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", _AUTHORIZER_API_KEY)
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    # These now grant independently of the authorizer (ADMIN_USERS) or ahead of
+    # the mock table (AUTH_STATIC_GROUPS), so an ambient value -- exported in a
+    # shell, or loaded from the project ``.env`` -- would quietly turn an
+    # "authorizer is authoritative" assertion into a test of the static path.
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
     config_manager.reload_configs()
 
 
@@ -500,6 +506,117 @@ async def test_admin_users_override_survives_a_broken_authorizer(monkeypatch):
         assert await is_user_in_group("alice@example.org", "admin") is True
         assert await is_user_in_group("mallory@example.org", "admin") is False
         assert await is_user_in_group("alice@example.org", "mcp_advanced") is False
+
+
+@pytest.mark.asyncio
+async def test_admin_users_override_applies_when_url_is_set_without_api_key(monkeypatch):
+    """The fail-closed branch, with the override in play.
+
+    ``AUTH_GROUP_CHECK_URL`` without ``AUTH_GROUP_CHECK_API_KEY`` never reaches
+    the external call, and the static table is deliberately not consulted there
+    (see the test at the bottom of this file). ``ADMIN_USERS`` is checked before
+    that branch is even selected, so it still grants -- which is the point: a
+    half-injected authorizer secret is exactly the incident the break-glass list
+    exists for. Everything else must still fail closed.
+    """
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.setenv("AUTH_STATIC_GROUPS", "admin:carol@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    assert await is_user_in_group("alice@example.org", "admin") is True
+    # Every other identity and group still fails closed in this state.
+    assert await is_user_in_group("mallory@example.org", "admin") is False
+    assert await is_user_in_group("carol@example.org", "admin") is False
+    assert await is_user_in_group("alice@example.org", "mcp_advanced") is False
+
+
+@pytest.mark.asyncio
+async def test_admin_override_is_logged_as_an_audit_signal(monkeypatch, caplog):
+    """A break-glass grant must be distinguishable from real group membership
+    in the logs, like the SKIP_AUTHORIZATION_CHECKS bypass it sits next to."""
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    patcher, _client = _patched_authorizer(False)
+    with caplog.at_level(logging.WARNING, logger="atlas.core.auth"), patcher:
+        assert await is_user_in_group("alice@example.org", "admin") is True
+
+    assert "ADMIN_USERS" in caplog.text
+    assert "alice@example.org" in caplog.text
+
+    # With no authorizer to override, this is simply how admins are configured;
+    # warning on every admin request would train operators to ignore the line.
+    _production_static_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
+    config_manager.reload_configs()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="atlas.core.auth"):
+        assert await is_user_in_group("alice@example.org", "admin") is True
+    assert caplog.text == ""
+
+
+def test_warns_when_admin_users_is_live_alongside_an_authorizer(monkeypatch, caplog):
+    """Entries that were inert before issue #945 become live admin grants on
+    the restart that picks up this version. That should not be silent."""
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+
+    # ``auth_group_check_url`` has a validation alias, so a kwarg under the
+    # field name is silently ignored -- it has to be passed by alias or the
+    # setting stays None and this test asserts nothing.
+    with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
+        settings = AppSettings(
+            debug_mode=False,
+            AUTH_GROUP_CHECK_URL="https://auth.example.com/check",
+            ADMIN_USERS="alice@example.org",
+        )
+    assert settings.auth_group_check_url == "https://auth.example.com/check"
+    assert "ADMIN_USERS is set alongside AUTH_GROUP_CHECK_URL" in caplog.text
+
+    # No authorizer, or no ADMIN_USERS: nothing changed, so say nothing.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
+        AppSettings(debug_mode=False, auth_group_check_url=None, ADMIN_USERS="alice@example.org")
+        AppSettings(
+            debug_mode=False,
+            AUTH_GROUP_CHECK_URL="https://auth.example.com/check",
+            ADMIN_USERS="",
+        )
+    assert "ADMIN_USERS is set alongside" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_debug_mock_table_is_case_and_whitespace_tolerant(monkeypatch):
+    """The documented tolerance should not stop at the static table: the
+    debug-only branches compared raw values while everything above them
+    compared normalized ones."""
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
+    _disable_external_authorizer(monkeypatch)
+    monkeypatch.setenv("ADMIN_TEST_USER", "admin@example.com")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    admin_group = config_manager.app_settings.admin_group
+    assert await is_user_in_group(" Admin@Example.COM ", admin_group.upper()) is True
+    assert await is_user_in_group("ADMIN@example.com", " mcp_advanced ") is True
+    assert await is_user_in_group("ADMIN@example.com", "nonexistent_group") is False
 
 
 def test_admin_user_set_is_normalized_and_separate_from_static_table(monkeypatch):

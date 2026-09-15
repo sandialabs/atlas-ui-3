@@ -257,8 +257,12 @@ unset AUTH_GROUP_CHECK_URL
 # ==========================================
 print_header "7. Backend auth unit suite"
 # ==========================================
-python -m pytest atlas/tests/test_core_auth.py -q 2>&1 | tail -2
-print_result $? "atlas/tests/test_core_auth.py passes"
+# Capture pytest's own status, not tail's: `pytest | tail` would report PASSED
+# even if every test failed.
+PYTEST_OUT="$(python -m pytest atlas/tests/test_core_auth.py -q 2>&1)"
+PYTEST_STATUS=$?
+echo "$PYTEST_OUT" | tail -2
+print_result "$PYTEST_STATUS" "atlas/tests/test_core_auth.py passes"
 
 print_header "Summary"
 echo -e "${GREEN}Passed: $PASSED${NC}"
