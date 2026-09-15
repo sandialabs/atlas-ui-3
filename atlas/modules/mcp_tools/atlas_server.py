@@ -300,7 +300,12 @@ GET_RUNS_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": GET_RUNS_TOOL_NAME,
-        "description": "List the direct sub-conversations launched by this conversation and their current status.",
+        "description": (
+            "List direct sub-conversations launched by this conversation. Returns "
+            "run_id, conversation_id, status, timestamps, waiting_on and errors. "
+            "Statuses are queued, running, waiting_for_input, completed, failed "
+            "or cancelled; this call does not wait."
+        ),
         "parameters": {"type": "object", "properties": {}},
     },
 }
@@ -309,7 +314,12 @@ RESULT_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": RESULT_TOOL_NAME,
-        "description": "Return the current status and final assistant result of a sub-conversation launched by this conversation. Does not wait.",
+        "description": (
+            "Return the current status and final assistant result of a direct child "
+            "launched by this conversation. Pass the run_id from atlas_launch or "
+            "atlas_get_runs. This never waits; poll with atlas_sleep between checks. "
+            "Results are scoped to this conversation and user."
+        ),
         "parameters": {
             "type": "object",
             "properties": {

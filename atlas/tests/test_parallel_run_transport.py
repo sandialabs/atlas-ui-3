@@ -49,11 +49,12 @@ def test_tagging_does_not_mutate_the_original_event():
 
 def test_producer_supplied_conversation_id_wins(caplog):
     """A producer that knows its own conversation is more authoritative."""
+    caplog.set_level("DEBUG")
     tagged = tag_run_event(
         {"type": "canvas_content", "conversation_id": "conv-real"}, "run-1", "conv-envelope"
     )
     assert tagged["conversation_id"] == "conv-real"
-    assert "disagrees with ambient" in caplog.text
+    assert "overrides ambient" in caplog.text
 
 
 def test_producer_supplied_run_id_mismatch_is_logged(caplog):

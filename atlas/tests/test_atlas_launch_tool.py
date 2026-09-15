@@ -26,7 +26,9 @@ from atlas.application.chat.runs.registry import RunRegistry, RunStatus, reset_r
 from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_TOOL_SCHEMAS,
+    GET_RUNS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
+    RESULT_TOOL_NAME,
     atlas_tool_schemas,
     is_atlas_tool,
 )
@@ -898,6 +900,61 @@ async def test_execution_refuses_the_tool_when_the_deployment_disables_it(monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", [GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME])
+async def test_observation_dispatches_through_the_manager(tool_name, monkeypatch):
+    from atlas.modules.mcp_tools import mcp_execution
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    set_current_run(parent.run_id, parent.conversation_id)
+    monkeypatch.setattr(
+        mcp_execution,
+        "_client",
+        lambda: SimpleNamespace(config_manager=SimpleNamespace(app_settings=_settings())),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-1",
+            name=tool_name,
+            arguments={"run_id": child.run_id} if tool_name == RESULT_TOOL_NAME else {},
+        ),
+        {"user_email": "user@example.com"},
+    )
+
+    assert result.success is True
+    assert tool_name == GET_RUNS_TOOL_NAME or child.run_id in result.content
+
+
+@pytest.mark.asyncio
+async def test_observation_dispatch_refuses_when_disabled(monkeypatch):
+    from atlas.modules.mcp_tools import mcp_execution
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    monkeypatch.setattr(
+        mcp_execution,
+        "_client",
+        lambda: SimpleNamespace(
+            config_manager=SimpleNamespace(app_settings=_settings(feature_atlas_launch_enabled=False))
+        ),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-1", name=GET_RUNS_TOOL_NAME, arguments={}),
+        {"user_email": "user@example.com"},
+    )
+
+    assert result.success is False
+    assert "disabled" in result.content
+
+
+@pytest.mark.asyncio
 async def test_the_launch_call_is_the_approval_for_the_childs_own_tools(monkeypatch):
     """Nobody is watching the child's conversation to answer an approval."""
     monkeypatch.setattr(
@@ -954,7 +1011,8 @@ def test_parent_can_list_only_its_direct_children():
     assert other.run_id not in [run["run_id"] for run in runs]
 
 
-def test_result_returns_persisted_assistant_content_only_for_a_child():
+@pytest.mark.asyncio
+async def test_result_returns_persisted_assistant_content_only_for_a_child():
     registry = _install_registry()
     parent = registry.start(conversation_id="parent", user_email="user@example.com")
     child = registry.start(
@@ -974,7 +1032,7 @@ def test_result_returns_persisted_assistant_content_only_for_a_child():
         )
     )
 
-    result = get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
+    result = await get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
 
     assert result["status"] == "completed"
     assert result["result"] == "answer"
@@ -984,7 +1042,8 @@ def test_result_returns_persisted_assistant_content_only_for_a_child():
     "status",
     [RunStatus.RUNNING, RunStatus.WAITING_FOR_INPUT, RunStatus.FAILED, RunStatus.CANCELLED],
 )
-def test_result_reports_non_completed_status_without_loading_history(status):
+@pytest.mark.asyncio
+async def test_result_reports_non_completed_status_without_loading_history(status):
     registry = _install_registry()
     parent = registry.start(conversation_id="parent", user_email="user@example.com")
     child = registry.start(
@@ -993,7 +1052,7 @@ def test_result_reports_non_completed_status_without_loading_history(status):
     registry.set_status(child.run_id, status)
     set_current_run(parent.run_id, parent.conversation_id)
 
-    result = get_child_result(
+    result = await get_child_result(
         child.run_id,
         {"user_email": "user@example.com"},
         SimpleNamespace(conversation_repository=None),
@@ -1003,7 +1062,8 @@ def test_result_reports_non_completed_status_without_loading_history(status):
     assert result["result"] is None
 
 
-def test_result_rejects_unknown_and_foreign_run_ids():
+@pytest.mark.asyncio
+async def test_result_rejects_unknown_and_foreign_run_ids():
     registry = _install_registry()
     parent = registry.start(conversation_id="parent", user_email="user@example.com")
     foreign = registry.start(
@@ -1012,6 +1072,6 @@ def test_result_rejects_unknown_and_foreign_run_ids():
     set_current_run(parent.run_id, parent.conversation_id)
 
     with pytest.raises(LaunchRefused):
-        get_child_result(foreign.run_id, {"user_email": "user@example.com"})
+        await get_child_result(foreign.run_id, {"user_email": "user@example.com"})
     with pytest.raises(LaunchRefused):
-        get_child_result("missing", {"user_email": "user@example.com"})
+        await get_child_result("missing", {"user_email": "user@example.com"})

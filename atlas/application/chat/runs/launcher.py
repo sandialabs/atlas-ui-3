@@ -48,7 +48,11 @@ from atlas.application.chat.runs.registry import (
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.domain.messages.models import ToolResult
-from atlas.modules.mcp_tools.atlas_server import launch_tool_enabled
+from atlas.modules.mcp_tools.atlas_server import (
+    GET_RUNS_TOOL_NAME,
+    RESULT_TOOL_NAME,
+    launch_tool_enabled,
+)
 
 __all__ = [
     "LaunchRefused",
@@ -579,6 +583,7 @@ def _scoped_children(context: Optional[Dict[str, Any]]) -> List[Any]:
     if not user_email or current is None:
         return []
     registry = get_run_registry()
+    registry.reap_terminal()
     return [
         record
         for record in registry.children_of(current.run_id, include_terminal=True)
@@ -590,7 +595,9 @@ def get_child_runs(context: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [record.to_public_dict() for record in _scoped_children(context)]
 
 
-def get_child_result(run_id: Any, context: Optional[Dict[str, Any]], factory: Any = None) -> Dict[str, Any]:
+async def get_child_result(
+    run_id: Any, context: Optional[Dict[str, Any]], factory: Any = None
+) -> Dict[str, Any]:
     if not isinstance(run_id, str) or not run_id.strip():
         raise LaunchRefused("'run_id' is required and must be a non-empty string.")
     children = {record.run_id: record for record in _scoped_children(context)}
@@ -605,6 +612,7 @@ def get_child_result(run_id: Any, context: Optional[Dict[str, Any]], factory: An
         "error": record.error,
         "waiting_on": record.waiting_on,
         "result": None,
+        "result_status": "pending" if not record.is_terminal else "unavailable",
     }
     if not record.is_terminal or record.status is not RunStatus.COMPLETED:
         return result
@@ -613,33 +621,60 @@ def get_child_result(run_id: Any, context: Optional[Dict[str, Any]], factory: An
         from atlas.infrastructure.app_factory import app_factory as factory
     repository = getattr(factory, "conversation_repository", None)
     if repository is None:
+        result["result_status"] = "unavailable"
         return result
-    conversation = repository.get_conversation(record.conversation_id, record.user_email)
-    if conversation:
-        for message in reversed(conversation.get("messages", [])):
-            if message.get("role") == "assistant" and message.get("content"):
-                result["result"] = message["content"]
-                break
+    try:
+        conversation = await asyncio.to_thread(
+            repository.get_conversation, record.conversation_id, record.user_email
+        )
+    except Exception as error:
+        logger.warning("Could not load result for run %s: %s", record.run_id, error)
+        result["result_status"] = "unreadable"
+        result["result_error"] = "The child result could not be read."
+        return result
+    if not conversation:
+        result["result_status"] = "unavailable"
+        return result
+    assistant_messages = [
+        message for message in conversation.get("messages", []) if message.get("role") == "assistant"
+    ]
+    if not assistant_messages:
+        result["result_status"] = "empty"
+        return result
+    content = assistant_messages[-1].get("content")
+    result["result"] = content if isinstance(content, str) else json.dumps(content)
+    result["result_status"] = "available"
     return result
 
 
-async def execute_observation_tool(tool_call: Any, context: Optional[Dict[str, Any]]) -> ToolResult:
-    name = getattr(tool_call, "function", None)
-    name = getattr(name, "name", None) or getattr(tool_call, "name", "")
+async def execute_observation_tool(
+    tool_call: Any, context: Optional[Dict[str, Any]], tool_name: str
+) -> ToolResult:
     arguments = getattr(tool_call, "arguments", None) or {}
     if not isinstance(arguments, dict):
         arguments = {}
     try:
-        if name == "atlas_get_runs":
+        if tool_name == GET_RUNS_TOOL_NAME:
             payload = {"runs": get_child_runs(context)}
+        elif tool_name == RESULT_TOOL_NAME:
+            payload = await get_child_result(arguments.get("run_id"), context)
         else:
-            payload = get_child_result(arguments.get("run_id"), context)
+            raise LaunchRefused("Unknown sub-conversation observation tool.")
     except LaunchRefused as error:
         return ToolResult(
             tool_call_id=getattr(tool_call, "id", None),
             content=str(error),
             success=False,
             error=str(error),
+        )
+    except Exception:
+        logger.error("Sub-conversation observation failed", exc_info=True)
+        message = "The sub-conversation status could not be retrieved due to an internal error."
+        return ToolResult(
+            tool_call_id=getattr(tool_call, "id", None),
+            content=message,
+            success=False,
+            error=message,
         )
     return ToolResult(
         tool_call_id=getattr(tool_call, "id", None),

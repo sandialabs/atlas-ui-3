@@ -173,7 +173,8 @@ def tag_run_event(message: T, run_id: str, conversation_id: str) -> T:
 
     Delegates to the single tagging authority (issue #915); copies because the
     event belongs to the caller. Inherits that authority's non-dict
-    passthrough, hence ``Any``. See :func:`tag_event` for the rule itself.
+    passthrough, while preserving the input type through ``T``. See
+    :func:`tag_event` for the rule itself.
     """
     return tag_event(message, run_id, conversation_id, copy=True)
 

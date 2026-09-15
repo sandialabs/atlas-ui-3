@@ -831,7 +831,7 @@ class ExecutionMixin:
                     success=False,
                     error=error_msg,
                 )
-            return await execute_observation_tool(tool_call, context)
+            return await execute_observation_tool(tool_call, context, resolved_name)
         if resolved_name == LAUNCH_TOOL_NAME:
             # Gated at execution as well as in the schema, like the other
             # built-ins: a saved conversation or a non-UI client can still name

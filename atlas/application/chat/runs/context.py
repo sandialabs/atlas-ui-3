@@ -89,8 +89,8 @@ def tag_event(
     if "run_id" in data and data["run_id"] != run_id:
         logger.warning("Event run_id %s disagrees with ambient run_id %s", data["run_id"], run_id)
     if "conversation_id" in data and data["conversation_id"] != conversation_id:
-        logger.warning(
-            "Event conversation_id %s disagrees with ambient conversation_id %s",
+        logger.debug(
+            "Event conversation_id %s overrides ambient conversation_id %s",
             data["conversation_id"],
             conversation_id,
         )
