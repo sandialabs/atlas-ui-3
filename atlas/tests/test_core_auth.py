@@ -548,8 +548,9 @@ async def test_admin_override_is_logged_as_an_audit_signal(monkeypatch, caplog):
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
     config_manager.reload_configs()
 
-    from atlas.core.auth import is_user_in_group
+    from atlas.core.auth import _reset_admin_override_log_for_tests, is_user_in_group
 
+    _reset_admin_override_log_for_tests()
     patcher, _client = _patched_authorizer(False)
     with caplog.at_level(logging.WARNING, logger="atlas.core.auth"), patcher:
         assert await is_user_in_group("alice@example.org", "admin") is True
@@ -563,9 +564,58 @@ async def test_admin_override_is_logged_as_an_audit_signal(monkeypatch, caplog):
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
     config_manager.reload_configs()
     caplog.clear()
+    _reset_admin_override_log_for_tests()
     with caplog.at_level(logging.WARNING, logger="atlas.core.auth"):
         assert await is_user_in_group("alice@example.org", "admin") is True
     assert caplog.text == ""
+
+
+@pytest.mark.asyncio
+async def test_admin_override_audit_line_is_throttled(monkeypatch, caplog):
+    """Admin-gated routes are polled by the UI, so an unthrottled line per
+    request buries the signal it exists to provide: log once per identity and
+    group, not once per authorization check."""
+    monkeypatch.setenv("DEBUG_MODE", "false")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.setenv("ADMIN_USERS", "alice@example.org,bob@example.org")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
+    monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
+    config_manager.reload_configs()
+
+    from atlas.core.auth import _reset_admin_override_log_for_tests, is_user_in_group
+
+    _reset_admin_override_log_for_tests()
+    patcher, _client = _patched_authorizer(False)
+    with caplog.at_level(logging.WARNING, logger="atlas.core.auth"), patcher:
+        for _ in range(5):
+            assert await is_user_in_group("alice@example.org", "admin") is True
+        # A different identity is a different audit event and still logs.
+        assert await is_user_in_group("bob@example.org", "admin") is True
+
+    override_lines = [
+        r for r in caplog.records
+        if r.name == "atlas.core.auth" and "ADMIN_USERS" in r.getMessage()
+    ]
+    assert len(override_lines) == 2
+    assert any("alice@example.org" in r.getMessage() for r in override_lines)
+    assert any("bob@example.org" in r.getMessage() for r in override_lines)
+
+
+@pytest.mark.asyncio
+async def test_external_authorizer_receives_the_raw_identity(monkeypatch):
+    """Normalization is for the sources Atlas evaluates itself. The external
+    service owns its own matching rules, so it gets the values as received --
+    rewriting them could change its answer."""
+    _external_authorizer_env(monkeypatch)
+
+    from atlas.core.auth import is_user_in_group
+
+    patcher, client = _patched_authorizer(True)
+    with patcher:
+        await is_user_in_group("  Alice@Example.ORG ", " Admin ")
+
+    _args, kwargs = client.post.call_args
+    assert kwargs["json"] == {"user_id": "  Alice@Example.ORG ", "group_id": " Admin "}
 
 
 @pytest.mark.asyncio
@@ -644,6 +694,29 @@ def test_warns_when_admin_users_is_live_alongside_an_authorizer(monkeypatch, cap
             ADMIN_USERS="",
         )
     assert "ADMIN_USERS is set alongside" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_blank_identity_is_never_an_admin_in_debug_mode(monkeypatch):
+    """An empty ADMIN_TEST_USER/TEST_USER would key the debug mock table on
+    "", handing admin to a blank or missing identity -- the one input an
+    unauthenticated request is most likely to arrive with."""
+    monkeypatch.setenv("DEBUG_MODE", "true")
+    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
+    monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
+    monkeypatch.delenv("ADMIN_USERS", raising=False)
+    monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
+    monkeypatch.setenv("ADMIN_TEST_USER", "")
+    monkeypatch.setenv("TEST_USER", "")
+    _disable_external_authorizer(monkeypatch)
+    config_manager.reload_configs()
+
+    from atlas.core.auth import is_user_in_group
+
+    admin_group = config_manager.app_settings.admin_group
+    for blank in ("", "   ", None):
+        assert await is_user_in_group(blank, admin_group) is False
+        assert await is_user_in_group(blank, "mcp_advanced") is False
 
 
 @pytest.mark.asyncio

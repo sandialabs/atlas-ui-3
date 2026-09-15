@@ -28,6 +28,37 @@ _ALB_NEGATIVE_TTL = timedelta(minutes=5)
 # memory-growth lever.
 _ALB_CACHE_MAX_ENTRIES = 256
 
+# The ADMIN_USERS audit line fires on an authorization check, and admin-gated
+# routes are polled by the UI -- an unthrottled line per request buries the
+# signal it exists to provide. Log once per identity/group per TTL instead.
+# Keys are identities that already matched the configured allowlist, so the
+# table is bounded by that list; the ceiling is belt-and-braces.
+_ADMIN_OVERRIDE_LOG_TTL = timedelta(hours=1)
+_ADMIN_OVERRIDE_LOG_MAX_ENTRIES = 256
+_admin_override_logged: Dict[Tuple[str, str], datetime] = {}
+
+
+def _should_log_admin_override(user: str, group: str) -> bool:
+    """Whether to emit the ADMIN_USERS audit line for this (user, group) now."""
+    now = datetime.utcnow()
+    for key in [k for k, exp in _admin_override_logged.items() if exp <= now]:
+        _admin_override_logged.pop(key, None)
+
+    cache_key = (user, group)
+    if cache_key in _admin_override_logged:
+        return False
+
+    while len(_admin_override_logged) >= _ADMIN_OVERRIDE_LOG_MAX_ENTRIES:
+        oldest = min(_admin_override_logged, key=lambda k: _admin_override_logged[k])
+        _admin_override_logged.pop(oldest, None)
+    _admin_override_logged[cache_key] = now + _ADMIN_OVERRIDE_LOG_TTL
+    return True
+
+
+def _reset_admin_override_log_for_tests() -> None:
+    """Clear the audit-line throttle so tests do not depend on each other."""
+    _admin_override_logged.clear()
+
 
 def _prune_alb_cache() -> None:
     """Drop expired entries, then oldest-first if still over the ceiling."""
@@ -60,10 +91,16 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
        are configured, query the HTTP authorization service for membership. A real
        authorization service remains authoritative for every group: the static
        table below is not consulted as an additional grant when an endpoint is
-       configured.
+       configured. The identity and group are forwarded **as received**, not
+       normalized -- the service owns its own matching rules, and rewriting the
+       values Atlas asks about could change its answer.
     4. Static config: ``AUTH_STATIC_GROUPS`` grants explicit static membership
-       without an external service, in production mode as well as debug. Matching
-       is case-insensitive and whitespace-tolerant.
+       without an external service, in production mode as well as debug.
+
+    Case-insensitive, whitespace-tolerant matching applies to every source Atlas
+    evaluates itself (the admin override, the static table, the ``users``
+    short-circuit and the debug mock table) -- not to the external endpoint,
+    which receives the raw values per (3).
     5. Mock table (fallback for local development): everyone is in the ``users``
        group; the debug-only mock table grants admin to the configured test users.
 
@@ -129,6 +166,8 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # overrides an authorizer -- on a deployment with no authorizer this
         # is the ordinary way admins are configured, and warning on every
         # admin request would train operators to ignore the line.
+        if not _should_log_admin_override(normalized_user, normalized_group):
+            return True
         if auth_url:
             logger.warning(
                 "Admin override: granting admin group '%s' to user '%s' via "
@@ -190,7 +229,9 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
         # Compared normalized, like every other branch: the documented
         # case/whitespace tolerance should not stop at the static table.
         normalized_admin_group = (app_settings.admin_group or "").strip().lower()
-        if (normalized_user == (app_settings.test_user or "").strip().lower()
+        normalized_test_user = (app_settings.test_user or "").strip().lower()
+        if (normalized_user
+                and normalized_user == normalized_test_user
                 and normalized_group == normalized_admin_group):
             return True
 
@@ -207,6 +248,12 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
                 normalized_admin_group, "users", "mcp_basic", "mcp_advanced"
             ],
         }
+        # An empty ADMIN_TEST_USER/TEST_USER would otherwise key this table on
+        # "", handing admin to a blank or missing identity -- the one input an
+        # unauthenticated request is most likely to arrive with.
+        mock_groups.pop("", None)
+        if not normalized_user:
+            return False
         user_groups = mock_groups.get(normalized_user, [])
         return normalized_group in user_groups
 
