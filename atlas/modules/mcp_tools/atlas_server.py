@@ -116,9 +116,9 @@ DISCOVER_TOOL_DESCRIPTION = (
 
 DISCOVER_LAUNCH_OPTIONS_TOOL_DESCRIPTION = (
     "Before using atlas_launch, list the saved workspaces and LLM provider/model "
-    "options available to the current user. This is the source of truth for "
-    "valid launch arguments; if discovery fails or returns no choices, launch "
-    "must not be attempted. Takes no arguments."
+    "options available to the current user. Use the returned model 'name' "
+    "exactly as the atlas_launch model argument; if discovery fails or returns "
+    "no choices, launch must not be attempted. Takes no arguments."
 )
 
 LAUNCH_TOOL_DESCRIPTION = (

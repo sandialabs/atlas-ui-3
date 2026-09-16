@@ -19,7 +19,11 @@ from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
-from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
+from atlas.modules.mcp_tools.atlas_server import (
+    CANVAS_TOOL_NAME,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+    normalize_tool_name,
+)
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
@@ -28,8 +32,8 @@ from ..utilities.agent_digest import build_tool_digest
 from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
-from ..utilities.tool_selection import normalize_selected_tools
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
+from ..utilities.tool_selection import normalize_selected_tools
 from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
@@ -441,7 +445,8 @@ class ToolsModeRunner:
                     skip_approval=self.skip_approval,
                 )
                 for tc in fresh:
-                    executed_signatures.add(self._tool_call_signature(tc))
+                    if normalize_tool_name(self._tool_call_signature(tc)[0]) != DISCOVER_LAUNCH_OPTIONS_TOOL_NAME:
+                        executed_signatures.add(self._tool_call_signature(tc))
                 result_by_id = {r.tool_call_id: r.content for r in results}
                 # Append tool results in the SAME order as the assistant tool_calls.
                 for tc in tool_calls:
