@@ -15,6 +15,7 @@ import pytest
 from atlas.application.chat.runs.context import clear_current_run, set_current_run
 from atlas.application.chat.runs.launcher import (
     LaunchRefused,
+    discover_launch_options,
     execute_launch_tool,
     launch_sub_conversation,
     launch_tool_enabled,
@@ -144,6 +145,14 @@ def test_launch_is_a_built_in_atlas_tool():
     assert sorted(schema["parameters"]["properties"]) == ["model", "prompt", "workspace"]
 
 
+def test_launch_discovery_is_a_built_in_tool():
+    from atlas.modules.mcp_tools.atlas_server import DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+
+    assert is_atlas_tool(DISCOVER_LAUNCH_OPTIONS_TOOL_NAME)
+    schema = ATLAS_TOOL_SCHEMAS[DISCOVER_LAUNCH_OPTIONS_TOOL_NAME]["function"]
+    assert schema["parameters"]["properties"] == {}
+
+
 def test_launch_is_omitted_from_the_schema_when_disabled():
     names = [
         s["function"]["name"]
@@ -163,6 +172,42 @@ def test_launch_is_omitted_from_the_schema_when_disabled():
 def test_launch_requires_its_feature_flag_and_its_ground(override):
     assert launch_tool_enabled(_settings(**override)) is False
     assert launch_tool_enabled(_settings()) is True
+
+
+# ---------------------------------------------------------------------------
+# Discovery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_launch_discovery_returns_authorized_workspaces_and_models():
+    factory = _Factory(lambda c: _ChatService(c))
+    context = {"user_email": "user@example.com"}
+
+    options = await discover_launch_options(context, factory=factory)
+
+    assert options["workspaces"] == [{"id": "ws-1", "name": "Research"}]
+    assert options["models"] == [{"name": "gpt-4o", "provider": "unknown", "model": "gpt-4o"}]
+    assert context["launch_discovery"] == options
+
+
+@pytest.mark.asyncio
+async def test_launch_is_blocked_when_discovery_has_no_choices():
+    factory = _Factory(lambda c: _ChatService(c), workspaces=_Workspaces(rows=[]), models={})
+
+    with pytest.raises(LaunchRefused, match="no valid workspaces or LLM models"):
+        await discover_launch_options({"user_email": "user@example.com"}, factory=factory)
+
+
+@pytest.mark.asyncio
+async def test_launch_requires_discovery_when_tool_context_supplies_state():
+    factory = _Factory(lambda c: _ChatService(c))
+    with pytest.raises(LaunchRefused, match="discover_launch_options"):
+        await launch_sub_conversation(
+            {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+            {"user_email": "user@example.com", "launch_discovery": {}},
+            factory=factory,
+        )
 
 
 # ---------------------------------------------------------------------------

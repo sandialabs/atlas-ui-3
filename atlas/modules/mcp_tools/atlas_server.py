@@ -7,8 +7,8 @@ panel as its own server with one or two tools, which made a short list of
 built-ins look like a crowd of servers.
 
 They are now a single server, ``atlas``, exposing ``atlas_canvas``,
-``atlas_sleep``, ``atlas_search``, ``atlas_discover_sources`` and
-``atlas_launch``. The old fully-qualified names are still
+``atlas_sleep``, ``atlas_search``, ``atlas_discover_sources``,
+``atlas_discover_launch_options`` and ``atlas_launch``. The old fully-qualified names are still
 accepted -- persisted tool selections, saved conversations and non-UI clients
 all carry them -- and are normalized to the new names at the edges via
 ``normalize_tool_name``.
@@ -43,6 +43,7 @@ CANVAS_TOOL_NAME = "atlas_canvas"
 SLEEP_TOOL_NAME = "atlas_sleep"
 SEARCH_TOOL_NAME = "atlas_search"
 DISCOVER_TOOL_NAME = "atlas_discover_sources"
+DISCOVER_LAUNCH_OPTIONS_TOOL_NAME = "atlas_discover_launch_options"
 LAUNCH_TOOL_NAME = "atlas_launch"
 
 ATLAS_TOOL_NAMES = (
@@ -50,6 +51,7 @@ ATLAS_TOOL_NAMES = (
     SLEEP_TOOL_NAME,
     SEARCH_TOOL_NAME,
     DISCOVER_TOOL_NAME,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
 )
 
@@ -110,6 +112,13 @@ DISCOVER_TOOL_DESCRIPTION = (
     "to tell the user that what they are asking about is not in any source "
     "they can reach. Takes no arguments; searching does not require calling "
     "this first."
+)
+
+DISCOVER_LAUNCH_OPTIONS_TOOL_DESCRIPTION = (
+    "Before using atlas_launch, list the saved workspaces and LLM provider/model "
+    "options available to the current user. This is the source of truth for "
+    "valid launch arguments; if discovery fails or returns no choices, launch "
+    "must not be attempted. Takes no arguments."
 )
 
 LAUNCH_TOOL_DESCRIPTION = (
@@ -254,6 +263,18 @@ DISCOVER_TOOL_SCHEMA = {
     },
 }
 
+DISCOVER_LAUNCH_OPTIONS_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+        "description": DISCOVER_LAUNCH_OPTIONS_TOOL_DESCRIPTION,
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+}
+
 LAUNCH_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -297,13 +318,14 @@ ATLAS_TOOL_SCHEMAS = {
     SLEEP_TOOL_NAME: SLEEP_TOOL_SCHEMA,
     SEARCH_TOOL_NAME: SEARCH_TOOL_SCHEMA,
     DISCOVER_TOOL_NAME: DISCOVER_TOOL_SCHEMA,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME: DISCOVER_LAUNCH_OPTIONS_TOOL_SCHEMA,
     LAUNCH_TOOL_NAME: LAUNCH_TOOL_SCHEMA,
 }
 
 ATLAS_SERVER_DESCRIPTION = (
     "Built-in ATLAS tools: render final content in the canvas panel, wait "
     "between agent steps, search the selected data sources, list which "
-    "sources are available and launch sub-conversations. These run "
+    "sources and launch options are available and launch sub-conversations. These run "
     "inside ATLAS rather than on an MCP server."
 )
 
@@ -381,7 +403,7 @@ def atlas_tool_schemas(
             continue
         if requested in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
             continue
-        if requested == LAUNCH_TOOL_NAME and not launch_enabled:
+        if requested in (DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, LAUNCH_TOOL_NAME) and not launch_enabled:
             continue
         schema = ATLAS_TOOL_SCHEMAS.get(requested)
         if schema is not None:
