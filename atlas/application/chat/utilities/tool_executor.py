@@ -90,14 +90,17 @@ async def execute_multiple_tools(
         == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
     ]
     for index in discovery_indices:
-        results[index] = await execute_single_tool(
-            tool_call=tool_calls[index],
-            session_context=session_context,
-            tool_manager=tool_manager,
-            update_callback=update_callback,
-            config_manager=config_manager,
-            skip_approval=skip_approval,
-        )
+        try:
+            results[index] = await execute_single_tool(
+                tool_call=tool_calls[index],
+                session_context=session_context,
+                tool_manager=tool_manager,
+                update_callback=update_callback,
+                config_manager=config_manager,
+                skip_approval=skip_approval,
+            )
+        except Exception as exc:
+            results[index] = exc
 
     remaining = [index for index in range(len(tool_calls)) if index not in discovery_indices]
     coros = [

@@ -421,7 +421,14 @@ class ToolsModeRunner:
                 }
                 fresh = [
                     tc for tc in tool_calls
-                    if self._tool_call_signature(tc) not in executed_signatures
+                    if (
+                        self._tool_call_signature(tc) not in executed_signatures
+                        or (
+                            normalize_tool_name(self._tool_call_signature(tc)[0])
+                            == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+                            and not session_context.get("launch_discovery")
+                        )
+                    )
                 ]
 
                 if not fresh:
@@ -445,8 +452,7 @@ class ToolsModeRunner:
                     skip_approval=self.skip_approval,
                 )
                 for tc in fresh:
-                    if normalize_tool_name(self._tool_call_signature(tc)[0]) != DISCOVER_LAUNCH_OPTIONS_TOOL_NAME:
-                        executed_signatures.add(self._tool_call_signature(tc))
+                    executed_signatures.add(self._tool_call_signature(tc))
                 result_by_id = {r.tool_call_id: r.content for r in results}
                 # Append tool results in the SAME order as the assistant tool_calls.
                 for tc in tool_calls:

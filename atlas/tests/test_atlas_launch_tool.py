@@ -193,7 +193,7 @@ async def test_launch_discovery_returns_authorized_workspaces_and_models():
     options = await discover_launch_options(context, factory=factory)
 
     assert options["workspaces"] == [{"id": "ws-1", "name": "Research"}]
-    assert options["models"] == [{"name": "gpt-4o", "provider": "unknown", "model": "gpt-4o"}]
+    assert options["models"] == [{"name": "gpt-4o"}]
     assert context["launch_discovery"] == options
 
 

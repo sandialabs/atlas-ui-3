@@ -52,7 +52,6 @@ from atlas.core.model_access import (
     filter_authorized_models,
 )
 from atlas.domain.messages.models import ToolResult
-from atlas.modules.llm.models import split_provider
 from atlas.modules.mcp_tools.atlas_server import launch_tool_enabled
 
 __all__ = [
@@ -183,18 +182,7 @@ async def discover_launch_options(
         for item in workspaces
         if item.get("id") and item.get("name")
     ]
-    model_options = [
-        {
-            "name": name,
-            "provider": split_provider(
-                getattr(model_config, "model_name", None) or name
-            )[0],
-            "model": split_provider(
-                getattr(model_config, "model_name", None) or name
-            )[1],
-        }
-        for name, model_config in sorted(models.items())
-    ]
+    model_options = [{"name": name} for name in sorted(models)]
     if not workspace_options or not model_options:
         missing = []
         if not workspace_options:
