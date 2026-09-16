@@ -368,3 +368,152 @@ async def test_one_result_carrying_both_colliding_names_keeps_both(chat_service)
         )
         assert not response.get("error"), (name, response.get("error"))
         assert base64.b64decode(response["content_base64"]) == body, name
+
+
+@pytest.mark.asyncio
+async def test_storage_key_decides_when_the_caller_has_one(chat_service):
+    """A row that knows its key gets that file, not a name-matched one.
+
+    In one result, `a b.txt` is stored at `a_b.txt` and `a_b.txt` at
+    `a_b_1.txt`. Clicking the `a_b.txt` row sends that stored name, which by
+    name alone is indistinguishable from the second artifact's advertised
+    name -- the key is what settles it.
+    """
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+    bodies = {"a b.txt": b"spaced", "a_b.txt": b"underscored"}
+
+    session = await chat_service.create_session(session_id, user_email)
+    context = {"session_id": str(session_id), "user_email": user_email, "files": {}}
+    context = await file_processor.process_tool_artifacts(
+        session_context=context,
+        tool_result=_ToolResult([
+            {"name": name, "b64": base64.b64encode(body).decode(), "mime": "text/plain"}
+            for name, body in bodies.items()
+        ]),
+        file_manager=chat_service.file_manager,
+        update_callback=None,
+    )
+    session.context.update({k: v for k, v in context.items() if k != "session_id"})
+
+    for stored_name, ref in session.context["files"].items():
+        response = await chat_service.handle_download_file(
+            session_id=session_id,
+            filename=stored_name,
+            user_email=user_email,
+            s3_key=ref["key"],
+        )
+        assert not response.get("error"), (stored_name, response.get("error"))
+        expected = bodies[ref["original_filename"]]
+        assert base64.b64decode(response["content_base64"]) == expected, stored_name
+
+
+@pytest.mark.asyncio
+async def test_storage_key_outside_the_session_is_refused(chat_service, file_manager):
+    """The key disambiguates within the session; it is not a way out of it."""
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+    await _run_tool_producing(chat_service, session_id, user_email, ADVERTISED_NAME)
+
+    elsewhere = await file_manager.s3_client.upload_file(
+        user_email=user_email,
+        filename="other.txt",
+        content_base64=base64.b64encode(b"not in this session").decode(),
+        content_type="text/plain",
+        tags={"source": "user"},
+        source_type="user",
+    )
+
+    response = await chat_service.handle_download_file(
+        session_id=session_id,
+        filename=ADVERTISED_NAME,
+        user_email=user_email,
+        s3_key=elsewhere["key"],
+    )
+
+    assert response.get("error") == "File not found in session"
+    assert "content_base64" not in response
+
+
+@pytest.mark.asyncio
+async def test_canvas_event_describes_the_artifact_just_ingested(chat_service, file_manager):
+    """A same-named user attachment must not lend its key to a tool artifact."""
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+    name = "chart final.png"
+    updates = []
+
+    async def capture(msg):
+        updates.append(msg)
+
+    attached = await file_manager.s3_client.upload_file(
+        user_email=user_email,
+        filename=name,
+        content_base64=base64.b64encode(b"mine").decode(),
+        content_type="image/png",
+        tags={"source": "user"},
+        source_type="user",
+    )
+    await chat_service.handle_attach_file(
+        session_id=session_id, s3_key=attached["key"],
+        user_email=user_email, update_callback=None,
+    )
+    session = await chat_service.session_repository.get(session_id)
+
+    context = {
+        "session_id": str(session_id),
+        "user_email": user_email,
+        "files": dict(session.context["files"]),
+    }
+    await file_processor.process_tool_artifacts(
+        session_context=context,
+        tool_result=_ToolResult(
+            [{"name": name, "b64": base64.b64encode(b"theirs").decode(), "mime": "image/png"}],
+            display_config={"open_canvas": True, "primary_file": name},
+        ),
+        file_manager=file_manager,
+        update_callback=capture,
+    )
+
+    canvas = [
+        u for u in updates
+        if u.get("update_type") == "canvas_files" and u["data"].get("files")
+    ]
+    assert canvas, "expected a canvas_files event"
+    emitted = canvas[-1]["data"]["files"][0]
+    assert emitted["s3_key"] != attached["key"], "canvas showed the attachment's key"
+
+
+@pytest.mark.asyncio
+async def test_legacy_matching_survives_a_new_artifact_in_the_session(chat_service):
+    """One new-style artifact must not switch off compatibility for old ones."""
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+
+    await _run_tool_producing(chat_service, session_id, user_email, ADVERTISED_NAME)
+    session = await chat_service.session_repository.get(session_id)
+    for ref in session.context["files"].values():
+        ref.pop("original_filename", None)
+
+    context = {
+        "session_id": str(session_id),
+        "user_email": user_email,
+        "files": dict(session.context["files"]),
+    }
+    context = await file_processor.process_tool_artifacts(
+        session_context=context,
+        tool_result=_ToolResult(
+            [{"name": "unrelated.txt", "b64": base64.b64encode(b"new").decode(),
+              "mime": "text/plain"}]
+        ),
+        file_manager=chat_service.file_manager,
+        update_callback=None,
+    )
+    session.context.update({k: v for k, v in context.items() if k != "session_id"})
+
+    response = await chat_service.handle_download_file(
+        session_id=session_id, filename=ADVERTISED_NAME, user_email=user_email
+    )
+
+    assert not response.get("error"), response.get("error")
+    assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"

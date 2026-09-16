@@ -1030,7 +1030,7 @@ class ChatService:
             }
 
     def _resolve_session_file(
-        self, session: Session, filename: str
+        self, session: Session, filename: str, s3_key: Optional[str] = None
     ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
         """Find the session file entry a download request names.
 
@@ -1042,9 +1042,22 @@ class ChatService:
         silently has nothing to offer. ``resolve_session_file`` reconciles the
         two; the canvas resolves display names through the same function, so
         the two views of the session cannot drift apart.
+
+        A caller that knows the file's storage key says so, and the key
+        answers directly -- a name is only ever a label, and two entries can
+        wear labels that reduce to the same thing, so a control that has the
+        key should never have its bytes chosen by name matching. The key must
+        still belong to an entry of *this* session, which is what keeps it a
+        disambiguator rather than a way to reach arbitrary storage.
         """
+        files = session.context.get("files", {}) or {}
+        if isinstance(s3_key, str) and s3_key:
+            for name, meta in files.items():
+                if isinstance(meta, dict) and meta.get("key") == s3_key:
+                    return name, meta
+            return None, None
         return file_processor.resolve_session_file(
-            session.context.get("files", {}),
+            files,
             filename,
             self.file_manager.sanitize_filename if self.file_manager else None,
         )
@@ -1053,9 +1066,10 @@ class ChatService:
         self,
         session_id: UUID,
         filename: str,
-        user_email: Optional[str]
+        user_email: Optional[str],
+        s3_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Download a file by original filename (within session context)."""
+        """Download a session file, by its storage key when the caller has one."""
         # ``filename`` arrives straight from a client JSON frame, so it can be
         # any JSON value. Reject anything that is not a non-empty string here,
         # where it still becomes an ordinary error reply, rather than letting a
@@ -1073,7 +1087,7 @@ class ChatService:
                 "filename": filename,
                 "error": "Session or file manager not available"
             }
-        stored_name, ref = self._resolve_session_file(session, filename)
+        stored_name, ref = self._resolve_session_file(session, filename, s3_key)
         if not ref:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,

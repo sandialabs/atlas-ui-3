@@ -520,12 +520,13 @@ async def process_tool_artifacts(
     updated_context = dict(session_context)
 
     # Process v2 artifacts (only if we have artifacts)
+    ingested_refs: Dict[str, Dict[str, Any]] = {}
     if tool_result.artifacts:
         user_email = session_context.get("user_email")
         if not user_email:
             return session_context
 
-        updated_context = await ingest_v2_artifacts(
+        updated_context, ingested_refs = await ingest_v2_artifacts(
             session_context=updated_context,
             tool_result=tool_result,
             user_email=user_email,
@@ -539,7 +540,8 @@ async def process_tool_artifacts(
         session_context=updated_context,
         tool_result=tool_result,
         file_manager=file_manager,
-        update_callback=update_callback
+        update_callback=update_callback,
+        ingested_refs=ingested_refs,
     )
 
     return updated_context
@@ -727,14 +729,18 @@ async def ingest_v2_artifacts(
     user_email: str,
     file_manager,
     update_callback: Optional[UpdateCallback] = None
-) -> Dict[str, Any]:
+) -> tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
     """
     Persist v2 MCP artifacts into storage and update session context.
 
-    Pure function that returns updated context without mutations.
+    Returns the updated context and the references as actually stored, so the
+    caller can describe exactly what it ingested rather than looking the names
+    back up in a session map that may hold somebody else's entry under one of
+    them.
     """
+    stored_refs: Dict[str, Dict[str, Any]] = {}
     if not tool_result.artifacts:
-        return session_context
+        return session_context, stored_refs
 
     # Work with a copy
     updated_context = dict(session_context)
@@ -762,7 +768,7 @@ async def ingest_v2_artifacts(
             })
 
         if not files_to_upload:
-            return updated_context
+            return updated_context, stored_refs
 
         # Upload files to storage
         uploaded_refs = await file_manager.upload_files_from_base64(
@@ -780,6 +786,7 @@ async def ingest_v2_artifacts(
         uploaded_refs = _merge_without_displacing(
             current_files, uploaded_refs, file_manager.unique_key
         )
+        stored_refs = uploaded_refs
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
@@ -801,7 +808,7 @@ async def ingest_v2_artifacts(
     except Exception as e:
         logger.error(f"Error ingesting v2 artifacts: {e}", exc_info=True)
 
-    return updated_context
+    return updated_context, stored_refs
 
 
 def resolve_session_file(
@@ -864,13 +871,16 @@ def resolve_session_file(
 
     if sanitize is None:
         return None, None
-    if any(
-        isinstance(meta, dict) and meta.get("original_filename")
-        for meta in files.values()
-    ):
-        return None, None
+    # Only entries recording no advertised original are candidates: a modern
+    # entry answers by its own key or by its alias, never by sanitizing alike.
+    # Scoping it this way keeps one new-style artifact from switching the
+    # compatibility path off for every older reference in the same session.
     target = sanitize(filename)
-    legacy = [name for name in files if sanitize(name) == target]
+    legacy = [
+        name for name, meta in files.items()
+        if not (isinstance(meta, dict) and meta.get("original_filename"))
+        and sanitize(name) == target
+    ]
     if len(legacy) == 1:
         return legacy[0], files[legacy[0]]
     return None, None
@@ -927,7 +937,8 @@ async def notify_canvas_files_v2(
     session_context: Dict[str, Any],
     tool_result,
     file_manager,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    ingested_refs: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> None:
     """
     Send v2 canvas files notification with display configuration.
@@ -950,8 +961,11 @@ async def notify_canvas_files_v2(
         return
 
     try:
-        # Get uploaded file references from session context
-        uploaded_refs = session_context.get("files", {})
+        # Prefer the references this ingestion actually stored. Resolving an
+        # advertised name against the whole session map can land on somebody
+        # else's entry -- a user attachment keyed by that very name, say --
+        # and label its key as the artifact the tool just produced.
+        uploaded_refs = ingested_refs or session_context.get("files", {})
         artifact_names = [artifact.get("name") for artifact in tool_result.artifacts if artifact.get("name")]
 
         # Handle iframe-only display (no artifacts)
