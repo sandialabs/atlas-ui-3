@@ -191,6 +191,14 @@ export const ChatProvider = ({ children }) => {
 	// reaches it through this ref rather than reordering the two callbacks.
 	const restoreConversationRef = useRef(null)
 
+	// clearChat needs the full transcript to build its Undo snapshot, but must
+	// not take `messages` as a dependency: its identity would then change on
+	// every streamed token, and Header re-registers its Ctrl+Alt+N keydown
+	// listener whenever clearChat changes. Read the latest value from a ref
+	// instead, and keep depending on messages.length for the emptiness check.
+	const latestMessagesRef = useRef(messages)
+	latestMessagesRef.current = messages
+
 	// The workspace this conversation is bound to, as opposed to the one that
 	// happens to be active right now. Only a load (which reads it from the saved
 	// metadata) or the user actually sending a turn updates it, so the local
@@ -838,7 +846,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const undoSnapshot = (!skipConfirm && hasContent && !mustStopCurrentTurn)
 			? {
 				id: activeConversationId || `undo_${Date.now()}_${generateSecureRandomString()}`,
-				messages: messages.map(m => buildPersistedMessage(m)),
+				messages: latestMessagesRef.current.map(m => buildPersistedMessage(m)),
 				canvasContent: files.canvasContent || '',
 				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
 			}
@@ -899,7 +907,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			})
 		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages, agent, streamEnd, runs, activeConversationId, toast])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData) => {
