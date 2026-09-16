@@ -8,6 +8,14 @@
  *     blocking window.confirm. It clears immediately and offers Undo.
  *   - The Undo action restores the transcript AND re-seeds the backend via
  *     restore_conversation, so the model still has the prior context.
+ *   - Undo never sends a fabricated conversation id: the backend rejects any
+ *     id its repository does not know, so a made-up one would produce an error
+ *     frame and no re-seed while the UI showed a "successful" restore. With no
+ *     real id (incognito, the default) Undo restores locally and says in the
+ *     timeline that the context is gone.
+ *   - The offer is retired the moment the replacement chat is touched, so Undo
+ *     can never discard an exchange that is not saved anywhere.
+ *
  * The confirm that survives -- an untracked reply still generating -- is
  * covered by new-chat-stops-generation.test.js.
  */
@@ -20,7 +28,8 @@ const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
-  toastInfo: vi.fn(),
+  toastInfo: vi.fn((() => { let n = 0; return () => ++n })()),
+  toastDismiss: vi.fn(),
   // selection spies
   applyWorkspace: vi.fn(),
   snapshotSelections: vi.fn(() => ({})),
@@ -49,7 +58,12 @@ vi.mock('../contexts/WSContext', () => ({
 }))
 
 vi.mock('../components/ui/toastContext', () => ({
-  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: h.toastInfo }),
+  useToast: () => ({
+    error: h.toastError,
+    success: h.toastSuccess,
+    info: h.toastInfo,
+    dismiss: h.toastDismiss,
+  }),
 }))
 
 vi.mock('../hooks/chat/useChatConfig', () => ({
@@ -183,6 +197,9 @@ const lastUndoAction = () => {
   return call?.[1]?.action
 }
 
+const restoreFrames = () =>
+  h.sendMessage.mock.calls.map(c => c[0]).filter(m => m.type === 'restore_conversation')
+
 beforeEach(() => {
   vi.clearAllMocks()
   h.sendMessage.mockImplementation(() => true)
@@ -252,5 +269,91 @@ describe('New Chat over an existing transcript', () => {
     await act(async () => { await result.current.loadSavedConversation(CONVERSATION) })
     await act(async () => { result.current.clearChat({ skipConfirm: true }) })
     expect(lastUndoAction()).toBeUndefined()
+  })
+})
+
+describe('Undo never fabricates a conversation id', () => {
+  it('skips the backend re-seed when the cleared chat was never persisted', async () => {
+    // Incognito (saveMode 'none') is the default: activeConversationId stays
+    // null, so there is nothing the server could restore from. A null id with
+    // messages on screen is exactly that state.
+    const { result } = renderChat()
+    await act(async () => { await result.current.loadSavedConversation({ ...CONVERSATION, id: null }) })
+    await act(async () => { result.current.clearChat() })
+
+    const action = lastUndoAction()
+    expect(action).toBeTruthy()
+
+    h.sendMessage.mockClear()
+    await act(async () => { await action.onClick() })
+
+    // No restore_conversation at all -- certainly not one carrying an invented id.
+    expect(restoreFrames()).toEqual([])
+    // The transcript is back...
+    expect(result.current.messages.some(m => m.content === 'What is the weather')).toBe(true)
+    // ...and the timeline says the assistant lost the context, rather than
+    // letting Undo look like a full recovery.
+    const note = result.current.messages.find(m => m.type === 'system')
+    expect(note).toBeTruthy()
+    expect(note.text).toMatch(/does not have them in context/)
+  })
+
+  it('uses the real id, and re-seeds the backend, when there is one', async () => {
+    const { result } = renderChat()
+    await act(async () => { await result.current.loadSavedConversation(CONVERSATION) })
+    await act(async () => { result.current.clearChat() })
+
+    h.sendMessage.mockClear()
+    await act(async () => { await lastUndoAction().onClick() })
+
+    const frames = restoreFrames()
+    expect(frames).toHaveLength(1)
+    expect(frames[0].conversation_id).toBe(CONVERSATION.id)
+    expect(frames[0].conversation_id).not.toMatch(/^undo_/)
+  })
+})
+
+describe('Undo is retired once the replacement chat is touched', () => {
+  it('is dismissed and inert after a turn is sent into the new chat', async () => {
+    const { result } = renderChat()
+    await act(async () => { await result.current.loadSavedConversation(CONVERSATION) })
+    await act(async () => { result.current.clearChat() })
+
+    const action = lastUndoAction()
+    const toastId = h.toastInfo.mock.results.at(-1).value
+
+    // The user types into the fresh chat during the toast's window.
+    await act(async () => { await result.current.sendChatMessage('Replacement question') })
+    expect(h.toastDismiss).toHaveBeenCalledWith(toastId)
+
+    // A stale tap on the toast must not wipe out that exchange.
+    h.sendMessage.mockClear()
+    await act(async () => { await action.onClick() })
+    expect(result.current.messages.some(m => m.content === 'Replacement question')).toBe(true)
+    expect(result.current.messages.some(m => m.content === 'Clear skies')).toBe(false)
+    expect(restoreFrames()).toEqual([])
+  })
+
+  it('is dismissed when a conversation is loaded from history instead', async () => {
+    const { result } = renderChat()
+    await act(async () => { await result.current.loadSavedConversation(CONVERSATION) })
+    await act(async () => { result.current.clearChat() })
+    const toastId = h.toastInfo.mock.results.at(-1).value
+
+    await act(async () => { await result.current.loadSavedConversation({ ...CONVERSATION, id: 'conv-other' }) })
+    expect(h.toastDismiss).toHaveBeenCalledWith(toastId)
+  })
+
+  it('a second New Chat supersedes the first offer', async () => {
+    // The second clear lands mid-generation (sendChatMessage sets isThinking),
+    // which is the one path that still confirms -- jsdom has no window.confirm.
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { result } = renderChat()
+    await act(async () => { await result.current.loadSavedConversation(CONVERSATION) })
+    await act(async () => { result.current.clearChat() })
+    const firstToastId = h.toastInfo.mock.results.at(-1).value
+    await act(async () => { await result.current.sendChatMessage('Another question') })
+    await act(async () => { result.current.clearChat() })
+    expect(h.toastDismiss).toHaveBeenCalledWith(firstToastId)
   })
 })

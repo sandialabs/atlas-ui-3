@@ -46,11 +46,41 @@ irreversible outcome. (A reply belonging to a *tracked* background run is not
 affected: it keeps running and New Chat is pure navigation, per issue #884.)
 
 Every other New Chat clears immediately and pushes a toast carrying an **Undo**
-action. Undo replays the snapshot through the same `restore_conversation` path
-a history load uses, so the transcript *and* the backend's context both come
-back -- not just the pixels. This required a small addition to `ToastProvider`:
-a toast may now carry one inline `action: { label, onClick }`, rendered as a
-full-size button.
+action. This required a small addition to `ToastProvider`: a toast may now
+carry one inline `action: { label, onClick }`, rendered as a full-size button.
+
+### What Undo can and cannot restore
+
+`handle_restore_conversation` rejects any conversation id the configured
+repository does not know, and for an id it *does* know it deliberately ignores
+the client's message payload in favour of the stored copy -- a client must not
+be able to replay forged history into the LLM context. Undo respects that
+rather than working around it, so it has two shapes:
+
+- **With a real `activeConversationId`** (server save mode), Undo goes through
+  `loadSavedConversation`, which sends `restore_conversation`. The server
+  reloads the canonical transcript into the session history and the next turn
+  has full prior context.
+- **Without one** -- incognito is the default, and there the conversation only
+  ever existed in the tab -- there is nothing on the server to restore from and
+  the session has already been reset. Undo puts the transcript back locally and
+  appends a system row saying the assistant no longer has those messages in
+  context. Undo never invents an id to paper over this: a fabricated id would
+  draw an error frame from the backend and no re-seed, while the UI showed what
+  looked like a successful recovery.
+
+A better long-term answer is to *defer* `reset_session` until either the user
+sends the first turn of the new chat or the undo window closes; then Undo in
+incognito needs no re-seed at all because the session was never torn down.
+That is a larger change to the session lifecycle and is not attempted here.
+
+### Invalidating the offer
+
+Undo is only valid while the chat it cleared into is still untouched. Sending a
+turn, loading a conversation from history, or clearing again all retire the
+offer and dismiss its toast, and the action itself re-checks a token before
+running. Without that, tapping a stale Undo would reset the replacement chat --
+and in incognito that exchange is saved nowhere and would be gone for good.
 
 ## 3. Touch targets
 
