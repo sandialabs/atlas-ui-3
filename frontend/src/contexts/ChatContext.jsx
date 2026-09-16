@@ -187,6 +187,34 @@ export const ChatProvider = ({ children }) => {
 	// it, so a late restore can never overwrite a deliberate choice.
 	const pendingWorkspaceRestoreRef = useRef(null)
 
+	// restoreUndoSnapshot is declared after loadSavedConversation, which it
+	// delegates to; clearChat's Undo action reaches it through this ref rather
+	// than reordering the callbacks.
+	const restoreUndoSnapshotRef = useRef(null)
+
+	// clearChat needs the full transcript to build its Undo snapshot, but must
+	// not take `messages` as a dependency: its identity would then change on
+	// every streamed token, and Header re-registers its Ctrl+Alt+N keydown
+	// listener whenever clearChat changes. Read the latest value from a ref
+	// instead, and keep depending on messages.length for the emptiness check.
+	const latestMessagesRef = useRef(messages)
+	latestMessagesRef.current = messages
+
+	// The Undo offer currently on screen: { token, toastId }. Undo is only valid
+	// while the chat it cleared into is still empty and untouched. The moment
+	// anything replaces it -- the user sends a turn, loads a conversation from
+	// history, or clears again -- restoring the snapshot would destroy that
+	// replacement, which in incognito mode is not persisted anywhere and would
+	// be gone for good. So the offer is invalidated and its toast dismissed.
+	const undoOfferRef = useRef(null)
+
+	const invalidateUndoOffer = useCallback(() => {
+		const offer = undoOfferRef.current
+		if (!offer) return
+		undoOfferRef.current = null
+		toast.dismiss(offer.toastId)
+	}, [toast])
+
 	// The workspace this conversation is bound to, as opposed to the one that
 	// happens to be active right now. Only a load (which reads it from the saved
 	// metadata) or the user actually sending a turn updates it, so the local
@@ -590,6 +618,10 @@ export const ChatProvider = ({ children }) => {
 
 	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null, selectedToolsOverride = null, captureCorrection = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
+		// A turn in the replacement chat retires any outstanding Undo: restoring
+		// the old snapshot now would discard this exchange, which in incognito
+		// mode is not saved anywhere and could not be recovered.
+		invalidateUndoOffer()
 		// Don't allow sending while the WebSocket is disconnected -- the message
 		// would never reach the backend and the UI would hang on "Thinking...".
 		if (!isConnected) {
@@ -756,7 +788,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -803,9 +835,6 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	}, [sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
-		// If there is any chat content or generation in progress, confirm before
-		// discarding it -- "New Chat" should not silently throw away a reply the
-		// user is actively reading / waiting on (mistakes happen).
 		// Returns true if the chat was cleared, false if the user cancelled --
 		// callers (Header/Ctrl+Alt+N) gate follow-up side-effects on this so a
 		// cancelled confirm doesn't still close the canvas or steal focus.
@@ -817,14 +846,40 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const hasBackgroundRun = isRunActive(runs.getRun(activeConversationId))
 		const mustStopCurrentTurn = isGenerating && !hasBackgroundRun
 		const hasContent = messages.length > 0
-		if (!skipConfirm && (hasContent || isGenerating)) {
-			const prompt = mustStopCurrentTurn
-				? 'A response is still being generated. Start a new chat and stop the current response?'
-				: 'Start a new chat? This will clear the current conversation from view.'
+		// Confirm ONLY for the one genuinely irreversible case: an untracked
+		// reply that is still being generated and would be cancelled outright.
+		// Every other New Chat is recoverable, so it clears immediately and
+		// offers Undo in a toast instead of a blocking modal. The old
+		// window.confirm fired on every New Chat with any content at all, which
+		// is a hard two-step on a phone and effectively unusable from a car
+		// mount -- and a native confirm cannot be styled or made touch-sized.
+		if (!skipConfirm && mustStopCurrentTurn) {
+			const prompt = 'A response is still being generated. Start a new chat and stop the current response?'
 			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
 				if (!window.confirm(prompt)) return false
 			}
 		}
+
+		// Snapshot what the view is about to lose so Undo can put it back. Held
+		// in a ref rather than state: nothing renders from it, and it must not
+		// retrigger the autosave effect.
+		// `id` is the REAL conversation id or nothing. Fabricating one would be
+		// worse than useless: handle_restore_conversation rejects any id the
+		// configured repository does not know (service.py, "Rejected restore
+		// for conversation ... not found"), so a made-up id produces an error
+		// frame and no re-seed while the UI happily shows the transcript back.
+		// With no id we skip the backend round-trip entirely and say so.
+		const undoSnapshot = (!skipConfirm && hasContent && !mustStopCurrentTurn)
+			? {
+				id: activeConversationId || null,
+				messages: latestMessagesRef.current.map(m => buildPersistedMessage(m)),
+				canvasContent: files.canvasContent || '',
+				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
+			}
+			: null
+
+		// A second New Chat supersedes any offer still on screen.
+		invalidateUndoOffer()
 
 		// If generation is in progress, tell the backend to cancel it *before* we
 		// ask for a new session. Otherwise the in-flight task keeps streaming
@@ -861,12 +916,38 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (sendMessage) {
 			sendMessage({ type: 'reset_session' })
 		}
+
+		// Offer Undo. The token guards against a stale toast surviving whatever
+		// invalidated it (a dismiss that lost a race, a toast kept open by the
+		// user): restoring here would wipe out the chat that replaced this one.
+		if (undoSnapshot) {
+			const token = {}
+			const toastId = toast.info('New chat started.', {
+				duration: 8000,
+				action: {
+					label: 'Undo',
+					onClick: () => {
+						if (undoOfferRef.current?.token !== token) return
+						undoOfferRef.current = null
+						const restore = restoreUndoSnapshotRef.current
+						if (!restore) return
+						Promise.resolve(restore(undoSnapshot)).then(() => {
+							if (undoSnapshot.canvasContent) files.setCanvasContent(undoSnapshot.canvasContent)
+						})
+					},
+				},
+			})
+			undoOfferRef.current = { token, toastId }
+		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData) => {
 		if (!conversationData || !conversationData.messages) return
+
+		// Whatever was on offer refers to a chat that is no longer on screen.
+		invalidateUndoOffer()
 
 		// Clear current state
 		resetMessages()
@@ -919,7 +1000,59 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// conversation's workspace rather than whatever is active at save time.
 		conversationWorkspaceIdRef.current = meta.workspace_id || null
 		restoreWorkspace(meta.workspace_id)
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace])
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer])
+
+	// Undo's restore. Two shapes, because the backend cannot re-seed a
+	// conversation it has never stored:
+	//
+	//   - With a real conversation id, go through loadSavedConversation, which
+	//     sends restore_conversation. The server reloads the conversation from
+	//     its repository (the canonical, non-forgeable copy) into the session
+	//     history, so the next turn has the full prior context.
+	//   - Without one -- incognito, the default mode, where the conversation
+	//     exists only in this tab -- there is nothing on the server to restore
+	//     from, and the session was already reset. Put the transcript back
+	//     locally and say plainly in the timeline that the assistant no longer
+	//     has the earlier messages, rather than letting Undo look like a full
+	//     recovery when it is not.
+	const restoreUndoSnapshot = useCallback((snapshot) => {
+		if (snapshot.id) {
+			return loadSavedConversation({
+				id: snapshot.id,
+				messages: snapshot.messages,
+				metadata: snapshot.metadata,
+			})
+		}
+
+		resetMessages()
+		setIsWelcomeVisible(false)
+		const restored = snapshot.messages.map(msg => ({
+			role: msg.role,
+			content: msg.content || '',
+			timestamp: msg.timestamp,
+			type: msg.message_type || 'chat',
+			...(msg.metadata || {}),
+		}))
+		if (restored.length > 0) bulkAdd(restored)
+		// Message.jsx renders an unrecognised system subtype from `content`, not
+		// `text` -- set both so the row is actually visible. A note nobody can
+		// read is worse than no note: it would leave Undo looking like a full
+		// recovery, which is the thing this row exists to prevent.
+		const undoNote = 'Restored the previous messages. This conversation is not saved anywhere, so the assistant does not have them in context -- re-state anything it needs.'
+		addMessage({
+			role: 'system',
+			type: 'system',
+			subtype: 'info',
+			content: undoNote,
+			text: undoNote,
+			meta: {},
+			timestamp: new Date().toISOString(),
+			id: `system_${Date.now()}_${generateSecureRandomString()}`,
+		})
+		return Promise.resolve()
+	}, [loadSavedConversation, resetMessages, bulkAdd, addMessage])
+
+	restoreUndoSnapshotRef.current = restoreUndoSnapshot
 
 	// Ask the backend for the file by name and let it answer. The name a chat
 	// or canvas download control carries is the one the tool advertised, while
