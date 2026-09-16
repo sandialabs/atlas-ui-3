@@ -1054,10 +1054,33 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 	restoreUndoSnapshotRef.current = restoreUndoSnapshot
 
-	const downloadFile = useCallback((filename) => {
-		if (!files.sessionFiles.files.find(f => f.filename === filename)) return
-		sendMessage({ type: 'download_file', filename, user: config.user })
-	}, [files.sessionFiles.files, sendMessage, config.user])
+	// Ask the backend for the file by name and let it answer. The name a chat
+	// or canvas download control carries is the one the tool advertised, while
+	// the session file list is keyed by the sanitized name storage assigned --
+	// so a client-side "is it in sessionFiles?" guard silently swallowed every
+	// download of a file whose name storage had to rewrite. The backend matches
+	// the two names and reports a real miss, which the handler surfaces.
+	// `s3Key` is optional: a control that knows which stored file it stands for
+	// passes it, and the backend answers by key. Two files can carry names that
+	// reduce to the same stored name, so a row that has the key must not have
+	// its bytes chosen by name matching.
+	const downloadFile = useCallback((filename, s3Key) => {
+		if (!filename && !s3Key) return
+		// Name the conversation (and its run, when one is live). The backend
+		// searches the connection session first and then this user's run
+		// sessions newest-first, so an unaddressed frame could answer from a
+		// different parallel conversation that produced a file of the same
+		// name; naming the conversation puts its own session at the front.
+		const run = runs.getRun(activeConversationId)
+		sendMessage({
+			type: 'download_file',
+			filename,
+			s3_key: s3Key || undefined,
+			user: config.user,
+			conversation_id: activeConversationId || undefined,
+			run_id: run?.run_id || undefined,
+		})
+	}, [sendMessage, config.user, runs, activeConversationId])
 
 		// Agent controls
 		// Stop addresses one run (issue #884). Naming the conversation -- and the

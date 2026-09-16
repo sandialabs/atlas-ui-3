@@ -106,7 +106,7 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
                 </button>
 
                 <button
-                  onClick={() => onDownloadFile?.(file.filename)}
+                  onClick={() => onDownloadFile?.(file.filename, file.s3_key)}
                   className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
                   title="Download file"
                 >

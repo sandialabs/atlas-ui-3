@@ -242,7 +242,7 @@ const CanvasPanel = ({
   const handleDownload = () => {
     const currentFile = canvasFiles[currentCanvasFileIndex];
     if (canDownloadFile(currentFile) && downloadFile) {
-      downloadFile(currentFile.filename);
+      downloadFile(currentFile.filename, currentFile.s3_key);
     }
   };
 
