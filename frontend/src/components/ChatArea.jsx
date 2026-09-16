@@ -817,9 +817,17 @@ const ChatArea = () => {
       {/* Welcome Screen */}
       {isWelcomeVisible && <WelcomeScreen />}
       
-      {/* Powered by ATLAS logo - only shown on welcome screen */}
+      {/* Powered by ATLAS logo - only shown on welcome screen.
+          Anchored to the live composer height for the same reason the feedback
+          button is: it used to be pinned at a constant bottom-32/36/40, and the
+          composer grows past that as soon as the user types a long message on
+          the welcome screen, leaving the logo drawn over the composer (measured
+          at 390x844, it sat 116px inside the composer footer). */}
       {isWelcomeVisible && showPoweredByAtlas && (
-        <div className="absolute bottom-32 left-0 right-0 sm:bottom-36 md:bottom-40 z-10 px-4">
+        <div
+          style={{ bottom: 'calc(var(--atlas-composer-height, 8rem) + 1rem)' }}
+          className="absolute left-0 right-0 z-10 px-4"
+        >
           <div className="max-w-4xl mx-auto flex justify-end">
             <img
               src="/sandia-powered-by-atlas.png"

@@ -34,6 +34,16 @@ anchored to it.
 
 Same 390x844 reproduction after the change: 0px overlap.
 
+### The same bug, one element over
+
+The "Powered by ATLAS" logo on the welcome screen (gated on
+`VITE_FEATURE_POWERED_BY_ATLAS`) was pinned the same way, at
+`bottom-32 sm:bottom-36 md:bottom-40`. Typing a long message before sending the
+first one grows the composer past those offsets and the logo is drawn over it --
+measured at 390x844 with the flag on, it sat 116px inside the composer footer.
+It is decorative and not interactive, so it cost appearance rather than taps,
+but it is the same root cause and takes the same one-line anchor. Also 0px after.
+
 ## 2. New Chat raised a native confirm on every use
 
 `clearChat` called `window.confirm` whenever the chat had *any* content. That
