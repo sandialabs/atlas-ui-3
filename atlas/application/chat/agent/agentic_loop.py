@@ -31,8 +31,8 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 from ..utilities import error_handler, tool_executor
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
-from ..utilities.tool_selection import normalize_selected_tools
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
+from ..utilities.tool_selection import normalize_selected_tools
 from .protocols import AgentContext, AgentEvent, AgentEventHandler, AgentLoopProtocol, AgentResult
 from .steering import SteeringChannel
 from .streaming_final_answer import stream_final_answer
@@ -149,6 +149,7 @@ class AgenticLoop(AgentLoopProtocol):
         # mode executes tools through this loop's own callback, so it needs the
         # same wrapper here.
         recorder = ToolCallRecorder(self.connection.send_json if self.connection else None)
+        launch_discovery: Dict[str, Any] = {}
 
         try:
             steps, final_answer = await self._run_steps(
@@ -163,6 +164,7 @@ class AgenticLoop(AgentLoopProtocol):
                 use_streaming=use_streaming,
                 event_publisher=event_publisher,
                 recorder=recorder,
+                launch_discovery=launch_discovery,
                 steering=steering,
             )
         except BaseException:
@@ -213,6 +215,7 @@ class AgenticLoop(AgentLoopProtocol):
         use_streaming: bool,
         event_publisher,
         recorder: ToolCallRecorder,
+        launch_discovery: Dict[str, Any],
         steering: Optional[SteeringChannel] = None,
     ) -> Tuple[int, Optional[str]]:
         """Run the tool-calling steps, returning ``(steps, final_answer)``.
@@ -343,6 +346,8 @@ class AgenticLoop(AgentLoopProtocol):
                     # scoping) so direct callers that omit conversation_id still
                     # get one stable persistent session instead of None.
                     "conversation_id": context.conversation_id or str(context.session_id),
+                    "factory": getattr(self.tool_manager, "app_factory", None),
+                    "launch_discovery": launch_discovery,
                     # Mutable, one per turn: atlas_agent_sleep accumulates the
                     # seconds it has slept here so the turn's total wait is
                     # bounded, not just each individual call.
