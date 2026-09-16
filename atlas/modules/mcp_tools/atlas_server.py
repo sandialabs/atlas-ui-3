@@ -376,6 +376,8 @@ def normalize_tool_names(tool_names: Optional[List[Any]]) -> List[Any]:
             continue
         seen.add(key)
         out.append(normalized)
+    if LAUNCH_TOOL_NAME in out and DISCOVER_LAUNCH_OPTIONS_TOOL_NAME not in out:
+        out.insert(out.index(LAUNCH_TOOL_NAME), DISCOVER_LAUNCH_OPTIONS_TOOL_NAME)
     return out
 
 

@@ -151,6 +151,8 @@ async def discover_launch_options(
     if factory is None:
         from atlas.infrastructure.app_factory import app_factory as factory
 
+    if context is not None and isinstance(context.get("launch_discovery"), dict):
+        context["launch_discovery"].clear()
     config_manager = factory.get_config_manager()
     app_settings = getattr(config_manager, "app_settings", None)
     if not launch_tool_enabled(app_settings):

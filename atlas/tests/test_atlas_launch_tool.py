@@ -16,6 +16,7 @@ from atlas.application.chat.runs.context import clear_current_run, set_current_r
 from atlas.application.chat.runs.launcher import (
     LaunchRefused,
     discover_launch_options,
+    execute_launch_discovery_tool,
     execute_launch_tool,
     launch_sub_conversation,
     launch_tool_enabled,
@@ -187,7 +188,7 @@ def test_launch_requires_its_feature_flag_and_its_ground(override):
 @pytest.mark.asyncio
 async def test_launch_discovery_returns_authorized_workspaces_and_models():
     factory = _Factory(lambda c: _ChatService(c))
-    context = {"user_email": "user@example.com", "launch_discovery": _DISCOVERY}
+    context = {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}
 
     options = await discover_launch_options(context, factory=factory)
 
@@ -201,7 +202,26 @@ async def test_launch_is_blocked_when_discovery_has_no_choices():
     factory = _Factory(lambda c: _ChatService(c), workspaces=_Workspaces(rows=[]), models={})
 
     with pytest.raises(LaunchRefused, match="no valid workspaces or LLM models"):
-        await discover_launch_options({"user_email": "user@example.com", "launch_discovery": _DISCOVERY}, factory=factory)
+        await discover_launch_options({"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}, factory=factory)
+
+
+@pytest.mark.asyncio
+async def test_discovery_execution_primes_the_same_context_for_launch():
+    factory = _Factory(lambda c: _ChatService(c))
+    context = {"user_email": "user@example.com", "factory": factory, "launch_discovery": {}}
+    result = await execute_launch_discovery_tool(
+        ToolCall(id="discover-1", name="atlas_discover_launch_options", arguments={}),
+        context,
+    )
+
+    assert result.success
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        context,
+        factory=factory,
+    )
+    factory.services[0].release.set()
+    assert handle["workspace"] == "Research"
 
 
 @pytest.mark.asyncio
@@ -240,7 +260,7 @@ async def test_a_model_the_user_cannot_use_is_refused_like_an_unknown_one():
         with pytest.raises(LaunchRefused) as excinfo:
             await launch_sub_conversation(
                 {"workspace": "Research", "model": model, "prompt": "go"},
-                {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+                {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
                 factory=factory,
             )
         messages.append(str(excinfo.value).replace(model, "<model>"))
@@ -252,7 +272,7 @@ async def test_the_child_only_gets_tools_the_caller_is_still_authorized_for():
     factory = _Factory(lambda c: _ChatService(c, authorized=("math_add",)))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     assert handle["tools"] == ["math_add"]
@@ -271,7 +291,7 @@ async def test_a_workspace_with_no_authorized_tools_is_refused():
     with pytest.raises(LaunchRefused, match="no tools"):
         await launch_sub_conversation(
             {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-            {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+            {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
             factory=factory,
         )
 
@@ -302,7 +322,7 @@ async def test_depth_is_capped():
 
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     assert handle["depth"] == 1
@@ -313,7 +333,7 @@ async def test_depth_is_capped():
     with pytest.raises(LaunchRefused, match="nest more than 1"):
         await launch_sub_conversation(
             {"workspace": "Research", "model": "gpt-4o", "prompt": "deeper"},
-            {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+            {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
             factory=factory,
         )
     for service in factory.services:
@@ -331,13 +351,13 @@ async def test_children_per_run_are_capped():
 
     await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "first"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     with pytest.raises(LaunchRefused, match="limit is 1"):
         await launch_sub_conversation(
             {"workspace": "Research", "model": "gpt-4o", "prompt": "second"},
-            {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+            {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
             factory=factory,
         )
     for service in factory.services:
@@ -400,7 +420,7 @@ async def test_the_handle_comes_back_before_the_child_finishes():
     factory = _Factory(lambda c: _ChatService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
 
@@ -420,7 +440,7 @@ async def test_child_events_carry_the_childs_own_identity():
     factory = _Factory(lambda c: _ChatService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY, "update_callback": await _collect(frames)},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY), "update_callback": await _collect(frames)},
         factory=factory,
     )
 
@@ -440,7 +460,7 @@ async def test_a_child_approval_is_replayable_from_its_run_record():
     factory = _Factory(lambda c: _ChatService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     service = factory.services[0]
@@ -468,7 +488,7 @@ async def test_a_finished_child_reaches_a_terminal_status():
     factory = _Factory(lambda c: _ChatService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     service = factory.services[0]
@@ -490,7 +510,7 @@ async def test_a_rag_disabled_workspace_sends_no_data_sources():
     factory = _Factory(lambda c: _ChatService(c), workspaces=_Workspaces(rows))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     assert handle["data_sources"] == []
@@ -520,7 +540,7 @@ async def test_missing_arguments_are_refused_by_name():
     with pytest.raises(LaunchRefused, match="'prompt' is required"):
         await launch_sub_conversation(
             {"workspace": "Research", "model": "gpt-4o", "prompt": "   "},
-            {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+            {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
             factory=factory,
         )
 
@@ -549,7 +569,8 @@ async def test_the_model_is_not_offered_launch_when_the_deployment_disables_it(m
 
     monkeypatch.setattr(mcp_discovery, "_atlas_tool_flags", lambda: (True, True, True))
     assert [s["function"]["name"] for s in manager.get_tools_schema([LAUNCH_TOOL_NAME])] == [
-        LAUNCH_TOOL_NAME
+        "atlas_discover_launch_options",
+        LAUNCH_TOOL_NAME,
     ]
 
 
@@ -563,7 +584,7 @@ async def test_an_untracked_turn_is_still_bounded_in_fan_out():
 
     first = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "first"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     assert first["parent_run_id"] is None
@@ -571,7 +592,7 @@ async def test_an_untracked_turn_is_still_bounded_in_fan_out():
     with pytest.raises(LaunchRefused, match="limit is 1"):
         await launch_sub_conversation(
             {"workspace": "Research", "model": "gpt-4o", "prompt": "second"},
-            {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+            {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
             factory=factory,
         )
     for service in factory.services:
@@ -584,7 +605,7 @@ async def test_the_parents_compliance_level_travels_to_the_child():
     factory = _Factory(lambda c: _ChatService(c))
     await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY, "compliance_level": "restricted"},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY), "compliance_level": "restricted"},
         factory=factory,
     )
     service = factory.services[0]
@@ -617,7 +638,7 @@ async def test_concurrent_launches_in_one_step_cannot_both_pass_a_cap_of_one():
         *[
             launch_sub_conversation(
                 {"workspace": "Research", "model": "gpt-4o", "prompt": f"task {i}"},
-                {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+                {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
                 factory=factory,
             )
             for i in range(4)
@@ -643,7 +664,7 @@ async def test_stopping_a_finished_parent_still_cancels_a_running_child():
 
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     service = factory.services[0]
@@ -743,7 +764,7 @@ async def test_a_child_error_response_marks_the_run_failed():
     factory = _Factory(lambda c: _FailingService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     await asyncio.wait_for(registry.get(handle["run_id"]).task, timeout=1)
@@ -770,7 +791,7 @@ async def test_a_childs_tool_rows_are_not_recorded_into_the_parents_history():
     factory = _Factory(lambda c: _ChatService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY, "update_callback": recorder},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY), "update_callback": recorder},
         factory=factory,
     )
     service = factory.services[0]
@@ -849,7 +870,7 @@ async def test_a_run_id_the_registry_never_saw_is_treated_as_untracked():
 
     first = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "first"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
     assert first["parent_run_id"] is None
@@ -857,7 +878,7 @@ async def test_a_run_id_the_registry_never_saw_is_treated_as_untracked():
     with pytest.raises(LaunchRefused, match="limit is 1"):
         await launch_sub_conversation(
             {"workspace": "Research", "model": "gpt-4o", "prompt": "second"},
-            {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+            {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
             factory=factory,
         )
     for service in factory.services:
@@ -907,12 +928,12 @@ async def test_the_three_launch_gates_agree_on_the_same_flag():
             s["function"]["name"]
             for s in atlas_tool_schemas([LAUNCH_TOOL_NAME], launch_enabled=enabled)
         ]
-        assert offered == ([LAUNCH_TOOL_NAME] if enabled else [])
+        assert offered == (["atlas_discover_launch_options", LAUNCH_TOOL_NAME] if enabled else [])
         # Authorization gate.
         allowed = await service.filter_authorized_tools(
             [LAUNCH_TOOL_NAME], "user@example.com"
         )
-        assert allowed == ([LAUNCH_TOOL_NAME] if enabled else [])
+        assert allowed == (["atlas_discover_launch_options", LAUNCH_TOOL_NAME] if enabled else [])
 
 
 @pytest.mark.asyncio
@@ -938,7 +959,7 @@ async def test_execution_refuses_the_tool_when_the_deployment_disables_it(monkey
             name=LAUNCH_TOOL_NAME,
             arguments={"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
         ),
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
     )
 
     assert result.success is False
@@ -955,7 +976,7 @@ async def test_the_launch_call_is_the_approval_for_the_childs_own_tools(monkeypa
     factory = _Factory(lambda c: _ChatService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
 
@@ -975,7 +996,7 @@ async def test_an_admin_mandated_tool_still_prompts_inside_the_child(monkeypatch
     factory = _Factory(lambda c: _ChatService(c))
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-        {"user_email": "user@example.com", "launch_discovery": _DISCOVERY},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
         factory=factory,
     )
 

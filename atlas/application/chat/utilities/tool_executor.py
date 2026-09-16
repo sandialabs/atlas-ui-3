@@ -20,6 +20,7 @@ from atlas.modules.llm.tool_call_guard import repair_structural_json
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     LEGACY_SERVER_NAMES,
     normalize_tool_name,
 )
@@ -81,19 +82,38 @@ async def execute_multiple_tools(
 
     logger.info("Executing %d tool calls in parallel", len(tool_calls))
 
-    coros = [
-        execute_single_tool(
-            tool_call=tc,
+    results: List[Any] = [None] * len(tool_calls)
+    discovery_indices = [
+        index
+        for index, tool_call in enumerate(tool_calls)
+        if normalize_tool_name(getattr(getattr(tool_call, "function", None), "name", ""))
+        == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+    ]
+    for index in discovery_indices:
+        results[index] = await execute_single_tool(
+            tool_call=tool_calls[index],
             session_context=session_context,
             tool_manager=tool_manager,
             update_callback=update_callback,
             config_manager=config_manager,
             skip_approval=skip_approval,
         )
-        for tc in tool_calls
-    ]
 
-    results = await asyncio.gather(*coros, return_exceptions=True)
+    remaining = [index for index in range(len(tool_calls)) if index not in discovery_indices]
+    coros = [
+        execute_single_tool(
+            tool_call=tool_calls[index],
+            session_context=session_context,
+            tool_manager=tool_manager,
+            update_callback=update_callback,
+            config_manager=config_manager,
+            skip_approval=skip_approval,
+        )
+        for index in remaining
+    ]
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
+    for index, result in zip(remaining, gathered):
+        results[index] = result
 
     # Convert exceptions to error ToolResults so callers always get a list
     final: List[ToolResult] = []

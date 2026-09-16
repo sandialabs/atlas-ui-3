@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### PR #949 - 2026-09-16
-- Add `atlas_discover_launch_options` so sub-conversation launches use authorized, current workspaces and provider/model choices, and block clearly when discovery fails or returns no valid options.
+- Add `atlas_discover_launch_options` so sub-conversation launches use authorized, current workspaces and provider/model choices, and block clearly when discovery fails or returns no valid options. Deployments with `FEATURE_ATLAS_LAUNCH_ENABLED` should allow the agent to use the new discovery step before launching.
 
 ### PR #947 - 2026-09-15
 - Admin MCP status now distinguishes unauthenticated OAuth servers from genuinely unreachable servers, labeling the former as requiring OAuth authentication while preserving connection failures as failed.
