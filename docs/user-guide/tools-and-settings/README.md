@@ -128,7 +128,11 @@ says so.
 
 When your administrator has enabled it, the built-in `atlas_launch` tool lets a
 conversation start other conversations to work on pieces of a task. Tick
-`atlas_launch` in the tools list, then ask for the work to be split up.
+`atlas_launch` in the tools list, then ask for the work to be split up. ATLAS
+also offers `atlas_discover_launch_options`; the agent must call it first to
+receive the current workspaces and provider/model choices. Launch is blocked
+with an actionable error if discovery fails, returns no choices, or the launch
+arguments are not in the discovered options.
 
 Each sub-conversation is told which of **your saved workspaces** to run under,
 and that workspace decides which tools and data sources it may use -- so save a
