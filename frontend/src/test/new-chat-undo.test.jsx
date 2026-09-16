@@ -295,7 +295,10 @@ describe('Undo never fabricates a conversation id', () => {
     // letting Undo look like a full recovery.
     const note = result.current.messages.find(m => m.type === 'system')
     expect(note).toBeTruthy()
-    expect(note.text).toMatch(/does not have them in context/)
+    // Assert on `content`: Message.jsx renders an unrecognised system subtype
+    // from content, so a note that only sets `text` renders as a blank row.
+    expect(note.content).toMatch(/does not have them in context/)
+    expect(note.text).toBe(note.content)
   })
 
   it('uses the real id, and re-seeds the backend, when there is one', async () => {

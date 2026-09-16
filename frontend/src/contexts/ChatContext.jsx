@@ -1034,11 +1034,17 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			...(msg.metadata || {}),
 		}))
 		if (restored.length > 0) bulkAdd(restored)
+		// Message.jsx renders an unrecognised system subtype from `content`, not
+		// `text` -- set both so the row is actually visible. A note nobody can
+		// read is worse than no note: it would leave Undo looking like a full
+		// recovery, which is the thing this row exists to prevent.
+		const undoNote = 'Restored the previous messages. This conversation is not saved anywhere, so the assistant does not have them in context -- re-state anything it needs.'
 		addMessage({
 			role: 'system',
 			type: 'system',
 			subtype: 'info',
-			text: 'Restored the previous messages. This conversation is not saved anywhere, so the assistant does not have them in context -- re-state anything it needs.',
+			content: undoNote,
+			text: undoNote,
 			meta: {},
 			timestamp: new Date().toISOString(),
 			id: `system_${Date.now()}_${generateSecureRandomString()}`,
