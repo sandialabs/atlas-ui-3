@@ -187,6 +187,10 @@ export const ChatProvider = ({ children }) => {
 	// it, so a late restore can never overwrite a deliberate choice.
 	const pendingWorkspaceRestoreRef = useRef(null)
 
+	// loadSavedConversation is declared after clearChat; clearChat's Undo action
+	// reaches it through this ref rather than reordering the two callbacks.
+	const restoreConversationRef = useRef(null)
+
 	// The workspace this conversation is bound to, as opposed to the one that
 	// happens to be active right now. Only a load (which reads it from the saved
 	// metadata) or the user actually sending a turn updates it, so the local
@@ -803,9 +807,6 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	}, [sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
-		// If there is any chat content or generation in progress, confirm before
-		// discarding it -- "New Chat" should not silently throw away a reply the
-		// user is actively reading / waiting on (mistakes happen).
 		// Returns true if the chat was cleared, false if the user cancelled --
 		// callers (Header/Ctrl+Alt+N) gate follow-up side-effects on this so a
 		// cancelled confirm doesn't still close the canvas or steal focus.
@@ -817,14 +818,31 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const hasBackgroundRun = isRunActive(runs.getRun(activeConversationId))
 		const mustStopCurrentTurn = isGenerating && !hasBackgroundRun
 		const hasContent = messages.length > 0
-		if (!skipConfirm && (hasContent || isGenerating)) {
-			const prompt = mustStopCurrentTurn
-				? 'A response is still being generated. Start a new chat and stop the current response?'
-				: 'Start a new chat? This will clear the current conversation from view.'
+		// Confirm ONLY for the one genuinely irreversible case: an untracked
+		// reply that is still being generated and would be cancelled outright.
+		// Every other New Chat is recoverable, so it clears immediately and
+		// offers Undo in a toast instead of a blocking modal. The old
+		// window.confirm fired on every New Chat with any content at all, which
+		// is a hard two-step on a phone and effectively unusable from a car
+		// mount -- and a native confirm cannot be styled or made touch-sized.
+		if (!skipConfirm && mustStopCurrentTurn) {
+			const prompt = 'A response is still being generated. Start a new chat and stop the current response?'
 			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
 				if (!window.confirm(prompt)) return false
 			}
 		}
+
+		// Snapshot what the view is about to lose so Undo can put it back. Held
+		// in a ref rather than state: nothing renders from it, and it must not
+		// retrigger the autosave effect.
+		const undoSnapshot = (!skipConfirm && hasContent && !mustStopCurrentTurn)
+			? {
+				id: activeConversationId || `undo_${Date.now()}_${generateSecureRandomString()}`,
+				messages: messages.map(m => buildPersistedMessage(m)),
+				canvasContent: files.canvasContent || '',
+				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
+			}
+			: null
 
 		// If generation is in progress, tell the backend to cancel it *before* we
 		// ask for a new session. Otherwise the in-flight task keeps streaming
@@ -861,8 +879,27 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (sendMessage) {
 			sendMessage({ type: 'reset_session' })
 		}
+
+		// Undo restores the transcript *and* re-seeds the backend with it (the
+		// same restore_conversation path a history load uses), so the model
+		// still has the prior context after the session reset above.
+		if (undoSnapshot) {
+			toast.info('New chat started.', {
+				duration: 8000,
+				action: {
+					label: 'Undo',
+					onClick: () => {
+						const restore = restoreConversationRef.current
+						if (!restore) return
+						Promise.resolve(restore(undoSnapshot)).then(() => {
+							if (undoSnapshot.canvasContent) files.setCanvasContent(undoSnapshot.canvasContent)
+						})
+					},
+				},
+			})
+		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages, agent, streamEnd, runs, activeConversationId, toast])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData) => {
@@ -920,6 +957,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		conversationWorkspaceIdRef.current = meta.workspace_id || null
 		restoreWorkspace(meta.workspace_id)
 	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace])
+
+	restoreConversationRef.current = loadSavedConversation
 
 	const downloadFile = useCallback((filename) => {
 		if (!files.sessionFiles.files.find(f => f.filename === filename)) return

@@ -6,6 +6,7 @@ import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import { autoResizeComposer, resetComposerHeight, COMPOSER_MAX_HEIGHT } from '../utils/composerAutoResize'
+import { useComposerHeightVar } from '../hooks/useComposerHeightVar'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 import EnabledDataSourcesIndicator from './EnabledDataSourcesIndicator'
@@ -54,6 +55,7 @@ const ChatArea = () => {
   const prevMessageCountRef = useRef(0)
   const fileInputRef = useRef(null)
   const dragCounterRef = useRef(0)
+  const composerRef = useRef(null)
   
   const {
     messages,
@@ -155,6 +157,10 @@ const ChatArea = () => {
   const autoResizeTextarea = () => {
     autoResizeComposer(textareaRef.current, messagesRef.current, COMPOSER_MAX_HEIGHT)
   }
+
+  // Keep --atlas-composer-height in sync so floating controls (the feedback
+  // button) can sit above the composer instead of on top of Send.
+  useComposerHeightVar(composerRef)
 
   // Check for mobile screen size
   useEffect(() => {
@@ -946,7 +952,9 @@ const ChatArea = () => {
       )}
 
       {/* Input Area */}
-  <footer 
+  <footer
+        ref={composerRef}
+        data-testid="composer-footer"
         className="p-4 border-t border-gray-700 flex-shrink-0"
       >
         <div className="max-w-4xl mx-auto">
@@ -1131,8 +1139,9 @@ const ChatArea = () => {
               <button
                 type="button"
                 onClick={triggerFileUpload}
-                className="px-3 py-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                className="px-4 py-3 min-w-[48px] min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                 title="Upload files"
+                aria-label="Upload files"
               >
                 <Paperclip className="w-5 h-5" />
               </button>
@@ -1146,8 +1155,9 @@ const ChatArea = () => {
                 <button
                   type="button"
                   onClick={stopAgent}
-                  className="px-3 py-3 bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                  className="px-4 py-3 min-w-[48px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                   title="Stop agent"
+                  aria-label="Stop agent"
                 >
                   <Square className="w-5 h-5" />
                 </button>
@@ -1240,8 +1250,9 @@ const ChatArea = () => {
               <button
                 type="button"
                 onClick={stopStreaming}
-                className="px-4 py-3 bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                className="px-5 py-3 min-w-[56px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                 title="Stop streaming"
+                aria-label="Stop streaming"
               >
                 <Square className="w-5 h-5" />
               </button>
@@ -1249,13 +1260,16 @@ const ChatArea = () => {
               <button
                 type="submit"
                 disabled={!canSend}
-                className={`px-4 py-3 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
+                title="Send message"
+                aria-label="Send message"
+                data-testid="send-button"
+                className={`px-5 py-3 min-w-[56px] min-h-[48px] rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
                   canSend
                     ? 'bg-blue-600 hover:bg-blue-700 text-white'
                     : 'bg-gray-700 text-gray-400 cursor-not-allowed'
                 }`}
               >
-                <Send className="w-5 h-5" />
+                <Send className="w-6 h-6" />
               </button>
             )}
           </div>
