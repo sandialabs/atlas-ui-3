@@ -1029,6 +1029,26 @@ class ChatService:
                 "error": str(e)
             }
 
+    def _resolve_session_file(
+        self, session: Session, filename: str
+    ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Find the session file entry a download request names.
+
+        The chat UI renders a download control for the name a tool advertised
+        -- an artifact ``name``, a ``meta_data.output_files`` entry -- while
+        storage sanitizes names on the way in and keys the session map by the
+        sanitized form. An exact lookup therefore misses, leaving the file
+        downloadable from the library (which fetches by S3 key) while chat
+        silently has nothing to offer. ``resolve_session_file`` reconciles the
+        two; the canvas resolves display names through the same function, so
+        the two views of the session cannot drift apart.
+        """
+        return file_processor.resolve_session_file(
+            session.context.get("files", {}),
+            filename,
+            self.file_manager.sanitize_filename if self.file_manager else None,
+        )
+
     async def handle_download_file(
         self,
         session_id: UUID,
@@ -1036,6 +1056,16 @@ class ChatService:
         user_email: Optional[str]
     ) -> Dict[str, Any]:
         """Download a file by original filename (within session context)."""
+        # ``filename`` arrives straight from a client JSON frame, so it can be
+        # any JSON value. Reject anything that is not a non-empty string here,
+        # where it still becomes an ordinary error reply, rather than letting a
+        # dict lookup or the sanitizer raise out of the websocket handler.
+        if not isinstance(filename, str) or not filename:
+            return {
+                "type": MessageType.FILE_DOWNLOAD.value,
+                "filename": filename if isinstance(filename, str) else "",
+                "error": "A filename is required"
+            }
         session = await self.session_repository.get(session_id)
         if not session or not self.file_manager or not user_email:
             return {
@@ -1043,7 +1073,7 @@ class ChatService:
                 "filename": filename,
                 "error": "Session or file manager not available"
             }
-        ref = session.context.get("files", {}).get(filename)
+        stored_name, ref = self._resolve_session_file(session, filename)
         if not ref:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
@@ -1053,7 +1083,7 @@ class ChatService:
         try:
             content_b64 = await self.file_manager.get_file_content(
                 user_email=user_email,
-                filename=filename,
+                filename=stored_name,
                 s3_key=ref.get("key")
             )
             if not content_b64:

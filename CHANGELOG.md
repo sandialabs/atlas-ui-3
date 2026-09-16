@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #951 - 2026-09-16
+- Files produced by an MCP tool can now be downloaded from chat, not only from the File Manager library: storage sanitizes a filename on the way in (`Q3 Sales Report (final).csv` is stored as `Q3_Sales_Report_final_.csv`) while chat download controls carry the name the tool advertised, so the by-name lookup missed and the click was silently dropped in the browser. Ingestion now records the advertised name alongside the stored one and the download resolves against it, names that sanitize alike no longer displace each other in the session -- each keeps its own entry and downloads its own bytes whichever order they arrive in, including when one tool result carries both, a re-emitted artifact refreshes its own entry, a user's attachment is never shadowed by a tool advertising the same name, and the canvas resolves display names through the same lookup so it cannot preview one artifact's bytes under another's name -- a download request names its conversation so a parallel conversation's same-named file cannot answer it, and a failed download says so in the transcript instead of only in the console.
+
 ### PR #947 - 2026-09-15
 - Admin MCP status now distinguishes unauthenticated OAuth servers from genuinely unreachable servers, labeling the former as requiring OAuth authentication while preserving connection failures as failed.
 
