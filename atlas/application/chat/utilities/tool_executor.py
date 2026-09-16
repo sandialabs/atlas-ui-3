@@ -716,6 +716,7 @@ async def execute_single_tool(
                     "session_id": session_context.get("session_id"),
                     "user_email": session_context.get("user_email"),
                     "conversation_id": session_context.get("conversation_id"),
+                    "factory": getattr(tool_manager, "app_factory", None),
                     "launch_discovery": session_context.setdefault("launch_discovery", {}),
                     # Carry the request's selected RAG data sources so tools that
                     # consult them (e.g. atlas_rag_query) honor the user's UI

@@ -164,7 +164,7 @@ async def discover_launch_options(
     if repository is None:
         raise LaunchRefused("Launch discovery failed: workspaces are not configured.")
     try:
-        workspaces = repository.list_workspaces(user_email) or []
+        workspaces = await asyncio.to_thread(repository.list_workspaces, user_email) or []
     except Exception as exc:
         logger.warning("Launch option discovery failed for workspaces", exc_info=True)
         raise LaunchRefused("Launch discovery failed while loading workspaces. Try again.") from exc
@@ -184,10 +184,14 @@ async def discover_launch_options(
     model_options = [
         {
             "name": name,
-            "provider": split_provider(name)[0],
-            "model": split_provider(name)[1],
+            "provider": split_provider(
+                getattr(model_config, "model_name", None) or name
+            )[0],
+            "model": split_provider(
+                getattr(model_config, "model_name", None) or name
+            )[1],
         }
-        for name in sorted(models)
+        for name, model_config in sorted(models.items())
     ]
     if not workspace_options or not model_options:
         missing = []
@@ -205,13 +209,21 @@ async def discover_launch_options(
         "models": model_options,
     }
     if context is not None:
-        context["launch_discovery"] = options
+        state = context.get("launch_discovery")
+        if state is None:
+            context["launch_discovery"] = options
+        else:
+            state.clear()
+            state.update(options)
     return options
 
 
 def _require_discovered_option(context: Optional[Dict[str, Any]], workspace: str, model: str) -> None:
     if context is None or "launch_discovery" not in context:
-        return
+        raise LaunchRefused(
+            "Run atlas_discover_launch_options successfully before atlas_launch; "
+            "launch is blocked until current workspaces and LLM models are discovered."
+        )
     options = context.get("launch_discovery") or {}
     workspaces = options.get("workspaces")
     models = options.get("models")
@@ -677,7 +689,9 @@ async def execute_launch_discovery_tool(
 ) -> ToolResult:
     """Discover launch choices and return a model-readable failure when blocked."""
     try:
-        options = await discover_launch_options(context)
+        options = await discover_launch_options(
+            context, factory=(context or {}).get("factory")
+        )
     except LaunchRefused as exc:
         return ToolResult(
             tool_call_id=getattr(tool_call, "id", None),
