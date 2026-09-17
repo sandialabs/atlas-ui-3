@@ -42,16 +42,27 @@ def test_events_carry_run_and_conversation_ids():
 
 def test_tagging_does_not_mutate_the_original_event():
     original = {"type": "response_complete"}
-    tag_run_event(original, "run-1", "conv-1")
+    tagged = tag_run_event(original, "run-1", "conv-1")
+    assert tagged is not original
     assert original == {"type": "response_complete"}
 
 
-def test_producer_supplied_conversation_id_wins():
+def test_producer_supplied_conversation_id_wins(caplog):
     """A producer that knows its own conversation is more authoritative."""
+    caplog.set_level("DEBUG")
     tagged = tag_run_event(
         {"type": "canvas_content", "conversation_id": "conv-real"}, "run-1", "conv-envelope"
     )
     assert tagged["conversation_id"] == "conv-real"
+    assert "overrides ambient" in caplog.text
+
+
+def test_producer_supplied_run_id_mismatch_is_logged(caplog):
+    caplog.set_level("DEBUG")
+    tag_run_event(
+        {"type": "token_stream", "run_id": "run-real"}, "run-envelope", "conv-1"
+    )
+    assert "run_id" in caplog.text
 
 
 def test_non_dict_event_passes_through():

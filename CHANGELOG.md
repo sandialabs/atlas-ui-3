@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #948 - 2026-09-15
 - Remove obsolete `.gemini` settings, `.env.otel.example`, and archived PR 921 screenshots.
 
+### PR #943 - 2026-09-14
+- **Launched sub-conversation observation** (closes #941 and #926): add scoped `atlas_get_runs` and `atlas_result` tools for non-blocking status and result retrieval, and harden run-event tagging type preservation, mismatch diagnostics, and copy semantics.
 
 ### PR #939 - 2026-09-13
 - **`atlas_launch`: a conversation can launch sub-conversations** (closes #925). A new built-in `atlas` tool takes a `workspace`, a `model` and a `prompt`, starts a real run for the child, and returns its `run_id`/`conversation_id` immediately instead of waiting for an answer; the child's transcript is its own conversation in history. The workspace carries the child's tools *and* data sources: the tool list is re-filtered through the caller's ACLs at launch time and the sources are authorized per source when queried, so a sub-conversation can never reach a tool, model, data source or workspace its caller could not. A launch from an incognito or local-save turn is refused rather than silently persisting a transcript, and approving the `atlas_launch` call is what approves the sub-conversation's own tool calls (admin-mandated approvals still prompt inside it). `ATLAS_LAUNCH_MAX_DEPTH` and `ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN` bound recursion and fan-out (per-user run concurrency still applies), stopping a conversation now stops the ones it launched, and the tool is gated by `FEATURE_ATLAS_LAUNCH_ENABLED` (off by default). Design record: `docs/developer/design-notes/atlas-launch-sub-conversations-2026-09-13.md`.
