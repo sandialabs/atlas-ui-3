@@ -899,6 +899,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (sendMessage) {
 			sendMessage({ type: 'reset_session' })
 		}
+		if (mustStopCurrentTurn) {
+			toast.info('Response stopped. New chat started.')
+		}
 
 		// Offer Undo. The token guards against a stale toast surviving whatever
 		// invalidated it (a dismiss that lost a race, a toast kept open by the
