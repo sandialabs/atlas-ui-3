@@ -16,7 +16,7 @@
  *   - The offer is retired the moment the replacement chat is touched, so Undo
  *     can never discard an exchange that is not saved anywhere.
  *
- * The confirm that survives -- an untracked reply still generating -- is
+ * An untracked reply is stopped before the new session is created and is
  * covered by new-chat-stops-generation.test.js.
  */
 
