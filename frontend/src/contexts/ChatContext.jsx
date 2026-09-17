@@ -835,9 +835,6 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	}, [sendChatMessage, isThinking, isSynthesizing, isStreaming, toast])
 
 	const clearChat = useCallback(({ skipConfirm = false } = {}) => {
-		// Returns true if the chat was cleared, false if the user cancelled --
-		// callers (Header/Ctrl+Alt+N) gate follow-up side-effects on this so a
-		// cancelled confirm doesn't still close the canvas or steal focus.
 		const isGenerating = isThinking || isSynthesizing || isStreaming
 		// Issue #884: when the current conversation is a tracked run, New Chat is
 		// pure navigation -- the run keeps going in the background and shows up
@@ -846,21 +843,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const hasBackgroundRun = isRunActive(runs.getRun(activeConversationId))
 		const mustStopCurrentTurn = isGenerating && !hasBackgroundRun
 		const hasContent = messages.length > 0
-		// Confirm ONLY for the one genuinely irreversible case: an untracked
-		// reply that is still being generated and would be cancelled outright.
-		// Every other New Chat is recoverable, so it clears immediately and
-		// offers Undo in a toast instead of a blocking modal. The old
-		// window.confirm fired on every New Chat with any content at all, which
-		// is a hard two-step on a phone and effectively unusable from a car
-		// mount -- and a native confirm cannot be styled or made touch-sized.
-		if (!skipConfirm && mustStopCurrentTurn) {
-			const prompt = 'A response is still being generated. Start a new chat and stop the current response?'
-			if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-				if (!window.confirm(prompt)) return false
-			}
-		}
-
-		// Snapshot what the view is about to lose so Undo can put it back. Held
+		// Snapshot what the view is about to lose. Held
 		// in a ref rather than state: nothing renders from it, and it must not
 		// retrigger the autosave effect.
 		// `id` is the REAL conversation id or nothing. Fabricating one would be

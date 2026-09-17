@@ -3,11 +3,9 @@
  * causes outputs to be disrupted when generating).
  *
  * Verifies that clearChat():
- *   1. Confirms ONLY for the irreversible case -- an untracked reply that is
- *      still being generated and would be cancelled outright. A plain clear of
- *      an existing transcript is recoverable (Undo toast, see
- *      new-chat-undo.test.jsx) and must not raise a blocking dialog: a native
- *      confirm is a hard two-step on a phone and unusable from a car mount.
+ *   1. Never raises a blocking dialog: New Chat stops an active turn and
+ *      clears immediately, while an idle transcript is recoverable through the
+ *      Undo toast (see new-chat-undo.test.jsx).
  *   2. Cancels in-flight generation (stop_streaming + agent_control:stop) before
  *      asking the backend for a new session, so tokens don't keep streaming
  *      into the fresh empty chat.
@@ -38,15 +36,9 @@ function clearChat({
   sendMessage,
   resetLocalState,
   offerUndo = () => {},
-  confirmFn = (globalThis.window && globalThis.window.confirm) || (() => true),
 } = {}) {
   const isGenerating = isThinking || isSynthesizing || isStreaming
   const mustStopCurrentTurn = isGenerating && !hasBackgroundRun
-  if (!skipConfirm && mustStopCurrentTurn) {
-    const prompt = 'A response is still being generated. Start a new chat and stop the current response?'
-    if (!confirmFn(prompt)) return false
-  }
-
   const canUndo = !skipConfirm && hasContent && !mustStopCurrentTurn
 
   if (sendMessage && mustStopCurrentTurn) {
@@ -84,7 +76,6 @@ describe('New Chat while generating', () => {
       agentModeEnabled: false,
       sendMessage,
       resetLocalState,
-      confirmFn: () => true,
     })
 
     const types = sendMessage.mock.calls.map(c => c[0].type)
@@ -106,7 +97,6 @@ describe('New Chat while generating', () => {
       agentModeEnabled: true,
       sendMessage,
       resetLocalState,
-      confirmFn: () => true,
     })
 
     const types = sendMessage.mock.calls.map(c => c[0].type)
@@ -117,8 +107,7 @@ describe('New Chat while generating', () => {
     expect(agentCall[0].action).toBe('stop')
   })
 
-  it('prompts for confirmation when an untracked reply is still generating', () => {
-    const confirmFn = vi.fn(() => true)
+  it('stops an untracked reply without prompting', () => {
     clearChat({
       isThinking: true,
       isSynthesizing: false,
@@ -127,13 +116,12 @@ describe('New Chat while generating', () => {
       agentModeEnabled: false,
       sendMessage,
       resetLocalState,
-      confirmFn,
     })
-    expect(confirmFn).toHaveBeenCalledTimes(1)
+    expect(resetLocalState).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'reset_session' })
   })
 
   it('does NOT prompt when the chat merely has content -- it offers Undo instead', () => {
-    const confirmFn = vi.fn(() => true)
     const offerUndo = vi.fn()
     const result = clearChat({
       isThinking: false,
@@ -144,16 +132,13 @@ describe('New Chat while generating', () => {
       sendMessage,
       resetLocalState,
       offerUndo,
-      confirmFn,
     })
-    expect(confirmFn).not.toHaveBeenCalled()
     expect(offerUndo).toHaveBeenCalledTimes(1)
     expect(result).toBe(true)
     expect(resetLocalState).toHaveBeenCalledTimes(1)
   })
 
   it('does not prompt when generation belongs to a tracked background run', () => {
-    const confirmFn = vi.fn(() => true)
     clearChat({
       isThinking: false,
       isSynthesizing: false,
@@ -163,9 +148,7 @@ describe('New Chat while generating', () => {
       agentModeEnabled: false,
       sendMessage,
       resetLocalState,
-      confirmFn,
     })
-    expect(confirmFn).not.toHaveBeenCalled()
     // The background run is not stopped -- it keeps going in history.
     expect(sendMessage.mock.calls.map(c => c[0].type)).not.toContain('stop_streaming')
   })
@@ -177,7 +160,7 @@ describe('New Chat while generating', () => {
     expect(offerUndo).not.toHaveBeenCalled()
   })
 
-  it('aborts without resetting or sending when user cancels the confirm dialog', () => {
+  it('clears an active turn without waiting for confirmation', () => {
     const result = clearChat({
       isThinking: false,
       isSynthesizing: false,
@@ -186,12 +169,12 @@ describe('New Chat while generating', () => {
       agentModeEnabled: false,
       sendMessage,
       resetLocalState,
-      confirmFn: () => false,
     })
 
-    expect(result).toBe(false)
-    expect(sendMessage).not.toHaveBeenCalled()
-    expect(resetLocalState).not.toHaveBeenCalled()
+    expect(result).toBe(true)
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'stop_streaming' })
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'reset_session' })
+    expect(resetLocalState).toHaveBeenCalledTimes(1)
   })
 
   it('returns true after a successful clear so callers can gate side-effects', () => {
@@ -203,13 +186,11 @@ describe('New Chat while generating', () => {
       agentModeEnabled: false,
       sendMessage,
       resetLocalState,
-      confirmFn: () => true,
     })
     expect(result).toBe(true)
   })
 
   it('does not prompt when the chat is empty and idle', () => {
-    const confirmFn = vi.fn(() => true)
     clearChat({
       isThinking: false,
       isSynthesizing: false,
@@ -218,9 +199,7 @@ describe('New Chat while generating', () => {
       agentModeEnabled: false,
       sendMessage,
       resetLocalState,
-      confirmFn,
     })
-    expect(confirmFn).not.toHaveBeenCalled()
     // Still resets and creates a new session.
     expect(resetLocalState).toHaveBeenCalledTimes(1)
     expect(sendMessage).toHaveBeenCalledWith({ type: 'reset_session' })
@@ -235,7 +214,6 @@ describe('New Chat while generating', () => {
       agentModeEnabled: true,
       sendMessage,
       resetLocalState,
-      confirmFn: () => true,
     })
     const types = sendMessage.mock.calls.map(c => c[0].type)
     expect(types).not.toContain('stop_streaming')
