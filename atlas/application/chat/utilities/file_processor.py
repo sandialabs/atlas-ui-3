@@ -520,12 +520,13 @@ async def process_tool_artifacts(
     updated_context = dict(session_context)
 
     # Process v2 artifacts (only if we have artifacts)
+    ingested_refs: Dict[str, Dict[str, Any]] = {}
     if tool_result.artifacts:
         user_email = session_context.get("user_email")
         if not user_email:
             return session_context
 
-        updated_context = await ingest_v2_artifacts(
+        updated_context, ingested_refs = await ingest_v2_artifacts(
             session_context=updated_context,
             tool_result=tool_result,
             user_email=user_email,
@@ -539,7 +540,8 @@ async def process_tool_artifacts(
         session_context=updated_context,
         tool_result=tool_result,
         file_manager=file_manager,
-        update_callback=update_callback
+        update_callback=update_callback,
+        ingested_refs=ingested_refs,
     )
 
     return updated_context
@@ -727,14 +729,18 @@ async def ingest_v2_artifacts(
     user_email: str,
     file_manager,
     update_callback: Optional[UpdateCallback] = None
-) -> Dict[str, Any]:
+) -> tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
     """
     Persist v2 MCP artifacts into storage and update session context.
 
-    Pure function that returns updated context without mutations.
+    Returns the updated context and the references as actually stored, so the
+    caller can describe exactly what it ingested rather than looking the names
+    back up in a session map that may hold somebody else's entry under one of
+    them.
     """
+    stored_refs: Dict[str, Dict[str, Any]] = {}
     if not tool_result.artifacts:
-        return session_context
+        return session_context, stored_refs
 
     # Work with a copy
     updated_context = dict(session_context)
@@ -762,16 +768,25 @@ async def ingest_v2_artifacts(
             })
 
         if not files_to_upload:
-            return updated_context
+            return updated_context, stored_refs
 
         # Upload files to storage
         uploaded_refs = await file_manager.upload_files_from_base64(
             files_to_upload, user_email
         )
 
-        # Add file references to session context
+        # Add file references to session context, without letting one artifact
+        # displace another. Storage sanitizes names, so two artifacts the tools
+        # advertised differently -- "a b.txt" and "a_b.txt" -- arrive keyed
+        # alike; a plain update would drop whichever landed first, leaving its
+        # download control pointing at the survivor's bytes. Give the newcomer
+        # its own key instead, so every advertised name keeps an entry of its
+        # own and resolves to the file it names.
         current_files = updated_context.setdefault("files", {})
-        current_files.update(uploaded_refs)
+        uploaded_refs = _merge_without_displacing(
+            current_files, uploaded_refs, file_manager.unique_key
+        )
+        stored_refs = uploaded_refs
 
         # Emit files update if successful uploads
         if uploaded_refs and update_callback:
@@ -793,14 +808,137 @@ async def ingest_v2_artifacts(
     except Exception as e:
         logger.error(f"Error ingesting v2 artifacts: {e}", exc_info=True)
 
-    return updated_context
+    return updated_context, stored_refs
+
+
+def resolve_session_file(
+    files: Dict[str, Any],
+    filename: str,
+    sanitize: Optional[Callable[[str], str]] = None,
+) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Find the session file entry that ``filename`` names.
+
+    The map is keyed by the *stored* name. A user attachment is keyed by its
+    real filename and records no original; a v2 tool artifact is keyed by the
+    sanitized name and records the advertised original it was named for. A
+    download or canvas lookup arrives with whichever name the UI displayed, so
+    both have to resolve, and neither may shadow the other:
+
+    1. the exact key, when the entry there is not claimed by some *other*
+       advertised name -- a user attachment at ``report final.csv`` keeps its
+       own name even after a tool advertises a file called the same thing;
+    2. the entry whose recorded ``original_filename`` is ``filename`` -- when
+       two advertised names sanitize alike only one can hold the key, so the
+       entry sitting at ``a_b.txt`` may be the one advertised as ``a b.txt``,
+       and the request belongs to whichever entry claims the name;
+    3. the exact key after all -- the ordinary case, where the request is the
+       sanitized stored name and nothing else claims it;
+    4. failing everything, and only for a map where nothing records an
+       original at all, a comparison of sanitized forms, so sessions written
+       before originals were recorded keep working.
+
+    A name claimed by more than one entry is ambiguous and resolves to
+    nothing, rather than to whichever happened to be first.
+    """
+    if not isinstance(filename, str) or not filename:
+        return None, None
+    files = files or {}
+
+    exact = files.get(filename)
+    if exact is not None:
+        claimed_by_other = (
+            isinstance(exact, dict)
+            and exact.get("original_filename") not in (None, filename)
+        )
+        if not claimed_by_other:
+            return filename, exact
+
+    aliased = [
+        name for name, meta in files.items()
+        if isinstance(meta, dict) and meta.get("original_filename") == filename
+    ]
+    if len(aliased) == 1:
+        return aliased[0], files[aliased[0]]
+    if aliased:
+        logger.warning(
+            "Ambiguous session file request: %d entries claim the same "
+            "advertised name", len(aliased),
+        )
+        return None, None
+
+    if exact is not None:
+        return filename, exact
+
+    if sanitize is None:
+        return None, None
+    # Only entries recording no advertised original are candidates: a modern
+    # entry answers by its own key or by its alias, never by sanitizing alike.
+    # Scoping it this way keeps one new-style artifact from switching the
+    # compatibility path off for every older reference in the same session.
+    target = sanitize(filename)
+    legacy = [
+        name for name, meta in files.items()
+        if not (isinstance(meta, dict) and meta.get("original_filename"))
+        and sanitize(name) == target
+    ]
+    if len(legacy) == 1:
+        return legacy[0], files[legacy[0]]
+    return None, None
+
+
+def _merge_without_displacing(
+    current_files: Dict[str, Any],
+    uploaded_refs: Dict[str, Dict[str, Any]],
+    unique_key: Callable[[Any, str], str],
+) -> Dict[str, Dict[str, Any]]:
+    """Merge ``uploaded_refs`` into ``current_files``, re-keying collisions.
+
+    An artifact re-emitted under a name it already holds refreshes that entry
+    wherever it ended up -- including a suffixed key it was given earlier, so
+    a tool rewriting its output does not pile up copies and does not end with
+    two entries claiming the same advertised name. Otherwise, a key already
+    held by an entry recording a *different* advertised original belongs to
+    another artifact, and the newcomer takes a suffixed key (before the
+    extension, so type sniffing by suffix still works).
+
+    Returns the refs as actually stored, so the caller's ``files_update``
+    describes the session rather than what it tried to write.
+    """
+    stored: Dict[str, Dict[str, Any]] = {}
+    for name, ref in uploaded_refs.items():
+        advertised = ref.get("original_filename")
+        key = next(
+            (
+                existing_name for existing_name, meta in current_files.items()
+                if isinstance(meta, dict)
+                and advertised is not None
+                and meta.get("original_filename") == advertised
+            ),
+            None,
+        )
+        if key is None:
+            key = name
+            existing = current_files.get(key)
+            if existing is not None and (
+                not isinstance(existing, dict)
+                or existing.get("original_filename") != advertised
+            ):
+                key = unique_key(current_files, name)
+                logger.info(
+                    "Tool artifact name collides after sanitizing; storing it "
+                    "under a distinct session key"
+                )
+        current_files[key] = ref
+        stored[key] = ref
+    return stored
 
 
 async def notify_canvas_files_v2(
     session_context: Dict[str, Any],
     tool_result,
     file_manager,
-    update_callback: Optional[UpdateCallback] = None
+    update_callback: Optional[UpdateCallback] = None,
+    ingested_refs: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> None:
     """
     Send v2 canvas files notification with display configuration.
@@ -823,8 +961,11 @@ async def notify_canvas_files_v2(
         return
 
     try:
-        # Get uploaded file references from session context
-        uploaded_refs = session_context.get("files", {})
+        # Prefer the references this ingestion actually stored. Resolving an
+        # advertised name against the whole session map can land on somebody
+        # else's entry -- a user attachment keyed by that very name, say --
+        # and label its key as the artifact the tool just produced.
+        uploaded_refs = ingested_refs or session_context.get("files", {})
         artifact_names = [artifact.get("name") for artifact in tool_result.artifacts if artifact.get("name")]
 
         # Handle iframe-only display (no artifacts)
@@ -850,7 +991,12 @@ async def notify_canvas_files_v2(
             user_email = session_context.get("user_email")
             canvas_files = []
             for fname in artifact_names:
-                meta = uploaded_refs.get(fname)
+                # Resolve the advertised name rather than indexing by it: a
+                # re-keyed artifact does not sit at its own name, and the entry
+                # that does may belong to a different artifact entirely.
+                _stored, meta = resolve_session_file(
+                    uploaded_refs, fname, file_manager.sanitize_filename
+                )
                 if meta and file_manager.should_display_in_canvas(fname):
                     # Get MIME type from artifact if available
                     artifact = next((a for a in tool_result.artifacts if a.get("name") == fname), {})

@@ -20,7 +20,7 @@ class TestMCPAdminEndpoints:
     def test_mcp_status_endpoint_requires_admin(self):
         """Test that MCP status endpoint requires admin access."""
         from main import app
-        from atlas.modules.config import config_manager
+
         client = TestClient(app)
 
         # Non-admin user should be denied
@@ -30,6 +30,7 @@ class TestMCPAdminEndpoints:
     def test_mcp_status_endpoint_returns_data(self):
         """Test that MCP status endpoint returns expected data structure."""
         from main import app
+
         from atlas.modules.config import config_manager
         client = TestClient(app)
 
@@ -56,6 +57,7 @@ class TestMCPAdminEndpoints:
     def test_mcp_status_marks_failed_servers_not_connected(self):
         """Servers with recorded failures should not appear as connected."""
         from main import app
+
         from atlas.modules.config import config_manager
         client = TestClient(app)
 
@@ -77,10 +79,68 @@ class TestMCPAdminEndpoints:
         data = r.json()
         assert "failing-server" not in data["connected_servers"]
 
+    def test_mcp_status_marks_unauthenticated_oauth_as_auth_required(self):
+        from main import app
+
+        from atlas.infrastructure.app_factory import app_factory
+        from atlas.modules.config import config_manager
+
+        client = TestClient(app)
+        mcp = app_factory.get_mcp_manager()
+        server_name = "oauth-auth-required"
+        mcp.servers_config[server_name] = {
+            "url": "https://mcp.example.com/mcp",
+            "auth_type": "oauth",
+        }
+        mcp._failed_servers[server_name] = {
+            "last_attempt": time.time(),
+            "attempt_count": 1,
+            "error": "RuntimeError: 401 Unauthorized",
+        }
+        try:
+            response = client.get(
+                "/admin/mcp/status",
+                headers={"X-User-Email": config_manager.app_settings.admin_test_user},
+            )
+            assert response.status_code == 200
+            assert response.json()["failed_servers"][server_name]["auth_required"] is True
+        finally:
+            mcp.servers_config.pop(server_name, None)
+            mcp._failed_servers.pop(server_name, None)
+
+    def test_mcp_status_keeps_unreachable_oauth_as_failed(self):
+        from main import app
+
+        from atlas.infrastructure.app_factory import app_factory
+        from atlas.modules.config import config_manager
+
+        client = TestClient(app)
+        mcp = app_factory.get_mcp_manager()
+        server_name = "oauth-unreachable"
+        mcp.servers_config[server_name] = {
+            "url": "https://mcp.example.com/mcp",
+            "auth_type": "oauth",
+        }
+        mcp._failed_servers[server_name] = {
+            "last_attempt": time.time(),
+            "attempt_count": 1,
+            "error": "ConnectError: connection refused",
+        }
+        try:
+            response = client.get(
+                "/admin/mcp/status",
+                headers={"X-User-Email": config_manager.app_settings.admin_test_user},
+            )
+            assert response.status_code == 200
+            assert response.json()["failed_servers"][server_name]["auth_required"] is False
+        finally:
+            mcp.servers_config.pop(server_name, None)
+            mcp._failed_servers.pop(server_name, None)
+
     def test_mcp_reload_endpoint_requires_admin(self):
         """Test that MCP reload endpoint requires admin access."""
         from main import app
-        from atlas.modules.config import config_manager
+
         client = TestClient(app)
 
         # Non-admin user should be denied
@@ -90,7 +150,7 @@ class TestMCPAdminEndpoints:
     def test_mcp_reconnect_endpoint_requires_admin(self):
         """Test that MCP reconnect endpoint requires admin access."""
         from main import app
-        from atlas.modules.config import config_manager
+
         client = TestClient(app)
 
         # Non-admin user should be denied
@@ -100,6 +160,7 @@ class TestMCPAdminEndpoints:
     def test_mcp_reconnect_endpoint_returns_data(self):
         """Test that MCP reconnect endpoint returns expected data structure."""
         from main import app
+
         from atlas.modules.config import config_manager
         client = TestClient(app)
 
@@ -117,6 +178,7 @@ class TestMCPAdminEndpoints:
     def test_admin_dashboard_includes_mcp_endpoints(self):
         """Test that admin dashboard lists MCP endpoints."""
         from main import app
+
         from atlas.modules.config import config_manager
         client = TestClient(app)
 

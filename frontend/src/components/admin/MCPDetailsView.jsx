@@ -10,6 +10,8 @@ const MCPDetailsView = ({ content }) => {
   const configPath = content.configPath || 'config/mcp.json'
   const connectedSet = new Set(status.connected_servers || [])
   const failedServers = status.failed_servers || {}
+  const failedServerCount = Object.values(failedServers).filter((failure) => !failure?.auth_required).length
+  const authRequiredCount = Object.values(failedServers).filter((failure) => failure?.auth_required).length
   const toolCounts = status.tool_counts || {}
   const promptCounts = status.prompt_counts || {}
   const serverNames = Object.keys(servers)
@@ -35,6 +37,7 @@ const MCPDetailsView = ({ content }) => {
                 <div className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-700/50">
                   <span className={`inline-block w-2 h-2 rounded-full ${
                     connectedSet.has(name) ? 'bg-green-400' :
+                    failedServers[name]?.auth_required ? 'bg-yellow-400' :
                     failedServers[name] ? 'bg-red-400' : 'bg-gray-500'
                   }`} />
                   <span className="font-mono text-sm font-semibold text-gray-200">{name}</span>
@@ -51,7 +54,7 @@ const MCPDetailsView = ({ content }) => {
       {/* Right panel: status per server */}
       <div className="w-80 flex-shrink-0 overflow-y-auto space-y-2">
         <div className="px-3 py-2 bg-gray-700 rounded-lg text-xs text-gray-400">
-          {connectedSet.size} connected, {Object.keys(failedServers).length} failed
+          {connectedSet.size} connected, {failedServerCount} failed{authRequiredCount > 0 ? `, ${authRequiredCount} OAuth auth required` : ''}
         </div>
         {serverNames.map((name) => {
           const isConnected = connectedSet.has(name)
@@ -61,6 +64,7 @@ const MCPDetailsView = ({ content }) => {
           return (
             <div key={name} className={`p-3 rounded-lg border ${
               isConnected ? 'border-green-700/60 bg-green-900/10' :
+              failure?.auth_required ? 'border-yellow-700/60 bg-yellow-900/10' :
               failure ? 'border-red-700/60 bg-red-900/10' :
               'border-gray-600 bg-gray-800/50'
             }`}>
@@ -68,10 +72,11 @@ const MCPDetailsView = ({ content }) => {
                 <span className="font-mono text-sm font-semibold text-gray-200">{name}</span>
                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                   isConnected ? 'bg-green-900/60 text-green-300' :
+                  failure?.auth_required ? 'bg-yellow-900/60 text-yellow-300' :
                   failure ? 'bg-red-900/60 text-red-300' :
                   'bg-gray-700 text-gray-400'
                 }`}>
-                  {isConnected ? 'Connected' : failure ? 'Failed' : 'Unknown'}
+                  {isConnected ? 'Connected' : failure?.auth_required ? 'OAuth auth required' : failure ? 'Failed' : 'Unknown'}
                 </span>
               </div>
               {isConnected && (

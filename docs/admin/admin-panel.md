@@ -62,7 +62,7 @@ The response includes:
 
 - `connected_servers`: list of servers with active clients (excludes failed and non-configured servers).
 - `configured_servers`: all servers defined in `mcp.json`.
-- `failed_servers`: per-server error details and timing information (`attempt_count`, `error`, `last_attempt`, `backoff_delay`, `next_retry_in_seconds`).
+- `failed_servers`: per-server error details and timing information (`attempt_count`, `error`, `last_attempt`, `backoff_delay`, `next_retry_in_seconds`). OAuth servers whose endpoint responded with an authentication challenge also include `auth_required: true`; the admin UI labels these as `OAuth auth required` rather than treating them as unreachable. OAuth servers with connection or transport errors retain `auth_required: false` and are shown as failed.
 - `mcp_config_path`: absolute path to the active `mcp.json` file being read/written.
 - `tool_counts`: per-server count of discovered tools (only for configured servers).
 - `prompt_counts`: per-server count of discovered prompts (only for configured servers).

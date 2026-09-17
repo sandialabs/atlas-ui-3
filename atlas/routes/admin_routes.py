@@ -6,6 +6,7 @@ Provides admin-only endpoints for: banners, configuration files, logs, and (comm
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -153,6 +154,18 @@ def _log_base_dir() -> Path:
     if app_settings.app_log_dir:
         return Path(app_settings.app_log_dir)
     return _project_root() / "logs"
+
+
+def _is_oauth_authentication_failure(server_config: Dict[str, Any], error: str) -> bool:
+    if server_config.get("auth_type") != "oauth":
+        return False
+    normalized_error = str(error or "").lower()
+    return (
+        re.search(r"\b401\b", normalized_error) is not None
+        or "unauthorized" in normalized_error
+        or "authentication required" in normalized_error
+        or "authentication failed" in normalized_error
+    )
 
 
 def _locate_log_file() -> Path:
@@ -407,6 +420,9 @@ async def get_mcp_status(admin_user: str = Depends(require_admin)):
 
             failed_servers_with_timing[server_name] = {
                 **failure_info,
+                "auth_required": _is_oauth_authentication_failure(
+                    mcp.servers_config.get(server_name, {}), failure_info.get("error", "")
+                ),
                 "backoff_delay": backoff_delay,
                 "next_retry_in_seconds": next_retry_in,
             }

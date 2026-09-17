@@ -35,6 +35,26 @@ class FileManager:
         """
         return re.sub(r"[^\w.\-]+", "_", filename)
 
+    @staticmethod
+    def unique_key(taken, name: str) -> str:
+        """Return ``name``, or a suffixed variant of it not already in ``taken``.
+
+        Sanitizing is lossy, so two distinct advertised names can want the same
+        stored key. Suffix the stem -- before the extension, so type sniffing
+        by suffix still works -- until the key is free.
+        """
+        if name not in taken:
+            return name
+        stem, dot, ext = name.rpartition(".")
+        if not dot:
+            stem, ext = name, ""
+        counter = 1
+        candidate = f"{stem}_{counter}{dot}{ext}"
+        while candidate in taken:
+            counter += 1
+            candidate = f"{stem}_{counter}{dot}{ext}"
+        return candidate
+
     def get_content_type(self, filename: str) -> str:
         """Determine content type based on filename."""
         extension = filename.lower().split('.')[-1] if '.' in filename else ''
@@ -226,9 +246,8 @@ class FileManager:
         uploaded_refs: Dict[str, Dict[str, Any]] = {}
         for f in files:
             try:
-                filename = f.get("filename")
-                if filename:
-                    filename = self.sanitize_filename(filename)
+                advertised = f.get("filename")
+                filename = self.sanitize_filename(advertised) if advertised else advertised
                 content_b64 = f.get("content")
                 mime_type = f.get("mime_type") or self.get_content_type(filename or "")
                 if not filename or not content_b64:
@@ -242,14 +261,28 @@ class FileManager:
                     tags={"source": source_type},
                     source_type=source_type,
                 )
-                # Normalize minimal reference for session context
-                uploaded_refs[filename] = {
+                # Normalize minimal reference for session context. Two
+                # artifacts in one result can sanitize to the same name; keep
+                # both rather than letting the later one erase the earlier.
+                key = filename
+                if (
+                    filename in uploaded_refs
+                    and uploaded_refs[filename].get("original_filename") != advertised
+                ):
+                    key = self.unique_key(uploaded_refs, filename)
+                uploaded_refs[key] = {
                     "key": meta.get("key"),
                     "content_type": meta.get("content_type", mime_type),
                     "size": meta.get("size", 0),
                     "source": source_type,
                     "last_modified": meta.get("last_modified"),
                     "tags": {"source": source_type},
+                    # The name the producer advertised, before sanitizing. The
+                    # UI shows that name and asks to download it by that name,
+                    # so recording it is what lets the lookup be exact instead
+                    # of guessing from the sanitized key -- two different
+                    # originals can sanitize to the same stored name.
+                    "original_filename": advertised,
                 }
             except Exception as e:
                 logger.error(f"Failed to upload artifact {f.get('filename')}: {e}")

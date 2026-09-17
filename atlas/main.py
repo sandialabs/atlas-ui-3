@@ -1597,6 +1597,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 # run's output. Try the connection session first (the common
                 # case and the cheapest), then the sessions of this user's runs.
                 filename = data.get("filename", "")
+                # A client that knows the file's storage key sends it, and the
+                # key decides. Names are only labels and two files can wear
+                # labels that reduce to the same stored name, so a control with
+                # the key must not have its bytes chosen by name matching.
+                s3_key = data.get("s3_key")
                 response = None
                 for candidate_session_id in _download_session_candidates(
                     run_registry, session_id, user_email, data
@@ -1605,6 +1610,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         session_id=candidate_session_id,
                         filename=filename,
                         user_email=user_email,
+                        s3_key=s3_key,
                     )
                     if not response.get("error"):
                         break
