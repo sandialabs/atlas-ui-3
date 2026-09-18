@@ -47,8 +47,16 @@ def chat_service(file_manager):
 ADVERTISED_NAME = "Q3 Sales Report (final).csv"
 
 
-async def _run_tool_producing(chat_service, session_id, user_email, name):
-    """Ingest one tool artifact named ``name`` into ``session_id``."""
+DEFAULT_BODY = b"a,b\n1,2\n"
+
+
+async def _run_tool_producing(chat_service, session_id, user_email, name, body=DEFAULT_BODY):
+    """Ingest one tool artifact named ``name`` into ``session_id``.
+
+    ``body`` distinguishes artifacts that share a name: a test asserting which
+    of two colliding entries a download resolved to can only do so if their
+    bytes differ.
+    """
     session = await chat_service.create_session(session_id, user_email)
     context = {
         "session_id": str(session_id),
@@ -58,7 +66,7 @@ async def _run_tool_producing(chat_service, session_id, user_email, name):
     context = await file_processor.process_tool_artifacts(
         session_context=context,
         tool_result=_ToolResult(
-            [{"name": name, "b64": base64.b64encode(b"a,b\n1,2\n").decode(), "mime": "text/csv"}]
+            [{"name": name, "b64": base64.b64encode(body).decode(), "mime": "text/csv"}]
         ),
         file_manager=chat_service.file_manager,
         update_callback=None,
@@ -611,22 +619,35 @@ async def test_run_artifact_downloads_after_its_run_session_is_reaped(chat_servi
 async def test_a_collided_run_artifact_is_still_reachable_by_key(chat_service):
     """The justification for suffixing rather than dropping (issue #953).
 
-    When the connection already holds a different file under the artifact's
+    When the connection already holds a *different* file under the artifact's
     name, the run's entry is filed under a suffixed key -- and a client that
-    sends the storage key must still get the run's bytes, not the other file's.
+    sends the storage key must get the run's bytes, not the other file's.
     """
     from atlas.main import _merge_run_session_files
 
     user_email = "user1@example.com"
     connection_session_id = uuid.uuid4()
     run_session_id = uuid.uuid4()
+    run_body = b"run,artifact\n9,9\n"
 
     await _run_tool_producing(
         chat_service, connection_session_id, user_email, ADVERTISED_NAME
     )
-    await _run_tool_producing(chat_service, run_session_id, user_email, ADVERTISED_NAME)
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, ADVERTISED_NAME, body=run_body
+    )
     run_session = await chat_service.session_repository.get(run_session_id)
-    run_key = next(iter(run_session.context["files"].values()))["key"]
+    run_ref = next(iter(run_session.context["files"].values()))
+    # Distinct bytes mean distinct keys; otherwise there is no collision to test.
+    connection_session = await chat_service.session_repository.get(
+        connection_session_id
+    )
+    connection_ref = next(iter(connection_session.context["files"].values()))
+    assert run_ref["key"] != connection_ref["key"]
+    # Same advertised name, so the merge must not treat them as one artifact
+    # purely because they collide on the label.
+    run_ref = dict(run_ref, original_filename=f"run-{ADVERTISED_NAME}")
+    run_session.context["files"] = {ADVERTISED_NAME: run_ref}
 
     await _merge_run_session_files(
         chat_service, run_session_id, connection_session_id
@@ -636,8 +657,101 @@ async def test_a_collided_run_artifact_is_still_reachable_by_key(chat_service):
         session_id=connection_session_id,
         filename=ADVERTISED_NAME,
         user_email=user_email,
-        s3_key=run_key,
+        s3_key=run_ref["key"],
     )
 
     assert not response.get("error"), response.get("error")
-    assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"
+    assert base64.b64decode(response["content_base64"]) == run_body
+
+
+@pytest.mark.asyncio
+async def test_a_reemitted_artifact_converges_to_one_entry(chat_service):
+    """A tool rewriting its output every turn must not pile up copies.
+
+    The ingest path re-uploads a re-emitted artifact under a fresh storage key,
+    so keying identity on the storage key alone would file a_1, a_2, ... one
+    per turn while a name-only download kept returning the first turn's bytes.
+    """
+    from atlas.main import _merge_run_session_files
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    await chat_service.create_session(connection_session_id, user_email)
+
+    for turn in range(3):
+        run_session_id = uuid.uuid4()
+        await _run_tool_producing(
+            chat_service,
+            run_session_id,
+            user_email,
+            ADVERTISED_NAME,
+            body=f"turn,{turn}\n".encode(),
+        )
+        await _merge_run_session_files(
+            chat_service, run_session_id, connection_session_id
+        )
+
+    connection_session = await chat_service.session_repository.get(
+        connection_session_id
+    )
+    assert len(connection_session.context["files"]) == 1
+
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename=ADVERTISED_NAME,
+        user_email=user_email,
+    )
+    # The newest bytes, not the first turn's.
+    assert base64.b64decode(response["content_base64"]) == b"turn,2\n"
+
+
+@pytest.mark.asyncio
+async def test_a_merge_racing_new_chat_lands_on_the_live_session(chat_service):
+    """`handle_reset_session` installs a new Session under the same id.
+
+    A merge that interleaves with the reset writes into the object the reset
+    discarded, so the artifacts must be re-applied to its replacement.
+    """
+    from atlas.main import _merge_run_session_files
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    await chat_service.create_session(connection_session_id, user_email)
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
+    )
+
+    original = await chat_service.session_repository.get(connection_session_id)
+    real_get = chat_service.session_repository.get
+    reset_done = {"yes": False}
+
+    async def _get_then_reset(session_id):
+        session = await real_get(session_id)
+        # Interleave the reset exactly once, after the merge has read the
+        # session it is about to write into.
+        if session_id == connection_session_id and not reset_done["yes"]:
+            reset_done["yes"] = True
+            await chat_service.handle_reset_session(
+                connection_session_id, user_email=user_email
+            )
+        return session
+
+    chat_service.session_repository.get = _get_then_reset
+    try:
+        await _merge_run_session_files(
+            chat_service, run_session_id, connection_session_id
+        )
+    finally:
+        chat_service.session_repository.get = real_get
+
+    live = await chat_service.session_repository.get(connection_session_id)
+    assert live is not original, "fixture no longer exercises session replacement"
+    assert "mcp_image_0.jpeg" in live.context["files"]
+
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename="mcp_image_0.jpeg",
+        user_email=user_email,
+    )
+    assert not response.get("error"), response.get("error")

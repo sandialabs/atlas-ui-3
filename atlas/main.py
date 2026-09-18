@@ -243,33 +243,43 @@ async def _merge_run_session_files(
         target = connection_session.context.setdefault("files", {})
         for name, meta in files.items():
             _merge_one_file(target, name, meta)
+
+        # ``handle_reset_session`` ends the session and then installs a *new*
+        # Session object under the same id. A merge that interleaved with that
+        # just wrote into the discarded object, so re-fetch and, if the object
+        # changed under us, apply the same merge to its replacement.
+        current = await chat_service.session_repository.get(connection_session_id)
+        if current is not None and current is not connection_session:
+            replacement = current.context.setdefault("files", {})
+            for name, meta in files.items():
+                _merge_one_file(replacement, name, meta)
     except Exception as e:
         # Losing the merge costs a download, not the run's result.
         logger.warning("Could not merge run session files: %s", e)
 
 
 def _merge_one_file(target: dict, name: str, meta) -> None:
-    """Add one run artifact to a file map without displacing what is there.
+    """Add one run artifact to a file map without displacing another file.
 
-    Three cases. The name is free: take it. The entry already there *is* this
-    file: nothing to do -- which is what makes the seed/merge round trip
-    idempotent, since every file the connection seeded into the run session
-    comes back unchanged on every tracked turn and must not accumulate copies.
-    Otherwise two different files want one label, and neither may be dropped:
-    the connection's keeps the plain name (it is the live one for what the user
-    attached) and the run's takes a suffixed key from the same helper the
-    artifact ingest path uses, so session keys stay in one format that
-    ``sanitize_filename`` round-trips.
+    The name is free: take it. Some slot already holds *this* file: refresh it
+    in place, wherever it ended up -- which is what keeps the seed/merge round
+    trip idempotent and stops a tool that re-emits its output every turn from
+    piling up a copy per turn. Otherwise two different files want one label and
+    neither may be dropped: the slot's occupant keeps the plain name and the
+    newcomer takes a suffixed key from the same helper the artifact ingest path
+    uses, so session keys stay in one format ``sanitize_filename`` round-trips.
     """
     existing = target.get(name)
     if existing is None:
         target[name] = meta
         return
     if _same_stored_file(existing, meta):
+        # Same file: the key may have moved (the ingest path re-uploads a
+        # re-emitted artifact), so take the newer ref rather than keeping a
+        # ref to bytes that may no longer be the current ones.
+        target[name] = meta
         return
-    # An earlier turn may already have filed this very artifact under a
-    # suffixed key; refresh that rather than adding yet another copy.
-    for held_name, held in target.items():
+    for held_name, held in list(target.items()):
         if _same_stored_file(held, meta):
             target[held_name] = meta
             return
@@ -279,13 +289,26 @@ def _merge_one_file(target: dict, name: str, meta) -> None:
 def _same_stored_file(a, b) -> bool:
     """Whether two file map entries stand for the same file.
 
-    A shared non-empty storage key proves it. Failing that, entries that are
-    simply equal are the same entry -- that is the seeded copy coming home.
-    Two *different* keyless entries are unknown, not equal: calling them equal
-    would make the second look like a duplicate and silently drop it.
+    Three signals, any of which settles it: a shared storage key; plain
+    equality (that is the copy this connection seeded coming home); or a shared
+    ``original_filename``, the advertised name the rest of the codebase already
+    treats as an artifact's identity -- see
+    :func:`file_processor._merge_without_displacing`, which refreshes on the
+    same signal. Without that last one, a tool re-emitting its output under a
+    fresh storage key looks like a new file every turn and accumulates
+    ``a_1.txt``, ``a_2.txt``, ... while name-only downloads keep returning the
+    first turn's bytes.
+
+    Two entries sharing none of the three are unknown, not equal: calling them
+    equal would make the second look like a duplicate and silently drop it.
     """
-    key = a.get("key") if isinstance(a, dict) else None
-    if key and key == (b.get("key") if isinstance(b, dict) else None):
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return a == b
+    key = a.get("key")
+    if key and key == b.get("key"):
+        return True
+    advertised = a.get("original_filename")
+    if advertised and advertised == b.get("original_filename"):
         return True
     return a == b
 

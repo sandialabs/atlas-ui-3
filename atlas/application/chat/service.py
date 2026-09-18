@@ -1138,7 +1138,9 @@ class ChatService:
             # endpoint host and principal. It belongs in the server log, not in
             # a frame sent to the browser.
             logger.error(
-                "Download failed for %s: %s", sanitize_for_logging(filename), e
+                "Download failed for %s: %s",
+                sanitize_for_logging(filename),
+                sanitize_for_logging(str(e)),
             )
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
