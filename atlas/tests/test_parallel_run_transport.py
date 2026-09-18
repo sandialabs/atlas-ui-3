@@ -6,6 +6,7 @@ frame is resolved to exactly one run.
 """
 
 import copy
+from types import SimpleNamespace
 
 import pytest
 from main import (
@@ -1035,3 +1036,73 @@ async def test_the_replay_does_not_stamp_seeded_attachments(caplog):
         "a.txt": attached,
         "a_1.txt": produced,
     }
+
+
+# ---------------------------------------------------------------------------
+# A connection whose every turn is a tracked run (issue #953 follow-up)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_seeding_creates_the_connection_session_when_it_is_missing():
+    """The connection session is only ever created by a turn that runs on it.
+
+    A connection whose every turn is a tracked run has no such turn, so
+    without this the session never exists: the merge finds nothing to merge
+    into and reads the absence as a closed socket, and the download's first
+    candidate answers "Session or file manager not available".
+    """
+    service = _FakeChatService({})
+
+    await _seed_run_session_files(service, "conn", "run-session", USER)
+
+    assert "conn" in service.session_repository._sessions
+    assert service.created == ["conn", "run-session"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_tells_the_connection_which_conversation_it_is_on():
+    """Only a turn on the connection session sets its conversation_id.
+
+    A tracked run does not, so the id stays at whatever the last New Chat
+    minted while the run carries the id the transport minted for this turn --
+    and the merge's isolation check then reads a connection sitting on this
+    very conversation as one that has moved away.
+    """
+    sessions = {"conn": _FakeSession({"conversation_id": "from-new-chat"})}
+    service = _FakeChatService(sessions)
+
+    await _seed_run_session_files(service, "conn", "run-session", USER, "run-conv")
+
+    assert sessions["conn"].context["conversation_id"] == "run-conv"
+
+
+@pytest.mark.asyncio
+async def test_a_run_does_not_redirect_a_connection_that_runs_its_own_turns():
+    """An untracked turn reads this id back when it saves."""
+
+    class _WithHistory(_FakeSession):
+        history = SimpleNamespace(messages=[{"role": "user"}])
+
+    sessions = {"conn": _WithHistory({"conversation_id": "untracked-conv"})}
+    service = _FakeChatService(sessions)
+
+    await _seed_run_session_files(service, "conn", "run-session", USER, "run-conv")
+
+    assert sessions["conn"].context["conversation_id"] == "untracked-conv"
+
+
+@pytest.mark.asyncio
+async def test_artifacts_survive_when_only_tracked_runs_ever_ran():
+    """End to end: seed then merge with no connection session to begin with."""
+    service = _FakeChatService({})
+
+    await _seed_run_session_files(service, "conn", "run-session", USER, "conv-1")
+    service.session_repository._sessions["run-session"].context["files"] = {
+        "deck.pptx": {"key": "s3/deck"}
+    }
+
+    await _merge_run_session_files(service, "run-session", "conn", "conv-1")
+
+    merged = service.session_repository._sessions["conn"].context["files"]
+    assert _without_provenance(merged) == {"deck.pptx": {"key": "s3/deck"}}

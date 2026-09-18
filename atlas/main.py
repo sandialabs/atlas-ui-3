@@ -680,7 +680,11 @@ async def _resolve_download(chat_service, candidates, filename, user_email, s3_k
 
 
 async def _seed_run_session_files(
-    chat_service, connection_session_id, run_session_id, user_email: str
+    chat_service,
+    connection_session_id,
+    run_session_id,
+    user_email: str,
+    conversation_id=None,
 ) -> None:
     """Give a tracked run's session the files attached to the connection.
 
@@ -689,6 +693,17 @@ async def _seed_run_session_files(
     share one history object), which would otherwise start with no file map at
     all, making a just-attached file invisible to the very turn that was sent
     to act on it.
+
+    Creates the connection session when it does not exist yet. The connection
+    session is only ever created lazily, by the first turn that runs against it
+    -- and a connection whose every turn is a tracked run has no such turn, so
+    on that connection the session is never created at all. Nothing shows until
+    the run ends and :func:`_merge_run_session_files` looks for somewhere to put
+    the run's artifacts, finds no session, and reads the absence as "the socket
+    closed" (issue #953 follow-up): the artifacts are dropped and the download
+    answers "Session or file manager not available", because the first candidate
+    session it tries does not exist either. Creating it here makes the merge
+    target exist for the whole life of the run.
     """
     if run_session_id == connection_session_id:
         return
@@ -696,6 +711,26 @@ async def _seed_run_session_files(
         connection_session = await chat_service.session_repository.get(
             connection_session_id
         )
+        if connection_session is None:
+            connection_session = await chat_service.create_session(
+                connection_session_id, user_email
+            )
+        # Tell the connection which conversation it is on. Only a turn that
+        # runs *against* the connection session ever sets this, and a tracked
+        # run does not -- so the id stays at whatever ``handle_reset_session``
+        # minted at the last New Chat, while the run carries the different id
+        # the transport minted for this turn. The merge's isolation check then
+        # compares two ids that were never meant to match and reads a
+        # connection sitting on this very conversation as one that has moved
+        # away, so it drops the run's artifacts (issue #953 follow-up).
+        #
+        # Only when no turn has ever run on the connection session itself: an
+        # untracked turn in flight reads this id back when it saves, and a run
+        # starting in another conversation must not redirect that write.
+        if conversation_id and not getattr(
+            getattr(connection_session, "history", None), "messages", None
+        ):
+            connection_session.context["conversation_id"] = conversation_id
         files = (connection_session.context.get("files") if connection_session else None)
         run_session = await chat_service.session_repository.get(run_session_id)
         if run_session is None:
@@ -1695,7 +1730,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     # map across. Copied, not shared, so the run and the
                     # connection cannot mutate each other's state.
                     await _seed_run_session_files(
-                        chat_service, session_id, turn_session_id, user_email
+                        chat_service,
+                        session_id,
+                        turn_session_id,
+                        user_email,
+                        run_record.conversation_id,
                     )
 
                     async def turn_update_callback(
