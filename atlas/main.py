@@ -181,7 +181,7 @@ def tag_run_event(message: T, run_id: str, conversation_id: str) -> T:
 
 
 async def _merge_run_session_files(
-    chat_service, run_session_id, connection_session_id
+    chat_service, run_session_id, connection_session_id, conversation_id=None
 ) -> None:
     """Copy a finished run's file map back onto the connection session.
 
@@ -226,6 +226,20 @@ async def _merge_run_session_files(
                 len(files),
             )
             return
+        if not _same_conversation(connection_session, conversation_id):
+            # The connection moved on -- New Chat, or a restore of a different
+            # conversation -- before this run's files came home. They belong to
+            # the conversation the run ran in, and dropping them into the one
+            # on screen would put them in front of the model and its tools
+            # there, and seed them into its runs.
+            logger.info(
+                "Not merging %d file(s) from run %s: the connection has moved "
+                "to another conversation; they remain downloadable from the "
+                "File Library",
+                len(files),
+                sanitize_for_logging(str(run_session_id)),
+            )
+            return
         if not getattr(connection_session, "active", True):
             # Inactive is ambiguous: the socket may have closed, but New Chat
             # and conversation restore also end the session and immediately
@@ -256,6 +270,7 @@ async def _merge_run_session_files(
         if (
             current is not None
             and current is not connection_session
+            and _same_conversation(current, conversation_id)
             and current.context.get("conversation_id")
             == connection_session.context.get("conversation_id")
         ):
@@ -273,6 +288,21 @@ async def _merge_run_session_files(
 # advertised name with an attachment is a different file, and must not take
 # over the slot the attachment holds.
 _MERGED_FROM_RUN = "_merged_from_run"
+
+
+def _same_conversation(session, conversation_id) -> bool:
+    """Whether ``session`` is still on the conversation a run belonged to.
+
+    Unknown on either side means "do not block": a run registered without a
+    conversation, or a session that has not recorded one, predates this check
+    and behaved fine without it.
+    """
+    if not conversation_id:
+        return True
+    current = session.context.get("conversation_id")
+    if not current:
+        return True
+    return str(current) == str(conversation_id)
 
 
 def _strip_provenance(meta):
@@ -337,8 +367,28 @@ class _FileIndex:
         )
 
     def put(self, name, meta) -> None:
+        """Install ``meta`` at ``name``, retiring whatever it replaces.
+
+        The outgoing entry's key and advertised name must leave the indexes
+        with it. Leaving a superseded key indexed would make a later artifact
+        in the same run map look like this already-updated name and be dropped
+        instead of filed.
+        """
+        outgoing = self.target.get(name)
+        if isinstance(outgoing, dict):
+            key = outgoing.get("key")
+            if key and self.by_key.get(key) == name:
+                del self.by_key[key]
+            advertised = outgoing.get("original_filename")
+            if advertised and self.by_advertised.get(advertised) == name:
+                del self.by_advertised[advertised]
         self.target[name] = meta
         self._index(name, meta)
+
+    def is_from_run(self, name) -> bool:
+        """Whether the entry at ``name`` was written by a merge."""
+        held = self.target.get(name)
+        return isinstance(held, dict) and bool(held.get(_MERGED_FROM_RUN))
 
 
 def _merge_one_file(index: _FileIndex, name: str, meta, run_session_id=None) -> None:
@@ -356,18 +406,23 @@ def _merge_one_file(index: _FileIndex, name: str, meta, run_session_id=None) -> 
     and the newcomer takes a suffixed key from the same helper the artifact
     ingest path uses, so session keys stay in one format that
     ``sanitize_filename`` round-trips.
+
+    A refresh carries the held entry's provenance forward rather than stamping
+    it. Every file the connection owns is seeded into each run and merged back,
+    so stamping on refresh would mark the user's own attachments as run output
+    and admit them to advertised-name matching -- after which the next
+    same-named artifact would take the attachment's slot, which is exactly what
+    the stamp exists to prevent.
     """
-    if isinstance(meta, dict):
-        meta = {**meta, _MERGED_FROM_RUN: True}
     held_name = index.find(meta)
     if held_name is not None:
         # The key may have moved (the ingest path re-uploads a re-emitted
         # artifact), so take the newer ref rather than keeping one that points
         # at superseded bytes.
-        index.put(held_name, meta)
+        index.put(held_name, _stamp(meta, index.is_from_run(held_name)))
         return
     if name not in index.target:
-        index.put(name, meta)
+        index.put(name, _stamp(meta, True))
         return
     assigned = FileManager.unique_key(index.target, name)
     # The one merge outcome that changes what the user sees, and the
@@ -379,7 +434,16 @@ def _merge_one_file(index: _FileIndex, name: str, meta, run_session_id=None) -> 
         sanitize_for_logging(name),
         sanitize_for_logging(assigned),
     )
-    index.put(assigned, meta)
+    index.put(assigned, _stamp(meta, True))
+
+
+def _stamp(meta, from_run: bool):
+    """``meta`` marked as run output, or explicitly not."""
+    if not isinstance(meta, dict):
+        return meta
+    if from_run:
+        return {**meta, _MERGED_FROM_RUN: True}
+    return _strip_provenance(meta)
 
 
 async def _release_finished_run(
@@ -413,7 +477,7 @@ async def _release_finished_run(
             # searches first (issue #953).
             if connection_session_id is not None:
                 await _merge_run_session_files(
-                    chat_service, session_id, connection_session_id
+                    chat_service, session_id, connection_session_id, conversation_id
                 )
             await chat_service.end_session(session_id)
             # end_session only marks the session inactive. For a connection's

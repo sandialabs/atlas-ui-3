@@ -10,6 +10,7 @@ import copy
 import pytest
 from main import (
     _cancel_addressed_run,
+    _DOWNLOAD_ERROR_PRIORITY,
     _download_error_rank,
     _download_session_candidates,
     _MERGED_FROM_RUN,
@@ -822,3 +823,112 @@ async def test_an_artifact_never_holds_both_a_plain_and_a_suffixed_key():
     assert _without_provenance(sessions["conn"].context["files"]) == {
         "a_1.txt": produced
     }
+
+
+@pytest.mark.asyncio
+async def test_a_round_trip_does_not_mark_attachments_as_run_output():
+    """The stamp must not spread to the files the connection already owned.
+
+    Every file the connection owns is seeded into each run and merged back. If
+    that round trip stamped them, a user's attachment would join advertised-name
+    matching and the next same-named artifact would take over its slot.
+    """
+    attached = {"key": "s3/attached", "original_filename": "a.txt"}
+    produced = {"key": "s3/produced", "original_filename": "a.txt"}
+    sessions = {"conn": _FakeSession({"files": {"a.txt": dict(attached)}})}
+    service = _FakeChatService(sessions)
+
+    # One ordinary turn: seed the attachment into a run, merge it back.
+    await _seed_run_session_files(service, "conn", "run-0", USER)
+    await _merge_run_session_files(service, "run-0", "conn")
+
+    # Now a run produces a *different* file advertising the same name.
+    sessions["run-1"] = _FakeSession({"files": {"a.txt": dict(produced)}})
+    await _merge_run_session_files(service, "run-1", "conn")
+
+    assert _without_provenance(sessions["conn"].context["files"]) == {
+        "a.txt": attached,
+        "a_1.txt": produced,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_key_does_not_swallow_a_later_artifact():
+    """A replaced entry's old key must leave the index with it.
+
+    A re-emitted artifact is refreshed to a new storage key. If the old key
+    stayed indexed against that name, a *different* file later in the same run
+    map that happens to carry the old key would look like the name just
+    updated, overwrite it, and lose its own name into the bargain.
+    """
+    sessions = {
+        "conn": _FakeSession({"files": {}}),
+        "turn-1": _FakeSession({
+            "files": {"a.txt": {"key": "s3/old", "original_filename": "a.txt"}}
+        }),
+    }
+    service = _FakeChatService(sessions)
+    # Turn one: the run produces a.txt, so the entry carries the merge's stamp.
+    await _merge_run_session_files(service, "turn-1", "conn")
+
+    # Turn two re-emits a.txt under a fresh key -- retiring ``s3/old`` -- and
+    # produces a second file that reuses it.
+    sessions["turn-2"] = _FakeSession({
+        "files": {
+            "a.txt": {"key": "s3/new", "original_filename": "a.txt"},
+            "b.txt": {"key": "s3/old"},
+        }
+    })
+
+    await _merge_run_session_files(service, "turn-2", "conn")
+
+    assert _without_provenance(sessions["conn"].context["files"]) == {
+        "a.txt": {"key": "s3/new", "original_filename": "a.txt"},
+        "b.txt": {"key": "s3/old"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_files_are_not_merged_into_another_conversation():
+    """A reset that completes *before* the merge starts must still be honoured.
+
+    Gating only the replay leaves this window open: artifacts from the run's
+    conversation would land in the one now on screen, where the model and its
+    tools would see them and the next run would be seeded with them.
+    """
+    sessions = {
+        "conn": _FakeSession({"files": {}}),
+        "run-session": _FakeSession({"files": {"out.png": {"key": "s3/out"}}}),
+    }
+    sessions["conn"].context["conversation_id"] = "conversation-B"
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(
+        service, "run-session", "conn", "conversation-A"
+    )
+
+    assert sessions["conn"].context["files"] == {}
+
+
+@pytest.mark.asyncio
+async def test_files_are_merged_when_the_conversation_still_matches():
+    sessions = {
+        "conn": _FakeSession({"files": {}}),
+        "run-session": _FakeSession({"files": {"out.png": {"key": "s3/out"}}}),
+    }
+    sessions["conn"].context["conversation_id"] = "conversation-A"
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(
+        service, "run-session", "conn", "conversation-A"
+    )
+
+    assert _without_provenance(sessions["conn"].context["files"]) == {
+        "out.png": {"key": "s3/out"}
+    }
+
+
+def test_every_download_error_code_has_an_explicit_rank():
+    """A new DownloadError member must not silently fall to unknown rank."""
+    ranked = {code for code in _DOWNLOAD_ERROR_PRIORITY if code is not None}
+    assert ranked == {member.value for member in DownloadError}
