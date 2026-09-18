@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from atlas.application.chat.service import ChatService
+from atlas.application.chat.service import ChatService, DownloadError
 from atlas.application.chat.utilities import file_processor
 from atlas.modules.file_storage.manager import FileManager
 from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
@@ -47,8 +47,16 @@ def chat_service(file_manager):
 ADVERTISED_NAME = "Q3 Sales Report (final).csv"
 
 
-async def _run_tool_producing(chat_service, session_id, user_email, name):
-    """Ingest one tool artifact named ``name`` into ``session_id``."""
+DEFAULT_BODY = b"a,b\n1,2\n"
+
+
+async def _run_tool_producing(chat_service, session_id, user_email, name, body=DEFAULT_BODY):
+    """Ingest one tool artifact named ``name`` into ``session_id``.
+
+    ``body`` distinguishes artifacts that share a name: a test asserting which
+    of two colliding entries a download resolved to can only do so if their
+    bytes differ.
+    """
     session = await chat_service.create_session(session_id, user_email)
     context = {
         "session_id": str(session_id),
@@ -58,7 +66,7 @@ async def _run_tool_producing(chat_service, session_id, user_email, name):
     context = await file_processor.process_tool_artifacts(
         session_context=context,
         tool_result=_ToolResult(
-            [{"name": name, "b64": base64.b64encode(b"a,b\n1,2\n").decode(), "mime": "text/csv"}]
+            [{"name": name, "b64": base64.b64encode(body).decode(), "mime": "text/csv"}]
         ),
         file_manager=chat_service.file_manager,
         update_callback=None,
@@ -517,3 +525,285 @@ async def test_legacy_matching_survives_a_new_artifact_in_the_session(chat_servi
 
     assert not response.get("error"), response.get("error")
     assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"
+
+
+@pytest.mark.asyncio
+async def test_download_failures_carry_their_machine_readable_code(chat_service):
+    """The websocket picks which candidate's failure the user sees by code.
+
+    That choice must not depend on how the messages happen to be worded, so
+    pin the codes to the replies this method actually produces (issue #953).
+    """
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+
+    missing_session = await chat_service.handle_download_file(
+        session_id=uuid.uuid4(), filename="whatever.txt", user_email=user_email
+    )
+    assert missing_session["error_code"] == DownloadError.NO_SESSION.value
+
+    await _run_tool_producing(chat_service, session_id, user_email, ADVERTISED_NAME)
+    missing_file = await chat_service.handle_download_file(
+        session_id=session_id, filename="never-produced.txt", user_email=user_email
+    )
+    assert missing_file["error_code"] == DownloadError.NOT_FOUND.value
+
+    no_name = await chat_service.handle_download_file(
+        session_id=session_id, filename="", user_email=user_email
+    )
+    assert no_name["error_code"] == DownloadError.BAD_REQUEST.value
+
+
+@pytest.mark.asyncio
+async def test_a_storage_failure_is_not_relayed_verbatim(chat_service):
+    """Exception text names buckets, keys and hosts; it stays server-side."""
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+    await _run_tool_producing(chat_service, session_id, user_email, ADVERTISED_NAME)
+
+    async def _boom(**kwargs):
+        raise RuntimeError("s3://secret-bucket/tenant-42/key.bin: access denied")
+
+    chat_service.file_manager.get_file_content = _boom
+
+    response = await chat_service.handle_download_file(
+        session_id=session_id, filename=ADVERTISED_NAME, user_email=user_email
+    )
+
+    assert response["error_code"] == DownloadError.STORAGE.value
+    assert "secret-bucket" not in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_run_artifact_downloads_after_its_run_session_is_reaped(chat_service):
+    """The reported symptom of issue #953, driven end to end.
+
+    A tool artifact is produced on a tracked run's own session; the run then
+    finishes, which merges its file map back and deletes that session. The
+    bytes must still come back through the ordinary chat download path -- the
+    one that used to answer "Session or file manager not available".
+    """
+    from atlas.application.chat.runs import RunRegistry
+    from atlas.main import _release_finished_run
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    await chat_service.create_session(connection_session_id, user_email)
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
+    )
+
+    await _release_finished_run(
+        chat_service,
+        RunRegistry(),
+        "run-1",
+        run_session_id,
+        None,
+        user_email,
+        connection_session_id=connection_session_id,
+    )
+
+    assert await chat_service.session_repository.get(run_session_id) is None
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename="mcp_image_0.jpeg",
+        user_email=user_email,
+    )
+
+    assert not response.get("error"), response.get("error")
+    assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"
+
+
+@pytest.mark.asyncio
+async def test_a_collided_run_artifact_is_still_reachable_by_key(chat_service):
+    """The justification for suffixing rather than dropping (issue #953).
+
+    When the connection already holds a *different* file under the artifact's
+    name, the run's entry is filed under a suffixed key -- and a client that
+    sends the storage key must get the run's bytes, not the other file's.
+    """
+    from atlas.main import _merge_run_session_files
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    run_body = b"run,artifact\n9,9\n"
+
+    await _run_tool_producing(
+        chat_service, connection_session_id, user_email, ADVERTISED_NAME
+    )
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, ADVERTISED_NAME, body=run_body
+    )
+    run_session = await chat_service.session_repository.get(run_session_id)
+    run_ref = next(iter(run_session.context["files"].values()))
+    # Distinct bytes mean distinct keys; otherwise there is no collision to test.
+    connection_session = await chat_service.session_repository.get(
+        connection_session_id
+    )
+    connection_ref = next(iter(connection_session.context["files"].values()))
+    assert run_ref["key"] != connection_ref["key"]
+    # Same advertised name, so the merge must not treat them as one artifact
+    # purely because they collide on the label.
+    run_ref = dict(run_ref, original_filename=f"run-{ADVERTISED_NAME}")
+    run_session.context["files"] = {ADVERTISED_NAME: run_ref}
+
+    await _merge_run_session_files(
+        chat_service, run_session_id, connection_session_id
+    )
+
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename=ADVERTISED_NAME,
+        user_email=user_email,
+        s3_key=run_ref["key"],
+    )
+
+    assert not response.get("error"), response.get("error")
+    assert base64.b64decode(response["content_base64"]) == run_body
+
+
+@pytest.mark.asyncio
+async def test_a_reemitted_artifact_converges_to_one_entry(chat_service):
+    """A tool rewriting its output every turn must not pile up copies.
+
+    The ingest path re-uploads a re-emitted artifact under a fresh storage key,
+    so keying identity on the storage key alone would file a_1, a_2, ... one
+    per turn while a name-only download kept returning the first turn's bytes.
+    """
+    from atlas.main import _merge_run_session_files
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    await chat_service.create_session(connection_session_id, user_email)
+
+    for turn in range(3):
+        run_session_id = uuid.uuid4()
+        await _run_tool_producing(
+            chat_service,
+            run_session_id,
+            user_email,
+            ADVERTISED_NAME,
+            body=f"turn,{turn}\n".encode(),
+        )
+        await _merge_run_session_files(
+            chat_service, run_session_id, connection_session_id
+        )
+
+    connection_session = await chat_service.session_repository.get(
+        connection_session_id
+    )
+    assert len(connection_session.context["files"]) == 1
+
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename=ADVERTISED_NAME,
+        user_email=user_email,
+    )
+    # The newest bytes, not the first turn's.
+    assert base64.b64decode(response["content_base64"]) == b"turn,2\n"
+
+
+async def _merge_racing_a_session_swap(chat_service, connection_session_id, run_session_id, swap):
+    """Run the merge with ``swap`` interleaved once, mid-merge.
+
+    ``swap`` fires after the merge has read the session it is about to write
+    into, which is the window in which the session object gets replaced.
+    """
+    from atlas.main import _merge_run_session_files
+
+    real_get = chat_service.session_repository.get
+    fired = {"yes": False}
+
+    async def _get_then_swap(session_id):
+        session = await real_get(session_id)
+        if session_id == connection_session_id and not fired["yes"]:
+            fired["yes"] = True
+            await swap()
+        return session
+
+    chat_service.session_repository.get = _get_then_swap
+    try:
+        await _merge_run_session_files(
+            chat_service, run_session_id, connection_session_id
+        )
+    finally:
+        chat_service.session_repository.get = real_get
+
+
+@pytest.mark.asyncio
+async def test_a_merge_racing_a_session_swap_lands_on_the_live_session(chat_service):
+    """A replaced Session object must not swallow the artifacts.
+
+    The repository can hand back a new `Session` under the same id, and a merge
+    that interleaved with that wrote into the object being discarded.
+    """
+    from atlas.domain.sessions.models import Session
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    original = await chat_service.create_session(connection_session_id, user_email)
+    conversation_id = original.context.get("conversation_id")
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
+    )
+
+    async def _replace_the_session_object():
+        # Same conversation, new object -- a reconnect or restore of the
+        # conversation already in progress.
+        replacement = Session(id=connection_session_id, user_email=user_email)
+        replacement.context["conversation_id"] = conversation_id
+        chat_service.session_repository._sessions[connection_session_id] = replacement
+
+    await _merge_racing_a_session_swap(
+        chat_service, connection_session_id, run_session_id, _replace_the_session_object
+    )
+
+    live = await chat_service.session_repository.get(connection_session_id)
+    assert live is not original, "fixture no longer exercises session replacement"
+    assert "mcp_image_0.jpeg" in live.context["files"]
+
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename="mcp_image_0.jpeg",
+        user_email=user_email,
+    )
+    assert not response.get("error"), response.get("error")
+
+
+@pytest.mark.asyncio
+async def test_a_merge_racing_new_chat_does_not_leak_into_the_new_conversation(
+    chat_service,
+):
+    """New Chat replaces the session *and* the conversation.
+
+    Replaying there would drop a finished run's files into an unrelated
+    conversation, where they would then be seeded into its runs. The old
+    conversation is gone from the session either way; the artifacts remain in
+    the File Library.
+    """
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    original = await chat_service.create_session(connection_session_id, user_email)
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
+    )
+
+    async def _new_chat():
+        await chat_service.handle_reset_session(
+            connection_session_id, user_email=user_email
+        )
+
+    await _merge_racing_a_session_swap(
+        chat_service, connection_session_id, run_session_id, _new_chat
+    )
+
+    live = await chat_service.session_repository.get(connection_session_id)
+    assert live is not original, "fixture no longer exercises the reset"
+    assert live.context.get("conversation_id") != original.context.get(
+        "conversation_id"
+    )
+    assert live.context.get("files", {}) == {}
