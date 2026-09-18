@@ -27,6 +27,7 @@ del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
 # Standard imports follow - must come after LiteLLM logging suppression above
 # ruff: noqa: E402
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -206,6 +207,7 @@ async def _merge_run_session_files(
     """
     if run_session_id is None or run_session_id == connection_session_id:
         return
+    files = None
     try:
         run_session = await chat_service.session_repository.get(run_session_id)
         files = run_session.context.get("files") if run_session else None
@@ -220,10 +222,11 @@ async def _merge_run_session_files(
             # artifacts are reachable only through the File Library -- say so,
             # rather than losing them silently.
             logger.warning(
-                "Run %s produced %d file(s) but its connection session is gone; "
-                "they remain downloadable from the File Library only",
-                run_session_id,
+                "Run %s produced %d file(s) but its connection session %s is "
+                "gone; they remain downloadable from the File Library only",
+                sanitize_for_logging(str(run_session_id)),
                 len(files),
+                sanitize_for_logging(str(connection_session_id)),
             )
             return
         if not _same_conversation(connection_session, conversation_id):
@@ -248,11 +251,12 @@ async def _merge_run_session_files(
             # reads costs nothing, while skipping would drop artifacts the user
             # can still see on screen -- and record the ambiguity.
             logger.info(
-                "Merging %d file(s) from run %s into an inactive connection "
-                "session; if the socket has closed they remain downloadable "
-                "from the File Library",
+                "Merging %d file(s) from run %s into inactive connection "
+                "session %s; if the socket has closed they remain "
+                "downloadable from the File Library",
                 len(files),
-                run_session_id,
+                sanitize_for_logging(str(run_session_id)),
+                sanitize_for_logging(str(connection_session_id)),
             )
         index = _FileIndex(connection_session.context.setdefault("files", {}))
         for name, meta in files.items():
@@ -274,12 +278,26 @@ async def _merge_run_session_files(
             and current.context.get("conversation_id")
             == connection_session.context.get("conversation_id")
         ):
+            # Replay the *result* map, not the raw run map: it already has
+            # each entry's provenance settled, and re-deciding it here would
+            # stamp the user's seeded attachments as run output.
             replacement = _FileIndex(current.context.setdefault("files", {}))
-            for name, meta in files.items():
-                _merge_one_file(replacement, name, meta, run_session_id)
+            for name, meta in list(index.target.items()):
+                _merge_one_file(
+                    replacement, name, meta, run_session_id, preserve=True
+                )
     except Exception as e:
-        # Losing the merge costs a download, not the run's result.
-        logger.warning("Could not merge run session files: %s", e)
+        # Losing the merge costs a download, not the run's result -- but this
+        # is the branch that fires on unexpected artifact loss, so it carries
+        # everything a user's report would have to be matched against.
+        logger.warning(
+            "Could not merge files from run %s into connection session %s "
+            "(%s file(s) affected): %s",
+            sanitize_for_logging(str(run_session_id)),
+            sanitize_for_logging(str(connection_session_id)),
+            len(files) if isinstance(files, dict) else "unknown",
+            sanitize_for_logging(str(e)),
+        )
 
 
 # Stamped onto every entry the merge writes, so a later merge can tell its own
@@ -289,26 +307,53 @@ async def _merge_run_session_files(
 # over the slot the attachment holds.
 _MERGED_FROM_RUN = "_merged_from_run"
 
+# Stamped onto the copies ``_seed_run_session_files`` puts into a run's map, so
+# the merge can tell the connection's own files -- riding back out of a run
+# that did not produce them -- from what the run actually produced. Deciding
+# that from the target map instead would misread them whenever the target is
+# empty, e.g. when the session object was replaced before the merge ran.
+_SEEDED_FROM_CONNECTION = "_seeded_from_connection"
+_PROVENANCE_MARKERS = (_MERGED_FROM_RUN, _SEEDED_FROM_CONNECTION)
+
 
 def _same_conversation(session, conversation_id) -> bool:
     """Whether ``session`` is still on the conversation a run belonged to.
 
-    Unknown on either side means "do not block": a run registered without a
-    conversation, or a session that has not recorded one, predates this check
-    and behaved fine without it.
+    Unknown on either side cannot prove a mismatch, so it does not block --
+    ``create_session`` does not set a ``conversation_id``, and denying there
+    would drop the artifacts of a first turn that never left its conversation.
+    It is logged, because an unprovable check is worth seeing in the record.
     """
-    if not conversation_id:
-        return True
     current = session.context.get("conversation_id")
-    if not current:
+    if not conversation_id or not current:
+        logger.warning(
+            "Cannot confirm the connection is still on run conversation %s "
+            "(session records %s); merging without the isolation check",
+            sanitize_for_logging(str(conversation_id)),
+            sanitize_for_logging(str(current)),
+        )
         return True
     return str(current) == str(conversation_id)
 
 
+def _signature(meta):
+    """A hashable stand-in for an entry, ignoring the provenance stamp.
+
+    Equality is one of the three identity signals, and the connection map is
+    unbounded, so comparing entry-by-entry would make every miss a full scan
+    with a dict copy per comparison. Hash the content once instead.
+    """
+    bare = _strip_provenance(meta)
+    try:
+        return json.dumps(bare, sort_keys=True, default=str)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return repr(bare)
+
+
 def _strip_provenance(meta):
-    """An entry as it read before the merge stamped it."""
-    if isinstance(meta, dict) and _MERGED_FROM_RUN in meta:
-        return {k: v for k, v in meta.items() if k != _MERGED_FROM_RUN}
+    """An entry as it read before the merge or the seed marked it."""
+    if isinstance(meta, dict) and any(m in meta for m in _PROVENANCE_MARKERS):
+        return {k: v for k, v in meta.items() if k not in _PROVENANCE_MARKERS}
     return meta
 
 
@@ -324,10 +369,12 @@ class _FileIndex:
         self.target = target
         self.by_key = {}
         self.by_advertised = {}
+        self.by_signature = {}
         for name, meta in target.items():
             self._index(name, meta)
 
     def _index(self, name, meta) -> None:
+        self.by_signature.setdefault(_signature(meta), name)
         if not isinstance(meta, dict):
             return
         key = meta.get("key")
@@ -337,34 +384,35 @@ class _FileIndex:
         if advertised and meta.get(_MERGED_FROM_RUN):
             self.by_advertised.setdefault(advertised, name)
 
-    def find(self, meta):
-        """The name under which this same file is already held, if it is."""
-        bare = _strip_provenance(meta)
-        if not isinstance(meta, dict):
-            return next(
-                (
-                    name for name, held in self.target.items()
-                    if _strip_provenance(held) == bare
-                ),
-                None,
-            )
-        key = meta.get("key")
-        if key and key in self.by_key:
-            return self.by_key[key]
-        advertised = meta.get("original_filename")
-        if advertised and advertised in self.by_advertised:
-            return self.by_advertised[advertised]
-        # The copy this connection seeded coming home: equal in every field,
-        # including the ones the indexes do not cover. The stamp itself is not
-        # part of that comparison -- an entry merged on an earlier turn carries
-        # it and the copy arriving now does not.
-        return next(
-            (
-                name for name, held in self.target.items()
-                if _strip_provenance(held) == bare
-            ),
-            None,
-        )
+    def find(self, meta, by_advertised_name=True):
+        """The name under which this same file is already held, if it is.
+
+        ``by_advertised_name`` is off for an entry this connection seeded: it
+        is the user's own file riding back out of a run that did not produce
+        it, and must never take over an artifact's slot by advertising the
+        same name.
+
+        Order matters. A shared storage key is proof. Then plain equality --
+        the copy this connection seeded coming home -- which must be asked
+        *before* the advertised name: ``_seed_run_session_files`` copies the
+        user's attachments into every run map, and an attachment that merely
+        advertises the same name as some earlier artifact would otherwise take
+        that artifact's slot. Matching itself by equality first means an
+        incoming entry only ever reaches advertised-name matching when it is
+        genuinely new to this map, i.e. run output.
+        """
+        if isinstance(meta, dict):
+            key = meta.get("key")
+            if key and key in self.by_key:
+                return self.by_key[key]
+        held_name = self.by_signature.get(_signature(meta))
+        if held_name is not None:
+            return held_name
+        if by_advertised_name and isinstance(meta, dict):
+            advertised = meta.get("original_filename")
+            if advertised and advertised in self.by_advertised:
+                return self.by_advertised[advertised]
+        return None
 
     def put(self, name, meta) -> None:
         """Install ``meta`` at ``name``, retiring whatever it replaces.
@@ -375,6 +423,10 @@ class _FileIndex:
         instead of filed.
         """
         outgoing = self.target.get(name)
+        if name in self.target:
+            signature = _signature(outgoing)
+            if self.by_signature.get(signature) == name:
+                del self.by_signature[signature]
         if isinstance(outgoing, dict):
             key = outgoing.get("key")
             if key and self.by_key.get(key) == name:
@@ -391,7 +443,9 @@ class _FileIndex:
         return isinstance(held, dict) and bool(held.get(_MERGED_FROM_RUN))
 
 
-def _merge_one_file(index: _FileIndex, name: str, meta, run_session_id=None) -> None:
+def _merge_one_file(
+    index: _FileIndex, name: str, meta, run_session_id=None, preserve=False
+) -> None:
     """Add one run artifact to a file map without displacing another file.
 
     Some slot already holds *this* file: refresh it in place, wherever it ended
@@ -407,22 +461,36 @@ def _merge_one_file(index: _FileIndex, name: str, meta, run_session_id=None) -> 
     ingest path uses, so session keys stay in one format that
     ``sanitize_filename`` round-trips.
 
-    A refresh carries the held entry's provenance forward rather than stamping
-    it. Every file the connection owns is seeded into each run and merged back,
-    so stamping on refresh would mark the user's own attachments as run output
-    and admit them to advertised-name matching -- after which the next
-    same-named artifact would take the attachment's slot, which is exactly what
-    the stamp exists to prevent.
+    ``preserve`` copies each entry's provenance verbatim instead of deciding
+    it, for replaying an already-merged map onto a replacement session.
+
+    Provenance comes from the seed marker the entry carries, not from the map
+    it is landing in. Every file the connection owns is seeded into each run
+    and merged back, and reading provenance off the target would mark those
+    copies as run output whenever the target cannot contradict it -- an empty
+    one, say, because the session object was replaced. They would then join
+    advertised-name matching, and the next same-named artifact would take the
+    attachment's slot, which is exactly what the stamp exists to prevent.
     """
-    held_name = index.find(meta)
+    from_run = not (
+        isinstance(meta, dict) and meta.get(_SEEDED_FROM_CONNECTION)
+    )
+    held_name = index.find(meta, by_advertised_name=from_run)
     if held_name is not None:
         # The key may have moved (the ingest path re-uploads a re-emitted
         # artifact), so take the newer ref rather than keeping one that points
-        # at superseded bytes.
-        index.put(held_name, _stamp(meta, index.is_from_run(held_name)))
+        # at superseded bytes. A file the connection seeded keeps whatever
+        # provenance the slot already had.
+        if preserve:
+            refreshed = meta
+        elif from_run:
+            refreshed = _stamp(meta, True)
+        else:
+            refreshed = _stamp(meta, index.is_from_run(held_name))
+        index.put(held_name, refreshed)
         return
     if name not in index.target:
-        index.put(name, _stamp(meta, True))
+        index.put(name, meta if preserve else _stamp(meta, from_run))
         return
     assigned = FileManager.unique_key(index.target, name)
     # The one merge outcome that changes what the user sees, and the
@@ -434,16 +502,19 @@ def _merge_one_file(index: _FileIndex, name: str, meta, run_session_id=None) -> 
         sanitize_for_logging(name),
         sanitize_for_logging(assigned),
     )
-    index.put(assigned, _stamp(meta, True))
+    index.put(assigned, meta if preserve else _stamp(meta, from_run))
 
 
 def _stamp(meta, from_run: bool):
-    """``meta`` marked as run output, or explicitly not."""
-    if not isinstance(meta, dict):
-        return meta
-    if from_run:
-        return {**meta, _MERGED_FROM_RUN: True}
-    return _strip_provenance(meta)
+    """``meta`` marked as run output, or explicitly not.
+
+    The seed marker never survives into the connection map; it only ever
+    described the copy's trip through a run session.
+    """
+    bare = _strip_provenance(meta)
+    if not isinstance(bare, dict) or not from_run:
+        return bare
+    return {**bare, _MERGED_FROM_RUN: True}
 
 
 async def _release_finished_run(
@@ -630,7 +701,13 @@ async def _seed_run_session_files(
         if run_session is None:
             run_session = await chat_service.create_session(run_session_id, user_email)
         if files:
-            run_session.context.setdefault("files", {}).update(dict(files))
+            run_session.context.setdefault("files", {}).update({
+                name: (
+                    {**meta, _SEEDED_FROM_CONNECTION: True}
+                    if isinstance(meta, dict) else meta
+                )
+                for name, meta in files.items()
+            })
     except Exception as e:  # pragma: no cover - defensive
         # A missing file map must not stop the run from starting; the turn
         # simply behaves as it did before this seeding existed.

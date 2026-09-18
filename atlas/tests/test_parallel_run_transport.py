@@ -14,6 +14,7 @@ from main import (
     _download_error_rank,
     _download_session_candidates,
     _MERGED_FROM_RUN,
+    _SEEDED_FROM_CONNECTION,
     _merge_run_session_files,
     _release_finished_run,
     _resolve_download,
@@ -438,7 +439,7 @@ async def test_attached_files_are_copied_onto_the_run_session():
 
     await _seed_run_session_files(service, "conn", "run-session", USER)
 
-    assert sessions["run-session"].context["files"] == attached
+    assert _without_provenance(sessions["run-session"].context["files"]) == attached
 
 
 @pytest.mark.asyncio
@@ -485,7 +486,10 @@ async def test_seeding_failure_does_not_stop_the_run():
 def _without_provenance(files):
     """The file map as it would read without the merge's provenance stamp."""
     return {
-        name: {k: v for k, v in meta.items() if k != _MERGED_FROM_RUN}
+        name: {
+            k: v for k, v in meta.items()
+            if k not in (_MERGED_FROM_RUN, _SEEDED_FROM_CONNECTION)
+        }
         if isinstance(meta, dict) else meta
         for name, meta in files.items()
     }
@@ -617,7 +621,7 @@ async def test_merging_is_a_noop_for_an_untracked_turn():
 
 
 @pytest.mark.asyncio
-async def test_merge_failure_does_not_break_release():
+async def test_merge_failure_does_not_break_release(caplog):
     class _Exploding(_FakeSessionRepo):
         async def get(self, session_id):
             raise RuntimeError("repo down")
@@ -625,7 +629,13 @@ async def test_merge_failure_does_not_break_release():
     service = _FakeChatService({})
     service.session_repository = _Exploding({})
 
-    await _merge_run_session_files(service, "run-session", "conn")
+    with caplog.at_level("WARNING"):
+        await _merge_run_session_files(service, "run-session", "conn")
+
+    # The one branch that fires on unexpected artifact loss has to be
+    # matchable against a user's report.
+    assert "run-session" in caplog.text
+    assert "conn" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -680,7 +690,7 @@ class _FakeDownloads:
         self.calls = []
 
     async def handle_download_file(self, session_id, filename, user_email, s3_key=None):
-        self.calls.append(session_id)
+        self.calls.append((session_id, s3_key))
         return self._replies.pop(0)
 
 
@@ -714,7 +724,7 @@ async def test_a_later_success_wins_and_stops_the_search():
     )
 
     assert response == {"content_base64": "aGk="}
-    assert service.calls == ["conn", "run"]
+    assert [session_id for session_id, _ in service.calls] == ["conn", "run"]
 
 
 @pytest.mark.asyncio
@@ -932,3 +942,96 @@ def test_every_download_error_code_has_an_explicit_rank():
     """A new DownloadError member must not silently fall to unknown rank."""
     ranked = {code for code in _DOWNLOAD_ERROR_PRIORITY if code is not None}
     assert ranked == {member.value for member in DownloadError}
+
+
+@pytest.mark.asyncio
+async def test_every_candidate_is_asked_for_the_caller_s_key():
+    """The key is why a collided artifact is still reachable.
+
+    Dropping it on the way to one candidate would leave the name to decide,
+    which is exactly what the suffixing is designed not to rely on -- and
+    every other test here would stay green.
+    """
+    service = _FakeDownloads([
+        _fail(DownloadError.NOT_FOUND.value, "File not found in session"),
+        _fail(DownloadError.NOT_FOUND.value, "File not found in session"),
+    ])
+
+    await _resolve_download(service, ["conn", "run"], "img.jpeg", USER, "s3/wanted")
+
+    assert service.calls == [("conn", "s3/wanted"), ("run", "s3/wanted")]
+
+
+@pytest.mark.asyncio
+async def test_a_seeded_attachment_does_not_take_an_artifact_s_slot():
+    """Attachments ride into every run map; they must not match by name.
+
+    ``_seed_run_session_files`` copies the connection's files into the run, so
+    an attachment advertising the same name as a previously merged artifact
+    arrives in the run map alongside it. Equality has to settle that entry
+    before the advertised name ever gets a say.
+    """
+    produced = {"key": "s3/produced", "original_filename": "a.txt"}
+    attached = {"original_filename": "a.txt"}
+    sessions = {
+        "conn": _FakeSession({"files": {}}),
+        "turn-1": _FakeSession({"files": {"a.txt": dict(produced)}}),
+    }
+    service = _FakeChatService(sessions)
+    await _merge_run_session_files(service, "turn-1", "conn")
+    # The user attaches a keyless file advertising the same name.
+    sessions["conn"].context["files"]["a.txt (attached)"] = dict(attached)
+
+    await _seed_run_session_files(service, "conn", "turn-2", USER)
+    await _merge_run_session_files(service, "turn-2", "conn")
+
+    merged = _without_provenance(sessions["conn"].context["files"])
+    assert produced in merged.values(), merged
+    assert attached in merged.values(), merged
+
+
+@pytest.mark.asyncio
+async def test_the_replay_does_not_stamp_seeded_attachments(caplog):
+    """The replay must copy provenance, not re-decide it.
+
+    It builds an index over the replacement's (empty) map, so re-running the
+    merge decision there would mark every entry -- attachments included -- as
+    run output, and the next same-named artifact would take the attachment's
+    slot.
+    """
+    attached = {"key": "s3/attached", "original_filename": "a.txt"}
+    produced = {"key": "s3/produced", "original_filename": "a.txt"}
+    original = _FakeSession({"files": {"a.txt": dict(attached)}})
+    original.context["conversation_id"] = "conversation-A"
+    sessions = {"conn": original, "run-1": _FakeSession({"files": {}})}
+    service = _FakeChatService(sessions)
+
+    replacement = _FakeSession({"files": {}})
+    replacement.context["conversation_id"] = "conversation-A"
+    swapped = {"yes": False}
+    real_get = service.session_repository.get
+
+    async def _get_then_swap(session_id):
+        session = await real_get(session_id)
+        if session_id == "conn" and not swapped["yes"]:
+            swapped["yes"] = True
+            sessions["conn"] = replacement
+        return session
+
+    # A turn whose run produced nothing new: only the seeded attachment rides
+    # back, and the session object is swapped underneath the merge -- after it
+    # has read the session it is about to write into.
+    await _seed_run_session_files(service, "conn", "run-1", USER)
+    service.session_repository.get = _get_then_swap
+    await _merge_run_session_files(service, "run-1", "conn", "conversation-A")
+    service.session_repository.get = real_get
+    assert sessions["conn"] is replacement, "fixture no longer swaps the session"
+
+    # Now a run produces a different file advertising the attachment's name.
+    sessions["run-2"] = _FakeSession({"files": {"a.txt": dict(produced)}})
+    await _merge_run_session_files(service, "run-2", "conn", "conversation-A")
+
+    assert _without_provenance(replacement.context["files"]) == {
+        "a.txt": attached,
+        "a_1.txt": produced,
+    }
