@@ -564,3 +564,44 @@ async def test_a_storage_failure_is_not_relayed_verbatim(chat_service):
 
     assert response["error_code"] == DownloadError.STORAGE.value
     assert "secret-bucket" not in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_run_artifact_downloads_after_its_run_session_is_reaped(chat_service):
+    """The reported symptom of issue #953, driven end to end.
+
+    A tool artifact is produced on a tracked run's own session; the run then
+    finishes, which merges its file map back and deletes that session. The
+    bytes must still come back through the ordinary chat download path -- the
+    one that used to answer "Session or file manager not available".
+    """
+    from atlas.application.chat.runs import RunRegistry
+    from atlas.main import _release_finished_run
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    await chat_service.create_session(connection_session_id, user_email)
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
+    )
+
+    await _release_finished_run(
+        chat_service,
+        RunRegistry(),
+        "run-1",
+        run_session_id,
+        None,
+        user_email,
+        connection_session_id=connection_session_id,
+    )
+
+    assert await chat_service.session_repository.get(run_session_id) is None
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename="mcp_image_0.jpeg",
+        user_email=user_email,
+    )
+
+    assert not response.get("error"), response.get("error")
+    assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"

@@ -233,7 +233,7 @@ def _merge_one_file(target: dict, name: str, meta) -> None:
     if existing is None:
         target[name] = meta
         return
-    if _file_key(existing) == _file_key(meta):
+    if _same_stored_file(existing, meta):
         # Same stored object under the same label: already merged.
         return
     stem, dot, ext = name.rpartition(".")
@@ -245,13 +245,19 @@ def _merge_one_file(target: dict, name: str, meta) -> None:
         if current is None:
             target[candidate] = meta
             return
-        if _file_key(current) == _file_key(meta):
+        if _same_stored_file(current, meta):
             return
 
 
-def _file_key(meta):
-    """The storage key a file map entry points at, if it has one."""
-    return meta.get("key") if isinstance(meta, dict) else None
+def _same_stored_file(a, b) -> bool:
+    """Whether two file map entries certainly point at the same stored object.
+
+    Only a shared storage key proves it. Two keyless entries are *unknown*, not
+    equal -- treating them as equal would make the second one look like a
+    duplicate of the first and silently drop the run's artifact.
+    """
+    key = a.get("key") if isinstance(a, dict) else None
+    return bool(key) and key == (b.get("key") if isinstance(b, dict) else None)
 
 
 async def _release_finished_run(
