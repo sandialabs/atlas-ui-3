@@ -196,6 +196,13 @@ async def _merge_run_session_files(
     connection's own entry keeps the plain name (it is the live one for files
     the user attached) and the run's is filed under a suffixed name as well as
     being reachable by key.
+
+    The collision handling deliberately differs from
+    :func:`file_processor._merge_without_displacing`, which the artifact
+    ingest path uses: that one keys on ``original_filename`` and *replaces* the
+    entry it matches, which here would let a finished run displace a file the
+    user attached. The suffix helper and key format are shared with it
+    (:meth:`FileManager.unique_key`); only the precedence differs.
     """
     if run_session_id is None or run_session_id == connection_session_id:
         return
@@ -207,12 +214,11 @@ async def _merge_run_session_files(
         connection_session = await chat_service.session_repository.get(
             connection_session_id
         )
-        if connection_session is None or not getattr(
-            connection_session, "active", True
-        ):
-            # The socket closed while a detached run kept going. Nothing here
-            # outlives the run, so the artifact is reachable only through the
-            # File Library -- say so, rather than losing it silently.
+        if connection_session is None:
+            # The socket closed while a detached run kept going, and the
+            # session went with it. Nothing here outlives the run, so the
+            # artifacts are reachable only through the File Library -- say so,
+            # rather than losing them silently.
             logger.warning(
                 "Run %s produced %d file(s) but its connection session is gone; "
                 "they remain downloadable from the File Library only",
@@ -220,6 +226,20 @@ async def _merge_run_session_files(
                 len(files),
             )
             return
+        if not getattr(connection_session, "active", True):
+            # Inactive is ambiguous: the socket may have closed, but New Chat
+            # and conversation restore also end the session and immediately
+            # re-create it under the same id, so this window happens on a live
+            # connection too. Merge anyway -- writing into a session nobody
+            # reads costs nothing, while skipping would drop artifacts the user
+            # can still see on screen -- and record the ambiguity.
+            logger.info(
+                "Merging %d file(s) from run %s into an inactive connection "
+                "session; if the socket has closed they remain downloadable "
+                "from the File Library",
+                len(files),
+                run_session_id,
+            )
         target = connection_session.context.setdefault("files", {})
         for name, meta in files.items():
             _merge_one_file(target, name, meta)

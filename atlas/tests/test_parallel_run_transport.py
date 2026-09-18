@@ -558,8 +558,27 @@ async def test_a_file_filed_under_a_suffix_is_refreshed_not_recopied():
 
 
 @pytest.mark.asyncio
-async def test_merging_into_a_closed_connection_session_is_logged(caplog):
+async def test_merging_when_the_connection_session_is_gone_is_logged(caplog):
     """A detached run outliving its socket must not lose files silently."""
+    sessions = {
+        "run-session": _FakeSession({"files": {"out.png": {"key": "s3/out"}}}),
+    }
+    service = _FakeChatService(sessions)
+
+    with caplog.at_level("WARNING"):
+        await _merge_run_session_files(service, "run-session", "conn")
+
+    assert "File Library" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_connection_session_still_receives_the_files():
+    """New Chat ends and re-creates the session under the same id.
+
+    A run releasing in that window is on a live connection, so skipping the
+    merge would drop artifacts the user can still see on screen. Merging into
+    a session nobody reads costs nothing, so merge either way.
+    """
     sessions = {
         "conn": _FakeSession({"files": {}}),
         "run-session": _FakeSession({"files": {"out.png": {"key": "s3/out"}}}),
@@ -567,11 +586,9 @@ async def test_merging_into_a_closed_connection_session_is_logged(caplog):
     sessions["conn"].active = False
     service = _FakeChatService(sessions)
 
-    with caplog.at_level("WARNING"):
-        await _merge_run_session_files(service, "run-session", "conn")
+    await _merge_run_session_files(service, "run-session", "conn")
 
-    assert "File Library" in caplog.text
-    assert sessions["conn"].context["files"] == {}
+    assert sessions["conn"].context["files"] == {"out.png": {"key": "s3/out"}}
 
 
 @pytest.mark.asyncio
