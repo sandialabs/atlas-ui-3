@@ -12,6 +12,7 @@ from main import (
     _cancel_addressed_run,
     _download_error_rank,
     _download_session_candidates,
+    _MERGED_FROM_RUN,
     _merge_run_session_files,
     _release_finished_run,
     _resolve_download,
@@ -479,6 +480,16 @@ async def test_seeding_failure_does_not_stop_the_run():
 # Files produced by a finished run (issue #953)
 # ---------------------------------------------------------------------------
 
+
+def _without_provenance(files):
+    """The file map as it would read without the merge's provenance stamp."""
+    return {
+        name: {k: v for k, v in meta.items() if k != _MERGED_FROM_RUN}
+        if isinstance(meta, dict) else meta
+        for name, meta in files.items()
+    }
+
+
 @pytest.mark.asyncio
 async def test_run_artifacts_are_merged_back_to_the_connection():
     """A tool artifact must stay downloadable after its run's session goes."""
@@ -491,7 +502,8 @@ async def test_run_artifacts_are_merged_back_to_the_connection():
 
     await _merge_run_session_files(service, "run-session", "conn")
 
-    assert sessions["conn"].context["files"]["mcp_image_0.jpeg"] == {"key": "s3/img"}
+    merged = _without_provenance(sessions["conn"].context["files"])
+    assert merged["mcp_image_0.jpeg"] == {"key": "s3/img"}
 
 
 @pytest.mark.asyncio
@@ -510,7 +522,7 @@ async def test_a_name_collision_keeps_both_files():
 
     await _merge_run_session_files(service, "run-session", "conn")
 
-    merged = sessions["conn"].context["files"]
+    merged = _without_provenance(sessions["conn"].context["files"])
     # The suffixed key is the one the artifact ingest path produces, so it
     # survives ``sanitize_filename`` like any other session key.
     assert merged == {
@@ -536,7 +548,7 @@ async def test_seeded_files_do_not_accumulate_across_turns():
         await _seed_run_session_files(service, "conn", run_session_id, USER)
         await _merge_run_session_files(service, run_session_id, "conn")
 
-    assert sessions["conn"].context["files"] == attached
+    assert _without_provenance(sessions["conn"].context["files"]) == attached
 
 
 @pytest.mark.asyncio
@@ -551,7 +563,7 @@ async def test_a_file_filed_under_a_suffix_is_refreshed_not_recopied():
     await _merge_run_session_files(service, "run-session", "conn")
     await _merge_run_session_files(service, "run-session", "conn")
 
-    assert sessions["conn"].context["files"] == {
+    assert _without_provenance(sessions["conn"].context["files"]) == {
         "a.txt": {"key": "s3/conn-a"},
         "a_1.txt": {"key": "s3/run-a"},
     }
@@ -588,7 +600,9 @@ async def test_an_inactive_connection_session_still_receives_the_files():
 
     await _merge_run_session_files(service, "run-session", "conn")
 
-    assert sessions["conn"].context["files"] == {"out.png": {"key": "s3/out"}}
+    assert _without_provenance(sessions["conn"].context["files"]) == {
+        "out.png": {"key": "s3/out"}
+    }
 
 
 @pytest.mark.asyncio
@@ -646,7 +660,7 @@ async def test_release_merges_files_before_deleting_the_run_session(registry):
 
     assert ended == ["run-session"]
     assert "run-session" not in sessions
-    assert seen["files_at_delete"] == {"out.png": {"key": "s3/out"}}
+    assert _without_provenance(seen["files_at_delete"]) == {"out.png": {"key": "s3/out"}}
 
 
 async def _noop(sink, session_id):
@@ -757,3 +771,54 @@ async def test_an_unmapped_error_beats_a_missing_session_in_either_order():
             service, ["conn", "run"], "img.jpeg", USER, None
         )
         assert response["error"] == "something odd"
+
+
+@pytest.mark.asyncio
+async def test_a_run_artifact_does_not_displace_an_attachment_of_the_same_name():
+    """Matching advertised names alone do not make two files one file.
+
+    The identity rule that lets a re-emitted artifact converge is scoped to
+    entries the merge itself wrote. A user's attachment carries no such mark,
+    so a run artifact advertising the same name is a *different* file: the
+    attachment keeps its name and its storage ref, and the artifact is filed
+    beside it.
+    """
+    attached = {"key": "s3/attached", "original_filename": "a.txt"}
+    produced = {"key": "s3/produced", "original_filename": "a.txt"}
+    sessions = {
+        "conn": _FakeSession({"files": {"a.txt": dict(attached)}}),
+        "run-session": _FakeSession({"files": {"a.txt": dict(produced)}}),
+    }
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(service, "run-session", "conn")
+
+    assert _without_provenance(sessions["conn"].context["files"]) == {
+        "a.txt": attached,
+        "a_1.txt": produced,
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_artifact_never_holds_both_a_plain_and_a_suffixed_key():
+    """One file under two names makes ``_resolve_session_file`` call it missing.
+
+    A run whose artifact was suffixed on an earlier turn (because an
+    attachment held the plain name) must keep refreshing that suffixed entry
+    even after the attachment is gone and the plain name is free again.
+    """
+    attached = {"key": "s3/attached", "original_filename": "a.txt"}
+    produced = {"key": "s3/produced", "original_filename": "a.txt"}
+    sessions = {
+        "conn": _FakeSession({"files": {"a.txt": dict(attached)}}),
+        "run-session": _FakeSession({"files": {"a.txt": dict(produced)}}),
+    }
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(service, "run-session", "conn")
+    del sessions["conn"].context["files"]["a.txt"]
+    await _merge_run_session_files(service, "run-session", "conn")
+
+    assert _without_provenance(sessions["conn"].context["files"]) == {
+        "a_1.txt": produced
+    }

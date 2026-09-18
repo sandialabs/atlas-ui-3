@@ -240,77 +240,146 @@ async def _merge_run_session_files(
                 len(files),
                 run_session_id,
             )
-        target = connection_session.context.setdefault("files", {})
+        index = _FileIndex(connection_session.context.setdefault("files", {}))
         for name, meta in files.items():
-            _merge_one_file(target, name, meta)
+            _merge_one_file(index, name, meta, run_session_id)
 
         # ``handle_reset_session`` ends the session and then installs a *new*
         # Session object under the same id. A merge that interleaved with that
         # just wrote into the discarded object, so re-fetch and, if the object
-        # changed under us, apply the same merge to its replacement.
+        # changed under us, apply the same merge to its replacement -- but only
+        # when it is still the same conversation. New Chat replaces the session
+        # *and* the conversation, and replaying there would drop a finished
+        # run's files into an unrelated conversation, where they would then be
+        # seeded into its runs.
         current = await chat_service.session_repository.get(connection_session_id)
-        if current is not None and current is not connection_session:
-            replacement = current.context.setdefault("files", {})
+        if (
+            current is not None
+            and current is not connection_session
+            and current.context.get("conversation_id")
+            == connection_session.context.get("conversation_id")
+        ):
+            replacement = _FileIndex(current.context.setdefault("files", {}))
             for name, meta in files.items():
-                _merge_one_file(replacement, name, meta)
+                _merge_one_file(replacement, name, meta, run_session_id)
     except Exception as e:
         # Losing the merge costs a download, not the run's result.
         logger.warning("Could not merge run session files: %s", e)
 
 
-def _merge_one_file(target: dict, name: str, meta) -> None:
+# Stamped onto every entry the merge writes, so a later merge can tell its own
+# earlier output from a file the user attached. Only the merge's own entries
+# take part in advertised-name matching: a run artifact that merely shares an
+# advertised name with an attachment is a different file, and must not take
+# over the slot the attachment holds.
+_MERGED_FROM_RUN = "_merged_from_run"
+
+
+def _strip_provenance(meta):
+    """An entry as it read before the merge stamped it."""
+    if isinstance(meta, dict) and _MERGED_FROM_RUN in meta:
+        return {k: v for k, v in meta.items() if k != _MERGED_FROM_RUN}
+    return meta
+
+
+class _FileIndex:
+    """A connection file map, indexed for repeated same-file lookups.
+
+    The map grows for the life of the socket and every merge asks the same two
+    questions of it, so scanning it per artifact makes a merge quadratic. Build
+    the indexes once and keep them current as entries land.
+    """
+
+    def __init__(self, target: dict):
+        self.target = target
+        self.by_key = {}
+        self.by_advertised = {}
+        for name, meta in target.items():
+            self._index(name, meta)
+
+    def _index(self, name, meta) -> None:
+        if not isinstance(meta, dict):
+            return
+        key = meta.get("key")
+        if key:
+            self.by_key.setdefault(key, name)
+        advertised = meta.get("original_filename")
+        if advertised and meta.get(_MERGED_FROM_RUN):
+            self.by_advertised.setdefault(advertised, name)
+
+    def find(self, meta):
+        """The name under which this same file is already held, if it is."""
+        bare = _strip_provenance(meta)
+        if not isinstance(meta, dict):
+            return next(
+                (
+                    name for name, held in self.target.items()
+                    if _strip_provenance(held) == bare
+                ),
+                None,
+            )
+        key = meta.get("key")
+        if key and key in self.by_key:
+            return self.by_key[key]
+        advertised = meta.get("original_filename")
+        if advertised and advertised in self.by_advertised:
+            return self.by_advertised[advertised]
+        # The copy this connection seeded coming home: equal in every field,
+        # including the ones the indexes do not cover. The stamp itself is not
+        # part of that comparison -- an entry merged on an earlier turn carries
+        # it and the copy arriving now does not.
+        return next(
+            (
+                name for name, held in self.target.items()
+                if _strip_provenance(held) == bare
+            ),
+            None,
+        )
+
+    def put(self, name, meta) -> None:
+        self.target[name] = meta
+        self._index(name, meta)
+
+
+def _merge_one_file(index: _FileIndex, name: str, meta, run_session_id=None) -> None:
     """Add one run artifact to a file map without displacing another file.
 
-    The name is free: take it. Some slot already holds *this* file: refresh it
-    in place, wherever it ended up -- which is what keeps the seed/merge round
-    trip idempotent and stops a tool that re-emits its output every turn from
-    piling up a copy per turn. Otherwise two different files want one label and
-    neither may be dropped: the slot's occupant keeps the plain name and the
-    newcomer takes a suffixed key from the same helper the artifact ingest path
-    uses, so session keys stay in one format ``sanitize_filename`` round-trips.
+    Some slot already holds *this* file: refresh it in place, wherever it ended
+    up -- which keeps the seed/merge round trip idempotent and stops a tool
+    that re-emits its output every turn from piling up a copy per turn. The
+    scan comes first, before the name is even checked: an artifact that already
+    sits under a suffixed key must not also take the plain name, or
+    ``_resolve_session_file`` sees one file twice and reports it missing.
+
+    Otherwise the name is free and it is taken, or two different files want one
+    label and neither may be dropped: the slot's occupant keeps the plain name
+    and the newcomer takes a suffixed key from the same helper the artifact
+    ingest path uses, so session keys stay in one format that
+    ``sanitize_filename`` round-trips.
     """
-    existing = target.get(name)
-    if existing is None:
-        target[name] = meta
+    if isinstance(meta, dict):
+        meta = {**meta, _MERGED_FROM_RUN: True}
+    held_name = index.find(meta)
+    if held_name is not None:
+        # The key may have moved (the ingest path re-uploads a re-emitted
+        # artifact), so take the newer ref rather than keeping one that points
+        # at superseded bytes.
+        index.put(held_name, meta)
         return
-    if _same_stored_file(existing, meta):
-        # Same file: the key may have moved (the ingest path re-uploads a
-        # re-emitted artifact), so take the newer ref rather than keeping a
-        # ref to bytes that may no longer be the current ones.
-        target[name] = meta
+    if name not in index.target:
+        index.put(name, meta)
         return
-    for held_name, held in list(target.items()):
-        if _same_stored_file(held, meta):
-            target[held_name] = meta
-            return
-    target[FileManager.unique_key(target, name)] = meta
-
-
-def _same_stored_file(a, b) -> bool:
-    """Whether two file map entries stand for the same file.
-
-    Three signals, any of which settles it: a shared storage key; plain
-    equality (that is the copy this connection seeded coming home); or a shared
-    ``original_filename``, the advertised name the rest of the codebase already
-    treats as an artifact's identity -- see
-    :func:`file_processor._merge_without_displacing`, which refreshes on the
-    same signal. Without that last one, a tool re-emitting its output under a
-    fresh storage key looks like a new file every turn and accumulates
-    ``a_1.txt``, ``a_2.txt``, ... while name-only downloads keep returning the
-    first turn's bytes.
-
-    Two entries sharing none of the three are unknown, not equal: calling them
-    equal would make the second look like a duplicate and silently drop it.
-    """
-    if not isinstance(a, dict) or not isinstance(b, dict):
-        return a == b
-    key = a.get("key")
-    if key and key == b.get("key"):
-        return True
-    advertised = a.get("original_filename")
-    if advertised and advertised == b.get("original_filename"):
-        return True
-    return a == b
+    assigned = FileManager.unique_key(index.target, name)
+    # The one merge outcome that changes what the user sees, and the
+    # ``files_update`` frame announcing it is deferred -- so leave a trace.
+    logger.info(
+        "Run %s produced %s, which collides with a different file already in "
+        "the session; filed it under %s",
+        sanitize_for_logging(str(run_session_id)),
+        sanitize_for_logging(name),
+        sanitize_for_logging(assigned),
+    )
+    index.put(assigned, meta)
 
 
 async def _release_finished_run(

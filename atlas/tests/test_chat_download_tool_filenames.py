@@ -705,45 +705,61 @@ async def test_a_reemitted_artifact_converges_to_one_entry(chat_service):
     assert base64.b64decode(response["content_base64"]) == b"turn,2\n"
 
 
-@pytest.mark.asyncio
-async def test_a_merge_racing_new_chat_lands_on_the_live_session(chat_service):
-    """`handle_reset_session` installs a new Session under the same id.
+async def _merge_racing_a_session_swap(chat_service, connection_session_id, run_session_id, swap):
+    """Run the merge with ``swap`` interleaved once, mid-merge.
 
-    A merge that interleaves with the reset writes into the object the reset
-    discarded, so the artifacts must be re-applied to its replacement.
+    ``swap`` fires after the merge has read the session it is about to write
+    into, which is the window in which the session object gets replaced.
     """
     from atlas.main import _merge_run_session_files
 
-    user_email = "user1@example.com"
-    connection_session_id = uuid.uuid4()
-    run_session_id = uuid.uuid4()
-    await chat_service.create_session(connection_session_id, user_email)
-    await _run_tool_producing(
-        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
-    )
-
-    original = await chat_service.session_repository.get(connection_session_id)
     real_get = chat_service.session_repository.get
-    reset_done = {"yes": False}
+    fired = {"yes": False}
 
-    async def _get_then_reset(session_id):
+    async def _get_then_swap(session_id):
         session = await real_get(session_id)
-        # Interleave the reset exactly once, after the merge has read the
-        # session it is about to write into.
-        if session_id == connection_session_id and not reset_done["yes"]:
-            reset_done["yes"] = True
-            await chat_service.handle_reset_session(
-                connection_session_id, user_email=user_email
-            )
+        if session_id == connection_session_id and not fired["yes"]:
+            fired["yes"] = True
+            await swap()
         return session
 
-    chat_service.session_repository.get = _get_then_reset
+    chat_service.session_repository.get = _get_then_swap
     try:
         await _merge_run_session_files(
             chat_service, run_session_id, connection_session_id
         )
     finally:
         chat_service.session_repository.get = real_get
+
+
+@pytest.mark.asyncio
+async def test_a_merge_racing_a_session_swap_lands_on_the_live_session(chat_service):
+    """A replaced Session object must not swallow the artifacts.
+
+    The repository can hand back a new `Session` under the same id, and a merge
+    that interleaved with that wrote into the object being discarded.
+    """
+    from atlas.domain.sessions.models import Session
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    original = await chat_service.create_session(connection_session_id, user_email)
+    conversation_id = original.context.get("conversation_id")
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
+    )
+
+    async def _replace_the_session_object():
+        # Same conversation, new object -- a reconnect or restore of the
+        # conversation already in progress.
+        replacement = Session(id=connection_session_id, user_email=user_email)
+        replacement.context["conversation_id"] = conversation_id
+        chat_service.session_repository._sessions[connection_session_id] = replacement
+
+    await _merge_racing_a_session_swap(
+        chat_service, connection_session_id, run_session_id, _replace_the_session_object
+    )
 
     live = await chat_service.session_repository.get(connection_session_id)
     assert live is not original, "fixture no longer exercises session replacement"
@@ -755,3 +771,39 @@ async def test_a_merge_racing_new_chat_lands_on_the_live_session(chat_service):
         user_email=user_email,
     )
     assert not response.get("error"), response.get("error")
+
+
+@pytest.mark.asyncio
+async def test_a_merge_racing_new_chat_does_not_leak_into_the_new_conversation(
+    chat_service,
+):
+    """New Chat replaces the session *and* the conversation.
+
+    Replaying there would drop a finished run's files into an unrelated
+    conversation, where they would then be seeded into its runs. The old
+    conversation is gone from the session either way; the artifacts remain in
+    the File Library.
+    """
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+    original = await chat_service.create_session(connection_session_id, user_email)
+    await _run_tool_producing(
+        chat_service, run_session_id, user_email, "mcp_image_0.jpeg"
+    )
+
+    async def _new_chat():
+        await chat_service.handle_reset_session(
+            connection_session_id, user_email=user_email
+        )
+
+    await _merge_racing_a_session_swap(
+        chat_service, connection_session_id, run_session_id, _new_chat
+    )
+
+    live = await chat_service.session_repository.get(connection_session_id)
+    assert live is not original, "fixture no longer exercises the reset"
+    assert live.context.get("conversation_id") != original.context.get(
+        "conversation_id"
+    )
+    assert live.context.get("files", {}) == {}
