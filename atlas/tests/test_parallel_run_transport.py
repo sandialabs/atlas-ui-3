@@ -14,11 +14,13 @@ from main import (
     _download_session_candidates,
     _merge_run_session_files,
     _release_finished_run,
+    _resolve_download,
     _resume_waiting_run,
     _seed_run_session_files,
     tag_run_event,
 )
 
+from atlas.application.chat.service import DownloadError
 from atlas.application.chat.runs import RunRegistry, RunStatus, reset_run_registry
 
 USER = "a@example.com"
@@ -493,8 +495,13 @@ async def test_run_artifacts_are_merged_back_to_the_connection():
 
 
 @pytest.mark.asyncio
-async def test_merging_does_not_overwrite_the_connections_own_files():
-    """The connection's live map wins a name collision."""
+async def test_a_name_collision_keeps_both_files():
+    """Two different files wearing one label: neither may be dropped.
+
+    The connection's entry is the live one for what the user attached, so it
+    keeps the plain name -- but discarding the run's entry would lose its
+    storage key, and with it the only way to fetch bytes that do exist.
+    """
     sessions = {
         "conn": _FakeSession({"files": {"a.txt": {"key": "s3/conn-a"}}}),
         "run-session": _FakeSession({"files": {"a.txt": {"key": "s3/run-a"}}}),
@@ -503,7 +510,41 @@ async def test_merging_does_not_overwrite_the_connections_own_files():
 
     await _merge_run_session_files(service, "run-session", "conn")
 
-    assert sessions["conn"].context["files"]["a.txt"] == {"key": "s3/conn-a"}
+    merged = sessions["conn"].context["files"]
+    assert merged["a.txt"] == {"key": "s3/conn-a"}
+    assert {"key": "s3/run-a"} in merged.values()
+
+
+@pytest.mark.asyncio
+async def test_merging_the_same_file_twice_does_not_duplicate_it():
+    """Same label, same stored object: one entry, not a growing chain."""
+    sessions = {
+        "conn": _FakeSession({"files": {"a.txt": {"key": "s3/a"}}}),
+        "run-session": _FakeSession({"files": {"a.txt": {"key": "s3/a"}}}),
+    }
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(service, "run-session", "conn")
+    await _merge_run_session_files(service, "run-session", "conn")
+
+    assert sessions["conn"].context["files"] == {"a.txt": {"key": "s3/a"}}
+
+
+@pytest.mark.asyncio
+async def test_merging_into_a_closed_connection_session_is_logged(caplog):
+    """A detached run outliving its socket must not lose files silently."""
+    sessions = {
+        "conn": _FakeSession({"files": {}}),
+        "run-session": _FakeSession({"files": {"out.png": {"key": "s3/out"}}}),
+    }
+    sessions["conn"].active = False
+    service = _FakeChatService(sessions)
+
+    with caplog.at_level("WARNING"):
+        await _merge_run_session_files(service, "run-session", "conn")
+
+    assert "File Library" in caplog.text
+    assert sessions["conn"].context["files"] == {}
 
 
 @pytest.mark.asyncio
@@ -550,7 +591,13 @@ async def test_release_merges_files_before_deleting_the_run_session(registry):
     service.end_session = lambda sid: _noop(ended, sid)
 
     await _release_finished_run(
-        service, registry, "run-1", "run-session", None, USER, "conn"
+        service,
+        registry,
+        "run-1",
+        "run-session",
+        None,
+        USER,
+        connection_session_id="conn",
     )
 
     assert ended == ["run-session"]
@@ -562,11 +609,76 @@ async def _noop(sink, session_id):
     sink.append(session_id)
 
 
-def test_the_least_informative_download_error_loses():
-    """A reaped run session must not mask the real "file not found"."""
-    missing_session = {"error": "Session or file manager not available"}
-    missing_file = {"error": "File not found in session"}
-    storage = {"error": "connection reset"}
+# ---------------------------------------------------------------------------
+# Picking which candidate session's answer the user sees (issue #953)
+# ---------------------------------------------------------------------------
 
-    assert _download_error_rank(missing_file) < _download_error_rank(missing_session)
-    assert _download_error_rank(storage) < _download_error_rank(missing_file)
+class _FakeDownloads:
+    """Replays a scripted reply per candidate session, in order."""
+
+    def __init__(self, replies):
+        self._replies = list(replies)
+        self.calls = []
+
+    async def handle_download_file(self, session_id, filename, user_email, s3_key=None):
+        self.calls.append(session_id)
+        return self._replies.pop(0)
+
+
+def _fail(code, message):
+    return {"error": message, "error_code": code}
+
+
+@pytest.mark.asyncio
+async def test_a_dead_run_session_does_not_mask_file_not_found():
+    """The exact reversal reported in #953: the useful error must win."""
+    service = _FakeDownloads([
+        _fail(DownloadError.NOT_FOUND.value, "File not found in session"),
+        _fail(DownloadError.NO_SESSION.value, "Session or file manager not available"),
+    ])
+
+    response = await _resolve_download(service, ["conn", "run"], "img.jpeg", USER, None)
+
+    assert response["error"] == "File not found in session"
+
+
+@pytest.mark.asyncio
+async def test_a_later_success_wins_and_stops_the_search():
+    service = _FakeDownloads([
+        _fail(DownloadError.NOT_FOUND.value, "File not found in session"),
+        {"content_base64": "aGk="},
+        _fail(DownloadError.NO_SESSION.value, "never reached"),
+    ])
+
+    response = await _resolve_download(
+        service, ["conn", "run", "other"], "img.jpeg", USER, None
+    )
+
+    assert response == {"content_base64": "aGk="}
+    assert service.calls == ["conn", "run"]
+
+
+@pytest.mark.asyncio
+async def test_an_unmapped_error_does_not_outrank_file_not_found():
+    """An unclassified failure elsewhere says less than an accurate answer."""
+    service = _FakeDownloads([
+        _fail(DownloadError.NOT_FOUND.value, "File not found in session"),
+        {"error": "something odd"},
+    ])
+
+    response = await _resolve_download(service, ["conn", "run"], "img.jpeg", USER, None)
+
+    assert response["error"] == "File not found in session"
+
+
+def test_error_ranking_prefers_the_most_informative_failure():
+    ranks = [
+        _download_error_rank(_fail(code, "x"))
+        for code in (
+            DownloadError.NOT_FOUND.value,
+            DownloadError.STORAGE.value,
+            DownloadError.NO_SESSION.value,
+        )
+    ]
+    assert ranks == sorted(ranks)
+    assert len(set(ranks)) == 3

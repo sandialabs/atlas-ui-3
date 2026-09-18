@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from atlas.application.chat.service import ChatService
+from atlas.application.chat.service import ChatService, DownloadError
 from atlas.application.chat.utilities import file_processor
 from atlas.modules.file_storage.manager import FileManager
 from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
@@ -517,3 +517,50 @@ async def test_legacy_matching_survives_a_new_artifact_in_the_session(chat_servi
 
     assert not response.get("error"), response.get("error")
     assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"
+
+
+@pytest.mark.asyncio
+async def test_download_failures_carry_their_machine_readable_code(chat_service):
+    """The websocket picks which candidate's failure the user sees by code.
+
+    That choice must not depend on how the messages happen to be worded, so
+    pin the codes to the replies this method actually produces (issue #953).
+    """
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+
+    missing_session = await chat_service.handle_download_file(
+        session_id=uuid.uuid4(), filename="whatever.txt", user_email=user_email
+    )
+    assert missing_session["error_code"] == DownloadError.NO_SESSION.value
+
+    await _run_tool_producing(chat_service, session_id, user_email, ADVERTISED_NAME)
+    missing_file = await chat_service.handle_download_file(
+        session_id=session_id, filename="never-produced.txt", user_email=user_email
+    )
+    assert missing_file["error_code"] == DownloadError.NOT_FOUND.value
+
+    no_name = await chat_service.handle_download_file(
+        session_id=session_id, filename="", user_email=user_email
+    )
+    assert no_name["error_code"] == DownloadError.BAD_REQUEST.value
+
+
+@pytest.mark.asyncio
+async def test_a_storage_failure_is_not_relayed_verbatim(chat_service):
+    """Exception text names buckets, keys and hosts; it stays server-side."""
+    user_email = "user1@example.com"
+    session_id = uuid.uuid4()
+    await _run_tool_producing(chat_service, session_id, user_email, ADVERTISED_NAME)
+
+    async def _boom(**kwargs):
+        raise RuntimeError("s3://secret-bucket/tenant-42/key.bin: access denied")
+
+    chat_service.file_manager.get_file_content = _boom
+
+    response = await chat_service.handle_download_file(
+        session_id=session_id, filename=ADVERTISED_NAME, user_email=user_email
+    )
+
+    assert response["error_code"] == DownloadError.STORAGE.value
+    assert "secret-bucket" not in response["error"]

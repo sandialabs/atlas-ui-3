@@ -49,7 +49,7 @@ from atlas.application.chat.runs import (
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
-from atlas.application.chat.service import UNSET
+from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
@@ -189,9 +189,12 @@ async def _merge_run_session_files(
     moment the run ends, so without this the only session that ever knew about
     a just-produced file is gone by the time the user clicks download.
 
-    Existing entries win: the connection session's own map is the live one for
-    files the user attached, and a finished run must not overwrite a name the
-    connection is still using for something else.
+    A name collision must not cost the run its artifact: the two entries are
+    different files that happen to share a label, and dropping either one makes
+    it unreachable even for a client that sends the right storage key. The
+    connection's own entry keeps the plain name (it is the live one for files
+    the user attached) and the run's is filed under a suffixed name as well as
+    being reachable by key.
     """
     if run_session_id is None or run_session_id == connection_session_id:
         return
@@ -203,14 +206,52 @@ async def _merge_run_session_files(
         connection_session = await chat_service.session_repository.get(
             connection_session_id
         )
-        if connection_session is None:
+        if connection_session is None or not getattr(
+            connection_session, "active", True
+        ):
+            # The socket closed while a detached run kept going. Nothing here
+            # outlives the run, so the artifact is reachable only through the
+            # File Library -- say so, rather than losing it silently.
+            logger.warning(
+                "Run %s produced %d file(s) but its connection session is gone; "
+                "they remain downloadable from the File Library only",
+                run_session_id,
+                len(files),
+            )
             return
         target = connection_session.context.setdefault("files", {})
         for name, meta in files.items():
-            target.setdefault(name, meta)
-    except Exception as e:  # pragma: no cover - defensive
+            _merge_one_file(target, name, meta)
+    except Exception as e:
         # Losing the merge costs a download, not the run's result.
         logger.warning("Could not merge run session files: %s", e)
+
+
+def _merge_one_file(target: dict, name: str, meta) -> None:
+    """Add one run artifact to a file map without displacing what is there."""
+    existing = target.get(name)
+    if existing is None:
+        target[name] = meta
+        return
+    if _file_key(existing) == _file_key(meta):
+        # Same stored object under the same label: already merged.
+        return
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    for suffix in range(1, 1000):
+        candidate = f"{stem} ({suffix}){dot}{ext}"
+        current = target.get(candidate)
+        if current is None:
+            target[candidate] = meta
+            return
+        if _file_key(current) == _file_key(meta):
+            return
+
+
+def _file_key(meta):
+    """The storage key a file map entry points at, if it has one."""
+    return meta.get("key") if isinstance(meta, dict) else None
 
 
 async def _release_finished_run(
@@ -220,7 +261,8 @@ async def _release_finished_run(
     session_id,
     conversation_id,
     user_email,
-    connection_session_id=None,
+    *,
+    connection_session_id,
 ):
     """Free what a finished run owned (issue #884).
 
@@ -321,23 +363,54 @@ def _download_session_candidates(run_registry, session_id, user_email: str, data
     return candidates
 
 
-# Download errors, most informative first. A candidate session that no longer
-# exists says nothing about the file the user asked for, so it must never be
-# the error they see while a real lookup failure is available (issue #953).
+# Download failures, most worth showing the user first. One download frame is
+# tried against several candidate sessions, and the reply the user sees should
+# be the one that says something about *their* file: a candidate session that
+# no longer exists says nothing at all, so it must never mask a real lookup or
+# storage failure from another candidate (issue #953). Ranking on the
+# machine-readable code rather than the display text keeps this independent of
+# how the messages are worded.
 _DOWNLOAD_ERROR_PRIORITY = (
-    "Session or file manager not available",
-    "File not found in session",
+    DownloadError.BAD_REQUEST.value,
+    DownloadError.NOT_FOUND.value,
+    DownloadError.STORAGE.value,
+    DownloadError.NO_SESSION.value,
 )
+# An unrecognised code sorts between the accurate answers and "no session":
+# it may name a real problem, but not one we can claim is about this file.
+_DOWNLOAD_UNKNOWN_RANK = _DOWNLOAD_ERROR_PRIORITY.index(DownloadError.NO_SESSION.value)
 
 
 def _download_error_rank(response: dict) -> int:
     """Rank a failed download reply; lower is more worth showing the user."""
-    error = response.get("error") or ""
+    code = response.get("error_code") or ""
     try:
-        return len(_DOWNLOAD_ERROR_PRIORITY) - _DOWNLOAD_ERROR_PRIORITY.index(error)
+        return _DOWNLOAD_ERROR_PRIORITY.index(code)
     except ValueError:
-        # An error from the storage layer names an actual failure; prefer it.
-        return 0
+        return _DOWNLOAD_UNKNOWN_RANK
+
+
+async def _resolve_download(chat_service, candidates, filename, user_email, s3_key):
+    """Try each candidate session for one file; return the best reply.
+
+    Stops at the first success. When every candidate fails, returns the most
+    informative failure rather than whichever happened to come last -- the loop
+    used to keep the last, so a reaped run session's "no session" overwrote the
+    connection session's accurate "file not found".
+    """
+    best = None
+    for candidate_session_id in candidates:
+        attempt = await chat_service.handle_download_file(
+            session_id=candidate_session_id,
+            filename=filename,
+            user_email=user_email,
+            s3_key=s3_key,
+        )
+        if not attempt.get("error"):
+            return attempt
+        if best is None or _download_error_rank(attempt) < _download_error_rank(best):
+            best = attempt
+    return best
 
 
 async def _seed_run_session_files(
@@ -1630,7 +1703,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                         run_session_id,
                                         run_conversation_id,
                                         user_email,
-                                        session_id,
+                                        connection_session_id=session_id,
                                     )
                                 )
                             )
@@ -1664,29 +1737,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 # labels that reduce to the same stored name, so a control with
                 # the key must not have its bytes chosen by name matching.
                 s3_key = data.get("s3_key")
-                response = None
-                for candidate_session_id in _download_session_candidates(
-                    run_registry, session_id, user_email, data
-                ):
-                    attempt = await chat_service.handle_download_file(
-                        session_id=candidate_session_id,
-                        filename=filename,
-                        user_email=user_email,
-                        s3_key=s3_key,
-                    )
-                    if not attempt.get("error"):
-                        response = attempt
-                        break
-                    # Every candidate failed so far: keep the most informative
-                    # error rather than whichever one happened to come last
-                    # (issue #953). A reaped run session reports "session not
-                    # available", which tells the user nothing about *their*
-                    # file and would otherwise mask the connection session's
-                    # accurate "file not found".
-                    if response is None or _download_error_rank(
-                        attempt
-                    ) < _download_error_rank(response):
-                        response = attempt
+                response = await _resolve_download(
+                    chat_service,
+                    _download_session_candidates(
+                        run_registry, session_id, user_email, data
+                    ),
+                    filename,
+                    user_email,
+                    s3_key,
+                )
                 # Echo the run identity the client addressed so a client that
                 # routes frames by conversation can place the reply.
                 if response is not None:

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from enum import Enum
 from typing import (
     Any,
     Awaitable,
@@ -46,6 +47,23 @@ from .utilities.conversation_loader import load_messages_into_history
 from .utilities.interrupted_turn import close_open_turn
 
 logger = logging.getLogger(__name__)
+
+
+class DownloadError(str, Enum):
+    """Why a download reply failed, as a stable machine-readable code.
+
+    The websocket handler tries several candidate sessions for one file and has
+    to pick the most useful failure to show. Ranking on the human-readable
+    ``error`` text would make that choice depend on display copy: reword a
+    string and every candidate ties, silently reinstating the misleading error
+    of issue #953. The code is what callers compare; the text stays free to
+    change.
+    """
+
+    BAD_REQUEST = "bad_request"
+    NO_SESSION = "no_session"
+    NOT_FOUND = "not_found"
+    STORAGE = "storage"
 
 # Distinguishes "the client did not send this field" from "the client sent
 # null"; the two mean different things for the conversation's workspace binding.
@@ -1078,21 +1096,24 @@ class ChatService:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename if isinstance(filename, str) else "",
-                "error": "A filename is required"
+                "error": "A filename is required",
+                "error_code": DownloadError.BAD_REQUEST.value,
             }
         session = await self.session_repository.get(session_id)
         if not session or not self.file_manager or not user_email:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": "Session or file manager not available"
+                "error": "Session or file manager not available",
+                "error_code": DownloadError.NO_SESSION.value,
             }
         stored_name, ref = self._resolve_session_file(session, filename, s3_key)
         if not ref:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": "File not found in session"
+                "error": "File not found in session",
+                "error_code": DownloadError.NOT_FOUND.value,
             }
         try:
             content_b64 = await self.file_manager.get_file_content(
@@ -1104,7 +1125,8 @@ class ChatService:
                 return {
                     "type": MessageType.FILE_DOWNLOAD.value,
                     "filename": filename,
-                    "error": "Unable to retrieve file content"
+                    "error": "Unable to retrieve file content",
+                    "error_code": DownloadError.STORAGE.value,
                 }
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
@@ -1112,11 +1134,15 @@ class ChatService:
                 "content_base64": content_b64
             }
         except Exception as e:
+            # The exception text routinely names the bucket, object key,
+            # endpoint host and principal. It belongs in the server log, not in
+            # a frame sent to the browser.
             logger.error(f"Download failed for {filename}: {e}")
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": str(e)
+                "error": "Unable to retrieve file content",
+                "error_code": DownloadError.STORAGE.value,
             }
 
     async def _update_session_from_tool_results(
