@@ -80,6 +80,7 @@ from atlas.domain.errors import (
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available
+from atlas.modules.file_storage.manager import FileManager
 from atlas.routes.admin_routes import admin_router
 from atlas.routes.agent_portal_availability import load_agent_portal_router
 
@@ -228,36 +229,45 @@ async def _merge_run_session_files(
 
 
 def _merge_one_file(target: dict, name: str, meta) -> None:
-    """Add one run artifact to a file map without displacing what is there."""
+    """Add one run artifact to a file map without displacing what is there.
+
+    Three cases. The name is free: take it. The entry already there *is* this
+    file: nothing to do -- which is what makes the seed/merge round trip
+    idempotent, since every file the connection seeded into the run session
+    comes back unchanged on every tracked turn and must not accumulate copies.
+    Otherwise two different files want one label, and neither may be dropped:
+    the connection's keeps the plain name (it is the live one for what the user
+    attached) and the run's takes a suffixed key from the same helper the
+    artifact ingest path uses, so session keys stay in one format that
+    ``sanitize_filename`` round-trips.
+    """
     existing = target.get(name)
     if existing is None:
         target[name] = meta
         return
     if _same_stored_file(existing, meta):
-        # Same stored object under the same label: already merged.
         return
-    stem, dot, ext = name.rpartition(".")
-    if not dot:
-        stem, ext = name, ""
-    for suffix in range(1, 1000):
-        candidate = f"{stem} ({suffix}){dot}{ext}"
-        current = target.get(candidate)
-        if current is None:
-            target[candidate] = meta
+    # An earlier turn may already have filed this very artifact under a
+    # suffixed key; refresh that rather than adding yet another copy.
+    for held_name, held in target.items():
+        if _same_stored_file(held, meta):
+            target[held_name] = meta
             return
-        if _same_stored_file(current, meta):
-            return
+    target[FileManager.unique_key(target, name)] = meta
 
 
 def _same_stored_file(a, b) -> bool:
-    """Whether two file map entries certainly point at the same stored object.
+    """Whether two file map entries stand for the same file.
 
-    Only a shared storage key proves it. Two keyless entries are *unknown*, not
-    equal -- treating them as equal would make the second one look like a
-    duplicate of the first and silently drop the run's artifact.
+    A shared non-empty storage key proves it. Failing that, entries that are
+    simply equal are the same entry -- that is the seeded copy coming home.
+    Two *different* keyless entries are unknown, not equal: calling them equal
+    would make the second look like a duplicate and silently drop it.
     """
     key = a.get("key") if isinstance(a, dict) else None
-    return bool(key) and key == (b.get("key") if isinstance(b, dict) else None)
+    if key and key == (b.get("key") if isinstance(b, dict) else None):
+        return True
+    return a == b
 
 
 async def _release_finished_run(
@@ -376,15 +386,18 @@ def _download_session_candidates(run_registry, session_id, user_email: str, data
 # storage failure from another candidate (issue #953). Ranking on the
 # machine-readable code rather than the display text keeps this independent of
 # how the messages are worded.
+# ``None`` is the slot an unrecognised code takes: it may name a real problem,
+# but not one we can claim is about this file, so it sorts below every known
+# answer and above "no session". Giving it a rank of its own (rather than
+# sharing one) keeps the choice independent of the order candidates are tried.
 _DOWNLOAD_ERROR_PRIORITY = (
     DownloadError.BAD_REQUEST.value,
     DownloadError.NOT_FOUND.value,
     DownloadError.STORAGE.value,
+    None,
     DownloadError.NO_SESSION.value,
 )
-# An unrecognised code sorts between the accurate answers and "no session":
-# it may name a real problem, but not one we can claim is about this file.
-_DOWNLOAD_UNKNOWN_RANK = _DOWNLOAD_ERROR_PRIORITY.index(DownloadError.NO_SESSION.value)
+_DOWNLOAD_UNKNOWN_RANK = _DOWNLOAD_ERROR_PRIORITY.index(None)
 
 
 def _download_error_rank(response: dict) -> int:

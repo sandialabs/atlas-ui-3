@@ -511,23 +511,50 @@ async def test_a_name_collision_keeps_both_files():
     await _merge_run_session_files(service, "run-session", "conn")
 
     merged = sessions["conn"].context["files"]
-    assert merged["a.txt"] == {"key": "s3/conn-a"}
-    assert {"key": "s3/run-a"} in merged.values()
+    # The suffixed key is the one the artifact ingest path produces, so it
+    # survives ``sanitize_filename`` like any other session key.
+    assert merged == {
+        "a.txt": {"key": "s3/conn-a"},
+        "a_1.txt": {"key": "s3/run-a"},
+    }
 
 
 @pytest.mark.asyncio
-async def test_merging_the_same_file_twice_does_not_duplicate_it():
-    """Same label, same stored object: one entry, not a growing chain."""
+async def test_seeded_files_do_not_accumulate_across_turns():
+    """The seed/merge round trip must be a no-op, turn after turn.
+
+    Every tracked turn copies the connection's files into the run session and
+    merges them back. Treating the returning copy as a new file would add one
+    phantom entry per file per turn, and then copy those forward too.
+    """
+    attached = {"report.csv": {"key": "s3/report"}, "notes.txt": {}}
+    sessions = {"conn": _FakeSession({"files": dict(attached)})}
+    service = _FakeChatService(sessions)
+
+    for turn in range(3):
+        run_session_id = f"run-{turn}"
+        await _seed_run_session_files(service, "conn", run_session_id, USER)
+        await _merge_run_session_files(service, run_session_id, "conn")
+
+    assert sessions["conn"].context["files"] == attached
+
+
+@pytest.mark.asyncio
+async def test_a_file_filed_under_a_suffix_is_refreshed_not_recopied():
+    """A run re-emitting its own artifact updates the entry it already has."""
     sessions = {
-        "conn": _FakeSession({"files": {"a.txt": {"key": "s3/a"}}}),
-        "run-session": _FakeSession({"files": {"a.txt": {"key": "s3/a"}}}),
+        "conn": _FakeSession({"files": {"a.txt": {"key": "s3/conn-a"}}}),
+        "run-session": _FakeSession({"files": {"a.txt": {"key": "s3/run-a"}}}),
     }
     service = _FakeChatService(sessions)
 
     await _merge_run_session_files(service, "run-session", "conn")
     await _merge_run_session_files(service, "run-session", "conn")
 
-    assert sessions["conn"].context["files"] == {"a.txt": {"key": "s3/a"}}
+    assert sessions["conn"].context["files"] == {
+        "a.txt": {"key": "s3/conn-a"},
+        "a_1.txt": {"key": "s3/run-a"},
+    }
 
 
 @pytest.mark.asyncio
@@ -682,3 +709,34 @@ def test_error_ranking_prefers_the_most_informative_failure():
     ]
     assert ranks == sorted(ranks)
     assert len(set(ranks)) == 3
+
+
+@pytest.mark.asyncio
+async def test_an_unmapped_error_loses_to_file_not_found_in_either_order():
+    """Which reply wins must not depend on the order candidates are tried."""
+    for replies in (
+        [_fail(DownloadError.NOT_FOUND.value, "File not found in session"),
+         {"error": "something odd"}],
+        [{"error": "something odd"},
+         _fail(DownloadError.NOT_FOUND.value, "File not found in session")],
+    ):
+        service = _FakeDownloads(replies)
+        response = await _resolve_download(
+            service, ["conn", "run"], "img.jpeg", USER, None
+        )
+        assert response["error"] == "File not found in session"
+
+
+@pytest.mark.asyncio
+async def test_an_unmapped_error_beats_a_missing_session_in_either_order():
+    for replies in (
+        [{"error": "something odd"},
+         _fail(DownloadError.NO_SESSION.value, "Session or file manager not available")],
+        [_fail(DownloadError.NO_SESSION.value, "Session or file manager not available"),
+         {"error": "something odd"}],
+    ):
+        service = _FakeDownloads(replies)
+        response = await _resolve_download(
+            service, ["conn", "run"], "img.jpeg", USER, None
+        )
+        assert response["error"] == "something odd"

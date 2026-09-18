@@ -1137,7 +1137,9 @@ class ChatService:
             # The exception text routinely names the bucket, object key,
             # endpoint host and principal. It belongs in the server log, not in
             # a frame sent to the browser.
-            logger.error(f"Download failed for {filename}: {e}")
+            logger.error(
+                "Download failed for %s: %s", sanitize_for_logging(filename), e
+            )
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,

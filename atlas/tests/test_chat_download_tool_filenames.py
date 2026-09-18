@@ -605,3 +605,39 @@ async def test_run_artifact_downloads_after_its_run_session_is_reaped(chat_servi
 
     assert not response.get("error"), response.get("error")
     assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"
+
+
+@pytest.mark.asyncio
+async def test_a_collided_run_artifact_is_still_reachable_by_key(chat_service):
+    """The justification for suffixing rather than dropping (issue #953).
+
+    When the connection already holds a different file under the artifact's
+    name, the run's entry is filed under a suffixed key -- and a client that
+    sends the storage key must still get the run's bytes, not the other file's.
+    """
+    from atlas.main import _merge_run_session_files
+
+    user_email = "user1@example.com"
+    connection_session_id = uuid.uuid4()
+    run_session_id = uuid.uuid4()
+
+    await _run_tool_producing(
+        chat_service, connection_session_id, user_email, ADVERTISED_NAME
+    )
+    await _run_tool_producing(chat_service, run_session_id, user_email, ADVERTISED_NAME)
+    run_session = await chat_service.session_repository.get(run_session_id)
+    run_key = next(iter(run_session.context["files"].values()))["key"]
+
+    await _merge_run_session_files(
+        chat_service, run_session_id, connection_session_id
+    )
+
+    response = await chat_service.handle_download_file(
+        session_id=connection_session_id,
+        filename=ADVERTISED_NAME,
+        user_email=user_email,
+        s3_key=run_key,
+    )
+
+    assert not response.get("error"), response.get("error")
+    assert base64.b64decode(response["content_base64"]) == b"a,b\n1,2\n"
