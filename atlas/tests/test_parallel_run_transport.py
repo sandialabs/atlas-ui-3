@@ -5,8 +5,8 @@ an event is stamped with the run that produced it, and how a stop / approval
 frame is resolved to exactly one run.
 """
 
+import asyncio
 import copy
-from types import SimpleNamespace
 
 import pytest
 from main import (
@@ -17,6 +17,8 @@ from main import (
     _MERGED_FROM_RUN,
     _SEEDED_FROM_CONNECTION,
     _merge_run_session_files,
+    _same_conversation,
+    forget_run_conversations,
     _release_finished_run,
     _resolve_download,
     _resume_waiting_run,
@@ -1061,35 +1063,119 @@ async def test_seeding_creates_the_connection_session_when_it_is_missing():
 
 
 @pytest.mark.asyncio
-async def test_a_run_tells_the_connection_which_conversation_it_is_on():
-    """Only a turn on the connection session sets its conversation_id.
+async def test_a_run_tells_the_connection_it_is_on_that_conversation():
+    """The merge's isolation check has to have something to match against.
 
-    A tracked run does not, so the id stays at whatever the last New Chat
-    minted while the run carries the id the transport minted for this turn --
-    and the merge's isolation check then reads a connection sitting on this
-    very conversation as one that has moved away.
+    Only a turn running against the connection session writes its
+    ``conversation_id``, and a tracked run never does -- so that field holds
+    whatever the last New Chat minted, and the run carries the id the transport
+    minted for this turn.
     """
     sessions = {"conn": _FakeSession({"conversation_id": "from-new-chat"})}
     service = _FakeChatService(sessions)
 
-    await _seed_run_session_files(service, "conn", "run-session", USER, "run-conv")
+    await _seed_run_session_files(
+        service, "conn", "run-session", USER, conversation_id="run-conv"
+    )
 
-    assert sessions["conn"].context["conversation_id"] == "run-conv"
+    assert _same_conversation(sessions["conn"], "run-conv")
+    # The connection's own id is not the run's to rewrite: an untracked turn
+    # reads it back when it saves.
+    assert sessions["conn"].context["conversation_id"] == "from-new-chat"
 
 
 @pytest.mark.asyncio
-async def test_a_run_does_not_redirect_a_connection_that_runs_its_own_turns():
-    """An untracked turn reads this id back when it saves."""
+async def test_two_runs_in_two_conversations_both_come_home():
+    """One connection, two tracked runs, two conversations.
 
-    class _WithHistory(_FakeSession):
-        history = SimpleNamespace(messages=[{"role": "user"}])
-
-    sessions = {"conn": _WithHistory({"conversation_id": "untracked-conv"})}
+    A single ``conversation_id`` stamped per run would be last-writer-wins, and
+    the first run's artifacts would be dropped when it finished.
+    """
+    sessions = {"conn": _FakeSession({"conversation_id": "from-new-chat"})}
     service = _FakeChatService(sessions)
 
-    await _seed_run_session_files(service, "conn", "run-session", USER, "run-conv")
+    for conv, run in (("conv-a", "run-a"), ("conv-b", "run-b")):
+        await _seed_run_session_files(
+            service, "conn", run, USER, conversation_id=conv
+        )
+        service.session_repository._sessions[run].context["files"] = {
+            f"{conv}.txt": {"key": f"s3/{conv}"}
+        }
 
-    assert sessions["conn"].context["conversation_id"] == "untracked-conv"
+    await _merge_run_session_files(service, "run-a", "conn", "conv-a")
+    await _merge_run_session_files(service, "run-b", "conn", "conv-b")
+
+    merged = _without_provenance(
+        service.session_repository._sessions["conn"].context["files"]
+    )
+    assert merged == {
+        "conv-a.txt": {"key": "s3/conv-a"},
+        "conv-b.txt": {"key": "s3/conv-b"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_navigating_away_still_keeps_a_runs_files_out():
+    """The record is what New Chat and restore clear; isolation survives it."""
+    sessions = {"conn": _FakeSession({})}
+    service = _FakeChatService(sessions)
+
+    await _seed_run_session_files(
+        service, "conn", "run-session", USER, conversation_id="conv-1"
+    )
+    forget_run_conversations(sessions["conn"])
+    sessions["conn"].context["conversation_id"] = "conv-2"
+    sessions["run-session"].context["files"] = {"a.txt": {"key": "s3/a"}}
+
+    await _merge_run_session_files(service, "run-session", "conn", "conv-1")
+
+    assert sessions["conn"].context.get("files", {}) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_hook_denied_connection_session_still_seeds_the_run():
+    """The run's own files must not depend on the merge target existing."""
+
+    class _Denying(_FakeChatService):
+        async def create_session(self, session_id, user_email=None):
+            if session_id == "conn":
+                raise RuntimeError("SessionStart hook denied")
+            return await super().create_session(session_id, user_email)
+
+    service = _Denying({})
+
+    await _seed_run_session_files(
+        service, "conn", "run-session", USER, conversation_id="conv-1"
+    )
+
+    assert "run-session" in service.session_repository._sessions
+
+
+@pytest.mark.asyncio
+async def test_two_runs_starting_at_once_share_one_connection_session():
+    """``create_session`` overwrites, so the loser's merge target would vanish."""
+
+    class _Yielding(_FakeSessionRepo):
+        async def get(self, session_id):
+            # Read, then suspend: this is the window a real repository leaves
+            # open. Without the lock both runs come back holding the "no
+            # session" they read before the other one created it, and both
+            # create -- the second overwriting the first.
+            session = await super().get(session_id)
+            await asyncio.sleep(0)
+            return session
+
+    service = _FakeChatService({})
+    service.session_repository = _Yielding(service.session_repository._sessions)
+
+    await asyncio.gather(*[
+        _seed_run_session_files(
+            service, "conn", f"run-{i}", USER, conversation_id=f"conv-{i}"
+        )
+        for i in range(2)
+    ])
+
+    assert service.created.count("conn") == 1
 
 
 @pytest.mark.asyncio
@@ -1097,7 +1183,9 @@ async def test_artifacts_survive_when_only_tracked_runs_ever_ran():
     """End to end: seed then merge with no connection session to begin with."""
     service = _FakeChatService({})
 
-    await _seed_run_session_files(service, "conn", "run-session", USER, "conv-1")
+    await _seed_run_session_files(
+        service, "conn", "run-session", USER, conversation_id="conv-1"
+    )
     service.session_repository._sessions["run-session"].context["files"] = {
         "deck.pptx": {"key": "s3/deck"}
     }
