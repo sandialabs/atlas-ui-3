@@ -319,11 +319,23 @@ _PROVENANCE_MARKERS = (_MERGED_FROM_RUN, _SEEDED_FROM_CONNECTION)
 def _same_conversation(session, conversation_id) -> bool:
     """Whether ``session`` is still on the conversation a run belonged to.
 
+    A connection is "still there" if the run's conversation is one it started a
+    run in and has not navigated away from since -- see ``_RUN_CONVERSATIONS``.
+    That record, not the session's own ``conversation_id``, is what answers for
+    a tracked run: only a turn running against the connection session writes
+    that field, and a tracked run never does, so it holds whatever the last New
+    Chat minted and would read a connection sitting on this very conversation as
+    one that had moved away.
+
     Unknown on either side cannot prove a mismatch, so it does not block --
     ``create_session`` does not set a ``conversation_id``, and denying there
     would drop the artifacts of a first turn that never left its conversation.
     It is logged, because an unprovable check is worth seeing in the record.
     """
+    if conversation_id and conversation_id in session.context.get(
+        _RUN_CONVERSATIONS, []
+    ):
+        return True
     current = session.context.get("conversation_id")
     if not conversation_id or not current:
         logger.warning(
@@ -679,8 +691,93 @@ async def _resolve_download(chat_service, candidates, filename, user_email, s3_k
     return best
 
 
+# Conversations whose tracked runs this connection started, since the last time
+# the user navigated. A run's artifacts come home only if its conversation is
+# still one of them, and New Chat / conversation restore clear the record. A
+# single ``conversation_id`` cannot stand in for this: the connection session's
+# own id is written only by a turn that runs *against* it, which a tracked run
+# never does, and overwriting it per run would make two runs in two
+# conversations last-writer-wins -- the earlier one's artifacts dropped.
+_RUN_CONVERSATIONS = "run_conversations"
+
+# A connection cannot navigate faster than it can start runs, so this only ever
+# has to hold the conversations of runs in flight plus a little history. The cap
+# is what keeps a long-lived socket from growing the list without bound.
+_MAX_RUN_CONVERSATIONS = 64
+
+# ``create_session`` overwrites whatever is stored under the id, so two runs
+# starting at once on a connection with no session yet would each install one
+# and the loser's merge would write into a discarded object. The get-or-create
+# below is short and never blocks on I/O, so one lock for the process costs
+# nothing and removes the window.
+_connection_session_lock = asyncio.Lock()
+
+
+async def _ensure_connection_session(chat_service, connection_session_id, user_email):
+    """The connection's session, created if this connection has none yet.
+
+    A session is otherwise created lazily, by the first turn that runs against
+    it -- and on a connection whose every turn is a tracked run there is no such
+    turn, because a tracked run executes against its own session. Nothing shows
+    until the run ends and :func:`_merge_run_session_files` looks for somewhere
+    to put the artifacts, finds no session, and reads the absence as a closed
+    socket (issue #953 follow-up): the artifacts are dropped, and the download
+    answers "Session or file manager not available" because the first candidate
+    session it tries is that same missing one.
+
+    Returns ``None`` if the session could not be created -- a ``SessionStart``
+    hook may deny it. That costs the merge, not the run: the caller carries on
+    and seeds the run session regardless.
+    """
+    async with _connection_session_lock:
+        session = await chat_service.session_repository.get(connection_session_id)
+        if session is not None:
+            return session
+        try:
+            return await chat_service.create_session(
+                connection_session_id, user_email
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not create connection session %s; a tracked run's files "
+                "will not be merged back: %s",
+                sanitize_for_logging(str(connection_session_id)),
+                sanitize_for_logging(str(e)),
+            )
+            return None
+
+
+def _record_run_conversation(connection_session, conversation_id) -> None:
+    """Note that this connection started a run in ``conversation_id``."""
+    if connection_session is None or not conversation_id:
+        return
+    known = connection_session.context.setdefault(_RUN_CONVERSATIONS, [])
+    if conversation_id in known:
+        return
+    known.append(conversation_id)
+    if len(known) > _MAX_RUN_CONVERSATIONS:
+        del known[:-_MAX_RUN_CONVERSATIONS]
+
+
+def forget_run_conversations(session) -> None:
+    """Drop the record when the user navigates away.
+
+    New Chat and conversation restore are the two things that move a connection
+    off the conversations its runs belong to. New Chat installs a fresh Session
+    (so the record goes with the old one); restore keeps the object, so it has
+    to be cleared by hand.
+    """
+    if session is not None:
+        session.context.pop(_RUN_CONVERSATIONS, None)
+
+
 async def _seed_run_session_files(
-    chat_service, connection_session_id, run_session_id, user_email: str
+    chat_service,
+    connection_session_id,
+    run_session_id,
+    user_email: str,
+    *,
+    conversation_id: Optional[str] = None,
 ) -> None:
     """Give a tracked run's session the files attached to the connection.
 
@@ -689,14 +786,20 @@ async def _seed_run_session_files(
     share one history object), which would otherwise start with no file map at
     all, making a just-attached file invisible to the very turn that was sent
     to act on it.
+
+    Also creates the connection session when this connection has none yet, and
+    records the conversation the run belongs to, so that the merge at the end of
+    the run has somewhere to put the artifacts and can tell it is still the
+    right place to put them.
     """
     if run_session_id == connection_session_id:
         return
+    connection_session = await _ensure_connection_session(
+        chat_service, connection_session_id, user_email
+    )
     try:
-        connection_session = await chat_service.session_repository.get(
-            connection_session_id
-        )
-        files = (connection_session.context.get("files") if connection_session else None)
+        _record_run_conversation(connection_session, conversation_id)
+        files = connection_session.context.get("files") if connection_session else None
         run_session = await chat_service.session_repository.get(run_session_id)
         if run_session is None:
             run_session = await chat_service.create_session(run_session_id, user_email)
@@ -1695,7 +1798,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     # map across. Copied, not shared, so the run and the
                     # connection cannot mutate each other's state.
                     await _seed_run_session_files(
-                        chat_service, session_id, turn_session_id, user_email
+                        chat_service,
+                        session_id,
+                        turn_session_id,
+                        user_email,
+                        conversation_id=run_record.conversation_id,
                     )
 
                     async def turn_update_callback(
@@ -2037,6 +2144,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Release MCP sessions for the current conversation before restoring
                 session = await chat_service.session_repository.get(session_id)
                 if session:
+                    # The connection is moving to another conversation, so the
+                    # runs it started before this point no longer have a home
+                    # here. New Chat gets this for free (it installs a fresh
+                    # Session); restore keeps the object, so say it.
+                    forget_run_conversations(session)
                     old_conv_id = session.context.get("conversation_id")
                     # Issue #884: navigation controls what is *visible*, not
                     # what is allowed to execute. Releasing the MCP sessions of
