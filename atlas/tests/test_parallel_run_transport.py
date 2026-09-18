@@ -10,7 +10,10 @@ import copy
 import pytest
 from main import (
     _cancel_addressed_run,
+    _download_error_rank,
     _download_session_candidates,
+    _merge_run_session_files,
+    _release_finished_run,
     _resume_waiting_run,
     _seed_run_session_files,
     tag_run_event,
@@ -468,3 +471,102 @@ async def test_seeding_failure_does_not_stop_the_run():
     service = _Exploding({"conn": _FakeSession({"files": {"a.txt": {}}})})
 
     await _seed_run_session_files(service, "conn", "run-session", USER)
+
+
+# ---------------------------------------------------------------------------
+# Files produced by a finished run (issue #953)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_run_artifacts_are_merged_back_to_the_connection():
+    """A tool artifact must stay downloadable after its run's session goes."""
+    produced = {"mcp_image_0.jpeg": {"key": "s3/img"}}
+    sessions = {
+        "conn": _FakeSession({"files": {}}),
+        "run-session": _FakeSession({"files": produced}),
+    }
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(service, "run-session", "conn")
+
+    assert sessions["conn"].context["files"]["mcp_image_0.jpeg"] == {"key": "s3/img"}
+
+
+@pytest.mark.asyncio
+async def test_merging_does_not_overwrite_the_connections_own_files():
+    """The connection's live map wins a name collision."""
+    sessions = {
+        "conn": _FakeSession({"files": {"a.txt": {"key": "s3/conn-a"}}}),
+        "run-session": _FakeSession({"files": {"a.txt": {"key": "s3/run-a"}}}),
+    }
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(service, "run-session", "conn")
+
+    assert sessions["conn"].context["files"]["a.txt"] == {"key": "s3/conn-a"}
+
+
+@pytest.mark.asyncio
+async def test_merging_is_a_noop_for_an_untracked_turn():
+    sessions = {"conn": _FakeSession({"files": {"a.txt": {"key": "s3/a"}}})}
+    service = _FakeChatService(sessions)
+
+    await _merge_run_session_files(service, "conn", "conn")
+
+    assert sessions["conn"].context["files"] == {"a.txt": {"key": "s3/a"}}
+
+
+@pytest.mark.asyncio
+async def test_merge_failure_does_not_break_release():
+    class _Exploding(_FakeSessionRepo):
+        async def get(self, session_id):
+            raise RuntimeError("repo down")
+
+    service = _FakeChatService({})
+    service.session_repository = _Exploding({})
+
+    await _merge_run_session_files(service, "run-session", "conn")
+
+
+@pytest.mark.asyncio
+async def test_release_merges_files_before_deleting_the_run_session(registry):
+    """The merge has to happen while the run's session still exists."""
+    seen = {}
+
+    class _Repo(_FakeSessionRepo):
+        async def delete(self, session_id):
+            seen["files_at_delete"] = dict(
+                self._sessions["conn"].context.get("files", {})
+            )
+            self._sessions.pop(session_id, None)
+
+    sessions = {
+        "conn": _FakeSession({"files": {}}),
+        "run-session": _FakeSession({"files": {"out.png": {"key": "s3/out"}}}),
+    }
+    service = _FakeChatService(sessions)
+    service.session_repository = _Repo(sessions)
+    ended = []
+    service.end_session = lambda sid: _noop(ended, sid)
+
+    await _release_finished_run(
+        service, registry, "run-1", "run-session", None, USER, "conn"
+    )
+
+    assert ended == ["run-session"]
+    assert "run-session" not in sessions
+    assert seen["files_at_delete"] == {"out.png": {"key": "s3/out"}}
+
+
+async def _noop(sink, session_id):
+    sink.append(session_id)
+
+
+def test_the_least_informative_download_error_loses():
+    """A reaped run session must not mask the real "file not found"."""
+    missing_session = {"error": "Session or file manager not available"}
+    missing_file = {"error": "File not found in session"}
+    storage = {"error": "connection reset"}
+
+    assert _download_error_rank(missing_file) < _download_error_rank(missing_session)
+    assert _download_error_rank(storage) < _download_error_rank(missing_file)

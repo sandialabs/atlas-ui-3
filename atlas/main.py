@@ -179,6 +179,40 @@ def tag_run_event(message: T, run_id: str, conversation_id: str) -> T:
     return tag_event(message, run_id, conversation_id, copy=True)
 
 
+async def _merge_run_session_files(
+    chat_service, run_session_id, connection_session_id
+) -> None:
+    """Copy a finished run's file map back onto the connection session.
+
+    The mirror of :func:`_seed_run_session_files` (issue #953). Tool artifacts
+    are registered into the *run's* session, and that session is deleted the
+    moment the run ends, so without this the only session that ever knew about
+    a just-produced file is gone by the time the user clicks download.
+
+    Existing entries win: the connection session's own map is the live one for
+    files the user attached, and a finished run must not overwrite a name the
+    connection is still using for something else.
+    """
+    if run_session_id is None or run_session_id == connection_session_id:
+        return
+    try:
+        run_session = await chat_service.session_repository.get(run_session_id)
+        files = run_session.context.get("files") if run_session else None
+        if not files:
+            return
+        connection_session = await chat_service.session_repository.get(
+            connection_session_id
+        )
+        if connection_session is None:
+            return
+        target = connection_session.context.setdefault("files", {})
+        for name, meta in files.items():
+            target.setdefault(name, meta)
+    except Exception as e:  # pragma: no cover - defensive
+        # Losing the merge costs a download, not the run's result.
+        logger.warning("Could not merge run session files: %s", e)
+
+
 async def _release_finished_run(
     chat_service,
     run_registry,
@@ -186,6 +220,7 @@ async def _release_finished_run(
     session_id,
     conversation_id,
     user_email,
+    connection_session_id=None,
 ):
     """Free what a finished run owned (issue #884).
 
@@ -203,6 +238,13 @@ async def _release_finished_run(
     """
     try:
         if session_id is not None:
+            # Before the session goes: hand its file map back to the
+            # connection, which outlives the run and is what a download frame
+            # searches first (issue #953).
+            if connection_session_id is not None:
+                await _merge_run_session_files(
+                    chat_service, session_id, connection_session_id
+                )
             await chat_service.end_session(session_id)
             # end_session only marks the session inactive. For a connection's
             # session that is right -- it is reused for the life of the socket
@@ -277,6 +319,25 @@ def _download_session_candidates(run_registry, session_id, user_email: str, data
     for record in run_registry.records_for_user(user_email or ""):
         _add(record)
     return candidates
+
+
+# Download errors, most informative first. A candidate session that no longer
+# exists says nothing about the file the user asked for, so it must never be
+# the error they see while a real lookup failure is available (issue #953).
+_DOWNLOAD_ERROR_PRIORITY = (
+    "Session or file manager not available",
+    "File not found in session",
+)
+
+
+def _download_error_rank(response: dict) -> int:
+    """Rank a failed download reply; lower is more worth showing the user."""
+    error = response.get("error") or ""
+    try:
+        return len(_DOWNLOAD_ERROR_PRIORITY) - _DOWNLOAD_ERROR_PRIORITY.index(error)
+    except ValueError:
+        # An error from the storage layer names an actual failure; prefer it.
+        return 0
 
 
 async def _seed_run_session_files(
@@ -1569,6 +1630,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                         run_session_id,
                                         run_conversation_id,
                                         user_email,
+                                        session_id,
                                     )
                                 )
                             )
@@ -1606,14 +1668,25 @@ async def websocket_endpoint(websocket: WebSocket):
                 for candidate_session_id in _download_session_candidates(
                     run_registry, session_id, user_email, data
                 ):
-                    response = await chat_service.handle_download_file(
+                    attempt = await chat_service.handle_download_file(
                         session_id=candidate_session_id,
                         filename=filename,
                         user_email=user_email,
                         s3_key=s3_key,
                     )
-                    if not response.get("error"):
+                    if not attempt.get("error"):
+                        response = attempt
                         break
+                    # Every candidate failed so far: keep the most informative
+                    # error rather than whichever one happened to come last
+                    # (issue #953). A reaped run session reports "session not
+                    # available", which tells the user nothing about *their*
+                    # file and would otherwise mask the connection session's
+                    # accurate "file not found".
+                    if response is None or _download_error_rank(
+                        attempt
+                    ) < _download_error_rank(response):
+                        response = attempt
                 # Echo the run identity the client addressed so a client that
                 # routes frames by conversation can place the reply.
                 if response is not None:
