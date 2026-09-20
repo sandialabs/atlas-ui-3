@@ -153,6 +153,14 @@ deferred and replayed as described below.
 
 ### Pending approvals are replayed, not lost
 
+The pause is recorded at every transport chokepoint -- the connection adapter
+the agent loop publishes through, the turn callback, and a launched run's
+child connection (`RunRegistry.note_event`) -- so it does not matter which
+path a producer used. Before this, a run started from the UI whose approval
+request went through the adapter was never marked `waiting_for_input`: no
+"Needs approval" marker, nothing to replay, and the run sat until the
+approval timed out.
+
 An approval request that arrives while the user is looking at another
 conversation is not shown as a modal there; the conversation is marked "Needs
 approval" in the history list instead. The server keeps the request frame and

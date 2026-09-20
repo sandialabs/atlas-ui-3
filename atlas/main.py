@@ -160,13 +160,6 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         logger.debug("Websocket closed before update could be sent: %s", e)
 
 
-# Events that mean "the tool this run was paused on has settled". Used to clear
-# a stale waiting_for_input status; see the run update callback.
-_TOOL_SETTLED_EVENTS = frozenset(
-    {"tool_complete", "tool_error", "tool_interrupted", "tool_result"}
-)
-
-
 T = TypeVar("T")
 
 
@@ -1832,33 +1825,15 @@ async def websocket_endpoint(websocket: WebSocket):
                         # working: reflect that in its status so the client can
                         # show "waiting for you" on a conversation the user is
                         # not currently looking at.
-                        message_type_out = message.get("type") if isinstance(message, dict) else None
-                        if message_type_out in ("tool_approval_request", "elicitation_request"):
-                            run_registry.set_status(
-                                _run_id,
-                                RunStatus.WAITING_FOR_INPUT,
-                                waiting_on=message_type_out,
-                            )
-                            # Keep the frame itself. If the user is looking at
-                            # another conversation (or is not here at all) the
-                            # client discards it, and nothing else holds the
-                            # request id and arguments needed to answer it.
-                            run_registry.set_pending_request(
-                                _run_id, tag_run_event(message, _run_id, _conv)
-                            )
-                        elif message_type_out in _TOOL_SETTLED_EVENTS:
-                            # The tool the run was paused on has settled one way
-                            # or another. Resolving the pause here as well as on
-                            # the response frame covers the case where nobody
-                            # ever answers and the request times out -- the run
-                            # carries on working, and would otherwise be stuck
-                            # showing "Needs approval" for the rest of its life.
-                            record = run_registry.get(_run_id)
-                            if record is not None and record.status == RunStatus.WAITING_FOR_INPUT:
-                                run_registry.set_status(_run_id, RunStatus.RUNNING)
-                        await websocket_update_callback(
-                            websocket, tag_run_event(message, _run_id, _conv)
-                        )
+                        # Keep the frame itself when it asks for input. If the
+                        # user is looking at another conversation (or is not
+                        # here at all) the client discards it, and nothing else
+                        # holds the request id and arguments needed to answer
+                        # it. A settling tool clears a stale pause -- the case
+                        # where nobody answers and the request times out.
+                        tagged = tag_run_event(message, _run_id, _conv)
+                        run_registry.note_event(_run_id, tagged)
+                        await websocket_update_callback(websocket, tagged)
 
                 # Bind the per-turn values as defaults: the loop reassigns them
                 # on the next message, and a still-running task must keep the

@@ -57,6 +57,13 @@ MAX_RETAINED_TERMINAL_RUNS_PER_USER = 50
 # Matches the title length ConversationRepository stores for a conversation.
 RUN_TITLE_MAX_CHARS = 200
 
+# Frames that pause a run until the user answers, and frames that mean the
+# tool it was paused on has settled one way or another.
+INPUT_REQUEST_EVENTS = frozenset({"tool_approval_request", "elicitation_request"})
+TOOL_SETTLED_EVENTS = frozenset(
+    {"tool_complete", "tool_error", "tool_interrupted", "tool_result"}
+)
+
 
 class RunStatus(str, Enum):
     """Lifecycle states from the issue's suggested state machine.
@@ -426,6 +433,44 @@ class RunRegistry:
             record.task = None
         self._notify(record)
         return record
+
+    def note_event(self, run_id: Optional[str], frame: Any) -> None:
+        """Keep a run's status in step with the frames it emits.
+
+        An approval or elicitation request pauses the run: it is marked
+        ``waiting_for_input`` (which drives the "Needs approval" marker in the
+        history list) and the frame is kept for replay, because a client that
+        is looking at another conversation drops it. A tool settling clears a
+        stale pause -- the request timed out, or was answered on a path that
+        did not go through the transport.
+
+        Every transport chokepoint calls this -- the connection adapter the
+        agent loop publishes through, the turn callback, and a launched run's
+        child connection -- so the bookkeeping does not depend on which path
+        a producer happened to use. Only the first observer of a frame can
+        change anything; the rest are no-ops.
+        """
+        if not run_id or not isinstance(frame, dict):
+            return
+        event_type = frame.get("type")
+        if event_type in INPUT_REQUEST_EVENTS:
+            record = self.get(run_id)
+            if record is None or record.is_terminal:
+                return
+            already = (
+                record.status == RunStatus.WAITING_FOR_INPUT
+                and record.pending_request is not None
+                and record.pending_request.get("tool_call_id") == frame.get("tool_call_id")
+                and record.pending_request.get("elicitation_id") == frame.get("elicitation_id")
+            )
+            if already:
+                return
+            self.set_status(run_id, RunStatus.WAITING_FOR_INPUT, waiting_on=event_type)
+            self.set_pending_request(run_id, frame)
+        elif event_type in TOOL_SETTLED_EVENTS:
+            record = self.get(run_id)
+            if record is not None and record.status == RunStatus.WAITING_FOR_INPUT:
+                self.set_status(run_id, RunStatus.RUNNING)
 
     def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
         """Remember the request a run is blocked on, for later replay."""
