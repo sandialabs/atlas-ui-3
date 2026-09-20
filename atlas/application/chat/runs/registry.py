@@ -442,7 +442,9 @@ class RunRegistry:
         history list) and the frame is kept for replay, because a client that
         is looking at another conversation drops it. A tool settling clears a
         stale pause -- the request timed out, or was answered on a path that
-        did not go through the transport.
+        did not go through the transport -- but only when the settle frame
+        answers the request that is outstanding; a sibling tool finishing
+        while another approval is still pending leaves the pause intact.
 
         Every transport chokepoint calls this -- the connection adapter the
         agent loop publishes through, the turn callback, and a launched run's
@@ -469,8 +471,34 @@ class RunRegistry:
             self.set_pending_request(run_id, frame)
         elif event_type in TOOL_SETTLED_EVENTS:
             record = self.get(run_id)
-            if record is not None and record.status == RunStatus.WAITING_FOR_INPUT:
-                self.set_status(run_id, RunStatus.RUNNING)
+            if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
+                return
+            if not self._settles_pending(record.pending_request, frame):
+                # A sibling tool settled while another request is still
+                # outstanding. Clearing the pause here would drop the pending
+                # request and strand the run until the approval timed out --
+                # the exact state ``note_event`` exists to fix.
+                return
+            self.set_status(run_id, RunStatus.RUNNING)
+
+    @staticmethod
+    def _settles_pending(pending_request: Optional[Dict[str, Any]], frame: Dict[str, Any]) -> bool:
+        """Whether a settle frame answers the request the run is paused on.
+
+        Frames are matched on their identifier when both sides carry one; a
+        frame with no identifier at all is treated as settling whatever is
+        outstanding.
+        """
+        if not isinstance(pending_request, dict):
+            return True
+        for key in ("tool_call_id", "elicitation_id"):
+            frame_id = frame.get(key)
+            pending_id = pending_request.get(key)
+            if frame_id is not None and pending_id is not None:
+                if frame_id == pending_id:
+                    return True
+                return False
+        return True
 
     def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
         """Remember the request a run is blocked on, for later replay."""

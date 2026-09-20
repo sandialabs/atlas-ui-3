@@ -1597,6 +1597,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 if frame_conversation_id and run_registry.active_for_conversation_any_owner(
                     frame_conversation_id
                 ) not in (None, user_email):
+                    logger.warning(
+                        "WS refused a turn naming conversation=%s while another "
+                        "user's run is executing under it",
+                        sanitize_for_logging(frame_conversation_id),
+                    )
                     await websocket.send_json({
                         "type": "error",
                         "message": "Conversation not found",
@@ -2108,12 +2113,27 @@ async def websocket_endpoint(websocket: WebSocket):
                 # chat has none) would file them as background activity and
                 # drop them from the transcript it is showing.
                 if run_record is not None:
-                    await websocket.send_json({
-                        "type": "run_started",
-                        "run_id": run_record.run_id,
-                        "conversation_id": run_record.conversation_id,
-                        "title": run_record.title,
-                    })
+                    try:
+                        await websocket.send_json({
+                            "type": "run_started",
+                            "run_id": run_record.run_id,
+                            "conversation_id": run_record.conversation_id,
+                            "title": run_record.title,
+                        })
+                    except Exception:
+                        # The run was admitted but its task has not started:
+                        # nothing will ever execute it. Leaving the record
+                        # running would hold one of the user's concurrency
+                        # slots until the wall-clock sweeper reaps it, so
+                        # mark the failure now. Re-raise so the disconnect
+                        # path still tears the connection down normally; the
+                        # terminal record makes ``mark_detached`` a no-op.
+                        run_registry.set_status(
+                            run_record.run_id,
+                            RunStatus.FAILED,
+                            error="Connection closed before the run started",
+                        )
+                        raise
                 # Start chat handling in background
                 chat_task = asyncio.create_task(handle_chat_guarded())
                 if run_record is None:

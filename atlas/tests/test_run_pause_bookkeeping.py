@@ -74,6 +74,54 @@ def test_note_event_clears_the_pause_when_the_tool_settles(registry):
     assert record.pending_request is None
 
 
+def test_note_event_keeps_the_pause_when_a_sibling_tool_settles(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t2"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert record.pending_request["tool_call_id"] == "t1"
+    assert registry.pending_requests_for_conversation("c", USER) == [
+        {"type": "tool_approval_request", "tool_call_id": "t1"}
+    ]
+
+
+def test_note_event_matches_elicitation_ids(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "elicitation_request", "elicitation_id": "e1"})
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "elicitation_id": "e2"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "elicitation_id": "e1"})
+    assert registry.get(run.run_id).status == RunStatus.RUNNING
+
+
+def test_note_event_treats_an_unidentified_settle_as_clearing(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    registry.note_event(run.run_id, {"type": "tool_error"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_request is None
+
+
+def test_note_event_leaves_a_run_with_no_pending_request_alone(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t2"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.QUEUED
+    assert record.pending_request is None
+
+
 def test_note_event_ignores_terminal_runs_and_garbage(registry):
     run = registry.start(conversation_id="c", user_email=USER)
     registry.cancel(run.run_id, USER)

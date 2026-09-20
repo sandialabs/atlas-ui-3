@@ -423,9 +423,11 @@ export const ChatProvider = ({ children }) => {
 				if (data?.type === 'run_started' && !activeConversationIdRef.current) {
 					// The run was just admitted for the chat on screen, which has no
 					// saved conversation yet. Remember its first prompt so the
-					// history list can name it after the user navigates away.
+					// history list can name it after the user navigates away. The
+					// server title wins when it has one (an attachment-only prompt
+					// produces no client-side title to fall back on).
 					const firstUser = latestMessagesRef.current.find(m => m.role === 'user')
-					data = { ...data, title: (firstUser?.content || '').substring(0, 200) || null }
+					data = { ...data, title: data.title || (firstUser?.content || '').substring(0, 200) || null }
 				}
 				if (data?.type === 'background_activity' && data.frame?.type === 'tool_approval_request') {
 					// Auto-approve is a client behaviour, and the row that performs
@@ -434,7 +436,7 @@ export const ChatProvider = ({ children }) => {
 					// happened to open it -- the opposite of running unattended.
 					const frame = data.frame
 					if (settingsRef.current?.autoApproveTools && !frame.admin_required && sendMessageRef.current) {
-						sendMessageRef.current({
+						const sent = sendMessageRef.current({
 							type: 'tool_approval_response',
 							tool_call_id: frame.tool_call_id,
 							approved: true,
@@ -442,6 +444,11 @@ export const ChatProvider = ({ children }) => {
 							run_id: frame.run_id,
 							conversation_id: frame.conversation_id,
 						})
+						if (!sent) {
+							// The answer would be dropped; leaving the run parked with
+							// no signal turns an unattended run into a silent stall.
+							toast.error('Could not auto-approve a background tool call: not connected')
+						}
 					}
 				}
 				runs.handleRunFrame(data)
@@ -1089,7 +1096,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// conversation's workspace rather than whatever is active at save time.
 		conversationWorkspaceIdRef.current = meta.workspace_id || null
 		restoreWorkspace(meta.workspace_id)
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent, runs])
+		// Stable members only: `runs` and `agent` are unmemoised objects that a
+		// new token frame rebuilds, so the objects themselves would tear this
+		// callback down -- and re-subscribe everything that depends on it -- on
+		// every streaming frame.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:

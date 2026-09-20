@@ -169,6 +169,12 @@ re-sends it when that conversation is opened (`restore_conversation`) or named o
 the request id and arguments would exist nowhere the client could reach, and the
 run would sit blocked until it timed out.
 
+A tool that finishes clears a stale pause only when it is the tool the run is
+paused on: settle frames are matched on their tool call / elicitation id, so a
+sibling tool completing while another approval is still outstanding leaves the
+pause -- and the replayable request -- intact. A settle frame that carries no
+identifier at all is treated as clearing whatever was outstanding.
+
 Every event a tracked run emits — tokens, agent updates, tool rows, files,
 canvas, completion, errors — carries `run_id` and `conversation_id`. Tagging
 happens in the WebSocket connection adapter, driven by a context variable bound
