@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #961 - 2026-09-20
+- Run admission now settles ownership of a stored conversation before admitting a run (closes #958). A chat turn naming a conversation id another user saved was admitted as a tracked run first -- the caller saw `run_started` and `run_status` frames, then the turn failed with an `authorization` error, leaving a `failed` run in their snapshot for a conversation they never owned. The WebSocket transport now runs `ChatService.validate_conversation_id_owner` before `run_registry.start`, refusing the turn with the same error the service would have raised and creating no run record; ids that are not stored yet (minted ids, runs still in flight) still pass, and plain turns are unchanged.
+
 ### PR #950 - 2026-09-16
 - Mobile/in-car composer friendliness. The feedback button no longer sits on top of Send once the textarea grows for a long message: it now anchors to the live composer height (`--atlas-composer-height`) instead of a constant 128px offset (measured 1936px of overlap before, 0px after, at 390x844). "New Chat" no longer raises a native `window.confirm` on every use -- it clears immediately and offers **Undo** in a toast, which restores the transcript and the backend context via `restore_conversation`. The confirm survives only for the one irreversible case, an untracked reply still being generated. Composer Upload/Stop/Send buttons and the feedback button are now at least 48px touch targets. Undo re-seeds the backend only for a conversation the server actually has; for an unsaved (incognito) chat it restores the transcript locally and says in the timeline that the assistant no longer has it in context. The offer is retired as soon as the replacement chat is touched. The welcome-screen "Powered by ATLAS" logo (`VITE_FEATURE_POWERED_BY_ATLAS`) was pinned the same way and is now anchored to the composer too.
 
