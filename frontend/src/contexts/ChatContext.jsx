@@ -1032,14 +1032,23 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		// Opened while its run is executing: the live stream is not replayed,
-		// so remember to reload from the store once the run ends.
+		// so remember to reload from the store once the run ends. The record's
+		// own `in_flight` flag decides this, not the run tracker: the snapshot
+		// that would carry the run may still be in flight in this tab (another
+		// tab, a reload), and a null here would leave the partial view stale
+		// forever.
 		if (joinedRunTimerRef.current) {
 			clearTimeout(joinedRunTimerRef.current)
 			joinedRunTimerRef.current = null
 		}
-		joinedRunConversationRef.current = isRunActive(runs.getRun(conversationData.id))
-			? conversationData.id
-			: null
+		const runInFlight = isRunActive(runs.getRun(conversationData.id)) || conversationData.in_flight === true
+		joinedRunConversationRef.current = runInFlight ? conversationData.id : null
+		if (runInFlight) {
+			// Ask for a fresh run snapshot: this tab may not have received
+			// `run_started`/`run_status` for a run its tracker has never seen,
+			// and the reload-on-run-end below keys off that tracker.
+			sendMessage?.({ type: 'list_runs', conversation_id: conversationData.id })
+		}
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })

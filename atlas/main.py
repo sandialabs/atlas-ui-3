@@ -187,6 +187,13 @@ def _stream_replay_frame(record) -> Optional[Dict[str, Any]]:
     it if it has already navigated away again. ``replay`` tells the client to
     *define* the bubble rather than append to it: the transcript it loaded may
     already hold an earlier snapshot of this same segment.
+
+    The snapshot races the run's own sends by design: a token recorded between
+    this read and the send is erased by the client's replace and lost from the
+    view. The window is a single send, the erased tokens are replaced by the
+    run-end reload's stored transcript, and serializing with the run's task
+    would put bookkeeping into its hot path -- so the race is accepted rather
+    than papered over with a replay cursor (issue #760 owns live re-attach).
     """
     if record is None:
         return None

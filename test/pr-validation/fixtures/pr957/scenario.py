@@ -42,7 +42,6 @@ async def connect(user):
 
 
 async def recv_until(ws, pred, timeout=15):
-    got = []
     try:
         while True:
             m = json.loads(await asyncio.wait_for(ws.recv(), timeout))
