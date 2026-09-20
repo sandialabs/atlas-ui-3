@@ -12,9 +12,27 @@ not refused; it meets the ordinary conversation-busy guard.
 
 import pytest
 from fastapi.testclient import TestClient
-from main import app
+from main import _run_title_from_frame, app
 
 from atlas.application.chat.runs import get_run_registry, reset_run_registry
+
+OWNER = "owner@example.com"
+OTHER = "other@example.com"
+CONVERSATION_ID = "conv-owned-by-owner"
+
+
+def test_run_title_from_frame_handles_non_string_content():
+    """Titles come from the first text part; anything else yields no title."""
+    assert _run_title_from_frame({"content": "  hello  "}) == "hello"
+    assert _run_title_from_frame({
+        "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,x"}},
+            {"type": "text", "text": "  second part  "},
+        ]
+    }) == "second part"
+    assert _run_title_from_frame({"content": [{"type": "image_url"}]}) is None
+    assert _run_title_from_frame({"content": 42}) is None
+    assert _run_title_from_frame({}) is None
 
 OWNER = "owner@example.com"
 OTHER = "other@example.com"
@@ -116,3 +134,65 @@ def test_the_owner_meets_the_busy_guard_not_the_ownership_refusal(
     # the ordinary steering/busy routing for a conversation that already has
     # a run.
     assert reply["error_type"] == "conversation_busy"
+
+
+def test_a_differently_cased_owner_email_is_still_the_owner(
+    mock_app_factory, registry_with_foreign_run
+):
+    """The registry compares emails the way the conversation repository does:
+    case-insensitively. A proxy handing the socket ``Owner@Example.com`` when
+    the run was admitted under ``owner@example.com`` must not read as foreign
+    -- and a stranger with a case-variant of someone else's email must not
+    read as the owner."""
+    client = TestClient(app)
+
+    with _connect(client, OWNER.upper()) as websocket:
+        websocket.send_json({
+            "type": "chat",
+            "content": "hello again",
+            "conversation_id": CONVERSATION_ID,
+        })
+        reply = websocket.receive_json()
+
+    assert reply["error_type"] == "conversation_busy"
+
+    with _connect(client, OWNER.upper() + ".not") as websocket:
+        websocket.send_json({
+            "type": "chat",
+            "content": "hello",
+            "conversation_id": CONVERSATION_ID,
+        })
+        reply = websocket.receive_json()
+
+    assert reply["error_type"] == "authorization"
+
+
+def test_multimodal_content_does_not_crash_run_admission(
+    mock_app_factory, registry_with_foreign_run
+):
+    """A multimodal turn carries a list as ``content``; admission must title
+    the run from its first text part, not raise on ``str.strip``."""
+    client = TestClient(app)
+    registry = registry_with_foreign_run
+
+    with _connect(client, OWNER) as websocket:
+        websocket.send_json({
+            "type": "chat",
+            "agent_mode": True,
+            "save_mode": "server",
+            "selected_tools": ["atlas_sleep"],
+            "content": [
+                {"type": "text", "text": "summarize this image"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,x"}},
+            ],
+            # A different conversation: not owned by the seeded run, so the
+            # frame is admitted as a fresh run rather than refused or steered.
+            "conversation_id": "conv-fresh-multimodal",
+        })
+        reply = websocket.receive_json()
+
+    assert reply["type"] == "run_started"
+    assert reply["title"] == "summarize this image"
+    record = registry.get(reply["run_id"])
+    assert record is not None
+    assert record.title == "summarize this image"

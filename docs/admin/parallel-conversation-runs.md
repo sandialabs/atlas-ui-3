@@ -163,17 +163,21 @@ approval timed out.
 
 An approval request that arrives while the user is looking at another
 conversation is not shown as a modal there; the conversation is marked "Needs
-approval" in the history list instead. The server keeps the request frame and
-re-sends it when that conversation is opened (`restore_conversation`) or named on
-`list_runs` after a reconnect, so it can still be answered. Without the replay
-the request id and arguments would exist nowhere the client could reach, and the
-run would sit blocked until it timed out.
+approval" in the history list instead. The server keeps the request frames and
+re-sends them when that conversation is opened (`restore_conversation`) or named on
+`list_runs` after a reconnect, so they can still be answered. One agent step
+may fire several approval-gated tools in parallel, so every outstanding
+request is kept and replayed individually -- not just the latest. Without the
+replay the request ids and arguments would exist nowhere the client could
+reach, and the run would sit blocked until it timed out.
 
-A tool that finishes clears a stale pause only when it is the tool the run is
-paused on: settle frames are matched on their tool call / elicitation id, so a
-sibling tool completing while another approval is still outstanding leaves the
-pause -- and the replayable request -- intact. A settle frame that carries no
-identifier at all is treated as clearing whatever was outstanding.
+A tool that finishes clears its own pending request only when the settle frame
+names it: settle frames are matched on their tool call / elicitation id, so a
+sibling tool completing while other approvals are still outstanding leaves
+those -- and their replayable requests -- intact. The run returns to `running`
+when nothing is outstanding anymore. Ownership comparisons (stop, steer,
+in-flight reads, the foreign-id guard) normalize email casing, the same way
+the conversation repository does.
 
 Every event a tracked run emits — tokens, agent updates, tool rows, files,
 canvas, completion, errors — carries `run_id` and `conversation_id`. Tagging

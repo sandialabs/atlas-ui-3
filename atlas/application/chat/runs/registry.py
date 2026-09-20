@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
@@ -154,13 +155,15 @@ class RunRecord:
     # stored until the turn ends, so this is the only name the history list
     # can give it in the meantime -- in this tab and in every other one.
     title: Optional[str] = None
-    # The exact frame that asked for input, kept so it can be re-sent.
+    # The exact frames that asked for input, kept so they can be re-sent.
     # A request emitted while the user was looking at another conversation (or
     # had the browser closed) is otherwise gone: the client dropped it, and the
-    # id and arguments needed to answer it exist nowhere else. Replaying it when
-    # the conversation is opened is what makes "a run paused on approval can be
-    # approved after reconnect" true rather than aspirational.
-    pending_request: Optional[Dict[str, Any]] = None
+    # id and arguments needed to answer it exist nowhere else. Replaying them
+    # when the conversation is opened is what makes "a run paused on approval
+    # can be approved after reconnect" true rather than aspirational. A list,
+    # not a single slot: one agent step can fire several approval-gated tools
+    # in parallel, and every one of them needs its answer.
+    pending_requests: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_terminal(self) -> bool:
@@ -230,10 +233,12 @@ class RunRegistry:
 
         Every transport action that addresses a run by id goes through this, so
         a client cannot stop, steer, or inspect another user's run by guessing
-        an id.
+        an id. Ownership compares normalized emails, the same way the
+        conversation repository does: a proxy that hands over ``User`` and
+        ``user`` must read as one owner, not two.
         """
         record = self.get(run_id)
-        if record is None or record.user_email != user_email:
+        if record is None or record.user_email != normalize_user_email(user_email):
             return None
         return record
 
@@ -243,10 +248,11 @@ class RunRegistry:
         """The non-terminal run for a conversation, if any."""
         if not conversation_id:
             return None
+        owner = normalize_user_email(user_email)
         for record in self._runs.values():
             if (
                 record.conversation_id == conversation_id
-                and record.user_email == user_email
+                and record.user_email == owner
                 and not record.is_terminal
             ):
                 return record
@@ -266,7 +272,7 @@ class RunRegistry:
             return None
         for record in self._runs.values():
             if record.conversation_id == conversation_id and not record.is_terminal:
-                return record.user_email
+                return normalize_user_email(record.user_email)
         return None
 
     def children_of(self, run_id: Optional[str], *, include_terminal: bool = False) -> List[RunRecord]:
@@ -298,10 +304,11 @@ class RunRegistry:
         ]
 
     def active_for_user(self, user_email: str) -> List[RunRecord]:
+        owner = normalize_user_email(user_email)
         return [
             r
             for r in self._runs.values()
-            if r.user_email == user_email and not r.is_terminal
+            if r.user_email == owner and not r.is_terminal
         ]
 
     def records_for_user(self, user_email: str) -> List[RunRecord]:
@@ -311,7 +318,8 @@ class RunRegistry:
         just *after* the run that produced it finished, and that run's session
         is where the file is registered.
         """
-        records = [r for r in self._runs.values() if r.user_email == user_email]
+        owner = normalize_user_email(user_email)
+        records = [r for r in self._runs.values() if r.user_email == owner]
         records.sort(key=lambda r: r.created_at, reverse=True)
         return records
 
@@ -322,7 +330,8 @@ class RunRegistry:
         run finished should be able to show "completed" rather than nothing.
         """
         self.reap_terminal()
-        records = [r for r in self._runs.values() if r.user_email == user_email]
+        owner = normalize_user_email(user_email)
+        records = [r for r in self._runs.values() if r.user_email == owner]
         records.sort(key=lambda r: r.created_at, reverse=True)
         return [r.to_public_dict() for r in records]
 
@@ -365,7 +374,10 @@ class RunRegistry:
         record = RunRecord(
             run_id=str(uuid4()),
             conversation_id=conversation_id,
-            user_email=user_email,
+            # Stored normalized so ownership comparisons (this registry's, the
+            # transport guard's) read one owner for ``User@x`` and ``user@x``,
+            # the way the conversation repository already does.
+            user_email=normalize_user_email(user_email),
             # Each run gets its own Session so two concurrent conversations
             # never write through the same history object.
             session_id=session_id or uuid4(),
@@ -426,7 +438,7 @@ class RunRegistry:
         record.waiting_on = waiting_on if status == RunStatus.WAITING_FOR_INPUT else None
         if status != RunStatus.WAITING_FOR_INPUT:
             # Whatever it was waiting for is no longer outstanding.
-            record.pending_request = None
+            record.pending_requests.clear()
         if status.is_terminal:
             record.ended_at = record.updated_at
             record.steering = None
@@ -440,10 +452,12 @@ class RunRegistry:
         An approval or elicitation request pauses the run: it is marked
         ``waiting_for_input`` (which drives the "Needs approval" marker in the
         history list) and the frame is kept for replay, because a client that
-        is looking at another conversation drops it. A tool settling clears a
-        stale pause -- the request timed out, or was answered on a path that
-        did not go through the transport -- but only when the settle frame
-        answers the request that is outstanding; a sibling tool finishing
+        is looking at another conversation drops it. Several requests can be
+        outstanding at once -- one agent step may fire several approval-gated
+        tools in parallel -- so each is stored and replayed individually. A
+        tool settling clears its own request -- timed out, or answered on a
+        path that did not go through the transport -- but only when the settle
+        frame answers a request that is outstanding; a sibling tool finishing
         while another approval is still pending leaves the pause intact.
 
         Every transport chokepoint calls this -- the connection adapter the
@@ -459,13 +473,7 @@ class RunRegistry:
             record = self.get(run_id)
             if record is None or record.is_terminal:
                 return
-            already = (
-                record.status == RunStatus.WAITING_FOR_INPUT
-                and record.pending_request is not None
-                and record.pending_request.get("tool_call_id") == frame.get("tool_call_id")
-                and record.pending_request.get("elicitation_id") == frame.get("elicitation_id")
-            )
-            if already:
+            if self._is_stored_request(record.pending_requests, frame):
                 return
             self.set_status(run_id, RunStatus.WAITING_FOR_INPUT, waiting_on=event_type)
             self.set_pending_request(run_id, frame)
@@ -473,48 +481,61 @@ class RunRegistry:
             record = self.get(run_id)
             if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
                 return
-            if not self._settles_pending(record.pending_request, frame):
-                # A sibling tool settled while another request is still
-                # outstanding. Clearing the pause here would drop the pending
-                # request and strand the run until the approval timed out --
-                # the exact state ``note_event`` exists to fix.
+            outstanding = record.pending_requests
+            frame_ids = {
+                key: frame[key]
+                for key in ("tool_call_id", "elicitation_id")
+                if frame.get(key) is not None
+            }
+            if frame_ids:
+                # Clear only the requests this frame actually answers; a
+                # sibling tool settling while others are still outstanding
+                # must not drop requests that still need an answer -- the
+                # exact state ``note_event`` exists to fix.
+                record.pending_requests = [
+                    request for request in outstanding
+                    if not any(
+                        request.get(key) == value for key, value in frame_ids.items()
+                    )
+                ]
+                if not record.pending_requests:
+                    self.set_status(run_id, RunStatus.RUNNING)
                 return
-            self.set_status(run_id, RunStatus.RUNNING)
+            # A frame with no identifier at all can only mean something when
+            # exactly one request is outstanding; with several it is
+            # ambiguous, and dropping any of them could strand an unanswered
+            # tool until its approval timed out.
+            if len(outstanding) == 1:
+                self.set_status(run_id, RunStatus.RUNNING)
 
     @staticmethod
-    def _settles_pending(pending_request: Optional[Dict[str, Any]], frame: Dict[str, Any]) -> bool:
-        """Whether a settle frame answers the request the run is paused on.
-
-        Frames are matched on their identifier when both sides carry one; a
-        frame with no identifier at all is treated as settling whatever is
-        outstanding.
-        """
-        if not isinstance(pending_request, dict):
-            return True
-        for key in ("tool_call_id", "elicitation_id"):
-            frame_id = frame.get(key)
-            pending_id = pending_request.get(key)
-            if frame_id is not None and pending_id is not None:
-                if frame_id == pending_id:
-                    return True
-                return False
-        return True
+    def _is_stored_request(pending_requests: List[Dict[str, Any]], frame: Dict[str, Any]) -> bool:
+        """Whether the exact request frame is already stored (idempotent replay)."""
+        return any(
+            request.get("tool_call_id") == frame.get("tool_call_id")
+            and request.get("elicitation_id") == frame.get("elicitation_id")
+            for request in pending_requests
+        )
 
     def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
-        """Remember the request a run is blocked on, for later replay."""
+        """Remember a request the run is blocked on, for later replay."""
         record = self.get(run_id)
         if record is None or record.is_terminal:
             return
-        record.pending_request = dict(frame) if isinstance(frame, dict) else None
+        if not isinstance(frame, dict):
+            return
+        if self._is_stored_request(record.pending_requests, frame):
+            return
+        record.pending_requests.append(dict(frame))
 
     def pending_requests_for_conversation(
         self, conversation_id: Optional[str], user_email: str
     ) -> List[Dict[str, Any]]:
         """Outstanding input requests for a conversation, for replay on open."""
         record = self.active_for_conversation(conversation_id, user_email)
-        if record is None or record.pending_request is None:
+        if record is None or not record.pending_requests:
             return []
-        return [record.pending_request]
+        return [dict(request) for request in record.pending_requests]
 
     def mark_detached(self, run_id: str) -> None:
         """Note that the run's originating socket is gone."""
@@ -702,12 +723,15 @@ class RunRegistry:
         This is how a conversation the user is *not* looking at still gets an
         indicator in the history list: status transitions are published to
         every live socket of the owning user, not just the one that started
-        the run. Returns an unsubscribe callable.
+        the run. Returns an unsubscribe callable. The key is normalized so a
+        socket authenticated under a differently-cased email still receives
+        the runs it owns.
         """
-        self._listeners.setdefault(user_email, []).append(listener)
+        key = normalize_user_email(user_email)
+        self._listeners.setdefault(key, []).append(listener)
 
         def _unsubscribe() -> None:
-            listeners = self._listeners.get(user_email)
+            listeners = self._listeners.get(key)
             if not listeners:
                 return
             try:
@@ -717,12 +741,12 @@ class RunRegistry:
                 # teardown) is a no-op, not an error.
                 pass
             if not listeners:
-                self._listeners.pop(user_email, None)
+                self._listeners.pop(key, None)
 
         return _unsubscribe
 
     def _notify(self, record: RunRecord) -> None:
-        for listener in list(self._listeners.get(record.user_email, [])):
+        for listener in list(self._listeners.get(normalize_user_email(record.user_email), [])):
             try:
                 listener(record)
             except Exception:  # pragma: no cover - a bad listener must not

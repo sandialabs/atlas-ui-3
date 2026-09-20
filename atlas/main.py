@@ -62,6 +62,7 @@ from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 from atlas.core.session_middleware import SessionMiddleware
+from atlas.core.user_identity import normalize_user_email
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
@@ -762,6 +763,25 @@ def _normalize_conversation_id(raw: Any) -> Optional[str]:
     if not isinstance(raw, str):
         return None
     return raw.strip() or None
+
+
+def _run_title_from_frame(data: dict) -> Optional[str]:
+    """The run's title from the chat frame that admitted it.
+
+    Plain-text turns carry their prompt as ``content``; a multimodal turn
+    carries a list of parts, whose first text item names the run. Anything
+    else yields no title rather than raising at admission.
+    """
+    content = data.get("content")
+    if isinstance(content, str):
+        return content.strip() or None
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text.strip() or None
+    return None
 
 
 def forget_run_conversations(session) -> None:
@@ -1596,7 +1616,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # someone else. Refuse it here, before a run is admitted.
                 if frame_conversation_id and run_registry.active_for_conversation_any_owner(
                     frame_conversation_id
-                ) not in (None, user_email):
+                ) not in (None, normalize_user_email(user_email)):
                     logger.warning(
                         "WS refused a turn naming conversation=%s while another "
                         "user's run is executing under it",
@@ -1786,7 +1806,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             conversation_id=turn_conversation_id,
                             user_email=user_email,
                             steering=steering_channel,
-                            title=(data.get("content") or "").strip() or None,
+                            # Multimodal turns carry a list as `content`; the
+                            # title wants the first text part, never a crash
+                            # at admission.
+                            title=_run_title_from_frame(data),
                         )
                     except ConcurrencyLimitError as e:
                         await websocket.send_json({
