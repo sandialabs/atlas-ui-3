@@ -208,8 +208,12 @@ These are known and deliberate, not oversights:
 - **A reconnected browser does not resume a live event stream.** It sees the run
   in `runs_snapshot` and, on reopening the conversation, the run's transcript so
   far (prompt and tool rows) — not the tokens it missed. Once the run ends the
-  client reloads the conversation from the store, so the final answer appears
-  without a manual refresh. Live re-attach is issue #760.
+  client refreshes the conversation from the store, so the final answer appears
+  without a manual refresh. The refresh appends only the rows the view is
+  missing, so a reader who scrolled up keeps their position and their expanded
+  tool rows; a transcript that has diverged from the view (rewound or edited
+  elsewhere) falls back to a full reload (issue #959). Live re-attach is issue
+  #760.
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
   Use a single worker, or sticky sessions, until the run store is shared.

@@ -220,7 +220,13 @@ const ChatArea = () => {
     const lastMsg = messages[messages.length - 1]
     const isNewMessage = newCount !== prevMessageCountRef.current
     const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
-    const force = isNewMessage && lastMsg && (lastMsg.role !== 'user')
+    // A transcript refresh (issue #959) appends the rows a background run
+    // wrote while this conversation was not on screen. That is a catch-up,
+    // not a new answer arriving live: force-scrolling would yank a reader
+    // who is scrolled up back to the bottom, so respect their position the
+    // way streaming does.
+    const isTranscriptRefresh = lastMsg && lastMsg._transcriptRefresh === true
+    const force = isNewMessage && lastMsg && (lastMsg.role !== 'user') && !isTranscriptRefresh
     prevMessageCountRef.current = newCount
     // During streaming token updates, only scroll if user hasn't scrolled away.
     // Use instant scroll (no smooth animation) so users can break out easily.

@@ -26,7 +26,8 @@ function computeMessageChangeScroll(messages, prevMessageCount) {
   const lastMsg = messages[messages.length - 1]
   const isNewMessage = newCount !== prevMessageCount
   const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
-  const force = isNewMessage && lastMsg && (lastMsg.role !== 'user')
+  const isTranscriptRefresh = lastMsg && lastMsg._transcriptRefresh === true
+  const force = isNewMessage && lastMsg && (lastMsg.role !== 'user') && !isTranscriptRefresh
 
   if (isStreamingUpdate) {
     return { force: false, isStreamingUpdate: true }
@@ -207,6 +208,46 @@ describe('Auto-scroll during streaming (#441)', () => {
 
       // Step 7: Post-streaming DOM mutation — still no force, user stays where they are
       expect(shouldActuallyScroll(false, true)).toBe(false) // user still scrolled up
+    })
+  })
+
+  describe('Scenario 8: Transcript refresh appends (issue #959)', () => {
+    it('does not force-scroll a reader who is scrolled up when the joined-run refresh appends', () => {
+      const prevCount = 4
+      const messages = [
+        { role: 'user', content: 'Multi-step task' },
+        { role: 'assistant', content: 'Working on it' },
+        { role: 'user', content: 'And tomorrow?' },
+        { role: 'assistant', content: 'Sunny', _transcriptRefresh: true },
+      ]
+      const scroll = computeMessageChangeScroll(messages, prevCount)
+      // The count grew, but the tail is a catch-up from the store, not a live
+      // answer: respect the reader's position like streaming does.
+      expect(scroll.force).toBe(false)
+      expect(scroll.isStreamingUpdate).toBe(false)
+      expect(shouldActuallyScroll(false, true)).toBe(false)
+    })
+
+    it('still follows the new tail for a reader at the bottom', () => {
+      const messages = [
+        { role: 'user', content: 'Multi-step task' },
+        { role: 'assistant', content: 'Sunny', _transcriptRefresh: true },
+      ]
+      const scroll = computeMessageChangeScroll(messages, 1)
+      expect(scroll.force).toBe(false)
+      expect(shouldActuallyScroll(false, false)).toBe(true)
+    })
+
+    it('does not let a refresh marker suppress a later live answer', () => {
+      // The next genuinely new message has no marker, so it forces again.
+      const messages = [
+        { role: 'user', content: 'Multi-step task' },
+        { role: 'assistant', content: 'Sunny', _transcriptRefresh: true },
+        { role: 'user', content: 'Thanks' },
+        { role: 'assistant', content: 'Anytime' },
+      ]
+      const scroll = computeMessageChangeScroll(messages, 2)
+      expect(scroll.force).toBe(true)
     })
   })
 })

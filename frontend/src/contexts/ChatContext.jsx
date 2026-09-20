@@ -26,6 +26,34 @@ import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
 const RUN_END_RELOAD_GRACE_MS = 2500
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
+// Row types the live transcript renders that a persisted transcript never
+// contains: agent-loop status lines and tool progress chrome exist only in
+// the view. The joined-run refresh (issue #959) aligns the stored rows
+// against the view past them; without the skip they would break the match
+// and force a full reload, which is exactly what the refresh exists to avoid.
+const LIVE_ONLY_ROW_TYPES = new Set([
+	'agent_status', 'agent_reason', 'agent_observe',
+	'agent_request_input', 'agent_error', 'tool_log',
+	'warning', 'iframe',
+])
+
+// Whether a stored row and a live view row describe the same transcript row.
+// Tool and approval rows are matched by their tool_call_id, which survives
+// the save/reload round-trip, because the persisted shape of a tool row
+// (role 'tool', elided arguments) deliberately differs from the live one
+// (role 'system', raw arguments). Everything else matches on role and content.
+const sameTranscriptRow = (a, b) => {
+	const typeA = a.type || 'chat'
+	const typeB = b.type || 'chat'
+	if (typeA !== typeB) return false
+	if ((typeA === 'tool_call' || typeA === 'tool_approval_request') && a.tool_call_id && b.tool_call_id) {
+		return a.tool_call_id === b.tool_call_id
+	}
+	return a.role === b.role && (a.content || '') === (b.content || '')
+}
+
+const isLiveOnlyRow = (m) => LIVE_ONLY_ROW_TYPES.has(m.type) || m._agentInput === true
+
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
   const array = new Uint8Array(length)
@@ -1103,6 +1131,67 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun])
 
+	const refreshJoinedConversation = useCallback((conversationData) => {
+		if (!conversationData || !conversationData.messages) return false
+		const stored = conversationData.messages.map(msg => ({
+			role: msg.role,
+			content: msg.content || '',
+			timestamp: msg.timestamp,
+			type: msg.message_type || 'chat',
+			...(msg.metadata || {}),
+		}))
+		// Re-seed the backend session from the store. It was seeded from the
+		// run's snapshot when the view was opened and does not have the run's
+		// final turn, so the next message here would lose that context.
+		// Display-only rows (e.g. persisted tool_call messages, issue #684) are
+		// excluded, exactly as in loadSavedConversation.
+		const restoreContext = () => {
+			if (!sendMessage) return
+			sendMessage({
+				type: 'restore_conversation',
+				conversation_id: conversationData.id,
+				messages: conversationData.messages
+					.filter(msg => (msg.message_type || 'chat') !== 'tool_call')
+					.map(msg => ({ role: msg.role, content: msg.content || '' })),
+			})
+		}
+		// Live-only rows and agent-loop answers have no stored counterpart;
+		// aligning past them keeps the match alive.
+		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m))
+
+		// Walk both lists together; everything must line up one-to-one or the
+		// refresh refuses.
+		let viewIdx = 0
+		let storedIdx = 0
+		while (storedIdx < stored.length && viewIdx < current.length) {
+			if (!sameTranscriptRow(current[viewIdx], stored[storedIdx])) return false
+			viewIdx += 1
+			storedIdx += 1
+		}
+
+		// The store ran out first: the view carries rows the store does not
+		// have (transient rows). Nothing to append; leave the view alone
+		// rather than destroying those rows.
+		if (storedIdx >= stored.length) {
+			restoreContext()
+			return true
+		}
+
+		// The view ran out first: whatever the store still holds from here on
+		// is what the view is missing -- the run's output that reached the
+		// transcript it was streaming into, not this one. Mark the appended
+		// tail so the message list treats it as a refresh rather than a new
+		// answer: ChatArea must not force the scroll to the bottom over a user
+		// who is scrolled up reading.
+		const missing = stored.slice(storedIdx)
+		const appended = missing.map((msg, i) => (
+			i === missing.length - 1 ? { ...msg, _transcriptRefresh: true } : msg
+		))
+		bulkAdd(appended)
+		restoreContext()
+		return true
+	}, [sendMessage, bulkAdd])
+
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:
 	//
@@ -1565,6 +1654,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setSaveMode,
 		activeConversationId,
 		loadSavedConversation,
+		refreshJoinedConversation,
 		followUpSuggestions,
 		setFollowUpSuggestions,
 	}

@@ -1,0 +1,507 @@
+/**
+ * Refreshing a joined conversation when its background run ends (issue #959).
+ *
+ * A conversation opened while its run was executing is reloaded from the
+ * store when the run reaches a terminal state (PR #956). That reload
+ * replaced the whole transcript, which reset the scroll position of a user
+ * who had scrolled up to read and collapsed the tool rows they had expanded.
+ * The fix appends only what the view is missing and leaves the existing rows
+ * untouched; when the stored transcript has diverged from the view the full
+ * reload runs as before.
+ *
+ * Renders the real ChatProvider and drives live rows in through the real
+ * websocket handler, so the rows the refresh must match are the ones the app
+ * actually creates -- not hand-built stand-ins.
+ *
+ * Guarantees pinned here:
+ *   - Rows the view already shows are kept as the same objects, so React
+ *     preserves their state (expanded tool rows) and the scroll anchor stands.
+ *   - The run's output that only reached the store (this view was not on
+ *     screen when it streamed) is appended, with the tail marked
+ *     `_transcriptRefresh` so ChatArea does not force the scroll to the
+ *     bottom over a reader who is scrolled up.
+ *   - Tool rows align by tool_call_id across the persisted/live shape drift
+ *     (persisted: role 'tool', elided arguments; live: role 'system', raw).
+ *   - Live-only rows (agent status lines, agent-loop answers) are skipped
+ *     during alignment instead of breaking the match and forcing a reload.
+ *   - A diverged transcript refuses the refresh (returns false) and sends
+ *     nothing; the caller's fallback full reload owns it.
+ *   - The backend session is re-seeded with restore_conversation either way:
+ *     it was seeded from the snapshot at open time and lacks the run's final
+ *     turn, so the next message here would lose that context.
+ */
+
+import { describe, it, expect, vi } from 'vitest'
+import { renderHook, act } from '@testing-library/react'
+
+// Shared mock handles (hoisted so the vi.mock factories can close over them).
+const h = vi.hoisted(() => ({
+  sendMessage: vi.fn(() => true),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastInfo: vi.fn((() => { let n = 0; return () => ++n })()),
+  toastDismiss: vi.fn(),
+  applyWorkspace: vi.fn(),
+  snapshotSelections: vi.fn(() => ({})),
+  wsState: { workspaces: [], loaded: true, error: null },
+  activeWorkspaceId: null,
+  setActiveWorkspaceId: vi.fn(),
+  configReady: true,
+  workspacesEnabled: true,
+  saveLocalConv: vi.fn(() => Promise.resolve()),
+  saveMode: 'none',
+  // Every websocket frame handler ChatContext registered; tests dispatch
+  // frames through them the way the socket would.
+  handlers: new Set(),
+}))
+
+vi.mock('../contexts/WSContext', () => ({
+  useWS: () => ({
+    sendMessage: h.sendMessage,
+    isConnected: true,
+    addMessageHandler: (fn) => {
+      h.handlers.add(fn)
+      return () => h.handlers.delete(fn)
+    },
+  }),
+}))
+
+vi.mock('../components/ui/toastContext', () => ({
+  useToast: () => ({
+    error: h.toastError,
+    success: h.toastSuccess,
+    info: h.toastInfo,
+    dismiss: h.toastDismiss,
+  }),
+}))
+
+vi.mock('../hooks/chat/useChatConfig', () => ({
+  useChatConfig: () => ({
+    currentModel: 'test-model',
+    user: 'tester@example.com',
+    ragServers: [],
+    tools: [{ server: 'files', tools: ['read', 'write'] }],
+    configReady: h.configReady,
+    features: { workspaces: h.workspacesEnabled },
+    prompts: [],
+    appName: 'Atlas',
+    isInAdminGroup: false,
+    fileExtraction: {},
+    setIsCanvasOpen: vi.fn(),
+  }),
+}))
+
+vi.mock('../hooks/chat/useSelections', async (importActual) => {
+  const actual = await importActual()
+  return {
+    ...actual,
+    useSelections: () => ({
+      selectedTools: new Set(),
+      selectedPrompts: new Set(),
+      activePrompts: [],
+      activePromptKey: null,
+      clearActivePrompt: vi.fn(),
+      selectedDataSources: new Set(),
+      ragEnabled: false,
+      toggleRagEnabled: vi.fn(),
+      complianceLevelFilter: '',
+      addTools: vi.fn(),
+      removeTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removePrompts: vi.fn(),
+      addDataSources: vi.fn(),
+      clearDataSources: vi.fn(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      toggleDataSource: vi.fn(),
+      makePromptActive: vi.fn(),
+      setSinglePrompt: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      setComplianceLevelFilter: vi.fn(),
+      setRagEnabled: vi.fn(),
+      applyWorkspace: h.applyWorkspace,
+      snapshotSelections: h.snapshotSelections,
+    }),
+  }
+})
+
+vi.mock('../hooks/useUserPrompts', () => ({ useUserPrompts: () => ({ prompts: [] }) }))
+
+vi.mock('../hooks/chat/useAgentMode', () => ({
+  useAgentMode: () => ({
+    agentModeEnabled: false,
+    agentMaxSteps: 10,
+    setCurrentAgentStep: vi.fn(),
+    setAgentPendingQuestion: vi.fn(),
+    agentPendingQuestion: null,
+  }),
+}))
+
+vi.mock('../hooks/chat/useFiles', () => ({
+  useFiles: () => ({
+    getTaggedFilesContent: () => ({}),
+    setCanvasContent: vi.fn(),
+    setCanvasFiles: vi.fn(),
+    setCurrentCanvasFileIndex: vi.fn(),
+    setCustomUIContent: vi.fn(),
+    setSessionFiles: vi.fn(),
+    getFileType: vi.fn(),
+    canvasContent: null,
+    sessionFiles: { files: [], total_files: 0, categories: {} },
+  }),
+}))
+
+vi.mock('../utils/localConversationDB', () => ({
+  saveConversation: (...args) => h.saveLocalConv(...args),
+  getConversation: vi.fn(),
+  listConversations: vi.fn(() => Promise.resolve([])),
+  deleteConversation: vi.fn(),
+}))
+
+vi.mock('../hooks/useSettings', () => ({
+  useSettings: () => ({ settings: {}, updateSettings: vi.fn() }),
+}))
+
+vi.mock('../hooks/chat/usePersistentState', () => ({
+  usePersistentState: (key, initial) => {
+    if (key === 'chatui-active-workspace') return [h.activeWorkspaceId, h.setActiveWorkspaceId]
+    if (key === 'chatui-save-mode') return [h.saveMode, vi.fn()]
+    return [initial, vi.fn()]
+  },
+}))
+
+vi.mock('../hooks/useWorkspaces', () => ({
+  useWorkspaces: () => ({
+    workspaces: h.wsState.workspaces,
+    loading: false,
+    loaded: h.wsState.loaded,
+    error: h.wsState.error,
+    fetchWorkspaces: vi.fn(),
+    createWorkspace: vi.fn(),
+    updateWorkspace: vi.fn(),
+    deleteWorkspace: vi.fn(),
+  }),
+  isStaleWorkspacePointer: () => false,
+}))
+
+import { ChatProvider, useChat } from '../contexts/ChatContext'
+
+const wrapper = ({ children }) => <ChatProvider>{children}</ChatProvider>
+const renderChat = () => renderHook(() => useChat(), { wrapper })
+
+// Deliver a frame the way the socket would: through every handler the
+// context registered. Frames for the conversation on screen apply to the
+// view; the routing in the handler does the rest.
+const dispatchFrame = (frame) => {
+  act(() => {
+    for (const fn of h.handlers) fn(frame)
+  })
+}
+
+const restoreCalls = () =>
+  h.sendMessage.mock.calls.map(c => c[0]).filter(m => m.type === 'restore_conversation')
+
+// A stored row in the shape the repository returns: message_type + metadata.
+const storedChat = (role, content) => ({
+  role,
+  content,
+  timestamp: '2026-01-01T00:00:00Z',
+  message_type: 'chat',
+})
+const storedToolCall = (toolCallId, toolName) => ({
+  role: 'tool',
+  content: `Tool call: ${toolCallId}`,
+  timestamp: '2026-01-01T00:00:01Z',
+  message_type: 'tool_call',
+  metadata: {
+    tool_call_id: toolCallId,
+    tool_name: toolName,
+    server_name: 'basic_fns',
+    arguments: { seconds: 5 },
+    result: 'slept',
+    status: 'completed',
+  },
+})
+// The live row a tagged tool event creates in the view for the same call.
+const dispatchToolStart = (toolCallId, toolName) => dispatchFrame({
+  type: 'tool_start',
+  conversation_id: 'conv-1',
+  run_id: 'r1',
+  tool_call_id: toolCallId,
+  tool_name: toolName,
+  server_name: 'basic_fns',
+  arguments: { seconds: 5 },
+})
+const dispatchToolComplete = (toolCallId, toolName) => dispatchFrame({
+  type: 'tool_complete',
+  conversation_id: 'conv-1',
+  run_id: 'r1',
+  tool_call_id: toolCallId,
+  tool_name: toolName,
+  success: true,
+  result: 'slept',
+})
+
+const loadConversation = async (result, loaded) => {
+  await act(async () => {
+    await result.current.loadSavedConversation(loaded)
+  })
+}
+
+describe('refreshJoinedConversation (issue #959)', () => {
+  it('appends only the rows the view is missing and marks the tail', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedChat('assistant', 'Clear skies'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    const before = result.current.messages
+
+    // The store gained the run's turn after the view was opened.
+    const store = [
+      ...loaded.messages,
+      storedChat('user', 'And tomorrow?'),
+      storedChat('assistant', 'Sunny'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+
+    const after = result.current.messages
+    // Only the tail was added; the shared prefix kept the same objects, so
+    // the rendered rows keep their state (expanded tool rows, scroll anchor).
+    expect(after.length).toBe(4)
+    expect(after[0]).toBe(before[0])
+    expect(after[1]).toBe(before[1])
+    expect(after[2].role).toBe('user')
+    expect(after[2].content).toBe('And tomorrow?')
+    expect(after[3].content).toBe('Sunny')
+    // The tail is marked so ChatArea treats it as a catch-up, not a new answer.
+    expect(after[3]._transcriptRefresh).toBe(true)
+    expect(after[2]._transcriptRefresh).toBeUndefined()
+
+    // The backend session is re-seeded with the full stored transcript.
+    const restore = restoreCalls().find(c => c.conversation_id === 'conv-1')
+    expect(restore).toBeTruthy()
+    expect(restore.messages).toHaveLength(4)
+  })
+
+  it('leaves the view untouched when the store adds nothing', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedChat('assistant', 'Clear skies'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    const before = result.current.messages
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: loaded.messages, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    expect(result.current.messages).toBe(before)
+    // The session is still re-seeded: it was seeded from the snapshot at open
+    // time and lacks the run's final turn even when the view already shows it.
+    expect(restoreCalls()).toHaveLength(1)
+  })
+
+  it('aligns tool rows by tool_call_id across the persisted/live shape drift', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'Sleep for a bit'),
+        storedToolCall('tc-1', 'atlas_sleep'),
+        storedChat('assistant', 'Working on it'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    // The run streamed this tool into the view after it was opened: the live
+    // row the handler created differs from the persisted shape (role,
+    // content, raw arguments), but is the same transcript row.
+    dispatchToolStart('tc-2', 'atlas_sleep')
+    dispatchToolComplete('tc-2', 'atlas_sleep')
+
+    const store = [
+      storedChat('user', 'Sleep for a bit'),
+      storedToolCall('tc-1', 'atlas_sleep'),
+      storedChat('assistant', 'Working on it'),
+      storedToolCall('tc-2', 'atlas_sleep'),
+      storedChat('assistant', 'Done sleeping'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    const after = result.current.messages
+    // The live tool row matched its stored counterpart (no duplicate); only
+    // the final answer the run streamed elsewhere is appended.
+    expect(after.length).toBe(5)
+    expect(after[3].tool_call_id).toBe('tc-2')
+    expect(after[3].role).toBe('system')
+    expect(after[4].content).toBe('Done sleeping')
+    expect(after[4]._transcriptRefresh).toBe(true)
+  })
+
+  it('skips live-only rows (agent status lines) instead of breaking alignment', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'Multi-step task'),
+        storedToolCall('tc-1', 'atlas_sleep'),
+        storedChat('assistant', 'All done'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    // The run streamed status chrome into this view between the stored rows.
+    dispatchFrame({ type: 'agent_update', conversation_id: 'conv-1', run_id: 'r1', update_type: 'agent_start' })
+    dispatchFrame({ type: 'agent_update', conversation_id: 'conv-1', run_id: 'r1', update_type: 'agent_reason', message: 'planning' })
+
+    const store = [
+      storedChat('user', 'Multi-step task'),
+      storedToolCall('tc-1', 'atlas_sleep'),
+      storedChat('assistant', 'All done'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    // Nothing appended; the status chrome the run produced stays on screen.
+    expect(result.current.messages.length).toBe(5)
+  })
+
+  it('appends the tail past live rows the run streamed into this view', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'Multi-step task'),
+        storedChat('assistant', 'Working on it'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    // The run is still going: it streams a tool row into this view live.
+    dispatchToolStart('tc-9', 'atlas_sleep')
+    dispatchToolComplete('tc-9', 'atlas_sleep')
+
+    // The store's final transcript for the same conversation. The streamed
+    // assistant text never reached this view (it streamed elsewhere), so the
+    // tool row plus the final answer are what the refresh must add.
+    const store = [
+      ...loaded.messages,
+      storedToolCall('tc-9', 'atlas_sleep'),
+      storedChat('assistant', 'Final answer'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    const after = result.current.messages
+    expect(after.length).toBe(4)
+    expect(after[3].content).toBe('Final answer')
+    expect(after[3]._transcriptRefresh).toBe(true)
+    // The tool row the view already had is untouched.
+    expect(after[2].tool_call_id).toBe('tc-9')
+  })
+
+  it('refuses (returns false) when the stored transcript has diverged', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedChat('assistant', 'Clear skies'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    const before = result.current.messages
+    h.sendMessage.mockClear()
+    // The store's first row was rewritten (rewind in another tab).
+    const store = [
+      storedChat('user', 'Edited prompt'),
+      storedChat('assistant', 'Clear skies'),
+    ]
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(false)
+    expect(result.current.messages).toBe(before)
+    // No restore was sent on the refusal path; the fallback full reload owns it.
+    expect(h.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps view rows the store does not have instead of destroying them', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedChat('assistant', 'Clear skies'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    // The view gained a row the store never persisted.
+    dispatchFrame({
+      type: 'intermediate_update',
+      conversation_id: 'conv-1',
+      run_id: 'r1',
+      update_type: 'system_message',
+      data: { message: 'Watch out', subtype: 'info' },
+    })
+    const before = result.current.messages
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: loaded.messages, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    expect(result.current.messages.length).toBe(before.length)
+    expect(result.current.messages[2].type).toBe('system')
+  })
+
+  it('rejects malformed input without touching the view', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'hi')],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    const before = result.current.messages
+    let ok1, ok2
+    act(() => { ok1 = result.current.refreshJoinedConversation(null) })
+    act(() => { ok2 = result.current.refreshJoinedConversation({ id: 'conv-1', metadata: {} }) })
+    expect(ok1).toBe(false)
+    expect(ok2).toBe(false)
+    expect(result.current.messages).toBe(before)
+  })
+})
