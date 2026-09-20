@@ -41,11 +41,17 @@ const LIVE_ONLY_ROW_TYPES = new Set([
 // Tool and approval rows are matched by their tool_call_id, which survives
 // the save/reload round-trip, because the persisted shape of a tool row
 // (role 'tool', elided arguments) deliberately differs from the live one
-// (role 'system', raw arguments). Everything else matches on role and content.
+// (role 'system', raw arguments). Everything else matches on role and
+// content. Agent narration is one row that wears two type names: the loop
+// persists the pre-tool narration with message_type 'agent_intermediate'
+// while the streamed row in the view is a plain assistant row -- same text,
+// same place in the transcript, so the pair matches.
+const PROSE_ROW_TYPES = new Set(['chat', 'agent_intermediate'])
+
 const sameTranscriptRow = (a, b) => {
 	const typeA = a.type || 'chat'
 	const typeB = b.type || 'chat'
-	if (typeA !== typeB) return false
+	if (typeA !== typeB && !(PROSE_ROW_TYPES.has(typeA) && PROSE_ROW_TYPES.has(typeB))) return false
 	if ((typeA === 'tool_call' || typeA === 'tool_approval_request') && a.tool_call_id && b.tool_call_id) {
 		return a.tool_call_id === b.tool_call_id
 	}

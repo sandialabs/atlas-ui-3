@@ -430,6 +430,56 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(after[2].tool_call_id).toBe('tc-9')
   })
 
+  it('matches agent narration persisted as agent_intermediate to its streamed row', async () => {
+    // The agent loop persists pre-tool narration with message_type
+    // 'agent_intermediate' (atlas/application/chat/agent/agentic_loop.py),
+    // while the same narration streams into the view as a plain assistant
+    // row. The pair is the same transcript row and must not break the
+    // alignment (review finding on this PR).
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'Let me check that for you.'),
+        storedChat('assistant', 'Sure, one moment.'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    // The run streamed this narration into the view after it was opened.
+    dispatchFrame({ type: 'token_stream', conversation_id: 'conv-1', run_id: 'r1', is_first: true, token: 'On it.' })
+    // Drain the buffered tokens the way the socket flush does.
+    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+    const narrationIdx = result.current.messages.findIndex(m => m.content === 'On it.')
+    expect(narrationIdx).toBeGreaterThan(-1)
+
+    const store = [
+      storedChat('user', 'Let me check that for you.'),
+      storedChat('assistant', 'Sure, one moment.'),
+      // The same narration, in the shape the agent loop persists.
+      {
+        role: 'assistant',
+        content: 'On it.',
+        timestamp: '2026-01-01T00:00:02Z',
+        message_type: 'agent_intermediate',
+        metadata: { agent_mode: true, agent_intermediate: true, step: 1 },
+      },
+      storedChat('assistant', 'Working on it'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    // The streamed narration matched its persisted counterpart (despite the
+    // different type); only the final answer was appended.
+    const after = result.current.messages
+    expect(after[after.length - 1].content).toBe('Working on it')
+    expect(after[after.length - 1]._transcriptRefresh).toBe(true)
+  })
+
   it('refuses (returns false) when the stored transcript has diverged', async () => {
     const loaded = {
       id: 'conv-1',

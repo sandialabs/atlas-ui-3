@@ -70,13 +70,18 @@ def chat(content, conversation_id=None):
 
 
 def row_key_client(msg):
-    """The matching rule ChatContext.refreshJoinedConversation applies."""
+    """The matching rule ChatContext.refreshJoinedConversation applies.
+
+    Always a (type, identity, extra) triple so two rows can only compare
+    equal through the same branch: tool rows on their tool_call_id, prose
+    rows on role and content.
+    """
     mtype = (msg.get("metadata") or {}).get("message_type") or msg.get("message_type") or "chat"
     if mtype == "tool_call":
         tc = (msg.get("metadata") or {}).get("tool_call_id") or msg.get("tool_call_id")
         if tc:
-            return ("tool_call", tc)
-    return (mtype, msg.get("role"), msg.get("content") or "")
+            return (mtype, tc, "")
+    return (mtype, msg.get("role") or "", msg.get("content") or "")
 
 
 def aligns_prefix(view_rows, stored_rows):
