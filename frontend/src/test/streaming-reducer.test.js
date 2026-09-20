@@ -132,3 +132,57 @@ describe('useMessages - STREAM_TOKEN / STREAM_END actions', () => {
     expect(result.current.messages[0]._streaming).toBe(false)
   })
 })
+
+describe('useMessages - STREAM_TOKEN replace (stream replay, issue #957)', () => {
+  it('seeds a replayed bubble when no streaming message exists', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => {
+      result.current.addMessage({ role: 'user', content: 'question' })
+    })
+    act(() => {
+      result.current.streamToken('The answer starts here', true)
+    })
+
+    expect(result.current.messages).toHaveLength(2)
+    const msg = result.current.messages[1]
+    expect(msg.content).toBe('The answer starts here')
+    expect(msg._streaming).toBe(true)
+    expect(msg._replayed).toBe(true)
+  })
+
+  it('replaces an already-seeded bubble instead of duplicating it', () => {
+    const { result } = renderHook(() => useMessages())
+
+    // The REST record seeded an earlier snapshot of the same segment.
+    act(() => { result.current.streamToken('begin', true) })
+    // The restore replay carries a newer, longer snapshot.
+    act(() => { result.current.streamToken('begin plus more text', true) })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].content).toBe('begin plus more text')
+    expect(result.current.messages[0]._streaming).toBe(true)
+    expect(result.current.messages[0]._replayed).toBe(true)
+  })
+
+  it('a replaced bubble keeps streaming appends after it', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => { result.current.streamToken('replayed prefix', true) })
+    act(() => { result.current.streamToken(' and live continuation') })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].content).toBe('replayed prefix and live continuation')
+    expect(result.current.messages[0]._streaming).toBe(true)
+  })
+
+  it('STREAM_END closes a replaced bubble and clears the marker with it', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => { result.current.streamToken('done', true) })
+    act(() => { result.current.streamEnd() })
+
+    expect(result.current.messages[0]._streaming).toBe(false)
+    expect(result.current.messages[0]._replayed).toBe(true)
+  })
+})

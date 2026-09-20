@@ -13,6 +13,25 @@ function messagesReducer(state, action) {
     case 'RESET':
       return []
     case 'STREAM_TOKEN': {
+      // A replayed stream (issue #957) defines the text rather than adding to
+      // it: the transcript being loaded may already hold an earlier snapshot
+      // of the same segment, and appending would duplicate the overlap.
+      if (action.replace) {
+        const current = state.findLastIndex(m => m._streaming)
+        const replayed = {
+          role: 'assistant',
+          content: action.token,
+          timestamp: new Date().toISOString(),
+          _streaming: true,
+          _replayed: true,
+        }
+        if (current >= 0) {
+          const updated = [...state]
+          updated[current] = { ...state[current], ...replayed }
+          return updated
+        }
+        return [...state, replayed]
+      }
       // Find the streaming message anywhere in the array (not just last)
       // to handle interleaved tool_start/progress messages mid-stream
       const idx = state.findLastIndex(m => m._streaming)
@@ -51,7 +70,7 @@ export function useMessages() {
   const mapMessages = useCallback(mapper => dispatch({ type: 'MAP', mapper }), [])
   const updateToolResult = useCallback((tool_call_id, patch) => dispatch({ type: 'UPDATE_TOOL_RESULT', tool_call_id, patch }), [])
   const resetMessages = useCallback(() => dispatch({ type: 'RESET' }), [])
-  const streamToken = useCallback(token => dispatch({ type: 'STREAM_TOKEN', token }), [])
+  const streamToken = useCallback((token, replace = false) => dispatch({ type: 'STREAM_TOKEN', token, replace }), [])
   const streamEnd = useCallback(() => dispatch({ type: 'STREAM_END' }), [])
 
   return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd }

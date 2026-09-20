@@ -1,0 +1,82 @@
+"""The open token segment of a tracked run, kept for late re-attach (issue #957).
+
+A tracked run streams its answer token by token, and the client drops frames
+for any conversation it is not displaying (issue #884) -- so a user who leaves
+a conversation mid-stream and comes back finds the reply starting at whatever
+token happened to be current on arrival, its beginning gone. The run's own
+session is no help for this window: it receives a streamed segment only once
+the segment is finished, as a narration row or, at turn end, as the answer.
+
+This module holds the *currently open* segment's text per run, updated as the
+tokens flow through the notifier. The reopen paths read it:
+
+* the in-flight conversation record carries it as ``streaming_text`` -- that
+  is what a second tab and a page reload show, since no live frames follow
+  them (the run's frames stay bound to the socket that started it);
+* ``restore_conversation`` sends it as a ``token_stream`` frame so the
+  reopened view shows the reply from its first word, with the live stream
+  continuing on top of it.
+
+Only the open segment is held, and deliberately so: a segment the run has
+closed is committed to the run's session history -- narration rows go in the
+moment a step ends, and the answer at turn end -- which the in-flight record
+already replays. Holding closed segments here as well would show their text
+twice in the reopened view.
+"""
+
+from __future__ import annotations
+
+
+class StreamReplay:
+    """Accumulates the token segment a tracked run is streaming right now.
+
+    One instance per run, owned by its :class:`~atlas.application.chat.runs.registry.RunRecord`.
+    ``is_first`` starts a new segment (clearing the previous one), ``is_last``
+    closes it -- from that moment the text belongs to the session history and
+    the buffer must be empty again.
+
+    A replay is best effort. An answer longer than :attr:`MAX_CHARS` replays
+    its beginning only; the reload the client does when the run ends replaces
+    the transcript with the stored one either way, so the cap bounds memory,
+    not correctness.
+    """
+
+    __slots__ = ("_text", "_truncated")
+
+    MAX_CHARS = 200_000
+
+    def __init__(self) -> None:
+        self._text = ""
+        self._truncated = False
+
+    def observe(self, token: str, is_first: bool, is_last: bool) -> None:
+        """Fold one ``token_stream`` frame into the buffer."""
+        if is_first:
+            self._text = ""
+            self._truncated = False
+        if is_last:
+            # Closed segments reach history through the run itself; keeping
+            # the text here would duplicate it in a reopened view.
+            self._text = ""
+            self._truncated = False
+            return
+        if not token or self._truncated:
+            return
+        room = self.MAX_CHARS - len(self._text)
+        if len(token) > room:
+            self._text += token[: max(0, room)]
+            self._truncated = True
+            return
+        self._text += token
+
+    def text(self) -> str:
+        """What the run has streamed into its open segment so far."""
+        return self._text
+
+    @property
+    def truncated(self) -> bool:
+        return self._truncated
+
+    def clear(self) -> None:
+        self._text = ""
+        self._truncated = False

@@ -1060,6 +1060,20 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			bulkAdd(loadedMessages)
 		}
 
+		// Issue #957: the run executing in this conversation has streamed text
+		// this client never saw -- it was dropped as background activity while
+		// another conversation was on screen, or this tab was not the one the
+		// run streams into. Seed the open bubble with what the run holds so
+		// the reply starts at its first word, not the token that happened to
+		// be current when the user came back. The restore below replays the
+		// same segment again (a newer snapshot), which replaces this seed, and
+		// the live stream continues from there. Runs until the turn ends, so
+		// the bubble keeps its "in progress" marker (Message.jsx) until the
+		// reload that replaces it with the stored transcript.
+		if (conversationData.streaming_text) {
+			streamToken(conversationData.streaming_text, true)
+		}
+
 		// Notify backend to restore this conversation's context
 		// Sends the conversation_id and messages so the LLM has prior context.
 		// Display-only rows (e.g. persisted tool_call messages, issue #684) are
@@ -1089,7 +1103,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// conversation's workspace rather than whatever is active at save time.
 		conversationWorkspaceIdRef.current = meta.workspace_id || null
 		restoreWorkspace(meta.workspace_id)
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent, runs])
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent, runs])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:

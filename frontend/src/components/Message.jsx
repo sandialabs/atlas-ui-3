@@ -827,6 +827,15 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         {message._streaming && (
           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
         )}
+        {message._streaming && message._replayed && (
+          <div
+            className="mt-2 text-xs text-gray-400 italic flex items-center gap-1.5"
+            data-testid="stream-replay-in-progress"
+          >
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
+            Answer in progress -- it will refresh when the run finishes.
+          </div>
+        )}
       </div>
     </div>
   )

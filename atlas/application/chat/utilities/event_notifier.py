@@ -12,9 +12,39 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urlparse
+
 from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+# Imported lazily by _current_run_for_replay; kept out of module scope so the
+# notifier stays importable from every layer, including ones the runs package
+# itself pulls in.
+_get_current_run = None
+_get_run_registry = None
+
+
+def _current_run_for_replay():
+    """The ambient run for stream-replay bookkeeping, or ``None``.
+
+    Resolved lazily: the runs package is not imported (or even importable) on
+    every path that uses the notifier, and this is the only function here that
+    needs it.
+    """
+    global _get_current_run, _get_run_registry
+    if _get_current_run is None:
+        from atlas.application.chat.runs.context import get_current_run
+        from atlas.application.chat.runs.registry import get_run_registry
+
+        _get_current_run = get_current_run
+        _get_run_registry = get_run_registry
+    return _get_current_run()
+
+
+def _replay_registry():
+    if _get_run_registry is None:
+        return None
+    return _get_run_registry()
 
 # Type hint for update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -404,6 +434,19 @@ async def notify_token_stream(
     update_callback: Optional[UpdateCallback] = None,
 ) -> None:
     """Send a streaming token chunk to the client."""
+    # Issue #957: every token frame a tracked run publishes passes through
+    # here exactly once, from inside the run's own task -- so the ambient run
+    # is the frame's owner, and the replay buffer one run's text rather than a
+    # blend of two concurrent ones. Recording at this chokepoint rather than
+    # the transport keeps the count exact: a child run's frames reach the
+    # parent's connection already tagged and would otherwise be observed twice
+    # on their way out. Recorded before the send, so the buffer also fills for
+    # a socket nobody is reading -- which is the point.
+    run = _current_run_for_replay()
+    if run is not None:
+        registry = _replay_registry()
+        if registry is not None:
+            registry.note_stream_token(run.run_id, token, is_first, is_last)
     if not update_callback:
         return
 

@@ -66,6 +66,15 @@ async def in_flight_conversation(
             title = str(msg["content"])[:TITLE_MAX_CHARS]
             break
 
+    # What the run is streaming right now (issue #957). Finished segments are
+    # already in the messages above; this is the open one, which exists
+    # nowhere else until the turn ends. A client that opens the conversation
+    # from a tab that will receive no further frames (another tab, a reload)
+    # renders it with an "in progress" marker; the socket that owns the run
+    # also gets it again as a replay frame on restore, so its continuation
+    # appends onto the same text.
+    stream_text = record.stream.text()
+
     return {
         "id": conversation_id,
         "user_email": user_email,
@@ -83,4 +92,9 @@ async def in_flight_conversation(
         # Tells a client this is the run's live view, not a stored record.
         "in_flight": True,
         "run_id": record.run_id,
+        # The open token segment, for seeding the partial answer on reopen.
+        # Absent (not None) when there is nothing open, so a record with
+        # nothing streaming looks exactly like the stored shape.
+        "streaming_text": stream_text or None,
+        "streaming_truncated": bool(record.stream.truncated) if stream_text else False,
     }
