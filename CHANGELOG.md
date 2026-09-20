@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-09-20
+### PR #956 - 2026-09-20
 - Parallel-run navigation fixes from a Playwright pass over conversation switching (follow-up to #884). Starting a new chat or opening another conversation while a run is in flight no longer leaves the fresh view showing a Stop button, a busy indicator and a disabled Send; a run started from a new chat stays listed (and marked Running) in the history list after New Chat and in other tabs, named by its first prompt; the list refreshes when a background run ends; a conversation opened while its run is executing shows the run's live transcript (prompt and tool rows) and reloads itself when the run finishes; auto-approve now answers approval requests for conversations that are not on screen, so unattended multi-step runs no longer stall on every tool call. Backend: a run whose tool approval (or elicitation) request went out through the agent loop's publisher never reached `waiting_for_input` -- no "Needs approval" marker, no replay on reopen, stuck until the approval timeout; the pause is now recorded at every transport chokepoint (`RunRegistry.note_event`). `run_started` is sent before the run's task can emit, the run record carries a `title`, `GET /api/conversations/{id}` and `restore_conversation` fall back to the run session for an unsaved in-flight conversation, and a turn naming a conversation id that another user's run is executing under is refused before admission (previously it could be stored first and the owner's save rejected).
 
 ### PR #950 - 2026-09-16
