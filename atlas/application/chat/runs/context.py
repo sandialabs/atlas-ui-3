@@ -97,8 +97,8 @@ def tag_event(
     if "conversation_id" in data and data["conversation_id"] != conversation_id:
         logger.debug(
             "Event conversation_id %s overrides ambient conversation_id %s",
-            data["conversation_id"],
-            conversation_id,
+            sanitize_for_logging(str(data["conversation_id"])),
+            sanitize_for_logging(conversation_id),
         )
     tagged = dict(data) if copy else data
     tagged.setdefault("run_id", run_id)
