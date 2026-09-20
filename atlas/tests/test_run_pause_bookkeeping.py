@@ -74,6 +74,22 @@ def test_note_event_clears_the_pause_when_the_tool_settles(registry):
     assert record.pending_request is None
 
 
+def test_a_sibling_tool_settling_does_not_clear_the_pause(registry):
+    # Tools run in parallel (#353): a run waiting on t1's approval can see
+    # t2 complete first. Clearing the pause on any settled frame would drop
+    # the still-outstanding request, and a reopen could no longer replay it.
+    run = registry.start(conversation_id="c", user_email=USER)
+    request = {"type": "tool_approval_request", "tool_call_id": "t1"}
+    registry.note_event(run.run_id, request)
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t2"})
+    registry.note_event(run.run_id, {"type": "tool_error", "tool_call_id": "t3"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert record.pending_request == request
+
+
 def test_note_event_ignores_terminal_runs_and_garbage(registry):
     run = registry.start(conversation_id="c", user_email=USER)
     registry.cancel(run.run_id, USER)

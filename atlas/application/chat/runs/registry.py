@@ -496,7 +496,17 @@ class RunRegistry:
             self.set_pending_request(run_id, frame)
         elif event_type in TOOL_SETTLED_EVENTS:
             record = self.get(run_id)
-            if record is not None and record.status == RunStatus.WAITING_FOR_INPUT:
+            if (
+                record is not None
+                and record.status == RunStatus.WAITING_FOR_INPUT
+                and record.pending_request is not None
+                and record.pending_request.get("tool_call_id") == frame.get("tool_call_id")
+            ):
+                # Only the paused tool's own settling clears the pause. Tools
+                # run in parallel (#353): a sibling completing while this run
+                # waits on another tool's approval must not dissolve the
+                # pause, or the still-outstanding request can never be
+                # replayed and the run sits blocked until its timeout.
                 self.set_status(run_id, RunStatus.RUNNING)
 
     def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
