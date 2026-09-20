@@ -68,6 +68,13 @@ class _RepoWithoutOwnerLookup:
     """A configured repo that cannot answer ownership questions."""
 
 
+class _ExplodingOwnerLookup:
+    """A repo whose lookup raises: the store is unreachable or locked."""
+
+    def get_conversation_owner(self, conversation_id):
+        raise RuntimeError("chat-history store is down")
+
+
 def _service_with(conversation_repository):
     return ChatService(
         llm=MagicMock(),
@@ -126,6 +133,28 @@ def test_no_repository_passes():
     service = _service_with(None)
 
     assert _conversation_access_error(service, "any-conv", OWNER) is None
+
+
+def test_a_raising_lookup_is_refused_without_tearing_down_the_socket(caplog):
+    """A store that cannot answer must not close the WebSocket (review P2).
+
+    The old path ran this lookup inside the turn, where a raw exception was
+    contained as the per-turn ``unexpected`` error. From the receive loop it
+    would instead escape and disconnect the caller, so the pre-admission
+    helper has to contain it: refuse fail-closed, log what actually broke,
+    and say nothing on the wire beyond "try again".
+    """
+    service = _service_with(_ExplodingOwnerLookup())
+
+    with caplog.at_level("ERROR"):
+        refusal = _conversation_access_error(service, STORED_ID, OWNER)
+
+    assert refusal is not None
+    assert refusal["type"] == "error"
+    assert refusal["error_type"] == "unexpected"
+    assert refusal["conversation_id"] == STORED_ID
+    assert "Conversation access could not be verified" in refusal["message"]
+    assert "chat-history store is down" in caplog.text
 
 
 def test_the_refused_frame_matches_what_the_service_raises(repo, stored):

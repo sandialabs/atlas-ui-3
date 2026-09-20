@@ -191,6 +191,12 @@ Check the server log for the run id. The sweeper stops runs past
 `MAX_RUN_WALL_CLOCK_SECONDS` and marks them failed; if that is set to `0`,
 nothing will.
 
+**"Conversation access could not be verified."**
+The ownership check could not read the chat-history store (unreachable or
+locked database), so the turn is refused before a run is admitted rather than
+admitted and failed. Check the server log for the exception; when the store
+recovers, tracked runs are admitted again.
+
 **Runs are not being created at all.**
 All three conditions under "When it applies" must hold. The most common cause is
 a user whose save mode is Local or Incognito rather than Server.

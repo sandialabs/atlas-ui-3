@@ -630,6 +630,14 @@ def _conversation_access_error(chat_service, conversation_id, user_email):
     or a run still in flight); the in-flight variant -- claiming a
     conversation another user's run is executing under -- is addressed
     separately in PR #956.
+
+    A lookup that *raises* (the chat-history store unreachable or locked)
+    must not tear down the socket the way it would from the receive loop:
+    inside the turn it used to be contained as the per-turn ``unexpected``
+    error. The question is equally unanswerable either way, so the failure
+    is refused too -- the same fail-closed answer the check gives a repo
+    that cannot answer at all -- and the exception is logged because the
+    frame deliberately says nothing about what broke.
     """
     try:
         chat_service.validate_conversation_id_owner(conversation_id, user_email)
@@ -638,6 +646,22 @@ def _conversation_access_error(chat_service, conversation_id, user_email):
             "type": "error",
             "message": str(e.message if hasattr(e, "message") else e),
             "error_type": "authorization",
+            "conversation_id": conversation_id,
+        }
+    except Exception:
+        logger.error(
+            "Conversation ownership check failed for %s; refusing before "
+            "run admission",
+            sanitize_for_logging(str(conversation_id)),
+            exc_info=True,
+        )
+        return {
+            "type": "error",
+            "message": (
+                "Conversation access could not be verified. "
+                "Please try again."
+            ),
+            "error_type": "unexpected",
             "conversation_id": conversation_id,
         }
     return None
