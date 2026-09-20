@@ -866,7 +866,16 @@ def _resume_waiting_run(run_registry, user_email: str, data: dict) -> None:
             return
         record = waiting[0]
     if record.status == RunStatus.WAITING_FOR_INPUT:
-        run_registry.set_status(record.run_id, RunStatus.RUNNING)
+        # Resume only the request that was answered. With several tools
+        # paused in parallel -- one agent step, several approval-gated
+        # calls -- the others still need their answers: going straight back
+        # to ``running`` would drop their replayable requests and hide the
+        # "Needs approval" marker while their executors sit blocked.
+        run_registry.answer_pending_request(
+            record.run_id,
+            tool_call_id=data.get("tool_call_id"),
+            elicitation_id=data.get("elicitation_id"),
+        )
 
 
 async def cleanup_disconnected_session(
@@ -2142,6 +2151,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             "run_id": run_record.run_id,
                             "conversation_id": run_record.conversation_id,
                             "title": run_record.title,
+                            # Lets the client tell a model-launched child
+                            # (atlas_launch) from a run the user started --
+                            # auto-approve is scoped to the latter.
+                            "parent_run_id": run_record.parent_run_id,
                         })
                     except Exception:
                         # The run was admitted but its task has not started:
@@ -2363,8 +2376,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=user_email,
                 )
 
-                # The run that was paused on this approval is working again.
-                _resume_waiting_run(run_registry, user_email, data)
+                if result:
+                    # The run that was paused on this approval is working
+                    # again -- or still paused on its other parallel tools.
+                    _resume_waiting_run(run_registry, user_email, data)
+                else:
+                    # The response was refused (unknown id, or a user who
+                    # does not own the request). Resuming the run here would
+                    # clear a pause the answer never addressed, so say so
+                    # instead of silently ignoring the frame.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "No matching pending tool approval",
+                        "error_type": "unknown_tool_approval",
+                        "tool_call_id": tool_call_id,
+                    })
 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
@@ -2418,7 +2444,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=user_email,
                 )
 
-                _resume_waiting_run(run_registry, user_email, data)
+                if result:
+                    _resume_waiting_run(run_registry, user_email, data)
+                else:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "No matching pending elicitation",
+                        "error_type": "unknown_elicitation",
+                        "elicitation_id": elicitation_id,
+                    })
 
                 logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the elicitation will unblock the waiting tool execution

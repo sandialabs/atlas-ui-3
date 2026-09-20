@@ -644,17 +644,21 @@ async def execute_single_tool(
                             "admin_required": admin_required
                         })
 
-                    response = await request.wait_for_response(
-                        timeout=resolve_approval_timeout()
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(f"Approval timeout for tool {tool_call.function.name}")
-                    return _finalize_span(ToolResult(
-                        tool_call_id=tool_call.id,
-                        content="Tool execution timed out waiting for user approval",
-                        success=False,
-                        error="Approval timeout"
-                    ))
+                    try:
+                        response = await request.wait_for_response(
+                            timeout=resolve_approval_timeout()
+                        )
+                    except asyncio.TimeoutError:
+                        # Only the wait can mean this: the send failing with
+                        # a timeout is a transport problem, not an approval
+                        # that timed out, and must not be reported as one.
+                        logger.warning(f"Approval timeout for tool {tool_call.function.name}")
+                        return _finalize_span(ToolResult(
+                            tool_call_id=tool_call.id,
+                            content="Tool execution timed out waiting for user approval",
+                            success=False,
+                            error="Approval timeout"
+                        ))
                 finally:
                     approval_manager.cleanup_request(tool_call.id)
 

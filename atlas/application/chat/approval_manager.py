@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ class ToolApprovalManager:
         # a user_email binding, the response MUST supply a matching one.
         # Backward compat: only legacy requests (no user_email set) skip the
         # check so single-user deployments continue to work.
-        if request.user_email and request.user_email != user_email:
+        if request.user_email and normalize_user_email(request.user_email) != normalize_user_email(user_email):
             # Inline sanitize for CodeQL py/log-injection: the query traces
             # explicit CR/LF removal as a log-injection sanitizer, but does
             # not recognize sanitize_for_logging() as one.

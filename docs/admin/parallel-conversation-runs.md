@@ -175,9 +175,18 @@ A tool that finishes clears its own pending request only when the settle frame
 names it: settle frames are matched on their tool call / elicitation id, so a
 sibling tool completing while other approvals are still outstanding leaves
 those -- and their replayable requests -- intact. The run returns to `running`
-when nothing is outstanding anymore. Ownership comparisons (stop, steer,
-in-flight reads, the foreign-id guard) normalize email casing, the same way
-the conversation repository does.
+when nothing is outstanding anymore. The same holds when the answer arrives
+through the approval-response path: answering one of several parked tools
+resumes only that request, and the run stays "Needs approval" until the last
+one is answered. Ownership comparisons (stop, steer, in-flight reads, the
+foreign-id guard) normalize email casing, the same way the conversation
+repository does.
+
+Background auto-approve covers runs the *user* started. A conversation the
+model launched (`atlas_launch`) runs on model-chosen arguments, so its
+approval requests are not answered off-screen; the child still appears in the
+history list -- titled by its prompt -- with its "Needs approval" marker, and
+admin-pinned tools pause it until it is opened.
 
 Every event a tracked run emits — tokens, agent updates, tool rows, files,
 canvas, completion, errors — carries `run_id` and `conversation_id`. Tagging

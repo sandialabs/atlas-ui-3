@@ -434,8 +434,18 @@ export const ChatProvider = ({ children }) => {
 					// it only renders for the conversation on screen. A background
 					// run would otherwise sit on every tool call until the user
 					// happened to open it -- the opposite of running unattended.
+					// Scoped to runs the user started: a child conversation the
+					// model launched (atlas_launch) runs on model-chosen
+					// arguments, and an on/off toggle must not silently broaden
+					// to approving those unattended.
 					const frame = data.frame
-					if (settingsRef.current?.autoApproveTools && !frame.admin_required && sendMessageRef.current) {
+					const childRun = runs.getRun(frame.conversation_id)?.parent_run_id
+					if (
+						settingsRef.current?.autoApproveTools &&
+						!frame.admin_required &&
+						!childRun &&
+						sendMessageRef.current
+					) {
 						const sent = sendMessageRef.current({
 							type: 'tool_approval_response',
 							tool_call_id: frame.tool_call_id,

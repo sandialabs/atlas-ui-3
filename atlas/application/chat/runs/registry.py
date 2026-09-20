@@ -408,6 +408,16 @@ class RunRegistry:
         if record is None:
             return
         record.task = task
+        if record.is_terminal:
+            # The run was stopped (or failed) in the window between admission
+            # and the task starting -- ``run_started`` goes out before the
+            # task exists, so a stop can land first. Terminal is sticky, so
+            # set_status below would keep the recorded outcome while the
+            # fresh task ran the turn to completion and persisted it anyway.
+            # Cancel it: the user already stopped this run.
+            if not task.done():
+                task.cancel()
+            return
         self.set_status(run_id, RunStatus.RUNNING)
 
     def set_status(
@@ -536,6 +546,43 @@ class RunRegistry:
         if record is None or not record.pending_requests:
             return []
         return [dict(request) for request in record.pending_requests]
+
+    def answer_pending_request(
+        self,
+        run_id: str,
+        *,
+        tool_call_id: Optional[str] = None,
+        elicitation_id: Optional[str] = None,
+    ) -> bool:
+        """One outstanding request was answered through the response path.
+
+        Drops the matching stored request and returns the run to ``running``
+        only when nothing is outstanding anymore. With several tools paused
+        in parallel, answering one must not discard the others' replayable
+        requests -- they still need their answers, and the run is still
+        paused on them. Returns whether the run was waiting on input.
+        """
+        record = self.get(run_id)
+        if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
+            return False
+
+        def _is_answered(request: Dict[str, Any]) -> bool:
+            if tool_call_id is not None and request.get("tool_call_id") == tool_call_id:
+                return True
+            if elicitation_id is not None and request.get("elicitation_id") == elicitation_id:
+                return True
+            return False
+
+        record.pending_requests = [
+            request for request in record.pending_requests if not _is_answered(request)
+        ]
+        if not record.pending_requests:
+            self.set_status(run_id, RunStatus.RUNNING)
+        else:
+            # Still paused on the others; republish so every tab's "Needs
+            # approval" marker reflects what remains.
+            self._notify(record)
+        return True
 
     def mark_detached(self, run_id: str) -> None:
         """Note that the run's originating socket is gone."""
