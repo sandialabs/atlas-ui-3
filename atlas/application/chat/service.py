@@ -860,9 +860,12 @@ class ChatService:
             # record, and may not have one at all yet: a tracked run's
             # transcript only reaches the repository when its turn ends
             # (issue #884). Its own session is the authority until then.
-            conv = await self._in_flight_conversation(conversation_id, user_email)
-            if conv is None or not conv.get("messages"):
-                conv = self.conversation_repository.get_conversation(conversation_id, user_email)
+            live = await self._in_flight_conversation(conversation_id, user_email)
+            conv = live if live and live.get("messages") else None
+            if conv is None:
+                # Stored record, or the still-empty live one for a run whose
+                # session has not appended its prompt yet: real, not missing.
+                conv = self.conversation_repository.get_conversation(conversation_id, user_email) or live
             if conv is None:
                 logger.warning(
                     "Rejected restore for conversation %s: not found for user %s",

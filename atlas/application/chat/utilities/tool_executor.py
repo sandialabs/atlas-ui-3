@@ -611,6 +611,20 @@ async def execute_single_tool(
             if needs_approval:
                 logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
 
+                # Register the request *before* the frame goes out. A client
+                # that answers immediately -- auto-approve for a conversation
+                # it is not displaying (issue #884) -- can otherwise reply
+                # before the request exists, the reply is dropped, and the run
+                # waits for an answer that already arrived.
+                approval_manager = get_approval_manager()
+                request = approval_manager.create_approval_request(
+                    tool_call.id,
+                    tool_call.function.name,
+                    filtered_args,
+                    allow_edit,
+                    user_email=session_context.get("user_email", ""),
+                )
+
                 # Send approval request to frontend
                 if update_callback:
                     await update_callback({
@@ -623,14 +637,6 @@ async def execute_single_tool(
                     })
 
                 # Wait for approval response
-                approval_manager = get_approval_manager()
-                request = approval_manager.create_approval_request(
-                    tool_call.id,
-                    tool_call.function.name,
-                    filtered_args,
-                    allow_edit,
-                    user_email=session_context.get("user_email", ""),
-                )
 
                 try:
                     try:

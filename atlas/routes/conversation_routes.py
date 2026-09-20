@@ -119,9 +119,13 @@ async def get_conversation(
     # every tool row so far, and nothing reaches the repository until the turn
     # ends. Prefer that live view; fall back to the store otherwise, so a
     # conversation the sidebar shows as "Running" never reads as missing.
-    conversation = await _in_flight_conversation(conversation_id, current_user)
-    if not conversation or not conversation.get("messages"):
-        conversation = repo.get_conversation(conversation_id, current_user)
+    live = await _in_flight_conversation(conversation_id, current_user)
+    conversation = live if live and live.get("messages") else None
+    if conversation is None:
+        # The stored record, or -- for a run whose session exists but has
+        # not appended its prompt yet -- the (still empty) live one, which is
+        # a real conversation and must not read as missing.
+        conversation = repo.get_conversation(conversation_id, current_user) or live
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
