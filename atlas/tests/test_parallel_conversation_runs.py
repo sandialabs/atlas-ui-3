@@ -390,3 +390,50 @@ def test_only_the_both_zero_combination_warns(caplog, approval_timeout, wall_clo
         )
 
     assert not any("no expiry" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# attach_task after a stop landed first (#956 review)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_attach_task_cancels_a_task_whose_run_was_already_stopped(registry):
+    """``run_started`` is announced before the turn task exists, so a stop can
+    land in between. Terminal is sticky, so the record would stay ``cancelled``
+    while the fresh task ran the turn to completion and persisted it anyway --
+    the task must be cancelled instead."""
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.cancel(run.run_id, USER)
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def turn():
+        started.set()
+        await release.wait()
+
+    task = asyncio.create_task(turn())
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    registry.attach_task(run.run_id, task)
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert registry.get(run.run_id).status == RunStatus.CANCELLED
+    release.set()
+
+
+@pytest.mark.asyncio
+async def test_attach_task_marks_a_live_run_running(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+
+    async def turn():
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(turn())
+    registry.attach_task(run.run_id, task)
+
+    assert registry.get(run.run_id).status == RunStatus.RUNNING
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
