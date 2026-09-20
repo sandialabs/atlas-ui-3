@@ -45,6 +45,8 @@ SEARCH_TOOL_NAME = "atlas_search"
 DISCOVER_TOOL_NAME = "atlas_discover_sources"
 DISCOVER_LAUNCH_OPTIONS_TOOL_NAME = "atlas_discover_launch_options"
 LAUNCH_TOOL_NAME = "atlas_launch"
+GET_RUNS_TOOL_NAME = "atlas_get_runs"
+RESULT_TOOL_NAME = "atlas_result"
 
 ATLAS_TOOL_NAMES = (
     CANVAS_TOOL_NAME,
@@ -53,6 +55,8 @@ ATLAS_TOOL_NAMES = (
     DISCOVER_TOOL_NAME,
     DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
+    GET_RUNS_TOOL_NAME,
+    RESULT_TOOL_NAME,
 )
 
 # Pre-#855 fully-qualified names -> consolidated names.
@@ -313,6 +317,42 @@ LAUNCH_TOOL_SCHEMA = {
     },
 }
 
+GET_RUNS_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": GET_RUNS_TOOL_NAME,
+        "description": (
+            "List direct sub-conversations launched by this conversation. Returns "
+            "run_id, conversation_id, status, timestamps, waiting_on and errors. "
+            "Statuses are queued, running, waiting_for_input, completed, failed "
+            "or cancelled; this call does not wait."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+RESULT_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": RESULT_TOOL_NAME,
+            "description": (
+            "Return the current status and final assistant result of a direct child "
+            "launched by this conversation. Pass the run_id from atlas_launch or "
+            "atlas_get_runs. This never waits; poll with atlas_sleep between checks. "
+            "Results are scoped to this conversation and user. result_status is "
+            "pending, available, available_truncated, empty, unreadable or "
+            "unavailable; only pending is normally worth polling again."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "The run_id returned by atlas_launch."}
+            },
+            "required": ["run_id"],
+        },
+    },
+}
+
 ATLAS_TOOL_SCHEMAS = {
     CANVAS_TOOL_NAME: CANVAS_TOOL_SCHEMA,
     SLEEP_TOOL_NAME: SLEEP_TOOL_SCHEMA,
@@ -320,6 +360,8 @@ ATLAS_TOOL_SCHEMAS = {
     DISCOVER_TOOL_NAME: DISCOVER_TOOL_SCHEMA,
     DISCOVER_LAUNCH_OPTIONS_TOOL_NAME: DISCOVER_LAUNCH_OPTIONS_TOOL_SCHEMA,
     LAUNCH_TOOL_NAME: LAUNCH_TOOL_SCHEMA,
+    GET_RUNS_TOOL_NAME: GET_RUNS_TOOL_SCHEMA,
+    RESULT_TOOL_NAME: RESULT_TOOL_SCHEMA,
 }
 
 ATLAS_SERVER_DESCRIPTION = (
@@ -405,7 +447,12 @@ def atlas_tool_schemas(
             continue
         if requested in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
             continue
-        if requested in (DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, LAUNCH_TOOL_NAME) and not launch_enabled:
+        if requested in (
+            DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+            LAUNCH_TOOL_NAME,
+            GET_RUNS_TOOL_NAME,
+            RESULT_TOOL_NAME,
+        ) and not launch_enabled:
             continue
         schema = ATLAS_TOOL_SCHEMAS.get(requested)
         if schema is not None:

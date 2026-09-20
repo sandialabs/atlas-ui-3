@@ -27,10 +27,11 @@ del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
 # Standard imports follow - must come after LiteLLM logging suppression above
 # ruff: noqa: E402
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional, TypeVar
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -49,7 +50,7 @@ from atlas.application.chat.runs import (
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
-from atlas.application.chat.service import UNSET
+from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
@@ -80,6 +81,7 @@ from atlas.domain.errors import (
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available
+from atlas.modules.file_storage.manager import FileManager
 from atlas.routes.admin_routes import admin_router
 from atlas.routes.agent_portal_availability import load_agent_portal_router
 
@@ -165,14 +167,366 @@ _TOOL_SETTLED_EVENTS = frozenset(
 )
 
 
-def tag_run_event(message: Any, run_id: str, conversation_id: str) -> Any:
+T = TypeVar("T")
+
+
+def tag_run_event(message: T, run_id: str, conversation_id: str) -> T:
     """Stamp an outbound event with the run that produced it (issue #884).
 
     Delegates to the single tagging authority (issue #915); copies because the
     event belongs to the caller. Inherits that authority's non-dict
-    passthrough, hence ``Any``. See :func:`tag_event` for the rule itself.
+    passthrough, while preserving the input type through ``T``. See
+    :func:`tag_event` for the rule itself.
     """
     return tag_event(message, run_id, conversation_id, copy=True)
+
+
+async def _merge_run_session_files(
+    chat_service, run_session_id, connection_session_id, conversation_id=None
+) -> None:
+    """Copy a finished run's file map back onto the connection session.
+
+    The mirror of :func:`_seed_run_session_files` (issue #953). Tool artifacts
+    are registered into the *run's* session, and that session is deleted the
+    moment the run ends, so without this the only session that ever knew about
+    a just-produced file is gone by the time the user clicks download.
+
+    A name collision must not cost the run its artifact: the two entries are
+    different files that happen to share a label, and dropping either one makes
+    it unreachable even for a client that sends the right storage key. The
+    connection's own entry keeps the plain name (it is the live one for files
+    the user attached) and the run's is filed under a suffixed name as well as
+    being reachable by key.
+
+    The collision handling deliberately differs from
+    :func:`file_processor._merge_without_displacing`, which the artifact
+    ingest path uses: that one keys on ``original_filename`` and *replaces* the
+    entry it matches, which here would let a finished run displace a file the
+    user attached. The suffix helper and key format are shared with it
+    (:meth:`FileManager.unique_key`); only the precedence differs.
+    """
+    if run_session_id is None or run_session_id == connection_session_id:
+        return
+    files = None
+    try:
+        run_session = await chat_service.session_repository.get(run_session_id)
+        files = run_session.context.get("files") if run_session else None
+        if not files:
+            return
+        connection_session = await chat_service.session_repository.get(
+            connection_session_id
+        )
+        if connection_session is None:
+            # The socket closed while a detached run kept going, and the
+            # session went with it. Nothing here outlives the run, so the
+            # artifacts are reachable only through the File Library -- say so,
+            # rather than losing them silently.
+            logger.warning(
+                "Run %s produced %d file(s) but its connection session %s is "
+                "gone; they remain downloadable from the File Library only",
+                sanitize_for_logging(str(run_session_id)),
+                len(files),
+                sanitize_for_logging(str(connection_session_id)),
+            )
+            return
+        if not _same_conversation(connection_session, conversation_id):
+            # The connection moved on -- New Chat, or a restore of a different
+            # conversation -- before this run's files came home. They belong to
+            # the conversation the run ran in, and dropping them into the one
+            # on screen would put them in front of the model and its tools
+            # there, and seed them into its runs.
+            logger.info(
+                "Not merging %d file(s) from run %s: the connection has moved "
+                "to another conversation; they remain downloadable from the "
+                "File Library",
+                len(files),
+                sanitize_for_logging(str(run_session_id)),
+            )
+            return
+        if not getattr(connection_session, "active", True):
+            # Inactive is ambiguous: the socket may have closed, but New Chat
+            # and conversation restore also end the session and immediately
+            # re-create it under the same id, so this window happens on a live
+            # connection too. Merge anyway -- writing into a session nobody
+            # reads costs nothing, while skipping would drop artifacts the user
+            # can still see on screen -- and record the ambiguity.
+            logger.info(
+                "Merging %d file(s) from run %s into inactive connection "
+                "session %s; if the socket has closed they remain "
+                "downloadable from the File Library",
+                len(files),
+                sanitize_for_logging(str(run_session_id)),
+                sanitize_for_logging(str(connection_session_id)),
+            )
+        index = _FileIndex(connection_session.context.setdefault("files", {}))
+        for name, meta in files.items():
+            _merge_one_file(index, name, meta, run_session_id)
+
+        # ``handle_reset_session`` ends the session and then installs a *new*
+        # Session object under the same id. A merge that interleaved with that
+        # just wrote into the discarded object, so re-fetch and, if the object
+        # changed under us, apply the same merge to its replacement -- but only
+        # when it is still the same conversation. New Chat replaces the session
+        # *and* the conversation, and replaying there would drop a finished
+        # run's files into an unrelated conversation, where they would then be
+        # seeded into its runs.
+        current = await chat_service.session_repository.get(connection_session_id)
+        if (
+            current is not None
+            and current is not connection_session
+            and _same_conversation(current, conversation_id)
+            and current.context.get("conversation_id")
+            == connection_session.context.get("conversation_id")
+        ):
+            # Replay the *result* map, not the raw run map: it already has
+            # each entry's provenance settled, and re-deciding it here would
+            # stamp the user's seeded attachments as run output.
+            replacement = _FileIndex(current.context.setdefault("files", {}))
+            for name, meta in list(index.target.items()):
+                _merge_one_file(
+                    replacement, name, meta, run_session_id, preserve=True
+                )
+    except Exception as e:
+        # Losing the merge costs a download, not the run's result -- but this
+        # is the branch that fires on unexpected artifact loss, so it carries
+        # everything a user's report would have to be matched against.
+        logger.warning(
+            "Could not merge files from run %s into connection session %s "
+            "(%s file(s) affected): %s",
+            sanitize_for_logging(str(run_session_id)),
+            sanitize_for_logging(str(connection_session_id)),
+            len(files) if isinstance(files, dict) else "unknown",
+            sanitize_for_logging(str(e)),
+        )
+
+
+# Stamped onto every entry the merge writes, so a later merge can tell its own
+# earlier output from a file the user attached. Only the merge's own entries
+# take part in advertised-name matching: a run artifact that merely shares an
+# advertised name with an attachment is a different file, and must not take
+# over the slot the attachment holds.
+_MERGED_FROM_RUN = "_merged_from_run"
+
+# Stamped onto the copies ``_seed_run_session_files`` puts into a run's map, so
+# the merge can tell the connection's own files -- riding back out of a run
+# that did not produce them -- from what the run actually produced. Deciding
+# that from the target map instead would misread them whenever the target is
+# empty, e.g. when the session object was replaced before the merge ran.
+_SEEDED_FROM_CONNECTION = "_seeded_from_connection"
+_PROVENANCE_MARKERS = (_MERGED_FROM_RUN, _SEEDED_FROM_CONNECTION)
+
+
+def _same_conversation(session, conversation_id) -> bool:
+    """Whether ``session`` is still on the conversation a run belonged to.
+
+    A connection is "still there" if the run's conversation is one it started a
+    run in and has not navigated away from since -- see ``_RUN_CONVERSATIONS``.
+    That record, not the session's own ``conversation_id``, is what answers for
+    a tracked run: only a turn running against the connection session writes
+    that field, and a tracked run never does, so it holds whatever the last New
+    Chat minted and would read a connection sitting on this very conversation as
+    one that had moved away.
+
+    Unknown on either side cannot prove a mismatch, so it does not block --
+    ``create_session`` does not set a ``conversation_id``, and denying there
+    would drop the artifacts of a first turn that never left its conversation.
+    It is logged, because an unprovable check is worth seeing in the record.
+    """
+    if conversation_id and conversation_id in session.context.get(
+        _RUN_CONVERSATIONS, []
+    ):
+        return True
+    current = session.context.get("conversation_id")
+    if not conversation_id or not current:
+        logger.warning(
+            "Cannot confirm the connection is still on run conversation %s "
+            "(session records %s); merging without the isolation check",
+            sanitize_for_logging(str(conversation_id)),
+            sanitize_for_logging(str(current)),
+        )
+        return True
+    return str(current) == str(conversation_id)
+
+
+def _signature(meta):
+    """A hashable stand-in for an entry, ignoring the provenance stamp.
+
+    Equality is one of the three identity signals, and the connection map is
+    unbounded, so comparing entry-by-entry would make every miss a full scan
+    with a dict copy per comparison. Hash the content once instead.
+    """
+    bare = _strip_provenance(meta)
+    try:
+        return json.dumps(bare, sort_keys=True, default=str)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return repr(bare)
+
+
+def _strip_provenance(meta):
+    """An entry as it read before the merge or the seed marked it."""
+    if isinstance(meta, dict) and any(m in meta for m in _PROVENANCE_MARKERS):
+        return {k: v for k, v in meta.items() if k not in _PROVENANCE_MARKERS}
+    return meta
+
+
+class _FileIndex:
+    """A connection file map, indexed for repeated same-file lookups.
+
+    The map grows for the life of the socket and every merge asks the same two
+    questions of it, so scanning it per artifact makes a merge quadratic. Build
+    the indexes once and keep them current as entries land.
+    """
+
+    def __init__(self, target: dict):
+        self.target = target
+        self.by_key = {}
+        self.by_advertised = {}
+        self.by_signature = {}
+        for name, meta in target.items():
+            self._index(name, meta)
+
+    def _index(self, name, meta) -> None:
+        self.by_signature.setdefault(_signature(meta), name)
+        if not isinstance(meta, dict):
+            return
+        key = meta.get("key")
+        if key:
+            self.by_key.setdefault(key, name)
+        advertised = meta.get("original_filename")
+        if advertised and meta.get(_MERGED_FROM_RUN):
+            self.by_advertised.setdefault(advertised, name)
+
+    def find(self, meta, by_advertised_name=True):
+        """The name under which this same file is already held, if it is.
+
+        ``by_advertised_name`` is off for an entry this connection seeded: it
+        is the user's own file riding back out of a run that did not produce
+        it, and must never take over an artifact's slot by advertising the
+        same name.
+
+        Order matters. A shared storage key is proof. Then plain equality --
+        the copy this connection seeded coming home -- which must be asked
+        *before* the advertised name: ``_seed_run_session_files`` copies the
+        user's attachments into every run map, and an attachment that merely
+        advertises the same name as some earlier artifact would otherwise take
+        that artifact's slot. Matching itself by equality first means an
+        incoming entry only ever reaches advertised-name matching when it is
+        genuinely new to this map, i.e. run output.
+        """
+        if isinstance(meta, dict):
+            key = meta.get("key")
+            if key and key in self.by_key:
+                return self.by_key[key]
+        held_name = self.by_signature.get(_signature(meta))
+        if held_name is not None:
+            return held_name
+        if by_advertised_name and isinstance(meta, dict):
+            advertised = meta.get("original_filename")
+            if advertised and advertised in self.by_advertised:
+                return self.by_advertised[advertised]
+        return None
+
+    def put(self, name, meta) -> None:
+        """Install ``meta`` at ``name``, retiring whatever it replaces.
+
+        The outgoing entry's key and advertised name must leave the indexes
+        with it. Leaving a superseded key indexed would make a later artifact
+        in the same run map look like this already-updated name and be dropped
+        instead of filed.
+        """
+        outgoing = self.target.get(name)
+        if name in self.target:
+            signature = _signature(outgoing)
+            if self.by_signature.get(signature) == name:
+                del self.by_signature[signature]
+        if isinstance(outgoing, dict):
+            key = outgoing.get("key")
+            if key and self.by_key.get(key) == name:
+                del self.by_key[key]
+            advertised = outgoing.get("original_filename")
+            if advertised and self.by_advertised.get(advertised) == name:
+                del self.by_advertised[advertised]
+        self.target[name] = meta
+        self._index(name, meta)
+
+    def is_from_run(self, name) -> bool:
+        """Whether the entry at ``name`` was written by a merge."""
+        held = self.target.get(name)
+        return isinstance(held, dict) and bool(held.get(_MERGED_FROM_RUN))
+
+
+def _merge_one_file(
+    index: _FileIndex, name: str, meta, run_session_id=None, preserve=False
+) -> None:
+    """Add one run artifact to a file map without displacing another file.
+
+    Some slot already holds *this* file: refresh it in place, wherever it ended
+    up -- which keeps the seed/merge round trip idempotent and stops a tool
+    that re-emits its output every turn from piling up a copy per turn. The
+    scan comes first, before the name is even checked: an artifact that already
+    sits under a suffixed key must not also take the plain name, or
+    ``_resolve_session_file`` sees one file twice and reports it missing.
+
+    Otherwise the name is free and it is taken, or two different files want one
+    label and neither may be dropped: the slot's occupant keeps the plain name
+    and the newcomer takes a suffixed key from the same helper the artifact
+    ingest path uses, so session keys stay in one format that
+    ``sanitize_filename`` round-trips.
+
+    ``preserve`` copies each entry's provenance verbatim instead of deciding
+    it, for replaying an already-merged map onto a replacement session.
+
+    Provenance comes from the seed marker the entry carries, not from the map
+    it is landing in. Every file the connection owns is seeded into each run
+    and merged back, and reading provenance off the target would mark those
+    copies as run output whenever the target cannot contradict it -- an empty
+    one, say, because the session object was replaced. They would then join
+    advertised-name matching, and the next same-named artifact would take the
+    attachment's slot, which is exactly what the stamp exists to prevent.
+    """
+    from_run = not (
+        isinstance(meta, dict) and meta.get(_SEEDED_FROM_CONNECTION)
+    )
+    held_name = index.find(meta, by_advertised_name=from_run)
+    if held_name is not None:
+        # The key may have moved (the ingest path re-uploads a re-emitted
+        # artifact), so take the newer ref rather than keeping one that points
+        # at superseded bytes. A file the connection seeded keeps whatever
+        # provenance the slot already had.
+        if preserve:
+            refreshed = meta
+        elif from_run:
+            refreshed = _stamp(meta, True)
+        else:
+            refreshed = _stamp(meta, index.is_from_run(held_name))
+        index.put(held_name, refreshed)
+        return
+    if name not in index.target:
+        index.put(name, meta if preserve else _stamp(meta, from_run))
+        return
+    assigned = FileManager.unique_key(index.target, name)
+    # The one merge outcome that changes what the user sees, and the
+    # ``files_update`` frame announcing it is deferred -- so leave a trace.
+    logger.info(
+        "Run %s produced %s, which collides with a different file already in "
+        "the session; filed it under %s",
+        sanitize_for_logging(str(run_session_id)),
+        sanitize_for_logging(name),
+        sanitize_for_logging(assigned),
+    )
+    index.put(assigned, meta if preserve else _stamp(meta, from_run))
+
+
+def _stamp(meta, from_run: bool):
+    """``meta`` marked as run output, or explicitly not.
+
+    The seed marker never survives into the connection map; it only ever
+    described the copy's trip through a run session.
+    """
+    bare = _strip_provenance(meta)
+    if not isinstance(bare, dict) or not from_run:
+        return bare
+    return {**bare, _MERGED_FROM_RUN: True}
 
 
 async def _release_finished_run(
@@ -182,6 +536,8 @@ async def _release_finished_run(
     session_id,
     conversation_id,
     user_email,
+    *,
+    connection_session_id,
 ):
     """Free what a finished run owned (issue #884).
 
@@ -199,6 +555,13 @@ async def _release_finished_run(
     """
     try:
         if session_id is not None:
+            # Before the session goes: hand its file map back to the
+            # connection, which outlives the run and is what a download frame
+            # searches first (issue #953).
+            if connection_session_id is not None:
+                await _merge_run_session_files(
+                    chat_service, session_id, connection_session_id, conversation_id
+                )
             await chat_service.end_session(session_id)
             # end_session only marks the session inactive. For a connection's
             # session that is right -- it is reused for the life of the socket
@@ -275,8 +638,146 @@ def _download_session_candidates(run_registry, session_id, user_email: str, data
     return candidates
 
 
+# Download failures, most worth showing the user first. One download frame is
+# tried against several candidate sessions, and the reply the user sees should
+# be the one that says something about *their* file: a candidate session that
+# no longer exists says nothing at all, so it must never mask a real lookup or
+# storage failure from another candidate (issue #953). Ranking on the
+# machine-readable code rather than the display text keeps this independent of
+# how the messages are worded.
+# ``None`` is the slot an unrecognised code takes: it may name a real problem,
+# but not one we can claim is about this file, so it sorts below every known
+# answer and above "no session". Giving it a rank of its own (rather than
+# sharing one) keeps the choice independent of the order candidates are tried.
+_DOWNLOAD_ERROR_PRIORITY = (
+    DownloadError.BAD_REQUEST.value,
+    DownloadError.NOT_FOUND.value,
+    DownloadError.STORAGE.value,
+    None,
+    DownloadError.NO_SESSION.value,
+)
+_DOWNLOAD_UNKNOWN_RANK = _DOWNLOAD_ERROR_PRIORITY.index(None)
+
+
+def _download_error_rank(response: dict) -> int:
+    """Rank a failed download reply; lower is more worth showing the user."""
+    code = response.get("error_code") or ""
+    try:
+        return _DOWNLOAD_ERROR_PRIORITY.index(code)
+    except ValueError:
+        return _DOWNLOAD_UNKNOWN_RANK
+
+
+async def _resolve_download(chat_service, candidates, filename, user_email, s3_key):
+    """Try each candidate session for one file; return the best reply.
+
+    Stops at the first success. When every candidate fails, returns the most
+    informative failure rather than whichever happened to come last -- the loop
+    used to keep the last, so a reaped run session's "no session" overwrote the
+    connection session's accurate "file not found".
+    """
+    best = None
+    for candidate_session_id in candidates:
+        attempt = await chat_service.handle_download_file(
+            session_id=candidate_session_id,
+            filename=filename,
+            user_email=user_email,
+            s3_key=s3_key,
+        )
+        if not attempt.get("error"):
+            return attempt
+        if best is None or _download_error_rank(attempt) < _download_error_rank(best):
+            best = attempt
+    return best
+
+
+# Conversations whose tracked runs this connection started, since the last time
+# the user navigated. A run's artifacts come home only if its conversation is
+# still one of them, and New Chat / conversation restore clear the record. A
+# single ``conversation_id`` cannot stand in for this: the connection session's
+# own id is written only by a turn that runs *against* it, which a tracked run
+# never does, and overwriting it per run would make two runs in two
+# conversations last-writer-wins -- the earlier one's artifacts dropped.
+_RUN_CONVERSATIONS = "run_conversations"
+
+# A connection cannot navigate faster than it can start runs, so this only ever
+# has to hold the conversations of runs in flight plus a little history. The cap
+# is what keeps a long-lived socket from growing the list without bound.
+_MAX_RUN_CONVERSATIONS = 64
+
+# ``create_session`` overwrites whatever is stored under the id, so two runs
+# starting at once on a connection with no session yet would each install one
+# and the loser's merge would write into a discarded object. The get-or-create
+# below is short and never blocks on I/O, so one lock for the process costs
+# nothing and removes the window.
+_connection_session_lock = asyncio.Lock()
+
+
+async def _ensure_connection_session(chat_service, connection_session_id, user_email):
+    """The connection's session, created if this connection has none yet.
+
+    A session is otherwise created lazily, by the first turn that runs against
+    it -- and on a connection whose every turn is a tracked run there is no such
+    turn, because a tracked run executes against its own session. Nothing shows
+    until the run ends and :func:`_merge_run_session_files` looks for somewhere
+    to put the artifacts, finds no session, and reads the absence as a closed
+    socket (issue #953 follow-up): the artifacts are dropped, and the download
+    answers "Session or file manager not available" because the first candidate
+    session it tries is that same missing one.
+
+    Returns ``None`` if the session could not be created -- a ``SessionStart``
+    hook may deny it. That costs the merge, not the run: the caller carries on
+    and seeds the run session regardless.
+    """
+    async with _connection_session_lock:
+        session = await chat_service.session_repository.get(connection_session_id)
+        if session is not None:
+            return session
+        try:
+            return await chat_service.create_session(
+                connection_session_id, user_email
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not create connection session %s; a tracked run's files "
+                "will not be merged back: %s",
+                sanitize_for_logging(str(connection_session_id)),
+                sanitize_for_logging(str(e)),
+            )
+            return None
+
+
+def _record_run_conversation(connection_session, conversation_id) -> None:
+    """Note that this connection started a run in ``conversation_id``."""
+    if connection_session is None or not conversation_id:
+        return
+    known = connection_session.context.setdefault(_RUN_CONVERSATIONS, [])
+    if conversation_id in known:
+        return
+    known.append(conversation_id)
+    if len(known) > _MAX_RUN_CONVERSATIONS:
+        del known[:-_MAX_RUN_CONVERSATIONS]
+
+
+def forget_run_conversations(session) -> None:
+    """Drop the record when the user navigates away.
+
+    New Chat and conversation restore are the two things that move a connection
+    off the conversations its runs belong to. New Chat installs a fresh Session
+    (so the record goes with the old one); restore keeps the object, so it has
+    to be cleared by hand.
+    """
+    if session is not None:
+        session.context.pop(_RUN_CONVERSATIONS, None)
+
+
 async def _seed_run_session_files(
-    chat_service, connection_session_id, run_session_id, user_email: str
+    chat_service,
+    connection_session_id,
+    run_session_id,
+    user_email: str,
+    *,
+    conversation_id: Optional[str] = None,
 ) -> None:
     """Give a tracked run's session the files attached to the connection.
 
@@ -285,19 +786,31 @@ async def _seed_run_session_files(
     share one history object), which would otherwise start with no file map at
     all, making a just-attached file invisible to the very turn that was sent
     to act on it.
+
+    Also creates the connection session when this connection has none yet, and
+    records the conversation the run belongs to, so that the merge at the end of
+    the run has somewhere to put the artifacts and can tell it is still the
+    right place to put them.
     """
     if run_session_id == connection_session_id:
         return
+    connection_session = await _ensure_connection_session(
+        chat_service, connection_session_id, user_email
+    )
     try:
-        connection_session = await chat_service.session_repository.get(
-            connection_session_id
-        )
-        files = (connection_session.context.get("files") if connection_session else None)
+        _record_run_conversation(connection_session, conversation_id)
+        files = connection_session.context.get("files") if connection_session else None
         run_session = await chat_service.session_repository.get(run_session_id)
         if run_session is None:
             run_session = await chat_service.create_session(run_session_id, user_email)
         if files:
-            run_session.context.setdefault("files", {}).update(dict(files))
+            run_session.context.setdefault("files", {}).update({
+                name: (
+                    {**meta, _SEEDED_FROM_CONNECTION: True}
+                    if isinstance(meta, dict) else meta
+                )
+                for name, meta in files.items()
+            })
     except Exception as e:  # pragma: no cover - defensive
         # A missing file map must not stop the run from starting; the turn
         # simply behaves as it did before this seeding existed.
@@ -1285,7 +1798,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     # map across. Copied, not shared, so the run and the
                     # connection cannot mutate each other's state.
                     await _seed_run_session_files(
-                        chat_service, session_id, turn_session_id, user_email
+                        chat_service,
+                        session_id,
+                        turn_session_id,
+                        user_email,
+                        conversation_id=run_record.conversation_id,
                     )
 
                     async def turn_update_callback(
@@ -1565,6 +2082,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                         run_session_id,
                                         run_conversation_id,
                                         user_email,
+                                        connection_session_id=session_id,
                                     )
                                 )
                             )
@@ -1593,17 +2111,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 # run's output. Try the connection session first (the common
                 # case and the cheapest), then the sessions of this user's runs.
                 filename = data.get("filename", "")
-                response = None
-                for candidate_session_id in _download_session_candidates(
-                    run_registry, session_id, user_email, data
-                ):
-                    response = await chat_service.handle_download_file(
-                        session_id=candidate_session_id,
-                        filename=filename,
-                        user_email=user_email,
-                    )
-                    if not response.get("error"):
-                        break
+                # A client that knows the file's storage key sends it, and the
+                # key decides. Names are only labels and two files can wear
+                # labels that reduce to the same stored name, so a control with
+                # the key must not have its bytes chosen by name matching.
+                s3_key = data.get("s3_key")
+                response = await _resolve_download(
+                    chat_service,
+                    _download_session_candidates(
+                        run_registry, session_id, user_email, data
+                    ),
+                    filename,
+                    user_email,
+                    s3_key,
+                )
                 # Echo the run identity the client addressed so a client that
                 # routes frames by conversation can place the reply.
                 if response is not None:
@@ -1623,6 +2144,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Release MCP sessions for the current conversation before restoring
                 session = await chat_service.session_repository.get(session_id)
                 if session:
+                    # The connection is moving to another conversation, so the
+                    # runs it started before this point no longer have a home
+                    # here. New Chat gets this for free (it installs a fresh
+                    # Session); restore keeps the object, so say it.
+                    forget_run_conversations(session)
                     old_conv_id = session.context.get("conversation_id")
                     # Issue #884: navigation controls what is *visible*, not
                     # what is allowed to execute. Releasing the MCP sessions of

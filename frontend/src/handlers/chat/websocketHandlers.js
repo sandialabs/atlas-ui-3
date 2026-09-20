@@ -636,7 +636,11 @@ export function createWebSocketHandler(deps) {
             triggerFileDownload(data.filename, data.content_base64)
           } else if (data.error) {
             console.error('File download error:', data.error)
-            // Could show a toast notification here
+            addMessage({
+              role: 'system',
+              content: `Error: could not download ${data.filename || 'the file'} -- ${data.error}`,
+              timestamp: new Date().toISOString(),
+            })
           }
           break
         case 'file_attach':

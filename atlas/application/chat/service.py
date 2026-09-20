@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from enum import Enum
 from typing import (
     Any,
     Awaitable,
@@ -46,6 +47,23 @@ from .utilities.conversation_loader import load_messages_into_history
 from .utilities.interrupted_turn import close_open_turn
 
 logger = logging.getLogger(__name__)
+
+
+class DownloadError(str, Enum):
+    """Why a download reply failed, as a stable machine-readable code.
+
+    The websocket handler tries several candidate sessions for one file and has
+    to pick the most useful failure to show. Ranking on the human-readable
+    ``error`` text would make that choice depend on display copy: reword a
+    string and every candidate ties, silently reinstating the misleading error
+    of issue #953. The code is what callers compare; the text stays free to
+    change.
+    """
+
+    BAD_REQUEST = "bad_request"
+    NO_SESSION = "no_session"
+    NOT_FOUND = "not_found"
+    STORAGE = "storage"
 
 # Distinguishes "the client did not send this field" from "the client sent
 # null"; the two mean different things for the conversation's workspace binding.
@@ -1029,38 +1047,86 @@ class ChatService:
                 "error": str(e)
             }
 
+    def _resolve_session_file(
+        self, session: Session, filename: str, s3_key: Optional[str] = None
+    ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Find the session file entry a download request names.
+
+        The chat UI renders a download control for the name a tool advertised
+        -- an artifact ``name``, a ``meta_data.output_files`` entry -- while
+        storage sanitizes names on the way in and keys the session map by the
+        sanitized form. An exact lookup therefore misses, leaving the file
+        downloadable from the library (which fetches by S3 key) while chat
+        silently has nothing to offer. ``resolve_session_file`` reconciles the
+        two; the canvas resolves display names through the same function, so
+        the two views of the session cannot drift apart.
+
+        A caller that knows the file's storage key says so, and the key
+        answers directly -- a name is only ever a label, and two entries can
+        wear labels that reduce to the same thing, so a control that has the
+        key should never have its bytes chosen by name matching. The key must
+        still belong to an entry of *this* session, which is what keeps it a
+        disambiguator rather than a way to reach arbitrary storage.
+        """
+        files = session.context.get("files", {}) or {}
+        if isinstance(s3_key, str) and s3_key:
+            for name, meta in files.items():
+                if isinstance(meta, dict) and meta.get("key") == s3_key:
+                    return name, meta
+            return None, None
+        return file_processor.resolve_session_file(
+            files,
+            filename,
+            self.file_manager.sanitize_filename if self.file_manager else None,
+        )
+
     async def handle_download_file(
         self,
         session_id: UUID,
         filename: str,
-        user_email: Optional[str]
+        user_email: Optional[str],
+        s3_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Download a file by original filename (within session context)."""
+        """Download a session file, by its storage key when the caller has one."""
+        # ``filename`` arrives straight from a client JSON frame, so it can be
+        # any JSON value. Reject anything that is not a non-empty string here,
+        # where it still becomes an ordinary error reply, rather than letting a
+        # dict lookup or the sanitizer raise out of the websocket handler.
+        if not isinstance(filename, str) or not filename:
+            return {
+                "type": MessageType.FILE_DOWNLOAD.value,
+                "filename": filename if isinstance(filename, str) else "",
+                "error": "A filename is required",
+                "error_code": DownloadError.BAD_REQUEST.value,
+            }
         session = await self.session_repository.get(session_id)
         if not session or not self.file_manager or not user_email:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": "Session or file manager not available"
+                "error": "Session or file manager not available",
+                "error_code": DownloadError.NO_SESSION.value,
             }
-        ref = session.context.get("files", {}).get(filename)
+        stored_name, ref = self._resolve_session_file(session, filename, s3_key)
         if not ref:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": "File not found in session"
+                "error": "File not found in session",
+                "error_code": DownloadError.NOT_FOUND.value,
             }
         try:
             content_b64 = await self.file_manager.get_file_content(
                 user_email=user_email,
-                filename=filename,
+                filename=stored_name,
                 s3_key=ref.get("key")
             )
             if not content_b64:
                 return {
                     "type": MessageType.FILE_DOWNLOAD.value,
                     "filename": filename,
-                    "error": "Unable to retrieve file content"
+                    "error": "Unable to retrieve file content",
+                    "error_code": DownloadError.STORAGE.value,
                 }
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
@@ -1068,11 +1134,19 @@ class ChatService:
                 "content_base64": content_b64
             }
         except Exception as e:
-            logger.error(f"Download failed for {filename}: {e}")
+            # The exception text routinely names the bucket, object key,
+            # endpoint host and principal. It belongs in the server log, not in
+            # a frame sent to the browser.
+            logger.error(
+                "Download failed for %s: %s",
+                sanitize_for_logging(filename),
+                sanitize_for_logging(str(e)),
+            )
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": str(e)
+                "error": "Unable to retrieve file content",
+                "error_code": DownloadError.STORAGE.value,
             }
 
     async def _update_session_from_tool_results(

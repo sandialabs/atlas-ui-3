@@ -19,6 +19,10 @@ export function ToastProvider({ children }) {
       kind: toast.kind || 'info',
       message: toast.message || '',
       duration: toast.duration ?? DEFAULT_DURATION_MS,
+      // Optional inline action, e.g. { label: 'Undo', onClick }. Rendered as a
+      // full-size button so it is usable one-handed on a phone or in a car
+      // mount; the toast dismisses itself once the action runs.
+      action: toast.action || null,
     }
     setToasts((prev) => [...prev, entry])
     if (entry.duration > 0) {
@@ -51,7 +55,7 @@ export function ToastProvider({ children }) {
 }
 
 function ToastItem({ toast, onDismiss }) {
-  const { kind, message } = toast
+  const { kind, message, action } = toast
   const palette =
     kind === 'success'
       ? 'bg-green-900/90 border-green-600 text-green-100'
@@ -66,10 +70,26 @@ function ToastItem({ toast, onDismiss }) {
     >
       <Icon className="w-4 h-4 mt-0.5 flex-shrink-0" />
       <div className="flex-1 text-sm whitespace-pre-wrap break-words">{message}</div>
+      {action && (
+        <button
+          type="button"
+          data-testid="toast-action"
+          onClick={() => {
+            try {
+              action.onClick?.()
+            } finally {
+              onDismiss()
+            }
+          }}
+          className="ml-1 px-3 min-h-[40px] rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100 flex-shrink-0"
+        >
+          {action.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={onDismiss}
-        className="ml-1 text-gray-400 hover:text-gray-200"
+        className="ml-1 -m-1 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center text-gray-400 hover:text-gray-200"
         aria-label="Dismiss notification"
       >
         <X className="w-4 h-4" />

@@ -18,6 +18,8 @@ from atlas.application.chat.runs.launcher import (
     discover_launch_options,
     execute_launch_discovery_tool,
     execute_launch_tool,
+    get_child_result,
+    get_child_runs,
     launch_sub_conversation,
     launch_tool_enabled,
     resolve_workspace,
@@ -26,7 +28,10 @@ from atlas.application.chat.runs.registry import RunRegistry, RunStatus, reset_r
 from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_TOOL_SCHEMAS,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+    GET_RUNS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
+    RESULT_TOOL_NAME,
     atlas_tool_schemas,
     is_atlas_tool,
 )
@@ -922,18 +927,20 @@ async def test_the_three_launch_gates_agree_on_the_same_flag():
             tool_manager=manager, config_manager=config_manager
         )
 
+        gated_names = [LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME]
         assert launch_tool_enabled(settings) is enabled
-        # Schema gate.
         offered = [
             s["function"]["name"]
-            for s in atlas_tool_schemas([LAUNCH_TOOL_NAME], launch_enabled=enabled)
+            for s in atlas_tool_schemas(gated_names, launch_enabled=enabled)
         ]
-        assert offered == (["atlas_discover_launch_options", LAUNCH_TOOL_NAME] if enabled else [])
-        # Authorization gate.
-        allowed = await service.filter_authorized_tools(
-            [LAUNCH_TOOL_NAME], "user@example.com"
+        expected = (
+            [DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME]
+            if enabled
+            else []
         )
-        assert allowed == (["atlas_discover_launch_options", LAUNCH_TOOL_NAME] if enabled else [])
+        assert offered == expected
+        allowed = await service.filter_authorized_tools(gated_names, "user@example.com")
+        assert allowed == expected
 
 
 @pytest.mark.asyncio
@@ -960,6 +967,61 @@ async def test_execution_refuses_the_tool_when_the_deployment_disables_it(monkey
             arguments={"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
         ),
         {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
+    )
+
+    assert result.success is False
+    assert "disabled" in result.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", [GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME])
+async def test_observation_dispatches_through_the_manager(tool_name, monkeypatch):
+    from atlas.modules.mcp_tools import mcp_execution
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    set_current_run(parent.run_id, parent.conversation_id)
+    monkeypatch.setattr(
+        mcp_execution,
+        "_client",
+        lambda: SimpleNamespace(config_manager=SimpleNamespace(app_settings=_settings())),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-1",
+            name=tool_name,
+            arguments={"run_id": child.run_id} if tool_name == RESULT_TOOL_NAME else {},
+        ),
+        {"user_email": "user@example.com"},
+    )
+
+    assert result.success is True
+    assert tool_name == GET_RUNS_TOOL_NAME or child.run_id in result.content
+
+
+@pytest.mark.asyncio
+async def test_observation_dispatch_refuses_when_disabled(monkeypatch):
+    from atlas.modules.mcp_tools import mcp_execution
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    monkeypatch.setattr(
+        mcp_execution,
+        "_client",
+        lambda: SimpleNamespace(
+            config_manager=SimpleNamespace(app_settings=_settings(feature_atlas_launch_enabled=False))
+        ),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-1", name=GET_RUNS_TOOL_NAME, arguments={}),
+        {"user_email": "user@example.com"},
     )
 
     assert result.success is False
@@ -1004,3 +1066,179 @@ async def test_an_admin_mandated_tool_still_prompts_inside_the_child(monkeypatch
     assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is False
     for service in factory.services:
         service.release.set()
+
+
+def test_parent_can_list_only_its_direct_children():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    other = registry.start(
+        conversation_id="other", user_email="user@example.com", parent_run_id="other-parent", depth=1
+    )
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    runs = get_child_runs({"user_email": "user@example.com"})
+
+    assert [run["run_id"] for run in runs] == [child.run_id]
+    assert other.run_id not in [run["run_id"] for run in runs]
+
+
+def test_parent_can_list_children_from_a_later_turn_in_the_same_conversation():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(parent.run_id, RunStatus.COMPLETED)
+    later_turn = registry.start(conversation_id="parent", user_email="user@example.com")
+    set_current_run(later_turn.run_id, later_turn.conversation_id)
+
+    runs = get_child_runs({"user_email": "user@example.com"})
+
+    assert [run["run_id"] for run in runs] == [child.run_id]
+
+
+@pytest.mark.asyncio
+async def test_result_returns_persisted_assistant_content_only_for_a_child():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: {
+                "messages": [
+                    {"role": "user", "content": "task"},
+                    {"role": "assistant", "content": "answer"},
+                ]
+            }
+        )
+    )
+
+    result = await get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
+
+    assert result["status"] == "completed"
+    assert result["result"] == "answer"
+    assert result["result_status"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_result_reads_a_child_from_a_later_turn_in_the_same_conversation():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(parent.run_id, RunStatus.COMPLETED)
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    later_turn = registry.start(conversation_id="parent", user_email="user@example.com")
+    set_current_run(later_turn.run_id, later_turn.conversation_id)
+
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: {
+                "messages": [{"role": "assistant", "content": "answer"}]
+            }
+        )
+    )
+
+    result = await get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
+
+    assert result["status"] == "completed"
+    assert result["result"] == "answer"
+    assert result["result_status"] == "available"
+
+
+@pytest.mark.parametrize(
+    "status",
+    [RunStatus.RUNNING, RunStatus.WAITING_FOR_INPUT, RunStatus.FAILED, RunStatus.CANCELLED],
+)
+@pytest.mark.asyncio
+async def test_result_reports_non_completed_status_without_loading_history(status):
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, status)
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    result = await get_child_result(
+        child.run_id,
+        {"user_email": "user@example.com"},
+        SimpleNamespace(conversation_repository=None),
+    )
+
+    assert result["status"] == status.value
+    assert result["result"] is None
+
+
+@pytest.mark.asyncio
+async def test_result_rejects_unknown_and_foreign_run_ids():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    foreign = registry.start(
+        conversation_id="foreign", user_email="other@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    with pytest.raises(LaunchRefused):
+        await get_child_result(foreign.run_id, {"user_email": "user@example.com"})
+    with pytest.raises(LaunchRefused):
+        await get_child_result("missing", {"user_email": "user@example.com"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "conversation,expected",
+    [
+        (None, "unavailable"),
+        ({"messages": []}, "empty"),
+    ],
+)
+async def test_result_status_distinguishes_unavailable_and_empty(conversation, expected):
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    set_current_run(parent.run_id, parent.conversation_id)
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: conversation
+        )
+    )
+
+    result = await get_child_result(child.run_id, {"user_email": "user@example.com"}, factory)
+
+    assert result["result_status"] == expected
+
+
+@pytest.mark.asyncio
+async def test_result_status_distinguishes_unreadable_repository():
+    registry = _install_registry()
+    parent = registry.start(conversation_id="parent", user_email="user@example.com")
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    set_current_run(parent.run_id, parent.conversation_id)
+
+    def _fail(*args):
+        raise RuntimeError("db unavailable")
+
+    result = await get_child_result(
+        child.run_id,
+        {"user_email": "user@example.com"},
+        SimpleNamespace(conversation_repository=SimpleNamespace(get_conversation=_fail)),
+    )
+
+    assert result["result_status"] == "unreadable"
+    assert result["result_error"]

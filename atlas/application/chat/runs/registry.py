@@ -135,6 +135,10 @@ class RunRecord:
     # children, and ``depth`` is what bounds recursion: a launched run is one
     # deeper than the run that launched it.
     parent_run_id: Optional[str] = None
+    # The conversation that launched this run. Observation tools are scoped to
+    # the conversation, not just the specific parent run, so later turns can
+    # still see children launched earlier from the same conversation.
+    parent_conversation_id: Optional[str] = None
     depth: int = 0
     # The exact frame that asked for input, kept so it can be re-sent.
     # A request emitted while the user was looking at another conversation (or
@@ -179,6 +183,7 @@ class RunRegistry:
         self._max_concurrent = max_concurrent_runs_per_user
         self._runs: Dict[str, RunRecord] = {}
         self._children: Dict[str, List[str]] = {}
+        self._conversation_children: Dict[str, List[str]] = {}
         self._listeners: Dict[str, List[Callable[[RunRecord], None]]] = {}
 
     # ------------------------------------------------------------------
@@ -247,6 +252,19 @@ class RunRegistry:
             and (include_terminal or not self._runs[child_id].is_terminal)
         ]
 
+    def children_of_conversation(
+        self, conversation_id: Optional[str], *, include_terminal: bool = False
+    ) -> List[RunRecord]:
+        """Runs launched from ``conversation_id`` across all of its turns."""
+        if not conversation_id:
+            return []
+        return [
+            self._runs[child_id]
+            for child_id in self._conversation_children.get(conversation_id, [])
+            if child_id in self._runs
+            and (include_terminal or not self._runs[child_id].is_terminal)
+        ]
+
     def active_for_user(self, user_email: str) -> List[RunRecord]:
         return [
             r
@@ -287,6 +305,7 @@ class RunRegistry:
         session_id: Optional[UUID] = None,
         steering: Optional[Any] = None,
         parent_run_id: Optional[str] = None,
+        parent_conversation_id: Optional[str] = None,
         depth: int = 0,
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
@@ -306,6 +325,10 @@ class RunRegistry:
         if len(active) >= self._max_concurrent:
             raise ConcurrencyLimitError(self._max_concurrent)
 
+        if parent_conversation_id is None and parent_run_id:
+            parent = self.get(parent_run_id)
+            parent_conversation_id = None if parent is None else parent.conversation_id
+
         record = RunRecord(
             run_id=str(uuid4()),
             conversation_id=conversation_id,
@@ -315,11 +338,16 @@ class RunRegistry:
             session_id=session_id or uuid4(),
             steering=steering,
             parent_run_id=parent_run_id,
+            parent_conversation_id=parent_conversation_id,
             depth=max(0, int(depth or 0)),
         )
         self._runs[record.run_id] = record
         if record.parent_run_id:
             self._children.setdefault(record.parent_run_id, []).append(record.run_id)
+        if record.parent_conversation_id:
+            self._conversation_children.setdefault(record.parent_conversation_id, []).append(
+                record.run_id
+            )
         logger.info(
             "Run %s started for conversation %s (active runs for user: %d)",
             record.run_id,
@@ -462,6 +490,12 @@ class RunRegistry:
                 siblings.remove(run_id)
             if not siblings:
                 self._children.pop(record.parent_run_id, None)
+        if record.parent_conversation_id:
+            siblings = self._conversation_children.get(record.parent_conversation_id, [])
+            if run_id in siblings:
+                siblings.remove(run_id)
+            if not siblings:
+                self._conversation_children.pop(record.parent_conversation_id, None)
         self._children.pop(run_id, None)
 
     def reap_terminal(self, now: Optional[float] = None) -> int:
