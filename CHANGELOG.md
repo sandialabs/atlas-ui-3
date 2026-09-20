@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### PR #TBD - 2026-09-20
+### PR #962 - 2026-09-20
 - Reopening a conversation mid-stream shows the assistant reply from its beginning instead of the token that happened to be current on arrival (issue #957, the remaining gap #956 noted). The registry now holds the token segment a tracked run is streaming right now -- recorded once per frame at the notifier chokepoint, keyed by the ambient run, cleared when a segment closes or the run ends -- and the reopen paths serve it: `GET /api/conversations/{id}` and `restore_conversation` carry `streaming_text` in the live in-flight view (which is what a second tab or a reload sees, since a run's frames stay bound to the socket that started it), and `restore_conversation` additionally replays it as a run-tagged `token_stream` frame with `replay: true` so the same tab continues the live stream unbroken on top of it. The partial bubble is marked "answer in progress -- it will refresh when the run finishes" until the reload-on-run-end replaces it with the stored transcript.
 
 ### PR #956 - 2026-09-20
