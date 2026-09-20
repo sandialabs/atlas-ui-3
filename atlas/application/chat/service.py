@@ -383,7 +383,7 @@ class ChatService:
         else:
             conversation_id = None
         if conversation_id:
-            self._validate_conversation_id_owner(conversation_id, user_email)
+            self.validate_conversation_id_owner(conversation_id, user_email)
             previous_conversation_id = session.context.get("conversation_id")
             session.context["conversation_id"] = conversation_id
             # An empty history re-attempts the load even when the session is
@@ -751,18 +751,25 @@ class ChatService:
             except Exception as e:
                 logger.error("Failed to persist conversation: %s", e, exc_info=True)
 
-    def _validate_conversation_id_owner(
+    def validate_conversation_id_owner(
         self,
         conversation_id: str,
         user_email: Optional[str],
     ) -> None:
         """Reject client-supplied conversation IDs owned by another user.
 
+        Public so the transport can run it *before* admitting a tracked run
+        (issue #958): the service-level check below fires only once the turn
+        is already executing, which is too late to keep run admission honest.
+
         Fails closed when a conversation repository is configured but does
         not expose ``get_conversation_owner``: a repo that cannot answer
         ownership questions cannot be trusted to enforce cross-user
         isolation, so we refuse the client-supplied id rather than letting
-        it through.
+        it through. A conversation that is not stored yet (owner ``None``)
+        is allowed: a minted id has no record to check, and an id another
+        user's run is executing under is the separate in-flight case
+        (PR #956).
         """
         if not user_email:
             logger.warning(

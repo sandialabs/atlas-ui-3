@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-09-08
+Last updated: 2026-09-20
 
 Issue #884.
 
@@ -118,6 +118,22 @@ own yet — the client only learns one when the turn is saved — so the server
 mints one at admission and reports it here. Without that, the first agent turn in
 a new conversation could never be a background run, which is the most common case
 of all.
+
+### Ownership is settled before admission
+
+A chat turn that names a conversation id is only admitted if the id is the
+caller's to use. For a **stored** conversation, the ownership check
+(`ChatService.validate_conversation_id_owner`) runs *before* a run is admitted
+(issue #958): a turn naming a conversation another user saved is refused with an
+`error` frame of type `authorization` ("Conversation not found or access
+denied") and no run record is created. Before that fix the run was admitted
+first — the caller saw `run_started` and `run_status` frames, then the
+authorization failure — leaving a `failed` run in their snapshot for a
+conversation they never owned.
+
+An id that is not stored yet — a minted id, or one whose run is still in flight
+— passes this check; the in-flight variant (claiming a conversation another
+user's run is executing under) is addressed separately in PR #956.
 
 ### Pending approvals are replayed, not lost
 

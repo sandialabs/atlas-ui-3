@@ -615,6 +615,34 @@ def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
     return True
 
 
+def _conversation_access_error(chat_service, conversation_id, user_email):
+    """The error frame refusing a client-supplied conversation id, or None.
+
+    Issue #958: this runs *before* a run is admitted, because the service's
+    own check (the same method) only fires once the turn is already executing
+    -- too late to keep ``run_started`` from announcing a run that then dies
+    on authorization. The frame carries the message the service would have
+    raised, so a refused turn looks the same on the wire whether the store
+    answered the transport or the service; the difference is that no run
+    record exists around it.
+
+    A conversation that is not stored yet is allowed through (a minted id,
+    or a run still in flight); the in-flight variant -- claiming a
+    conversation another user's run is executing under -- is addressed
+    separately in PR #956.
+    """
+    try:
+        chat_service.validate_conversation_id_owner(conversation_id, user_email)
+    except AuthorizationError as e:
+        return {
+            "type": "error",
+            "message": str(e.message if hasattr(e, "message") else e),
+            "error_type": "authorization",
+            "conversation_id": conversation_id,
+        }
+    return None
+
+
 def _download_session_candidates(run_registry, session_id, user_email: str, data: dict):
     """Sessions to search for a downloadable file, most likely first.
 
@@ -1748,6 +1776,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     selected_tools=data.get("selected_tools"),
                     conversation_id=turn_conversation_id,
                 ):
+                    # Issue #958: ownership of a *stored* conversation is
+                    # settled before a run is admitted. The service performs
+                    # the same check once the turn starts, but by then the
+                    # run already exists: `run_started` and `run_status`
+                    # frames have gone out, and the refused turn leaves a
+                    # `failed` run in the caller's snapshot for a conversation
+                    # they never owned. Refusing here keeps the check ahead
+                    # of admission; the error the caller sees is the one the
+                    # service would have raised, just without the run around
+                    # it.
+                    refusal = _conversation_access_error(
+                        chat_service, turn_conversation_id, user_email
+                    )
+                    if refusal is not None:
+                        await websocket.send_json(refusal)
+                        continue
                     try:
                         run_record = run_registry.start(
                             conversation_id=turn_conversation_id,
