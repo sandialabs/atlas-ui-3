@@ -538,6 +538,91 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(result.current.messages[2].type).toBe('system')
   })
 
+  it('refuses when the store is a strict prefix of the view (rewound elsewhere)', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedChat('assistant', 'Clear skies'),
+        storedChat('assistant', 'And humid'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    h.sendMessage.mockClear()
+    // Another tab rewound the conversation: the store is now shorter than
+    // the view. The refresh cannot reconcile a shorter store against the
+    // rows it drops, so it refuses; the caller's full reload takes the
+    // store's copy (review finding on this PR).
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        messages: [loaded.messages[0], loaded.messages[1]],
+        metadata: {},
+      })
+    })
+    expect(ok).toBe(false)
+    expect(h.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps informational system rows the store never persists', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedChat('assistant', 'Clear skies'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    // The view gained a system note the store never persists (server save
+    // mode is the only mode with tracked runs, and these rows never reach
+    // the backend history).
+    dispatchFrame({
+      type: 'intermediate_update',
+      conversation_id: 'conv-1',
+      run_id: 'r1',
+      update_type: 'system_message',
+      data: { message: 'Added report.csv to the session.', subtype: 'file-attached' },
+    })
+    const before = result.current.messages
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: loaded.messages, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    expect(result.current.messages.length).toBe(before.length)
+    expect(result.current.messages[2].type).toBe('system')
+  })
+
+  it('schedules the post-run refresh when the run ends while the view loads', async () => {
+    // The terminal run status can race the open: the GET returns the
+    // in-flight snapshot, then reports the run completed before
+    // loadSavedConversation's bookkeeping runs. The snapshot can be missing
+    // the run's final rows, and no run-end event will arrive afterwards, so
+    // the in_flight flag itself is the refresh obligation (review finding
+    // on this PR).
+    const snapshot = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+      in_flight: true,
+    }
+    dispatchFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'conv-1', status: 'completed' } })
+    const { result } = renderChat()
+    await loadConversation(result, snapshot)
+    expect(result.current.runEndedConversationId).toBeNull()
+    // The grace period the run-end path uses delays the refresh so a stop
+    // that reports cancelled before its interrupted turn is written does
+    // not reload a transcript the save is about to change.
+    await act(async () => { await new Promise(r => setTimeout(r, 2800)) })
+    expect(result.current.runEndedConversationId).toBe('conv-1')
+  })
+
   it('rejects malformed input without touching the view', async () => {
     const loaded = {
       id: 'conv-1',

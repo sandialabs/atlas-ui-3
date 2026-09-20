@@ -27,14 +27,17 @@ const RUN_END_RELOAD_GRACE_MS = 2500
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Row types the live transcript renders that a persisted transcript never
-// contains: agent-loop status lines and tool progress chrome exist only in
-// the view. The joined-run refresh (issue #959) aligns the stored rows
-// against the view past them; without the skip they would break the match
-// and force a full reload, which is exactly what the refresh exists to avoid.
+// contains: agent-loop status lines, tool progress chrome and the
+// informational system notes (file attach notices and the like) exist only
+// in the view -- tracked runs only exist in server save mode, where these
+// rows are never written to the store. The joined-run refresh (issue #959)
+// aligns the stored rows against the view past them; without the skip they
+// would break the match and force a full reload, which is exactly what the
+// refresh exists to avoid.
 const LIVE_ONLY_ROW_TYPES = new Set([
 	'agent_status', 'agent_reason', 'agent_observe',
 	'agent_request_input', 'agent_error', 'tool_log',
-	'warning', 'iframe',
+	'warning', 'iframe', 'system',
 ])
 
 // Whether a stored row and a live view row describe the same transcript row.
@@ -1073,14 +1076,30 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		// Opened while its run is executing: the live stream is not replayed,
-		// so remember to reload from the store once the run ends.
+		// so remember to reload from the store once the run ends. The
+		// `in_flight` flag the GET carries says the snapshot answered from the
+		// run's live session, which is a refresh obligation in its own right:
+		// the run can reach a terminal state while this fetch is in the air
+		// (the terminal status racing the open), leaving the snapshot missing
+		// the run's final rows even though no run-end event will arrive
+		// afterwards.
 		if (joinedRunTimerRef.current) {
 			clearTimeout(joinedRunTimerRef.current)
 			joinedRunTimerRef.current = null
 		}
-		joinedRunConversationRef.current = isRunActive(runs.getRun(conversationData.id))
+		const runRecord = runs.getRun(conversationData.id)
+		joinedRunConversationRef.current = (isRunActive(runRecord) || conversationData.in_flight)
 			? conversationData.id
 			: null
+		// The run already ended while the view was being loaded: schedule the
+		// same delayed refresh the run-end path runs, so the store's final
+		// rows are appended once the save has settled.
+		if (joinedRunConversationRef.current && !isRunActive(runRecord) && !joinedRunTimerRef.current) {
+			joinedRunTimerRef.current = setTimeout(() => {
+				joinedRunTimerRef.current = null
+				finishJoinedRun(conversationData.id)
+			}, RUN_END_RELOAD_GRACE_MS)
+		}
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -1130,12 +1149,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// conversation's workspace rather than whatever is active at save time.
 		conversationWorkspaceIdRef.current = meta.workspace_id || null
 		restoreWorkspace(meta.workspace_id)
-		// Stable members only: `runs` and `agent` are unmemoised objects that a
+// Stable members only: `runs` and `agent` are unmemoised objects that a
 		// new token frame rebuilds, so the objects themselves would tear this
 		// callback down -- and re-subscribe everything that depends on it -- on
 		// every streaming frame.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun])
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
 
 	const refreshJoinedConversation = useCallback((conversationData) => {
 		if (!conversationData || !conversationData.messages) return false
@@ -1176,9 +1195,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		}
 
 		// The store ran out first: the view carries rows the store does not
-		// have (transient rows). Nothing to append; leave the view alone
-		// rather than destroying those rows.
+		// have. After the live-only skips, any remaining extra row is
+		// persistable content the store no longer has -- the conversation was
+		// rewound or rewritten elsewhere -- so the refresh cannot reconcile a
+		// shorter store against it. Refuse and let the caller's full reload
+		// take the store's copy, as it would have before this refresh existed.
 		if (storedIdx >= stored.length) {
+			if (viewIdx < current.length) return false
 			restoreContext()
 			return true
 		}
