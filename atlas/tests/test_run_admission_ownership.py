@@ -157,9 +157,14 @@ def test_a_raising_lookup_is_refused_without_tearing_down_the_socket(caplog):
     assert "chat-history store is down" in caplog.text
 
 
-def test_the_refused_frame_matches_what_the_service_raises(repo, stored):
-    """Wire-equivalence: the pre-admission refusal and the service's late
-    rejection must read identically to the client (issue #958)."""
+def test_the_refused_message_matches_what_the_service_raises(repo, stored):
+    """The refusal reads like the service's late rejection (issue #958).
+
+    Message and error type are the ones the turn would have raised; the
+    frame additionally carries the refused conversation id for client
+    routing, the way the other admission refusals (run limit, busy
+    conversation) do.
+    """
     service = _service_with(repo)
 
     refusal = _conversation_access_error(service, STORED_ID, OTHER)

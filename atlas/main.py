@@ -621,10 +621,12 @@ def _conversation_access_error(chat_service, conversation_id, user_email):
     Issue #958: this runs *before* a run is admitted, because the service's
     own check (the same method) only fires once the turn is already executing
     -- too late to keep ``run_started`` from announcing a run that then dies
-    on authorization. The frame carries the message the service would have
-    raised, so a refused turn looks the same on the wire whether the store
-    answered the transport or the service; the difference is that no run
-    record exists around it.
+    on authorization. The frame carries the message and error type the
+    service would have raised, so the refusal reads the same to a client;
+    it additionally carries the refused conversation id (the other
+    admission refusals -- run limit, busy conversation -- do the same), and
+    the difference from the service path is that no run record exists
+    around it.
 
     A conversation that is not stored yet is allowed through (a minted id,
     or a run still in flight); the in-flight variant -- claiming a
@@ -1814,6 +1816,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         chat_service, turn_conversation_id, user_email
                     )
                     if refusal is not None:
+                        # Metric parity with the service-path refusal: the
+                        # turn never reaches handle_chat's except blocks, so
+                        # without this the cross-user probe (or the store
+                        # failure) goes uncounted.
+                        log_metric("error", user_email, error_type=refusal["error_type"])
                         await websocket.send_json(refusal)
                         continue
                     try:
