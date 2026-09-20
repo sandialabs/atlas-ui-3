@@ -1576,6 +1576,23 @@ async def websocket_endpoint(websocket: WebSocket):
                 # concurrent turn, because two turns writing the same history
                 # would interleave their writes.
                 frame_conversation_id = data.get("conversation_id")
+                # A conversation id that another user's run is executing
+                # under is not this user's to name. The stored-record check
+                # happens later in the service, but a tracked run's
+                # conversation is not stored until its turn ends: a turn that
+                # claimed the id in that window would be saved first, and the
+                # running owner's save would then be rejected as belonging to
+                # someone else. Refuse it here, before a run is admitted.
+                if frame_conversation_id and run_registry.active_for_conversation_any_owner(
+                    frame_conversation_id
+                ) not in (None, user_email):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Conversation not found",
+                        "error_type": "authorization",
+                        "conversation_id": frame_conversation_id,
+                    })
+                    continue
                 tracked_run = run_registry.active_for_conversation(
                     frame_conversation_id, user_email
                 )
@@ -1753,6 +1770,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             conversation_id=turn_conversation_id,
                             user_email=user_email,
                             steering=steering_channel,
+                            title=(data.get("content") or "").strip() or None,
                         )
                     except ConcurrencyLimitError as e:
                         await websocket.send_json({
@@ -2091,17 +2109,24 @@ async def websocket_endpoint(websocket: WebSocket):
                             except asyncio.CancelledError:
                                 pass
 
+                # Announce the run before its task can emit anything. The
+                # task's first frames are tagged with the run's conversation
+                # id, and a client that has not yet adopted that id (a new
+                # chat has none) would file them as background activity and
+                # drop them from the transcript it is showing.
+                if run_record is not None:
+                    await websocket.send_json({
+                        "type": "run_started",
+                        "run_id": run_record.run_id,
+                        "conversation_id": run_record.conversation_id,
+                        "title": run_record.title,
+                    })
                 # Start chat handling in background
                 chat_task = asyncio.create_task(handle_chat_guarded())
                 if run_record is None:
                     active_chat_task["task"] = chat_task
                 else:
                     run_registry.attach_task(run_record.run_id, chat_task)
-                    await websocket.send_json({
-                        "type": "run_started",
-                        "run_id": run_record.run_id,
-                        "conversation_id": run_record.conversation_id,
-                    })
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection).

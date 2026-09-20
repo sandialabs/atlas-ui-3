@@ -47,7 +47,10 @@ export function useConversationRuns() {
 				const existing = next[run.conversation_id]
 				// Several runs can share a conversation over time; the newest wins.
 				if (!existing || (run.created_at || 0) >= (existing.created_at || 0)) {
-					next[run.conversation_id] = run
+					// Keep the title this tab learned when it started the run: the
+					// server does not know one until the conversation is saved.
+					const prior = runsRef.current[run.conversation_id]
+					next[run.conversation_id] = (!run.title && prior?.title) ? { ...run, title: prior.title } : run
 				}
 			}
 			runsRef.current = next
@@ -64,12 +67,20 @@ export function useConversationRuns() {
 					run_id: data.run_id,
 					conversation_id: data.conversation_id,
 					status: 'running',
+					// A run started from a new chat has no saved conversation to
+					// take a title from, so the history list would have nothing to
+					// show for it. The caller supplies the first prompt.
+					title: data.title || prev[data.conversation_id]?.title || null,
 				},
 			}))
 			return
 		}
 		if (data.type === 'run_status' && data.run) {
-			applyRuns(prev => ({ ...prev, [data.run.conversation_id]: data.run }))
+			applyRuns(prev => {
+				const prior = prev[data.run.conversation_id]
+				const title = data.run.title || prior?.title || null
+				return { ...prev, [data.run.conversation_id]: title ? { ...data.run, title } : data.run }
+			})
 			return
 		}
 		if (data.type === 'background_activity' && data.conversation_id) {

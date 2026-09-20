@@ -114,10 +114,28 @@ async def get_conversation(
     if repo is None:
         return {"error": "Chat history is not enabled"}
 
-    conversation = repo.get_conversation(conversation_id, current_user)
+    # A conversation with a run in flight (issue #884) is ahead of its stored
+    # record: the run's session holds the prompt that started the turn and
+    # every tool row so far, and nothing reaches the repository until the turn
+    # ends. Prefer that live view; fall back to the store otherwise, so a
+    # conversation the sidebar shows as "Running" never reads as missing.
+    conversation = await _in_flight_conversation(conversation_id, current_user)
+    if not conversation or not conversation.get("messages"):
+        conversation = repo.get_conversation(conversation_id, current_user)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+async def _in_flight_conversation(conversation_id: str, user_email: str):
+    from atlas.application.chat.runs import get_run_registry
+    from atlas.application.chat.runs.in_flight import in_flight_conversation
+    from atlas.infrastructure.app_factory import app_factory
+
+    session_repository = getattr(app_factory, "session_repository", None)
+    return await in_flight_conversation(
+        session_repository, get_run_registry(), conversation_id, user_email
+    )
 
 
 @router.delete("/{conversation_id}")

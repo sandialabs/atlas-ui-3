@@ -456,7 +456,7 @@ export function createWebSocketHandler(deps) {
         const visible = getVisibleConversationId()
         if (visible !== data.conversation_id) {
           if (typeof onRunStatus === 'function') {
-            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id })
+            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id, frame: data })
           }
           return
         }

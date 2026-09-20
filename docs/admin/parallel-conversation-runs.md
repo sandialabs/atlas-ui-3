@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-09-08
+Last updated: 2026-09-20
 
 Issue #884.
 
@@ -119,6 +119,38 @@ mints one at admission and reports it here. Without that, the first agent turn i
 a new conversation could never be a background run, which is the most common case
 of all.
 
+### A running conversation is readable before its first save
+
+A tracked run persists its transcript only when the turn ends. Until then the
+conversation exists only in the run's own session, which used to mean that a
+run started from a new chat vanished from the history list the moment the
+user navigated away, and opening it (from another tab, or after a reload)
+answered "Conversation not found".
+
+Two things close that gap:
+
+- `run_started`, `run_status` and `runs_snapshot` carry a `title` -- the
+  prompt that started the run, truncated to 200 characters -- so every tab can
+  list the conversation while it runs.
+- `GET /api/conversations/{id}` and `restore_conversation` answer from the
+  run's live session when the conversation has a run in flight for the
+  requesting user: the prompt that started the turn, the tool rows so far and
+  any earlier saved turns. The stored record is used once the run ends. The
+  live view carries `in_flight: true` and the `run_id`.
+
+A conversation id that another user's run is executing under is refused
+before a run is admitted, exactly like a stored conversation owned by someone
+else. Without that a turn naming the id in the unsaved window would be stored
+first, and the running owner's own save would then be rejected.
+
+### Auto-approve covers background runs
+
+Auto-approve is a client setting. The client answers an approval request for
+a conversation it is **not** displaying immediately when the setting is on and
+the tool is not pinned to mandatory approval, so a multi-step run keeps going
+while the user works elsewhere. Requests the client does not answer are still
+deferred and replayed as described below.
+
 ### Pending approvals are replayed, not lost
 
 An approval request that arrives while the user is looking at another
@@ -156,8 +188,10 @@ These are known and deliberate, not oversights:
   them durable requires a persisted run store and persisted pending-request
   records.
 - **A reconnected browser does not resume a live event stream.** It sees the run
-  in `runs_snapshot` and, on reopening the conversation, the transcript the run
-  has saved so far — not the tokens it missed. Live re-attach is issue #760.
+  in `runs_snapshot` and, on reopening the conversation, the run's transcript so
+  far (prompt and tool rows) — not the tokens it missed. Once the run ends the
+  client reloads the conversation from the store, so the final answer appears
+  without a manual refresh. Live re-attach is issue #760.
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
   Use a single worker, or sticky sessions, until the run store is shared.

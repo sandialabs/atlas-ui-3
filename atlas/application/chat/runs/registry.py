@@ -54,6 +54,9 @@ TERMINAL_RETENTION_SECONDS = 30 * 60
 # registry without bound.
 MAX_RETAINED_TERMINAL_RUNS_PER_USER = 50
 
+# Matches the title length ConversationRepository stores for a conversation.
+RUN_TITLE_MAX_CHARS = 200
+
 
 class RunStatus(str, Enum):
     """Lifecycle states from the issue's suggested state machine.
@@ -140,6 +143,10 @@ class RunRecord:
     # still see children launched earlier from the same conversation.
     parent_conversation_id: Optional[str] = None
     depth: int = 0
+    # The prompt that started the run, truncated. A run's conversation is not
+    # stored until the turn ends, so this is the only name the history list
+    # can give it in the meantime -- in this tab and in every other one.
+    title: Optional[str] = None
     # The exact frame that asked for input, kept so it can be re-sent.
     # A request emitted while the user was looking at another conversation (or
     # had the browser closed) is otherwise gone: the client dropped it, and the
@@ -166,6 +173,7 @@ class RunRecord:
             "detached": self.detached,
             "parent_run_id": self.parent_run_id,
             "depth": self.depth,
+            "title": self.title,
         }
 
 
@@ -235,6 +243,23 @@ class RunRegistry:
                 and not record.is_terminal
             ):
                 return record
+        return None
+
+    def active_for_conversation_any_owner(
+        self, conversation_id: Optional[str]
+    ) -> Optional[str]:
+        """The owner of the non-terminal run on a conversation, if any.
+
+        Used by the transport to refuse a turn that names a conversation id
+        currently executing for *someone else*: an unsaved run's id is not in
+        the repository yet, so the ownership check on stored records cannot
+        catch it. Only the owner's email is returned, never the record.
+        """
+        if not conversation_id:
+            return None
+        for record in self._runs.values():
+            if record.conversation_id == conversation_id and not record.is_terminal:
+                return record.user_email
         return None
 
     def children_of(self, run_id: Optional[str], *, include_terminal: bool = False) -> List[RunRecord]:
@@ -307,6 +332,7 @@ class RunRegistry:
         parent_run_id: Optional[str] = None,
         parent_conversation_id: Optional[str] = None,
         depth: int = 0,
+        title: Optional[str] = None,
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
 
@@ -340,6 +366,7 @@ class RunRegistry:
             parent_run_id=parent_run_id,
             parent_conversation_id=parent_conversation_id,
             depth=max(0, int(depth or 0)),
+            title=(str(title)[:RUN_TITLE_MAX_CHARS] or None) if title else None,
         )
         self._runs[record.run_id] = record
         if record.parent_run_id:

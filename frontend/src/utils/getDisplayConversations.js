@@ -16,6 +16,8 @@ export function getDisplayConversations({
   saveMode,
   // Backward compat: accept isIncognito and derive saveMode from it
   isIncognito,
+  // Parallel conversation runs (issue #884): conversation_id -> run record.
+  runsByConversation,
 }) {
   const list = [...conversations]
   const userMessages = messages?.filter(m => m.role === 'user') || []
@@ -49,6 +51,26 @@ export function getDisplayConversations({
         updated_at: new Date().toISOString(),
         message_count: messages.length,
         _current: true,
+      })
+    }
+  }
+
+  // A run keeps executing after the user starts a new chat or opens another
+  // conversation, but its conversation is not stored until the turn ends.
+  // Without a row here it would vanish from the list the moment the user
+  // navigated away -- along with the only visible sign that it is running.
+  if (chatHistoryEnabled && effectiveMode !== 'none' && runsByConversation) {
+    for (const run of Object.values(runsByConversation)) {
+      if (!run || !run.conversation_id) continue
+      if (['completed', 'failed', 'cancelled'].includes(run.status)) continue
+      if (list.some(c => c.id === run.conversation_id)) continue
+      list.unshift({
+        id: run.conversation_id,
+        title: run.title || 'Conversation in progress',
+        preview: '',
+        updated_at: new Date((run.created_at || Date.now() / 1000) * 1000).toISOString(),
+        message_count: 0,
+        _run: true,
       })
     }
   }
