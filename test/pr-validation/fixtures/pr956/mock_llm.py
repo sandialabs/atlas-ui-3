@@ -23,9 +23,13 @@ LOG = []
 LOCK = threading.Lock()
 
 def parse_directives(text):
+    # Plain split rather than a regex: the prompt is user input and CodeQL
+    # flags adjacent overlapping classes as a polynomial match.
     d = {}
-    for m in re.finditer(r"(\w+)=([\w.-]+)", text or ""):
-        d[m.group(1)] = m.group(2)
+    for token in (text or "").split():
+        key, sep, value = token.partition("=")
+        if sep and key.isidentifier() and value:
+            d[key] = value
     return d
 
 def last_user(messages):
