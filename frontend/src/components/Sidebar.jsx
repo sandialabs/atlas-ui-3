@@ -77,6 +77,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     // Parallel conversation runs (issue #884): which conversations are still
     // working, including ones the user is not currently viewing.
     runsByConversation,
+    backgroundSaves,
     // A conversation opened while its run was in flight: the run's output
     // went to the transcript it was streaming into, not this view, so the
     // view is reloaded from the store once the run ends.
@@ -134,8 +135,23 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
   // A run that finishes in a conversation the user is not looking at saves
   // its transcript without any of the events above reaching this tab (they
-  // are filed as background activity). Refresh the list when a run ends so
-  // the conversation appears -- or reorders -- without a reload.
+  // are filed as background activity). Refresh the list when such a save
+  // lands, so the conversation appears -- or reorders -- without a reload.
+  const prevBackgroundSavesRef = useRef(backgroundSaves)
+  const runRefreshTimerRef = useRef(null)
+  useEffect(() => {
+    if (prevBackgroundSavesRef.current === backgroundSaves) return
+    prevBackgroundSavesRef.current = backgroundSaves
+    if (!chatHistoryEnabled || saveMode === 'none') return
+    if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
+    history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backgroundSaves, chatHistoryEnabled, saveMode])
+
+  // Fallback for a run that ends without a save reaching this tab (it failed
+  // before persisting, or another tab's socket got the frame). Delayed,
+  // because a stopped run reports `cancelled` before its interrupted turn is
+  // written, and fetching at that instant would miss the conversation.
   const prevTerminalRef = useRef('')
   useEffect(() => {
     if (!chatHistoryEnabled || saveMode === 'none') return
@@ -147,10 +163,17 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     const prev = prevTerminalRef.current
     prevTerminalRef.current = terminal
     if (prev !== terminal && terminal) {
-      history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+      if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
+      runRefreshTimerRef.current = setTimeout(() => {
+        runRefreshTimerRef.current = null
+        history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+      }, 2500)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runsByConversation, chatHistoryEnabled, saveMode])
+  useEffect(() => () => {
+    if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
+  }, [])
 
   // Reload the open conversation once the run it was opened under ends. The
   // stream the user joined partway is not replayed (issue #760); the stored

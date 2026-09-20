@@ -2,11 +2,12 @@
 // visible after the user navigates away from it, and the run tracker keeps
 // the name it was given before the conversation is saved.
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 import { getDisplayConversations } from '../utils/getDisplayConversations'
 import { useConversationRuns } from '../hooks/chat/useConversationRuns'
+import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 
 const base = {
   conversations: [{ id: 'saved-1', title: 'Saved one', updated_at: '2026-09-19T00:00:00Z', message_count: 2 }],
@@ -91,5 +92,48 @@ describe('useConversationRuns titles', () => {
       result.current.handleRunFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'c', status: 'running', title: 'Renamed' } })
     })
     expect(result.current.runsByConversation.c.title).toBe('Renamed')
+  })
+})
+
+describe('background saves', () => {
+  it('counts a conversation_saved that arrived for a conversation off screen', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    expect(result.current.backgroundSaves).toBe(0)
+    act(() => {
+      result.current.handleRunFrame({ type: 'background_activity', conversation_id: 'c', run_id: 'r1', frame: { type: 'conversation_saved', conversation_id: 'c', run_id: 'r1' } })
+    })
+    expect(result.current.backgroundSaves).toBe(1)
+    // An ordinary background frame does not count as a save.
+    act(() => {
+      result.current.handleRunFrame({ type: 'background_activity', conversation_id: 'c', run_id: 'r1', frame: { type: 'token_stream', run_id: 'r1', conversation_id: 'c' } })
+    })
+    expect(result.current.backgroundSaves).toBe(1)
+  })
+
+  it('reports a save of the conversation on screen to onConversationSaved', () => {
+    const onConversationSaved = vi.fn()
+    const setActiveConversationId = vi.fn()
+    const handleWebSocketMessage = createWebSocketHandler({
+      addMessage: vi.fn(), mapMessages: vi.fn(), setIsThinking: vi.fn(), setIsAgentRunning: vi.fn(),
+      setCurrentAgentStep: vi.fn(), setIsSynthesizing: vi.fn(), streamToken: vi.fn(), streamEnd: vi.fn(),
+      setActiveConversationId, onConversationSaved,
+      getVisibleConversationId: () => 'c',
+    })
+    handleWebSocketMessage({ type: 'conversation_saved', conversation_id: 'c', run_id: 'r1' })
+    expect(onConversationSaved).toHaveBeenCalledWith('c')
+    expect(setActiveConversationId).toHaveBeenCalledWith('c')
+  })
+
+  it('files a save for another conversation as background activity with the frame', () => {
+    const onRunStatus = vi.fn()
+    const handleWebSocketMessage = createWebSocketHandler({
+      addMessage: vi.fn(), mapMessages: vi.fn(), setIsThinking: vi.fn(), setIsAgentRunning: vi.fn(),
+      setCurrentAgentStep: vi.fn(), setIsSynthesizing: vi.fn(), streamToken: vi.fn(), streamEnd: vi.fn(),
+      setActiveConversationId: vi.fn(), onRunStatus,
+      getVisibleConversationId: () => 'other',
+    })
+    const frame = { type: 'conversation_saved', conversation_id: 'c', run_id: 'r1' }
+    handleWebSocketMessage(frame)
+    expect(onRunStatus).toHaveBeenCalledWith({ type: 'background_activity', conversation_id: 'c', run_id: 'r1', frame })
   })
 })

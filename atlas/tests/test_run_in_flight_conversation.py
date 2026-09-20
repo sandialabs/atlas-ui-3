@@ -106,3 +106,14 @@ def test_run_record_carries_a_truncated_title():
     untitled = registry.start(conversation_id="conv-2", user_email=OWNER, title="")
     assert untitled.title is None
     assert untitled.to_public_dict()["title"] is None
+
+
+def test_conversation_id_is_normalized_before_any_check():
+    from main import _normalize_conversation_id
+
+    assert _normalize_conversation_id("  abc  ") == "abc"
+    assert _normalize_conversation_id("") is None
+    assert _normalize_conversation_id("   ") is None
+    assert _normalize_conversation_id(None) is None
+    assert _normalize_conversation_id(123) is None
+    assert _normalize_conversation_id({"id": "x"}) is None

@@ -31,7 +31,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -750,6 +750,18 @@ def _record_run_conversation(connection_session, conversation_id) -> None:
     known.append(conversation_id)
     if len(known) > _MAX_RUN_CONVERSATIONS:
         del known[:-_MAX_RUN_CONVERSATIONS]
+
+
+def _normalize_conversation_id(raw: Any) -> Optional[str]:
+    """The client's conversation id as every check on the chat path sees it.
+
+    Whitespace is stripped and anything that is not a non-empty string is
+    treated as absent, so a padded or malformed id cannot read as one value
+    to the ownership guard and another to run admission.
+    """
+    if not isinstance(raw, str):
+        return None
+    return raw.strip() or None
 
 
 def forget_run_conversations(session) -> None:
@@ -1568,7 +1580,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 # loop, exactly as #824 defines -- never started as a second
                 # concurrent turn, because two turns writing the same history
                 # would interleave their writes.
-                frame_conversation_id = data.get("conversation_id")
+                # Normalize the client's conversation id once, before any
+                # check reads it: the ownership guard below and the admission
+                # further down must see the same value, or padding the id
+                # would slip a frame past the guard and into a run keyed by
+                # the stripped id.
+                frame_conversation_id = _normalize_conversation_id(data.get("conversation_id"))
+                data["conversation_id"] = frame_conversation_id
                 # A conversation id that another user's run is executing
                 # under is not this user's to name. The stored-record check
                 # happens later in the service, but a tracked run's
@@ -1743,7 +1761,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # conversation -- from background execution entirely. Mint one
                 # here instead and tell the client (see `run_started` below);
                 # the turn is then saved under the same id the run is keyed by.
-                turn_conversation_id = (data.get("conversation_id") or "").strip() or None
+                turn_conversation_id = frame_conversation_id
                 if turn_conversation_id is None and is_agent_turn:
                     turn_conversation_id = str(uuid4())
                 if turn_conversation_id:

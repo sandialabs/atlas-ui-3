@@ -24,6 +24,11 @@ export function useConversationRuns() {
 	// conversation_id -> run record from the server.
 	const [runsByConversation, setRunsByConversation] = useState({})
 	const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(null)
+	// A conversation that is not on screen was persisted: its run finished,
+	// was stopped, or failed after saving. The history list refetches on
+	// this rather than on the run's terminal status alone, because a stopped
+	// run reports `cancelled` before its interrupted turn is written.
+	const [backgroundSaves, setBackgroundSaves] = useState(0)
 	// Mirror of the map for callbacks that must not re-subscribe on every
 	// status frame (the websocket handler is rebuilt when its deps change).
 	const runsRef = useRef({})
@@ -83,6 +88,10 @@ export function useConversationRuns() {
 			})
 			return
 		}
+		if (data.type === 'background_activity' && data.frame?.type === 'conversation_saved') {
+			setBackgroundSaves(n => n + 1)
+			return
+		}
 		if (data.type === 'background_activity' && data.conversation_id) {
 			// An event arrived for a conversation that is not on screen. The run
 			// record may not have reached this tab yet (the socket connected
@@ -112,6 +121,7 @@ export function useConversationRuns() {
 		runsByConversation,
 		maxConcurrentRuns,
 		activeRunCount,
+		backgroundSaves,
 		handleRunFrame,
 		getRun,
 	}

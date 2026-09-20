@@ -21,6 +21,9 @@ import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
+// How long to wait for a `conversation_saved` after a joined run ends before
+// reloading anyway (a run that failed before saving never sends one).
+const RUN_END_RELOAD_GRACE_MS = 2500
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Generate cryptographically secure random string
@@ -83,8 +86,18 @@ export const ChatProvider = ({ children }) => {
 	// The run streams into the view it started in, so this one is stale by
 	// construction; once the run ends the Sidebar reloads it from the store.
 	const joinedRunConversationRef = useRef(null)
+	const joinedRunTimerRef = useRef(null)
 	const [runEndedConversationId, setRunEndedConversationId] = useState(null)
 	const clearRunEndedConversation = useCallback(() => setRunEndedConversationId(null), [])
+	const finishJoinedRun = useCallback((id) => {
+		if (!id || joinedRunConversationRef.current !== id) return
+		joinedRunConversationRef.current = null
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
+		setRunEndedConversationId(id)
+	}, [])
 	const [isSynthesizing, setIsSynthesizing] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
@@ -433,6 +446,10 @@ export const ChatProvider = ({ children }) => {
 				}
 				runs.handleRunFrame(data)
 			},
+			// The joined conversation's turn is on disk: reload now rather than
+			// on the run's terminal status, which a stopped run reports before
+			// its interrupted turn is persisted.
+			onConversationSaved: finishJoinedRun,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -445,17 +462,22 @@ export const ChatProvider = ({ children }) => {
 	const sendMessageRef = useRef(sendMessage)
 	sendMessageRef.current = sendMessage
 
-	// The run a joined conversation was opened under has ended: the stored
-	// transcript is now complete, and the Sidebar reloads it (issue #884).
+	// The run a joined conversation was opened under has ended. Its save
+	// normally arrives first (see onConversationSaved); this is the fallback
+	// for a run that ended without one, after a grace period so a stop --
+	// which reports `cancelled` before the interrupted turn is written --
+	// does not reload a transcript the save is about to change.
 	useEffect(() => {
 		const id = joinedRunConversationRef.current
-		if (!id) return
+		if (!id || joinedRunTimerRef.current) return
 		const run = runs.runsByConversation[id]
 		if (run && !isRunActive(run)) {
-			joinedRunConversationRef.current = null
-			setRunEndedConversationId(id)
+			joinedRunTimerRef.current = setTimeout(() => {
+				joinedRunTimerRef.current = null
+				finishJoinedRun(id)
+			}, RUN_END_RELOAD_GRACE_MS)
 		}
-	}, [runs.runsByConversation])
+	}, [runs.runsByConversation, finishJoinedRun])
 
 	// Ask the server which runs are still in flight whenever the socket comes
 	// up. This is what makes a run survive the browser closing in a way the
@@ -939,6 +961,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// chat would otherwise inherit a Stop button and a busy indicator.
 		setIsAgentRunning(false)
 		joinedRunConversationRef.current = null
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
@@ -1007,6 +1033,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		// Opened while its run is executing: the live stream is not replayed,
 		// so remember to reload from the store once the run ends.
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
 		joinedRunConversationRef.current = isRunActive(runs.getRun(conversationData.id))
 			? conversationData.id
 			: null
@@ -1385,6 +1415,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Parallel conversation runs (issue #884): conversation_id -> run record,
 		// including conversations that are not on screen.
 		runsByConversation: runs.runsByConversation,
+		backgroundSaves: runs.backgroundSaves,
 		runEndedConversationId,
 		clearRunEndedConversation,
 		// Whether the conversation on screen has work in flight. Derived from
