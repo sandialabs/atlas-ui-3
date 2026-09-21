@@ -265,8 +265,6 @@ class ToolsModeRunner:
         # so anything added from here on belongs to this turn. Remember where
         # it starts so the tool digest (issue #798) covers only this turn.
         turn_start_index = len(session.history.messages)
-        # Every narration segment persisted to history this turn (issue #957).
-        persisted_narrations: List[str] = []
         # Narration from canvas-only rounds, held back at the segment close:
         # a turn that ends on such a response closes with that very text (the
         # closing message is the LLM-visible copy), so the row is written only
@@ -381,9 +379,7 @@ class ToolsModeRunner:
             if self._is_canvas_only_response(final_llm_response):
                 deferred_narrations.append(accumulated_content)
             else:
-                persisted = self._persist_narration_row(session, accumulated_content)
-                if persisted:
-                    persisted_narrations.append(persisted)
+                self._persist_narration_row(session, accumulated_content)
 
         session_context = build_session_context(session)
         # See note above: propagate the per-request RAG selection so atlas_rag
@@ -527,9 +523,7 @@ class ToolsModeRunner:
                         if next_text:
                             deferred_narrations.append(next_text)
                     else:
-                        persisted = self._persist_narration_row(session, next_text)
-                        if persisted:
-                            persisted_narrations.append(persisted)
+                        self._persist_narration_row(session, next_text)
                     if current_response is None:
                         current_response = LLMResponse(content="")
                     break
@@ -553,11 +547,10 @@ class ToolsModeRunner:
                 # turn may end on this response, with this very text as the
                 # LLM-visible closing message.
                 if self._is_canvas_only_response(current_response):
-                    deferred_narrations.append(next_text)
+                    if next_text:
+                        deferred_narrations.append(next_text)
                 else:
-                    persisted = self._persist_narration_row(session, next_text)
-                    if persisted:
-                        persisted_narrations.append(persisted)
+                    self._persist_narration_row(session, next_text)
 
             # Budget exhausted or anti-loop tripped while the model still wanted
             # tools -> force a closing text answer via no-tools synthesis, hardened
@@ -569,9 +562,13 @@ class ToolsModeRunner:
             # placeholder only when neither exists.
             if self._is_canvas_only_response(current_response):
                 content = (current_response.content or "").strip()
+                deferred_text = next(
+                    (t.strip() for t in reversed(deferred_narrations) if t and t.strip()),
+                    "",
+                )
                 synthesis_content = (
                     content
-                    or (deferred_narrations[-1].strip() if deferred_narrations else "")
+                    or deferred_text
                     or "Content displayed in canvas."
                 )
             else:

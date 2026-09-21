@@ -526,6 +526,25 @@ async def test_a_cancel_during_a_canvas_round_keeps_the_deferred_narration():
 
 
 @pytest.mark.asyncio
+async def test_an_empty_canvas_continuation_does_not_shadow_earlier_prose():
+    """A canvas-only continuation that streams no text must not shadow the
+    prose an earlier canvas round deferred: the close picks the last
+    non-empty narration, not the last slot."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Here is the diagram.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+        (None, [_tc("c2", "atlas_canvas", '{"content":"svg2"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert contents.count("Here is the diagram.") == 1
+    assert "Content displayed in canvas." not in contents
+
+
+@pytest.mark.asyncio
 async def test_mixed_canvas_and_tool_round_persists_narration_immediately():
     """A round calling canvas alongside a real tool is not canvas-only: the
     shortcut cannot fire, so its narration is persisted at the segment close
