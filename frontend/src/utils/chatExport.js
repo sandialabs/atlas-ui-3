@@ -89,6 +89,16 @@ const TOOL_APPROVAL_PERSISTED_FIELDS = [
   'rejection_reason',
 ]
 
+// A replayed bubble (issue #957) is a transient placeholder: it holds a
+// mid-answer fragment the run's stored transcript supersedes when the run
+// ends. Persisting or exporting one would write the fragment into history as
+// if it were the finished reply -- so every persistence path (local autosave,
+// the New Chat undo snapshot, export) skips these rows. The single predicate
+// lives here so the rule cannot drift between call sites.
+export function isReplayPlaceholder(m) {
+  return Boolean(m && m._replayed)
+}
+
 // Serialize a live message into the shape persisted to history (local IndexedDB
 // or the server schema): role / content / timestamp / message_type plus a
 // `metadata` blob carrying any tool-call detail. Keeping tool I/O here means a
@@ -196,10 +206,9 @@ export function buildExportConversation(messages, promptInfoByKey) {
   let prev = null
   let sawAny = false
   for (const m of messages) {
-    // Replayed placeholder bubbles (issue #957) are transient: a mid-answer
-    // fragment the run's stored transcript supersedes. Exporting it would
-    // read as the finished reply.
-    if (m && m._replayed) continue
+    // Replayed placeholders are transient (see isReplayPlaceholder):
+    // exporting one would read as the finished reply.
+    if (isReplayPlaceholder(m)) continue
     if (m && m.role === 'user' && Object.prototype.hasOwnProperty.call(m, '_activePromptKey')) {
       const cur = m._activePromptKey || null
       if (!sawAny || cur !== prev) {

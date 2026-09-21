@@ -24,6 +24,11 @@ function messagesReducer(state, action) {
           timestamp: new Date().toISOString(),
           _streaming: true,
           _replayed: true,
+          // An empty replace is the marker-only seed for a run parked between
+          // segments: it must not absorb a later segment's tokens (they would
+          // render above any tool rows appended in between), so the append
+          // branch below skips it and the first real token replaces it.
+          _seed: !action.token,
         }
         if (current >= 0) {
           const updated = [...state]
@@ -33,19 +38,22 @@ function messagesReducer(state, action) {
         return [...state, replayed]
       }
       // Find the streaming message anywhere in the array (not just last)
-      // to handle interleaved tool_start/progress messages mid-stream
-      const idx = state.findLastIndex(m => m._streaming)
+      // to handle interleaved tool_start/progress messages mid-stream. A
+      // marker-only seed is skipped: the segment that is starting belongs in
+      // a fresh bubble at the end, after whatever rows landed meanwhile.
+      const idx = state.findLastIndex(m => m._streaming && !m._seed)
       if (idx >= 0) {
         const updated = [...state]
         // A live token landing on a replayed bubble means this tab owns the
         // stream after all: the view is refreshing itself, so the "it will
-        // refresh when the run finishes" marker (bound to _replayed) no
+        // refresh when the response finishes" marker (bound to _replayed) no
         // longer applies. A tab that receives no live frames keeps it.
         updated[idx] = { ...state[idx], content: state[idx].content + action.token, _replayed: false }
         return updated
       }
-      // Create new streaming assistant message
-      return [...state, {
+      // Create new streaming assistant message. Any marker-only seed is
+      // dropped now that real text exists to take its place.
+      return [...state.filter(m => !m._seed), {
         role: 'assistant',
         content: action.token,
         timestamp: new Date().toISOString(),

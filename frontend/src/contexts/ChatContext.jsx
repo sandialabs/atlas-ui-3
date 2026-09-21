@@ -15,7 +15,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
-import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
+import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
@@ -71,7 +71,12 @@ export const ChatProvider = ({ children }) => {
 	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
-	const isStreaming = messages.some(m => m._streaming === true)
+	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
+	// run whose frames go to another socket, and a live append would have
+	// cleared _replayed. Counting it would show Stop and hide Send for the
+	// whole run in a tab that can do neither -- the run's own Stop affordance
+	// is driven off run state (isAgentRunning includes it).
+	const isStreaming = messages.some(m => m._streaming === true && !m._replayed)
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
@@ -849,12 +854,16 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
-		// Close any streaming bubble left over from a reopened in-flight
+		// Close a replay placeholder left over from a reopened in-flight
 		// conversation (issue #957): in a tab that receives no further frames
 		// nothing else ends that stream, and STREAM_TOKEN's append lookup
 		// targets the last _streaming row -- without this the new turn's reply
 		// would accumulate into the stale bubble above the user's message.
-		streamEnd()
+		// Scoped to placeholders: ending a genuinely live bubble here (a
+		// steering send mid-run) would split the segment into two bubbles.
+		if (latestMessagesRef.current.some(m => m._streaming && m._replayed)) {
+			streamEnd()
+		}
 		// Rewind/edit-and-resubmit (issue #142): now that the send is confirmed on
 		// the wire, drop the targeted prompt and everything after it so the new
 		// message takes its place. Done here -- after the early returns and the
@@ -954,7 +963,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// Replayed placeholder bubbles (issue #957) are transient -- a
 				// mid-answer fragment the run's stored transcript supersedes --
 				// so they are not part of what Undo puts back.
-				messages: latestMessagesRef.current.filter(m => !m._replayed).map(m => buildPersistedMessage(m)),
+				messages: latestMessagesRef.current.filter(m => !isReplayPlaceholder(m)).map(m => buildPersistedMessage(m)),
 				canvasContent: files.canvasContent || '',
 				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
 			}
@@ -1123,16 +1132,20 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// Notify backend to restore this conversation's context
 		// Sends the conversation_id and messages so the LLM has prior context.
-		// Display-only rows (e.g. persisted tool_call messages, issue #684) are
-		// excluded: they exist purely to re-render the transcript and a bare
-		// role:'tool' row with no preceding tool_calls would be rejected as an
-		// orphan tool message by some providers.
+		// Display-only rows (persisted tool_call messages, issue #684, and
+		// agent_intermediate narration, issue #957 -- the two members of the
+		// domain's DISPLAY_ONLY_MESSAGE_TYPES) are excluded: they exist purely
+		// to re-render the transcript. A bare role:'tool' row with no preceding
+		// tool_calls would be rejected as an orphan tool message by some
+		// providers, and with no conversation repository configured the client
+		// payload is canonical, so a narration row would replay as a second
+		// assistant turn and break strict alternation.
 		if (sendMessage) {
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
 				messages: conversationData.messages
-					.filter(msg => (msg.message_type || 'chat') !== 'tool_call')
+					.filter(msg => !['tool_call', 'agent_intermediate'].includes(msg.message_type || 'chat'))
 					.map(msg => ({
 						role: msg.role,
 						content: msg.content || '',
@@ -1448,7 +1461,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// hold a mid-answer fragment the run's stored transcript will
 				// supersede, so persisting one would write the fragment into
 				// local history as if it were the finished reply.
-				messages: messages.filter(m => !m._replayed).map(m => buildPersistedMessage(m)),
+				messages: messages.filter(m => !isReplayPlaceholder(m)).map(m => buildPersistedMessage(m)),
 				tags: [],
 				// Persist the active workspace so a locally saved conversation
 				// restores it on reload (issue #829), mirroring the server save

@@ -218,4 +218,36 @@ describe('useMessages - STREAM_TOKEN replace (stream replay, issue #957)', () =>
     expect(result.current.messages[0].content).toBe('the answer')
     expect(result.current.messages[0]._streaming).toBe(false)
   })
+
+  it('a marker-only seed does not absorb a later segment: the first real token replaces it at the end', () => {
+    const { result } = renderHook(() => useMessages())
+
+    // Reopen a run parked on an approval: the transcript loads, the empty
+    // seed carries the marker, then the approval is answered and a tool row
+    // lands before the next segment streams.
+    act(() => { result.current.addMessage({ role: 'user', content: 'question' }) })
+    act(() => { result.current.streamToken('', true) })
+    act(() => { result.current.addMessage({ role: 'system', content: '**Tool Call: calc**', type: 'tool_call', tool_call_id: 't1' }) })
+
+    act(() => { result.current.streamToken('narration after the tool') })
+
+    // The seed is gone; the new segment is its own bubble AFTER the tool row
+    // it chronologically follows -- not absorbed into the seed above it.
+    expect(result.current.messages).toHaveLength(3)
+    expect(result.current.messages[2].content).toBe('narration after the tool')
+    expect(result.current.messages[2]._streaming).toBe(true)
+    expect(result.current.messages.some(m => m._seed)).toBe(false)
+  })
+
+  it('a replay frame with text fills the seed rather than spawning a second bubble', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => { result.current.streamToken('', true) })
+    act(() => { result.current.streamToken('the segment text', true) })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].content).toBe('the segment text')
+    expect(result.current.messages[0]._replayed).toBe(true)
+    expect(result.current.messages[0]._seed).toBe(false)
+  })
 })

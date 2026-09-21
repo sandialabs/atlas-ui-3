@@ -334,4 +334,71 @@ describe('loadSavedConversation in-flight reopen (issue #957)', () => {
     // empty placeholder rather than freezing it).
     expect(result.current.messages.some(m => m.role === 'assistant' && !m.content)).toBe(false)
   })
+
+  it('does not close a genuinely live bubble on send (steering mid-run)', async () => {
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(makeConversation()) })
+
+    // A live stream in this tab (not a replay placeholder): tokens are
+    // arriving here, so _replayed is false. The handler buffers tokens and
+    // flushes on a 30ms timer, so wait for the flush.
+    act(() => {
+      h.wsHandler({ type: 'token_stream', token: 'live answer', is_first: true, is_last: false })
+    })
+    await act(() => new Promise(r => setTimeout(r, 60)))
+    const live = result.current.messages.find(m => m._streaming)
+    expect(live).toBeTruthy()
+    expect(live._replayed).toBeFalsy()
+
+    act(() => { result.current.sendChatMessage('steer: also do this') })
+
+    // The live bubble keeps streaming: ending it would split the segment
+    // into two bubbles and persist the truncated fragment as a finished reply.
+    const still = result.current.messages.find(m => m.content === 'live answer')
+    expect(still._streaming).toBe(true)
+  })
+
+  it('excludes replayed placeholder rows from the local autosave', async () => {
+    h.saveMode = 'local'
+    const { result } = renderChat()
+    act(() => {
+      result.current.loadSavedConversation(makeConversation({
+        in_flight: true,
+        run_id: 'run-1',
+        streaming_text: 'fragment of the old answer',
+      }))
+    })
+
+    // The autosave debounces by a second; wait it out.
+    await act(() => new Promise(r => setTimeout(r, 1100)))
+
+    expect(h.saveLocalConv).toHaveBeenCalled()
+    const saved = h.saveLocalConv.mock.calls[h.saveLocalConv.mock.calls.length - 1][0]
+    expect(saved.messages.some(m => m.content === 'fragment of the old answer')).toBe(false)
+    expect(saved.messages.some(m => m.role === 'user')).toBe(true)
+  })
+
+  it('excludes display-only narration rows from the restore payload', () => {
+    const { result } = renderChat()
+    act(() => {
+      result.current.loadSavedConversation(makeConversation({
+        messages: [
+          { role: 'user', content: 'Hello', message_type: 'chat', timestamp: '2026-01-01T00:00:00Z' },
+          { role: 'assistant', content: 'narration', message_type: 'agent_intermediate', timestamp: '2026-01-01T00:00:01Z' },
+          { role: 'tool', content: 'Tool call: calc', message_type: 'tool_call', timestamp: '2026-01-01T00:00:02Z' },
+          { role: 'assistant', content: 'final answer', message_type: 'chat', timestamp: '2026-01-01T00:00:03Z' },
+        ],
+      }))
+    })
+
+    const restore = h.sendMessage.mock.calls.find(c => c[0]?.type === 'restore_conversation')
+    expect(restore).toBeTruthy()
+    // With no conversation repository configured the client payload is
+    // canonical: a display-only row replayed as a second assistant turn
+    // would break strict alternation.
+    expect(restore[0].messages).toEqual([
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'final answer' },
+    ])
+  })
 })

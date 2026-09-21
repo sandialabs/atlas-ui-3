@@ -831,14 +831,21 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           // extending. The role="status" marker below is the sole indicator.
           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
         )}
-        {message._streaming && message._replayed && (
+        {message._streaming && (
+          // The live region stays mounted for the bubble's streaming lifetime
+          // and only its contents toggle: mounting it already populated is
+          // what screen readers miss.
           <div
-            className="mt-2 text-xs text-gray-400 italic flex items-center gap-1.5"
-            data-testid="stream-replay-in-progress"
+            className={message._replayed ? 'mt-2 text-xs text-gray-400 italic flex items-center gap-1.5' : 'sr-only'}
+            data-testid={message._replayed ? 'stream-replay-in-progress' : undefined}
             role="status"
           >
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
-            Answer in progress — it will refresh when the response finishes.
+            {message._replayed && (
+              <>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
+                Answer in progress — it will refresh when the response finishes.
+              </>
+            )}
           </div>
         )}
       </div>
