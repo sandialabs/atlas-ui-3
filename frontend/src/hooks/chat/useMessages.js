@@ -17,10 +17,6 @@ function messagesReducer(state, action) {
       // it: the transcript being loaded may already hold an earlier snapshot
       // of the same segment, and appending would duplicate the overlap.
       if (action.replace) {
-        // Target placeholders only: a late replay frame must never overwrite
-        // a newer turn's genuinely live bubble (and re-mark it _replayed,
-        // which would hide it from the persistence paths).
-        const current = state.findLastIndex(m => m._streaming && m._replayed)
         const replayed = {
           role: 'assistant',
           content: action.token,
@@ -33,13 +29,32 @@ function messagesReducer(state, action) {
           // branch below skips it and the first real token replaces it.
           _seed: !action.token,
         }
+        // First target a placeholder (the seed or an earlier replay): the
+        // replay is a newer snapshot of the same segment and defines it.
+        const current = state.findLastIndex(m => m._streaming && m._replayed)
         if (current >= 0) {
           const updated = [...state]
           updated[current] = { ...state[current], ...replayed }
           return updated
         }
-        // No placeholder to define. A live stream owned by this tab means the
-        // view moved past the replay's segment -- drop the late frame.
+        // A live token can land before the replay frame and flip the bubble
+        // live. Dropping the replay then would leave a hole in the middle of
+        // the answer (the tokens between the bubble's content and the next
+        // live frame), so extend a live bubble the replay strictly
+        // continues: same segment (its content is a prefix), newer snapshot
+        // (strictly longer). The bubble stays live-owned -- no _replayed
+        // flag, so it is not hidden from the persistence paths.
+        const live = state.findLastIndex(
+          m => m._streaming && action.token.startsWith(m.content) && action.token.length > m.content.length
+        )
+        if (live >= 0) {
+          const updated = [...state]
+          updated[live] = { ...state[live], content: action.token }
+          return updated
+        }
+        // No placeholder and no continuable live bubble: a live stream owned
+        // by this tab means the view moved past the replay's segment, so the
+        // late frame is dropped rather than clobbering it.
         if (state.some(m => m._streaming)) return state
         return [...state, replayed]
       }

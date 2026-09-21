@@ -68,4 +68,27 @@ describe('Message stream-replay marker (issue #957)', () => {
 
     expect(screen.queryByTestId('stream-replay-in-progress')).not.toBeInTheDocument()
   })
+
+  it('a marker-only seed renders no full assistant chrome', () => {
+    // A run parked between segments (an approval wait) seeds an empty
+    // bubble: avatar, author and a live Copy button around no content reads
+    // as a broken reply and copies an empty string.
+    render(
+      <Message
+        message={{ role: 'assistant', content: '', timestamp: new Date().toISOString(), _streaming: true, _replayed: true, _seed: true }}
+        onRewind={null}
+        userIndex={null}
+      />
+    )
+
+    expect(screen.getByTestId('stream-replay-in-progress')).toBeInTheDocument()
+    expect(screen.queryByText('ATLAS')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Copy message to clipboard')).not.toBeInTheDocument()
+  })
+
+  it('hides Copy on a replayed partial bubble', () => {
+    render(<Message message={{ ...streamingMessage, _replayed: true }} onRewind={null} userIndex={null} />)
+
+    expect(screen.queryByTitle('Copy message to clipboard')).not.toBeInTheDocument()
+  })
 })

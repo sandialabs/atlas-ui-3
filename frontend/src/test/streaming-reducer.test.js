@@ -269,6 +269,40 @@ describe('useMessages - STREAM_TOKEN replace (stream replay, issue #957)', () =>
     expect(result.current.messages[0]._replayed).toBeFalsy()
   })
 
+  it('seed, live append, then replay: the replay extends the same segment instead of leaving a hole', () => {
+    const { result } = renderHook(() => useMessages())
+
+    // The REST record seeds an early snapshot; a live token lands before the
+    // replay frame and flips the bubble live.
+    act(() => { result.current.streamToken('w1 w2', true) })
+    act(() => { result.current.streamToken(' w3') })
+    expect(result.current.messages[0]._replayed).toBe(false)
+
+    // The replay frame carries a newer snapshot of the same segment. It must
+    // still apply: dropping it would leave the tokens it covers missing
+    // between the bubble and the next live frame.
+    act(() => { result.current.streamToken('w1 w2 w3 w4', true) })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].content).toBe('w1 w2 w3 w4')
+    // The bubble stays live-owned: no _replayed flag, so the persistence
+    // paths do not skip it.
+    expect(result.current.messages[0]._replayed).toBe(false)
+
+    // And the live stream continues on top of it.
+    act(() => { result.current.streamToken(' w5') })
+    expect(result.current.messages[0].content).toBe('w1 w2 w3 w4 w5')
+  })
+
+  it('a replay shorter than the live bubble does not rewind it', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => { result.current.streamToken('w1 w2 w3 w4 w5') })
+    act(() => { result.current.streamToken('w1 w2', true) })
+
+    expect(result.current.messages[0].content).toBe('w1 w2 w3 w4 w5')
+  })
+
   it('discarding placeholders removes fragments and seeds but keeps live rows', () => {
     const { result } = renderHook(() => useMessages())
 

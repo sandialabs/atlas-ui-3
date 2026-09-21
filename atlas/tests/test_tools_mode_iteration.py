@@ -451,9 +451,15 @@ async def test_canvas_round_narration_survives_a_continuation_round():
 
     await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
 
+    # The full row sequence, in the live view's order: the canvas round's
+    # narration lands where it streamed (before the continuation's answer),
+    # not bunched at the turn's end.
     rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
-    assert (MessageRole.ASSISTANT, "agent_intermediate", "Let me draw that.") in rows
-    assert rows[-1] == (MessageRole.ASSISTANT, None, "Done! The diagram is ready.")
+    assert rows == [
+        (MessageRole.USER, None, "draw"),
+        (MessageRole.ASSISTANT, "agent_intermediate", "Let me draw that."),
+        (MessageRole.ASSISTANT, None, "Done! The diagram is ready."),
+    ]
 
     # The closing answer is the LLM-visible reply; the narration row is
     # display-only by design (matching the agentic loop's intermediate rows).
@@ -523,6 +529,24 @@ async def test_a_cancel_during_a_canvas_round_keeps_the_deferred_narration():
 
     rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
     assert (MessageRole.ASSISTANT, "agent_intermediate", "Let me draw that.") in rows
+
+
+@pytest.mark.asyncio
+async def test_two_identical_canvas_narrations_do_not_collapse():
+    """Two canvas rounds that narrate identically are two bubbles live, so
+    they are two rows after a reload: the close takes back at most the one
+    row whose text the turn closes with."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Same words.", [_tc("c1", "atlas_canvas", '{"content":"a"}')]),
+        ("Same words.", [_tc("c2", "atlas_canvas", '{"content":"b"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert contents.count("Same words.") == 2
 
 
 @pytest.mark.asyncio

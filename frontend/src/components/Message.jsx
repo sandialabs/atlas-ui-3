@@ -111,6 +111,24 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   useEffect(() => {
     setShowReplayMarker(Boolean(message._streaming && message._replayed))
   }, [message._streaming, message._replayed])
+
+  // The replay marker, one definition for both the full bubble and the
+  // marker-only seed below. The live region stays mounted for the bubble's
+  // streaming lifetime and only its contents toggle (see the effect above).
+  const replayMarker = message._streaming && (
+    <div
+      className={showReplayMarker ? 'mt-2 text-xs text-gray-400 italic flex items-center gap-1.5' : 'sr-only'}
+      data-testid={showReplayMarker ? 'stream-replay-in-progress' : undefined}
+      role="status"
+    >
+      {showReplayMarker && (
+        <>
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
+          Answer in progress — it will refresh when the response finishes.
+        </>
+      )}
+    </div>
+  )
   // Set when the editor closes via Cancel/Esc so focus returns to the pencil
   // trigger (rather than falling back to <body>) for keyboard/screen-reader users.
   const restoreFocusRef = useRef(false)
@@ -743,6 +761,19 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     )
   }
 
+  // A marker-only seed (issue #957): a run parked between segments gets no
+  // full assistant chrome -- avatar, author and a live Copy button around no
+  // content reads as a broken reply and copies an empty string.
+  if (message._seed) {
+    return (
+      <div className="flex items-start gap-0 sm:gap-3 w-full group">
+        <div ref={containerRef} className="min-w-0 flex-1 bg-gray-800 rounded-lg p-3 sm:p-4">
+          {replayMarker}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={`flex items-start gap-0 sm:gap-3 ${isUser ? 'flex-row-reverse' : 'w-full'} group`}>
       <div className={`w-8 h-8 rounded-full ${avatarBg} items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex`}>
@@ -790,14 +821,20 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                   <RotateCcw className="w-3 h-3" />
                 </button>
               )}
-              <button
-                onClick={handleCopyMessage}
-                className="copy-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
-                title="Copy message to clipboard"
-                type="button"
-              >
-                <Copy className="w-3 h-3" />
-              </button>
+              {!message._replayed && (
+                // A replayed bubble holds a mid-answer fragment (issue #957):
+                // copying it pastes the fragment as if it were the finished
+                // reply. Copy returns when the reply completes (the flag
+                // clears on STREAM_END).
+                <button
+                  onClick={handleCopyMessage}
+                  className="copy-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                  title="Copy message to clipboard"
+                  type="button"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -841,20 +878,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           // extending. The role="status" marker below is the sole indicator.
           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
         )}
-        {message._streaming && (
-          <div
-            className={showReplayMarker ? 'mt-2 text-xs text-gray-400 italic flex items-center gap-1.5' : 'sr-only'}
-            data-testid={showReplayMarker ? 'stream-replay-in-progress' : undefined}
-            role="status"
-          >
-            {showReplayMarker && (
-              <>
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
-                Answer in progress — it will refresh when the response finishes.
-              </>
-            )}
-          </div>
-        )}
+        {replayMarker}
       </div>
     </div>
   )

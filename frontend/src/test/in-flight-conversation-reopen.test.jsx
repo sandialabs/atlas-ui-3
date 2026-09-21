@@ -232,6 +232,28 @@ describe('loadSavedConversation in-flight reopen (issue #957)', () => {
     expect(seeded._replayed).toBe(true)
   })
 
+  it('isStreaming ignores replay placeholders but counts a genuinely live token', async () => {
+    const { result } = renderChat()
+    act(() => {
+      result.current.loadSavedConversation(makeConversation({
+        in_flight: true,
+        run_id: 'run-1',
+        streaming_text: 'fragment of the old answer',
+      }))
+    })
+
+    // A reopened second tab must not show Stop and refuse every send for the
+    // whole run: the placeholder is not this tab streaming.
+    expect(result.current.isStreaming).toBe(false)
+
+    // A genuinely live token (this tab owns the stream) is.
+    act(() => {
+      h.wsHandler({ type: 'token_stream', token: 'more', is_first: true, is_last: false, run_id: 'run-1', conversation_id: 'conv-1' })
+    })
+    await act(() => new Promise(r => setTimeout(r, 60)))
+    expect(result.current.isStreaming).toBe(true)
+  })
+
   it('seeds nothing and asks for no snapshot for a stored, idle conversation', () => {
     const { result } = renderChat()
     act(() => { result.current.loadSavedConversation(makeConversation()) })

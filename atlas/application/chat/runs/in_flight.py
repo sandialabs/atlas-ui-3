@@ -16,11 +16,17 @@ owner resolves the conversation id to a run.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from atlas.application.chat.runs.registry import RunRegistry
 
 TITLE_MAX_CHARS = 200
+
+
+def _iso(epoch: float) -> str:
+    """The stored shape's timestamp format (ISO, UTC) from a time.time() value."""
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
 
 def _run_message_dicts(session) -> list:
@@ -80,8 +86,12 @@ async def in_flight_conversation(
         "user_email": user_email,
         "title": title,
         "model": None,
-        "created_at": None,
-        "updated_at": None,
+        # The record stands in for a stored conversation, so it carries the
+        # stored shape's timestamps too -- from the run's own clock (created
+        # at admission, updated at its last status change), in the same ISO
+        # format the repository serializes.
+        "created_at": _iso(record.created_at),
+        "updated_at": _iso(record.updated_at),
         "message_count": len(messages),
         "metadata": {
             "agent_mode": bool(session.context.get("agent_mode")),
