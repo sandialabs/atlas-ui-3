@@ -843,7 +843,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         )}
         {message._streaming && (
           <div
-            className={showReplayMarker ? 'mt-2 text-xs text-gray-500 italic flex items-center gap-1.5' : 'sr-only'}
+            className={showReplayMarker ? 'mt-2 text-xs text-gray-400 italic flex items-center gap-1.5' : 'sr-only'}
             data-testid={showReplayMarker ? 'stream-replay-in-progress' : undefined}
             role="status"
           >

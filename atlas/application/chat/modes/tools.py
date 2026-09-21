@@ -519,10 +519,17 @@ class ToolsModeRunner:
                     # Text the user watched stream in is still persisted:
                     # its segment closed inside the round, and dropping it
                     # here would leave a reload showing a turn that appears
-                    # to have said nothing before its tools.
-                    persisted = self._persist_narration_row(session, next_text)
-                    if persisted:
-                        persisted_narrations.append(persisted)
+                    # to have said nothing before its tools. A canvas-only
+                    # response defers instead, exactly like the clean path:
+                    # the close below may end on it, with this very text as
+                    # the LLM-visible closing message.
+                    if current_response is not None and self._is_canvas_only_response(current_response):
+                        if next_text:
+                            deferred_narrations.append(next_text)
+                    else:
+                        persisted = self._persist_narration_row(session, next_text)
+                        if persisted:
+                            persisted_narrations.append(persisted)
                     if current_response is None:
                         current_response = LLMResponse(content="")
                     break
@@ -598,7 +605,10 @@ class ToolsModeRunner:
         except BaseException:
             # A Stop / disconnect mid-round would otherwise discard every
             # tool call recorded since the turn began -- the recorder only
-            # flushes on the success path (issue #755).
+            # flushes on the success path (issue #755). Narration deferred
+            # from a canvas-only round is flushed too: the user watched it
+            # stream in, and a cancel must not drop it with the turn.
+            self._flush_deferred_narrations(session, deferred_narrations)
             await recorder.unwind(session.history)
             raise
 

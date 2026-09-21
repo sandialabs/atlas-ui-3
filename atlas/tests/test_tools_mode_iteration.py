@@ -464,6 +464,68 @@ async def test_canvas_round_narration_survives_a_continuation_round():
 
 
 @pytest.mark.asyncio
+async def test_canvas_response_then_stream_error_does_not_duplicate_the_narration():
+    """A provider can yield a canvas-only response and then raise. The error
+    branch defers the narration exactly like the clean path, so the close
+    (which ends on that response) carries it once, not twice."""
+    class CanvasThenRaiseLLM:
+        async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                    temperature=0.7, user_email=None):
+            yield "Here is the diagram."
+            yield LLMResponse(
+                content="Here is the diagram.",
+                tool_calls=[_tc("c1", "atlas_canvas", '{"content":"svg"}')],
+            )
+            raise RuntimeError("stream died after the response")
+
+        async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+            yield "unused"
+
+        async def call_plain(self, model, messages, temperature=0.7, user_email=None):
+            return "unused"
+
+    runner = _runner(CanvasThenRaiseLLM(), _config(max_extra_rounds=0))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert contents.count("Here is the diagram.") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_during_a_canvas_round_keeps_the_deferred_narration():
+    """A Stop mid-canvas-round unwinds through the BaseException handler: the
+    deferred narration the user watched stream in is flushed, not dropped
+    with the turn."""
+    import asyncio as _asyncio
+
+    llm = ScriptedToolsLLM(turns=[
+        ("Let me draw that.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=0))
+    session = _real_session()
+
+    async def _cancelled_execute(tool_calls, session_context, tool_manager,
+                                 update_callback=None, config_manager=None, skip_approval=False):
+        raise _asyncio.CancelledError()
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _cancelled_execute
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        with pytest.raises(_asyncio.CancelledError):
+            await runner.run_streaming(
+                session=session,
+                model="test-model",
+                messages=[{"role": "user", "content": "draw"}],
+                selected_tools=["atlas_canvas"],
+            )
+
+    rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
+    assert (MessageRole.ASSISTANT, "agent_intermediate", "Let me draw that.") in rows
+
+
+@pytest.mark.asyncio
 async def test_mixed_canvas_and_tool_round_persists_narration_immediately():
     """A round calling canvas alongside a real tool is not canvas-only: the
     shortcut cannot fire, so its narration is persisted at the segment close
