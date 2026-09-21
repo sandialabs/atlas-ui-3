@@ -27,25 +27,13 @@ const RUN_END_RELOAD_GRACE_MS = 2500
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Row types the live transcript renders that a persisted transcript never
-// contains: agent-loop status lines, tool progress chrome and the
-// informational system notes (file attach notices and the like) exist only
-// in the view -- tracked runs only exist in server save mode, where these
-// rows are never written to the store. The joined-run refresh (issue #959)
-// aligns the stored rows against the view past them; without the skip they
-// would break the match and force a full reload, which is exactly what the
-// refresh exists to avoid.
-const LIVE_ONLY_ROW_TYPES = new Set([
-	'agent_status', 'agent_reason', 'agent_observe',
-	'agent_request_input', 'agent_error', 'tool_log',
-	'warning', 'iframe', 'system', 'canvas_error',
-	// An approval row is view chrome for a tracked run. The backend writes
-	// only 'chat', 'tool_call' and 'agent_intermediate' to a run's transcript
-	// -- never the approval request -- and a tracked run only exists in server
-	// save mode, where the store is the backend's copy. So the live approval
-	// row has no stored counterpart and must be skipped, or every
-	// approval-gated run ends its refresh in the full reload.
-	'tool_approval_request',
-])
+// The only row types the backend ever writes to a tracked run's transcript.
+// An allowlist, deliberately: this started as a denylist of view-only types
+// and every type minted elsewhere that was missing from it -- the approval
+// row, canvas errors -- silently degraded the refresh into the full reload it
+// exists to avoid. Anything not written to the store is view chrome, and a new
+// row type is now skipped by default instead of breaking the match.
+const STORED_ROW_TYPES = new Set(['chat', 'tool_call', 'agent_intermediate'])
 
 // Whether a stored row and a live view row describe the same transcript row.
 // Tool rows are matched by their tool_call_id, which survives
@@ -68,13 +56,13 @@ const sameTranscriptRow = (a, b) => {
 	return a.role === b.role && (a.content || '') === (b.content || '')
 }
 
-// A row carrying no `type` at all and role 'system' is also view-only: the
-// socket's `error` frame adds one (websocketHandlers.js) without a type, so
-// the type set alone would not catch it. Stored rows always carry a type --
-// they are built with `msg.message_type || 'chat'` -- so this cannot swallow
-// a row the store actually has.
+// A row carrying no `type` at all and role 'system' is view chrome too: the
+// socket's `error` frame adds one (websocketHandlers.js) without a type, which
+// would otherwise fall through as a plain 'chat' row. Stored rows always carry
+// a type -- they are built with `msg.message_type || 'chat'` -- so this cannot
+// swallow a row the store actually has.
 const isLiveOnlyRow = (m) => (
-	LIVE_ONLY_ROW_TYPES.has(m.type) || m._agentInput === true || (!m.type && m.role === 'system')
+	!STORED_ROW_TYPES.has(m.type || 'chat') || m._agentInput === true || (!m.type && m.role === 'system')
 )
 
 // Generate cryptographically secure random string
@@ -1158,12 +1146,31 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// mid-run store and clear `joinedRunConversationRef`, leaving the
 			// run-end effect with nothing to fire on. Leave it to that effect
 			// instead, which is watching the same map.
+			//
+			// The grace period is counted from the *load*, not from the run going
+			// terminal, so a run that ends late in this window would be aligned
+			// against a store that has not been written yet and its answer would be
+			// lost until a manual reload. If the run's status changed while the
+			// timer was in the air, re-arm once to give the save the same grace the
+			// run-end path gives it, and only then discharge.
 			if (!isRunActive(runRecord)) {
-				joinedRunTimerRef.current = setTimeout(() => {
+				const armedStatus = runRecord?.status ?? null
+				let rearmed = false
+				const tick = () => {
 					joinedRunTimerRef.current = null
-					if (isRunActive(runsByConversationRef.current[conversationData.id])) return
+					const now = runsByConversationRef.current[conversationData.id]
+					// Still going: the run-end effect is watching the same map and
+					// owns the obligation from here.
+					if (isRunActive(now)) return
+					const status = now?.status ?? null
+					if (!rearmed && status !== armedStatus) {
+						rearmed = true
+						joinedRunTimerRef.current = setTimeout(tick, RUN_END_RELOAD_GRACE_MS)
+						return
+					}
 					finishJoinedRun(conversationData.id)
-				}, RUN_END_RELOAD_GRACE_MS)
+				}
+				joinedRunTimerRef.current = setTimeout(tick, RUN_END_RELOAD_GRACE_MS)
 			}
 		}
 		files.setCanvasContent('')
@@ -1181,11 +1188,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// Load messages into the chat view
 		const loadedMessages = conversationData.messages.map(msg => ({
+			...(msg.metadata || {}),
 			role: msg.role,
 			content: msg.content || '',
 			timestamp: msg.timestamp,
 			type: msg.message_type || 'chat',
-			...(msg.metadata || {}),
 		}))
 		if (loadedMessages.length > 0) {
 			bulkAdd(loadedMessages)
@@ -1258,12 +1265,22 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// context: without the guard a second caller could splice one
 		// conversation's rows into another's view.
 		if (conversationData.id !== activeConversationIdRef.current) return false
+		// The fetched record is itself mid-run: another run is writing into this
+		// conversation (a second turn started here while the first was settling),
+		// so what came back is a snapshot, not the final transcript. Appending it
+		// and returning would discharge the obligation against a moving target and
+		// the new run's answer would never reach the view. Append what it does
+		// have -- the reader keeps their place -- but re-arm the obligation so the
+		// run-end path refreshes again when this run finishes.
+		const stillInFlight = conversationData.in_flight === true
+		// Metadata is spread first: it is stored data, and a stray `role`,
+		// `content` or `type` in it must not decide how an appended row renders.
 		const stored = conversationData.messages.map(msg => ({
+			...(msg.metadata || {}),
 			role: msg.role,
 			content: msg.content || '',
 			timestamp: msg.timestamp,
 			type: msg.message_type || 'chat',
-			...(msg.metadata || {}),
 		}))
 		// Re-seed the backend session from the store. It was seeded from the
 		// run's snapshot when the view was opened and does not have the run's
@@ -1330,8 +1347,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// take the store's copy, as it would have before this refresh existed.
 		if (storedIdx >= stored.length) {
 			if (viewIdx < current.length) return false
-			settleReplayPlaceholder()
+			if (!stillInFlight) settleReplayPlaceholder()
 			restoreContext()
+			if (stillInFlight) joinedRunConversationRef.current = conversationData.id
 			return true
 		}
 
@@ -1345,9 +1363,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const appended = missing.map((msg, i) => (
 			i === missing.length - 1 ? { ...msg, _transcriptRefresh: true } : msg
 		))
-		settleReplayPlaceholder()
+		// A still-running record keeps its placeholder: the run is mid-answer and
+		// the open bubble is still the honest thing to show.
+		if (!stillInFlight) settleReplayPlaceholder()
 		bulkAdd(appended)
 		restoreContext()
+		if (stillInFlight) joinedRunConversationRef.current = conversationData.id
 		return true
 	}, [sendMessage, bulkAdd, discardReplayPlaceholders, streamEnd])
 

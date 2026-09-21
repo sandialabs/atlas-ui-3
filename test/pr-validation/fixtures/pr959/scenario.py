@@ -76,14 +76,11 @@ PROSE_ROW_TYPES = {"chat", "agent_intermediate"}
 
 # Mirror of ChatContext.jsx's LIVE_ONLY_ROW_TYPES: rows that exist only in the
 # live view and have no stored counterpart, skipped during alignment.
-LIVE_ONLY_ROW_TYPES = {
-    "agent_status", "agent_reason", "agent_observe", "agent_request_input",
-    "agent_error", "tool_log", "warning", "iframe", "system", "canvas_error",
-    # The backend writes only chat / tool_call / agent_intermediate to a run's
-    # transcript, so the approval row the run paused on is view chrome with no
-    # stored counterpart.
-    "tool_approval_request",
-}
+# Mirror of ChatContext.jsx's STORED_ROW_TYPES: the only types the backend
+# writes to a tracked run's transcript. Everything else on screen -- agent
+# status lines, the approval row the run paused on, canvas errors -- is view
+# chrome with no stored counterpart, and is skipped during alignment.
+STORED_ROW_TYPES = {"chat", "tool_call", "agent_intermediate"}
 
 
 def row_key_client(msg):
@@ -109,17 +106,30 @@ def aligns_prefix(view_rows, stored_rows):
     True when the view is a prefix of the stored transcript (the refresh
     appends only the tail) and False when it has diverged (the refresh
     refuses and the client falls back to the full reload)."""
-    live_only = LIVE_ONLY_ROW_TYPES
-    view = [r for r in view_rows if r.get("message_type", "chat") not in live_only
-            and r.get("type", "chat") not in live_only]
+    def is_stored_row(r):
+        # Mirror of isLiveOnlyRow: an allowlist of the types the backend
+        # writes, plus the untyped role-'system' rows the socket adds.
+        mtype = r.get("message_type") or r.get("type")
+        if mtype is None:
+            return r.get("role") != "system"
+        return mtype in STORED_ROW_TYPES
+
+    view = [r for r in view_rows if is_stored_row(r)]
     i = 0
     for stored in stored_rows:
         if i >= len(view):
+            # The store ran out first. The client refuses when the view still
+            # carries persistable rows the store does not have (rewound or
+            # rewritten elsewhere) -- it cannot reconcile a shorter store, so
+            # it falls back to the full reload. Mirror that refusal; accepting
+            # here would let this check pass a case the shipped code rejects.
             break
         if row_key_client(view[i]) != row_key_client(stored):
             return False
         i += 1
-    return True
+    # Every view row must have been consumed. Anything left over is
+    # persistable content the store does not have, which the client refuses.
+    return i >= len(view)
 
 
 async def main():

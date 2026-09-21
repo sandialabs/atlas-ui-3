@@ -850,6 +850,107 @@ describe('refreshJoinedConversation (issue #959)', () => {
     }
   })
 
+  it('keeps the refresh obligation when the fetched record is still in flight', async () => {
+    // A second run started on this conversation while the first was settling,
+    // so the GET returns a snapshot rather than the final transcript.
+    // Appending it and returning would discharge the obligation against a
+    // moving target and the new run's answer would never reach the view.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'What is the weather'), storedChat('assistant', 'partial so far')],
+        metadata: {},
+        in_flight: true,
+      })
+    })
+    // The reader keeps their place: the rows it does have are appended.
+    expect(ok).toBe(true)
+    expect(result.current.messages[result.current.messages.length - 1].content).toBe('partial so far')
+
+    // ...and the obligation is still live, so the run ending refreshes again.
+    vi.useFakeTimers()
+    try {
+      dispatchFrame({ type: 'run_status', run: { run_id: 'r2', conversation_id: 'conv-1', status: 'completed' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2800) })
+      expect(result.current.runEndedConversationId).toBe('conv-1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('re-arms the grace period when the run ends late in the load window', async () => {
+    // The load-path timer counts from the load, not from the run going
+    // terminal. A run that ends just before it fires would otherwise be
+    // aligned against a store that has not been written yet, losing the
+    // answer until a manual reload.
+    const snapshot = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+      in_flight: true,
+    }
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, snapshot)
+      dispatchFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'conv-1', status: 'running' } })
+      // The run goes terminal late in the first grace window.
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      dispatchFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'conv-1', status: 'completed' } })
+      // The original window elapses -- but the status changed, so it re-arms
+      // rather than discharging against a store mid-save.
+      await act(async () => { await vi.advanceTimersByTimeAsync(600) })
+      expect(result.current.runEndedConversationId).toBeNull()
+      // A full grace period after the run actually ended, it discharges.
+      await act(async () => { await vi.advanceTimersByTimeAsync(2600) })
+      expect(result.current.runEndedConversationId).toBe('conv-1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not let stored metadata override how an appended row renders', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'hi')],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        messages: [
+          storedChat('user', 'hi'),
+          {
+            role: 'assistant',
+            content: 'the real answer',
+            timestamp: '2026-01-01T00:00:05Z',
+            message_type: 'chat',
+            // Stored data, not a rendering instruction.
+            metadata: { role: 'system', content: 'spoofed', type: 'agent_error' },
+          },
+        ],
+        metadata: {},
+      })
+    })
+    expect(ok).toBe(true)
+    const last = result.current.messages[result.current.messages.length - 1]
+    expect(last.role).toBe('assistant')
+    expect(last.content).toBe('the real answer')
+    expect(last.type).toBe('chat')
+  })
+
   it('rejects malformed input without touching the view', async () => {
     const loaded = {
       id: 'conv-1',
