@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from atlas.application.chat.modes.tools import ToolsModeRunner
-from atlas.domain.messages.models import ToolResult
+from atlas.domain.messages.models import Message, MessageRole, ToolResult
 from atlas.interfaces.llm import LLMResponse
 
 
@@ -385,29 +385,61 @@ async def test_continuation_provider_error_falls_back_to_synthesis():
     assert resp["message"] == "The calculation returned 4."
 
 
+def _real_session(prompt="draw"):
+    """A Session with a real history, for assertions on get_messages_for_llm."""
+    from atlas.domain.sessions.models import Session
+
+    session = Session()
+    session.history.add_message(Message(role=MessageRole.USER, content=prompt))
+    return session
+
+
+async def _run_on_real_session(runner, session, messages):
+    async def _execute_multiple(tool_calls, session_context, tool_manager,
+                                update_callback=None, config_manager=None, skip_approval=False):
+        return [ToolResult(tool_call_id=tc.id, content="ok", success=True) for tc in tool_calls]
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _execute_multiple
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=messages,
+            selected_tools=["atlas_canvas"],
+        )
+
+
 @pytest.mark.asyncio
-async def test_canvas_only_turn_does_not_close_with_the_already_persisted_narration():
-    """A canvas-only response's narration is persisted as its own row when its
-    segment closes (issue #957). Closing the turn with the same text again
-    would render the paragraph twice after a reload, so the canvas-only
-    shortcut closes with the placeholder instead."""
+async def test_canvas_only_turn_keeps_its_prose_as_the_llm_visible_reply():
+    """A canvas-only round's narration is NOT persisted as an intermediate
+    row: the turn closes with that very text, and the closing message is the
+    LLM-visible copy. Persisting both would show the next turn the literal
+    placeholder "Content displayed in canvas." as the assistant's previous
+    reply -- the prose filtered out with the display-only row."""
     llm = ScriptedToolsLLM(turns=[
         ("Here is the diagram.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
     ])
     runner = _runner(llm, _config(max_extra_rounds=0))
+    session = _real_session()
 
-    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "draw"}])
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
 
-    contents = [m.content for m in added if m.role.value == "assistant"]
-    assert contents.count("Here is the diagram.") == 1
-    assert contents[-1] == "Content displayed in canvas."
+    assistant_rows = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert [m.content for m in assistant_rows] == ["Here is the diagram."]
+    assert all(m.metadata.get("message_type") != "agent_intermediate" for m in assistant_rows)
+
+    llm_visible = session.history.get_messages_for_llm()
+    visible = [m["content"] for m in llm_visible if m["role"] == "assistant"]
+    assert any("Here is the diagram." in content for content in visible)
+    assert all("Content displayed in canvas" not in content for content in visible)
 
 
 @pytest.mark.asyncio
 async def test_canvas_only_turn_keeps_a_narration_that_never_streamed():
-    """The shortcut drops the narration only when it was actually persisted.
-    A response whose text never streamed (no deltas, content only on the
-    final item) exists nowhere else -- it remains the turn's answer."""
+    """A response whose text never streamed (no deltas, content only on the
+    final item) exists nowhere else -- it remains the turn's answer, as the
+    closing message, LLM-visible."""
     class ContentOnlyCanvasLLM:
         async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
                                     temperature=0.7, user_email=None):
@@ -423,11 +455,16 @@ async def test_canvas_only_turn_keeps_a_narration_that_never_streamed():
             return "unused"
 
     runner = _runner(ContentOnlyCanvasLLM(), _config(max_extra_rounds=0))
+    session = _real_session()
 
-    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "draw"}])
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
 
-    contents = [m.content for m in added if m.role.value == "assistant"]
-    assert contents == ["Here is the diagram."]
+    assistant_rows = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert [m.content for m in assistant_rows] == ["Here is the diagram."]
+
+    llm_visible = session.history.get_messages_for_llm()
+    visible = [m["content"] for m in llm_visible if m["role"] == "assistant"]
+    assert any("Here is the diagram." in content for content in visible)
 
 
 @pytest.mark.asyncio

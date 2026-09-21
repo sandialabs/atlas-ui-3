@@ -836,7 +836,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           // and only its contents toggle: mounting it already populated is
           // what screen readers miss.
           <div
-            className={message._replayed ? 'mt-2 text-xs text-gray-400 italic flex items-center gap-1.5' : 'sr-only'}
+            className={message._replayed ? 'mt-2 text-xs text-gray-500 italic flex items-center gap-1.5' : 'sr-only'}
             data-testid={message._replayed ? 'stream-replay-in-progress' : undefined}
             role="status"
           >

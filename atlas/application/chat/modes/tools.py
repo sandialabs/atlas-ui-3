@@ -370,10 +370,15 @@ class ToolsModeRunner:
             # this text exists nowhere else -- the replay buffer (issue #957)
             # clears on the segment's is_last precisely because a closed
             # segment belongs to history, so history must have it before the
-            # tools run.
-            persisted = self._persist_narration_row(session, accumulated_content)
-            if persisted:
-                persisted_narrations.append(persisted)
+            # tools run. A canvas-only round is the exception: the turn closes
+            # with this very text (the synthesis shortcut), and the closing
+            # message is LLM-visible while an agent_intermediate row is not --
+            # persisting both would drop the prose from the model's view of
+            # the conversation (and render it twice on reload).
+            if not self._is_canvas_only_response(final_llm_response):
+                persisted = self._persist_narration_row(session, accumulated_content)
+                if persisted:
+                    persisted_narrations.append(persisted)
 
         session_context = build_session_context(session)
         # See note above: propagate the per-request RAG selection so atlas_rag
@@ -528,10 +533,14 @@ class ToolsModeRunner:
                 # else: loop to execute the newly requested tools. Persist the
                 # narration first: it closed with its segment, and the tools
                 # ahead may park on approval -- a reopen in that window reads
-                # history, where this text otherwise does not exist yet.
-                persisted = self._persist_narration_row(session, next_text)
-                if persisted:
-                    persisted_narrations.append(persisted)
+                # history, where this text otherwise does not exist yet. As at
+                # the initial close, a canvas-only round is the exception: the
+                # turn closes with this very text, and the closing message is
+                # the LLM-visible copy.
+                if not self._is_canvas_only_response(current_response):
+                    persisted = self._persist_narration_row(session, next_text)
+                    if persisted:
+                        persisted_narrations.append(persisted)
 
             # Budget exhausted or anti-loop tripped while the model still wanted
             # tools -> force a closing text answer via no-tools synthesis, hardened
@@ -839,6 +848,21 @@ class ToolsModeRunner:
         await publish_citations(self.event_publisher, citation_register)
         await self.event_publisher.publish_response_complete()
         return event_notifier.create_chat_response(content)
+
+    def _is_canvas_only_response(self, response: Any) -> bool:
+        """Whether every tool call on the response is the canvas tool.
+
+        Mirrors the condition the synthesis shortcut applies: only then does
+        the turn close with the response's own content, which is what makes a
+        canvas-only round's narration special (see the persist sites).
+        """
+        tool_calls = [tc for tc in (getattr(response, "tool_calls", None) or []) if tc is not None]
+        if not tool_calls:
+            return False
+        return all(
+            normalize_tool_name(self._tool_call_signature(tc)[0]) == CANVAS_TOOL_NAME
+            for tc in tool_calls
+        )
 
     def _persist_narration_row(self, session: Session, text: str) -> Optional[str]:
         """Write a closed narration segment into history the moment it closes.

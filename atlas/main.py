@@ -2385,6 +2385,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     }
                 await websocket.send_json(response)
 
+                # A refused restore (authorization, or the id simply not
+                # found) gets nothing more: the approval and segment replays
+                # below belong to a conversation the client actually loaded.
+                if isinstance(response, dict) and response.get("type") == "error":
+                    continue
+
                 # Issue #884: if a run in the conversation the user just opened
                 # is blocked on an approval, re-send the request now. It was
                 # dropped when it first arrived (the user was elsewhere), and

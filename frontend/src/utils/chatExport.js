@@ -89,6 +89,13 @@ const TOOL_APPROVAL_PERSISTED_FIELDS = [
   'rejection_reason',
 ]
 
+// Message types that exist only so the UI can re-render a reloaded
+// conversation. Mirrors the domain's DISPLAY_ONLY_MESSAGE_TYPES
+// (atlas/domain/messages/models.py): persisted, but never replayed to the
+// LLM as conversation turns -- which is exactly what the restore payload
+// filter in ChatContext excludes them for.
+export const DISPLAY_ONLY_MESSAGE_TYPES = ['tool_call', 'agent_intermediate']
+
 // A replayed bubble (issue #957) is a transient placeholder: it holds a
 // mid-answer fragment the run's stored transcript supersedes when the run
 // ends. Persisting or exporting one would write the fragment into history as

@@ -358,8 +358,32 @@ describe('loadSavedConversation in-flight reopen (issue #957)', () => {
     expect(still._streaming).toBe(true)
   })
 
-  it('excludes replayed placeholder rows from the local autosave', async () => {
-    h.saveMode = 'local'
+  it('excludes replayed placeholder rows from the local autosave', () => {
+    vi.useFakeTimers()
+    try {
+      h.saveMode = 'local'
+      const { result } = renderChat()
+      act(() => {
+        result.current.loadSavedConversation(makeConversation({
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'fragment of the old answer',
+        }))
+      })
+
+      // The autosave debounces by a second; run the timer deterministically.
+      act(() => { vi.advanceTimersByTime(1100) })
+
+      expect(h.saveLocalConv).toHaveBeenCalled()
+      const saved = h.saveLocalConv.mock.calls[h.saveLocalConv.mock.calls.length - 1][0]
+      expect(saved.messages.some(m => m.content === 'fragment of the old answer')).toBe(false)
+      expect(saved.messages.some(m => m.role === 'user')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('excludes replayed placeholder rows from the New Chat undo snapshot', () => {
     const { result } = renderChat()
     act(() => {
       result.current.loadSavedConversation(makeConversation({
@@ -369,13 +393,19 @@ describe('loadSavedConversation in-flight reopen (issue #957)', () => {
       }))
     })
 
-    // The autosave debounces by a second; wait it out.
-    await act(() => new Promise(r => setTimeout(r, 1100)))
+    // New Chat snapshots the view for the Undo offer. The seeded bubble no
+    // longer counts as streaming (it is a placeholder, not this tab's live
+    // stream), so the snapshot is taken -- but the placeholder is not in it.
+    act(() => { result.current.clearChat() })
+    const toastCall = h.toastInfo.mock.calls.find(c => c[1]?.action?.onClick)
+    expect(toastCall).toBeTruthy()
 
-    expect(h.saveLocalConv).toHaveBeenCalled()
-    const saved = h.saveLocalConv.mock.calls[h.saveLocalConv.mock.calls.length - 1][0]
-    expect(saved.messages.some(m => m.content === 'fragment of the old answer')).toBe(false)
-    expect(saved.messages.some(m => m.role === 'user')).toBe(true)
+    // Clicking Undo restores the snapshot through loadSavedConversation;
+    // observe what comes back.
+    act(() => { toastCall[1].action.onClick() })
+
+    expect(result.current.messages.some(m => m.content === 'fragment of the old answer')).toBe(false)
+    expect(result.current.messages.some(m => m.role === 'user' && m.content === 'Hello')).toBe(true)
   })
 
   it('excludes display-only narration rows from the restore payload', () => {

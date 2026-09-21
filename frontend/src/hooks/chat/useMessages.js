@@ -71,7 +71,10 @@ function messagesReducer(state, action) {
           return state.filter((_, i) => i !== idx)
         }
         const updated = [...state]
-        updated[idx] = { ...state[idx], _streaming: false }
+        // The reply is complete now, so the row is no longer a placeholder:
+        // keeping _replayed would have every persistence path (autosave,
+        // undo, export) drop a finished answer from local history.
+        updated[idx] = { ...state[idx], _streaming: false, _replayed: false }
         return updated
       }
       return state

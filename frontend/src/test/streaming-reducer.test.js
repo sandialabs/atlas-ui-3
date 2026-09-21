@@ -187,7 +187,9 @@ describe('useMessages - STREAM_TOKEN replace (stream replay, issue #957)', () =>
     act(() => { result.current.streamEnd() })
 
     expect(result.current.messages[0]._streaming).toBe(false)
-    expect(result.current.messages[0]._replayed).toBe(true)
+    // The reply is complete: the row is no longer a placeholder, so it must
+    // not be dropped by the persistence paths that skip _replayed rows.
+    expect(result.current.messages[0]._replayed).toBe(false)
   })
 
   it('STREAM_END removes an empty placeholder row instead of freezing it', () => {

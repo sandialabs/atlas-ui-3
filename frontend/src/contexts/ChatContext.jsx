@@ -15,7 +15,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
-import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
+import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
@@ -1133,19 +1133,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Notify backend to restore this conversation's context
 		// Sends the conversation_id and messages so the LLM has prior context.
 		// Display-only rows (persisted tool_call messages, issue #684, and
-		// agent_intermediate narration, issue #957 -- the two members of the
-		// domain's DISPLAY_ONLY_MESSAGE_TYPES) are excluded: they exist purely
-		// to re-render the transcript. A bare role:'tool' row with no preceding
-		// tool_calls would be rejected as an orphan tool message by some
-		// providers, and with no conversation repository configured the client
-		// payload is canonical, so a narration row would replay as a second
-		// assistant turn and break strict alternation.
+		// agent_intermediate narration, issue #957) are excluded: they exist
+		// purely to re-render the transcript. A bare role:'tool' row with no
+		// preceding tool_calls would be rejected as an orphan tool message by
+		// some providers, and with no conversation repository configured the
+		// client payload is canonical, so a narration row would replay as a
+		// second assistant turn and break strict alternation.
 		if (sendMessage) {
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
 				messages: conversationData.messages
-					.filter(msg => !['tool_call', 'agent_intermediate'].includes(msg.message_type || 'chat'))
+					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
 					.map(msg => ({
 						role: msg.role,
 						content: msg.content || '',

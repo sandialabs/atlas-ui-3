@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 
-from atlas.application.chat.runs import get_run_registry, reset_run_registry
+from atlas.application.chat.runs import RunStatus, get_run_registry, reset_run_registry
 
 OWNER = "owner@example.com"
 OTHER = "other@example.com"
@@ -97,19 +97,22 @@ def test_restore_sends_no_replay_to_a_non_owner(streaming_run):
     with _connect(client, OTHER) as websocket:
         _restore(websocket)
         first = websocket.receive_json()
-        # A second restore yields exactly one more frame -- the response --
-        # proving no replay frame followed the first: the replay resolve is
-        # ownership-checked, so the stranger's lookup found nothing.
+        # The handler is strictly sequential -- response, then the replay
+        # block, before the next frame is read -- so a replay could only ever
+        # arrive ahead of a second restore's response, never after it. Every
+        # frame this connection receives is asserted on directly.
         _restore(websocket)
         second = websocket.receive_json()
 
-    assert first["type"] == "conversation_restored"
-    assert second["type"] == "conversation_restored"
+    received = [first, second]
+    assert all(frame["type"] == "conversation_restored" for frame in received)
+    assert not any(frame.get("replay") for frame in received)
+    assert not any(frame["type"] == "token_stream" for frame in received)
 
 
 def test_restore_sends_no_replay_once_the_run_has_ended(streaming_run):
     registry, run = streaming_run
-    registry.set_status(run.run_id, registry.get(run.run_id).status.COMPLETED)
+    registry.set_status(run.run_id, RunStatus.COMPLETED)
     client = TestClient(app)
 
     with _connect(client, OWNER) as websocket:
@@ -120,5 +123,34 @@ def test_restore_sends_no_replay_once_the_run_has_ended(streaming_run):
 
     # A terminal run's buffer is cleared with the turn: there is nothing left
     # to replay, and the stored record is what the client loads instead.
-    assert first["type"] == "conversation_restored"
-    assert second["type"] == "conversation_restored"
+    received = [first, second]
+    assert all(frame["type"] == "conversation_restored" for frame in received)
+    assert not any(frame["type"] == "token_stream" for frame in received)
+
+
+def test_a_refused_restore_sends_no_replay_even_to_the_run_owner(
+    mock_app_factory, streaming_run
+):
+    """An error restore response (authorization, or an id the repository does
+    not know) skips the replay block: the segment belongs to a conversation
+    the client actually loaded, and a refused load gets nothing more."""
+    mock_app_factory.create_chat_service.return_value.handle_restore_conversation = AsyncMock(
+        return_value={
+            "type": "error",
+            "message": "Conversation not found or access denied",
+            "error_type": "authorization",
+        }
+    )
+    client = TestClient(app)
+
+    with _connect(client, OWNER) as websocket:
+        _restore(websocket)
+        first = websocket.receive_json()
+        # As above: the handler is sequential, so a replay could only arrive
+        # ahead of a second response, never after it.
+        _restore(websocket)
+        second = websocket.receive_json()
+
+    received = [first, second]
+    assert all(frame["type"] == "error" for frame in received)
+    assert not any(frame["type"] == "token_stream" for frame in received)
