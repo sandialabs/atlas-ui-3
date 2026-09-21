@@ -631,6 +631,140 @@ describe('refreshJoinedConversation (issue #959)', () => {
     }
   })
 
+  // Both shapes of an in-flight record seed a replay placeholder (issue
+  // #957): a half-streamed bubble when the run has an open segment, an empty
+  // one when it is between steps. Neither is a transcript row -- they are
+  // transient fragments the stored transcript supersedes -- so alignment must
+  // skip them. Before this was fixed the placeholder was compared against the
+  // run's finished answer, the match failed, and the refresh refused: the
+  // full reload ran and the scroll jumped, in exactly the case #959 is about.
+  it('appends over a half-streamed replay placeholder (in_flight + streaming_text)', async () => {
+    const snapshot = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+      in_flight: true,
+      streaming_text: 'Clear sk',
+    }
+    const { result } = renderChat()
+    await loadConversation(result, snapshot)
+    // The placeholder is on screen, carrying the partial fragment.
+    expect(result.current.messages.some(m => m._replayed)).toBe(true)
+
+    const store = [
+      storedChat('user', 'What is the weather'),
+      storedChat('assistant', 'Clear skies ahead'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+
+    const after = result.current.messages
+    // The fragment is gone and the run's real answer took its place.
+    expect(after.some(m => m._replayed)).toBe(false)
+    expect(after.map(m => m.content)).toEqual(['What is the weather', 'Clear skies ahead'])
+    expect(after[after.length - 1]._transcriptRefresh).toBe(true)
+    expect(restoreCalls()).toHaveLength(1)
+  })
+
+  it('appends over an empty replay placeholder (in_flight, between steps)', async () => {
+    const snapshot = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'Sleep for a bit')],
+      metadata: {},
+      in_flight: true,
+    }
+    const { result } = renderChat()
+    await loadConversation(result, snapshot)
+    expect(result.current.messages.some(m => m._replayed)).toBe(true)
+
+    const store = [
+      storedChat('user', 'Sleep for a bit'),
+      storedToolCall('tc-1', 'atlas_sleep'),
+      storedChat('assistant', 'Done sleeping'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+
+    const after = result.current.messages
+    expect(after.some(m => m._replayed)).toBe(false)
+    // No blank assistant bubble survives under the finished transcript.
+    expect(after.some(m => m.role === 'assistant' && !m.content)).toBe(false)
+    expect(after[after.length - 1].content).toBe('Done sleeping')
+    expect(after[after.length - 1]._transcriptRefresh).toBe(true)
+  })
+
+  it('omits display-only rows from the re-seeded restore payload', async () => {
+    // The re-seed must match loadSavedConversation's filter: a bare
+    // role:'tool' row replays as an orphan tool message and persisted
+    // agent_intermediate narration as a second assistant turn, either of
+    // which breaks strict alternation in the backend session.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'Sleep for a bit')],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    const store = [
+      storedChat('user', 'Sleep for a bit'),
+      { ...storedChat('assistant', 'Let me check that'), message_type: 'agent_intermediate' },
+      storedToolCall('tc-1', 'atlas_sleep'),
+      storedChat('assistant', 'Done sleeping'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+
+    const restore = restoreCalls().find(c => c.conversation_id === 'conv-1')
+    expect(restore).toBeTruthy()
+    expect(restore.messages).toEqual([
+      { role: 'user', content: 'Sleep for a bit' },
+      { role: 'assistant', content: 'Done sleeping' },
+    ])
+  })
+
+  it('does not discharge the refresh obligation for a run this tab has not heard of', async () => {
+    // `runs.getRun` returns undefined both for a run that has ended and for
+    // one this tab has simply never seen. Taking the second for the first
+    // would refresh against a mid-run store and clear the obligation, so the
+    // real run-end would never fire a refresh at all. The list_runs answer
+    // arrives during the grace period and the timer re-checks.
+    const snapshot = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+      in_flight: true,
+    }
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, snapshot)
+      // The tab asked, and the server says the run is still going.
+      dispatchFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'conv-1', status: 'running' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2800) })
+      expect(result.current.runEndedConversationId).toBeNull()
+
+      // When it really ends, the run-end effect still has its obligation.
+      dispatchFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'conv-1', status: 'completed' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2800) })
+      expect(result.current.runEndedConversationId).toBe('conv-1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rejects malformed input without touching the view', async () => {
     const loaded = {
       id: 'conv-1',

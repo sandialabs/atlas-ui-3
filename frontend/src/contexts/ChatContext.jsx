@@ -156,6 +156,12 @@ export const ChatProvider = ({ children }) => {
 	// a conversation the user is not looking at still has somewhere to live --
 	// and so the history list can mark it as still working.
 	const runs = useConversationRuns()
+	// The delayed joined-run refresh fires from a setTimeout closure, which
+	// would otherwise read the run map as it was when the timer was armed. Read
+	// the live map through a ref so the timer can re-check whether the run is
+	// still going before it declares the obligation discharged.
+	const runsByConversationRef = useRef(runs.runsByConversation)
+	runsByConversationRef.current = runs.runsByConversation
 	// Read by the websocket handler to route incoming events. A ref, not the
 	// state value: the handler is registered once and must always see the
 	// conversation that is on screen *now*, not the one that was on screen when
@@ -1129,9 +1135,19 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// The run already ended while the view was being loaded: schedule the
 			// same delayed refresh the run-end path runs, so the store's final
 			// rows are appended once the save has settled.
-			if (!isRunActive(runRecord) && !joinedRunTimerRef.current) {
+			//
+			// `runRecord` is also undefined for a run this tab has simply never
+			// heard of, which is indistinguishable here from one that has ended --
+			// so the timer re-checks before it fires. The `list_runs` asked for
+			// just above answers in the meantime; if it reports the run still
+			// going, discharging the obligation now would refresh against a
+			// mid-run store and clear `joinedRunConversationRef`, leaving the
+			// run-end effect with nothing to fire on. Leave it to that effect
+			// instead, which is watching the same map.
+			if (!isRunActive(runRecord)) {
 				joinedRunTimerRef.current = setTimeout(() => {
 					joinedRunTimerRef.current = null
+					if (isRunActive(runsByConversationRef.current[conversationData.id])) return
 					finishJoinedRun(conversationData.id)
 				}, RUN_END_RELOAD_GRACE_MS)
 			}
@@ -1233,21 +1249,49 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Re-seed the backend session from the store. It was seeded from the
 		// run's snapshot when the view was opened and does not have the run's
 		// final turn, so the next message here would lose that context.
-		// Display-only rows (e.g. persisted tool_call messages, issue #684) are
-		// excluded, exactly as in loadSavedConversation.
+		// Display-only rows (persisted tool_call messages, issue #684, and
+		// agent_intermediate narration, issue #957) are excluded, exactly as in
+		// loadSavedConversation: a bare role:'tool' row replays as an orphan tool
+		// message and a narration row as a second assistant turn, either of which
+		// breaks strict alternation in the re-seeded session.
 		const restoreContext = () => {
 			if (!sendMessage) return
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
 				messages: conversationData.messages
-					.filter(msg => (msg.message_type || 'chat') !== 'tool_call')
+					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
 					.map(msg => ({ role: msg.role, content: msg.content || '' })),
 			})
 		}
+		// The placeholder is retired the moment the refresh is accepted: the
+		// rows appended below are the run's real output, and leaving the open
+		// bubble behind would show an "in progress" marker under a finished
+		// transcript. Discard before `streamEnd`, never after: STREAM_END on a
+		// half-streamed fragment clears `_replayed` (useMessages.js), which
+		// would turn the discard into a no-op and leave the partial text
+		// standing as if it were the finished reply. The `streamEnd` after it
+		// closes a genuinely live segment, if one is somehow still open.
+		// Guarded on there actually being one: both dispatches rebuild the
+		// message array, and firing them when the view has no placeholder would
+		// hand React a new identity for rows that did not change -- remounting
+		// the very tool rows and scroll anchor this refresh exists to preserve.
+		const hasReplayPlaceholder = latestMessagesRef.current.some(isReplayPlaceholder)
+		const settleReplayPlaceholder = () => {
+			if (!hasReplayPlaceholder) return
+			discardReplayPlaceholders()
+			streamEnd()
+		}
 		// Live-only rows and agent-loop answers have no stored counterpart;
-		// aligning past them keeps the match alive.
-		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m))
+		// aligning past them keeps the match alive. So does the replay
+		// placeholder (issue #957): opening a conversation while its run executes
+		// seeds an open bubble -- half-streamed, or empty when the run is between
+		// steps -- and it is a plain assistant row that `isLiveOnlyRow` does not
+		// skip. Comparing it against the run's finished answer would fail and
+		// force the full reload in exactly the case this refresh exists for. It
+		// is transient by construction (the stored transcript supersedes it), so
+		// it is dropped from the view below rather than matched.
+		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !isReplayPlaceholder(m))
 
 		// Walk both lists together; everything must line up one-to-one or the
 		// refresh refuses.
@@ -1267,6 +1311,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// take the store's copy, as it would have before this refresh existed.
 		if (storedIdx >= stored.length) {
 			if (viewIdx < current.length) return false
+			settleReplayPlaceholder()
 			restoreContext()
 			return true
 		}
@@ -1281,10 +1326,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const appended = missing.map((msg, i) => (
 			i === missing.length - 1 ? { ...msg, _transcriptRefresh: true } : msg
 		))
+		settleReplayPlaceholder()
 		bulkAdd(appended)
 		restoreContext()
 		return true
-	}, [sendMessage, bulkAdd])
+	}, [sendMessage, bulkAdd, discardReplayPlaceholders, streamEnd])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:

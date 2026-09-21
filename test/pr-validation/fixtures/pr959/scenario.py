@@ -69,19 +69,34 @@ def chat(content, conversation_id=None):
     return json.dumps(frame)
 
 
+# Mirror of ChatContext.jsx's PROSE_ROW_TYPES: agent narration is one row
+# wearing two type names -- persisted as 'agent_intermediate', streamed as a
+# plain assistant row -- so the pair must compare equal.
+PROSE_ROW_TYPES = {"chat", "agent_intermediate"}
+
+# Mirror of ChatContext.jsx's LIVE_ONLY_ROW_TYPES: rows that exist only in the
+# live view and have no stored counterpart, skipped during alignment.
+LIVE_ONLY_ROW_TYPES = {
+    "agent_status", "agent_reason", "agent_observe", "agent_request_input",
+    "agent_error", "tool_log", "warning", "iframe", "system",
+}
+
+
 def row_key_client(msg):
     """The matching rule ChatContext.refreshJoinedConversation applies.
 
     Always a (type, identity, extra) triple so two rows can only compare
-    equal through the same branch: tool rows on their tool_call_id, prose
-    rows on role and content.
+    equal through the same branch: tool and approval rows on their
+    tool_call_id, prose rows on role and content. Prose types are collapsed
+    to a single bucket, matching sameTranscriptRow's PROSE_ROW_TYPES.
     """
     mtype = (msg.get("metadata") or {}).get("message_type") or msg.get("message_type") or "chat"
-    if mtype == "tool_call":
+    if mtype in ("tool_call", "tool_approval_request"):
         tc = (msg.get("metadata") or {}).get("tool_call_id") or msg.get("tool_call_id")
         if tc:
             return (mtype, tc, "")
-    return (mtype, msg.get("role") or "", msg.get("content") or "")
+    bucket = "prose" if mtype in PROSE_ROW_TYPES else mtype
+    return (bucket, msg.get("role") or "", msg.get("content") or "")
 
 
 def aligns_prefix(view_rows, stored_rows):
@@ -90,9 +105,7 @@ def aligns_prefix(view_rows, stored_rows):
     True when the view is a prefix of the stored transcript (the refresh
     appends only the tail) and False when it has diverged (the refresh
     refuses and the client falls back to the full reload)."""
-    live_only = {"agent_status", "agent_reason", "agent_observe",
-                 "agent_request_input", "agent_error", "tool_log",
-                 "warning", "iframe"}
+    live_only = LIVE_ONLY_ROW_TYPES
     view = [r for r in view_rows if r.get("message_type", "chat") not in live_only
             and r.get("type", "chat") not in live_only]
     i = 0
