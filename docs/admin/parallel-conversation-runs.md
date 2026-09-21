@@ -119,6 +119,22 @@ mints one at admission and reports it here. Without that, the first agent turn i
 a new conversation could never be a background run, which is the most common case
 of all.
 
+### Ownership is settled before admission
+
+A chat turn that names a conversation id is only admitted if the id is the
+caller's to use. For a **stored** conversation, the ownership check
+(`ChatService.validate_conversation_id_owner`) runs *before* a run is admitted
+(issue #958): a turn naming a conversation another user saved is refused with an
+`error` frame of type `authorization` ("Conversation not found or access
+denied") and no run record is created. Before that fix the run was admitted
+first — the caller saw `run_started` and `run_status` frames, then the
+authorization failure — leaving a `failed` run in their snapshot for a
+conversation they never owned.
+
+An id that is not stored yet — a minted id, or one whose run is still in flight
+— passes this check; the in-flight variant (claiming a conversation another
+user's run is executing under) is addressed separately in PR #956.
+
 ### A running conversation is readable before its first save
 
 A tracked run persists its transcript only when the turn ends. Until then the
@@ -235,6 +251,12 @@ up, or paused on an approval. Answer the approval, or stop the run.
 Check the server log for the run id. The sweeper stops runs past
 `MAX_RUN_WALL_CLOCK_SECONDS` and marks them failed; if that is set to `0`,
 nothing will.
+
+**"Conversation access could not be verified."**
+The ownership check could not read the chat-history store (unreachable or
+locked database), so the turn is refused before a run is admitted rather than
+admitted and failed. Check the server log for the exception; when the store
+recovers, tracked runs are admitted again.
 
 **Runs are not being created at all.**
 All three conditions under "When it applies" must hold. The most common cause is
