@@ -19,6 +19,7 @@ import { useCaptureConsent } from '../hooks/useCaptureConsent'
 import CorrectTurnModal from './CorrectTurnModal'
 import AgentBusyIndicator from './AgentBusyIndicator'
 import { useToast } from './ui/toastContext'
+import { computeMessageChangeScroll } from '../utils/scrollDecision'
 
 const DEFAULT_MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024
 
@@ -216,18 +217,10 @@ const ChatArea = () => {
   // During streaming token updates (same message, content growing), respect
   // the user's scroll position so they can read earlier output (#441).
   useEffect(() => {
-    const newCount = messages.length
-    const lastMsg = messages[messages.length - 1]
-    const isNewMessage = newCount !== prevMessageCountRef.current
-    const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
-    // A transcript refresh (issue #959) appends the rows a background run
-    // wrote while this conversation was not on screen. That is a catch-up,
-    // not a new answer arriving live: force-scrolling would yank a reader
-    // who is scrolled up back to the bottom, so respect their position the
-    // way streaming does.
-    const isTranscriptRefresh = lastMsg && lastMsg._transcriptRefresh === true
-    const force = isNewMessage && lastMsg && (lastMsg.role !== 'user') && !isTranscriptRefresh
-    prevMessageCountRef.current = newCount
+    // The rule itself lives in utils/scrollDecision, so the tests exercise
+    // the expression this component actually ships rather than a copy of it.
+    const { force, isStreamingUpdate } = computeMessageChangeScroll(messages, prevMessageCountRef.current)
+    prevMessageCountRef.current = messages.length
     // During streaming token updates, only scroll if user hasn't scrolled away.
     // Use instant scroll (no smooth animation) so users can break out easily.
     if (isStreamingUpdate) {

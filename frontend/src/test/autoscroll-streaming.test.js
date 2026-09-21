@@ -20,26 +20,9 @@ import { describe, it, expect } from 'vitest'
  * These mirror the conditions in the useEffect hooks.
  */
 
-// Mirrors the scroll-on-message-change effect in ChatArea.jsx
-function computeMessageChangeScroll(messages, prevMessageCount) {
-  const newCount = messages.length
-  const lastMsg = messages[messages.length - 1]
-  const isNewMessage = newCount !== prevMessageCount
-  const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
-  const isTranscriptRefresh = lastMsg && lastMsg._transcriptRefresh === true
-  const force = isNewMessage && lastMsg && (lastMsg.role !== 'user') && !isTranscriptRefresh
-
-  if (isStreamingUpdate) {
-    return { force: false, isStreamingUpdate: true }
-  }
-  return { force, isStreamingUpdate: false }
-}
-
-// Mirrors scrollToBottom logic in ChatArea.jsx
-function shouldActuallyScroll(force, userScrolledAway) {
-  if (userScrolledAway && !force) return false
-  return true
-}
+// The real decision ChatArea ships, imported rather than restated. A local
+// copy meant deleting a clause from the component left this suite green.
+import { computeMessageChangeScroll, shouldActuallyScroll } from '../utils/scrollDecision'
 
 describe('Auto-scroll during streaming (#441)', () => {
 

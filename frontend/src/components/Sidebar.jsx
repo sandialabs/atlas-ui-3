@@ -4,6 +4,7 @@ import { useConversationHistory } from '../hooks/useConversationHistory'
 import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
+import { applyRunEndRefresh } from '../utils/runEndRefresh'
 
 const ContextMenu = ({ x, y, onDelete, onClose }) => {
   const menuRef = useRef(null)
@@ -188,9 +189,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     ;(async () => {
       const fullConv = await history.loadConversation(runEndedConversationId)
       if (cancelled) return
-      if (fullConv && !fullConv.error && !refreshJoinedConversation(fullConv)) {
-        loadSavedConversation(fullConv)
-      }
+      applyRunEndRefresh({ fullConv, refreshJoinedConversation, loadSavedConversation })
       clearRunEndedConversation()
     })()
     return () => { cancelled = true }

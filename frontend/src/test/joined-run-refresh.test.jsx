@@ -860,26 +860,30 @@ describe('refreshJoinedConversation (issue #959)', () => {
       messages: [storedChat('user', 'What is the weather')],
       metadata: {},
     }
-    const { result } = renderChat()
-    await loadConversation(result, loaded)
-
-    let ok
-    act(() => {
-      ok = result.current.refreshJoinedConversation({
-        id: 'conv-1',
-        messages: [storedChat('user', 'What is the weather'), storedChat('assistant', 'partial so far')],
-        metadata: {},
-        in_flight: true,
-      })
-    })
-    // The reader keeps their place: the rows it does have are appended.
-    expect(ok).toBe(true)
-    expect(result.current.messages[result.current.messages.length - 1].content).toBe('partial so far')
-
-    // ...and the obligation is still live, so the run ending refreshes again.
+    // Fake timers from the start: the re-arm schedules its own delayed
+    // refresh synchronously, so a real-timer schedule would never fire here.
     vi.useFakeTimers()
     try {
-      dispatchFrame({ type: 'run_status', run: { run_id: 'r2', conversation_id: 'conv-1', status: 'completed' } })
+      const { result } = renderChat()
+      await loadConversation(result, loaded)
+
+      let ok
+      act(() => {
+        ok = result.current.refreshJoinedConversation({
+          id: 'conv-1',
+          messages: [storedChat('user', 'What is the weather'), storedChat('assistant', 'partial so far')],
+          metadata: {},
+          in_flight: true,
+        })
+      })
+      // The reader keeps their place: the rows it does have are appended.
+      expect(ok).toBe(true)
+      expect(result.current.messages[result.current.messages.length - 1].content).toBe('partial so far')
+      // Nothing discharged yet.
+      expect(result.current.runEndedConversationId).toBeNull()
+
+      // The obligation is still live and does not depend on a future run-map
+      // change: the run this tab never heard of gets its delayed refresh.
       await act(async () => { await vi.advanceTimersByTimeAsync(2800) })
       expect(result.current.runEndedConversationId).toBe('conv-1')
     } finally {
@@ -949,6 +953,81 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(last.role).toBe('assistant')
     expect(last.content).toBe('the real answer')
     expect(last.type).toBe('chat')
+  })
+
+  it('appends over a bubble this tab is genuinely streaming into', async () => {
+    // STREAM_TOKEN clears `_replayed` on the first live token, so a live
+    // partial is an ordinary assistant row holding half an answer. Compared
+    // against the stored finished answer it can never match, and the refresh
+    // would refuse -- the full reload and scroll jump this PR removes.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    // Real live tokens, not a replay frame.
+    dispatchFrame({ type: 'token_stream', conversation_id: 'conv-1', run_id: 'r1', is_first: true, token: 'Clear sk' })
+    await act(async () => { await new Promise(r => setTimeout(r, 60)) })
+    const partial = result.current.messages.find(m => m._streaming)
+    expect(partial).toBeTruthy()
+    // Not a replay placeholder -- so the `_replayed` filter would miss it.
+    expect(Boolean(partial._replayed)).toBe(false)
+
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'What is the weather'), storedChat('assistant', 'Clear skies')],
+        metadata: {},
+      })
+    })
+    expect(ok).toBe(true)
+    const after = result.current.messages
+    // The half-written answer is gone, replaced by the whole one exactly once.
+    expect(after.some(m => m._streaming)).toBe(false)
+    expect(after.filter(m => (m.content || '').startsWith('Clear sk'))).toHaveLength(1)
+    expect(after[after.length - 1].content).toBe('Clear skies')
+  })
+
+  it('keeps a retained in-flight bubble below the appended rows', async () => {
+    // The still-in-flight path keeps the open bubble, but it must not sit
+    // above the finished rows: it would go on filling over the top of them.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+    }
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, loaded)
+      act(() => { result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'What is the weather')],
+        metadata: {},
+        in_flight: true,
+      }) })
+      // Seed an open bubble the way an in-flight record does.
+      dispatchFrame({ type: 'token_stream', conversation_id: 'conv-1', run_id: 'r2', is_first: true, token: 'working' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(60) })
+      expect(result.current.messages.some(m => m._streaming)).toBe(true)
+
+      act(() => { result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'What is the weather'), storedChat('assistant', 'first answer')],
+        metadata: {},
+        in_flight: true,
+      }) })
+      const after = result.current.messages
+      // The open bubble is last; the appended finished row sits above it.
+      expect(after[after.length - 1]._streaming).toBe(true)
+      expect(after[after.length - 2].content).toBe('first answer')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rejects malformed input without touching the view', async () => {

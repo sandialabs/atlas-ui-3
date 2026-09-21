@@ -15,6 +15,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
+import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
@@ -33,38 +34,6 @@ const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 // row, canvas errors -- silently degraded the refresh into the full reload it
 // exists to avoid. Anything not written to the store is view chrome, and a new
 // row type is now skipped by default instead of breaking the match.
-const STORED_ROW_TYPES = new Set(['chat', 'tool_call', 'agent_intermediate'])
-
-// Whether a stored row and a live view row describe the same transcript row.
-// Tool rows are matched by their tool_call_id, which survives
-// the save/reload round-trip, because the persisted shape of a tool row
-// (role 'tool', elided arguments) deliberately differs from the live one
-// (role 'system', raw arguments). Everything else matches on role and
-// content. Agent narration is one row that wears two type names: the loop
-// persists the pre-tool narration with message_type 'agent_intermediate'
-// while the streamed row in the view is a plain assistant row -- same text,
-// same place in the transcript, so the pair matches.
-const PROSE_ROW_TYPES = new Set(['chat', 'agent_intermediate'])
-
-const sameTranscriptRow = (a, b) => {
-	const typeA = a.type || 'chat'
-	const typeB = b.type || 'chat'
-	if (typeA !== typeB && !(PROSE_ROW_TYPES.has(typeA) && PROSE_ROW_TYPES.has(typeB))) return false
-	if (typeA === 'tool_call' && a.tool_call_id && b.tool_call_id) {
-		return a.tool_call_id === b.tool_call_id
-	}
-	return a.role === b.role && (a.content || '') === (b.content || '')
-}
-
-// A row carrying no `type` at all and role 'system' is view chrome too: the
-// socket's `error` frame adds one (websocketHandlers.js) without a type, which
-// would otherwise fall through as a plain 'chat' row. Stored rows always carry
-// a type -- they are built with `msg.message_type || 'chat'` -- so this cannot
-// swallow a row the store actually has.
-const isLiveOnlyRow = (m) => (
-	!STORED_ROW_TYPES.has(m.type || 'chat') || m._agentInput === true || (!m.type && m.role === 'system')
-)
-
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
   const array = new Uint8Array(length)
@@ -107,7 +76,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders, refreshAppend } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
@@ -133,6 +102,25 @@ export const ChatProvider = ({ children }) => {
 	const joinedRunTimerRef = useRef(null)
 	const [runEndedConversationId, setRunEndedConversationId] = useState(null)
 	const clearRunEndedConversation = useCallback(() => setRunEndedConversationId(null), [])
+	// Take the refresh obligation back after an accepted refresh found the
+	// record still in flight. A bare ref write is not enough: if that run
+	// already reached a terminal status while the fetch was outstanding,
+	// `runsByConversation` never changes again, so the run-end effect -- which
+	// only fires on a map change -- would never re-fire and the final rows
+	// would never arrive. Re-check synchronously and schedule the same delayed
+	// refresh directly when it is already terminal.
+	const rearmJoinedRun = useCallback((id) => {
+		joinedRunConversationRef.current = id
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
+		if (isRunActive(runsByConversationRef.current[id])) return
+		joinedRunTimerRef.current = setTimeout(() => {
+			joinedRunTimerRef.current = null
+			finishJoinedRunRef.current(id)
+		}, RUN_END_RELOAD_GRACE_MS)
+	}, [])
 	const finishJoinedRun = useCallback((id) => {
 		if (!id || joinedRunConversationRef.current !== id) return
 		joinedRunConversationRef.current = null
@@ -142,6 +130,10 @@ export const ChatProvider = ({ children }) => {
 		}
 		setRunEndedConversationId(id)
 	}, [])
+	// rearmJoinedRun is defined above finishJoinedRun and calls it from a
+	// timer; the ref keeps that one-way dependency from becoming a cycle.
+	const finishJoinedRunRef = useRef(finishJoinedRun)
+	finishJoinedRunRef.current = finishJoinedRun
 	const [isSynthesizing, setIsSynthesizing] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
@@ -1292,6 +1284,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// breaks strict alternation in the re-seeded session.
 		const restoreContext = () => {
 			if (!sendMessage) return
+			// A still-running record is a snapshot the run is about to extend, and
+			// the refresh that follows its end re-seeds from the final transcript
+			// anyway. Seeding from the snapshot now would only be undone.
+			if (stillInFlight) return
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
@@ -1300,56 +1296,39 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 					.map(msg => ({ role: msg.role, content: msg.content || '' })),
 			})
 		}
-		// The placeholder is retired the moment the refresh is accepted: the
-		// rows appended below are the run's real output, and leaving the open
-		// bubble behind would show an "in progress" marker under a finished
-		// transcript. Discard before `streamEnd`, never after: STREAM_END on a
-		// half-streamed fragment clears `_replayed` (useMessages.js), which
-		// would turn the discard into a no-op and leave the partial text
-		// standing as if it were the finished reply. The `streamEnd` after it
-		// closes a genuinely live segment, if one is somehow still open.
-		// Guarded on there actually being one: both dispatches rebuild the
-		// message array, and firing them when the view has no placeholder would
-		// hand React a new identity for rows that did not change -- remounting
-		// the very tool rows and scroll anchor this refresh exists to preserve.
-		const hasReplayPlaceholder = latestMessagesRef.current.some(isReplayPlaceholder)
-		const settleReplayPlaceholder = () => {
-			if (!hasReplayPlaceholder) return
-			discardReplayPlaceholders()
-			streamEnd()
-		}
 		// Live-only rows and agent-loop answers have no stored counterpart;
-		// aligning past them keeps the match alive. So does the replay
-		// placeholder (issue #957): opening a conversation while its run executes
-		// seeds an open bubble -- half-streamed, or empty when the run is between
-		// steps -- and it is a plain assistant row that `isLiveOnlyRow` does not
-		// skip. Comparing it against the run's finished answer would fail and
-		// force the full reload in exactly the case this refresh exists for. It
-		// is transient by construction (the stored transcript supersedes it), so
-		// it is dropped from the view below rather than matched.
-		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !isReplayPlaceholder(m))
+		// aligning past them keeps the match alive. So does any open streaming
+		// bubble. The replay placeholder (issue #957) is one: opening a
+		// conversation while its run executes seeds a bubble -- half-streamed, or
+		// empty between steps -- that `isLiveOnlyRow` does not skip. But
+		// `_replayed` is not enough to find them: STREAM_TOKEN clears it on the
+		// first live token (useMessages.js), so a bubble this tab is genuinely
+		// streaming into looks like an ordinary assistant row holding a partial
+		// answer. Compared against the stored finished answer it would never
+		// match, and the refresh would refuse -- the full reload and scroll jump
+		// this exists to remove. Every `_streaming` row is transient by
+		// construction: the stored rows supersede it, so it is settled with the
+		// append rather than matched.
+		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
 
 		// Walk both lists together; everything must line up one-to-one or the
-		// refresh refuses.
-		let viewIdx = 0
-		let storedIdx = 0
-		while (storedIdx < stored.length && viewIdx < current.length) {
-			if (!sameTranscriptRow(current[viewIdx], stored[storedIdx])) return false
-			viewIdx += 1
-			storedIdx += 1
-		}
+		// refresh refuses. The rule itself lives in utils/transcriptAlignment so
+		// the vitest suite and the Python mirror can be driven from one shared
+		// case table instead of each restating it.
+		const storedIdx = alignTranscript(current, stored)
+		if (storedIdx === null) return false
 
-		// The store ran out first: the view carries rows the store does not
-		// have. After the live-only skips, any remaining extra row is
-		// persistable content the store no longer has -- the conversation was
-		// rewound or rewritten elsewhere -- so the refresh cannot reconcile a
-		// shorter store against it. Refuse and let the caller's full reload
-		// take the store's copy, as it would have before this refresh existed.
+		// The store had nothing beyond what the view already shows.
 		if (storedIdx >= stored.length) {
-			if (viewIdx < current.length) return false
-			if (!stillInFlight) settleReplayPlaceholder()
+			// Nothing to append, but an open bubble still has to be settled --
+			// skipped when nothing would change, so unchanged rows keep their
+			// identities and React does not remount the expanded tool rows and
+			// scroll anchor this refresh exists to preserve.
+			if (latestMessagesRef.current.some(m => m._streaming) && !stillInFlight) {
+				refreshAppend([], false)
+			}
 			restoreContext()
-			if (stillInFlight) joinedRunConversationRef.current = conversationData.id
+			if (stillInFlight) rearmJoinedRun(conversationData.id)
 			return true
 		}
 
@@ -1363,14 +1342,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const appended = missing.map((msg, i) => (
 			i === missing.length - 1 ? { ...msg, _transcriptRefresh: true } : msg
 		))
-		// A still-running record keeps its placeholder: the run is mid-answer and
-		// the open bubble is still the honest thing to show.
-		if (!stillInFlight) settleReplayPlaceholder()
-		bulkAdd(appended)
+		// One dispatch: the tail lands and any open bubble is settled together,
+		// so the list never renders a half-written answer beside the whole one.
+		// A still-running record keeps its bubble -- the run is genuinely
+		// mid-answer -- but after the appended rows, not above them.
+		refreshAppend(appended, stillInFlight)
 		restoreContext()
-		if (stillInFlight) joinedRunConversationRef.current = conversationData.id
+		if (stillInFlight) rearmJoinedRun(conversationData.id)
 		return true
-	}, [sendMessage, bulkAdd, discardReplayPlaceholders, streamEnd])
+	}, [sendMessage, refreshAppend, rearmJoinedRun])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:

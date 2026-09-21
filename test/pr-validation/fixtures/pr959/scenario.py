@@ -100,39 +100,80 @@ def row_key_client(msg):
     return (bucket, msg.get("role") or "", msg.get("content") or "")
 
 
+def align_transcript(view_rows, stored_rows):
+    """Mirror of utils/transcriptAlignment.alignTranscript.
+
+    Returns the index into ``stored_rows`` the tail is appended from, or
+    ``None`` when the two have diverged and the refresh refuses. Verified
+    against the shared case table by ``check_shared_alignment_cases`` below,
+    so this restatement cannot drift from the client rule unnoticed.
+    """
+    view = [r for r in view_rows if is_stored_row(r)]
+    i = 0
+    j = 0
+    while j < len(stored_rows) and i < len(view):
+        if row_key_client(view[i]) != row_key_client(stored_rows[j]):
+            return None
+        i += 1
+        j += 1
+    # The store ran out first while the view still holds persistable rows:
+    # rewound or rewritten elsewhere, and a shorter store cannot be
+    # reconciled against it.
+    if i < len(view):
+        return None
+    return j
+
+
+CASES_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    "fixtures", "transcript-alignment-cases.json",
+)
+
+
+def check_shared_alignment_cases():
+    """Run the shared case table the vitest suite runs.
+
+    The table lives in test/fixtures/transcript-alignment-cases.json and is
+    the single statement of the rule both languages answer to.
+    """
+    with open(CASES_PATH) as fh:
+        table = json.load(fh)
+    failures = []
+    for case in table["cases"]:
+        got = align_transcript(case["view"], case["stored"])
+        if got != case["expect"]:
+            failures.append(f"{case['name']}: expected {case['expect']}, got {got}")
+    return failures
+
+
+def is_stored_row(r):
+    """Mirror of isLiveOnlyRow, inverted: the types the backend writes."""
+    mtype = r.get("message_type") or r.get("type")
+    if mtype is None:
+        return r.get("role") != "system"
+    return mtype in STORED_ROW_TYPES
+
+
 def aligns_prefix(view_rows, stored_rows):
     """The client's alignment walk: every live-only row is skipped, every
     remaining view row must match the stored rows one-to-one in order. Returns
     True when the view is a prefix of the stored transcript (the refresh
     appends only the tail) and False when it has diverged (the refresh
     refuses and the client falls back to the full reload)."""
-    def is_stored_row(r):
-        # Mirror of isLiveOnlyRow: an allowlist of the types the backend
-        # writes, plus the untyped role-'system' rows the socket adds.
-        mtype = r.get("message_type") or r.get("type")
-        if mtype is None:
-            return r.get("role") != "system"
-        return mtype in STORED_ROW_TYPES
-
-    view = [r for r in view_rows if is_stored_row(r)]
-    i = 0
-    for stored in stored_rows:
-        if i >= len(view):
-            # The store ran out first. The client refuses when the view still
-            # carries persistable rows the store does not have (rewound or
-            # rewritten elsewhere) -- it cannot reconcile a shorter store, so
-            # it falls back to the full reload. Mirror that refusal; accepting
-            # here would let this check pass a case the shipped code rejects.
-            break
-        if row_key_client(view[i]) != row_key_client(stored):
-            return False
-        i += 1
-    # Every view row must have been consumed. Anything left over is
-    # persistable content the store does not have, which the client refuses.
-    return i >= len(view)
+    return align_transcript(view_rows, stored_rows) is not None
 
 
 async def main():
+    # The mirror below restates the client's alignment rule. Check it against
+    # the shared case table first: without this the end-to-end checks can
+    # certify a rule the shipped client does not apply, which is exactly how
+    # this mirror drifted twice during review.
+    mirror_failures = check_shared_alignment_cases()
+    for failure in mirror_failures:
+        print("  mirror mismatch: " + failure, flush=True)
+    check(not mirror_failures,
+          "alignment mirror agrees with the shared case table the client is tested against")
+
     origin = await connect(OWNER)
     joined = await connect(OWNER)
 
