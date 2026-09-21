@@ -91,7 +91,7 @@ def row_key_client(msg):
     rows on role and content. Prose types are collapsed
     to a single bucket, matching sameTranscriptRow's PROSE_ROW_TYPES.
     """
-    mtype = (msg.get("metadata") or {}).get("message_type") or msg.get("message_type") or "chat"
+    mtype = row_type(msg)
     if mtype == "tool_call":
         tc = (msg.get("metadata") or {}).get("tool_call_id") or msg.get("tool_call_id")
         if tc:
@@ -146,8 +146,23 @@ def check_shared_alignment_cases():
     return failures
 
 
+def row_type(msg):
+    """The row's type as the client computes it.
+
+    The client builds a view row as ``{...metadata, role, content, type}`` --
+    the canonical fields last -- so a ``message_type`` inside metadata never
+    decides the row's type. Mirror that precedence here; reading metadata
+    first is exactly the kind of drift the shared case table exists to catch.
+    """
+    return msg.get("message_type") or msg.get("type") or "chat"
+
+
 def is_stored_row(r):
     """Mirror of isLiveOnlyRow, inverted: the types the backend writes."""
+    metadata = r.get("metadata") or {}
+    # Agent-loop inputs are view-only wherever the flag is carried.
+    if metadata.get("_agentInput") is True or r.get("_agentInput") is True:
+        return False
     mtype = r.get("message_type") or r.get("type")
     if mtype is None:
         return r.get("role") != "system"

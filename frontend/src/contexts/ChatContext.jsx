@@ -25,15 +25,29 @@ import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
 // How long to wait for a `conversation_saved` after a joined run ends before
 // reloading anyway (a run that failed before saving never sends one).
 const RUN_END_RELOAD_GRACE_MS = 2500
+// How many times the joined-run refresh will re-arm for a conversation whose
+// record still reports itself in flight. Bounded so an untracked run cannot
+// turn the refresh into an open-ended poll; after this the caller's full
+// reload takes over.
+const MAX_JOINED_RUN_REARMS = 4
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
-// Row types the live transcript renders that a persisted transcript never
-// The only row types the backend ever writes to a tracked run's transcript.
-// An allowlist, deliberately: this started as a denylist of view-only types
-// and every type minted elsewhere that was missing from it -- the approval
-// row, canvas errors -- silently degraded the refresh into the full reload it
-// exists to avoid. Anything not written to the store is view chrome, and a new
-// row type is now skipped by default instead of breaking the match.
+// Stored metadata is data the store round-tripped, some of it shaped by a
+// model's tool output. The renderer's own flags all start with an underscore
+// (`_streaming`, `_replayed`, `_transcriptRefresh`, `_agentInput`, `_seed`),
+// and a persisted key of that shape would let stored content hide, reorder or
+// drop rows in the view. Strip them on the way in; nothing legitimately
+// persists them.
+const withoutInternalFlags = (metadata) => {
+	if (!metadata) return {}
+	const out = {}
+	for (const [k, v] of Object.entries(metadata)) {
+		if (k.startsWith('_')) continue
+		out[k] = v
+	}
+	return out
+}
+
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
   const array = new Uint8Array(length)
@@ -100,6 +114,7 @@ export const ChatProvider = ({ children }) => {
 	// construction; once the run ends the Sidebar reloads it from the store.
 	const joinedRunConversationRef = useRef(null)
 	const joinedRunTimerRef = useRef(null)
+	const rearmCountRef = useRef({ id: null, n: 0 })
 	const [runEndedConversationId, setRunEndedConversationId] = useState(null)
 	const clearRunEndedConversation = useCallback(() => setRunEndedConversationId(null), [])
 	// Take the refresh obligation back after an accepted refresh found the
@@ -110,6 +125,18 @@ export const ChatProvider = ({ children }) => {
 	// would never arrive. Re-check synchronously and schedule the same delayed
 	// refresh directly when it is already terminal.
 	const rearmJoinedRun = useCallback((id) => {
+		// Bounded: when this tab never hears about the run writing into the
+		// conversation, each pass comes back to the same state, and re-arming
+		// forever would poll the conversation endpoint (and run a full alignment
+		// pass) every grace period for the run's whole duration. After a few
+		// tries, give up the obligation and let the caller's full reload take
+		// the store's copy -- a jumped scroll, but a transcript that is correct.
+		if (rearmCountRef.current.id !== id) rearmCountRef.current = { id, n: 0 }
+		rearmCountRef.current.n += 1
+		if (rearmCountRef.current.n > MAX_JOINED_RUN_REARMS) {
+			joinedRunConversationRef.current = null
+			return
+		}
 		joinedRunConversationRef.current = id
 		if (joinedRunTimerRef.current) {
 			clearTimeout(joinedRunTimerRef.current)
@@ -1124,6 +1151,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			clearTimeout(joinedRunTimerRef.current)
 			joinedRunTimerRef.current = null
 		}
+		rearmCountRef.current = { id: null, n: 0 }
 		const runRecord = runs.getRun(conversationData.id)
 		const runInFlight = isRunActive(runRecord) || conversationData.in_flight === true
 		joinedRunConversationRef.current = runInFlight ? conversationData.id : null
@@ -1186,7 +1214,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// Load messages into the chat view
 		const loadedMessages = conversationData.messages.map(msg => ({
-			...(msg.metadata || {}),
+			...withoutInternalFlags(msg.metadata),
 			role: msg.role,
 			content: msg.content || '',
 			timestamp: msg.timestamp,
@@ -1274,7 +1302,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Metadata is spread first: it is stored data, and a stray `role`,
 		// `content` or `type` in it must not decide how an appended row renders.
 		const stored = conversationData.messages.map(msg => ({
-			...(msg.metadata || {}),
+			...withoutInternalFlags(msg.metadata),
 			role: msg.role,
 			content: msg.content || '',
 			timestamp: msg.timestamp,
@@ -1326,13 +1354,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// The store had nothing beyond what the view already shows.
 		if (storedIdx >= stored.length) {
-			// Nothing to append, but an open bubble still has to be settled --
-			// skipped when nothing would change, so unchanged rows keep their
-			// identities and React does not remount the expanded tool rows and
-			// scroll anchor this refresh exists to preserve.
-			if (latestMessagesRef.current.some(m => m._streaming) && !stillInFlight) {
-				refreshAppend([], false)
-			}
+			// Nothing to append. An open bubble is NOT settled here: with no
+			// stored rows to supersede it, dropping it would throw away tokens
+			// already received for a run that has just started writing. It is
+			// settled by the refresh that follows that run's end, which will have
+			// rows to put in its place. Dispatching nothing also keeps every row
+			// identity intact, so React does not remount the expanded tool rows
+			// and scroll anchor this refresh exists to preserve.
 			restoreContext()
 			if (stillInFlight) rearmJoinedRun(conversationData.id)
 			return true

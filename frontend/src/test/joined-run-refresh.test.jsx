@@ -956,6 +956,8 @@ describe('refreshJoinedConversation (issue #959)', () => {
   })
 
   it('appends over a bubble this tab is genuinely streaming into', async () => {
+    vi.useFakeTimers()
+    try {
     // STREAM_TOKEN clears `_replayed` on the first live token, so a live
     // partial is an ordinary assistant row holding half an answer. Compared
     // against the stored finished answer it can never match, and the refresh
@@ -968,9 +970,10 @@ describe('refreshJoinedConversation (issue #959)', () => {
     const { result } = renderChat()
     await loadConversation(result, loaded)
 
-    // Real live tokens, not a replay frame.
+    // Real live tokens, not a replay frame. Fake timers so the token flush is
+    // advanced exactly rather than raced against a 60ms real-time margin.
     dispatchFrame({ type: 'token_stream', conversation_id: 'conv-1', run_id: 'r1', is_first: true, token: 'Clear sk' })
-    await act(async () => { await new Promise(r => setTimeout(r, 60)) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(60) })
     const partial = result.current.messages.find(m => m._streaming)
     expect(partial).toBeTruthy()
     // Not a replay placeholder -- so the `_replayed` filter would miss it.
@@ -990,6 +993,9 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(after.some(m => m._streaming)).toBe(false)
     expect(after.filter(m => (m.content || '').startsWith('Clear sk'))).toHaveLength(1)
     expect(after[after.length - 1].content).toBe('Clear skies')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps a retained in-flight bubble below the appended rows', async () => {

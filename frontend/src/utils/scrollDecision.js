@@ -23,7 +23,18 @@ export function computeMessageChangeScroll(messages, prevMessageCount) {
   const lastMsg = messages[messages.length - 1]
   const isNewMessage = newCount !== prevMessageCount
   const isStreamingUpdate = Boolean(lastMsg && lastMsg._streaming && !isNewMessage)
-  const isTranscriptRefresh = Boolean(lastMsg && lastMsg._transcriptRefresh === true)
+
+  // Find the last settled row, skipping any trailing open bubble. A refresh
+  // that lands while another run is still writing keeps that run's bubble,
+  // and REFRESH_APPEND puts it *after* the appended tail -- so the marked
+  // catch-up row is no longer last. Reading only `lastMsg` here would miss
+  // the marker and force the scroll, yanking precisely the scrolled-up
+  // reader this is meant to protect.
+  let anchorIdx = messages.length - 1
+  while (anchorIdx >= 0 && messages[anchorIdx]._streaming) anchorIdx -= 1
+  const anchor = anchorIdx >= 0 ? messages[anchorIdx] : undefined
+
+  const isTranscriptRefresh = Boolean(anchor && anchor._transcriptRefresh === true)
   const force = Boolean(isNewMessage && lastMsg && lastMsg.role !== 'user' && !isTranscriptRefresh)
 
   if (isStreamingUpdate) return { force: false, isStreamingUpdate: true }

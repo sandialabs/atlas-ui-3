@@ -234,3 +234,41 @@ describe('Auto-scroll during streaming (#441)', () => {
     })
   })
 })
+
+describe('Transcript refresh with a run still writing (issue #959)', () => {
+  // The shape REFRESH_APPEND actually produces on the still-in-flight path:
+  // the appended catch-up rows, then the retained open bubble. The marked
+  // row is therefore NOT last, and a decision that only looked at the last
+  // row would force the scroll and yank the reader this PR protects.
+  const postAppend = [
+    { role: 'user', content: 'earlier turn' },
+    { role: 'assistant', content: 'the run answer', _transcriptRefresh: true },
+    { role: 'assistant', content: 'still writ', _streaming: true },
+  ]
+
+  it('does not force the scroll when a retained bubble trails the appended tail', () => {
+    const { force } = computeMessageChangeScroll(postAppend, 1)
+    expect(force).toBe(false)
+  })
+
+  it('still does not force when several open bubbles trail', () => {
+    const rows = [...postAppend, { role: 'assistant', content: 'and another', _streaming: true }]
+    expect(computeMessageChangeScroll(rows, 1).force).toBe(false)
+  })
+
+  it('a scrolled-up reader is not moved by that append', () => {
+    const { force } = computeMessageChangeScroll(postAppend, 1)
+    expect(shouldActuallyScroll(force, true)).toBe(false)
+  })
+
+  it('a genuinely new answer with a trailing bubble still forces', () => {
+    // Guard against over-skipping: without the _transcriptRefresh marker on
+    // the settled row, this is an ordinary new answer and must scroll.
+    const rows = [
+      { role: 'user', content: 'earlier turn' },
+      { role: 'assistant', content: 'a fresh answer' },
+      { role: 'assistant', content: 'still writ', _streaming: true },
+    ]
+    expect(computeMessageChangeScroll(rows, 1).force).toBe(true)
+  })
+})
