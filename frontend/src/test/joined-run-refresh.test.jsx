@@ -1036,6 +1036,43 @@ describe('refreshJoinedConversation (issue #959)', () => {
     }
   })
 
+  it('gives up and refuses once the in-flight re-arm budget is spent', async () => {
+    // A record that never settles would otherwise have the refresh re-arming
+    // for the run's whole duration, polling the conversation endpoint and
+    // re-running alignment every grace period. After the cap it must refuse,
+    // so the caller's full reload takes the store's copy -- returning true
+    // with no obligation left would strand the view instead.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+    }
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, loaded)
+
+      const inFlightRecord = () => ({
+        id: 'conv-1',
+        messages: [storedChat('user', 'What is the weather')],
+        metadata: {},
+        in_flight: true,
+      })
+
+      // The budget allows a bounded number of re-arms...
+      const outcomes = []
+      for (let i = 0; i < 6; i += 1) {
+        act(() => { outcomes.push(result.current.refreshJoinedConversation(inFlightRecord())) })
+      }
+      // ...and then it refuses, handing the caller its fallback.
+      expect(outcomes[0]).toBe(true)
+      expect(outcomes[outcomes.length - 1]).toBe(false)
+      expect(outcomes.filter(Boolean).length).toBeLessThanOrEqual(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rejects malformed input without touching the view', async () => {
     const loaded = {
       id: 'conv-1',

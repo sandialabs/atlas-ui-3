@@ -124,19 +124,21 @@ export const ChatProvider = ({ children }) => {
 	// only fires on a map change -- would never re-fire and the final rows
 	// would never arrive. Re-check synchronously and schedule the same delayed
 	// refresh directly when it is already terminal.
+	// Whether another re-arm is still allowed for this conversation. Bounded:
+	// when this tab never hears about the run writing into it, each pass comes
+	// back to the same state, and re-arming forever would poll the conversation
+	// endpoint (and run a full alignment pass) every grace period for the run's
+	// whole duration. Checked *before* the refresh commits to appending, so
+	// that once the budget is spent the refresh refuses and the caller's full
+	// reload takes the store's copy -- a jumped scroll, but a correct
+	// transcript. Returning `true` after giving up would strand it instead:
+	// nothing would re-arm and nothing would reload.
+	const canRearmJoinedRun = useCallback((id) => (
+		rearmCountRef.current.id !== id || rearmCountRef.current.n < MAX_JOINED_RUN_REARMS
+	), [])
 	const rearmJoinedRun = useCallback((id) => {
-		// Bounded: when this tab never hears about the run writing into the
-		// conversation, each pass comes back to the same state, and re-arming
-		// forever would poll the conversation endpoint (and run a full alignment
-		// pass) every grace period for the run's whole duration. After a few
-		// tries, give up the obligation and let the caller's full reload take
-		// the store's copy -- a jumped scroll, but a transcript that is correct.
 		if (rearmCountRef.current.id !== id) rearmCountRef.current = { id, n: 0 }
 		rearmCountRef.current.n += 1
-		if (rearmCountRef.current.n > MAX_JOINED_RUN_REARMS) {
-			joinedRunConversationRef.current = null
-			return
-		}
 		joinedRunConversationRef.current = id
 		if (joinedRunTimerRef.current) {
 			clearTimeout(joinedRunTimerRef.current)
@@ -1299,6 +1301,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// have -- the reader keeps their place -- but re-arm the obligation so the
 		// run-end path refreshes again when this run finishes.
 		const stillInFlight = conversationData.in_flight === true
+		// Budget spent on a record that still will not settle: refuse, so the
+		// caller falls back to the full reload rather than this returning `true`
+		// with no obligation left to discharge.
+		if (stillInFlight && !canRearmJoinedRun(conversationData.id)) return false
 		// Metadata is spread first: it is stored data, and a stray `role`,
 		// `content` or `type` in it must not decide how an appended row renders.
 		const stored = conversationData.messages.map(msg => ({
@@ -1384,7 +1390,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		restoreContext()
 		if (stillInFlight) rearmJoinedRun(conversationData.id)
 		return true
-	}, [sendMessage, refreshAppend, rearmJoinedRun])
+	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:
