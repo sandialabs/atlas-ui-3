@@ -23,6 +23,15 @@
 # (`bash test/pr-validation/test_pr957_mid_stream_reopen.sh`) or through the
 # PR-validation runner (`bash test/run_pr_validation.sh 962`), per
 # test/pr-validation/README.md.
+#
+# The visual half of the same scenario lives in
+# fixtures/pr957/ui_reopen.mjs: a Playwright driver (same mock model, same
+# backend, real browser) that reopens the streaming conversation in a second
+# tab and asserts the bubble starts at the answer's first word with the
+# "answer in progress" marker and no live caret, then that the run-end
+# reload settles the view to the complete stored transcript. It also
+# captures the two screenshots committed beside it
+# (reopen-mid-stream-marker.png, reopen-settled-transcript.png).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
