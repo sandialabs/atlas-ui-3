@@ -499,6 +499,11 @@ class ToolsModeRunner:
                 if err is not None:
                     # Provider error mid-continuation (e.g. the tool-choice
                     # rejection) -- fall back to a graceful final synthesis.
+                    # Text the user watched stream in is still persisted:
+                    # its segment closed inside the round, and dropping it
+                    # here would leave a reload showing a turn that appears
+                    # to have said nothing before its tools.
+                    self._persist_narration_row(session, next_text)
                     if current_response is None:
                         current_response = LLMResponse(content="")
                     break

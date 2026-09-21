@@ -1103,6 +1103,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// reload that replaces it with the stored transcript.
 		if (conversationData.streaming_text) {
 			streamToken(conversationData.streaming_text, true)
+		} else if (conversationData.in_flight === true) {
+			// No open segment right now -- the run is between steps (executing
+			// tools, parked on an approval). The transcript still needs a sign
+			// of life: an empty bubble carrying the marker, which the next
+			// segment's first token fills in this run's own tab, and the
+			// run-end reload replaces everywhere.
+			streamToken('', true)
 		}
 
 		// Notify backend to restore this conversation's context

@@ -386,6 +386,41 @@ async def test_continuation_provider_error_falls_back_to_synthesis():
 
 
 @pytest.mark.asyncio
+async def test_narration_streamed_before_a_round_error_is_still_persisted():
+    """A continuation round can stream narration and then fail (a provider
+    rejection mid-stream). The user watched that text stream in; dropping it
+    would leave a reload showing a turn that said nothing before its tools --
+    and its segment already closed, so the replay buffer no longer holds it
+    either (issue #957)."""
+    class ErrAfterTextLLM:
+        def __init__(self):
+            self._calls = 0
+
+        async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                    temperature=0.7, user_email=None):
+            self._calls += 1
+            if self._calls == 1:
+                yield "computing"
+                yield LLMResponse(content="computing", tool_calls=[_tc("c1", "calc", '{"e":"2+2"}')])
+            else:
+                yield "almost there"
+                raise RuntimeError("provider rejected the continuation")
+
+        async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+            yield "The calculation returned 4."
+
+        async def call_plain(self, model, messages, temperature=0.7, user_email=None):
+            return "The calculation returned 4."
+
+    runner = _runner(ErrAfterTextLLM(), _config(max_extra_rounds=3))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "calc"}])
+
+    narration = [m.content for m in added if m.metadata.get("message_type") == "agent_intermediate"]
+    assert narration == ["computing", "almost there"]
+
+
+@pytest.mark.asyncio
 async def test_data_sources_neither_inject_context_nor_add_the_search_tool():
     """Selected sources scope ``atlas_search``; they retrieve nothing themselves.
 
