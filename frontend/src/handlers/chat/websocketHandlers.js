@@ -580,6 +580,22 @@ export function createWebSocketHandler(deps) {
           break
         }
         case 'token_stream': {
+          if (data.replay) {
+            // Issue #957: the tokens streamed while this conversation was
+            // closed are replayed on reopen, in one frame carrying the open
+            // segment's text from its beginning. Replace whatever partial
+            // bubble the loaded transcript seeded (it is an earlier snapshot
+            // of the same segment), then let the live stream append onto it.
+            _tokenBuffer = ''
+            if (_tokenFlushTimer) {
+              clearTimeout(_tokenFlushTimer)
+              _tokenFlushTimer = null
+            }
+            _streamActive = true
+            setIsThinking(false)
+            if (data.token) streamToken(data.token, true)
+            break
+          }
           if (data.is_first) {
             // Reset stale state from any previous abnormal stream end
             _tokenBuffer = ''

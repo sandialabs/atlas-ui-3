@@ -1310,6 +1310,11 @@ class TestToolsModeTurnDigest:
         rows = [(m.role, m.metadata.get("message_type")) for m in session.history.messages]
         assert rows == [
             (MessageRole.USER, None),
+            # Pre-tool narration is persisted the moment its stream segment
+            # closes (issue #957): the tools ahead can park on approval, and a
+            # reopen in that window reads history, where the text otherwise
+            # does not exist until the turn closes.
+            (MessageRole.ASSISTANT, "agent_intermediate"),
             (MessageRole.TOOL, "tool_call"),
             (MessageRole.ASSISTANT, None),
         ]

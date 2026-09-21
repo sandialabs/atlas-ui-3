@@ -246,3 +246,55 @@ async def test_adapter_bookkeeping_survives_a_dead_socket(registry):
 
     assert ws.sent == []
     assert registry.get(run.run_id).status == RunStatus.WAITING_FOR_INPUT
+
+
+def test_answering_one_of_two_requests_keeps_the_other(registry):
+    """One agent step can park two tools. Answering the first must not flip
+    the run to running -- that would drop the second's replayable request and
+    hide the "Needs approval" marker while its executor sits blocked."""
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t2"})
+
+    assert registry.answer_pending_request(run.run_id, tool_call_id="t1") is True
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert [r["tool_call_id"] for r in record.pending_requests] == ["t2"]
+    assert registry.pending_requests_for_conversation("c", USER) == [
+        {"type": "tool_approval_request", "tool_call_id": "t2"}
+    ]
+
+    assert registry.answer_pending_request(run.run_id, tool_call_id="t2") is True
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []
+
+
+def test_answering_an_unknown_request_leaves_the_pause_alone(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    registry.answer_pending_request(run.run_id, tool_call_id="other")
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert [r["tool_call_id"] for r in record.pending_requests] == ["t1"]
+
+
+def test_answer_pending_request_ignores_a_run_not_waiting(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+
+    assert registry.answer_pending_request(run.run_id, tool_call_id="t1") is False
+    assert registry.get(run.run_id).status == RunStatus.QUEUED
+
+
+def test_answering_by_elicitation_id_clears_the_matching_request(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "elicitation_request", "elicitation_id": "e1"})
+
+    assert registry.answer_pending_request(run.run_id, elicitation_id="e1") is True
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []

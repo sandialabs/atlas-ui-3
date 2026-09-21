@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from atlas.application.chat.modes.tools import ToolsModeRunner
-from atlas.domain.messages.models import ToolResult
+from atlas.domain.messages.models import Message, MessageRole, ToolResult
 from atlas.interfaces.llm import LLMResponse
 
 
@@ -199,6 +199,90 @@ async def test_anti_loop_stops_on_repeated_identical_call():
     assert resp["message"] == "Here is the result: 4."
 
 
+async def _run_for_history(runner, session, messages):
+    """Run run_streaming against a real-ish session and return history writes."""
+    async def _execute_multiple(tool_calls, session_context, tool_manager,
+                                update_callback=None, config_manager=None, skip_approval=False):
+        results = []
+        for tc in tool_calls:
+            # Emit the lifecycle events the recorder persists, the way the
+            # real executor does through the turn's update callback.
+            if update_callback is not None:
+                await update_callback({
+                    "type": "tool_start", "tool_call_id": tc.id,
+                    "tool_name": tc.function.name, "server_name": "srv",
+                    "arguments": {},
+                })
+                await update_callback({
+                    "type": "tool_complete", "tool_call_id": tc.id,
+                    "tool_name": tc.function.name, "success": True, "result": "ok",
+                })
+            results.append(ToolResult(tool_call_id=tc.id, content="ok", success=True))
+        return results
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _execute_multiple
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=messages,
+            selected_tools=["calc", "pptx"],
+        )
+    return [c.args[0] for c in session.history.add_message.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_narration_is_persisted_at_segment_close():
+    """Pre-tool narration closes its stream segment long before the turn ends:
+    the tools that follow can park on approval for minutes, and a reopen in
+    that window reads the run's history -- where the narration otherwise does
+    not exist until the turn closes, showing an empty assistant turn
+    (issue #957). It is written at the close, as the same display-only
+    ``agent_intermediate`` row the agentic loop uses."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Let me check that.", [_tc("c1", "calc", '{"e":"2+2"}')]),
+        ("Done! It is 4.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "2+2?"}])
+
+    narration = [m for m in added if m.metadata.get("message_type") == "agent_intermediate"]
+    assert [m.content for m in narration] == ["Let me check that."]
+    assert narration[0].metadata["agent_intermediate"] is True
+    # The turn's closing answer is a separate, ordinary assistant row.
+    closing = [m for m in added if m.metadata.get("message_type") != "agent_intermediate"
+               and m.role.value == "assistant"]
+    assert closing and closing[-1].content == "Done! It is 4."
+
+
+@pytest.mark.asyncio
+async def test_every_rounds_narration_is_persisted():
+    """Each continuation round's narration closes its own segment; every one
+    is persisted, in order, before the tools that follow it run. Tool rows
+    flush per round too, so the reloaded transcript interleaves the way the
+    live view did instead of bunching every narration ahead of every tool."""
+    llm = ScriptedToolsLLM(turns=[
+        ("first I compute", [_tc("c1", "calc", '{"e":"2+2"}')]),
+        ("now I build", [_tc("c2", "pptx", '{"title":"X"}')]),
+        ("All done.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "go"}])
+
+    kinds = [
+        ("narration" if m.metadata.get("message_type") == "agent_intermediate"
+         else "tool" if m.metadata.get("message_type") == "tool_call"
+         else "answer")
+        for m in added
+    ]
+    assert kinds == ["narration", "tool", "narration", "tool", "answer"]
+    narration = [m.content for m in added if m.metadata.get("message_type") == "agent_intermediate"]
+    assert narration == ["first I compute", "now I build"]
+
+
 @pytest.mark.asyncio
 async def test_extra_round_budget_is_respected():
     """With max_extra_rounds=1, only one continuation round runs before synthesis."""
@@ -299,6 +383,275 @@ async def test_continuation_provider_error_falls_back_to_synthesis():
 
     assert executed == ["calc"]
     assert resp["message"] == "The calculation returned 4."
+
+
+def _real_session(prompt="draw"):
+    """A Session with a real history, for assertions on get_messages_for_llm."""
+    from atlas.domain.sessions.models import Session
+
+    session = Session()
+    session.history.add_message(Message(role=MessageRole.USER, content=prompt))
+    return session
+
+
+async def _run_on_real_session(runner, session, messages):
+    async def _execute_multiple(tool_calls, session_context, tool_manager,
+                                update_callback=None, config_manager=None, skip_approval=False):
+        return [ToolResult(tool_call_id=tc.id, content="ok", success=True) for tc in tool_calls]
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _execute_multiple
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=messages,
+            selected_tools=["atlas_canvas"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_canvas_only_turn_keeps_its_prose_as_the_llm_visible_reply():
+    """A canvas-only round's narration is NOT persisted as an intermediate
+    row: the turn closes with that very text, and the closing message is the
+    LLM-visible copy. Persisting both would show the next turn the literal
+    placeholder "Content displayed in canvas." as the assistant's previous
+    reply -- the prose filtered out with the display-only row."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Here is the diagram.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=0))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    assistant_rows = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert [m.content for m in assistant_rows] == ["Here is the diagram."]
+    assert all(m.metadata.get("message_type") != "agent_intermediate" for m in assistant_rows)
+
+    llm_visible = session.history.get_messages_for_llm()
+    visible = [m["content"] for m in llm_visible if m["role"] == "assistant"]
+    assert any("Here is the diagram." in content for content in visible)
+    assert all("Content displayed in canvas" not in content for content in visible)
+
+
+@pytest.mark.asyncio
+async def test_canvas_round_narration_survives_a_continuation_round():
+    """With rounds left in the budget, a canvas-only round is followed by a
+    continuation that closes the turn -- so the shortcut never fires and the
+    canvas round's narration must still exist after a reload. It is deferred
+    at its segment close and flushed (display-only) when the turn ends
+    another way."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Let me draw that.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+        ("Done! The diagram is ready.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    # The full row sequence, in the live view's order: the canvas round's
+    # narration lands where it streamed (before the continuation's answer),
+    # not bunched at the turn's end.
+    rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
+    assert rows == [
+        (MessageRole.USER, None, "draw"),
+        (MessageRole.ASSISTANT, "agent_intermediate", "Let me draw that."),
+        (MessageRole.ASSISTANT, None, "Done! The diagram is ready."),
+    ]
+
+    # The closing answer is the LLM-visible reply; the narration row is
+    # display-only by design (matching the agentic loop's intermediate rows).
+    llm_visible = session.history.get_messages_for_llm()
+    visible = [m["content"] for m in llm_visible if m["role"] == "assistant"]
+    assert any("Done! The diagram is ready." in content for content in visible)
+    assert all("Content displayed in canvas" not in content for content in visible)
+
+
+@pytest.mark.asyncio
+async def test_canvas_response_then_stream_error_does_not_duplicate_the_narration():
+    """A provider can yield a canvas-only response and then raise. The error
+    branch defers the narration exactly like the clean path, so the close
+    (which ends on that response) carries it once, not twice."""
+    class CanvasThenRaiseLLM:
+        async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                    temperature=0.7, user_email=None):
+            yield "Here is the diagram."
+            yield LLMResponse(
+                content="Here is the diagram.",
+                tool_calls=[_tc("c1", "atlas_canvas", '{"content":"svg"}')],
+            )
+            raise RuntimeError("stream died after the response")
+
+        async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+            yield "unused"
+
+        async def call_plain(self, model, messages, temperature=0.7, user_email=None):
+            return "unused"
+
+    runner = _runner(CanvasThenRaiseLLM(), _config(max_extra_rounds=0))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert contents.count("Here is the diagram.") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_during_a_canvas_round_keeps_the_deferred_narration():
+    """A Stop mid-canvas-round unwinds through the BaseException handler: the
+    deferred narration the user watched stream in is flushed, not dropped
+    with the turn."""
+    import asyncio as _asyncio
+
+    llm = ScriptedToolsLLM(turns=[
+        ("Let me draw that.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=0))
+    session = _real_session()
+
+    async def _cancelled_execute(tool_calls, session_context, tool_manager,
+                                 update_callback=None, config_manager=None, skip_approval=False):
+        raise _asyncio.CancelledError()
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _cancelled_execute
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        with pytest.raises(_asyncio.CancelledError):
+            await runner.run_streaming(
+                session=session,
+                model="test-model",
+                messages=[{"role": "user", "content": "draw"}],
+                selected_tools=["atlas_canvas"],
+            )
+
+    rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
+    assert (MessageRole.ASSISTANT, "agent_intermediate", "Let me draw that.") in rows
+
+
+@pytest.mark.asyncio
+async def test_two_identical_canvas_narrations_do_not_collapse():
+    """Two canvas rounds that narrate identically are two bubbles live, so
+    they are two rows after a reload: the close takes back at most the one
+    row whose text the turn closes with."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Same words.", [_tc("c1", "atlas_canvas", '{"content":"a"}')]),
+        ("Same words.", [_tc("c2", "atlas_canvas", '{"content":"b"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert contents.count("Same words.") == 2
+
+
+@pytest.mark.asyncio
+async def test_an_empty_canvas_continuation_does_not_shadow_earlier_prose():
+    """A canvas-only continuation that streams no text must not shadow the
+    prose an earlier canvas round deferred: the close picks the last
+    non-empty narration, not the last slot."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Here is the diagram.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+        (None, [_tc("c2", "atlas_canvas", '{"content":"svg2"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert contents.count("Here is the diagram.") == 1
+    assert "Content displayed in canvas." not in contents
+
+
+@pytest.mark.asyncio
+async def test_mixed_canvas_and_tool_round_persists_narration_immediately():
+    """A round calling canvas alongside a real tool is not canvas-only: the
+    shortcut cannot fire, so its narration is persisted at the segment close
+    like any other round's."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Computing, then drawing.", [_tc("c1", "atlas_canvas", '{"content":"svg"}'), _tc("c2", "calc", '{"e":"2+2"}')]),
+        ("All done.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "go"}])
+
+    rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
+    assert (MessageRole.ASSISTANT, "agent_intermediate", "Computing, then drawing.") in rows
+    assert rows[-1] == (MessageRole.ASSISTANT, None, "All done.")
+
+
+@pytest.mark.asyncio
+async def test_canvas_only_turn_keeps_a_narration_that_never_streamed():
+    """A response whose text never streamed (no deltas, content only on the
+    final item) exists nowhere else -- it remains the turn's answer, as the
+    closing message, LLM-visible."""
+    class ContentOnlyCanvasLLM:
+        async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                    temperature=0.7, user_email=None):
+            yield LLMResponse(
+                content="Here is the diagram.",
+                tool_calls=[_tc("c1", "atlas_canvas", '{"content":"svg"}')],
+            )
+
+        async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+            yield "unused"
+
+        async def call_plain(self, model, messages, temperature=0.7, user_email=None):
+            return "unused"
+
+    runner = _runner(ContentOnlyCanvasLLM(), _config(max_extra_rounds=0))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    assistant_rows = [m for m in session.history.messages if m.role == MessageRole.ASSISTANT]
+    assert [m.content for m in assistant_rows] == ["Here is the diagram."]
+
+    llm_visible = session.history.get_messages_for_llm()
+    visible = [m["content"] for m in llm_visible if m["role"] == "assistant"]
+    assert any("Here is the diagram." in content for content in visible)
+
+
+@pytest.mark.asyncio
+async def test_narration_streamed_before_a_round_error_is_still_persisted():
+    """A continuation round can stream narration and then fail (a provider
+    rejection mid-stream). The user watched that text stream in; dropping it
+    would leave a reload showing a turn that said nothing before its tools --
+    and its segment already closed, so the replay buffer no longer holds it
+    either (issue #957)."""
+    class ErrAfterTextLLM:
+        def __init__(self):
+            self._calls = 0
+
+        async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                    temperature=0.7, user_email=None):
+            self._calls += 1
+            if self._calls == 1:
+                yield "computing"
+                yield LLMResponse(content="computing", tool_calls=[_tc("c1", "calc", '{"e":"2+2"}')])
+            else:
+                yield "almost there"
+                raise RuntimeError("provider rejected the continuation")
+
+        async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+            yield "The calculation returned 4."
+
+        async def call_plain(self, model, messages, temperature=0.7, user_email=None):
+            return "The calculation returned 4."
+
+    runner = _runner(ErrAfterTextLLM(), _config(max_extra_rounds=3))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "calc"}])
+
+    narration = [m.content for m in added if m.metadata.get("message_type") == "agent_intermediate"]
+    assert narration == ["computing", "almost there"]
 
 
 @pytest.mark.asyncio
