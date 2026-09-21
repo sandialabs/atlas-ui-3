@@ -116,6 +116,12 @@ export const ChatProvider = ({ children }) => {
 			joinedRunTimerRef.current = null
 		}
 		if (isRunActive(runsByConversationRef.current[id])) return
+		// The tracker has no active run for this conversation, yet the record
+		// says otherwise -- this tab has not heard of the run writing into it.
+		// Ask, so the next pass can hand the obligation to the run-end effect
+		// instead of coming back here: without this the refresh is a blind poll
+		// for as long as that run lasts.
+		sendMessageRef.current?.({ type: 'list_runs', conversation_id: id })
 		joinedRunTimerRef.current = setTimeout(() => {
 			joinedRunTimerRef.current = null
 			finishJoinedRunRef.current(id)
