@@ -62,6 +62,7 @@ from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 from atlas.core.session_middleware import SessionMiddleware
+from atlas.core.user_identity import normalize_user_email
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
@@ -648,6 +649,60 @@ def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
     return True
 
 
+def _conversation_access_error(chat_service, conversation_id, user_email):
+    """The error frame refusing a client-supplied conversation id, or None.
+
+    Issue #958: this runs *before* a run is admitted, because the service's
+    own check (the same method) only fires once the turn is already executing
+    -- too late to keep ``run_started`` from announcing a run that then dies
+    on authorization. The frame carries the message and error type the
+    service would have raised, so the refusal reads the same to a client;
+    it additionally carries the refused conversation id (the other
+    admission refusals -- run limit, busy conversation -- do the same), and
+    the difference from the service path is that no run record exists
+    around it.
+
+    A conversation that is not stored yet is allowed through (a minted id,
+    or a run still in flight); the in-flight variant -- claiming a
+    conversation another user's run is executing under -- is addressed
+    separately in PR #956.
+
+    A lookup that *raises* (the chat-history store unreachable or locked)
+    must not tear down the socket the way it would from the receive loop:
+    inside the turn it used to be contained as the per-turn ``unexpected``
+    error. The question is equally unanswerable either way, so the failure
+    is refused too -- the same fail-closed answer the check gives a repo
+    that cannot answer at all -- and the exception is logged because the
+    frame deliberately says nothing about what broke.
+    """
+    try:
+        chat_service.validate_conversation_id_owner(conversation_id, user_email)
+    except AuthorizationError as e:
+        return {
+            "type": "error",
+            "message": str(e.message if hasattr(e, "message") else e),
+            "error_type": "authorization",
+            "conversation_id": conversation_id,
+        }
+    except Exception:
+        logger.error(
+            "Conversation ownership check failed for %s; refusing before "
+            "run admission",
+            sanitize_for_logging(str(conversation_id)),
+            exc_info=True,
+        )
+        return {
+            "type": "error",
+            "message": (
+                "Conversation access could not be verified. "
+                "Please try again."
+            ),
+            "error_type": "unexpected",
+            "conversation_id": conversation_id,
+        }
+    return None
+
+
 def _download_session_candidates(run_registry, session_id, user_email: str, data: dict):
     """Sessions to search for a downloadable file, most likely first.
 
@@ -804,6 +859,25 @@ def _normalize_conversation_id(raw: Any) -> Optional[str]:
     return raw.strip() or None
 
 
+def _run_title_from_frame(data: dict) -> Optional[str]:
+    """The run's title from the chat frame that admitted it.
+
+    Plain-text turns carry their prompt as ``content``; a multimodal turn
+    carries a list of parts, whose first text item names the run. Anything
+    else yields no title rather than raising at admission.
+    """
+    content = data.get("content")
+    if isinstance(content, str):
+        return content.strip() or None
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text.strip() or None
+    return None
+
+
 def forget_run_conversations(session) -> None:
     """Drop the record when the user navigates away.
 
@@ -886,7 +960,16 @@ def _resume_waiting_run(run_registry, user_email: str, data: dict) -> None:
             return
         record = waiting[0]
     if record.status == RunStatus.WAITING_FOR_INPUT:
-        run_registry.set_status(record.run_id, RunStatus.RUNNING)
+        # Resume only the request that was answered. With several tools
+        # paused in parallel -- one agent step, several approval-gated
+        # calls -- the others still need their answers: going straight back
+        # to ``running`` would drop their replayable requests and hide the
+        # "Needs approval" marker while their executors sit blocked.
+        run_registry.answer_pending_request(
+            record.run_id,
+            tool_call_id=data.get("tool_call_id"),
+            elicitation_id=data.get("elicitation_id"),
+        )
 
 
 async def cleanup_disconnected_session(
@@ -1636,7 +1719,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 # someone else. Refuse it here, before a run is admitted.
                 if frame_conversation_id and run_registry.active_for_conversation_any_owner(
                     frame_conversation_id
-                ) not in (None, user_email):
+                ) not in (None, normalize_user_email(user_email)):
+                    logger.warning(
+                        "WS refused a turn naming conversation=%s while another "
+                        "user's run is executing under it",
+                        sanitize_for_logging(frame_conversation_id),
+                    )
                     await websocket.send_json({
                         "type": "error",
                         "message": "Conversation not found",
@@ -1816,12 +1904,36 @@ async def websocket_endpoint(websocket: WebSocket):
                     selected_tools=data.get("selected_tools"),
                     conversation_id=turn_conversation_id,
                 ):
+                    # Issue #958: ownership of a *stored* conversation is
+                    # settled before a run is admitted. The service performs
+                    # the same check once the turn starts, but by then the
+                    # run already exists: `run_started` and `run_status`
+                    # frames have gone out, and the refused turn leaves a
+                    # `failed` run in the caller's snapshot for a conversation
+                    # they never owned. Refusing here keeps the check ahead
+                    # of admission; the error the caller sees is the one the
+                    # service would have raised, just without the run around
+                    # it.
+                    refusal = _conversation_access_error(
+                        chat_service, turn_conversation_id, user_email
+                    )
+                    if refusal is not None:
+                        # Metric parity with the service-path refusal: the
+                        # turn never reaches handle_chat's except blocks, so
+                        # without this the cross-user probe (or the store
+                        # failure) goes uncounted.
+                        log_metric("error", user_email, error_type=refusal["error_type"])
+                        await websocket.send_json(refusal)
+                        continue
                     try:
                         run_record = run_registry.start(
                             conversation_id=turn_conversation_id,
                             user_email=user_email,
                             steering=steering_channel,
-                            title=(data.get("content") or "").strip() or None,
+                            # Multimodal turns carry a list as `content`; the
+                            # title wants the first text part, never a crash
+                            # at admission.
+                            title=_run_title_from_frame(data),
                         )
                     except ConcurrencyLimitError as e:
                         await websocket.send_json({
@@ -2148,12 +2260,31 @@ async def websocket_endpoint(websocket: WebSocket):
                 # chat has none) would file them as background activity and
                 # drop them from the transcript it is showing.
                 if run_record is not None:
-                    await websocket.send_json({
-                        "type": "run_started",
-                        "run_id": run_record.run_id,
-                        "conversation_id": run_record.conversation_id,
-                        "title": run_record.title,
-                    })
+                    try:
+                        await websocket.send_json({
+                            "type": "run_started",
+                            "run_id": run_record.run_id,
+                            "conversation_id": run_record.conversation_id,
+                            "title": run_record.title,
+                            # Lets the client tell a model-launched child
+                            # (atlas_launch) from a run the user started --
+                            # auto-approve is scoped to the latter.
+                            "parent_run_id": run_record.parent_run_id,
+                        })
+                    except Exception:
+                        # The run was admitted but its task has not started:
+                        # nothing will ever execute it. Leaving the record
+                        # running would hold one of the user's concurrency
+                        # slots until the wall-clock sweeper reaps it, so
+                        # mark the failure now. Re-raise so the disconnect
+                        # path still tears the connection down normally; the
+                        # terminal record makes ``mark_detached`` a no-op.
+                        run_registry.set_status(
+                            run_record.run_id,
+                            RunStatus.FAILED,
+                            error="Connection closed before the run started",
+                        )
+                        raise
                 # Start chat handling in background
                 chat_task = asyncio.create_task(handle_chat_guarded())
                 if run_record is None:
@@ -2379,8 +2510,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=user_email,
                 )
 
-                # The run that was paused on this approval is working again.
-                _resume_waiting_run(run_registry, user_email, data)
+                if result:
+                    # The run that was paused on this approval is working
+                    # again -- or still paused on its other parallel tools.
+                    _resume_waiting_run(run_registry, user_email, data)
+                else:
+                    # The response was refused (unknown id, or a user who
+                    # does not own the request). Resuming the run here would
+                    # clear a pause the answer never addressed, so say so
+                    # instead of silently ignoring the frame.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "No matching pending tool approval",
+                        "error_type": "unknown_tool_approval",
+                        "tool_call_id": tool_call_id,
+                    })
 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
@@ -2434,7 +2578,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=user_email,
                 )
 
-                _resume_waiting_run(run_registry, user_email, data)
+                if result:
+                    _resume_waiting_run(run_registry, user_email, data)
+                else:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "No matching pending elicitation",
+                        "error_type": "unknown_elicitation",
+                        "elicitation_id": elicitation_id,
+                    })
 
                 logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the elicitation will unblock the waiting tool execution

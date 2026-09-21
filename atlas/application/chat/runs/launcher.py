@@ -516,6 +516,11 @@ async def launch_sub_conversation(
             parent_run_id=parent_run_id,
             parent_conversation_id=getattr(run_context, "conversation_id", None),
             depth=parent_depth + 1,
+            # The child's transcript is unsaved until its turn ends, and the
+            # history list names an unsaved run by its title: without this
+            # every launched sub-conversation reads as "Conversation in
+            # progress" even though the prompt that defines it is at hand.
+            title=prompt,
         )
     except (ConcurrencyLimitError, ConversationBusyError) as e:
         raise LaunchRefused(str(e)) from e

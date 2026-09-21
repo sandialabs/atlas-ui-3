@@ -119,6 +119,22 @@ mints one at admission and reports it here. Without that, the first agent turn i
 a new conversation could never be a background run, which is the most common case
 of all.
 
+### Ownership is settled before admission
+
+A chat turn that names a conversation id is only admitted if the id is the
+caller's to use. For a **stored** conversation, the ownership check
+(`ChatService.validate_conversation_id_owner`) runs *before* a run is admitted
+(issue #958): a turn naming a conversation another user saved is refused with an
+`error` frame of type `authorization` ("Conversation not found or access
+denied") and no run record is created. Before that fix the run was admitted
+first — the caller saw `run_started` and `run_status` frames, then the
+authorization failure — leaving a `failed` run in their snapshot for a
+conversation they never owned.
+
+An id that is not stored yet — a minted id, or one whose run is still in flight
+— passes this check; the in-flight variant (claiming a conversation another
+user's run is executing under) is addressed separately in PR #956.
+
 ### A running conversation is readable before its first save
 
 A tracked run persists its transcript only when the turn ends. Until then the
@@ -175,6 +191,7 @@ Either way the partial bubble is marked "answer in progress -- it will
 refresh when the run finishes": once the run ends, the client reloads the
 conversation from the store and the marker goes with the placeholder.
 
+=======
 ### Auto-approve covers background runs
 
 Auto-approve is a client setting. The client answers an approval request for
@@ -195,11 +212,30 @@ approval timed out.
 
 An approval request that arrives while the user is looking at another
 conversation is not shown as a modal there; the conversation is marked "Needs
-approval" in the history list instead. The server keeps the request frame and
-re-sends it when that conversation is opened (`restore_conversation`) or named on
-`list_runs` after a reconnect, so it can still be answered. Without the replay
-the request id and arguments would exist nowhere the client could reach, and the
-run would sit blocked until it timed out.
+approval" in the history list instead. The server keeps the request frames and
+re-sends them when that conversation is opened (`restore_conversation`) or named on
+`list_runs` after a reconnect, so they can still be answered. One agent step
+may fire several approval-gated tools in parallel, so every outstanding
+request is kept and replayed individually -- not just the latest. Without the
+replay the request ids and arguments would exist nowhere the client could
+reach, and the run would sit blocked until it timed out.
+
+A tool that finishes clears its own pending request only when the settle frame
+names it: settle frames are matched on their tool call / elicitation id, so a
+sibling tool completing while other approvals are still outstanding leaves
+those -- and their replayable requests -- intact. The run returns to `running`
+when nothing is outstanding anymore. The same holds when the answer arrives
+through the approval-response path: answering one of several parked tools
+resumes only that request, and the run stays "Needs approval" until the last
+one is answered. Ownership comparisons (stop, steer, in-flight reads, the
+foreign-id guard) normalize email casing, the same way the conversation
+repository does.
+
+Background auto-approve covers runs the *user* started. A conversation the
+model launched (`atlas_launch`) runs on model-chosen arguments, so its
+approval requests are not answered off-screen; the child still appears in the
+history list -- titled by its prompt -- with its "Needs approval" marker, and
+admin-pinned tools pause it until it is opened.
 
 Every event a tracked run emits — tokens, agent updates, tool rows, files,
 canvas, completion, errors — carries `run_id` and `conversation_id`. Tagging
@@ -251,6 +287,12 @@ up, or paused on an approval. Answer the approval, or stop the run.
 Check the server log for the run id. The sweeper stops runs past
 `MAX_RUN_WALL_CLOCK_SECONDS` and marks them failed; if that is set to `0`,
 nothing will.
+
+**"Conversation access could not be verified."**
+The ownership check could not read the chat-history store (unreachable or
+locked database), so the turn is refused before a run is admitted rather than
+admitted and failed. Check the server log for the exception; when the store
+recovers, tracked runs are admitted again.
 
 **Runs are not being created at all.**
 All three conditions under "When it applies" must hold. The most common cause is

@@ -59,7 +59,9 @@ export function getDisplayConversations({
   // conversation, but its conversation is not stored until the turn ends.
   // Without a row here it would vanish from the list the moment the user
   // navigated away -- along with the only visible sign that it is running.
-  if (chatHistoryEnabled && effectiveMode !== 'none' && runsByConversation) {
+  // Server save mode only: the rows carry server conversation ids, which do
+  // not resolve in a local (IndexedDB) history list.
+  if (chatHistoryEnabled && effectiveMode === 'server' && runsByConversation) {
     for (const run of Object.values(runsByConversation)) {
       if (!run || !run.conversation_id) continue
       if (['completed', 'failed', 'cancelled'].includes(run.status)) continue

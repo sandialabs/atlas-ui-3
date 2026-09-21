@@ -111,3 +111,34 @@ async def test_cancelling_the_approval_wait_cleans_up_the_request(
 
     # The regression: this used to still hold the request (and its arguments).
     assert TOOL_CALL_ID not in approval_manager.get_pending_requests()
+
+
+@pytest.mark.asyncio
+async def test_a_raising_update_callback_cleans_up_the_request(
+    approval_manager, config_manager, monkeypatch
+):
+    """The request is registered before the frame goes out, so the send itself
+    failing must not leak what the registration parked there (#956 review)."""
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.requires_approval",
+        lambda tool_name, cm: (True, False, True),
+    )
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.resolve_approval_timeout",
+        lambda: 0,
+    )
+
+    async def update_callback(message):
+        if message.get("type") == "tool_approval_request":
+            raise RuntimeError("socket is gone")
+
+    result = await execute_single_tool(
+        _tool_call(),
+        {"user_email": "owner@example.com", "session_id": "s1"},
+        _FakeToolManager(),
+        update_callback=update_callback,
+        config_manager=config_manager,
+    )
+
+    assert result.success is False
+    assert TOOL_CALL_ID not in approval_manager.get_pending_requests()

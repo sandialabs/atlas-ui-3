@@ -625,84 +625,82 @@ async def execute_single_tool(
                     user_email=session_context.get("user_email", ""),
                 )
 
-                # Send approval request to frontend
-                if update_callback:
-                    await update_callback({
-                        "type": "tool_approval_request",
-                        "tool_call_id": tool_call.id,
-                        "tool_name": tool_call.function.name,
-                        "arguments": display_args,
-                        "allow_edit": allow_edit,
-                        "admin_required": admin_required
-                    })
-
-                # Wait for approval response
-
+                # Send the approval request and wait for the answer. Both exits unwind
+                # through the finally: cancellation (user Stop, or the run
+                # wall-clock sweeper) goes through the wait, and a raising
+                # update callback goes through the send -- so the pending
+                # request, and the filtered_args it holds, never leak for the
+                # process lifetime. With TOOL_APPROVAL_TIMEOUT_SECONDS=0 the
+                # wait is indefinite, so cancellation is the *only* exit from
+                # the wait and this is the only cleanup that runs.
                 try:
+                    if update_callback:
+                        await update_callback({
+                            "type": "tool_approval_request",
+                            "tool_call_id": tool_call.id,
+                            "tool_name": tool_call.function.name,
+                            "arguments": display_args,
+                            "allow_edit": allow_edit,
+                            "admin_required": admin_required
+                        })
+
                     try:
                         response = await request.wait_for_response(
                             timeout=resolve_approval_timeout()
                         )
-                    finally:
-                        # Cancellation (user Stop, or the run wall-clock
-                        # sweeper) unwinds straight through both the success and
-                        # the timeout path, so without a finally the pending
-                        # request -- and the filtered_args it holds -- would
-                        # leak for the process lifetime. With
-                        # TOOL_APPROVAL_TIMEOUT_SECONDS=0 the wait is
-                        # indefinite, so cancellation is the *only* way out and
-                        # this is the only cleanup that runs.
-                        approval_manager.cleanup_request(tool_call.id)
-
-                    if not response["approved"]:
-                        # Tool was rejected
-                        reason = response.get("reason", "User rejected the tool call")
-                        logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
+                    except asyncio.TimeoutError:
+                        # Only the wait can mean this: the send failing with
+                        # a timeout is a transport problem, not an approval
+                        # that timed out, and must not be reported as one.
+                        logger.warning(f"Approval timeout for tool {tool_call.function.name}")
                         return _finalize_span(ToolResult(
                             tool_call_id=tool_call.id,
-                            content=f"Tool execution rejected by user: {reason}",
+                            content="Tool execution timed out waiting for user approval",
                             success=False,
-                            error=reason
+                            error="Approval timeout"
                         ))
+                finally:
+                    approval_manager.cleanup_request(tool_call.id)
 
-                    # Use potentially edited arguments
-                    if allow_edit and response.get("arguments"):
-                        edited_args = response["arguments"]
-                        # Check if arguments actually changed by comparing with what we sent (display_args)
-                        # Use json comparison to avoid false positives from dict ordering
-                        if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
-                            arguments_were_edited = True
-                            logger.info(f"User edited arguments for tool {tool_call.function.name}")
-
-                            # SECURITY: Re-apply security injections after user edits
-                            # This ensures _atlas_user and other security-critical parameters cannot be tampered with
-                            re_injected_args = inject_context_into_args(
-                                edited_args,
-                                session_context,
-                                tool_call.function.name,
-                                tool_manager
-                            )
-
-                            # Re-filter to schema to ensure only valid parameters
-                            filtered_args = _filter_args_to_schema(
-                                re_injected_args,
-                                tool_call.function.name,
-                                tool_manager
-                            )
-                            display_args = _sanitize_args_for_ui(dict(filtered_args))
-                        else:
-                            # No actual changes, but response included arguments - keep original filtered_args
-                            logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
-
-                except asyncio.TimeoutError:
-                    # Cleanup already ran in the finally above.
-                    logger.warning(f"Approval timeout for tool {tool_call.function.name}")
+                if not response["approved"]:
+                    # Tool was rejected
+                    reason = response.get("reason", "User rejected the tool call")
+                    logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
                     return _finalize_span(ToolResult(
                         tool_call_id=tool_call.id,
-                        content="Tool execution timed out waiting for user approval",
+                        content=f"Tool execution rejected by user: {reason}",
                         success=False,
-                        error="Approval timeout"
+                        error=reason
                     ))
+
+                # Use potentially edited arguments
+                if allow_edit and response.get("arguments"):
+                    edited_args = response["arguments"]
+                    # Check if arguments actually changed by comparing with what we sent (display_args)
+                    # Use json comparison to avoid false positives from dict ordering
+                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
+                        arguments_were_edited = True
+                        logger.info(f"User edited arguments for tool {tool_call.function.name}")
+
+                        # SECURITY: Re-apply security injections after user edits
+                        # This ensures _atlas_user and other security-critical parameters cannot be tampered with
+                        re_injected_args = inject_context_into_args(
+                            edited_args,
+                            session_context,
+                            tool_call.function.name,
+                            tool_manager
+                        )
+
+                        # Re-filter to schema to ensure only valid parameters
+                        filtered_args = _filter_args_to_schema(
+                            re_injected_args,
+                            tool_call.function.name,
+                            tool_manager
+                        )
+                        display_args = _sanitize_args_for_ui(dict(filtered_args))
+                    else:
+                        # No actual changes, but response included arguments - keep original filtered_args
+                        logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
 
             # Send tool start notification with sanitized args
             await event_notifier.notify_tool_start(

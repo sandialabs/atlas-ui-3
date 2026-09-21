@@ -615,3 +615,25 @@ class TestCrossUserApprovalPrevention:
         )
 
         assert result is True
+
+    @pytest.mark.asyncio
+    async def test_response_email_comparison_is_case_insensitive(self):
+        """Ownership compares emails the way the rest of the identity stack
+        does: a proxy handing the socket ``Alice@Example.com`` when the
+        request was admitted under ``alice@example.com`` is the same owner."""
+        manager = ToolApprovalManager()
+        manager.create_approval_request(
+            tool_call_id="case_1",
+            tool_name="test_tool",
+            arguments={},
+            allow_edit=False,
+            user_email="alice@example.com",
+        )
+
+        handled = manager.handle_approval_response(
+            tool_call_id="case_1",
+            approved=True,
+            user_email="Alice@Example.COM",
+        )
+
+        assert handled is True
