@@ -269,7 +269,10 @@ These are known and deliberate, not oversights:
   *after* it reopens reach only the socket that started the run. The marker on
   the partial bubble says it will refresh; once the run ends the client reloads
   the conversation from the store, so the final answer appears without a manual
-  refresh. Live re-attach is issue #760.
+  refresh. That refresh appends only the rows the view is missing, so a reader
+  who scrolled up keeps their position and their expanded tool rows; a
+  transcript that has diverged from the view (rewound or edited elsewhere)
+  falls back to a full reload (issue #959). Live re-attach is issue #760.
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
   Use a single worker, or sticky sessions, until the run store is shared.

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #963 - 2026-09-20
+- Refreshing a conversation opened while its run was executing appends only the rows the view is missing instead of replacing the transcript, keeping the reader's scroll position and expanded tool rows (closes #959). Rows align by `tool_call_id`/role+content past live-only agent chrome; on divergence the previous full reload runs, and the backend session is re-seeded so the next message keeps the run's final turn in context.
+
 ### PR #962 - 2026-09-20
 - Reopening a conversation mid-stream shows the assistant reply from its beginning instead of the token that happened to be current on arrival (issue #957, the remaining gap #956 noted). The registry now holds the token segment a tracked run is streaming right now -- recorded once per frame at the notifier chokepoint, keyed by the ambient run, cleared when a segment closes or the run ends -- and the reopen paths serve it: `GET /api/conversations/{id}` and `restore_conversation` carry `streaming_text` in the live in-flight view (which is what a second tab or a reload sees, since a run's frames stay bound to the socket that started it), and `restore_conversation` additionally replays it as a run-tagged `token_stream` frame with `replay: true` so the same tab continues the live stream unbroken on top of it. The partial bubble is marked "answer in progress -- it will refresh when the response finishes" until the reload-on-run-end replaces it with the stored transcript. Tools-mode pre-tool narration is now persisted to the run's history the moment its stream segment closes (matching the agentic loop), so a reopen during a tool approval shows the narration instead of an empty assistant turn -- and a reloaded tools-mode transcript shows the same narration bubbles the live view did.
 

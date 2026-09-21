@@ -15,6 +15,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
+import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
@@ -24,7 +25,28 @@ import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
 // How long to wait for a `conversation_saved` after a joined run ends before
 // reloading anyway (a run that failed before saving never sends one).
 const RUN_END_RELOAD_GRACE_MS = 2500
+// How many times the joined-run refresh will re-arm for a conversation whose
+// record still reports itself in flight. Bounded so an untracked run cannot
+// turn the refresh into an open-ended poll; after this the caller's full
+// reload takes over.
+const MAX_JOINED_RUN_REARMS = 4
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+// Stored metadata is data the store round-tripped, some of it shaped by a
+// model's tool output. The renderer's own flags all start with an underscore
+// (`_streaming`, `_replayed`, `_transcriptRefresh`, `_agentInput`, `_seed`),
+// and a persisted key of that shape would let stored content hide, reorder or
+// drop rows in the view. Strip them on the way in; nothing legitimately
+// persists them.
+const withoutInternalFlags = (metadata) => {
+	if (!metadata) return {}
+	const out = {}
+	for (const [k, v] of Object.entries(metadata)) {
+		if (k.startsWith('_')) continue
+		out[k] = v
+	}
+	return out
+}
 
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
@@ -68,7 +90,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders, refreshAppend } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
@@ -92,8 +114,48 @@ export const ChatProvider = ({ children }) => {
 	// construction; once the run ends the Sidebar reloads it from the store.
 	const joinedRunConversationRef = useRef(null)
 	const joinedRunTimerRef = useRef(null)
+	const rearmCountRef = useRef({ id: null, n: 0 })
 	const [runEndedConversationId, setRunEndedConversationId] = useState(null)
 	const clearRunEndedConversation = useCallback(() => setRunEndedConversationId(null), [])
+	// Take the refresh obligation back after an accepted refresh found the
+	// record still in flight. A bare ref write is not enough: if that run
+	// already reached a terminal status while the fetch was outstanding,
+	// `runsByConversation` never changes again, so the run-end effect -- which
+	// only fires on a map change -- would never re-fire and the final rows
+	// would never arrive. Re-check synchronously and schedule the same delayed
+	// refresh directly when it is already terminal.
+	// Whether another re-arm is still allowed for this conversation. Bounded:
+	// when this tab never hears about the run writing into it, each pass comes
+	// back to the same state, and re-arming forever would poll the conversation
+	// endpoint (and run a full alignment pass) every grace period for the run's
+	// whole duration. Checked *before* the refresh commits to appending, so
+	// that once the budget is spent the refresh refuses and the caller's full
+	// reload takes the store's copy -- a jumped scroll, but a correct
+	// transcript. Returning `true` after giving up would strand it instead:
+	// nothing would re-arm and nothing would reload.
+	const canRearmJoinedRun = useCallback((id) => (
+		rearmCountRef.current.id !== id || rearmCountRef.current.n < MAX_JOINED_RUN_REARMS
+	), [])
+	const rearmJoinedRun = useCallback((id) => {
+		if (rearmCountRef.current.id !== id) rearmCountRef.current = { id, n: 0 }
+		rearmCountRef.current.n += 1
+		joinedRunConversationRef.current = id
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
+		if (isRunActive(runsByConversationRef.current[id])) return
+		// The tracker has no active run for this conversation, yet the record
+		// says otherwise -- this tab has not heard of the run writing into it.
+		// Ask, so the next pass can hand the obligation to the run-end effect
+		// instead of coming back here: without this the refresh is a blind poll
+		// for as long as that run lasts.
+		sendMessageRef.current?.({ type: 'list_runs', conversation_id: id })
+		joinedRunTimerRef.current = setTimeout(() => {
+			joinedRunTimerRef.current = null
+			finishJoinedRunRef.current(id)
+		}, RUN_END_RELOAD_GRACE_MS)
+	}, [])
 	const finishJoinedRun = useCallback((id) => {
 		if (!id || joinedRunConversationRef.current !== id) return
 		joinedRunConversationRef.current = null
@@ -103,6 +165,10 @@ export const ChatProvider = ({ children }) => {
 		}
 		setRunEndedConversationId(id)
 	}, [])
+	// rearmJoinedRun is defined above finishJoinedRun and calls it from a
+	// timer; the ref keeps that one-way dependency from becoming a cycle.
+	const finishJoinedRunRef = useRef(finishJoinedRun)
+	finishJoinedRunRef.current = finishJoinedRun
 	const [isSynthesizing, setIsSynthesizing] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
@@ -119,6 +185,12 @@ export const ChatProvider = ({ children }) => {
 	// a conversation the user is not looking at still has somewhere to live --
 	// and so the history list can mark it as still working.
 	const runs = useConversationRuns()
+	// The delayed joined-run refresh fires from a setTimeout closure, which
+	// would otherwise read the run map as it was when the timer was armed. Read
+	// the live map through a ref so the timer can re-check whether the run is
+	// still going before it declares the obligation discharged.
+	const runsByConversationRef = useRef(runs.runsByConversation)
+	runsByConversationRef.current = runs.runsByConversation
 	// Read by the websocket handler to route incoming events. A ref, not the
 	// state value: the handler is registered once and must always see the
 	// conversation that is on screen *now*, not the one that was on screen when
@@ -1073,18 +1145,61 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// own `in_flight` flag decides this, not the run tracker: the snapshot
 		// that would carry the run may still be in flight in this tab (another
 		// tab, a reload), and a null here would leave the partial view stale
-		// forever.
+		// forever. It is a refresh obligation in its own right, too: the run can
+		// reach a terminal state while this fetch is in the air, leaving the
+		// snapshot missing the run's final rows even though no run-end event
+		// will arrive afterwards.
 		if (joinedRunTimerRef.current) {
 			clearTimeout(joinedRunTimerRef.current)
 			joinedRunTimerRef.current = null
 		}
-		const runInFlight = isRunActive(runs.getRun(conversationData.id)) || conversationData.in_flight === true
+		rearmCountRef.current = { id: null, n: 0 }
+		const runRecord = runs.getRun(conversationData.id)
+		const runInFlight = isRunActive(runRecord) || conversationData.in_flight === true
 		joinedRunConversationRef.current = runInFlight ? conversationData.id : null
 		if (runInFlight) {
 			// Ask for a fresh run snapshot: this tab may not have received
 			// `run_started`/`run_status` for a run its tracker has never seen,
 			// and the reload-on-run-end below keys off that tracker.
 			sendMessage?.({ type: 'list_runs', conversation_id: conversationData.id })
+			// The run already ended while the view was being loaded: schedule the
+			// same delayed refresh the run-end path runs, so the store's final
+			// rows are appended once the save has settled.
+			//
+			// `runRecord` is also undefined for a run this tab has simply never
+			// heard of, which is indistinguishable here from one that has ended --
+			// so the timer re-checks before it fires. The `list_runs` asked for
+			// just above answers in the meantime; if it reports the run still
+			// going, discharging the obligation now would refresh against a
+			// mid-run store and clear `joinedRunConversationRef`, leaving the
+			// run-end effect with nothing to fire on. Leave it to that effect
+			// instead, which is watching the same map.
+			//
+			// The grace period is counted from the *load*, not from the run going
+			// terminal, so a run that ends late in this window would be aligned
+			// against a store that has not been written yet and its answer would be
+			// lost until a manual reload. If the run's status changed while the
+			// timer was in the air, re-arm once to give the save the same grace the
+			// run-end path gives it, and only then discharge.
+			if (!isRunActive(runRecord)) {
+				const armedStatus = runRecord?.status ?? null
+				let rearmed = false
+				const tick = () => {
+					joinedRunTimerRef.current = null
+					const now = runsByConversationRef.current[conversationData.id]
+					// Still going: the run-end effect is watching the same map and
+					// owns the obligation from here.
+					if (isRunActive(now)) return
+					const status = now?.status ?? null
+					if (!rearmed && status !== armedStatus) {
+						rearmed = true
+						joinedRunTimerRef.current = setTimeout(tick, RUN_END_RELOAD_GRACE_MS)
+						return
+					}
+					finishJoinedRun(conversationData.id)
+				}
+				joinedRunTimerRef.current = setTimeout(tick, RUN_END_RELOAD_GRACE_MS)
+			}
 		}
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
@@ -1101,11 +1216,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// Load messages into the chat view
 		const loadedMessages = conversationData.messages.map(msg => ({
+			...withoutInternalFlags(msg.metadata),
 			role: msg.role,
 			content: msg.content || '',
 			timestamp: msg.timestamp,
 			type: msg.message_type || 'chat',
-			...(msg.metadata || {}),
 		}))
 		if (loadedMessages.length > 0) {
 			bulkAdd(loadedMessages)
@@ -1169,7 +1284,113 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// callback down -- and re-subscribe everything that depends on it -- on
 		// every streaming frame.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun])
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
+
+	const refreshJoinedConversation = useCallback((conversationData) => {
+		if (!conversationData || !conversationData.messages) return false
+		// Only ever reconcile against the transcript actually on screen. The
+		// current caller checks this before it calls, but this is exported on the
+		// context: without the guard a second caller could splice one
+		// conversation's rows into another's view.
+		if (conversationData.id !== activeConversationIdRef.current) return false
+		// The fetched record is itself mid-run: another run is writing into this
+		// conversation (a second turn started here while the first was settling),
+		// so what came back is a snapshot, not the final transcript. Appending it
+		// and returning would discharge the obligation against a moving target and
+		// the new run's answer would never reach the view. Append what it does
+		// have -- the reader keeps their place -- but re-arm the obligation so the
+		// run-end path refreshes again when this run finishes.
+		const stillInFlight = conversationData.in_flight === true
+		// Budget spent on a record that still will not settle: refuse, so the
+		// caller falls back to the full reload rather than this returning `true`
+		// with no obligation left to discharge.
+		if (stillInFlight && !canRearmJoinedRun(conversationData.id)) return false
+		// Metadata is spread first: it is stored data, and a stray `role`,
+		// `content` or `type` in it must not decide how an appended row renders.
+		const stored = conversationData.messages.map(msg => ({
+			...withoutInternalFlags(msg.metadata),
+			role: msg.role,
+			content: msg.content || '',
+			timestamp: msg.timestamp,
+			type: msg.message_type || 'chat',
+		}))
+		// Re-seed the backend session from the store. It was seeded from the
+		// run's snapshot when the view was opened and does not have the run's
+		// final turn, so the next message here would lose that context.
+		// Display-only rows (persisted tool_call messages, issue #684, and
+		// agent_intermediate narration, issue #957) are excluded, exactly as in
+		// loadSavedConversation: a bare role:'tool' row replays as an orphan tool
+		// message and a narration row as a second assistant turn, either of which
+		// breaks strict alternation in the re-seeded session.
+		const restoreContext = () => {
+			if (!sendMessage) return
+			// A still-running record is a snapshot the run is about to extend, and
+			// the refresh that follows its end re-seeds from the final transcript
+			// anyway. Seeding from the snapshot now would only be undone.
+			if (stillInFlight) return
+			sendMessage({
+				type: 'restore_conversation',
+				conversation_id: conversationData.id,
+				messages: conversationData.messages
+					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
+					.map(msg => ({ role: msg.role, content: msg.content || '' })),
+			})
+		}
+		// Live-only rows and agent-loop answers have no stored counterpart;
+		// aligning past them keeps the match alive. So does any open streaming
+		// bubble. The replay placeholder (issue #957) is one: opening a
+		// conversation while its run executes seeds a bubble -- half-streamed, or
+		// empty between steps -- that `isLiveOnlyRow` does not skip. But
+		// `_replayed` is not enough to find them: STREAM_TOKEN clears it on the
+		// first live token (useMessages.js), so a bubble this tab is genuinely
+		// streaming into looks like an ordinary assistant row holding a partial
+		// answer. Compared against the stored finished answer it would never
+		// match, and the refresh would refuse -- the full reload and scroll jump
+		// this exists to remove. Every `_streaming` row is transient by
+		// construction: the stored rows supersede it, so it is settled with the
+		// append rather than matched.
+		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
+
+		// Walk both lists together; everything must line up one-to-one or the
+		// refresh refuses. The rule itself lives in utils/transcriptAlignment so
+		// the vitest suite and the Python mirror can be driven from one shared
+		// case table instead of each restating it.
+		const storedIdx = alignTranscript(current, stored)
+		if (storedIdx === null) return false
+
+		// The store had nothing beyond what the view already shows.
+		if (storedIdx >= stored.length) {
+			// Nothing to append. An open bubble is NOT settled here: with no
+			// stored rows to supersede it, dropping it would throw away tokens
+			// already received for a run that has just started writing. It is
+			// settled by the refresh that follows that run's end, which will have
+			// rows to put in its place. Dispatching nothing also keeps every row
+			// identity intact, so React does not remount the expanded tool rows
+			// and scroll anchor this refresh exists to preserve.
+			restoreContext()
+			if (stillInFlight) rearmJoinedRun(conversationData.id)
+			return true
+		}
+
+		// The view ran out first: whatever the store still holds from here on
+		// is what the view is missing -- the run's output that reached the
+		// transcript it was streaming into, not this one. Mark the appended
+		// tail so the message list treats it as a refresh rather than a new
+		// answer: ChatArea must not force the scroll to the bottom over a user
+		// who is scrolled up reading.
+		const missing = stored.slice(storedIdx)
+		const appended = missing.map((msg, i) => (
+			i === missing.length - 1 ? { ...msg, _transcriptRefresh: true } : msg
+		))
+		// One dispatch: the tail lands and any open bubble is settled together,
+		// so the list never renders a half-written answer beside the whole one.
+		// A still-running record keeps its bubble -- the run is genuinely
+		// mid-answer -- but after the appended rows, not above them.
+		refreshAppend(appended, stillInFlight)
+		restoreContext()
+		if (stillInFlight) rearmJoinedRun(conversationData.id)
+		return true
+	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:
@@ -1637,6 +1858,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setSaveMode,
 		activeConversationId,
 		loadSavedConversation,
+		refreshJoinedConversation,
 		followUpSuggestions,
 		setFollowUpSuggestions,
 	}

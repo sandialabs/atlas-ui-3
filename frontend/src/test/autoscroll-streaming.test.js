@@ -20,25 +20,9 @@ import { describe, it, expect } from 'vitest'
  * These mirror the conditions in the useEffect hooks.
  */
 
-// Mirrors the scroll-on-message-change effect in ChatArea.jsx
-function computeMessageChangeScroll(messages, prevMessageCount) {
-  const newCount = messages.length
-  const lastMsg = messages[messages.length - 1]
-  const isNewMessage = newCount !== prevMessageCount
-  const isStreamingUpdate = lastMsg && lastMsg._streaming && !isNewMessage
-  const force = isNewMessage && lastMsg && (lastMsg.role !== 'user')
-
-  if (isStreamingUpdate) {
-    return { force: false, isStreamingUpdate: true }
-  }
-  return { force, isStreamingUpdate: false }
-}
-
-// Mirrors scrollToBottom logic in ChatArea.jsx
-function shouldActuallyScroll(force, userScrolledAway) {
-  if (userScrolledAway && !force) return false
-  return true
-}
+// The real decision ChatArea ships, imported rather than restated. A local
+// copy meant deleting a clause from the component left this suite green.
+import { computeMessageChangeScroll, shouldActuallyScroll } from '../utils/scrollDecision'
 
 describe('Auto-scroll during streaming (#441)', () => {
 
@@ -208,5 +192,83 @@ describe('Auto-scroll during streaming (#441)', () => {
       // Step 7: Post-streaming DOM mutation — still no force, user stays where they are
       expect(shouldActuallyScroll(false, true)).toBe(false) // user still scrolled up
     })
+  })
+
+  describe('Scenario 8: Transcript refresh appends (issue #959)', () => {
+    it('does not force-scroll a reader who is scrolled up when the joined-run refresh appends', () => {
+      const prevCount = 4
+      const messages = [
+        { role: 'user', content: 'Multi-step task' },
+        { role: 'assistant', content: 'Working on it' },
+        { role: 'user', content: 'And tomorrow?' },
+        { role: 'assistant', content: 'Sunny', _transcriptRefresh: true },
+      ]
+      const scroll = computeMessageChangeScroll(messages, prevCount)
+      // The count grew, but the tail is a catch-up from the store, not a live
+      // answer: respect the reader's position like streaming does.
+      expect(scroll.force).toBe(false)
+      expect(scroll.isStreamingUpdate).toBe(false)
+      expect(shouldActuallyScroll(false, true)).toBe(false)
+    })
+
+    it('still follows the new tail for a reader at the bottom', () => {
+      const messages = [
+        { role: 'user', content: 'Multi-step task' },
+        { role: 'assistant', content: 'Sunny', _transcriptRefresh: true },
+      ]
+      const scroll = computeMessageChangeScroll(messages, 1)
+      expect(scroll.force).toBe(false)
+      expect(shouldActuallyScroll(false, false)).toBe(true)
+    })
+
+    it('does not let a refresh marker suppress a later live answer', () => {
+      // The next genuinely new message has no marker, so it forces again.
+      const messages = [
+        { role: 'user', content: 'Multi-step task' },
+        { role: 'assistant', content: 'Sunny', _transcriptRefresh: true },
+        { role: 'user', content: 'Thanks' },
+        { role: 'assistant', content: 'Anytime' },
+      ]
+      const scroll = computeMessageChangeScroll(messages, 2)
+      expect(scroll.force).toBe(true)
+    })
+  })
+})
+
+describe('Transcript refresh with a run still writing (issue #959)', () => {
+  // The shape REFRESH_APPEND actually produces on the still-in-flight path:
+  // the appended catch-up rows, then the retained open bubble. The marked
+  // row is therefore NOT last, and a decision that only looked at the last
+  // row would force the scroll and yank the reader this PR protects.
+  const postAppend = [
+    { role: 'user', content: 'earlier turn' },
+    { role: 'assistant', content: 'the run answer', _transcriptRefresh: true },
+    { role: 'assistant', content: 'still writ', _streaming: true },
+  ]
+
+  it('does not force the scroll when a retained bubble trails the appended tail', () => {
+    const { force } = computeMessageChangeScroll(postAppend, 1)
+    expect(force).toBe(false)
+  })
+
+  it('still does not force when several open bubbles trail', () => {
+    const rows = [...postAppend, { role: 'assistant', content: 'and another', _streaming: true }]
+    expect(computeMessageChangeScroll(rows, 1).force).toBe(false)
+  })
+
+  it('a scrolled-up reader is not moved by that append', () => {
+    const { force } = computeMessageChangeScroll(postAppend, 1)
+    expect(shouldActuallyScroll(force, true)).toBe(false)
+  })
+
+  it('a genuinely new answer with a trailing bubble still forces', () => {
+    // Guard against over-skipping: without the _transcriptRefresh marker on
+    // the settled row, this is an ordinary new answer and must scroll.
+    const rows = [
+      { role: 'user', content: 'earlier turn' },
+      { role: 'assistant', content: 'a fresh answer' },
+      { role: 'assistant', content: 'still writ', _streaming: true },
+    ]
+    expect(computeMessageChangeScroll(rows, 1).force).toBe(true)
   })
 })

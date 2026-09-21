@@ -1,0 +1,254 @@
+{
+  "_comment": "Shared case table for the joined-run refresh alignment rule (issue #959). Consumed by frontend/src/test/transcript-alignment.test.js (against the shipped utils/transcriptAlignment.js) and by test/pr-validation/fixtures/pr959/scenario.py (against its Python mirror). One table, two consumers: the mirror drifted from the client rule twice during this PR's review, each time leaving the end-to-end check certifying a rule the client does not apply. Rows use the stored wire shape (role / content / message_type / metadata); 'expect' is the index into 'stored' the tail is appended from, or null when the refresh refuses.",
+  "cases": [
+    {
+      "name": "view is a prefix: the run's turn is appended",
+      "view": [
+        {
+          "role": "user",
+          "content": "What is the weather",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "user",
+          "content": "What is the weather",
+          "message_type": "chat"
+        },
+        {
+          "role": "assistant",
+          "content": "Clear skies",
+          "message_type": "chat"
+        }
+      ],
+      "expect": 1
+    },
+    {
+      "name": "exact match: nothing to append",
+      "view": [
+        {
+          "role": "user",
+          "content": "hi",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "user",
+          "content": "hi",
+          "message_type": "chat"
+        }
+      ],
+      "expect": 1
+    },
+    {
+      "name": "diverged content refuses",
+      "view": [
+        {
+          "role": "user",
+          "content": "hi",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "user",
+          "content": "something else",
+          "message_type": "chat"
+        }
+      ],
+      "expect": null
+    },
+    {
+      "name": "store is a strict prefix of the view (rewound elsewhere) refuses",
+      "view": [
+        {
+          "role": "user",
+          "content": "hi",
+          "message_type": "chat"
+        },
+        {
+          "role": "assistant",
+          "content": "there",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "user",
+          "content": "hi",
+          "message_type": "chat"
+        }
+      ],
+      "expect": null
+    },
+    {
+      "name": "tool rows align by tool_call_id across the persisted/live shape drift",
+      "view": [
+        {
+          "role": "system",
+          "content": "Tool: atlas_sleep",
+          "message_type": "tool_call",
+          "metadata": {
+            "tool_call_id": "tc-1"
+          }
+        }
+      ],
+      "stored": [
+        {
+          "role": "tool",
+          "content": "Tool call: tc-1",
+          "message_type": "tool_call",
+          "metadata": {
+            "tool_call_id": "tc-1"
+          }
+        }
+      ],
+      "expect": 1
+    },
+    {
+      "name": "a different tool_call_id refuses",
+      "view": [
+        {
+          "role": "system",
+          "content": "Tool: atlas_sleep",
+          "message_type": "tool_call",
+          "metadata": {
+            "tool_call_id": "tc-1"
+          }
+        }
+      ],
+      "stored": [
+        {
+          "role": "tool",
+          "content": "Tool call: tc-2",
+          "message_type": "tool_call",
+          "metadata": {
+            "tool_call_id": "tc-2"
+          }
+        }
+      ],
+      "expect": null
+    },
+    {
+      "name": "agent narration persisted as agent_intermediate matches its streamed assistant row",
+      "view": [
+        {
+          "role": "assistant",
+          "content": "On it.",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "assistant",
+          "content": "On it.",
+          "message_type": "agent_intermediate"
+        }
+      ],
+      "expect": 1
+    },
+    {
+      "name": "prose coalescing does not extend to other types",
+      "view": [
+        {
+          "role": "assistant",
+          "content": "On it.",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "assistant",
+          "content": "On it.",
+          "message_type": "tool_call"
+        }
+      ],
+      "expect": null
+    },
+    {
+      "name": "role must still match for prose rows",
+      "view": [
+        {
+          "role": "assistant",
+          "content": "same text",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "user",
+          "content": "same text",
+          "message_type": "chat"
+        }
+      ],
+      "expect": null
+    },
+    {
+      "name": "empty view aligns against any store",
+      "view": [],
+      "stored": [
+        {
+          "role": "user",
+          "content": "hi",
+          "message_type": "chat"
+        }
+      ],
+      "expect": 0
+    },
+    {
+      "name": "both empty",
+      "view": [],
+      "stored": [],
+      "expect": 0
+    },
+    {
+      "name": "a row flagged _agentInput in metadata is view-only and skipped",
+      "view": [
+        {
+          "role": "user",
+          "content": "agent input",
+          "message_type": "chat",
+          "metadata": {
+            "_agentInput": true
+          }
+        },
+        {
+          "role": "user",
+          "content": "real turn",
+          "message_type": "chat"
+        }
+      ],
+      "stored": [
+        {
+          "role": "user",
+          "content": "real turn",
+          "message_type": "chat"
+        }
+      ],
+      "expect": 1
+    },
+    {
+      "name": "metadata.message_type does not override the top-level message_type",
+      "view": [
+        {
+          "role": "assistant",
+          "content": "answer",
+          "message_type": "chat",
+          "metadata": {
+            "message_type": "tool_call"
+          }
+        }
+      ],
+      "stored": [
+        {
+          "role": "assistant",
+          "content": "answer",
+          "message_type": "chat"
+        }
+      ],
+      "expect": 1
+    }
+  ]
+}

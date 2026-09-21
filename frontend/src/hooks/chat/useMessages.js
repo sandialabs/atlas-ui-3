@@ -81,6 +81,24 @@ function messagesReducer(state, action) {
         _streaming: true,
       }]
     }
+    case 'REFRESH_APPEND': {
+      // The joined-run refresh (issue #959) appending the tail the view is
+      // missing. Every open streaming bubble is transient: the stored rows
+      // being appended are the run's finished output and supersede it,
+      // whether it is a replay placeholder or a live partial this tab was
+      // streaming. They are dropped in the same dispatch as the append, so
+      // the list never renders a half-written answer beside the whole one.
+      //
+      // `keepStreaming` is the still-in-flight case: another run is writing
+      // into this conversation, so its open bubble is still the honest thing
+      // to show. It is moved after the appended rows rather than left where
+      // it was, or the finished rows would render underneath a bubble that
+      // goes on filling above them.
+      const streaming = state.filter(m => m._streaming)
+      const settled = state.filter(m => !m._streaming)
+      const next = [...settled, ...action.rows]
+      return action.keepStreaming ? [...next, ...streaming] : next
+    }
     case 'DISCARD_REPLAY_PLACEHOLDERS': {
       // A replay placeholder is a transient mid-answer fragment the run's
       // stored transcript supersedes (issue #957). Discarding is NOT closing:
@@ -124,6 +142,7 @@ export function useMessages() {
   const streamToken = useCallback((token, replace = false) => dispatch({ type: 'STREAM_TOKEN', token, replace }), [])
   const streamEnd = useCallback(() => dispatch({ type: 'STREAM_END' }), [])
   const discardReplayPlaceholders = useCallback(() => dispatch({ type: 'DISCARD_REPLAY_PLACEHOLDERS' }), [])
+  const refreshAppend = useCallback((rows, keepStreaming = false) => dispatch({ type: 'REFRESH_APPEND', rows, keepStreaming }), [])
 
-  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders }
+  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders, refreshAppend }
 }
