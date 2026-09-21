@@ -61,6 +61,7 @@ export function cleanupStreamState() {
  * @param {Function} deps.streamEnd - Dispatch a STREAM_END action to finalize streaming.
  * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
  * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
+ * @param {Function} [deps.onConversationSaved] - Called with the id when the conversation on screen is persisted.
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
 export function createWebSocketHandler(deps) {
@@ -89,6 +90,7 @@ export function createWebSocketHandler(deps) {
     streamEnd,
     getVisibleConversationId,
     onRunStatus,
+    onConversationSaved,
   } = deps
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
@@ -456,7 +458,7 @@ export function createWebSocketHandler(deps) {
         const visible = getVisibleConversationId()
         if (visible !== data.conversation_id) {
           if (typeof onRunStatus === 'function') {
-            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id })
+            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id, frame: data })
           }
           return
         }
@@ -571,6 +573,9 @@ export function createWebSocketHandler(deps) {
         case 'conversation_saved': {
           if (data.conversation_id && typeof setActiveConversationId === 'function') {
             setActiveConversationId(data.conversation_id)
+          }
+          if (data.conversation_id && typeof onConversationSaved === 'function') {
+            onConversationSaved(data.conversation_id)
           }
           break
         }

@@ -192,10 +192,10 @@ def test_tool_settled_events_are_recognised():
     Without this the run keeps working after an approval times out but stays
     marked "Needs approval" in the conversation list for the rest of its life.
     """
-    from main import _TOOL_SETTLED_EVENTS
+    from atlas.application.chat.runs.registry import TOOL_SETTLED_EVENTS
 
-    assert {"tool_complete", "tool_error", "tool_interrupted"} <= _TOOL_SETTLED_EVENTS
-    assert "tool_approval_request" not in _TOOL_SETTLED_EVENTS
+    assert {"tool_complete", "tool_error", "tool_interrupted"} <= TOOL_SETTLED_EVENTS
+    assert "tool_approval_request" not in TOOL_SETTLED_EVENTS
 
 
 # ---------------------------------------------------------------------------

@@ -272,20 +272,7 @@ class _ChildConnection:
     async def send_json(self, data: Dict[str, Any]) -> None:
         try:
             tagged = tag_event(data, self._run_id, self._conversation_id)
-            if isinstance(tagged, dict):
-                event_type = tagged.get("type")
-                registry = get_run_registry()
-                record = registry.get(self._run_id)
-                if event_type in {"tool_approval_request", "elicitation_request"}:
-                    registry.set_status(
-                        self._run_id,
-                        RunStatus.WAITING_FOR_INPUT,
-                        waiting_on=event_type,
-                    )
-                    registry.set_pending_request(self._run_id, tagged)
-                elif event_type in {"tool_complete", "tool_error", "tool_interrupted", "tool_result"}:
-                    if record is not None and record.status is RunStatus.WAITING_FOR_INPUT:
-                        registry.set_status(self._run_id, RunStatus.RUNNING)
+            get_run_registry().note_event(self._run_id, tagged)
             if self._update_callback is not None:
                 await self._update_callback(tagged)
         except Exception:
@@ -529,6 +516,11 @@ async def launch_sub_conversation(
             parent_run_id=parent_run_id,
             parent_conversation_id=getattr(run_context, "conversation_id", None),
             depth=parent_depth + 1,
+            # The child's transcript is unsaved until its turn ends, and the
+            # history list names an unsaved run by its title: without this
+            # every launched sub-conversation reads as "Conversation in
+            # progress" even though the prompt that defines it is at hand.
+            title=prompt,
         )
     except (ConcurrencyLimitError, ConversationBusyError) as e:
         raise LaunchRefused(str(e)) from e

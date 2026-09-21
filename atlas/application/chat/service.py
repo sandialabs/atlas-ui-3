@@ -863,7 +863,16 @@ class ChatService:
         canonical_messages = messages
         stored_workspace_id = None
         if getattr(self, "conversation_repository", None) is not None:
-            conv = self.conversation_repository.get_conversation(conversation_id, user_email)
+            # A conversation with a run in flight is ahead of its stored
+            # record, and may not have one at all yet: a tracked run's
+            # transcript only reaches the repository when its turn ends
+            # (issue #884). Its own session is the authority until then.
+            live = await self._in_flight_conversation(conversation_id, user_email)
+            conv = live if live and live.get("messages") else None
+            if conv is None:
+                # Stored record, or the still-empty live one for a run whose
+                # session has not appended its prompt yet: real, not missing.
+                conv = self.conversation_repository.get_conversation(conversation_id, user_email) or live
             if conv is None:
                 logger.warning(
                     "Rejected restore for conversation %s: not found for user %s",
@@ -917,6 +926,21 @@ class ChatService:
             "conversation_id": conversation_id,
             "message_count": loaded,
         }
+
+    async def _in_flight_conversation(
+        self, conversation_id: str, user_email: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Live transcript of an unsaved conversation with an active run."""
+        from atlas.application.chat.runs import get_run_registry
+        from atlas.application.chat.runs.in_flight import in_flight_conversation
+
+        try:
+            return await in_flight_conversation(
+                self.session_repository, get_run_registry(), conversation_id, user_email
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("In-flight conversation lookup failed: %s", e)
+            return None
 
     async def handle_reset_session(
         self,
