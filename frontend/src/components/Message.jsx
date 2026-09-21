@@ -831,9 +831,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           <div
             className="mt-2 text-xs text-gray-400 italic flex items-center gap-1.5"
             data-testid="stream-replay-in-progress"
+            role="status"
           >
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
-            Answer in progress -- it will refresh when the run finishes.
+            Answer in progress — it will refresh when the run finishes.
           </div>
         )}
       </div>

@@ -41,42 +41,52 @@ class StreamReplay:
     not correctness.
     """
 
-    __slots__ = ("_text", "_truncated")
+    __slots__ = ("_parts", "_length", "_truncated")
 
     MAX_CHARS = 200_000
 
     def __init__(self) -> None:
-        self._text = ""
+        # Parts, not one growing string: observe() runs on the token hot path,
+        # and repeated ``text += token`` copies the whole buffer per frame.
+        # Appends are O(1); the join happens once per reopen read.
+        self._parts: list = []
+        self._length = 0
         self._truncated = False
 
     def observe(self, token: str, is_first: bool, is_last: bool) -> None:
         """Fold one ``token_stream`` frame into the buffer."""
         if is_first:
-            self._text = ""
+            self._parts = []
+            self._length = 0
             self._truncated = False
         if is_last:
             # Closed segments reach history through the run itself; keeping
             # the text here would duplicate it in a reopened view.
-            self._text = ""
+            self._parts = []
+            self._length = 0
             self._truncated = False
             return
         if not token or self._truncated:
             return
-        room = self.MAX_CHARS - len(self._text)
+        room = self.MAX_CHARS - self._length
         if len(token) > room:
-            self._text += token[: max(0, room)]
+            if room > 0:
+                self._parts.append(token[:room])
+                self._length += room
             self._truncated = True
             return
-        self._text += token
+        self._parts.append(token)
+        self._length += len(token)
 
     def text(self) -> str:
         """What the run has streamed into its open segment so far."""
-        return self._text
+        return "".join(self._parts)
 
     @property
     def truncated(self) -> bool:
         return self._truncated
 
     def clear(self) -> None:
-        self._text = ""
+        self._parts = []
+        self._length = 0
         self._truncated = False

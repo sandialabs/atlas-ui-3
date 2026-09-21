@@ -191,7 +191,6 @@ Either way the partial bubble is marked "answer in progress -- it will
 refresh when the run finishes": once the run ends, the client reloads the
 conversation from the store and the marker goes with the placeholder.
 
-=======
 ### Auto-approve covers background runs
 
 Auto-approve is a client setting. The client answers an approval request for

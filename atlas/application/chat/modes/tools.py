@@ -360,6 +360,13 @@ class ToolsModeRunner:
             await self.event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )
+            # The narration bubble is closed; persist it now. Tool execution
+            # (and any approval wait) comes next, and until the turn closes
+            # this text exists nowhere else -- the replay buffer (issue #957)
+            # clears on the segment's is_last precisely because a closed
+            # segment belongs to history, so history must have it before the
+            # tools run.
+            self._persist_narration_row(session, accumulated_content)
 
         session_context = build_session_context(session)
         # See note above: propagate the per-request RAG selection so atlas_rag
@@ -494,7 +501,11 @@ class ToolsModeRunner:
                         turn_start_index=turn_start_index,
                         citation_register=citation_register,
                     )
-                # else: loop to execute the newly requested tools.
+                # else: loop to execute the newly requested tools. Persist the
+                # narration first: it closed with its segment, and the tools
+                # ahead may park on approval -- a reopen in that window reads
+                # history, where this text otherwise does not exist yet.
+                self._persist_narration_row(session, next_text)
 
             # Budget exhausted or anti-loop tripped while the model still wanted
             # tools -> force a closing text answer via no-tools synthesis, hardened
@@ -785,6 +796,30 @@ class ToolsModeRunner:
         await publish_citations(self.event_publisher, citation_register)
         await self.event_publisher.publish_response_complete()
         return event_notifier.create_chat_response(content)
+
+    def _persist_narration_row(self, session: Session, text: str) -> None:
+        """Write a closed narration segment into history the moment it closes.
+
+        Tools mode streams pre-tool text as its own bubble, then runs the
+        tools -- which can park on approval for minutes. Until the turn's
+        closing message is written, that text exists nowhere else: the replay
+        buffer (issue #957) clears on the segment's ``is_last`` precisely
+        because a closed segment belongs to history. Persisting here is what
+        keeps that true in tools mode -- the same display-only
+        ``agent_intermediate`` row the agentic loop writes for a tool-call
+        step's narration, excluded from ``get_messages_for_llm`` so
+        strict-alternation providers never see back-to-back assistant turns.
+        """
+        if not text or not text.strip():
+            return
+        session.history.add_message(Message(
+            role=MessageRole.ASSISTANT,
+            content=text,
+            metadata={
+                "agent_intermediate": True,
+                "message_type": "agent_intermediate",
+            },
+        ))
 
     def _close_turn(
         self,

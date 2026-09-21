@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 # itself pulls in.
 _get_current_run = None
 _get_run_registry = None
+# Set when the lazy import fails (a circular-import window, a partial
+# install). The notifier sits on the token hot path of every turn, tracked or
+# not, so a failure here must disable replay bookkeeping -- not propagate into
+# the streaming loop and kill token delivery for turns that have no run at all.
+_replay_import_failed = False
 
 
 def _current_run_for_replay():
@@ -29,13 +34,23 @@ def _current_run_for_replay():
 
     Resolved lazily: the runs package is not imported (or even importable) on
     every path that uses the notifier, and this is the only function here that
-    needs it.
+    needs it. A failed resolve is cached and read as "no run": replay is
+    best-effort, token delivery is not.
     """
-    global _get_current_run, _get_run_registry
+    global _get_current_run, _get_run_registry, _replay_import_failed
+    if _replay_import_failed:
+        return None
     if _get_current_run is None:
-        from atlas.application.chat.runs.context import get_current_run
-        from atlas.application.chat.runs.registry import get_run_registry
-
+        try:
+            from atlas.application.chat.runs.context import get_current_run
+            from atlas.application.chat.runs.registry import get_run_registry
+        except Exception:
+            logger.warning(
+                "Stream replay bookkeeping unavailable; tokens stream without being recorded",
+                exc_info=True,
+            )
+            _replay_import_failed = True
+            return None
         _get_current_run = get_current_run
         _get_run_registry = get_run_registry
     return _get_current_run()

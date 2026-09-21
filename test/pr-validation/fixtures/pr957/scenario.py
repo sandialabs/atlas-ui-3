@@ -101,7 +101,10 @@ async def main():
         bool(first_snapshot) and first_snapshot.startswith("FINAL[" + LABEL + "]"),
         "live record carries the open segment from its beginning as streaming_text",
     )
-    check((body or {}).get("streaming_truncated") is False, "the segment is not reported truncated")
+    check(
+        "streaming_truncated" not in (body or {}),
+        "the record carries no truncation flag (no surface reads one)",
+    )
 
     await asyncio.sleep(0.6)
     status, body2 = get(f"/api/conversations/{conv_id}", OWNER)

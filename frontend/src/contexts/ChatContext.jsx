@@ -1070,7 +1070,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
 
-		// Track the loaded conversation
+		// Track the loaded conversation. The ref is set synchronously too: the
+		// replay frame answering the restore below is tagged with the run's ids
+		// and the routing gate reads the ref, so a frame that arrives before
+		// the next render must already see this conversation as visible --
+		// otherwise the replay is filed as background activity and dropped.
+		activeConversationIdRef.current = conversationData.id
 		setActiveConversationId(conversationData.id)
 		setIsWelcomeVisible(false)
 

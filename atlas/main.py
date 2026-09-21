@@ -208,7 +208,6 @@ def _stream_replay_frame(record) -> Optional[Dict[str, Any]]:
             "is_first": True,
             "is_last": False,
             "replay": True,
-            "streaming_truncated": bool(record.stream.truncated),
         },
         record.run_id,
         record.conversation_id,

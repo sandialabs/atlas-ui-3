@@ -108,6 +108,11 @@ def test_unknown_run_ids_are_ignored():
     registry = RunRegistry()
     registry.note_stream_token("no-such-run", "x", True, False)
 
+    # No record was created or mutated: the id resolves to nothing, and the
+    # frame is simply not recorded.
+    assert registry.get("no-such-run") is None
+    assert registry.active_for_user("a@example.com") == []
+
 
 # ---------------------------------------------------------------------------
 # Notifier observation
@@ -143,10 +148,19 @@ async def test_notify_token_stream_records_the_ambient_run():
 
 @pytest.mark.asyncio
 async def test_notify_token_stream_without_a_run_records_nothing(registry):
+    # A run exists in the registry but is not the ambient context, so the
+    # frame belongs to no run: it must still reach the client, and no run's
+    # buffer may absorb it.
+    record = registry.start(conversation_id="conv-1", user_email="a@example.com")
+    sent = []
+
     await event_notifier.notify_token_stream(
         token="orphan", is_first=True, is_last=False,
-        update_callback=lambda frame: None,
+        update_callback=sent.append,
     )
+
+    assert sent and sent[0]["type"] == "token_stream" and sent[0]["token"] == "orphan"
+    assert record.stream.text() == ""
 
 
 @pytest.mark.asyncio
@@ -195,7 +209,6 @@ async def test_in_flight_record_carries_the_open_segment():
     conv = await in_flight_conversation(repo, registry, "conv-1", OWNER)
 
     assert conv["streaming_text"] == "Four, because"
-    assert conv["streaming_truncated"] is False
 
 
 @pytest.mark.asyncio
@@ -207,11 +220,10 @@ async def test_in_flight_record_omits_streaming_when_nothing_is_open():
     conv = await in_flight_conversation(repo, registry, "conv-1", OWNER)
 
     assert conv["streaming_text"] is None
-    assert conv["streaming_truncated"] is False
 
 
 @pytest.mark.asyncio
-async def test_in_flight_record_reports_truncation():
+async def test_in_flight_record_caps_the_segment_at_the_buffer_limit():
     registry = RunRegistry()
     repo = InMemorySessionRepository()
     record = await _running_conversation(
@@ -221,8 +233,43 @@ async def test_in_flight_record_reports_truncation():
 
     conv = await in_flight_conversation(repo, registry, "conv-1", OWNER)
 
-    assert conv["streaming_truncated"] is True
+    # The cap bounds memory, not correctness: the beginning replays, and the
+    # run-end reload replaces the view with the stored transcript. No surface
+    # reads a truncation flag, so the record does not carry one.
     assert len(conv["streaming_text"]) == StreamReplay.MAX_CHARS
+    assert "streaming_truncated" not in conv
+
+
+@pytest.mark.asyncio
+async def test_in_flight_record_shows_a_closed_segment_from_history():
+    """A narration segment that closed (is_last) leaves the replay buffer --
+    the reopened view reads it from the run's history instead. Tools mode
+    persists that row at segment close, so a reopen during the tool approval
+    that follows shows the narration rather than an empty assistant turn.
+    """
+    registry = RunRegistry()
+    repo = InMemorySessionRepository()
+    record = registry.start(conversation_id="conv-1", user_email=OWNER, title="What is 2+2?")
+    session = Session(id=record.session_id, user_email=OWNER)
+    session.history.messages.append(Message(role=MessageRole.USER, content="What is 2+2?"))
+    await repo.create(session)
+
+    # The segment streams, then closes; the mode writes the narration row at
+    # the close (ToolsModeRunner._persist_narration_row), and the buffer
+    # clears on is_last.
+    registry.note_stream_token(record.run_id, "Let me check that.", True, False)
+    registry.note_stream_token(record.run_id, "", False, True)
+    session.history.add_message(Message(
+        role=MessageRole.ASSISTANT,
+        content="Let me check that.",
+        metadata={"agent_intermediate": True, "message_type": "agent_intermediate"},
+    ))
+
+    conv = await in_flight_conversation(repo, registry, "conv-1", OWNER)
+
+    narration = [m for m in conv["messages"] if m["role"] == "assistant"]
+    assert [m["content"] for m in narration] == ["Let me check that."]
+    assert conv["streaming_text"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +310,52 @@ def test_replay_frame_is_none_once_the_run_ends():
     registry.set_status(record.run_id, RunStatus.COMPLETED)
 
     assert _stream_replay_frame(record) is None
+
+
+def test_replay_is_refused_to_a_non_owner():
+    """The restore path resolves the run through the ownership-checked lookup
+    before building the frame; a conversation id naming someone else's run
+    resolves to nothing, and nothing is replayed.
+    """
+    registry = RunRegistry()
+    record = registry.start(conversation_id="conv-1", user_email=OWNER)
+    registry.note_stream_token(record.run_id, "secret draft", True, False)
+
+    resolved = registry.active_for_conversation("conv-1", OTHER)
+
+    assert resolved is None
+    assert _stream_replay_frame(resolved) is None
+
+
+# ---------------------------------------------------------------------------
+# Notifier resilience
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_notify_token_stream_survives_the_runs_package_being_unimportable(monkeypatch):
+    """The notifier sits on every turn's token path. If the lazy runs import
+    fails (a circular-import window, a partial install), replay bookkeeping
+    must switch off -- not propagate into the streaming loop and kill token
+    delivery for turns that have no run at all.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "atlas.application.chat.runs.context", None)
+    monkeypatch.setattr(event_notifier, "_get_current_run", None)
+    monkeypatch.setattr(event_notifier, "_get_run_registry", None)
+    monkeypatch.setattr(event_notifier, "_replay_import_failed", False)
+    sent = []
+
+    await event_notifier.notify_token_stream(
+        token="hi", is_first=True, is_last=False,
+        update_callback=sent.append,
+    )
+
+    assert sent and sent[0]["type"] == "token_stream" and sent[0]["token"] == "hi"
+    # The failure is cached: a second frame does not re-attempt the import.
+    assert event_notifier._replay_import_failed is True
+    await event_notifier.notify_token_stream(
+        token=" again", is_first=False, is_last=False,
+        update_callback=sent.append,
+    )
+    assert len(sent) == 2

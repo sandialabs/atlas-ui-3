@@ -199,6 +199,66 @@ async def test_anti_loop_stops_on_repeated_identical_call():
     assert resp["message"] == "Here is the result: 4."
 
 
+async def _run_for_history(runner, session, messages):
+    """Run run_streaming against a real-ish session and return history writes."""
+    async def _execute_multiple(tool_calls, session_context, tool_manager,
+                                update_callback=None, config_manager=None, skip_approval=False):
+        return [ToolResult(tool_call_id=tc.id, content="ok", success=True) for tc in tool_calls]
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _execute_multiple
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=messages,
+            selected_tools=["calc", "pptx"],
+        )
+    return [c.args[0] for c in session.history.add_message.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_narration_is_persisted_at_segment_close():
+    """Pre-tool narration closes its stream segment long before the turn ends:
+    the tools that follow can park on approval for minutes, and a reopen in
+    that window reads the run's history -- where the narration otherwise does
+    not exist until the turn closes, showing an empty assistant turn
+    (issue #957). It is written at the close, as the same display-only
+    ``agent_intermediate`` row the agentic loop uses."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Let me check that.", [_tc("c1", "calc", '{"e":"2+2"}')]),
+        ("Done! It is 4.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "2+2?"}])
+
+    narration = [m for m in added if m.metadata.get("message_type") == "agent_intermediate"]
+    assert [m.content for m in narration] == ["Let me check that."]
+    assert narration[0].metadata["agent_intermediate"] is True
+    # The turn's closing answer is a separate, ordinary assistant row.
+    closing = [m for m in added if m.metadata.get("message_type") != "agent_intermediate"
+               and m.role.value == "assistant"]
+    assert closing and closing[-1].content == "Done! It is 4."
+
+
+@pytest.mark.asyncio
+async def test_every_rounds_narration_is_persisted():
+    """Each continuation round's narration closes its own segment; every one
+    is persisted, in order, before the tools that follow it run."""
+    llm = ScriptedToolsLLM(turns=[
+        ("first I compute", [_tc("c1", "calc", '{"e":"2+2"}')]),
+        ("now I build", [_tc("c2", "pptx", '{"title":"X"}')]),
+        ("All done.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "go"}])
+
+    narration = [m.content for m in added if m.metadata.get("message_type") == "agent_intermediate"]
+    assert narration == ["first I compute", "now I build"]
+
+
 @pytest.mark.asyncio
 async def test_extra_round_budget_is_respected():
     """With max_extra_rounds=1, only one continuation round runs before synthesis."""
