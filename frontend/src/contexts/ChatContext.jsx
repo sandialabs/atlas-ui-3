@@ -37,11 +37,18 @@ const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 const LIVE_ONLY_ROW_TYPES = new Set([
 	'agent_status', 'agent_reason', 'agent_observe',
 	'agent_request_input', 'agent_error', 'tool_log',
-	'warning', 'iframe', 'system',
+	'warning', 'iframe', 'system', 'canvas_error',
+	// An approval row is view chrome for a tracked run. The backend writes
+	// only 'chat', 'tool_call' and 'agent_intermediate' to a run's transcript
+	// -- never the approval request -- and a tracked run only exists in server
+	// save mode, where the store is the backend's copy. So the live approval
+	// row has no stored counterpart and must be skipped, or every
+	// approval-gated run ends its refresh in the full reload.
+	'tool_approval_request',
 ])
 
 // Whether a stored row and a live view row describe the same transcript row.
-// Tool and approval rows are matched by their tool_call_id, which survives
+// Tool rows are matched by their tool_call_id, which survives
 // the save/reload round-trip, because the persisted shape of a tool row
 // (role 'tool', elided arguments) deliberately differs from the live one
 // (role 'system', raw arguments). Everything else matches on role and
@@ -55,13 +62,20 @@ const sameTranscriptRow = (a, b) => {
 	const typeA = a.type || 'chat'
 	const typeB = b.type || 'chat'
 	if (typeA !== typeB && !(PROSE_ROW_TYPES.has(typeA) && PROSE_ROW_TYPES.has(typeB))) return false
-	if ((typeA === 'tool_call' || typeA === 'tool_approval_request') && a.tool_call_id && b.tool_call_id) {
+	if (typeA === 'tool_call' && a.tool_call_id && b.tool_call_id) {
 		return a.tool_call_id === b.tool_call_id
 	}
 	return a.role === b.role && (a.content || '') === (b.content || '')
 }
 
-const isLiveOnlyRow = (m) => LIVE_ONLY_ROW_TYPES.has(m.type) || m._agentInput === true
+// A row carrying no `type` at all and role 'system' is also view-only: the
+// socket's `error` frame adds one (websocketHandlers.js) without a type, so
+// the type set alone would not catch it. Stored rows always carry a type --
+// they are built with `msg.message_type || 'chat'` -- so this cannot swallow
+// a row the store actually has.
+const isLiveOnlyRow = (m) => (
+	LIVE_ONLY_ROW_TYPES.has(m.type) || m._agentInput === true || (!m.type && m.role === 'system')
+)
 
 // Generate cryptographically secure random string
 const generateSecureRandomString = (length = 9) => {
@@ -1239,6 +1253,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 	const refreshJoinedConversation = useCallback((conversationData) => {
 		if (!conversationData || !conversationData.messages) return false
+		// Only ever reconcile against the transcript actually on screen. The
+		// current caller checks this before it calls, but this is exported on the
+		// context: without the guard a second caller could splice one
+		// conversation's rows into another's view.
+		if (conversationData.id !== activeConversationIdRef.current) return false
 		const stored = conversationData.messages.map(msg => ({
 			role: msg.role,
 			content: msg.content || '',

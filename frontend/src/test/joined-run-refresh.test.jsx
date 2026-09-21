@@ -431,6 +431,8 @@ describe('refreshJoinedConversation (issue #959)', () => {
   })
 
   it('matches agent narration persisted as agent_intermediate to its streamed row', async () => {
+    vi.useFakeTimers()
+    try {
     // The agent loop persists pre-tool narration with message_type
     // 'agent_intermediate' (atlas/application/chat/agent/agentic_loop.py),
     // while the same narration streams into the view as a plain assistant
@@ -449,8 +451,10 @@ describe('refreshJoinedConversation (issue #959)', () => {
 
     // The run streamed this narration into the view after it was opened.
     dispatchFrame({ type: 'token_stream', conversation_id: 'conv-1', run_id: 'r1', is_first: true, token: 'On it.' })
-    // Drain the buffered tokens the way the socket flush does.
-    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+    // Drain the buffered tokens the way the socket flush does. Fake timers so
+    // this does not depend on a 50ms real-time margin holding on a loaded CI
+    // runner -- the flush is scheduled, so advancing time is exact.
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
     const narrationIdx = result.current.messages.findIndex(m => m.content === 'On it.')
     expect(narrationIdx).toBeGreaterThan(-1)
 
@@ -478,6 +482,87 @@ describe('refreshJoinedConversation (issue #959)', () => {
     const after = result.current.messages
     expect(after[after.length - 1].content).toBe('Working on it')
     expect(after[after.length - 1]._transcriptRefresh).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('skips view-only chrome the store never holds (approval, canvas error, socket error)', async () => {
+    // A tracked run's transcript is written by the backend, which emits only
+    // chat / tool_call / agent_intermediate. The approval row the run paused
+    // on, a canvas error, and the socket's untyped `error` row are all view
+    // chrome with no stored counterpart -- if alignment tripped on any of
+    // them the approval-gated run (the PR's own fixture) would end every
+    // refresh in the full reload.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'Sleep for a bit')],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+
+    dispatchFrame({
+      type: 'tool_approval_request',
+      conversation_id: 'conv-1',
+      run_id: 'r1',
+      tool_call_id: 'tc-1',
+      tool_name: 'atlas_sleep',
+      arguments: { seconds: 5 },
+    })
+    dispatchFrame({ type: 'error', conversation_id: 'conv-1', run_id: 'r1', message: 'transient blip' })
+    dispatchFrame({
+      type: 'tool_error',
+      conversation_id: 'conv-1',
+      run_id: 'r1',
+      tool_name: 'atlas_canvas',
+      tool_call_id: 'tc-canvas',
+      error: 'canvas boom',
+    })
+    const before = result.current.messages
+    // All three are on screen.
+    expect(before.some(m => m.type === 'tool_approval_request')).toBe(true)
+    expect(before.some(m => m.type === 'canvas_error')).toBe(true)
+    expect(before.some(m => !m.type && m.role === 'system' && m.content.startsWith('Error:'))).toBe(true)
+
+    const store = [
+      storedChat('user', 'Sleep for a bit'),
+      storedToolCall('tc-1', 'atlas_sleep'),
+      storedChat('assistant', 'Done sleeping'),
+    ]
+    h.sendMessage.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    // Aligned past the chrome and appended, instead of refusing.
+    expect(ok).toBe(true)
+    // The chrome is left exactly where it was -- skipping is not deleting.
+    for (const row of before) expect(result.current.messages).toContain(row)
+    expect(result.current.messages[result.current.messages.length - 1].content).toBe('Done sleeping')
+  })
+
+  it('refuses a record for a conversation that is not the one on screen', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    const before = result.current.messages
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-OTHER',
+        messages: [storedChat('user', 'What is the weather'), storedChat('assistant', 'Not yours')],
+        metadata: {},
+      })
+    })
+    // Another conversation's rows must never be spliced into this view.
+    expect(ok).toBe(false)
+    expect(result.current.messages).toBe(before)
+    expect(restoreCalls().filter(c => c.conversation_id === 'conv-OTHER')).toHaveLength(0)
   })
 
   it('refuses (returns false) when the stored transcript has diverged', async () => {

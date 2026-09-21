@@ -78,7 +78,11 @@ PROSE_ROW_TYPES = {"chat", "agent_intermediate"}
 # live view and have no stored counterpart, skipped during alignment.
 LIVE_ONLY_ROW_TYPES = {
     "agent_status", "agent_reason", "agent_observe", "agent_request_input",
-    "agent_error", "tool_log", "warning", "iframe", "system",
+    "agent_error", "tool_log", "warning", "iframe", "system", "canvas_error",
+    # The backend writes only chat / tool_call / agent_intermediate to a run's
+    # transcript, so the approval row the run paused on is view chrome with no
+    # stored counterpart.
+    "tool_approval_request",
 }
 
 
@@ -86,12 +90,12 @@ def row_key_client(msg):
     """The matching rule ChatContext.refreshJoinedConversation applies.
 
     Always a (type, identity, extra) triple so two rows can only compare
-    equal through the same branch: tool and approval rows on their
-    tool_call_id, prose rows on role and content. Prose types are collapsed
+    equal through the same branch: tool rows on their tool_call_id, prose
+    rows on role and content. Prose types are collapsed
     to a single bucket, matching sameTranscriptRow's PROSE_ROW_TYPES.
     """
     mtype = (msg.get("metadata") or {}).get("message_type") or msg.get("message_type") or "chat"
-    if mtype in ("tool_call", "tool_approval_request"):
+    if mtype == "tool_call":
         tc = (msg.get("metadata") or {}).get("tool_call_id") or msg.get("tool_call_id")
         if tc:
             return (mtype, tc, "")
