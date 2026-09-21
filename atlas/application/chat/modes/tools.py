@@ -265,6 +265,11 @@ class ToolsModeRunner:
         # so anything added from here on belongs to this turn. Remember where
         # it starts so the tool digest (issue #798) covers only this turn.
         turn_start_index = len(session.history.messages)
+        # The most recent narration segment persisted to history (issue #957).
+        # The canvas-only synthesis shortcut needs it: that text is already a
+        # history row, so closing the turn with it again would render the same
+        # paragraph twice after a reload.
+        last_persisted_narration: Optional[str] = None
 
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
@@ -366,7 +371,7 @@ class ToolsModeRunner:
             # clears on the segment's is_last precisely because a closed
             # segment belongs to history, so history must have it before the
             # tools run.
-            self._persist_narration_row(session, accumulated_content)
+            last_persisted_narration = self._persist_narration_row(session, accumulated_content)
 
         session_context = build_session_context(session)
         # See note above: propagate the per-request RAG selection so atlas_rag
@@ -503,7 +508,7 @@ class ToolsModeRunner:
                     # its segment closed inside the round, and dropping it
                     # here would leave a reload showing a turn that appears
                     # to have said nothing before its tools.
-                    self._persist_narration_row(session, next_text)
+                    last_persisted_narration = self._persist_narration_row(session, next_text) or last_persisted_narration
                     if current_response is None:
                         current_response = LLMResponse(content="")
                     break
@@ -520,7 +525,7 @@ class ToolsModeRunner:
                 # narration first: it closed with its segment, and the tools
                 # ahead may park on approval -- a reopen in that window reads
                 # history, where this text otherwise does not exist yet.
-                self._persist_narration_row(session, next_text)
+                last_persisted_narration = self._persist_narration_row(session, next_text) or last_persisted_narration
 
             # Budget exhausted or anti-loop tripped while the model still wanted
             # tools -> force a closing text answer via no-tools synthesis, hardened
@@ -528,6 +533,7 @@ class ToolsModeRunner:
             # ignores that and the provider rejects.
             synthesis_content = await self._stream_synthesis(
                 current_response, messages, model, session_context, user_email, effective_callback,
+                narration_already_persisted=last_persisted_narration,
             )
 
             # Persist tool calls before the closing answer (issue #684).
@@ -564,6 +570,7 @@ class ToolsModeRunner:
         session_context: Dict[str, Any],
         user_email: Optional[str],
         update_callback: Optional[UpdateCallback],
+        narration_already_persisted: Optional[str] = None,
     ) -> str:
         """Stream the tool synthesis LLM call."""
         # Check canvas-only shortcut. ``tool_calls`` is None on the placeholder
@@ -575,7 +582,16 @@ class ToolsModeRunner:
             if normalize_tool_name(self._tool_call_signature(tc)[0]) == CANVAS_TOOL_NAME
         ]
         if response_tool_calls and len(canvas_calls) == len(response_tool_calls):
-            return llm_response.content or "Content displayed in canvas."
+            content = llm_response.content or ""
+            # The narration riding a canvas-only call was already persisted as
+            # its own history row when its stream segment closed (issue #957);
+            # closing the turn with it again would render the same paragraph
+            # twice after a reload. A narration that exists nowhere else (its
+            # stream yielded no text deltas, only the final response) is still
+            # the turn's answer and is kept.
+            if content.strip() and content != narration_already_persisted:
+                return content
+            return "Content displayed in canvas."
 
         # Add files manifest
         files_manifest = tool_executor.build_files_manifest(session_context)
@@ -812,7 +828,7 @@ class ToolsModeRunner:
         await self.event_publisher.publish_response_complete()
         return event_notifier.create_chat_response(content)
 
-    def _persist_narration_row(self, session: Session, text: str) -> None:
+    def _persist_narration_row(self, session: Session, text: str) -> Optional[str]:
         """Write a closed narration segment into history the moment it closes.
 
         Tools mode streams pre-tool text as its own bubble, then runs the
@@ -824,9 +840,13 @@ class ToolsModeRunner:
         ``agent_intermediate`` row the agentic loop writes for a tool-call
         step's narration, excluded from ``get_messages_for_llm`` so
         strict-alternation providers never see back-to-back assistant turns.
+
+        Returns the text persisted (``None`` for an empty segment), so the
+        canvas-only synthesis shortcut can tell a narration that is already a
+        history row from one that exists nowhere else.
         """
         if not text or not text.strip():
-            return
+            return None
         session.history.add_message(Message(
             role=MessageRole.ASSISTANT,
             content=text,
@@ -835,6 +855,7 @@ class ToolsModeRunner:
                 "message_type": "agent_intermediate",
             },
         ))
+        return text
 
     def _close_turn(
         self,

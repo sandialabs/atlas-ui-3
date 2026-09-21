@@ -328,6 +328,51 @@ def test_replay_is_refused_to_a_non_owner():
 
 
 # ---------------------------------------------------------------------------
+# Buffer isolation between concurrent runs
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_each_record_only_their_own_tokens():
+    """Buffer isolation is the design's central claim: two runs streaming at
+    once (a parent and the child it launched, two conversations of one user --
+    it does not matter) must never blend. The notifier keys the recording on
+    the ambient run context, which each run's task binds for itself, so a
+    frame lands in exactly the buffer of the run that produced it.
+    """
+    reset_run_registry()
+    try:
+        from atlas.application.chat.runs import get_run_registry
+        from atlas.application.chat.runs.context import clear_current_run, set_current_run
+
+        registry = get_run_registry()
+        parent = registry.start(conversation_id="conv-parent", user_email=OWNER)
+        child = registry.start(
+            conversation_id="conv-child",
+            user_email=OWNER,
+            parent_run_id=parent.run_id,
+            parent_conversation_id="conv-parent",
+            depth=1,
+        )
+
+        # Interleaved, the way two tasks on one loop actually emit.
+        set_current_run(parent.run_id, parent.conversation_id)
+        await event_notifier.notify_token_stream(token="parent w1 ", is_first=True, is_last=False)
+        set_current_run(child.run_id, child.conversation_id)
+        await event_notifier.notify_token_stream(token="child w1 ", is_first=True, is_last=False)
+        set_current_run(parent.run_id, parent.conversation_id)
+        await event_notifier.notify_token_stream(token="parent w2", is_first=False, is_last=False)
+        set_current_run(child.run_id, child.conversation_id)
+        await event_notifier.notify_token_stream(token="child w2", is_first=False, is_last=False)
+        clear_current_run()
+
+        assert parent.stream.text() == "parent w1 parent w2"
+        assert child.stream.text() == "child w1 child w2"
+    finally:
+        clear_current_run()
+        reset_run_registry()
+
+
+# ---------------------------------------------------------------------------
 # Notifier resilience
 # ---------------------------------------------------------------------------
 

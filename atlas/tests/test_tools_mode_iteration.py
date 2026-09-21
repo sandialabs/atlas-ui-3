@@ -386,6 +386,51 @@ async def test_continuation_provider_error_falls_back_to_synthesis():
 
 
 @pytest.mark.asyncio
+async def test_canvas_only_turn_does_not_close_with_the_already_persisted_narration():
+    """A canvas-only response's narration is persisted as its own row when its
+    segment closes (issue #957). Closing the turn with the same text again
+    would render the paragraph twice after a reload, so the canvas-only
+    shortcut closes with the placeholder instead."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Here is the diagram.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=0))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in added if m.role.value == "assistant"]
+    assert contents.count("Here is the diagram.") == 1
+    assert contents[-1] == "Content displayed in canvas."
+
+
+@pytest.mark.asyncio
+async def test_canvas_only_turn_keeps_a_narration_that_never_streamed():
+    """The shortcut drops the narration only when it was actually persisted.
+    A response whose text never streamed (no deltas, content only on the
+    final item) exists nowhere else -- it remains the turn's answer."""
+    class ContentOnlyCanvasLLM:
+        async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                    temperature=0.7, user_email=None):
+            yield LLMResponse(
+                content="Here is the diagram.",
+                tool_calls=[_tc("c1", "atlas_canvas", '{"content":"svg"}')],
+            )
+
+        async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+            yield "unused"
+
+        async def call_plain(self, model, messages, temperature=0.7, user_email=None):
+            return "unused"
+
+    runner = _runner(ContentOnlyCanvasLLM(), _config(max_extra_rounds=0))
+
+    added = await _run_for_history(runner, _session(), [{"role": "user", "content": "draw"}])
+
+    contents = [m.content for m in added if m.role.value == "assistant"]
+    assert contents == ["Here is the diagram."]
+
+
+@pytest.mark.asyncio
 async def test_narration_streamed_before_a_round_error_is_still_persisted():
     """A continuation round can stream narration and then fail (a provider
     rejection mid-stream). The user watched that text stream in; dropping it

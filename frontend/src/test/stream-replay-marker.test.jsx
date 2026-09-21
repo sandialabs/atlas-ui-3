@@ -48,7 +48,7 @@ describe('Message stream-replay marker (issue #957)', () => {
     const marker = screen.getByTestId('stream-replay-in-progress')
     expect(marker).toBeInTheDocument()
     expect(marker.textContent).toMatch(/answer in progress/i)
-    expect(marker.textContent).toMatch(/refresh when the run finishes/i)
+    expect(marker.textContent).toMatch(/refresh when the response finishes/i)
   })
 
   it('never marks a bubble that is streaming normally', () => {

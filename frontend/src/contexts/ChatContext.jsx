@@ -849,6 +849,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
+		// Close any streaming bubble left over from a reopened in-flight
+		// conversation (issue #957): in a tab that receives no further frames
+		// nothing else ends that stream, and STREAM_TOKEN's append lookup
+		// targets the last _streaming row -- without this the new turn's reply
+		// would accumulate into the stale bubble above the user's message.
+		streamEnd()
 		// Rewind/edit-and-resubmit (issue #142): now that the send is confirmed on
 		// the wire, drop the targeted prompt and everything after it so the new
 		// message takes its place. Done here -- after the early returns and the
@@ -878,7 +884,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, streamEnd])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped

@@ -824,7 +824,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             </div>
           </div>
         ) : renderContent()}
-        {message._streaming && (
+        {message._streaming && !message._replayed && (
+          // A replayed bubble (issue #957) is in a tab that receives no live
+          // frames -- a live append would have cleared _replayed -- so the
+          // blinking caret would animate forever over text nothing is
+          // extending. The role="status" marker below is the sole indicator.
           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
         )}
         {message._streaming && message._replayed && (
@@ -834,7 +838,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             role="status"
           >
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
-            Answer in progress — it will refresh when the run finishes.
+            Answer in progress — it will refresh when the response finishes.
           </div>
         )}
       </div>

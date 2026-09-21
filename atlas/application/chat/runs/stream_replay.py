@@ -26,6 +26,10 @@ twice in the reopened view.
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class StreamReplay:
     """Accumulates the token segment a tracked run is streaming right now.
@@ -74,6 +78,12 @@ class StreamReplay:
                 self._parts.append(token[:room])
                 self._length += room
             self._truncated = True
+            # Once per segment, at the transition: silent truncation would
+            # leave operators no signal that a replay is serving a prefix.
+            logger.warning(
+                "Stream replay buffer reached its %d-char cap; reopens replay the beginning only",
+                self.MAX_CHARS,
+            )
             return
         self._parts.append(token)
         self._length += len(token)
