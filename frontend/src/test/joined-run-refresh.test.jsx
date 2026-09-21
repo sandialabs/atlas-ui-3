@@ -612,15 +612,23 @@ describe('refreshJoinedConversation (issue #959)', () => {
       metadata: {},
       in_flight: true,
     }
-    dispatchFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'conv-1', status: 'completed' } })
-    const { result } = renderChat()
-    await loadConversation(result, snapshot)
-    expect(result.current.runEndedConversationId).toBeNull()
-    // The grace period the run-end path uses delays the refresh so a stop
-    // that reports cancelled before its interrupted turn is written does
-    // not reload a transcript the save is about to change.
-    await act(async () => { await new Promise(r => setTimeout(r, 2800)) })
-    expect(result.current.runEndedConversationId).toBe('conv-1')
+    // Fake timers so the grace period below costs nothing and does not
+    // depend on a real-time margin holding on a loaded CI runner. Installed
+    // before the load, because that is where the timer is scheduled.
+    vi.useFakeTimers()
+    try {
+      dispatchFrame({ type: 'run_status', run: { run_id: 'r1', conversation_id: 'conv-1', status: 'completed' } })
+      const { result } = renderChat()
+      await loadConversation(result, snapshot)
+      expect(result.current.runEndedConversationId).toBeNull()
+      // The grace period the run-end path uses delays the refresh so a stop
+      // that reports cancelled before its interrupted turn is written does
+      // not reload a transcript the save is about to change.
+      await act(async () => { await vi.advanceTimersByTimeAsync(2800) })
+      expect(result.current.runEndedConversationId).toBe('conv-1')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rejects malformed input without touching the view', async () => {
