@@ -436,6 +436,53 @@ async def test_canvas_only_turn_keeps_its_prose_as_the_llm_visible_reply():
 
 
 @pytest.mark.asyncio
+async def test_canvas_round_narration_survives_a_continuation_round():
+    """With rounds left in the budget, a canvas-only round is followed by a
+    continuation that closes the turn -- so the shortcut never fires and the
+    canvas round's narration must still exist after a reload. It is deferred
+    at its segment close and flushed (display-only) when the turn ends
+    another way."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Let me draw that.", [_tc("c1", "atlas_canvas", '{"content":"svg"}')]),
+        ("Done! The diagram is ready.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "draw"}])
+
+    rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
+    assert (MessageRole.ASSISTANT, "agent_intermediate", "Let me draw that.") in rows
+    assert rows[-1] == (MessageRole.ASSISTANT, None, "Done! The diagram is ready.")
+
+    # The closing answer is the LLM-visible reply; the narration row is
+    # display-only by design (matching the agentic loop's intermediate rows).
+    llm_visible = session.history.get_messages_for_llm()
+    visible = [m["content"] for m in llm_visible if m["role"] == "assistant"]
+    assert any("Done! The diagram is ready." in content for content in visible)
+    assert all("Content displayed in canvas" not in content for content in visible)
+
+
+@pytest.mark.asyncio
+async def test_mixed_canvas_and_tool_round_persists_narration_immediately():
+    """A round calling canvas alongside a real tool is not canvas-only: the
+    shortcut cannot fire, so its narration is persisted at the segment close
+    like any other round's."""
+    llm = ScriptedToolsLLM(turns=[
+        ("Computing, then drawing.", [_tc("c1", "atlas_canvas", '{"content":"svg"}'), _tc("c2", "calc", '{"e":"2+2"}')]),
+        ("All done.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=1))
+    session = _real_session()
+
+    await _run_on_real_session(runner, session, [{"role": "user", "content": "go"}])
+
+    rows = [(m.role, m.metadata.get("message_type"), m.content) for m in session.history.messages]
+    assert (MessageRole.ASSISTANT, "agent_intermediate", "Computing, then drawing.") in rows
+    assert rows[-1] == (MessageRole.ASSISTANT, None, "All done.")
+
+
+@pytest.mark.asyncio
 async def test_canvas_only_turn_keeps_a_narration_that_never_streamed():
     """A response whose text never streamed (no deltas, content only on the
     final item) exists nowhere else -- it remains the turn's answer, as the

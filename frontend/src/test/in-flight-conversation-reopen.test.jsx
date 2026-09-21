@@ -296,7 +296,7 @@ describe('loadSavedConversation in-flight reopen (issue #957)', () => {
     expect(bubble.content).toBe('mine')
   })
 
-  it('closes the seeded bubble when the user sends a new turn', () => {
+  it('discards the seeded placeholder when the user sends a new turn', () => {
     const { result } = renderChat()
     act(() => {
       result.current.loadSavedConversation(makeConversation({
@@ -309,16 +309,41 @@ describe('loadSavedConversation in-flight reopen (issue #957)', () => {
 
     // In a tab that receives no further frames nothing else ends the seeded
     // stream, and STREAM_TOKEN's append lookup targets the last _streaming
-    // row -- so the send path closes it, or the new reply would accumulate
-    // into the stale bubble above the user's message.
+    // row -- so the send path discards the placeholder, or the new reply
+    // would accumulate into the stale bubble above the user's message.
+    // Discard, not close: closing would clear _replayed and let the
+    // persistence paths write the fragment into history as a finished reply.
     act(() => { result.current.sendChatMessage('a new question') })
 
-    const stale = result.current.messages.find(m => m.content === 'fragment of the old answer')
-    expect(stale._streaming).toBe(false)
-    // The user's message landed after it, as its own row.
+    expect(result.current.messages.some(m => m.content === 'fragment of the old answer')).toBe(false)
+    // The user's message landed as the last row.
     const last = result.current.messages[result.current.messages.length - 1]
     expect(last.role).toBe('user')
     expect(last.content).toBe('a new question')
+  })
+
+  it('no replayed fragment reaches the local autosave after a send', () => {
+    vi.useFakeTimers()
+    try {
+      h.saveMode = 'local'
+      const { result } = renderChat()
+      act(() => {
+        result.current.loadSavedConversation(makeConversation({
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'fragment of the old answer',
+        }))
+      })
+      act(() => { result.current.sendChatMessage('a new question') })
+
+      act(() => { vi.advanceTimersByTime(1100) })
+
+      expect(h.saveLocalConv).toHaveBeenCalled()
+      const saved = h.saveLocalConv.mock.calls[h.saveLocalConv.mock.calls.length - 1][0]
+      expect(saved.messages.some(m => m.content === 'fragment of the old answer')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('removes the empty seeded bubble outright when a send ends its stream', () => {

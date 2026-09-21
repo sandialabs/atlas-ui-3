@@ -68,7 +68,7 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
 	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
@@ -854,16 +854,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
-		// Close a replay placeholder left over from a reopened in-flight
+		// Discard a replay placeholder left over from a reopened in-flight
 		// conversation (issue #957): in a tab that receives no further frames
 		// nothing else ends that stream, and STREAM_TOKEN's append lookup
 		// targets the last _streaming row -- without this the new turn's reply
 		// would accumulate into the stale bubble above the user's message.
-		// Scoped to placeholders: ending a genuinely live bubble here (a
-		// steering send mid-run) would split the segment into two bubbles.
-		if (latestMessagesRef.current.some(m => m._streaming && m._replayed)) {
-			streamEnd()
-		}
+		// Discard, not streamEnd: a placeholder is a transient fragment the
+		// run's stored transcript supersedes, and closing it would clear
+		// _replayed and let the persistence paths write the partial text into
+		// history as if it were the finished reply. Scoped to placeholders:
+		// ending a genuinely live bubble here (a steering send mid-run) would
+		// split the segment into two bubbles.
+		discardReplayPlaceholders()
 		// Rewind/edit-and-resubmit (issue #142): now that the send is confirmed on
 		// the wire, drop the targeted prompt and everything after it so the new
 		// message takes its place. Done here -- after the early returns and the
@@ -893,7 +895,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, streamEnd])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped

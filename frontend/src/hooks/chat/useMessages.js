@@ -17,7 +17,10 @@ function messagesReducer(state, action) {
       // it: the transcript being loaded may already hold an earlier snapshot
       // of the same segment, and appending would duplicate the overlap.
       if (action.replace) {
-        const current = state.findLastIndex(m => m._streaming)
+        // Target placeholders only: a late replay frame must never overwrite
+        // a newer turn's genuinely live bubble (and re-mark it _replayed,
+        // which would hide it from the persistence paths).
+        const current = state.findLastIndex(m => m._streaming && m._replayed)
         const replayed = {
           role: 'assistant',
           content: action.token,
@@ -35,6 +38,9 @@ function messagesReducer(state, action) {
           updated[current] = { ...state[current], ...replayed }
           return updated
         }
+        // No placeholder to define. A live stream owned by this tab means the
+        // view moved past the replay's segment -- drop the late frame.
+        if (state.some(m => m._streaming)) return state
         return [...state, replayed]
       }
       // Find the streaming message anywhere in the array (not just last)
@@ -59,6 +65,14 @@ function messagesReducer(state, action) {
         timestamp: new Date().toISOString(),
         _streaming: true,
       }]
+    }
+    case 'DISCARD_REPLAY_PLACEHOLDERS': {
+      // A replay placeholder is a transient mid-answer fragment the run's
+      // stored transcript supersedes (issue #957). Discarding is NOT closing:
+      // STREAM_END on a fragment would clear _replayed and let the
+      // persistence paths write the partial text into history as if it were
+      // the finished reply. Only genuinely live rows survive this.
+      return state.filter(m => !(m._streaming && m._replayed))
     }
     case 'STREAM_END': {
       const idx = state.findLastIndex(m => m._streaming)
@@ -94,6 +108,7 @@ export function useMessages() {
   const resetMessages = useCallback(() => dispatch({ type: 'RESET' }), [])
   const streamToken = useCallback((token, replace = false) => dispatch({ type: 'STREAM_TOKEN', token, replace }), [])
   const streamEnd = useCallback(() => dispatch({ type: 'STREAM_END' }), [])
+  const discardReplayPlaceholders = useCallback(() => dispatch({ type: 'DISCARD_REPLAY_PLACEHOLDERS' }), [])
 
-  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd }
+  return { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders }
 }

@@ -101,6 +101,16 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   const [editValue, setEditValue] = useState('')
   const editRef = useRef(null)
   const editButtonRef = useRef(null)
+  // The replay marker's live region must mount empty and fill afterwards:
+  // entering the tree already populated (which is exactly what a reopen does
+  // -- the seed renders streaming+replayed on its first frame) is what
+  // screen readers routinely skip, leaving the incomplete answer
+  // unannounced. Filling in an effect makes it a content change in an
+  // existing region, which is announced.
+  const [showReplayMarker, setShowReplayMarker] = useState(false)
+  useEffect(() => {
+    setShowReplayMarker(Boolean(message._streaming && message._replayed))
+  }, [message._streaming, message._replayed])
   // Set when the editor closes via Cancel/Esc so focus returns to the pencil
   // trigger (rather than falling back to <body>) for keyboard/screen-reader users.
   const restoreFocusRef = useRef(false)
@@ -832,15 +842,12 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" aria-label="Generating response..." />
         )}
         {message._streaming && (
-          // The live region stays mounted for the bubble's streaming lifetime
-          // and only its contents toggle: mounting it already populated is
-          // what screen readers miss.
           <div
-            className={message._replayed ? 'mt-2 text-xs text-gray-500 italic flex items-center gap-1.5' : 'sr-only'}
-            data-testid={message._replayed ? 'stream-replay-in-progress' : undefined}
+            className={showReplayMarker ? 'mt-2 text-xs text-gray-500 italic flex items-center gap-1.5' : 'sr-only'}
+            data-testid={showReplayMarker ? 'stream-replay-in-progress' : undefined}
             role="status"
           >
-            {message._replayed && (
+            {showReplayMarker && (
               <>
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
                 Answer in progress — it will refresh when the response finishes.

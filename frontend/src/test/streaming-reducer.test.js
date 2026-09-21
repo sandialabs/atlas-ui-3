@@ -252,4 +252,33 @@ describe('useMessages - STREAM_TOKEN replace (stream replay, issue #957)', () =>
     expect(result.current.messages[0]._replayed).toBe(true)
     expect(result.current.messages[0]._seed).toBe(false)
   })
+
+  it('a late replay frame never overwrites a genuinely live bubble', () => {
+    const { result } = renderHook(() => useMessages())
+
+    // A newer turn is streaming live in this tab (not a placeholder).
+    act(() => { result.current.streamToken('new turn answer so far') })
+
+    // A replay frame for the old segment arrives late.
+    act(() => { result.current.streamToken('stale old segment', true) })
+
+    // The live bubble is untouched and not re-marked _replayed (which would
+    // have hidden it from the persistence paths).
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].content).toBe('new turn answer so far')
+    expect(result.current.messages[0]._replayed).toBeFalsy()
+  })
+
+  it('discarding placeholders removes fragments and seeds but keeps live rows', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => { result.current.addMessage({ role: 'user', content: 'question' }) })
+    act(() => { result.current.streamToken('fragment', true) })
+    act(() => { result.current.streamToken('', true) })
+
+    act(() => { result.current.discardReplayPlaceholders() })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].role).toBe('user')
+  })
 })

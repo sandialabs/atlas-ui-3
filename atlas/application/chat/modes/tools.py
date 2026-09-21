@@ -266,10 +266,12 @@ class ToolsModeRunner:
         # it starts so the tool digest (issue #798) covers only this turn.
         turn_start_index = len(session.history.messages)
         # Every narration segment persisted to history this turn (issue #957).
-        # The canvas-only synthesis shortcut needs them: such a text is
-        # already a history row, so closing the turn with it again would
-        # render the same paragraph twice after a reload.
         persisted_narrations: List[str] = []
+        # Narration from canvas-only rounds, held back at the segment close:
+        # a turn that ends on such a response closes with that very text (the
+        # closing message is the LLM-visible copy), so the row is written only
+        # if the turn ends some other way.
+        deferred_narrations: List[str] = []
 
         tools_schema = await error_handler.safe_get_tools_schema(
             self.tool_manager,
@@ -370,12 +372,15 @@ class ToolsModeRunner:
             # this text exists nowhere else -- the replay buffer (issue #957)
             # clears on the segment's is_last precisely because a closed
             # segment belongs to history, so history must have it before the
-            # tools run. A canvas-only round is the exception: the turn closes
-            # with this very text (the synthesis shortcut), and the closing
-            # message is LLM-visible while an agent_intermediate row is not --
-            # persisting both would drop the prose from the model's view of
-            # the conversation (and render it twice on reload).
-            if not self._is_canvas_only_response(final_llm_response):
+            # tools run. A canvas-only round is the exception: if the turn
+            # closes on that response it closes with this very text (the
+            # synthesis shortcut), and the closing message is LLM-visible
+            # while an agent_intermediate row is not -- so the narration is
+            # deferred, and flushed to history only if the turn ends some
+            # other way (a continuation round answers instead).
+            if self._is_canvas_only_response(final_llm_response):
+                deferred_narrations.append(accumulated_content)
+            else:
                 persisted = self._persist_narration_row(session, accumulated_content)
                 if persisted:
                     persisted_narrations.append(persisted)
@@ -523,6 +528,9 @@ class ToolsModeRunner:
                     break
                 if current_response is None or not current_response.has_tool_calls():
                     # Model produced its final text answer -- finalize and return.
+                    # The turn did not end on a canvas-only response, so any
+                    # narration deferred from one belongs to history now.
+                    self._flush_deferred_narrations(session, deferred_narrations)
                     final_text = next_text or (current_response.content if current_response else "")
                     return await self._finalize_text_response(
                         session, final_text, bool(next_text),
@@ -534,10 +542,12 @@ class ToolsModeRunner:
                 # narration first: it closed with its segment, and the tools
                 # ahead may park on approval -- a reopen in that window reads
                 # history, where this text otherwise does not exist yet. As at
-                # the initial close, a canvas-only round is the exception: the
-                # turn closes with this very text, and the closing message is
-                # the LLM-visible copy.
-                if not self._is_canvas_only_response(current_response):
+                # the initial close, a canvas-only round defers instead: the
+                # turn may end on this response, with this very text as the
+                # LLM-visible closing message.
+                if self._is_canvas_only_response(current_response):
+                    deferred_narrations.append(next_text)
+                else:
                     persisted = self._persist_narration_row(session, next_text)
                     if persisted:
                         persisted_narrations.append(persisted)
@@ -545,11 +555,26 @@ class ToolsModeRunner:
             # Budget exhausted or anti-loop tripped while the model still wanted
             # tools -> force a closing text answer via no-tools synthesis, hardened
             # against another tool-call attempt with a graceful message if the model
-            # ignores that and the provider rejects.
-            synthesis_content = await self._stream_synthesis(
-                current_response, messages, model, session_context, user_email, effective_callback,
-                narrations_already_persisted=persisted_narrations,
-            )
+            # ignores that and the provider rejects. A canvas-only response needs
+            # no synthesis call: the turn closes with the response's own prose --
+            # or, when the provider put no text on the final response, with the
+            # narration this round streamed (deferred above), falling back to the
+            # placeholder only when neither exists.
+            if self._is_canvas_only_response(current_response):
+                content = (current_response.content or "").strip()
+                synthesis_content = (
+                    content
+                    or (deferred_narrations[-1].strip() if deferred_narrations else "")
+                    or "Content displayed in canvas."
+                )
+            else:
+                synthesis_content = await self._stream_synthesis(
+                    current_response, messages, model, session_context, user_email, effective_callback,
+                )
+            # Narration deferred from canvas-only rounds belongs to history
+            # now -- except the text the turn is closing with, which the
+            # closing message itself carries (LLM-visible).
+            self._flush_deferred_narrations(session, deferred_narrations, except_text=synthesis_content)
 
             # Persist tool calls before the closing answer (issue #684).
             recorder.flush(session.history)
@@ -585,35 +610,13 @@ class ToolsModeRunner:
         session_context: Dict[str, Any],
         user_email: Optional[str],
         update_callback: Optional[UpdateCallback],
-        narrations_already_persisted: Optional[List[str]] = None,
     ) -> str:
-        """Stream the tool synthesis LLM call."""
-        # Check canvas-only shortcut. ``tool_calls`` is None on the placeholder
-        # response built when a continuation round fails mid-stream, and an
-        # empty list is not "canvas-only" -- neither may take the shortcut.
-        response_tool_calls = llm_response.tool_calls or []
-        canvas_calls = [
-            tc for tc in response_tool_calls
-            if normalize_tool_name(self._tool_call_signature(tc)[0]) == CANVAS_TOOL_NAME
-        ]
-        if response_tool_calls and len(canvas_calls) == len(response_tool_calls):
-            content = llm_response.content or ""
-            # The narration riding a canvas-only call was already persisted as
-            # its own history row when its stream segment closed (issue #957);
-            # closing the turn with it again would render the same paragraph
-            # twice after a reload. The comparison is normalized: the persisted
-            # text was assembled from stream deltas while this value is the
-            # provider's final field, so whitespace alone must not defeat the
-            # guard. A narration that exists nowhere else (its stream yielded
-            # no text deltas, only the final response) is still the turn's
-            # answer and is kept.
-            persisted = {
-                text.strip() for text in (narrations_already_persisted or []) if text
-            }
-            if content.strip() and content.strip() not in persisted:
-                return content
-            return "Content displayed in canvas."
+        """Stream the tool synthesis LLM call.
 
+        The canvas-only shortcut lives at the call site (the loop's close,
+        which knows the deferred narrations); this always runs a real
+        synthesis call.
+        """
         # Add files manifest
         files_manifest = tool_executor.build_files_manifest(session_context)
         if files_manifest:
@@ -863,6 +866,31 @@ class ToolsModeRunner:
             normalize_tool_name(self._tool_call_signature(tc)[0]) == CANVAS_TOOL_NAME
             for tc in tool_calls
         )
+
+    def _flush_deferred_narrations(
+        self,
+        session: Session,
+        deferred: List[str],
+        *,
+        except_text: Optional[str] = None,
+    ) -> None:
+        """Write canvas-round narrations to history when the turn ends another way.
+
+        A canvas-only round's narration is deferred at its segment close: a
+        turn that ends on that response closes with the very same text (the
+        closing message is the LLM-visible copy). When the turn ends any
+        other way -- a continuation answers, or a real synthesis runs -- the
+        deferred text exists nowhere, so it is flushed here as the same
+        display-only row any other narration gets. ``except_text`` skips the
+        text the turn is closing with (normalized: the deferred text was
+        assembled from stream deltas, the closing value may be the provider's
+        final field).
+        """
+        skip = (except_text or "").strip()
+        for text in deferred:
+            if text and text.strip() and text.strip() != skip:
+                self._persist_narration_row(session, text)
+        deferred.clear()
 
     def _persist_narration_row(self, session: Session, text: str) -> Optional[str]:
         """Write a closed narration segment into history the moment it closes.
