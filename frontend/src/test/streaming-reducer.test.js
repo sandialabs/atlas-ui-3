@@ -174,6 +174,10 @@ describe('useMessages - STREAM_TOKEN replace (stream replay, issue #957)', () =>
     expect(result.current.messages).toHaveLength(1)
     expect(result.current.messages[0].content).toBe('replayed prefix and live continuation')
     expect(result.current.messages[0]._streaming).toBe(true)
+    // Live tokens arriving means this tab owns the stream: the bubble is
+    // refreshing itself, so the "will refresh when the run finishes" marker
+    // no longer applies. A tab that gets no live frames keeps the marker.
+    expect(result.current.messages[0]._replayed).toBe(false)
   })
 
   it('STREAM_END closes a replaced bubble and clears the marker with it', () => {

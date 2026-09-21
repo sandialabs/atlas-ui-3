@@ -212,7 +212,7 @@ async def test_in_flight_record_carries_the_open_segment():
 
 
 @pytest.mark.asyncio
-async def test_in_flight_record_omits_streaming_when_nothing_is_open():
+async def test_in_flight_record_has_no_streaming_text_when_nothing_is_open():
     registry = RunRegistry()
     repo = InMemorySessionRepository()
     await _running_conversation(registry, repo, tokens="")
@@ -343,7 +343,6 @@ async def test_notify_token_stream_survives_the_runs_package_being_unimportable(
     monkeypatch.setitem(sys.modules, "atlas.application.chat.runs.context", None)
     monkeypatch.setattr(event_notifier, "_get_current_run", None)
     monkeypatch.setattr(event_notifier, "_get_run_registry", None)
-    monkeypatch.setattr(event_notifier, "_replay_import_failed", False)
     sent = []
 
     await event_notifier.notify_token_stream(
@@ -352,8 +351,10 @@ async def test_notify_token_stream_survives_the_runs_package_being_unimportable(
     )
 
     assert sent and sent[0]["type"] == "token_stream" and sent[0]["token"] == "hi"
-    # The failure is cached: a second frame does not re-attempt the import.
-    assert event_notifier._replay_import_failed is True
+    # The failure is cached as the unavailable sentinel: a second frame does
+    # not re-attempt the import, and the registry resolve stays disabled.
+    assert event_notifier._get_current_run is event_notifier._replay_unavailable
+    assert event_notifier._replay_registry() is None
     await event_notifier.notify_token_stream(
         token=" again", is_first=False, is_last=False,
         update_callback=sent.append,

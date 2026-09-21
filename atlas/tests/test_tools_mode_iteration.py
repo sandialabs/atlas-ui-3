@@ -203,7 +203,22 @@ async def _run_for_history(runner, session, messages):
     """Run run_streaming against a real-ish session and return history writes."""
     async def _execute_multiple(tool_calls, session_context, tool_manager,
                                 update_callback=None, config_manager=None, skip_approval=False):
-        return [ToolResult(tool_call_id=tc.id, content="ok", success=True) for tc in tool_calls]
+        results = []
+        for tc in tool_calls:
+            # Emit the lifecycle events the recorder persists, the way the
+            # real executor does through the turn's update callback.
+            if update_callback is not None:
+                await update_callback({
+                    "type": "tool_start", "tool_call_id": tc.id,
+                    "tool_name": tc.function.name, "server_name": "srv",
+                    "arguments": {},
+                })
+                await update_callback({
+                    "type": "tool_complete", "tool_call_id": tc.id,
+                    "tool_name": tc.function.name, "success": True, "result": "ok",
+                })
+            results.append(ToolResult(tool_call_id=tc.id, content="ok", success=True))
+        return results
 
     with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
         mock_te.execute_multiple_tools = _execute_multiple
@@ -245,7 +260,9 @@ async def test_narration_is_persisted_at_segment_close():
 @pytest.mark.asyncio
 async def test_every_rounds_narration_is_persisted():
     """Each continuation round's narration closes its own segment; every one
-    is persisted, in order, before the tools that follow it run."""
+    is persisted, in order, before the tools that follow it run. Tool rows
+    flush per round too, so the reloaded transcript interleaves the way the
+    live view did instead of bunching every narration ahead of every tool."""
     llm = ScriptedToolsLLM(turns=[
         ("first I compute", [_tc("c1", "calc", '{"e":"2+2"}')]),
         ("now I build", [_tc("c2", "pptx", '{"title":"X"}')]),
@@ -255,6 +272,13 @@ async def test_every_rounds_narration_is_persisted():
 
     added = await _run_for_history(runner, _session(), [{"role": "user", "content": "go"}])
 
+    kinds = [
+        ("narration" if m.metadata.get("message_type") == "agent_intermediate"
+         else "tool" if m.metadata.get("message_type") == "tool_call"
+         else "answer")
+        for m in added
+    ]
+    assert kinds == ["narration", "tool", "narration", "tool", "answer"]
     narration = [m.content for m in added if m.metadata.get("message_type") == "agent_intermediate"]
     assert narration == ["first I compute", "now I build"]
 

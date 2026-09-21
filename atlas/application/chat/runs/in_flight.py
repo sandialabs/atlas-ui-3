@@ -93,11 +93,11 @@ async def in_flight_conversation(
         "in_flight": True,
         "run_id": record.run_id,
         # The open token segment, for seeding the partial answer on reopen.
-        # Absent (not None) when there is nothing open, so a record with
-        # nothing streaming looks exactly like the stored shape. A segment
-        # longer than the buffer's cap replays its beginning only; the
-        # run-end reload replaces the view with the stored transcript either
-        # way, so there is nothing for a client to do with a truncation flag
-        # that the "in progress" marker does not already say.
+        # None when there is nothing open, so a record with nothing streaming
+        # reads exactly like the stored shape. A segment longer than the
+        # buffer's cap replays its beginning only; the run-end reload
+        # replaces the view with the stored transcript either way, so there
+        # is nothing for a client to do with a truncation flag that the
+        # "in progress" marker does not already say.
         "streaming_text": stream_text or None,
     }

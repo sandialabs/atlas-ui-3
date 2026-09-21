@@ -476,6 +476,16 @@ class ToolsModeRunner:
                 if self.artifact_processor:
                     await self.artifact_processor(session, results, effective_callback)
 
+                # Persist this round's tool rows now, not only at turn end:
+                # the next round's narration is written when its stream
+                # segment closes (issue #957), and flushing per round keeps
+                # the reloaded transcript interleaved the way the live view
+                # was -- a narration, its tools, the next narration -- rather
+                # than every narration bunched ahead of every tool row. The
+                # flush is idempotent, so the closing flush at finalize still
+                # stands (it simply has nothing left to write).
+                recorder.flush(session.history)
+
                 # Budget check: stop chaining once the extra-round budget is spent.
                 if extra_round >= max_extra_rounds:
                     break

@@ -37,7 +37,11 @@ function messagesReducer(state, action) {
       const idx = state.findLastIndex(m => m._streaming)
       if (idx >= 0) {
         const updated = [...state]
-        updated[idx] = { ...state[idx], content: state[idx].content + action.token }
+        // A live token landing on a replayed bubble means this tab owns the
+        // stream after all: the view is refreshing itself, so the "it will
+        // refresh when the run finishes" marker (bound to _replayed) no
+        // longer applies. A tab that receives no live frames keeps it.
+        updated[idx] = { ...state[idx], content: state[idx].content + action.token, _replayed: false }
         return updated
       }
       // Create new streaming assistant message
