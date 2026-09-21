@@ -105,6 +105,20 @@ describe('chatExport.buildExportConversation', () => {
     expect(buildExportConversation(messages, lookup)).toEqual(messages)
   })
 
+  it('omits replayed placeholder rows (issue #957)', () => {
+    // A replayed bubble holds a mid-answer fragment the run's stored
+    // transcript supersedes when the run ends; exporting it would read as
+    // the finished reply.
+    const messages = [
+      { role: 'user', content: 'hi', timestamp: 't0' },
+      { role: 'assistant', content: 'prior answer', timestamp: 't1' },
+      { role: 'assistant', content: 'fragment still streaming', timestamp: 't2', _streaming: true, _replayed: true },
+    ]
+    const out = buildExportConversation(messages, lookup)
+    expect(out).toHaveLength(2)
+    expect(out.some(m => m.content === 'fragment still streaming')).toBe(false)
+  })
+
   it('injects a system entry when a custom prompt is first activated', () => {
     const messages = [
       { role: 'user', content: 'plain', timestamp: 't0', _activePromptKey: null },

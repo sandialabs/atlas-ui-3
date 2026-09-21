@@ -15,7 +15,7 @@ import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
-import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
+import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
@@ -68,10 +68,15 @@ export const ChatProvider = ({ children }) => {
 	// Pass through dynamic availability from backend config
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
-	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd } = useMessages()
+	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders } = useMessages()
 	const { settings, updateSettings } = useSettings()
 
-	const isStreaming = messages.some(m => m._streaming === true)
+	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
+	// run whose frames go to another socket, and a live append would have
+	// cleared _replayed. Counting it would show Stop and hide Send for the
+	// whole run in a tab that can do neither -- the run's own Stop affordance
+	// is driven off run state (isAgentRunning includes it).
+	const isStreaming = messages.some(m => m._streaming === true && !m._replayed)
 
 	const [isWelcomeVisible, setIsWelcomeVisible] = useState(true)
 	const [isThinking, setIsThinking] = useState(false)
@@ -849,6 +854,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Only mutate the UI once the message is actually on the wire.
 		if (isWelcomeVisible) setIsWelcomeVisible(false)
 		setFollowUpSuggestions([])
+		// Discard a replay placeholder left over from a reopened in-flight
+		// conversation (issue #957): in a tab that receives no further frames
+		// nothing else ends that stream, and STREAM_TOKEN's append lookup
+		// targets the last _streaming row -- without this the new turn's reply
+		// would accumulate into the stale bubble above the user's message.
+		// Discard, not streamEnd: a placeholder is a transient fragment the
+		// run's stored transcript supersedes, and closing it would clear
+		// _replayed and let the persistence paths write the partial text into
+		// history as if it were the finished reply. Scoped to placeholders:
+		// ending a genuinely live bubble here (a steering send mid-run) would
+		// split the segment into two bubbles.
+		discardReplayPlaceholders()
 		// Rewind/edit-and-resubmit (issue #142): now that the send is confirmed on
 		// the wire, drop the targeted prompt and everything after it so the new
 		// message takes its place. Done here -- after the early returns and the
@@ -878,7 +895,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -945,7 +962,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const undoSnapshot = (!skipConfirm && hasContent && !mustStopCurrentTurn)
 			? {
 				id: activeConversationId || null,
-				messages: latestMessagesRef.current.map(m => buildPersistedMessage(m)),
+				// Replayed placeholder bubbles (issue #957) are transient -- a
+				// mid-answer fragment the run's stored transcript supersedes --
+				// so they are not part of what Undo puts back.
+				messages: latestMessagesRef.current.filter(m => !isReplayPlaceholder(m)).map(m => buildPersistedMessage(m)),
 				canvasContent: files.canvasContent || '',
 				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
 			}
@@ -1049,19 +1069,33 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		// Opened while its run is executing: the live stream is not replayed,
-		// so remember to reload from the store once the run ends.
+		// so remember to reload from the store once the run ends. The record's
+		// own `in_flight` flag decides this, not the run tracker: the snapshot
+		// that would carry the run may still be in flight in this tab (another
+		// tab, a reload), and a null here would leave the partial view stale
+		// forever.
 		if (joinedRunTimerRef.current) {
 			clearTimeout(joinedRunTimerRef.current)
 			joinedRunTimerRef.current = null
 		}
-		joinedRunConversationRef.current = isRunActive(runs.getRun(conversationData.id))
-			? conversationData.id
-			: null
+		const runInFlight = isRunActive(runs.getRun(conversationData.id)) || conversationData.in_flight === true
+		joinedRunConversationRef.current = runInFlight ? conversationData.id : null
+		if (runInFlight) {
+			// Ask for a fresh run snapshot: this tab may not have received
+			// `run_started`/`run_status` for a run its tracker has never seen,
+			// and the reload-on-run-end below keys off that tracker.
+			sendMessage?.({ type: 'list_runs', conversation_id: conversationData.id })
+		}
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
 
-		// Track the loaded conversation
+		// Track the loaded conversation. The ref is set synchronously too: the
+		// replay frame answering the restore below is tagged with the run's ids
+		// and the routing gate reads the ref, so a frame that arrives before
+		// the next render must already see this conversation as visible --
+		// otherwise the replay is filed as background activity and dropped.
+		activeConversationIdRef.current = conversationData.id
 		setActiveConversationId(conversationData.id)
 		setIsWelcomeVisible(false)
 
@@ -1077,18 +1111,42 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			bulkAdd(loadedMessages)
 		}
 
+		// Issue #957: the run executing in this conversation has streamed text
+		// this client never saw -- it was dropped as background activity while
+		// another conversation was on screen, or this tab was not the one the
+		// run streams into. Seed the open bubble with what the run holds so
+		// the reply starts at its first word, not the token that happened to
+		// be current when the user came back. The restore below replays the
+		// same segment again (a newer snapshot), which replaces this seed, and
+		// the live stream continues from there. Runs until the turn ends, so
+		// the bubble keeps its "in progress" marker (Message.jsx) until the
+		// reload that replaces it with the stored transcript.
+		if (conversationData.streaming_text) {
+			streamToken(conversationData.streaming_text, true)
+		} else if (conversationData.in_flight === true) {
+			// No open segment right now -- the run is between steps (executing
+			// tools, parked on an approval). The transcript still needs a sign
+			// of life: an empty bubble carrying the marker, which the next
+			// segment's first token fills in this run's own tab, and the
+			// run-end reload replaces everywhere.
+			streamToken('', true)
+		}
+
 		// Notify backend to restore this conversation's context
 		// Sends the conversation_id and messages so the LLM has prior context.
-		// Display-only rows (e.g. persisted tool_call messages, issue #684) are
-		// excluded: they exist purely to re-render the transcript and a bare
-		// role:'tool' row with no preceding tool_calls would be rejected as an
-		// orphan tool message by some providers.
+		// Display-only rows (persisted tool_call messages, issue #684, and
+		// agent_intermediate narration, issue #957) are excluded: they exist
+		// purely to re-render the transcript. A bare role:'tool' row with no
+		// preceding tool_calls would be rejected as an orphan tool message by
+		// some providers, and with no conversation repository configured the
+		// client payload is canonical, so a narration row would replay as a
+		// second assistant turn and break strict alternation.
 		if (sendMessage) {
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
 				messages: conversationData.messages
-					.filter(msg => (msg.message_type || 'chat') !== 'tool_call')
+					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
 					.map(msg => ({
 						role: msg.role,
 						content: msg.content || '',
@@ -1111,7 +1169,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// callback down -- and re-subscribe everything that depends on it -- on
 		// every streaming frame.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun])
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:
@@ -1400,7 +1458,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				title: firstUserMsg.substring(0, 200) || 'Untitled',
 				model: currentModel,
 				created_at: messages[0]?.timestamp || new Date().toISOString(),
-				messages: messages.map(m => buildPersistedMessage(m)),
+				// Replayed placeholder bubbles (issue #957) are transient: they
+				// hold a mid-answer fragment the run's stored transcript will
+				// supersede, so persisting one would write the fragment into
+				// local history as if it were the finished reply.
+				messages: messages.filter(m => !isReplayPlaceholder(m)).map(m => buildPersistedMessage(m)),
 				tags: [],
 				// Persist the active workspace so a locally saved conversation
 				// restores it on reload (issue #829), mirroring the server save

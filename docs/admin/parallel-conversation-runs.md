@@ -159,6 +159,38 @@ before a run is admitted, exactly like a stored conversation owned by someone
 else. Without that a turn naming the id in the unsaved window would be stored
 first, and the running owner's own save would then be rejected.
 
+### A conversation reopened mid-stream shows the answer from the beginning
+
+Dropping another conversation's frames is what keeps transcripts honest, but
+it means a client that leaves a streaming conversation and comes back has
+missed part of the answer -- and its reopened view used to start the bubble
+at whatever token happened to be current on arrival, with nothing saying the
+text was incomplete.
+
+The registry now holds the token segment the run is streaming right now: the
+notifier records every `token_stream` frame a tracked run publishes (one
+chokepoint, so a frame is counted exactly once, and a child run's text lands
+in the child's buffer rather than its parent's). Only the *open* segment is
+held -- a segment the run has closed is already in the run's session history,
+which the live view above replays -- and a run that reaches a terminal state
+loses it with the turn.
+
+Reopen paths consume it in two shapes:
+
+- `GET /api/conversations/{id}` and `restore_conversation` carry
+  `streaming_text` in the live view, so a client that will receive no further
+  frames (a second tab, a page reload -- a run's frames stay bound to the
+  socket that started it) still shows the answer streamed so far.
+- `restore_conversation` additionally sends the segment as a normal
+  `token_stream` frame tagged with the run's ids, with `replay: true`. The
+  client replaces the partial bubble with it (the record it loaded may hold
+  an earlier snapshot of the same text) and the run's live stream continues
+  on top, so the reply runs unbroken from its first word.
+
+Either way the partial bubble is marked "answer in progress -- it will
+refresh when the response finishes": once the run ends, the client reloads the
+conversation from the store and the marker goes with the placeholder.
+
 ### Auto-approve covers background runs
 
 Auto-approve is a client setting. The client answers an approval request for
@@ -232,9 +264,12 @@ These are known and deliberate, not oversights:
   records.
 - **A reconnected browser does not resume a live event stream.** It sees the run
   in `runs_snapshot` and, on reopening the conversation, the run's transcript so
-  far (prompt and tool rows) — not the tokens it missed. Once the run ends the
-  client reloads the conversation from the store, so the final answer appears
-  without a manual refresh. Live re-attach is issue #760.
+  far (prompt and tool rows) plus the open segment streamed so far
+  (`streaming_text` / the restore replay frame) — but the tokens that stream
+  *after* it reopens reach only the socket that started the run. The marker on
+  the partial bubble says it will refresh; once the run ends the client reloads
+  the conversation from the store, so the final answer appears without a manual
+  refresh. Live re-attach is issue #760.
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
   Use a single worker, or sticky sessions, until the run store is shared.

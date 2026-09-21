@@ -363,6 +363,75 @@ describe('createWebSocketHandler - token streaming', () => {
   })
 })
 
+describe('createWebSocketHandler - stream replay on reopen (issue #957)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    cleanupStreamState()
+  })
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('replays the open segment as a replacement, not an append', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'token_stream', token: 'The answer begins', is_first: true, replay: true,
+      run_id: 'run-1', conversation_id: 'conv-1',
+    })
+
+    expect(deps.streamToken).toHaveBeenCalledWith('The answer begins', true)
+    expect(deps.streamEnd).not.toHaveBeenCalled()
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+  })
+
+  it('continues streaming live tokens onto the replayed bubble', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'token_stream', token: 'prefix', is_first: true, replay: true,
+      run_id: 'run-1', conversation_id: 'conv-1',
+    })
+    handler({ type: 'token_stream', token: ' and', is_first: false })
+    vi.advanceTimersByTime(35)
+
+    // First dispatch is the replay (replace); the second is a normal
+    // buffered append flushed after the interval.
+    expect(deps.streamToken).toHaveBeenNthCalledWith(1, 'prefix', true)
+    expect(deps.streamToken).toHaveBeenLastCalledWith(' and')
+  })
+
+  it('a replayed bubble still closes on is_last', () => {
+    const deps = makeDeps()
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'token_stream', token: 'mid-run text', is_first: true, replay: true,
+      run_id: 'run-1', conversation_id: 'conv-1',
+    })
+    handler({ type: 'token_stream', is_last: true })
+
+    expect(deps.streamEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a replay frame for a conversation that is not on screen', () => {
+    const deps = makeDeps()
+    deps.getVisibleConversationId = vi.fn(() => 'conv-other')
+    const handler = createWebSocketHandler(deps)
+
+    handler({
+      type: 'token_stream', token: 'lost while away', is_first: true, replay: true,
+      run_id: 'run-1', conversation_id: 'conv-1',
+    })
+
+    expect(deps.streamToken).not.toHaveBeenCalled()
+  })
+})
+
 describe('createWebSocketHandler – a stopped tool call', () => {
   // The row is created on tool_start and nothing else arrives once the turn is
   // cancelled, so it would spin as "calling" until a reload replaced it with

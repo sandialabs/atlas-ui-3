@@ -31,7 +31,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional, TypeVar
+from typing import Any, Dict, Optional, TypeVar
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -173,6 +173,45 @@ def tag_run_event(message: T, run_id: str, conversation_id: str) -> T:
     :func:`tag_event` for the rule itself.
     """
     return tag_event(message, run_id, conversation_id, copy=True)
+
+
+def _stream_replay_frame(record) -> Optional[Dict[str, Any]]:
+    """The frame that re-attaches a reopened client to a run's open segment.
+
+    Issue #957: a client that left a streaming conversation dropped every
+    frame since; the registry holds that segment's text, and this is the frame
+    that replays it. ``None`` when there is nothing to replay -- no run on the
+    conversation, or nothing open in its buffer.
+
+    The frame reuses the ``token_stream`` shape, tagged with the run's ids, so
+    the client routes it like any other event of that conversation and drops
+    it if it has already navigated away again. ``replay`` tells the client to
+    *define* the bubble rather than append to it: the transcript it loaded may
+    already hold an earlier snapshot of this same segment.
+
+    The snapshot races the run's own sends by design: a token recorded between
+    this read and the send is erased by the client's replace and lost from the
+    view. The window is a single send, the erased tokens are replaced by the
+    run-end reload's stored transcript, and serializing with the run's task
+    would put bookkeeping into its hot path -- so the race is accepted rather
+    than papered over with a replay cursor (issue #760 owns live re-attach).
+    """
+    if record is None:
+        return None
+    text = record.stream.text()
+    if not text:
+        return None
+    return tag_run_event(
+        {
+            "type": "token_stream",
+            "token": text,
+            "is_first": True,
+            "is_last": False,
+            "replay": True,
+        },
+        record.run_id,
+        record.conversation_id,
+    )
 
 
 async def _merge_run_session_files(
@@ -2346,6 +2385,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     }
                 await websocket.send_json(response)
 
+                # A refused restore (authorization, or the id simply not
+                # found) gets nothing more: the approval and segment replays
+                # below belong to a conversation the client actually loaded.
+                if isinstance(response, dict) and response.get("type") == "error":
+                    continue
+
                 # Issue #884: if a run in the conversation the user just opened
                 # is blocked on an approval, re-send the request now. It was
                 # dropped when it first arrived (the user was elsewhere), and
@@ -2355,6 +2400,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     data.get("conversation_id", ""), user_email
                 ):
                     await websocket.send_json(pending)
+
+                # Issue #957: re-attach the answer the client was away for. A
+                # tracked run streams only to the connection that started it,
+                # and this client dropped every frame emitted while it showed
+                # another conversation -- so what it displays for the open
+                # segment starts at the token that happened to be current when
+                # it came back. The registry holds that segment's text; send
+                # it and let the live stream continue on top. Replaying to any
+                # of the user's sockets (not only the run's own) is what a
+                # second tab needs: it will get no further frames, so this
+                # snapshot plus the "in progress" marker is its whole window.
+                # The frame carries the run's ids, so a client that has already
+                # navigated away again drops it like any other run event.
+                reopened = run_registry.active_for_conversation(
+                    str(data.get("conversation_id") or "").strip(), user_email
+                )
+                replay_frame = _stream_replay_frame(reopened)
+                if replay_frame is not None:
+                    await websocket.send_json(replay_frame)
 
             elif message_type == "reset_session":
                 # Issue #884: only the *untracked* turn is cancelled here.
