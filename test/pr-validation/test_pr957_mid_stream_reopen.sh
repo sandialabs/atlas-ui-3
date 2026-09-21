@@ -18,6 +18,11 @@
 # mock model (fixtures/pr957/mock_llm.py) that streams a labelled answer one
 # word at a time, so the reopen lands genuinely mid-stream. Nothing on the
 # path under test is stubbed.
+#
+# This driver runs on demand, not in a workflow: directly
+# (`bash test/pr-validation/test_pr957_mid_stream_reopen.sh`) or through the
+# PR-validation runner (`bash test/run_pr_validation.sh 962`), per
+# test/pr-validation/README.md.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

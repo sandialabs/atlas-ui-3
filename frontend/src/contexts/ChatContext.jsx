@@ -951,7 +951,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const undoSnapshot = (!skipConfirm && hasContent && !mustStopCurrentTurn)
 			? {
 				id: activeConversationId || null,
-				messages: latestMessagesRef.current.map(m => buildPersistedMessage(m)),
+				// Replayed placeholder bubbles (issue #957) are transient -- a
+				// mid-answer fragment the run's stored transcript supersedes --
+				// so they are not part of what Undo puts back.
+				messages: latestMessagesRef.current.filter(m => !m._replayed).map(m => buildPersistedMessage(m)),
 				canvasContent: files.canvasContent || '',
 				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
 			}
@@ -1441,7 +1444,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				title: firstUserMsg.substring(0, 200) || 'Untitled',
 				model: currentModel,
 				created_at: messages[0]?.timestamp || new Date().toISOString(),
-				messages: messages.map(m => buildPersistedMessage(m)),
+				// Replayed placeholder bubbles (issue #957) are transient: they
+				// hold a mid-answer fragment the run's stored transcript will
+				// supersede, so persisting one would write the fragment into
+				// local history as if it were the finished reply.
+				messages: messages.filter(m => !m._replayed).map(m => buildPersistedMessage(m)),
 				tags: [],
 				// Persist the active workspace so a locally saved conversation
 				// restores it on reload (issue #829), mirroring the server save

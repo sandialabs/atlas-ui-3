@@ -189,4 +189,33 @@ describe('useMessages - STREAM_TOKEN replace (stream replay, issue #957)', () =>
     expect(result.current.messages[0]._streaming).toBe(false)
     expect(result.current.messages[0]._replayed).toBe(true)
   })
+
+  it('STREAM_END removes an empty placeholder row instead of freezing it', () => {
+    const { result } = renderHook(() => useMessages())
+
+    // The seed for a run parked between segments (an approval wait): an
+    // empty bubble carrying only the marker. If the stream ends with nothing
+    // ever appended, the row must go -- a permanently blank assistant bubble
+    // is not a message.
+    act(() => { result.current.addMessage({ role: 'user', content: 'question' }) })
+    act(() => { result.current.streamToken('', true) })
+    expect(result.current.messages.some(m => m._streaming)).toBe(true)
+
+    act(() => { result.current.streamEnd() })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].role).toBe('user')
+  })
+
+  it('STREAM_END keeps a placeholder that live tokens filled', () => {
+    const { result } = renderHook(() => useMessages())
+
+    act(() => { result.current.streamToken('', true) })
+    act(() => { result.current.streamToken('the answer') })
+    act(() => { result.current.streamEnd() })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].content).toBe('the answer')
+    expect(result.current.messages[0]._streaming).toBe(false)
+  })
 })

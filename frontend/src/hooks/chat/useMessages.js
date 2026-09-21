@@ -55,6 +55,13 @@ function messagesReducer(state, action) {
     case 'STREAM_END': {
       const idx = state.findLastIndex(m => m._streaming)
       if (idx >= 0) {
+        // An empty streaming row is the replay placeholder (issue #957): the
+        // seed for a run that is between segments. Closing it must remove the
+        // row, not freeze it -- a blank assistant bubble that never fills is
+        // not a message.
+        if (!state[idx].content) {
+          return state.filter((_, i) => i !== idx)
+        }
         const updated = [...state]
         updated[idx] = { ...state[idx], _streaming: false }
         return updated

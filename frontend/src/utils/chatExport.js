@@ -196,6 +196,10 @@ export function buildExportConversation(messages, promptInfoByKey) {
   let prev = null
   let sawAny = false
   for (const m of messages) {
+    // Replayed placeholder bubbles (issue #957) are transient: a mid-answer
+    // fragment the run's stored transcript supersedes. Exporting it would
+    // read as the finished reply.
+    if (m && m._replayed) continue
     if (m && m.role === 'user' && Object.prototype.hasOwnProperty.call(m, '_activePromptKey')) {
       const cur = m._activePromptKey || null
       if (!sawAny || cur !== prev) {
