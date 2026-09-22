@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-22
+
 ### PR #963 - 2026-09-20
 - Refreshing a conversation opened while its run was executing appends only the rows the view is missing instead of replacing the transcript, keeping the reader's scroll position and expanded tool rows (closes #959). Rows align by `tool_call_id`/role+content past live-only agent chrome; on divergence the previous full reload runs, and the backend session is re-seeded so the next message keeps the run's final turn in context.
 
