@@ -31,7 +31,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional, TypeVar
+from typing import Any, Dict, Optional, TypeVar
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -173,6 +173,45 @@ def tag_run_event(message: T, run_id: str, conversation_id: str) -> T:
     :func:`tag_event` for the rule itself.
     """
     return tag_event(message, run_id, conversation_id, copy=True)
+
+
+def _stream_replay_frame(record) -> Optional[Dict[str, Any]]:
+    """The frame that re-attaches a reopened client to a run's open segment.
+
+    Issue #957: a client that left a streaming conversation dropped every
+    frame since; the registry holds that segment's text, and this is the frame
+    that replays it. ``None`` when there is nothing to replay -- no run on the
+    conversation, or nothing open in its buffer.
+
+    The frame reuses the ``token_stream`` shape, tagged with the run's ids, so
+    the client routes it like any other event of that conversation and drops
+    it if it has already navigated away again. ``replay`` tells the client to
+    *define* the bubble rather than append to it: the transcript it loaded may
+    already hold an earlier snapshot of this same segment.
+
+    The snapshot races the run's own sends by design: a token recorded between
+    this read and the send is erased by the client's replace and lost from the
+    view. The window is a single send, the erased tokens are replaced by the
+    run-end reload's stored transcript, and serializing with the run's task
+    would put bookkeeping into its hot path -- so the race is accepted rather
+    than papered over with a replay cursor (issue #760 owns live re-attach).
+    """
+    if record is None:
+        return None
+    text = record.stream.text()
+    if not text:
+        return None
+    return tag_run_event(
+        {
+            "type": "token_stream",
+            "token": text,
+            "is_first": True,
+            "is_last": False,
+            "replay": True,
+        },
+        record.run_id,
+        record.conversation_id,
+    )
 
 
 async def _merge_run_session_files(
@@ -607,6 +646,60 @@ def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
     logger.info("Cancelling run %s on user request", record.run_id)
     run_registry.cancel(record.run_id, user_email)
     return True
+
+
+def _conversation_access_error(chat_service, conversation_id, user_email):
+    """The error frame refusing a client-supplied conversation id, or None.
+
+    Issue #958: this runs *before* a run is admitted, because the service's
+    own check (the same method) only fires once the turn is already executing
+    -- too late to keep ``run_started`` from announcing a run that then dies
+    on authorization. The frame carries the message and error type the
+    service would have raised, so the refusal reads the same to a client;
+    it additionally carries the refused conversation id (the other
+    admission refusals -- run limit, busy conversation -- do the same), and
+    the difference from the service path is that no run record exists
+    around it.
+
+    A conversation that is not stored yet is allowed through (a minted id,
+    or a run still in flight); the in-flight variant -- claiming a
+    conversation another user's run is executing under -- is addressed
+    separately in PR #956.
+
+    A lookup that *raises* (the chat-history store unreachable or locked)
+    must not tear down the socket the way it would from the receive loop:
+    inside the turn it used to be contained as the per-turn ``unexpected``
+    error. The question is equally unanswerable either way, so the failure
+    is refused too -- the same fail-closed answer the check gives a repo
+    that cannot answer at all -- and the exception is logged because the
+    frame deliberately says nothing about what broke.
+    """
+    try:
+        chat_service.validate_conversation_id_owner(conversation_id, user_email)
+    except AuthorizationError as e:
+        return {
+            "type": "error",
+            "message": str(e.message if hasattr(e, "message") else e),
+            "error_type": "authorization",
+            "conversation_id": conversation_id,
+        }
+    except Exception:
+        logger.error(
+            "Conversation ownership check failed for %s; refusing before "
+            "run admission",
+            sanitize_for_logging(str(conversation_id)),
+            exc_info=True,
+        )
+        return {
+            "type": "error",
+            "message": (
+                "Conversation access could not be verified. "
+                "Please try again."
+            ),
+            "error_type": "unexpected",
+            "conversation_id": conversation_id,
+        }
+    return None
 
 
 def _download_session_candidates(run_registry, session_id, user_email: str, data: dict):
@@ -1810,6 +1903,27 @@ async def websocket_endpoint(websocket: WebSocket):
                     selected_tools=data.get("selected_tools"),
                     conversation_id=turn_conversation_id,
                 ):
+                    # Issue #958: ownership of a *stored* conversation is
+                    # settled before a run is admitted. The service performs
+                    # the same check once the turn starts, but by then the
+                    # run already exists: `run_started` and `run_status`
+                    # frames have gone out, and the refused turn leaves a
+                    # `failed` run in the caller's snapshot for a conversation
+                    # they never owned. Refusing here keeps the check ahead
+                    # of admission; the error the caller sees is the one the
+                    # service would have raised, just without the run around
+                    # it.
+                    refusal = _conversation_access_error(
+                        chat_service, turn_conversation_id, user_email
+                    )
+                    if refusal is not None:
+                        # Metric parity with the service-path refusal: the
+                        # turn never reaches handle_chat's except blocks, so
+                        # without this the cross-user probe (or the store
+                        # failure) goes uncounted.
+                        log_metric("error", user_email, error_type=refusal["error_type"])
+                        await websocket.send_json(refusal)
+                        continue
                     try:
                         run_record = run_registry.start(
                             conversation_id=turn_conversation_id,
@@ -2271,6 +2385,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     }
                 await websocket.send_json(response)
 
+                # A refused restore (authorization, or the id simply not
+                # found) gets nothing more: the approval and segment replays
+                # below belong to a conversation the client actually loaded.
+                if isinstance(response, dict) and response.get("type") == "error":
+                    continue
+
                 # Issue #884: if a run in the conversation the user just opened
                 # is blocked on an approval, re-send the request now. It was
                 # dropped when it first arrived (the user was elsewhere), and
@@ -2280,6 +2400,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     data.get("conversation_id", ""), user_email
                 ):
                     await websocket.send_json(pending)
+
+                # Issue #957: re-attach the answer the client was away for. A
+                # tracked run streams only to the connection that started it,
+                # and this client dropped every frame emitted while it showed
+                # another conversation -- so what it displays for the open
+                # segment starts at the token that happened to be current when
+                # it came back. The registry holds that segment's text; send
+                # it and let the live stream continue on top. Replaying to any
+                # of the user's sockets (not only the run's own) is what a
+                # second tab needs: it will get no further frames, so this
+                # snapshot plus the "in progress" marker is its whole window.
+                # The frame carries the run's ids, so a client that has already
+                # navigated away again drops it like any other run event.
+                reopened = run_registry.active_for_conversation(
+                    str(data.get("conversation_id") or "").strip(), user_email
+                )
+                replay_frame = _stream_replay_frame(reopened)
+                if replay_frame is not None:
+                    await websocket.send_json(replay_frame)
 
             elif message_type == "reset_session":
                 # Issue #884: only the *untracked* turn is cancelled here.

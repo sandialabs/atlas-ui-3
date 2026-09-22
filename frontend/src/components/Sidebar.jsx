@@ -4,6 +4,7 @@ import { useConversationHistory } from '../hooks/useConversationHistory'
 import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
+import { applyRunEndRefresh } from '../utils/runEndRefresh'
 
 const ContextMenu = ({ x, y, onDelete, onClose }) => {
   const menuRef = useRef(null)
@@ -73,7 +74,7 @@ export function RunIndicator({ run }) {
 
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
-    features, activeConversationId, loadSavedConversation, messages, saveMode, clearChat,
+    features, activeConversationId, loadSavedConversation, refreshJoinedConversation, messages, saveMode, clearChat,
     // Parallel conversation runs (issue #884): which conversations are still
     // working, including ones the user is not currently viewing.
     runsByConversation,
@@ -178,13 +179,17 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   // Reload the open conversation once the run it was opened under ends. The
   // stream the user joined partway is not replayed (issue #760); the stored
   // transcript is complete, so show that instead of a stale or partial view.
+  // The refresh appends only the rows the view is missing when the stored
+  // transcript still lines up with it, which keeps the user's scroll position
+  // and their expanded tool rows (issue #959); a transcript that has diverged
+  // from the view falls back to the full reload.
   useEffect(() => {
     if (!runEndedConversationId || runEndedConversationId !== activeConversationId) return
     let cancelled = false
     ;(async () => {
       const fullConv = await history.loadConversation(runEndedConversationId)
       if (cancelled) return
-      if (fullConv && !fullConv.error) loadSavedConversation(fullConv)
+      applyRunEndRefresh({ fullConv, refreshJoinedConversation, loadSavedConversation })
       clearRunEndedConversation()
     })()
     return () => { cancelled = true }
