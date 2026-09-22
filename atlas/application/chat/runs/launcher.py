@@ -823,7 +823,13 @@ async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]])
     if not isinstance(arguments, dict):
         arguments = {}
     try:
-        handle = await launch_sub_conversation(arguments, context)
+        # Honor the app factory the tool manager forwarded on the context, the
+        # way the discovery tool already does -- the two handlers have to read
+        # the same application instance or they disagree about which
+        # workspaces exist.
+        handle = await launch_sub_conversation(
+            arguments, context, factory=(context or {}).get("factory")
+        )
     except LaunchRefused as e:
         return ToolResult(
             tool_call_id=getattr(tool_call, "id", None),

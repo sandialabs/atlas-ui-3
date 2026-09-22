@@ -1262,3 +1262,75 @@ async def test_result_status_distinguishes_unreadable_repository():
 
     assert result["result_status"] == "unreadable"
     assert result["result_error"]
+
+
+def _llm_tool_call(call_id: str, name: str, arguments: str):
+    """The provider-shaped call object ``execute_multiple_tools`` consumes."""
+    return SimpleNamespace(
+        id=call_id,
+        type="function",
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+class _LaunchToolManager:
+    """Routes only the two atlas launch tools, the way the real manager does.
+
+    What is under test is the executor's ordering, not MCP dispatch, so this
+    stands in for ``MCPToolManager`` and forwards to the real handlers -- most
+    importantly with the same ``context`` the executor builds, whose
+    ``launch_discovery`` entry is the shared dict the two tools communicate
+    through.
+    """
+
+    def __init__(self, factory):
+        self.app_factory = factory
+
+    async def execute_tool(self, tool_call, context=None):
+        if tool_call.name == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME:
+            return await execute_launch_discovery_tool(tool_call, context)
+        return await execute_launch_tool(tool_call, context)
+
+
+@pytest.mark.asyncio
+async def test_a_step_holding_both_calls_discovers_before_it_launches():
+    """The review's missing artifact: ``[launch, discovery]`` driven through
+    ``execute_multiple_tools`` against one fresh ``session_context``.
+
+    ``execute_multiple_tools`` gathers a step's calls concurrently, so without
+    the discovery-first pre-pass a step that contains both tools would refuse
+    the launch or not depending on scheduling order -- and with the launch
+    listed first it would essentially always refuse. Nothing pre-seeds
+    ``launch_discovery`` here; the discovery call has to produce it.
+    """
+    from atlas.application.chat.utilities import tool_executor
+
+    _install_registry()
+    factory = _Factory(lambda c: _ChatService(c))
+    session_context = {"user_email": "user@example.com"}
+
+    results = await tool_executor.execute_multiple_tools(
+        tool_calls=[
+            _llm_tool_call(
+                "launch-1",
+                LAUNCH_TOOL_NAME,
+                '{"workspace": "Research", "model": "gpt-4o", "prompt": "go"}',
+            ),
+            _llm_tool_call("discover-1", DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, "{}"),
+        ],
+        session_context=session_context,
+        tool_manager=_LaunchToolManager(factory),
+        skip_approval=True,
+    )
+
+    by_id = {r.tool_call_id: r for r in results}
+    # Results still come back in the caller's order, whatever ran first.
+    assert [r.tool_call_id for r in results] == ["launch-1", "discover-1"]
+    assert by_id["discover-1"].success
+    assert by_id["launch-1"].success, by_id["launch-1"].content
+    assert "discover_launch_options" not in by_id["launch-1"].content
+    # The discovery really did publish into the context the launch read.
+    assert session_context["launch_discovery"]["workspaces"]
+
+    for service in factory.services:
+        service.release.set()

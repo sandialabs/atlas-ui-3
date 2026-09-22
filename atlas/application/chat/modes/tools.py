@@ -414,22 +414,28 @@ class ToolsModeRunner:
                     "tool_calls": [self._tool_call_dict(tc) for tc in tool_calls],
                 })
 
+                def _is_fresh(tc) -> bool:
+                    signature = self._tool_call_signature(tc)
+                    if signature not in executed_signatures:
+                        return True
+                    # A discovery call that has not yet produced options is
+                    # exempt from the anti-loop guard so the model can retry it.
+                    return (
+                        normalize_tool_name(signature[0]) == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+                        and not session_context.get("launch_discovery")
+                    )
+
+                fresh = [tc for tc in tool_calls if _is_fresh(tc)]
+                # The cached-result note belongs to exactly what is NOT being
+                # re-executed. Deriving it from ``_is_fresh`` rather than from
+                # ``executed_signatures`` alone is what keeps an exempted
+                # discovery retry's real content -- the options the launch needs
+                # -- from being replaced by that note (#949 review).
                 repeated_ids = {
                     self._tool_call_id(tc)
                     for tc in tool_calls
-                    if self._tool_call_signature(tc) in executed_signatures
+                    if not _is_fresh(tc)
                 }
-                fresh = [
-                    tc for tc in tool_calls
-                    if (
-                        self._tool_call_signature(tc) not in executed_signatures
-                        or (
-                            normalize_tool_name(self._tool_call_signature(tc)[0])
-                            == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
-                            and not session_context.get("launch_discovery")
-                        )
-                    )
-                ]
 
                 if not fresh:
                     # Anti-loop: the model is only repeating calls it already made.
