@@ -38,7 +38,8 @@ from atlas.modules.mcp_tools.atlas_server import (
 
 _DISCOVERY = {
     "workspaces": [{"id": "ws-1", "name": "Research"}],
-    "models": [{"name": "gpt-4o", "provider": "unknown", "model": "gpt-4o"}],
+    # Exactly the shape ``discover_launch_options`` publishes: a name only.
+    "models": [{"name": "gpt-4o"}],
 }
 
 WORKSPACE = {
@@ -200,6 +201,22 @@ async def test_launch_discovery_returns_authorized_workspaces_and_models():
     assert options["workspaces"] == [{"id": "ws-1", "name": "Research"}]
     assert options["models"] == [{"name": "gpt-4o"}]
     assert context["launch_discovery"] == options
+
+
+@pytest.mark.asyncio
+async def test_discovery_publishes_workspace_ids_and_bare_model_names():
+    """The tool description and the user guide promise exactly these keys.
+
+    A model option is a ``name`` and nothing else -- that name is what
+    ``atlas_launch`` takes as its ``model`` argument -- so anything claiming
+    discovery also reports a provider is wrong (#949 review).
+    """
+    factory = _Factory(lambda c: _ChatService(c))
+
+    options = await discover_launch_options({"user_email": "user@example.com"}, factory=factory)
+
+    assert all(set(m) == {"name"} for m in options["models"]), options["models"]
+    assert all(set(w) == {"id", "name"} for w in options["workspaces"]), options["workspaces"]
 
 
 @pytest.mark.asyncio
