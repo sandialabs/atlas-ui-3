@@ -1,0 +1,300 @@
+"""A run pauses -- and is resumable -- whichever path its request took.
+
+The agent loop publishes tool approval requests through the connection
+adapter, not the turn callback. Before ``RunRegistry.note_event`` only the
+turn callback (and a launched run's child connection) updated the registry,
+so a run started from the UI never reached ``waiting_for_input``: no "Needs
+approval" marker, no stored request, nothing to replay when the conversation
+was reopened, and the run sat until the approval timed out.
+"""
+
+
+import pytest
+from starlette.websockets import WebSocketState
+
+from atlas.application.chat.runs import RunRegistry, RunStatus
+from atlas.application.chat.runs import registry as registry_module
+from atlas.application.chat.runs.context import clear_current_run, set_current_run
+from atlas.infrastructure.transport.websocket_connection_adapter import (
+    WebSocketConnectionAdapter,
+)
+
+USER = "u@example.com"
+
+
+class _FakeWebSocket:
+    def __init__(self):
+        self.client_state = WebSocketState.CONNECTED
+        self.sent = []
+
+    async def send_json(self, data):
+        self.sent.append(data)
+
+
+@pytest.fixture
+def registry(monkeypatch):
+    reg = RunRegistry()
+    monkeypatch.setattr(registry_module, "_registry", reg)
+    yield reg
+    clear_current_run()
+
+
+def test_note_event_pauses_and_stores_the_request(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    frame = {"type": "tool_approval_request", "tool_call_id": "t1", "run_id": run.run_id}
+
+    registry.note_event(run.run_id, frame)
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert record.waiting_on == "tool_approval_request"
+    assert registry.pending_requests_for_conversation("c", USER) == [frame]
+
+
+def test_note_event_is_idempotent_for_the_same_request(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    seen = []
+    registry.add_listener(USER, lambda r: seen.append(r.status))
+    frame = {"type": "tool_approval_request", "tool_call_id": "t1"}
+
+    registry.note_event(run.run_id, frame)
+    registry.note_event(run.run_id, frame)
+
+    assert seen.count(RunStatus.WAITING_FOR_INPUT) == 1
+
+
+def test_note_event_clears_the_pause_when_the_tool_settles(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t1"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []
+
+
+def test_note_event_keeps_the_pause_when_a_sibling_tool_settles(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t2"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert record.pending_requests[-1]["tool_call_id"] == "t1"
+    assert registry.pending_requests_for_conversation("c", USER) == [
+        {"type": "tool_approval_request", "tool_call_id": "t1"}
+    ]
+
+
+def test_one_step_firing_two_approvals_stores_and_replays_both(registry):
+    """One agent step can fire several approval-gated tools in parallel; every
+    request needs its answer, so the replay cannot be a single slot."""
+    run = registry.start(conversation_id="c", user_email=USER)
+    r1 = {"type": "tool_approval_request", "tool_call_id": "t1", "arguments": {"a": 1}}
+    r2 = {"type": "tool_approval_request", "tool_call_id": "t2", "arguments": {"b": 2}}
+
+    registry.note_event(run.run_id, r1)
+    registry.note_event(run.run_id, r2)
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert registry.pending_requests_for_conversation("c", USER) == [r1, r2]
+
+
+def test_each_settle_clears_only_its_own_request(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t2"})
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t2"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert [r["tool_call_id"] for r in record.pending_requests] == ["t1"]
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t1"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []
+
+
+def test_an_unidentified_settle_among_several_clears_nothing(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t2"})
+
+    registry.note_event(run.run_id, {"type": "tool_error"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert len(record.pending_requests) == 2
+
+
+def test_resuming_the_run_clears_every_pending_request(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+    registry.note_event(run.run_id, {"type": "elicitation_request", "elicitation_id": "e1"})
+
+    registry.set_status(run.run_id, RunStatus.RUNNING)
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []
+
+
+def test_note_event_is_idempotent_across_distinct_requests(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    frame1 = {"type": "tool_approval_request", "tool_call_id": "t1"}
+    frame2 = {"type": "tool_approval_request", "tool_call_id": "t2"}
+
+    registry.note_event(run.run_id, frame1)
+    registry.note_event(run.run_id, frame1)
+    registry.note_event(run.run_id, frame2)
+    registry.note_event(run.run_id, frame2)
+
+    assert registry.pending_requests_for_conversation("c", USER) == [frame1, frame2]
+
+
+def test_note_event_matches_elicitation_ids(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "elicitation_request", "elicitation_id": "e1"})
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "elicitation_id": "e2"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "elicitation_id": "e1"})
+    assert registry.get(run.run_id).status == RunStatus.RUNNING
+
+
+def test_note_event_treats_an_unidentified_settle_as_clearing(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    registry.note_event(run.run_id, {"type": "tool_error"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []
+
+
+def test_note_event_leaves_a_run_with_no_pending_request_alone(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "t2"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.QUEUED
+    assert record.pending_requests == []
+
+
+def test_note_event_ignores_terminal_runs_and_garbage(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.cancel(run.run_id, USER)
+
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+    registry.note_event(run.run_id, "not a frame")
+    registry.note_event(None, {"type": "tool_approval_request"})
+
+    assert registry.get(run.run_id).status == RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_adapter_marks_the_current_run_waiting(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    ws = _FakeWebSocket()
+    adapter = WebSocketConnectionAdapter(ws, USER)
+    set_current_run(run.run_id, "c")
+
+    await adapter.send_json({"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert record.pending_requests[0]["run_id"] == run.run_id
+    assert record.pending_requests[0]["conversation_id"] == "c"
+    assert ws.sent[0]["run_id"] == run.run_id
+
+    await adapter.send_json({"type": "tool_complete", "tool_call_id": "t1"})
+    assert registry.get(run.run_id).status == RunStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_adapter_leaves_untracked_turns_alone(registry):
+    ws = _FakeWebSocket()
+    adapter = WebSocketConnectionAdapter(ws, USER)
+    clear_current_run()
+
+    await adapter.send_json({"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    assert ws.sent[0] == {"type": "tool_approval_request", "tool_call_id": "t1"}
+    assert registry.active_for_user(USER) == []
+
+
+@pytest.mark.asyncio
+async def test_adapter_bookkeeping_survives_a_dead_socket(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    ws = _FakeWebSocket()
+    ws.client_state = WebSocketState.DISCONNECTED
+    adapter = WebSocketConnectionAdapter(ws, USER)
+    set_current_run(run.run_id, "c")
+
+    await adapter.send_json({"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    assert ws.sent == []
+    assert registry.get(run.run_id).status == RunStatus.WAITING_FOR_INPUT
+
+
+def test_answering_one_of_two_requests_keeps_the_other(registry):
+    """One agent step can park two tools. Answering the first must not flip
+    the run to running -- that would drop the second's replayable request and
+    hide the "Needs approval" marker while its executor sits blocked."""
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t2"})
+
+    assert registry.answer_pending_request(run.run_id, tool_call_id="t1") is True
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert [r["tool_call_id"] for r in record.pending_requests] == ["t2"]
+    assert registry.pending_requests_for_conversation("c", USER) == [
+        {"type": "tool_approval_request", "tool_call_id": "t2"}
+    ]
+
+    assert registry.answer_pending_request(run.run_id, tool_call_id="t2") is True
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []
+
+
+def test_answering_an_unknown_request_leaves_the_pause_alone(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})
+
+    registry.answer_pending_request(run.run_id, tool_call_id="other")
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.WAITING_FOR_INPUT
+    assert [r["tool_call_id"] for r in record.pending_requests] == ["t1"]
+
+
+def test_answer_pending_request_ignores_a_run_not_waiting(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+
+    assert registry.answer_pending_request(run.run_id, tool_call_id="t1") is False
+    assert registry.get(run.run_id).status == RunStatus.QUEUED
+
+
+def test_answering_by_elicitation_id_clears_the_matching_request(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    registry.note_event(run.run_id, {"type": "elicitation_request", "elicitation_id": "e1"})
+
+    assert registry.answer_pending_request(run.run_id, elicitation_id="e1") is True
+
+    record = registry.get(run.run_id)
+    assert record.status == RunStatus.RUNNING
+    assert record.pending_requests == []

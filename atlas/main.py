@@ -31,7 +31,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -62,6 +62,7 @@ from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 from atlas.core.session_middleware import SessionMiddleware
+from atlas.core.user_identity import normalize_user_email
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
@@ -158,13 +159,6 @@ async def websocket_update_callback(websocket: WebSocket, message: dict):
         # server already sent its close frame).  Nothing to deliver -- the
         # disconnect handler owns cleanup.
         logger.debug("Websocket closed before update could be sent: %s", e)
-
-
-# Events that mean "the tool this run was paused on has settled". Used to clear
-# a stale waiting_for_input status; see the run update callback.
-_TOOL_SETTLED_EVENTS = frozenset(
-    {"tool_complete", "tool_error", "tool_interrupted", "tool_result"}
-)
 
 
 T = TypeVar("T")
@@ -759,6 +753,37 @@ def _record_run_conversation(connection_session, conversation_id) -> None:
         del known[:-_MAX_RUN_CONVERSATIONS]
 
 
+def _normalize_conversation_id(raw: Any) -> Optional[str]:
+    """The client's conversation id as every check on the chat path sees it.
+
+    Whitespace is stripped and anything that is not a non-empty string is
+    treated as absent, so a padded or malformed id cannot read as one value
+    to the ownership guard and another to run admission.
+    """
+    if not isinstance(raw, str):
+        return None
+    return raw.strip() or None
+
+
+def _run_title_from_frame(data: dict) -> Optional[str]:
+    """The run's title from the chat frame that admitted it.
+
+    Plain-text turns carry their prompt as ``content``; a multimodal turn
+    carries a list of parts, whose first text item names the run. Anything
+    else yields no title rather than raising at admission.
+    """
+    content = data.get("content")
+    if isinstance(content, str):
+        return content.strip() or None
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text.strip() or None
+    return None
+
+
 def forget_run_conversations(session) -> None:
     """Drop the record when the user navigates away.
 
@@ -841,7 +866,16 @@ def _resume_waiting_run(run_registry, user_email: str, data: dict) -> None:
             return
         record = waiting[0]
     if record.status == RunStatus.WAITING_FOR_INPUT:
-        run_registry.set_status(record.run_id, RunStatus.RUNNING)
+        # Resume only the request that was answered. With several tools
+        # paused in parallel -- one agent step, several approval-gated
+        # calls -- the others still need their answers: going straight back
+        # to ``running`` would drop their replayable requests and hide the
+        # "Needs approval" marker while their executors sit blocked.
+        run_registry.answer_pending_request(
+            record.run_id,
+            tool_call_id=data.get("tool_call_id"),
+            elicitation_id=data.get("elicitation_id"),
+        )
 
 
 async def cleanup_disconnected_session(
@@ -1575,7 +1609,35 @@ async def websocket_endpoint(websocket: WebSocket):
                 # loop, exactly as #824 defines -- never started as a second
                 # concurrent turn, because two turns writing the same history
                 # would interleave their writes.
-                frame_conversation_id = data.get("conversation_id")
+                # Normalize the client's conversation id once, before any
+                # check reads it: the ownership guard below and the admission
+                # further down must see the same value, or padding the id
+                # would slip a frame past the guard and into a run keyed by
+                # the stripped id.
+                frame_conversation_id = _normalize_conversation_id(data.get("conversation_id"))
+                data["conversation_id"] = frame_conversation_id
+                # A conversation id that another user's run is executing
+                # under is not this user's to name. The stored-record check
+                # happens later in the service, but a tracked run's
+                # conversation is not stored until its turn ends: a turn that
+                # claimed the id in that window would be saved first, and the
+                # running owner's save would then be rejected as belonging to
+                # someone else. Refuse it here, before a run is admitted.
+                if frame_conversation_id and run_registry.active_for_conversation_any_owner(
+                    frame_conversation_id
+                ) not in (None, normalize_user_email(user_email)):
+                    logger.warning(
+                        "WS refused a turn naming conversation=%s while another "
+                        "user's run is executing under it",
+                        sanitize_for_logging(frame_conversation_id),
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Conversation not found",
+                        "error_type": "authorization",
+                        "conversation_id": frame_conversation_id,
+                    })
+                    continue
                 tracked_run = run_registry.active_for_conversation(
                     frame_conversation_id, user_email
                 )
@@ -1733,7 +1795,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # conversation -- from background execution entirely. Mint one
                 # here instead and tell the client (see `run_started` below);
                 # the turn is then saved under the same id the run is keyed by.
-                turn_conversation_id = (data.get("conversation_id") or "").strip() or None
+                turn_conversation_id = frame_conversation_id
                 if turn_conversation_id is None and is_agent_turn:
                     turn_conversation_id = str(uuid4())
                 if turn_conversation_id:
@@ -1753,6 +1815,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             conversation_id=turn_conversation_id,
                             user_email=user_email,
                             steering=steering_channel,
+                            # Multimodal turns carry a list as `content`; the
+                            # title wants the first text part, never a crash
+                            # at admission.
+                            title=_run_title_from_frame(data),
                         )
                     except ConcurrencyLimitError as e:
                         await websocket.send_json({
@@ -1814,33 +1880,15 @@ async def websocket_endpoint(websocket: WebSocket):
                         # working: reflect that in its status so the client can
                         # show "waiting for you" on a conversation the user is
                         # not currently looking at.
-                        message_type_out = message.get("type") if isinstance(message, dict) else None
-                        if message_type_out in ("tool_approval_request", "elicitation_request"):
-                            run_registry.set_status(
-                                _run_id,
-                                RunStatus.WAITING_FOR_INPUT,
-                                waiting_on=message_type_out,
-                            )
-                            # Keep the frame itself. If the user is looking at
-                            # another conversation (or is not here at all) the
-                            # client discards it, and nothing else holds the
-                            # request id and arguments needed to answer it.
-                            run_registry.set_pending_request(
-                                _run_id, tag_run_event(message, _run_id, _conv)
-                            )
-                        elif message_type_out in _TOOL_SETTLED_EVENTS:
-                            # The tool the run was paused on has settled one way
-                            # or another. Resolving the pause here as well as on
-                            # the response frame covers the case where nobody
-                            # ever answers and the request times out -- the run
-                            # carries on working, and would otherwise be stuck
-                            # showing "Needs approval" for the rest of its life.
-                            record = run_registry.get(_run_id)
-                            if record is not None and record.status == RunStatus.WAITING_FOR_INPUT:
-                                run_registry.set_status(_run_id, RunStatus.RUNNING)
-                        await websocket_update_callback(
-                            websocket, tag_run_event(message, _run_id, _conv)
-                        )
+                        # Keep the frame itself when it asks for input. If the
+                        # user is looking at another conversation (or is not
+                        # here at all) the client discards it, and nothing else
+                        # holds the request id and arguments needed to answer
+                        # it. A settling tool clears a stale pause -- the case
+                        # where nobody answers and the request times out.
+                        tagged = tag_run_event(message, _run_id, _conv)
+                        run_registry.note_event(_run_id, tagged)
+                        await websocket_update_callback(websocket, tagged)
 
                 # Bind the per-turn values as defaults: the loop reassigns them
                 # on the next message, and a still-running task must keep the
@@ -2091,17 +2139,43 @@ async def websocket_endpoint(websocket: WebSocket):
                             except asyncio.CancelledError:
                                 pass
 
+                # Announce the run before its task can emit anything. The
+                # task's first frames are tagged with the run's conversation
+                # id, and a client that has not yet adopted that id (a new
+                # chat has none) would file them as background activity and
+                # drop them from the transcript it is showing.
+                if run_record is not None:
+                    try:
+                        await websocket.send_json({
+                            "type": "run_started",
+                            "run_id": run_record.run_id,
+                            "conversation_id": run_record.conversation_id,
+                            "title": run_record.title,
+                            # Lets the client tell a model-launched child
+                            # (atlas_launch) from a run the user started --
+                            # auto-approve is scoped to the latter.
+                            "parent_run_id": run_record.parent_run_id,
+                        })
+                    except Exception:
+                        # The run was admitted but its task has not started:
+                        # nothing will ever execute it. Leaving the record
+                        # running would hold one of the user's concurrency
+                        # slots until the wall-clock sweeper reaps it, so
+                        # mark the failure now. Re-raise so the disconnect
+                        # path still tears the connection down normally; the
+                        # terminal record makes ``mark_detached`` a no-op.
+                        run_registry.set_status(
+                            run_record.run_id,
+                            RunStatus.FAILED,
+                            error="Connection closed before the run started",
+                        )
+                        raise
                 # Start chat handling in background
                 chat_task = asyncio.create_task(handle_chat_guarded())
                 if run_record is None:
                     active_chat_task["task"] = chat_task
                 else:
                     run_registry.attach_task(run_record.run_id, chat_task)
-                    await websocket.send_json({
-                        "type": "run_started",
-                        "run_id": run_record.run_id,
-                        "conversation_id": run_record.conversation_id,
-                    })
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection).
@@ -2302,8 +2376,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=user_email,
                 )
 
-                # The run that was paused on this approval is working again.
-                _resume_waiting_run(run_registry, user_email, data)
+                if result:
+                    # The run that was paused on this approval is working
+                    # again -- or still paused on its other parallel tools.
+                    _resume_waiting_run(run_registry, user_email, data)
+                else:
+                    # The response was refused (unknown id, or a user who
+                    # does not own the request). Resuming the run here would
+                    # clear a pause the answer never addressed, so say so
+                    # instead of silently ignoring the frame.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "No matching pending tool approval",
+                        "error_type": "unknown_tool_approval",
+                        "tool_call_id": tool_call_id,
+                    })
 
                 logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the approval will unblock the waiting tool execution
@@ -2357,7 +2444,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_email=user_email,
                 )
 
-                _resume_waiting_run(run_registry, user_email, data)
+                if result:
+                    _resume_waiting_run(run_registry, user_email, data)
+                else:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "No matching pending elicitation",
+                        "error_type": "unknown_elicitation",
+                        "elicitation_id": elicitation_id,
+                    })
 
                 logger.info(f"Elicitation response handled: result={sanitize_for_logging(result)}")
                 # No response needed - the elicitation will unblock the waiting tool execution

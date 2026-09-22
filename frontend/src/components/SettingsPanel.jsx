@@ -701,7 +701,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               </button>
             </div>
             <p className="text-sm text-gray-400">
-              When enabled, tools that don't require admin approval will execute automatically without prompting.
+              When enabled, tools that don't require admin approval will execute automatically without prompting --
+              including tool calls in conversations you are not currently viewing.
               Tools that require admin approval will still prompt for confirmation.
             </p>
             {!ctxSettings?.autoApproveTools && (

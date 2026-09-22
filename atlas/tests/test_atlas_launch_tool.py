@@ -660,6 +660,26 @@ async def test_concurrent_launches_in_one_step_cannot_both_pass_a_cap_of_one():
 
 
 @pytest.mark.asyncio
+async def test_a_launched_child_record_carries_its_prompt_as_title():
+    """The history list names an unsaved run by its title; a child's prompt
+    is at hand at admission, so the record must carry it (#956 review)."""
+    registry = _install_registry()
+    factory = _Factory(lambda c: _ChatService(c))
+
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "summarize the corpus"},
+        {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
+        factory=factory,
+    )
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+
+    child = registry.get(handle["run_id"])
+    assert child.title == "summarize the corpus"
+    service.release.set()
+
+
+@pytest.mark.asyncio
 async def test_stopping_a_finished_parent_still_cancels_a_running_child():
     """The common case: the parent turn ends while the child keeps working."""
     registry = _install_registry()

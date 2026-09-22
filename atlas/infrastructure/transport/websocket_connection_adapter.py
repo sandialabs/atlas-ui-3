@@ -6,7 +6,8 @@ from typing import Any, Dict, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from atlas.application.chat.runs.context import stamp_with_current_run
+from atlas.application.chat.runs.context import get_current_run, stamp_with_current_run
+from atlas.application.chat.runs.registry import get_run_registry
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,15 @@ class WebSocketConnectionAdapter:
         # is what stops two concurrent runs' output from being indistinguishable
         # at the client. A no-op when no run owns the current context.
         data = stamp_with_current_run(data)
+        # Same chokepoint, same reason: an approval request the agent loop
+        # publishes here pauses the run, and the registry has to know that
+        # (and keep the frame) whether or not anyone is looking -- otherwise
+        # a run started from the UI never shows "Needs approval" and its
+        # request can never be replayed. Launched runs and the turn callback
+        # do the same; the registry ignores repeats.
+        run = get_current_run()
+        if run is not None:
+            get_run_registry().note_event(run.run_id, data)
 
         if self.websocket.client_state != WebSocketState.CONNECTED:
             logger.debug("Dropping %s; websocket not connected", data.get("type"))

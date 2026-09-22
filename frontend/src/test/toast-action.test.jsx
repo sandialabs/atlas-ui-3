@@ -26,21 +26,27 @@ const renderWithToasts = (onUndo) =>
   )
 
 describe('toast actions', () => {
-  it('renders the action label and runs it on click', () => {
+  it('renders the action label and runs it on click', async () => {
     const onUndo = vi.fn()
     renderWithToasts(onUndo)
     act(() => screen.getByText('go').click())
 
     const action = screen.getByTestId('toast-action')
     expect(action.textContent).toBe('Undo')
-    act(() => action.click())
+    await act(async () => {
+      action.click()
+    })
     expect(onUndo).toHaveBeenCalledTimes(1)
   })
 
-  it('dismisses the toast after the action runs', () => {
+  it('dismisses the toast after the action runs', async () => {
     renderWithToasts(vi.fn())
     act(() => screen.getByText('go').click())
-    act(() => screen.getByTestId('toast-action').click())
+    // The action handler awaits the callback before dismissing, so the
+    // dismiss lands a microtask later -- flush it inside act().
+    await act(async () => {
+      screen.getByTestId('toast-action').click()
+    })
     expect(screen.queryByTestId('toast-action')).toBeNull()
   })
 

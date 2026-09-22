@@ -21,6 +21,9 @@ import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
+// How long to wait for a `conversation_saved` after a joined run ends before
+// reloading anyway (a run that failed before saving never sends one).
+const RUN_END_RELOAD_GRACE_MS = 2500
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Generate cryptographically secure random string
@@ -79,6 +82,22 @@ export const ChatProvider = ({ children }) => {
 	// ends. Cleared on the terminal agent events (see websocketHandlers) and on
 	// an explicit stop.
 	const [isAgentRunning, setIsAgentRunning] = useState(false)
+	// Issue #884: a conversation opened while its run was still executing.
+	// The run streams into the view it started in, so this one is stale by
+	// construction; once the run ends the Sidebar reloads it from the store.
+	const joinedRunConversationRef = useRef(null)
+	const joinedRunTimerRef = useRef(null)
+	const [runEndedConversationId, setRunEndedConversationId] = useState(null)
+	const clearRunEndedConversation = useCallback(() => setRunEndedConversationId(null), [])
+	const finishJoinedRun = useCallback((id) => {
+		if (!id || joinedRunConversationRef.current !== id) return
+		joinedRunConversationRef.current = null
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
+		setRunEndedConversationId(id)
+	}, [])
 	const [isSynthesizing, setIsSynthesizing] = useState(false)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
@@ -400,11 +419,82 @@ export const ChatProvider = ({ children }) => {
 			streamToken,
 			streamEnd,
 			getVisibleConversationId: () => activeConversationIdRef.current,
-			onRunStatus: runs.handleRunFrame,
+			onRunStatus: (data) => {
+				if (data?.type === 'run_started' && !activeConversationIdRef.current) {
+					// The run was just admitted for the chat on screen, which has no
+					// saved conversation yet. Remember its first prompt so the
+					// history list can name it after the user navigates away. The
+					// server title wins when it has one (an attachment-only prompt
+					// produces no client-side title to fall back on).
+					const firstUser = latestMessagesRef.current.find(m => m.role === 'user')
+					data = { ...data, title: data.title || (firstUser?.content || '').substring(0, 200) || null }
+				}
+				if (data?.type === 'background_activity' && data.frame?.type === 'tool_approval_request') {
+					// Auto-approve is a client behaviour, and the row that performs
+					// it only renders for the conversation on screen. A background
+					// run would otherwise sit on every tool call until the user
+					// happened to open it -- the opposite of running unattended.
+					// Scoped to runs the user started: a child conversation the
+					// model launched (atlas_launch) runs on model-chosen
+					// arguments, and an on/off toggle must not silently broaden
+					// to approving those unattended.
+					const frame = data.frame
+					const childRun = runs.getRun(frame.conversation_id)?.parent_run_id
+					if (
+						settingsRef.current?.autoApproveTools &&
+						!frame.admin_required &&
+						!childRun &&
+						sendMessageRef.current
+					) {
+						const sent = sendMessageRef.current({
+							type: 'tool_approval_response',
+							tool_call_id: frame.tool_call_id,
+							approved: true,
+							arguments: frame.arguments,
+							run_id: frame.run_id,
+							conversation_id: frame.conversation_id,
+						})
+						if (!sent) {
+							// The answer would be dropped; leaving the run parked with
+							// no signal turns an unattended run into a silent stall.
+							toast.error('Could not auto-approve a background tool call: not connected')
+						}
+					}
+				}
+				runs.handleRunFrame(data)
+			},
+			// The joined conversation's turn is on disk: reload now rather than
+			// on the run's terminal status, which a stopped run reports before
+			// its interrupted turn is persisted.
+			onConversationSaved: finishJoinedRun,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, runs.handleRunFrame])
+
+	// Refs so the message handler above (rebuilt only when its deps change)
+	// sees the current settings and socket without re-subscribing per change.
+	const settingsRef = useRef(settings)
+	settingsRef.current = settings
+	const sendMessageRef = useRef(sendMessage)
+	sendMessageRef.current = sendMessage
+
+	// The run a joined conversation was opened under has ended. Its save
+	// normally arrives first (see onConversationSaved); this is the fallback
+	// for a run that ended without one, after a grace period so a stop --
+	// which reports `cancelled` before the interrupted turn is written --
+	// does not reload a transcript the save is about to change.
+	useEffect(() => {
+		const id = joinedRunConversationRef.current
+		if (!id || joinedRunTimerRef.current) return
+		const run = runs.runsByConversation[id]
+		if (run && !isRunActive(run)) {
+			joinedRunTimerRef.current = setTimeout(() => {
+				joinedRunTimerRef.current = null
+				finishJoinedRun(id)
+			}, RUN_END_RELOAD_GRACE_MS)
+		}
+	}, [runs.runsByConversation, finishJoinedRun])
 
 	// Ask the server which runs are still in flight whenever the socket comes
 	// up. This is what makes a run survive the browser closing in a way the
@@ -882,6 +972,16 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		resetMessages()
 		setIsThinking(false)
 		setIsSynthesizing(false)
+		// The visible turn's flags belong to the conversation being left. A
+		// tracked run keeps going, but its completion frames are filed as
+		// background activity and never reach the flag clears, so the fresh
+		// chat would otherwise inherit a Stop button and a busy indicator.
+		setIsAgentRunning(false)
+		joinedRunConversationRef.current = null
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
@@ -935,8 +1035,28 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Whatever was on offer refers to a chat that is no longer on screen.
 		invalidateUndoOffer()
 
-		// Clear current state
+		// Clear current state. The per-turn flags and the token buffer belong
+		// to the conversation being left: a run there continues (issue #884),
+		// but nothing it emits from here on is applied to this view, so the
+		// flags would never clear on their own and a buffered token fragment
+		// would be flushed into the transcript loaded below.
+		cleanupStreamState()
+		streamEnd()
 		resetMessages()
+		setIsThinking(false)
+		setIsSynthesizing(false)
+		setIsAgentRunning(false)
+		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
+		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
+		// Opened while its run is executing: the live stream is not replayed,
+		// so remember to reload from the store once the run ends.
+		if (joinedRunTimerRef.current) {
+			clearTimeout(joinedRunTimerRef.current)
+			joinedRunTimerRef.current = null
+		}
+		joinedRunConversationRef.current = isRunActive(runs.getRun(conversationData.id))
+			? conversationData.id
+			: null
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -986,7 +1106,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// conversation's workspace rather than whatever is active at save time.
 		conversationWorkspaceIdRef.current = meta.workspace_id || null
 		restoreWorkspace(meta.workspace_id)
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer])
+		// Stable members only: `runs` and `agent` are unmemoised objects that a
+		// new token frame rebuilds, so the objects themselves would tear this
+		// callback down -- and re-subscribe everything that depends on it -- on
+		// every streaming frame.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun])
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:
@@ -1312,6 +1437,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Parallel conversation runs (issue #884): conversation_id -> run record,
 		// including conversations that are not on screen.
 		runsByConversation: runs.runsByConversation,
+		backgroundSaves: runs.backgroundSaves,
+		runEndedConversationId,
+		clearRunEndedConversation,
 		// Whether the conversation on screen has work in flight. Derived from
 		// the run snapshot as well as the transient streaming flags, so a user
 		// who reopens the browser onto a still-running conversation gets the
