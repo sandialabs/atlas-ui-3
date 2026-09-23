@@ -27,6 +27,7 @@ class AppFactory:
 
         # MCP tools manager
         self.mcp_tools = MCPToolManager()
+        self.mcp_tools.app_factory = self
 
         # Only initialize general RAG services when the RAG feature flag is enabled
         if self.config_manager.app_settings.feature_rag_enabled:

@@ -15,6 +15,7 @@ export const CANVAS_TOOL = 'atlas_canvas'
 export const SLEEP_TOOL = 'atlas_sleep'
 export const SEARCH_TOOL = 'atlas_search'
 export const DISCOVER_TOOL = 'atlas_discover_sources'
+export const DISCOVER_LAUNCH_OPTIONS_TOOL = 'atlas_discover_launch_options'
 
 const LEGACY_TOOL_ALIASES = {
   canvas_canvas: CANVAS_TOOL,

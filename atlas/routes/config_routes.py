@@ -9,21 +9,24 @@ from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
-from atlas.routes.files_routes import get_file_upload_limit_config
 from atlas.modules.config.settings import configured_agent_max_steps
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
     ATLAS_SERVER_NAME,
     ATLAS_TOOL_SCHEMAS,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
     GET_RUNS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
     RESULT_TOOL_NAME,
     SEARCH_TOOL_NAME,
     launch_tool_enabled,
+)
+from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
 )
 from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
+from atlas.routes.files_routes import get_file_upload_limit_config
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +77,12 @@ def _atlas_tools_info(
             continue
         if full_name in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
             continue
-        if full_name in (LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME) and not launch_enabled:
+        if full_name in (
+            DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+            LAUNCH_TOOL_NAME,
+            GET_RUNS_TOOL_NAME,
+            RESULT_TOOL_NAME,
+        ) and not launch_enabled:
             continue
         function = schema["function"]
         tool_name = full_name.removeprefix(f"{ATLAS_SERVER_NAME}_")

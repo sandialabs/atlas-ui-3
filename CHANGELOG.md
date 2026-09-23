@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #949 - 2026-09-16
+- Add `atlas_discover_launch_options` so sub-conversation launches use authorized, current workspaces and model names, and block clearly when discovery fails or returns no valid options. Deployments with `FEATURE_ATLAS_LAUNCH_ENABLED` should allow the agent to use the new discovery step before launching.
+
 ## [0.6.0] - 2026-09-22
 
 ### PR #963 - 2026-09-20

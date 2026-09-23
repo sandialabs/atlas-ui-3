@@ -46,7 +46,11 @@ from atlas.application.chat.runs.registry import (
     get_run_registry,
 )
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.core.model_access import ModelAccessDecision, check_model_access
+from atlas.core.model_access import (
+    ModelAccessDecision,
+    check_model_access,
+    filter_authorized_models,
+)
 from atlas.domain.messages.models import ToolResult
 from atlas.modules.mcp_tools.atlas_server import (
     GET_RUNS_TOOL_NAME,
@@ -56,6 +60,7 @@ from atlas.modules.mcp_tools.atlas_server import (
 
 __all__ = [
     "LaunchRefused",
+    "execute_launch_discovery_tool",
     "execute_launch_tool",
     "launch_sub_conversation",
     "launch_tool_enabled",
@@ -139,6 +144,102 @@ async def resolve_model(config_manager: Any, model: str, user_email: str) -> str
         f"Model '{model}' is not available to you. Choose one of the models "
         "offered in this conversation."
     )
+
+
+async def discover_launch_options(
+    context: Optional[Dict[str, Any]],
+    *,
+    factory: Any = None,
+) -> Dict[str, Any]:
+    """Return and remember the caller's currently usable launch options."""
+    if factory is None:
+        from atlas.infrastructure.app_factory import app_factory as factory
+
+    if context is not None and isinstance(context.get("launch_discovery"), dict):
+        context["launch_discovery"].clear()
+    config_manager = factory.get_config_manager()
+    app_settings = getattr(config_manager, "app_settings", None)
+    if not launch_tool_enabled(app_settings):
+        raise LaunchRefused(
+            "Launch discovery is unavailable because sub-conversations are disabled."
+        )
+    user_email = (context or {}).get("user_email")
+    if not user_email:
+        raise LaunchRefused("Launch discovery requires an authenticated user.")
+    repository = getattr(factory, "workspace_repository", None)
+    if repository is None:
+        raise LaunchRefused("Launch discovery failed: workspaces are not configured.")
+    try:
+        workspaces = await asyncio.to_thread(repository.list_workspaces, user_email) or []
+    except Exception as exc:
+        logger.warning("Launch option discovery failed for workspaces", exc_info=True)
+        raise LaunchRefused("Launch discovery failed while loading workspaces. Try again.") from exc
+    try:
+        models = await filter_authorized_models(
+            getattr(getattr(config_manager, "llm_config", None), "models", None) or {},
+            user_email,
+        )
+    except Exception as exc:
+        logger.warning("Launch option discovery failed for models", exc_info=True)
+        raise LaunchRefused("Launch discovery failed while loading models. Try again.") from exc
+    workspace_options = [
+        {"id": str(item.get("id")), "name": str(item.get("name"))}
+        for item in workspaces
+        if item.get("id") and item.get("name")
+    ]
+    model_options = [{"name": name} for name in sorted(models)]
+    if not workspace_options or not model_options:
+        missing = []
+        if not workspace_options:
+            missing.append("workspaces")
+        if not model_options:
+            missing.append("LLM models")
+        raise LaunchRefused(
+            "Launch discovery returned no valid "
+            + " or ".join(missing)
+            + ". Configure an available option before launching."
+        )
+    options = {
+        "workspaces": workspace_options,
+        "models": model_options,
+    }
+    if context is not None:
+        state = context.get("launch_discovery")
+        if state is None:
+            context["launch_discovery"] = options
+        else:
+            state.clear()
+            state.update(options)
+    return options
+
+
+def _require_discovered_option(context: Optional[Dict[str, Any]], workspace: str, model: str) -> None:
+    if context is None or "launch_discovery" not in context:
+        raise LaunchRefused(
+            "Run atlas_discover_launch_options successfully before atlas_launch; "
+            "launch is blocked until current workspaces and LLM models are discovered."
+        )
+    options = context.get("launch_discovery") or {}
+    workspaces = options.get("workspaces")
+    models = options.get("models")
+    if not workspaces or not models:
+        raise LaunchRefused(
+            "Run atlas_discover_launch_options successfully before atlas_launch; "
+            "launch is blocked until current workspaces and LLM models are discovered."
+        )
+    workspace_names = {str(item.get("name", "")).casefold() for item in workspaces}
+    workspace_ids = {str(item.get("id", "")) for item in workspaces}
+    model_names = {str(item.get("name", "")) for item in models}
+    if workspace.casefold() not in workspace_names and workspace not in workspace_ids:
+        raise LaunchRefused(
+            f"Workspace '{workspace}' was not returned by the latest launch discovery. "
+            "Run atlas_discover_launch_options again and use a returned workspace."
+        )
+    if model not in model_names:
+        raise LaunchRefused(
+            f"Model '{model}' was not returned by the latest launch discovery. "
+            "Run atlas_discover_launch_options again and use a returned model."
+        )
 
 
 async def resolve_child_tools(
@@ -455,6 +556,8 @@ async def launch_sub_conversation(
             f"{MAX_PROMPT_CHARS}. Summarize the task for the sub-conversation."
         )
 
+    _require_discovered_option(context, workspace_name, model_name)
+
     repository = getattr(factory, "workspace_repository", None)
     if repository is None:
         raise LaunchRefused(
@@ -568,6 +671,28 @@ async def launch_sub_conversation(
         # on those tools; the model should say so rather than promise a result.
         "tools_needing_approval": admin_gated,
     }
+
+
+async def execute_launch_discovery_tool(
+    tool_call: Any, context: Optional[Dict[str, Any]]
+) -> ToolResult:
+    """Discover launch choices and return a model-readable failure when blocked."""
+    try:
+        options = await discover_launch_options(
+            context, factory=(context or {}).get("factory")
+        )
+    except LaunchRefused as exc:
+        return ToolResult(
+            tool_call_id=getattr(tool_call, "id", None),
+            content=str(exc),
+            success=False,
+            error=str(exc),
+        )
+    return ToolResult(
+        tool_call_id=getattr(tool_call, "id", None),
+        content=json.dumps(options, sort_keys=True),
+        success=True,
+    )
 
 
 def _scoped_children(context: Optional[Dict[str, Any]]) -> List[Any]:
@@ -698,7 +823,13 @@ async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]])
     if not isinstance(arguments, dict):
         arguments = {}
     try:
-        handle = await launch_sub_conversation(arguments, context)
+        # Honor the app factory the tool manager forwarded on the context, the
+        # way the discovery tool already does -- the two handlers have to read
+        # the same application instance or they disagree about which
+        # workspaces exist.
+        handle = await launch_sub_conversation(
+            arguments, context, factory=(context or {}).get("factory")
+        )
     except LaunchRefused as e:
         return ToolResult(
             tool_call_id=getattr(tool_call, "id", None),

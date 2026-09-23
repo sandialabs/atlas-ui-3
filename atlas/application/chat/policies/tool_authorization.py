@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 from atlas.core.auth import is_user_in_group
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
     GET_RUNS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
@@ -70,6 +71,16 @@ class ToolAuthorizationService:
 
         try:
             user = user_email or ""
+            resolved_tools = [normalize_tool_name(tool) for tool in selected_tools]
+            if (
+                LAUNCH_TOOL_NAME in resolved_tools
+                and DISCOVER_LAUNCH_OPTIONS_TOOL_NAME not in resolved_tools
+            ):
+                selected_tools = list(selected_tools)
+                selected_tools.insert(
+                    resolved_tools.index(LAUNCH_TOOL_NAME),
+                    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+                )
 
             # Get authorized servers for this user
             authorized_servers = await self._get_authorized_servers(user)
@@ -89,7 +100,12 @@ class ToolAuthorizationService:
                     if sleep_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue
-                if resolved in (LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME):
+                if resolved in (
+                    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+                    LAUNCH_TOOL_NAME,
+                    GET_RUNS_TOOL_NAME,
+                    RESULT_TOOL_NAME,
+                ):
                     if launch_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue
