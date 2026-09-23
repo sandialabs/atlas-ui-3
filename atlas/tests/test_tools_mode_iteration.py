@@ -743,3 +743,69 @@ async def test_the_requesting_user_reaches_the_schema_scoping_api_non_streaming(
 
     args, kwargs = runner.tool_manager.get_tools_schema.call_args
     assert (kwargs.get("user_email") or (args[1] if len(args) > 1 else None)) == "owner@example.gov"
+
+
+@pytest.mark.asyncio
+async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note():
+    """A failed ``atlas_discover_launch_options`` is exempt from the anti-loop
+    guard so the model can retry it. The exemption is only worth having if the
+    retry's result actually reaches the model: the launch that follows needs the
+    discovered workspaces and models. Before #949's review fix the retry was
+    re-executed but its tool message was overwritten with the
+    "identical tool call already executed" note, so the model never saw the
+    options and every subsequent launch kept being refused.
+    """
+    from atlas.modules.mcp_tools.atlas_server import DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+
+    def discovery_call(cid):
+        return _tc(cid, DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, "{}")
+    llm = ScriptedToolsLLM(turns=[
+        ("discovering", [discovery_call("d1")]),
+        # The identical call again -- same name, same arguments.
+        ("retrying discovery", [discovery_call("d2")]),
+        ("Here are your options.", None),
+    ])
+    runner = _runner(llm, _config(max_extra_rounds=3))
+
+    attempts = {"n": 0}
+    options_payload = '{"workspaces": [{"name": "Research"}], "models": [{"name": "gpt-4o"}]}'
+
+    async def _execute_multiple(tool_calls, session_context, tool_manager,
+                                update_callback=None, config_manager=None, skip_approval=False):
+        results = []
+        for tc in tool_calls:
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                # First discovery fails and publishes nothing.
+                results.append(ToolResult(
+                    tool_call_id=tc.id, content="discovery failed", success=False))
+            else:
+                session_context["launch_discovery"] = {
+                    "workspaces": [{"name": "Research"}],
+                    "models": [{"name": "gpt-4o"}],
+                }
+                results.append(ToolResult(
+                    tool_call_id=tc.id, content=options_payload, success=True))
+        return results
+
+    with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+        mock_te.execute_multiple_tools = _execute_multiple
+        mock_te.build_files_manifest = MagicMock(return_value=None)
+        await runner.run_streaming(
+            session=_session(),
+            model="test-model",
+            messages=[{"role": "user", "content": "launch a sub-conversation"}],
+            selected_tools=[DISCOVER_LAUNCH_OPTIONS_TOOL_NAME],
+        )
+
+    # The retry really was executed a second time.
+    assert attempts["n"] == 2, "the exempted discovery retry was not re-executed"
+
+    # The messages the model saw on its third turn must carry the options.
+    final_messages = llm.seen_messages[-1]
+    retry_message = next(
+        m for m in final_messages
+        if m.get("role") == "tool" and m.get("tool_call_id") == "d2"
+    )
+    assert retry_message["content"] == options_payload
+    assert "already executed" not in retry_message["content"]

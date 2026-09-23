@@ -74,9 +74,9 @@ function ToastItem({ toast, onDismiss }) {
         <button
           type="button"
           data-testid="toast-action"
-          onClick={() => {
+          onClick={async () => {
             try {
-              action.onClick?.()
+              await action.onClick?.()
             } finally {
               onDismiss()
             }
@@ -269,4 +269,3 @@ function DialogHost({ dialog, onClose }) {
     </div>
   )
 }
-

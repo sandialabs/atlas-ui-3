@@ -19,7 +19,11 @@ from atlas.domain.sessions.models import Session
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
-from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
+from atlas.modules.mcp_tools.atlas_server import (
+    CANVAS_TOOL_NAME,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+    normalize_tool_name,
+)
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..preprocessors.message_builder import build_session_context
@@ -28,8 +32,8 @@ from ..utilities.agent_digest import build_tool_digest
 from ..utilities.citation_publishing import attach_citations, publish_citations
 from ..utilities.dropped_calls import publish_dropped_call_warning
 from ..utilities.tool_history import ToolCallRecorder
-from ..utilities.tool_selection import normalize_selected_tools
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
+from ..utilities.tool_selection import normalize_selected_tools
 from .streaming_helpers import stream_and_accumulate
 
 logger = logging.getLogger(__name__)
@@ -435,15 +439,28 @@ class ToolsModeRunner:
                     "tool_calls": [self._tool_call_dict(tc) for tc in tool_calls],
                 })
 
+                def _is_fresh(tc) -> bool:
+                    signature = self._tool_call_signature(tc)
+                    if signature not in executed_signatures:
+                        return True
+                    # A discovery call that has not yet produced options is
+                    # exempt from the anti-loop guard so the model can retry it.
+                    return (
+                        normalize_tool_name(signature[0]) == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+                        and not session_context.get("launch_discovery")
+                    )
+
+                fresh = [tc for tc in tool_calls if _is_fresh(tc)]
+                # The cached-result note belongs to exactly what is NOT being
+                # re-executed. Deriving it from ``_is_fresh`` rather than from
+                # ``executed_signatures`` alone is what keeps an exempted
+                # discovery retry's real content -- the options the launch needs
+                # -- from being replaced by that note (#949 review).
                 repeated_ids = {
                     self._tool_call_id(tc)
                     for tc in tool_calls
-                    if self._tool_call_signature(tc) in executed_signatures
+                    if not _is_fresh(tc)
                 }
-                fresh = [
-                    tc for tc in tool_calls
-                    if self._tool_call_signature(tc) not in executed_signatures
-                ]
 
                 if not fresh:
                     # Anti-loop: the model is only repeating calls it already made.
