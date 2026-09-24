@@ -36,6 +36,9 @@ class RagModeRunner:
         """
         self.llm = llm
         self.event_publisher = event_publisher
+        # Opt-in (CLI only): re-raise stream failures instead of synthesizing
+        # an error message, so `atlas-chat` exits non-zero on LLM failures.
+        self.raise_on_stream_error = False
 
     async def run(
         self,
@@ -106,6 +109,7 @@ class RagModeRunner:
                 ),
                 context_label="RAG",
                 partial_sink=partial,
+                raise_on_stream_error=self.raise_on_stream_error,
             )
         except asyncio.CancelledError:
             if partial:

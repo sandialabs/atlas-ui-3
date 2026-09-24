@@ -43,9 +43,8 @@ jobs:
         bash scripts/check-docs.sh
 
     - name: Install uv
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+      # Pinned to a commit SHA so the install step is immutable.
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
     - name: Install frontend dependencies
       run: |

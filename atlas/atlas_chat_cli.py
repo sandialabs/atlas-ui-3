@@ -391,6 +391,7 @@ async def run(args: argparse.Namespace) -> int:
             user_email=args.user_email,
             session_id=None,
             streaming=streaming,
+            raise_on_llm_error=True,
         )
 
         if args.json_output:

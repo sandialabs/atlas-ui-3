@@ -15,23 +15,33 @@ This guide covers how to publish new versions of the `atlas-chat` package to PyP
 ### Option A: GitHub CLI (Recommended)
 
 ```bash
-# 1. Update version in pyproject.toml
-#    version = "0.2.0"
+# 1. Update version in BOTH sources the publish workflow cross-checks
+#    pyproject.toml:  version = "0.2.0"
+#    atlas/version.py: VERSION = "0.2.0"
+#    (a mismatch fails the publish build)
 
-# 2. Commit the version bump
-git add pyproject.toml
+# 2. Refresh the lockfile the publish workflow validates
+uv lock
+#    (`uv lock --check` runs in pypi-publish.yml; a stale lock fails it)
+
+# 3. Commit the version bump
+git add pyproject.toml atlas/version.py uv.lock
 git commit -m "Bump version to 0.2.0"
 git push
 
-# 3. Create tag and release (triggers PyPI publish)
+# 4. Create tag and release (triggers PyPI publish)
 git tag v0.2.0
 git push origin v0.2.0
 gh release create v0.2.0 --title "v0.2.0" --notes "Release notes here"
 ```
 
+For the full release runbook (changelog reshape, release branch, smoke
+test), see [docs/developer/release-process.md](../developer/release-process.md).
+
 ### Option B: GitHub Web UI
 
-1. Update `version` in `pyproject.toml` and push
+1. Update `version` in `pyproject.toml`, `VERSION` in `atlas/version.py`
+   (they must agree), and run `uv lock` to refresh `uv.lock`; commit and push
 2. Go to **Releases** → **Draft a new release**
 3. Click **Choose a tag** → type `v0.2.0` → **Create new tag**
 4. Title: `v0.2.0`

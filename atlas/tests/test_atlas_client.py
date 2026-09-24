@@ -340,3 +340,49 @@ class TestCaptureConsentWiring:
         chat_service.handle_chat_message.assert_awaited_once()
         _, kwargs = chat_service.handle_chat_message.call_args
         assert kwargs.get("capture_consent_implied") is True
+
+
+class TestRaiseOnLLMErrorWiring:
+    async def _client_with_mock_service(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from atlas_client import AtlasClient
+
+        client = AtlasClient()
+        client._initialized = True  # skip real AppFactory/MCP init
+        chat_service = MagicMock()
+        chat_service.handle_chat_message = AsyncMock(return_value={})
+        factory = MagicMock()
+        factory.create_chat_service.return_value = chat_service
+        client._factory = factory
+        return client, chat_service
+
+    async def test_raise_flag_defaults_off_for_library_callers(self):
+        """Programmatic callers keep graceful ChatResult behavior by default."""
+        client, chat_service = await self._client_with_mock_service()
+
+        await client.chat(prompt="hi", model="m", user_email="u@x")
+
+        for runner in (
+            chat_service.plain_mode,
+            chat_service.rag_mode,
+            chat_service.tools_mode,
+            chat_service.agent_mode,
+        ):
+            assert runner.raise_on_stream_error is False
+
+    async def test_raise_flag_opt_in_reaches_every_runner(self):
+        """The opt-in flag must cover plain, RAG, tools, and agent paths alike."""
+        client, chat_service = await self._client_with_mock_service()
+
+        await client.chat(
+            prompt="hi", model="m", user_email="u@x", raise_on_llm_error=True,
+        )
+
+        for runner in (
+            chat_service.plain_mode,
+            chat_service.rag_mode,
+            chat_service.tools_mode,
+            chat_service.agent_mode,
+        ):
+            assert runner.raise_on_stream_error is True

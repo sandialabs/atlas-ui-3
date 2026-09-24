@@ -74,4 +74,7 @@ class AgentLoopProtocol(Protocol):
         # agent without stopping it. ``Any`` avoids importing asyncio at the
         # protocol layer; the concrete type is SteeringChannel.
         steering: Optional[Any] = None,
+        # Opt-in (CLI only): re-raise LLM stream failures instead of turning
+        # them into a successful answer, so `atlas-chat` exits non-zero.
+        raise_on_stream_error: bool = False,
     ) -> AgentResult: ...

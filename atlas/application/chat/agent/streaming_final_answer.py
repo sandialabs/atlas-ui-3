@@ -16,6 +16,7 @@ async def stream_final_answer(
     messages: list,
     temperature: float,
     user_email: str | None,
+    raise_on_stream_error: bool = False,
 ) -> str:
     """Stream the final answer token-by-token via event_publisher.
 
@@ -54,7 +55,17 @@ async def stream_final_answer(
                 accumulated = await llm.call_plain(
                     model, messages, temperature=temperature, user_email=user_email,
                 )
+                return accumulated
             except Exception:
+                if raise_on_stream_error:
+                    # CLI failure policy: both the stream and the non-streaming
+                    # retry failed -- surface the classified error instead of
+                    # returning an error text as a successful answer.
+                    _err_class, user_msg, _log_msg = classify_llm_error(exc)
+                    raise _err_class(user_msg) from exc
                 _err_class, user_msg, _log_msg = classify_llm_error(exc)
                 accumulated = user_msg
+        elif raise_on_stream_error:
+            _err_class, user_msg, _log_msg = classify_llm_error(exc)
+            raise _err_class(user_msg) from exc
     return accumulated
