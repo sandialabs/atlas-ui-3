@@ -261,7 +261,7 @@ async def test_stream_and_accumulate_error_raises_for_cli_publishers():
     """CLI publishers should surface stream failures as exceptions for non-zero exit codes."""
     from atlas.infrastructure.events.cli_event_publisher import CLIEventPublisher
 
-    pub = CLIEventPublisher(streaming=False)
+    pub = CLIEventPublisher(streaming=True)
 
     async def _auth_error():
         raise RuntimeError("AuthenticationError: invalid api key")
