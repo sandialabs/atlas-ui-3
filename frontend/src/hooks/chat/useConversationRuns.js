@@ -24,6 +24,11 @@ export function useConversationRuns() {
 	// conversation_id -> run record from the server.
 	const [runsByConversation, setRunsByConversation] = useState({})
 	const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(null)
+	// A conversation that is not on screen was persisted: its run finished,
+	// was stopped, or failed after saving. The history list refetches on
+	// this rather than on the run's terminal status alone, because a stopped
+	// run reports `cancelled` before its interrupted turn is written.
+	const [backgroundSaves, setBackgroundSaves] = useState(0)
 	// Mirror of the map for callbacks that must not re-subscribe on every
 	// status frame (the websocket handler is rebuilt when its deps change).
 	const runsRef = useRef({})
@@ -47,7 +52,10 @@ export function useConversationRuns() {
 				const existing = next[run.conversation_id]
 				// Several runs can share a conversation over time; the newest wins.
 				if (!existing || (run.created_at || 0) >= (existing.created_at || 0)) {
-					next[run.conversation_id] = run
+					// Keep the title this tab learned when it started the run: the
+					// server does not know one until the conversation is saved.
+					const prior = runsRef.current[run.conversation_id]
+					next[run.conversation_id] = (!run.title && prior?.title) ? { ...run, title: prior.title } : run
 				}
 			}
 			runsRef.current = next
@@ -64,12 +72,27 @@ export function useConversationRuns() {
 					run_id: data.run_id,
 					conversation_id: data.conversation_id,
 					status: 'running',
+					// A run started from a new chat has no saved conversation to
+					// take a title from, so the history list would have nothing to
+					// show for it. The caller supplies the first prompt.
+					title: data.title || prev[data.conversation_id]?.title || null,
+					// Set for a run launched by atlas_launch: the client scopes
+					// background auto-approve to runs the user started.
+					parent_run_id: data.parent_run_id || prev[data.conversation_id]?.parent_run_id || null,
 				},
 			}))
 			return
 		}
 		if (data.type === 'run_status' && data.run) {
-			applyRuns(prev => ({ ...prev, [data.run.conversation_id]: data.run }))
+			applyRuns(prev => {
+				const prior = prev[data.run.conversation_id]
+				const title = data.run.title || prior?.title || null
+				return { ...prev, [data.run.conversation_id]: title ? { ...data.run, title } : data.run }
+			})
+			return
+		}
+		if (data.type === 'background_activity' && data.frame?.type === 'conversation_saved') {
+			setBackgroundSaves(n => n + 1)
 			return
 		}
 		if (data.type === 'background_activity' && data.conversation_id) {
@@ -101,6 +124,7 @@ export function useConversationRuns() {
 		runsByConversation,
 		maxConcurrentRuns,
 		activeRunCount,
+		backgroundSaves,
 		handleRunFrame,
 		getRun,
 	}

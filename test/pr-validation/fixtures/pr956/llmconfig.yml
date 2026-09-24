@@ -1,0 +1,8 @@
+models:
+  scripted-mock:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/scripted-mock"
+    api_key: "mock"
+    description: "Scripted mock model: returns atlas_sleep tool calls, then a labelled answer"
+    compliance_level: "Internal"
+    supports_tools: true

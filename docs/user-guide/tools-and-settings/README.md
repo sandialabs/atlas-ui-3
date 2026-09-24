@@ -124,6 +124,35 @@ them itself. If you select sources together with other tools but leave
 `atlas_search` unticked, nothing in that turn can read the sources and Atlas
 says so.
 
+## Launching sub-conversations
+
+When your administrator has enabled it, the built-in `atlas_launch` tool lets a
+conversation start other conversations to work on pieces of a task. Tick
+`atlas_launch` in the tools list, then ask for the work to be split up. ATLAS
+also offers `atlas_discover_launch_options`; the agent must call it first to
+receive the current workspaces and model names. Ticking `atlas_launch` enables
+the discovery tool automatically, so there is nothing extra to select. Launch is
+blocked with an actionable error if discovery fails, returns no choices, or the
+launch arguments are not in the discovered options.
+
+Each sub-conversation is told which of **your saved workspaces** to run under,
+and that workspace decides which tools and data sources it may use -- so save a
+workspace for the kind of work you want to hand off before asking for one. The
+sub-conversation runs on a model you name, appears in your history as its own
+conversation, and starts immediately: the conversation you are in gets the new
+conversation's id back rather than waiting for an answer, so open it from the
+history list to follow along. Stopping the conversation that launched them stops
+the sub-conversations too.
+
+Approving the launch approves the sub-conversation's own tool calls, so it can
+work without stopping to ask you again - except for tools your administrator has
+made always-approve, which still prompt inside the sub-conversation and pause it
+until you open that conversation and answer.
+
+A sub-conversation can never use a tool, model or data source you could not use
+yourself, and how deep they may nest and how many may run at once are limits
+your administrator sets.
+
 ## Top bar sizing
 
 The admin shield is gone -- admin controls are the Admin tab, and the full

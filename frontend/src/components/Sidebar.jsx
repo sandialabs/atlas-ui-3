@@ -4,6 +4,7 @@ import { useConversationHistory } from '../hooks/useConversationHistory'
 import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
+import { applyRunEndRefresh } from '../utils/runEndRefresh'
 
 const ContextMenu = ({ x, y, onDelete, onClose }) => {
   const menuRef = useRef(null)
@@ -73,10 +74,15 @@ export function RunIndicator({ run }) {
 
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
-    features, activeConversationId, loadSavedConversation, messages, saveMode, clearChat,
+    features, activeConversationId, loadSavedConversation, refreshJoinedConversation, messages, saveMode, clearChat,
     // Parallel conversation runs (issue #884): which conversations are still
     // working, including ones the user is not currently viewing.
     runsByConversation,
+    backgroundSaves,
+    // A conversation opened while its run was in flight: the run's output
+    // went to the transcript it was streaming into, not this view, so the
+    // view is reloaded from the store once the run ends.
+    runEndedConversationId, clearRunEndedConversation,
   } = useChat()
 
   const chatHistoryEnabled = features?.chat_history
@@ -127,6 +133,68 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages?.length, chatHistoryEnabled])
+
+  // A run that finishes in a conversation the user is not looking at saves
+  // its transcript without any of the events above reaching this tab (they
+  // are filed as background activity). Refresh the list when such a save
+  // lands, so the conversation appears -- or reorders -- without a reload.
+  const prevBackgroundSavesRef = useRef(backgroundSaves)
+  const runRefreshTimerRef = useRef(null)
+  useEffect(() => {
+    if (prevBackgroundSavesRef.current === backgroundSaves) return
+    prevBackgroundSavesRef.current = backgroundSaves
+    if (!chatHistoryEnabled || saveMode === 'none') return
+    if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
+    history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backgroundSaves, chatHistoryEnabled, saveMode])
+
+  // Fallback for a run that ends without a save reaching this tab (it failed
+  // before persisting, or another tab's socket got the frame). Delayed,
+  // because a stopped run reports `cancelled` before its interrupted turn is
+  // written, and fetching at that instant would miss the conversation.
+  const prevTerminalRef = useRef('')
+  useEffect(() => {
+    if (!chatHistoryEnabled || saveMode === 'none') return
+    const terminal = Object.values(runsByConversation || {})
+      .filter(r => r && ['completed', 'failed', 'cancelled'].includes(r.status))
+      .map(r => r.run_id)
+      .sort()
+      .join(',')
+    const prev = prevTerminalRef.current
+    prevTerminalRef.current = terminal
+    if (prev !== terminal && terminal) {
+      if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
+      runRefreshTimerRef.current = setTimeout(() => {
+        runRefreshTimerRef.current = null
+        history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+      }, 2500)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runsByConversation, chatHistoryEnabled, saveMode])
+  useEffect(() => () => {
+    if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
+  }, [])
+
+  // Reload the open conversation once the run it was opened under ends. The
+  // stream the user joined partway is not replayed (issue #760); the stored
+  // transcript is complete, so show that instead of a stale or partial view.
+  // The refresh appends only the rows the view is missing when the stored
+  // transcript still lines up with it, which keeps the user's scroll position
+  // and their expanded tool rows (issue #959); a transcript that has diverged
+  // from the view falls back to the full reload.
+  useEffect(() => {
+    if (!runEndedConversationId || runEndedConversationId !== activeConversationId) return
+    let cancelled = false
+    ;(async () => {
+      const fullConv = await history.loadConversation(runEndedConversationId)
+      if (cancelled) return
+      applyRunEndRefresh({ fullConv, refreshJoinedConversation, loadSavedConversation })
+      clearRunEndedConversation()
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runEndedConversationId, activeConversationId])
 
   // Immediately refresh when a conversation is saved (activeConversationId changes from null to a value)
   const prevActiveIdRef = useRef(activeConversationId)
@@ -251,6 +319,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
         activeConversationId,
         chatHistoryEnabled,
         saveMode,
+        runsByConversation,
       })
     : []
 

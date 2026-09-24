@@ -61,6 +61,7 @@ export function cleanupStreamState() {
  * @param {Function} deps.streamEnd - Dispatch a STREAM_END action to finalize streaming.
  * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
  * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
+ * @param {Function} [deps.onConversationSaved] - Called with the id when the conversation on screen is persisted.
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
 export function createWebSocketHandler(deps) {
@@ -89,6 +90,7 @@ export function createWebSocketHandler(deps) {
     streamEnd,
     getVisibleConversationId,
     onRunStatus,
+    onConversationSaved,
   } = deps
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
@@ -456,7 +458,7 @@ export function createWebSocketHandler(deps) {
         const visible = getVisibleConversationId()
         if (visible !== data.conversation_id) {
           if (typeof onRunStatus === 'function') {
-            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id })
+            onRunStatus({ type: 'background_activity', conversation_id: data.conversation_id, run_id: data.run_id, frame: data })
           }
           return
         }
@@ -572,9 +574,28 @@ export function createWebSocketHandler(deps) {
           if (data.conversation_id && typeof setActiveConversationId === 'function') {
             setActiveConversationId(data.conversation_id)
           }
+          if (data.conversation_id && typeof onConversationSaved === 'function') {
+            onConversationSaved(data.conversation_id)
+          }
           break
         }
         case 'token_stream': {
+          if (data.replay) {
+            // Issue #957: the tokens streamed while this conversation was
+            // closed are replayed on reopen, in one frame carrying the open
+            // segment's text from its beginning. Replace whatever partial
+            // bubble the loaded transcript seeded (it is an earlier snapshot
+            // of the same segment), then let the live stream append onto it.
+            _tokenBuffer = ''
+            if (_tokenFlushTimer) {
+              clearTimeout(_tokenFlushTimer)
+              _tokenFlushTimer = null
+            }
+            _streamActive = true
+            setIsThinking(false)
+            if (data.token) streamToken(data.token, true)
+            break
+          }
           if (data.is_first) {
             // Reset stale state from any previous abnormal stream end
             _tokenBuffer = ''
@@ -636,7 +657,11 @@ export function createWebSocketHandler(deps) {
             triggerFileDownload(data.filename, data.content_base64)
           } else if (data.error) {
             console.error('File download error:', data.error)
-            // Could show a toast notification here
+            addMessage({
+              role: 'system',
+              content: `Error: could not download ${data.filename || 'the file'} -- ${data.error}`,
+              timestamp: new Date().toISOString(),
+            })
           }
           break
         case 'file_attach':

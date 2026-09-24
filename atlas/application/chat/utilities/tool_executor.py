@@ -20,6 +20,7 @@ from atlas.modules.llm.tool_call_guard import repair_structural_json
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     LEGACY_SERVER_NAMES,
     normalize_tool_name,
 )
@@ -81,19 +82,41 @@ async def execute_multiple_tools(
 
     logger.info("Executing %d tool calls in parallel", len(tool_calls))
 
+    results: List[Any] = [None] * len(tool_calls)
+    discovery_indices = [
+        index
+        for index, tool_call in enumerate(tool_calls)
+        if normalize_tool_name(getattr(getattr(tool_call, "function", None), "name", ""))
+        == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+    ]
+    for index in discovery_indices:
+        try:
+            results[index] = await execute_single_tool(
+                tool_call=tool_calls[index],
+                session_context=session_context,
+                tool_manager=tool_manager,
+                update_callback=update_callback,
+                config_manager=config_manager,
+                skip_approval=skip_approval,
+            )
+        except Exception as exc:
+            results[index] = exc
+
+    remaining = [index for index in range(len(tool_calls)) if index not in discovery_indices]
     coros = [
         execute_single_tool(
-            tool_call=tc,
+            tool_call=tool_calls[index],
             session_context=session_context,
             tool_manager=tool_manager,
             update_callback=update_callback,
             config_manager=config_manager,
             skip_approval=skip_approval,
         )
-        for tc in tool_calls
+        for index in remaining
     ]
-
-    results = await asyncio.gather(*coros, return_exceptions=True)
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
+    for index, result in zip(remaining, gathered):
+        results[index] = result
 
     # Convert exceptions to error ToolResults so callers always get a list
     final: List[ToolResult] = []
@@ -611,18 +634,11 @@ async def execute_single_tool(
             if needs_approval:
                 logger.info(f"Tool {tool_call.function.name} requires approval (admin_required={admin_required})")
 
-                # Send approval request to frontend
-                if update_callback:
-                    await update_callback({
-                        "type": "tool_approval_request",
-                        "tool_call_id": tool_call.id,
-                        "tool_name": tool_call.function.name,
-                        "arguments": display_args,
-                        "allow_edit": allow_edit,
-                        "admin_required": admin_required
-                    })
-
-                # Wait for approval response
+                # Register the request *before* the frame goes out. A client
+                # that answers immediately -- auto-approve for a conversation
+                # it is not displaying (issue #884) -- can otherwise reply
+                # before the request exists, the reply is dropped, and the run
+                # waits for an answer that already arrived.
                 approval_manager = get_approval_manager()
                 request = approval_manager.create_approval_request(
                     tool_call.id,
@@ -632,71 +648,82 @@ async def execute_single_tool(
                     user_email=session_context.get("user_email", ""),
                 )
 
+                # Send the approval request and wait for the answer. Both exits unwind
+                # through the finally: cancellation (user Stop, or the run
+                # wall-clock sweeper) goes through the wait, and a raising
+                # update callback goes through the send -- so the pending
+                # request, and the filtered_args it holds, never leak for the
+                # process lifetime. With TOOL_APPROVAL_TIMEOUT_SECONDS=0 the
+                # wait is indefinite, so cancellation is the *only* exit from
+                # the wait and this is the only cleanup that runs.
                 try:
+                    if update_callback:
+                        await update_callback({
+                            "type": "tool_approval_request",
+                            "tool_call_id": tool_call.id,
+                            "tool_name": tool_call.function.name,
+                            "arguments": display_args,
+                            "allow_edit": allow_edit,
+                            "admin_required": admin_required
+                        })
+
                     try:
                         response = await request.wait_for_response(
                             timeout=resolve_approval_timeout()
                         )
-                    finally:
-                        # Cancellation (user Stop, or the run wall-clock
-                        # sweeper) unwinds straight through both the success and
-                        # the timeout path, so without a finally the pending
-                        # request -- and the filtered_args it holds -- would
-                        # leak for the process lifetime. With
-                        # TOOL_APPROVAL_TIMEOUT_SECONDS=0 the wait is
-                        # indefinite, so cancellation is the *only* way out and
-                        # this is the only cleanup that runs.
-                        approval_manager.cleanup_request(tool_call.id)
-
-                    if not response["approved"]:
-                        # Tool was rejected
-                        reason = response.get("reason", "User rejected the tool call")
-                        logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
+                    except asyncio.TimeoutError:
+                        # Only the wait can mean this: the send failing with
+                        # a timeout is a transport problem, not an approval
+                        # that timed out, and must not be reported as one.
+                        logger.warning(f"Approval timeout for tool {tool_call.function.name}")
                         return _finalize_span(ToolResult(
                             tool_call_id=tool_call.id,
-                            content=f"Tool execution rejected by user: {reason}",
+                            content="Tool execution timed out waiting for user approval",
                             success=False,
-                            error=reason
+                            error="Approval timeout"
                         ))
+                finally:
+                    approval_manager.cleanup_request(tool_call.id)
 
-                    # Use potentially edited arguments
-                    if allow_edit and response.get("arguments"):
-                        edited_args = response["arguments"]
-                        # Check if arguments actually changed by comparing with what we sent (display_args)
-                        # Use json comparison to avoid false positives from dict ordering
-                        if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
-                            arguments_were_edited = True
-                            logger.info(f"User edited arguments for tool {tool_call.function.name}")
-
-                            # SECURITY: Re-apply security injections after user edits
-                            # This ensures _atlas_user and other security-critical parameters cannot be tampered with
-                            re_injected_args = inject_context_into_args(
-                                edited_args,
-                                session_context,
-                                tool_call.function.name,
-                                tool_manager
-                            )
-
-                            # Re-filter to schema to ensure only valid parameters
-                            filtered_args = _filter_args_to_schema(
-                                re_injected_args,
-                                tool_call.function.name,
-                                tool_manager
-                            )
-                            display_args = _sanitize_args_for_ui(dict(filtered_args))
-                        else:
-                            # No actual changes, but response included arguments - keep original filtered_args
-                            logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
-
-                except asyncio.TimeoutError:
-                    # Cleanup already ran in the finally above.
-                    logger.warning(f"Approval timeout for tool {tool_call.function.name}")
+                if not response["approved"]:
+                    # Tool was rejected
+                    reason = response.get("reason", "User rejected the tool call")
+                    logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
                     return _finalize_span(ToolResult(
                         tool_call_id=tool_call.id,
-                        content="Tool execution timed out waiting for user approval",
+                        content=f"Tool execution rejected by user: {reason}",
                         success=False,
-                        error="Approval timeout"
+                        error=reason
                     ))
+
+                # Use potentially edited arguments
+                if allow_edit and response.get("arguments"):
+                    edited_args = response["arguments"]
+                    # Check if arguments actually changed by comparing with what we sent (display_args)
+                    # Use json comparison to avoid false positives from dict ordering
+                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
+                        arguments_were_edited = True
+                        logger.info(f"User edited arguments for tool {tool_call.function.name}")
+
+                        # SECURITY: Re-apply security injections after user edits
+                        # This ensures _atlas_user and other security-critical parameters cannot be tampered with
+                        re_injected_args = inject_context_into_args(
+                            edited_args,
+                            session_context,
+                            tool_call.function.name,
+                            tool_manager
+                        )
+
+                        # Re-filter to schema to ensure only valid parameters
+                        filtered_args = _filter_args_to_schema(
+                            re_injected_args,
+                            tool_call.function.name,
+                            tool_manager
+                        )
+                        display_args = _sanitize_args_for_ui(dict(filtered_args))
+                    else:
+                        # No actual changes, but response included arguments - keep original filtered_args
+                        logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
 
             # Send tool start notification with sanitized args
             await event_notifier.notify_tool_start(
@@ -716,6 +743,8 @@ async def execute_single_tool(
                     "session_id": session_context.get("session_id"),
                     "user_email": session_context.get("user_email"),
                     "conversation_id": session_context.get("conversation_id"),
+                    "factory": getattr(tool_manager, "app_factory", None),
+                    "launch_discovery": session_context.setdefault("launch_discovery", {}),
                     # Carry the request's selected RAG data sources so tools that
                     # consult them (e.g. atlas_rag_query) honor the user's UI
                     # selection instead of falling back to all authorized sources.
@@ -727,6 +756,10 @@ async def execute_single_tool(
                     # the session (not tool arguments), so a model cannot change
                     # or remove it.
                     "compliance_level": session_context.get("compliance_level"),
+                    # Whether this turn's transcript is kept off the server.
+                    # atlas_launch refuses to start a sub-conversation from an
+                    # incognito turn, since the child would persist one (#925).
+                    "incognito": session_context.get("incognito", False),
                     # pass update callback so MCP client can emit progress
                     "update_callback": update_callback,
                     # Per-turn scratchpad (agent mode only) that the built-in

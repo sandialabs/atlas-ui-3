@@ -247,15 +247,21 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
         )}
         {Object.keys(mcpStatus.failed_servers).length > 0 && (
           <div>
-            <div className="text-gray-400 mb-1">Failed servers ({Object.keys(mcpStatus.failed_servers).length})</div>
+            <div className="text-gray-400 mb-1">Unavailable servers ({Object.keys(mcpStatus.failed_servers).length})</div>
             <div className="flex flex-wrap gap-1">
               {Object.entries(mcpStatus.failed_servers).map(([name, info]) => (
                 <span
                   key={name}
-                  className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-red-900/40 text-red-300 border border-red-700/60"
-                  title={info?.error || 'Failed to connect'}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${
+                    info?.auth_required
+                      ? 'bg-yellow-900/40 text-yellow-300 border border-yellow-700/60'
+                      : 'bg-red-900/40 text-red-300 border border-red-700/60'
+                  }`}
+                  title={info?.error || (info?.auth_required ? 'OAuth authentication required' : 'Failed to connect')}
                 >
-                  {name}{info?.attempt_count > 1 ? ` (${info.attempt_count} attempts)` : ''}
+                  {info?.auth_required
+                    ? `${name} (OAuth auth required)`
+                    : `${name}${info?.attempt_count > 1 ? ` (${info.attempt_count} attempts)` : ''}`}
                 </span>
               ))}
             </div>

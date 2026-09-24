@@ -20,7 +20,7 @@ const FileManagerPanel = ({ isOpen, onClose }) => {
       sessionFiles.files.forEach((file, index) => {
         // Add a small delay between downloads to avoid overwhelming the browser
         setTimeout(() => {
-          downloadFile(file.filename)
+          downloadFile(file.filename, file.s3_key)
         }, index * 100)
       })
     }

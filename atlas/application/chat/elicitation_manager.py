@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from atlas.core.user_identity import normalize_user_email
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,7 +136,7 @@ class ElicitationManager:
         # run may wait indefinitely (issue #884), the id stays answerable for
         # the process lifetime. Fail-closed: a bound request REQUIRES a
         # matching responder. Legacy unbound requests skip the check.
-        if request.user_email and request.user_email != user_email:
+        if request.user_email and normalize_user_email(request.user_email) != normalize_user_email(user_email):
             # Inline CR/LF stripping: CodeQL py/log-injection recognizes this
             # as a sanitizer where it does not recognize sanitize_for_logging().
             safe_user_email = str(user_email).replace("\r", "").replace("\n", "")

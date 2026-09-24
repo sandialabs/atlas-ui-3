@@ -36,3 +36,5 @@ docs that describe how the system works today, see the
 - [Opt-in Fine-tune Capture](finetune-capture-2026-06-25.md) - Consent-gated chat capture and rollback preference pairs (issue #622)
 - [Agent Busy Indicator](agent-busy-indicator-2026-08-08.md) - Spinner shown between agent loop steps (issue #748)
 - [Agent Steering](agent-steering-2026-08-27.md) - Mid-run user messages injected as normal user turns without stopping the loop (issue #824)
+- [Atlas Launch: Sub-Conversations](atlas-launch-sub-conversations-2026-09-13.md) - `atlas_launch` starts a bounded, workspace-scoped sub-conversation and returns a handle (issue #925)
+- [Mobile and In-Car Composer Friendliness](mobile-composer-friendliness-2026-09-16.md) - Feedback button anchored to the live composer height, New Chat confirm replaced with an Undo toast, bigger touch targets

@@ -102,12 +102,24 @@ const FeedbackButton = () => {
   return (
     <>
       {/* Feedback Button */}
+      {/* Anchored above the composer, not at a fixed offset from the bottom of
+          the viewport. The composer grows as the user types a long message
+          (up to COMPOSER_MAX_HEIGHT plus warning banners and the controls
+          row), and a fixed `bottom-32` put this button straight on top of the
+          Send button -- an accidental tap on a phone or an in-car mount sent
+          the user into the feedback modal instead of sending the message.
+          ChatArea publishes the live composer height as --atlas-composer-height
+          (see useComposerHeightVar); the fallback keeps the button clear of the
+          composer before the first measurement lands. */}
       <button
         onClick={() => setIsOpen(true)}
-        className="absolute bottom-32 min-[1102px]:bottom-4 right-4 z-40 p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all duration-200 hover:scale-105"
+        style={{ bottom: 'calc(var(--atlas-composer-height, 8rem) + 1rem)' }}
+        className="fixed right-4 z-40 w-14 h-14 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all duration-200 hover:scale-105"
         title="Give feedback"
+        aria-label="Give feedback"
+        data-testid="feedback-button"
       >
-        <MessageCircle className="w-5 h-5" />
+        <MessageCircle className="w-6 h-6" />
       </button>
 
       {/* Feedback Overlay */}

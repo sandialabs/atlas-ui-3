@@ -39,7 +39,9 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
+from atlas.application.chat.runs.stream_replay import StreamReplay
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,16 @@ TERMINAL_RETENTION_SECONDS = 30 * 60
 # finishes thousands of runs inside the retention window cannot grow the
 # registry without bound.
 MAX_RETAINED_TERMINAL_RUNS_PER_USER = 50
+
+# Matches the title length ConversationRepository stores for a conversation.
+RUN_TITLE_MAX_CHARS = 200
+
+# Frames that pause a run until the user answers, and frames that mean the
+# tool it was paused on has settled one way or another.
+INPUT_REQUEST_EVENTS = frozenset({"tool_approval_request", "elicitation_request"})
+TOOL_SETTLED_EVENTS = frozenset(
+    {"tool_complete", "tool_error", "tool_interrupted", "tool_result"}
+)
 
 
 class RunStatus(str, Enum):
@@ -130,13 +142,34 @@ class RunRecord:
     # Free-form label for what the run is waiting on (e.g. "tool_approval"),
     # surfaced to the client alongside WAITING_FOR_INPUT.
     waiting_on: Optional[str] = None
-    # The exact frame that asked for input, kept so it can be re-sent.
+    # Set when this run was started by ``atlas_launch`` from another run
+    # (issue #925). ``parent_run_id`` is what makes stopping a parent stop its
+    # children, and ``depth`` is what bounds recursion: a launched run is one
+    # deeper than the run that launched it.
+    parent_run_id: Optional[str] = None
+    # The conversation that launched this run. Observation tools are scoped to
+    # the conversation, not just the specific parent run, so later turns can
+    # still see children launched earlier from the same conversation.
+    parent_conversation_id: Optional[str] = None
+    depth: int = 0
+    # The prompt that started the run, truncated. A run's conversation is not
+    # stored until the turn ends, so this is the only name the history list
+    # can give it in the meantime -- in this tab and in every other one.
+    title: Optional[str] = None
+    # The exact frames that asked for input, kept so they can be re-sent.
     # A request emitted while the user was looking at another conversation (or
     # had the browser closed) is otherwise gone: the client dropped it, and the
-    # id and arguments needed to answer it exist nowhere else. Replaying it when
-    # the conversation is opened is what makes "a run paused on approval can be
-    # approved after reconnect" true rather than aspirational.
-    pending_request: Optional[Dict[str, Any]] = None
+    # id and arguments needed to answer it exist nowhere else. Replaying them
+    # when the conversation is opened is what makes "a run paused on approval
+    # can be approved after reconnect" true rather than aspirational. A list,
+    # not a single slot: one agent step can fire several approval-gated tools
+    # in parallel, and every one of them needs its answer.
+    pending_requests: List[Dict[str, Any]] = field(default_factory=list)
+    # The token segment the run is streaming right now (issue #957). A client
+    # that left the conversation mid-stream dropped every frame since; this is
+    # what a reopen replays so the reply starts at its beginning instead of
+    # the token that happened to be current on arrival.
+    stream: StreamReplay = field(default_factory=StreamReplay, repr=False, compare=False)
 
     @property
     def is_terminal(self) -> bool:
@@ -154,6 +187,9 @@ class RunRecord:
             "ended_at": self.ended_at,
             "error": self.error,
             "detached": self.detached,
+            "parent_run_id": self.parent_run_id,
+            "depth": self.depth,
+            "title": self.title,
         }
 
 
@@ -170,6 +206,8 @@ class RunRegistry:
     def __init__(self, max_concurrent_runs_per_user: int = 5):
         self._max_concurrent = max_concurrent_runs_per_user
         self._runs: Dict[str, RunRecord] = {}
+        self._children: Dict[str, List[str]] = {}
+        self._conversation_children: Dict[str, List[str]] = {}
         self._listeners: Dict[str, List[Callable[[RunRecord], None]]] = {}
 
     # ------------------------------------------------------------------
@@ -201,10 +239,12 @@ class RunRegistry:
 
         Every transport action that addresses a run by id goes through this, so
         a client cannot stop, steer, or inspect another user's run by guessing
-        an id.
+        an id. Ownership compares normalized emails, the same way the
+        conversation repository does: a proxy that hands over ``User`` and
+        ``user`` must read as one owner, not two.
         """
         record = self.get(run_id)
-        if record is None or record.user_email != user_email:
+        if record is None or record.user_email != normalize_user_email(user_email):
             return None
         return record
 
@@ -214,20 +254,67 @@ class RunRegistry:
         """The non-terminal run for a conversation, if any."""
         if not conversation_id:
             return None
+        owner = normalize_user_email(user_email)
         for record in self._runs.values():
             if (
                 record.conversation_id == conversation_id
-                and record.user_email == user_email
+                and record.user_email == owner
                 and not record.is_terminal
             ):
                 return record
         return None
 
+    def active_for_conversation_any_owner(
+        self, conversation_id: Optional[str]
+    ) -> Optional[str]:
+        """The owner of the non-terminal run on a conversation, if any.
+
+        Used by the transport to refuse a turn that names a conversation id
+        currently executing for *someone else*: an unsaved run's id is not in
+        the repository yet, so the ownership check on stored records cannot
+        catch it. Only the owner's email is returned, never the record.
+        """
+        if not conversation_id:
+            return None
+        for record in self._runs.values():
+            if record.conversation_id == conversation_id and not record.is_terminal:
+                return normalize_user_email(record.user_email)
+        return None
+
+    def children_of(self, run_id: Optional[str], *, include_terminal: bool = False) -> List[RunRecord]:
+        """Runs launched by ``run_id`` (issue #925).
+
+        Direct children only; the cascade in :meth:`cancel` walks the tree one
+        level at a time, so a grandchild is reached through its own parent.
+        """
+        if not run_id:
+            return []
+        return [
+            self._runs[child_id]
+            for child_id in self._children.get(run_id, [])
+            if child_id in self._runs
+            and (include_terminal or not self._runs[child_id].is_terminal)
+        ]
+
+    def children_of_conversation(
+        self, conversation_id: Optional[str], *, include_terminal: bool = False
+    ) -> List[RunRecord]:
+        """Runs launched from ``conversation_id`` across all of its turns."""
+        if not conversation_id:
+            return []
+        return [
+            self._runs[child_id]
+            for child_id in self._conversation_children.get(conversation_id, [])
+            if child_id in self._runs
+            and (include_terminal or not self._runs[child_id].is_terminal)
+        ]
+
     def active_for_user(self, user_email: str) -> List[RunRecord]:
+        owner = normalize_user_email(user_email)
         return [
             r
             for r in self._runs.values()
-            if r.user_email == user_email and not r.is_terminal
+            if r.user_email == owner and not r.is_terminal
         ]
 
     def records_for_user(self, user_email: str) -> List[RunRecord]:
@@ -237,7 +324,8 @@ class RunRegistry:
         just *after* the run that produced it finished, and that run's session
         is where the file is registered.
         """
-        records = [r for r in self._runs.values() if r.user_email == user_email]
+        owner = normalize_user_email(user_email)
+        records = [r for r in self._runs.values() if r.user_email == owner]
         records.sort(key=lambda r: r.created_at, reverse=True)
         return records
 
@@ -248,7 +336,8 @@ class RunRegistry:
         run finished should be able to show "completed" rather than nothing.
         """
         self.reap_terminal()
-        records = [r for r in self._runs.values() if r.user_email == user_email]
+        owner = normalize_user_email(user_email)
+        records = [r for r in self._runs.values() if r.user_email == owner]
         records.sort(key=lambda r: r.created_at, reverse=True)
         return [r.to_public_dict() for r in records]
 
@@ -262,6 +351,10 @@ class RunRegistry:
         user_email: str,
         session_id: Optional[UUID] = None,
         steering: Optional[Any] = None,
+        parent_run_id: Optional[str] = None,
+        parent_conversation_id: Optional[str] = None,
+        depth: int = 0,
+        title: Optional[str] = None,
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
 
@@ -280,16 +373,33 @@ class RunRegistry:
         if len(active) >= self._max_concurrent:
             raise ConcurrencyLimitError(self._max_concurrent)
 
+        if parent_conversation_id is None and parent_run_id:
+            parent = self.get(parent_run_id)
+            parent_conversation_id = None if parent is None else parent.conversation_id
+
         record = RunRecord(
             run_id=str(uuid4()),
             conversation_id=conversation_id,
-            user_email=user_email,
+            # Stored normalized so ownership comparisons (this registry's, the
+            # transport guard's) read one owner for ``User@x`` and ``user@x``,
+            # the way the conversation repository already does.
+            user_email=normalize_user_email(user_email),
             # Each run gets its own Session so two concurrent conversations
             # never write through the same history object.
             session_id=session_id or uuid4(),
             steering=steering,
+            parent_run_id=parent_run_id,
+            parent_conversation_id=parent_conversation_id,
+            depth=max(0, int(depth or 0)),
+            title=(str(title)[:RUN_TITLE_MAX_CHARS] or None) if title else None,
         )
         self._runs[record.run_id] = record
+        if record.parent_run_id:
+            self._children.setdefault(record.parent_run_id, []).append(record.run_id)
+        if record.parent_conversation_id:
+            self._conversation_children.setdefault(record.parent_conversation_id, []).append(
+                record.run_id
+            )
         logger.info(
             "Run %s started for conversation %s (active runs for user: %d)",
             record.run_id,
@@ -304,6 +414,16 @@ class RunRegistry:
         if record is None:
             return
         record.task = task
+        if record.is_terminal:
+            # The run was stopped (or failed) in the window between admission
+            # and the task starting -- ``run_started`` goes out before the
+            # task exists, so a stop can land first. Terminal is sticky, so
+            # set_status below would keep the recorded outcome while the
+            # fresh task ran the turn to completion and persisted it anyway.
+            # Cancel it: the user already stopped this run.
+            if not task.done():
+                task.cancel()
+            return
         self.set_status(run_id, RunStatus.RUNNING)
 
     def set_status(
@@ -334,29 +454,162 @@ class RunRegistry:
         record.waiting_on = waiting_on if status == RunStatus.WAITING_FOR_INPUT else None
         if status != RunStatus.WAITING_FOR_INPUT:
             # Whatever it was waiting for is no longer outstanding.
-            record.pending_request = None
+            record.pending_requests.clear()
         if status.is_terminal:
             record.ended_at = record.updated_at
             record.steering = None
             record.task = None
+            # Whatever the run was streaming closed with it (issue #957): the
+            # turn's text is in the stored transcript now, and a stale buffer
+            # would replay a finished answer over a reopen's fresh one.
+            record.stream.clear()
         self._notify(record)
         return record
 
+    def note_stream_token(
+        self, run_id: Optional[str], token: str, is_first: bool, is_last: bool
+    ) -> None:
+        """Record a ``token_stream`` frame into the run's replay buffer.
+
+        Called from the notifier, which every token producer reaches exactly
+        once, from inside the run's own task -- so the buffer is one run's
+        text, never a blend of two concurrent ones. Unknown or terminal runs
+        are ignored: there is nothing to replay for a run that is over.
+        """
+        if not run_id:
+            return
+        record = self._runs.get(run_id)
+        if record is None or record.is_terminal:
+            return
+        record.stream.observe(token, is_first, is_last)
+
+    def note_event(self, run_id: Optional[str], frame: Any) -> None:
+        """Keep a run's status in step with the frames it emits.
+
+        An approval or elicitation request pauses the run: it is marked
+        ``waiting_for_input`` (which drives the "Needs approval" marker in the
+        history list) and the frame is kept for replay, because a client that
+        is looking at another conversation drops it. Several requests can be
+        outstanding at once -- one agent step may fire several approval-gated
+        tools in parallel -- so each is stored and replayed individually. A
+        tool settling clears its own request -- timed out, or answered on a
+        path that did not go through the transport -- but only when the settle
+        frame answers a request that is outstanding; a sibling tool finishing
+        while another approval is still pending leaves the pause intact.
+
+        Every transport chokepoint calls this -- the connection adapter the
+        agent loop publishes through, the turn callback, and a launched run's
+        child connection -- so the bookkeeping does not depend on which path
+        a producer happened to use. Only the first observer of a frame can
+        change anything; the rest are no-ops.
+        """
+        if not run_id or not isinstance(frame, dict):
+            return
+        event_type = frame.get("type")
+        if event_type in INPUT_REQUEST_EVENTS:
+            record = self.get(run_id)
+            if record is None or record.is_terminal:
+                return
+            if self._is_stored_request(record.pending_requests, frame):
+                return
+            self.set_status(run_id, RunStatus.WAITING_FOR_INPUT, waiting_on=event_type)
+            self.set_pending_request(run_id, frame)
+        elif event_type in TOOL_SETTLED_EVENTS:
+            record = self.get(run_id)
+            if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
+                return
+            outstanding = record.pending_requests
+            frame_ids = {
+                key: frame[key]
+                for key in ("tool_call_id", "elicitation_id")
+                if frame.get(key) is not None
+            }
+            if frame_ids:
+                # Clear only the requests this frame actually answers; a
+                # sibling tool settling while others are still outstanding
+                # must not drop requests that still need an answer -- the
+                # exact state ``note_event`` exists to fix.
+                record.pending_requests = [
+                    request for request in outstanding
+                    if not any(
+                        request.get(key) == value for key, value in frame_ids.items()
+                    )
+                ]
+                if not record.pending_requests:
+                    self.set_status(run_id, RunStatus.RUNNING)
+                return
+            # A frame with no identifier at all can only mean something when
+            # exactly one request is outstanding; with several it is
+            # ambiguous, and dropping any of them could strand an unanswered
+            # tool until its approval timed out.
+            if len(outstanding) == 1:
+                self.set_status(run_id, RunStatus.RUNNING)
+
+    @staticmethod
+    def _is_stored_request(pending_requests: List[Dict[str, Any]], frame: Dict[str, Any]) -> bool:
+        """Whether the exact request frame is already stored (idempotent replay)."""
+        return any(
+            request.get("tool_call_id") == frame.get("tool_call_id")
+            and request.get("elicitation_id") == frame.get("elicitation_id")
+            for request in pending_requests
+        )
+
     def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
-        """Remember the request a run is blocked on, for later replay."""
+        """Remember a request the run is blocked on, for later replay."""
         record = self.get(run_id)
         if record is None or record.is_terminal:
             return
-        record.pending_request = dict(frame) if isinstance(frame, dict) else None
+        if not isinstance(frame, dict):
+            return
+        if self._is_stored_request(record.pending_requests, frame):
+            return
+        record.pending_requests.append(dict(frame))
 
     def pending_requests_for_conversation(
         self, conversation_id: Optional[str], user_email: str
     ) -> List[Dict[str, Any]]:
         """Outstanding input requests for a conversation, for replay on open."""
         record = self.active_for_conversation(conversation_id, user_email)
-        if record is None or record.pending_request is None:
+        if record is None or not record.pending_requests:
             return []
-        return [record.pending_request]
+        return [dict(request) for request in record.pending_requests]
+
+    def answer_pending_request(
+        self,
+        run_id: str,
+        *,
+        tool_call_id: Optional[str] = None,
+        elicitation_id: Optional[str] = None,
+    ) -> bool:
+        """One outstanding request was answered through the response path.
+
+        Drops the matching stored request and returns the run to ``running``
+        only when nothing is outstanding anymore. With several tools paused
+        in parallel, answering one must not discard the others' replayable
+        requests -- they still need their answers, and the run is still
+        paused on them. Returns whether the run was waiting on input.
+        """
+        record = self.get(run_id)
+        if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
+            return False
+
+        def _is_answered(request: Dict[str, Any]) -> bool:
+            if tool_call_id is not None and request.get("tool_call_id") == tool_call_id:
+                return True
+            if elicitation_id is not None and request.get("elicitation_id") == elicitation_id:
+                return True
+            return False
+
+        record.pending_requests = [
+            request for request in record.pending_requests if not _is_answered(request)
+        ]
+        if not record.pending_requests:
+            self.set_status(run_id, RunStatus.RUNNING)
+        else:
+            # Still paused on the others; republish so every tab's "Needs
+            # approval" marker reflects what remains.
+            self._notify(record)
+        return True
 
     def mark_detached(self, run_id: str) -> None:
         """Note that the run's originating socket is gone."""
@@ -367,7 +620,14 @@ class RunRegistry:
         record.updated_at = time.time()
         self._notify(record)
 
-    def cancel(self, run_id: str, user_email: str) -> bool:
+    def cancel(
+        self,
+        run_id: str,
+        user_email: str,
+        *,
+        status: RunStatus = RunStatus.CANCELLED,
+        error: Optional[str] = None,
+    ) -> bool:
         """Cancel one run, addressed by id and checked for ownership.
 
         Returns whether a live run was actually cancelled, so the transport can
@@ -375,13 +635,34 @@ class RunRegistry:
         client believed was live but had already finished).
         """
         record = self.get_for_user(run_id, user_email)
-        if record is None or record.is_terminal:
+        if record is None:
             return False
+        # Stopping a parent stops the sub-conversations it launched (#925).
+        # Children run in their own tasks, so cancelling the parent's task
+        # alone would leave them working -- and billing -- with nobody
+        # watching.
+        #
+        # This is deliberately *above* the terminal check. ``atlas_launch``
+        # returns a handle rather than an answer, so the parent turn normally
+        # finishes while its children are still working: by the time a user
+        # stops the conversation, the parent run is usually already terminal.
+        # Cascading only for a live parent would make "stopping a conversation
+        # stops the ones it launched" true in the rare case and false in the
+        # common one.
+        cascaded = False
+        # ``include_terminal=True``: a child that has already finished may still
+        # have running children of its own, and skipping it would hide that
+        # whole branch from the stop. Cancelling a terminal record is a no-op
+        # beyond its own cascade.
+        for child in self.children_of(run_id, include_terminal=True):
+            cascaded = self.cancel(child.run_id, user_email, status=status, error=error) or cascaded
+        if record.is_terminal:
+            return cascaded
         task = record.task
         # Mark first: the cancellation propagates asynchronously, and the run
         # must never be observable as still running once the user has stopped
         # it.
-        self.set_status(run_id, RunStatus.CANCELLED)
+        self.set_status(run_id, status, error=error)
         if task is not None and not task.done():
             task.cancel()
             return True
@@ -395,7 +676,22 @@ class RunRegistry:
         return count
 
     def remove(self, run_id: str) -> None:
-        self._runs.pop(run_id, None)
+        record = self._runs.pop(run_id, None)
+        if record is None:
+            return
+        if record.parent_run_id:
+            siblings = self._children.get(record.parent_run_id, [])
+            if run_id in siblings:
+                siblings.remove(run_id)
+            if not siblings:
+                self._children.pop(record.parent_run_id, None)
+        if record.parent_conversation_id:
+            siblings = self._conversation_children.get(record.parent_conversation_id, [])
+            if run_id in siblings:
+                siblings.remove(run_id)
+            if not siblings:
+                self._conversation_children.pop(record.parent_conversation_id, None)
+        self._children.pop(run_id, None)
 
     def reap_terminal(self, now: Optional[float] = None) -> int:
         """Drop terminal runs past the retention window, and trim the excess.
@@ -409,9 +705,16 @@ class RunRegistry:
         for run_id, record in list(self._runs.items()):
             if not record.is_terminal:
                 continue
+            if self._has_live_descendants(run_id):
+                # A finished parent whose sub-conversations are still running
+                # must outlive them (#925): reaping it now would orphan the
+                # subtree, and a later stop addressed at the parent would find
+                # no record and cascade to nothing. Descendants, not just direct
+                # children -- a finished child can itself have a live one.
+                continue
             ended = record.ended_at or record.updated_at
             if now - ended > TERMINAL_RETENTION_SECONDS:
-                del self._runs[run_id]
+                self.remove(run_id)
                 removed += 1
             else:
                 per_user_terminal.setdefault(record.user_email, []).append(record)
@@ -421,10 +724,21 @@ class RunRegistry:
                 continue
             records.sort(key=lambda r: r.ended_at or r.updated_at)
             for record in records[: len(records) - MAX_RETAINED_TERMINAL_RUNS_PER_USER]:
-                self._runs.pop(record.run_id, None)
+                self.remove(record.run_id)
                 removed += 1
 
         return removed
+
+    def _has_live_descendants(self, run_id: str, _depth: int = 0) -> bool:
+        """Whether anything below ``run_id`` in the launch tree is still running."""
+        if _depth > 10:  # pragma: no cover - depth is capped far below this
+            return False
+        for child in self.children_of(run_id, include_terminal=True):
+            if not child.is_terminal:
+                return True
+            if self._has_live_descendants(child.run_id, _depth + 1):
+                return True
+        return False
 
     def enforce_wall_clock(self, max_seconds: float, now: Optional[float] = None) -> List[str]:
         """Stop non-terminal runs that have exceeded the wall-clock budget.
@@ -442,6 +756,8 @@ class RunRegistry:
         now = time.time() if now is None else now
         expired: List[str] = []
         for record in list(self.active_for_user_all()):
+            if record.is_terminal:
+                continue
             if now - record.created_at <= max_seconds:
                 continue
             logger.warning(
@@ -450,11 +766,17 @@ class RunRegistry:
                 max_seconds,
             )
             task = record.task
-            self.set_status(
-                record.run_id,
-                RunStatus.FAILED,
-                error="This run exceeded the maximum allowed run time and was stopped.",
-            )
+            # Same cascade as an explicit stop (#925): a parent that hit the
+            # wall clock must not leave its sub-conversations running.
+            timeout_error = "This run exceeded the maximum allowed run time and was stopped."
+            for child in self.children_of(record.run_id, include_terminal=True):
+                self.cancel(
+                    child.run_id,
+                    child.user_email,
+                    status=RunStatus.FAILED,
+                    error=timeout_error,
+                )
+            self.set_status(record.run_id, RunStatus.FAILED, error=timeout_error)
             if task is not None and not task.done():
                 task.cancel()
             expired.append(record.run_id)
@@ -475,12 +797,15 @@ class RunRegistry:
         This is how a conversation the user is *not* looking at still gets an
         indicator in the history list: status transitions are published to
         every live socket of the owning user, not just the one that started
-        the run. Returns an unsubscribe callable.
+        the run. Returns an unsubscribe callable. The key is normalized so a
+        socket authenticated under a differently-cased email still receives
+        the runs it owns.
         """
-        self._listeners.setdefault(user_email, []).append(listener)
+        key = normalize_user_email(user_email)
+        self._listeners.setdefault(key, []).append(listener)
 
         def _unsubscribe() -> None:
-            listeners = self._listeners.get(user_email)
+            listeners = self._listeners.get(key)
             if not listeners:
                 return
             try:
@@ -490,12 +815,12 @@ class RunRegistry:
                 # teardown) is a no-op, not an error.
                 pass
             if not listeners:
-                self._listeners.pop(user_email, None)
+                self._listeners.pop(key, None)
 
         return _unsubscribe
 
     def _notify(self, record: RunRecord) -> None:
-        for listener in list(self._listeners.get(record.user_email, [])):
+        for listener in list(self._listeners.get(normalize_user_email(record.user_email), [])):
             try:
                 listener(record)
             except Exception:  # pragma: no cover - a bad listener must not

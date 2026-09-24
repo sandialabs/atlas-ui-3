@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from enum import Enum
 from typing import (
     Any,
     Awaitable,
@@ -46,6 +47,23 @@ from .utilities.conversation_loader import load_messages_into_history
 from .utilities.interrupted_turn import close_open_turn
 
 logger = logging.getLogger(__name__)
+
+
+class DownloadError(str, Enum):
+    """Why a download reply failed, as a stable machine-readable code.
+
+    The websocket handler tries several candidate sessions for one file and has
+    to pick the most useful failure to show. Ranking on the human-readable
+    ``error`` text would make that choice depend on display copy: reword a
+    string and every candidate ties, silently reinstating the misleading error
+    of issue #953. The code is what callers compare; the text stays free to
+    change.
+    """
+
+    BAD_REQUEST = "bad_request"
+    NO_SESSION = "no_session"
+    NOT_FOUND = "not_found"
+    STORAGE = "storage"
 
 # Distinguishes "the client did not send this field" from "the client sent
 # null"; the two mean different things for the conversation's workspace binding.
@@ -343,6 +361,10 @@ class ChatService:
         # runs, makes the policy immune to that race (issue #755).
         turn_is_incognito = session_id in self._incognito_sessions
         turn_save_floor = self._incognito_save_floor.get(session_id, 0)
+        # Carried on the session so it reaches the tool execution context,
+        # where atlas_launch needs it: a sub-conversation persists its own
+        # transcript, which an incognito turn must not start (#925).
+        session.context["incognito"] = turn_is_incognito
 
         # Rewind / edit-and-resubmit is the one turn that legitimately ends with
         # fewer messages than are stored: it drops the edited prompt and
@@ -361,7 +383,7 @@ class ChatService:
         else:
             conversation_id = None
         if conversation_id:
-            self._validate_conversation_id_owner(conversation_id, user_email)
+            self.validate_conversation_id_owner(conversation_id, user_email)
             previous_conversation_id = session.context.get("conversation_id")
             session.context["conversation_id"] = conversation_id
             # An empty history re-attempts the load even when the session is
@@ -729,18 +751,25 @@ class ChatService:
             except Exception as e:
                 logger.error("Failed to persist conversation: %s", e, exc_info=True)
 
-    def _validate_conversation_id_owner(
+    def validate_conversation_id_owner(
         self,
         conversation_id: str,
         user_email: Optional[str],
     ) -> None:
         """Reject client-supplied conversation IDs owned by another user.
 
+        Public so the transport can run it *before* admitting a tracked run
+        (issue #958): the service-level check below fires only once the turn
+        is already executing, which is too late to keep run admission honest.
+
         Fails closed when a conversation repository is configured but does
         not expose ``get_conversation_owner``: a repo that cannot answer
         ownership questions cannot be trusted to enforce cross-user
         isolation, so we refuse the client-supplied id rather than letting
-        it through.
+        it through. A conversation that is not stored yet (owner ``None``)
+        is allowed: a minted id has no record to check, and an id another
+        user's run is executing under is the separate in-flight case
+        (PR #956).
         """
         if not user_email:
             logger.warning(
@@ -834,7 +863,16 @@ class ChatService:
         canonical_messages = messages
         stored_workspace_id = None
         if getattr(self, "conversation_repository", None) is not None:
-            conv = self.conversation_repository.get_conversation(conversation_id, user_email)
+            # A conversation with a run in flight is ahead of its stored
+            # record, and may not have one at all yet: a tracked run's
+            # transcript only reaches the repository when its turn ends
+            # (issue #884). Its own session is the authority until then.
+            live = await self._in_flight_conversation(conversation_id, user_email)
+            conv = live if live and live.get("messages") else None
+            if conv is None:
+                # Stored record, or the still-empty live one for a run whose
+                # session has not appended its prompt yet: real, not missing.
+                conv = self.conversation_repository.get_conversation(conversation_id, user_email) or live
             if conv is None:
                 logger.warning(
                     "Rejected restore for conversation %s: not found for user %s",
@@ -888,6 +926,21 @@ class ChatService:
             "conversation_id": conversation_id,
             "message_count": loaded,
         }
+
+    async def _in_flight_conversation(
+        self, conversation_id: str, user_email: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Live transcript of an unsaved conversation with an active run."""
+        from atlas.application.chat.runs import get_run_registry
+        from atlas.application.chat.runs.in_flight import in_flight_conversation
+
+        try:
+            return await in_flight_conversation(
+                self.session_repository, get_run_registry(), conversation_id, user_email
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("In-flight conversation lookup failed: %s", e)
+            return None
 
     async def handle_reset_session(
         self,
@@ -1025,38 +1078,86 @@ class ChatService:
                 "error": str(e)
             }
 
+    def _resolve_session_file(
+        self, session: Session, filename: str, s3_key: Optional[str] = None
+    ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Find the session file entry a download request names.
+
+        The chat UI renders a download control for the name a tool advertised
+        -- an artifact ``name``, a ``meta_data.output_files`` entry -- while
+        storage sanitizes names on the way in and keys the session map by the
+        sanitized form. An exact lookup therefore misses, leaving the file
+        downloadable from the library (which fetches by S3 key) while chat
+        silently has nothing to offer. ``resolve_session_file`` reconciles the
+        two; the canvas resolves display names through the same function, so
+        the two views of the session cannot drift apart.
+
+        A caller that knows the file's storage key says so, and the key
+        answers directly -- a name is only ever a label, and two entries can
+        wear labels that reduce to the same thing, so a control that has the
+        key should never have its bytes chosen by name matching. The key must
+        still belong to an entry of *this* session, which is what keeps it a
+        disambiguator rather than a way to reach arbitrary storage.
+        """
+        files = session.context.get("files", {}) or {}
+        if isinstance(s3_key, str) and s3_key:
+            for name, meta in files.items():
+                if isinstance(meta, dict) and meta.get("key") == s3_key:
+                    return name, meta
+            return None, None
+        return file_processor.resolve_session_file(
+            files,
+            filename,
+            self.file_manager.sanitize_filename if self.file_manager else None,
+        )
+
     async def handle_download_file(
         self,
         session_id: UUID,
         filename: str,
-        user_email: Optional[str]
+        user_email: Optional[str],
+        s3_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Download a file by original filename (within session context)."""
+        """Download a session file, by its storage key when the caller has one."""
+        # ``filename`` arrives straight from a client JSON frame, so it can be
+        # any JSON value. Reject anything that is not a non-empty string here,
+        # where it still becomes an ordinary error reply, rather than letting a
+        # dict lookup or the sanitizer raise out of the websocket handler.
+        if not isinstance(filename, str) or not filename:
+            return {
+                "type": MessageType.FILE_DOWNLOAD.value,
+                "filename": filename if isinstance(filename, str) else "",
+                "error": "A filename is required",
+                "error_code": DownloadError.BAD_REQUEST.value,
+            }
         session = await self.session_repository.get(session_id)
         if not session or not self.file_manager or not user_email:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": "Session or file manager not available"
+                "error": "Session or file manager not available",
+                "error_code": DownloadError.NO_SESSION.value,
             }
-        ref = session.context.get("files", {}).get(filename)
+        stored_name, ref = self._resolve_session_file(session, filename, s3_key)
         if not ref:
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": "File not found in session"
+                "error": "File not found in session",
+                "error_code": DownloadError.NOT_FOUND.value,
             }
         try:
             content_b64 = await self.file_manager.get_file_content(
                 user_email=user_email,
-                filename=filename,
+                filename=stored_name,
                 s3_key=ref.get("key")
             )
             if not content_b64:
                 return {
                     "type": MessageType.FILE_DOWNLOAD.value,
                     "filename": filename,
-                    "error": "Unable to retrieve file content"
+                    "error": "Unable to retrieve file content",
+                    "error_code": DownloadError.STORAGE.value,
                 }
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
@@ -1064,11 +1165,19 @@ class ChatService:
                 "content_base64": content_b64
             }
         except Exception as e:
-            logger.error(f"Download failed for {filename}: {e}")
+            # The exception text routinely names the bucket, object key,
+            # endpoint host and principal. It belongs in the server log, not in
+            # a frame sent to the browser.
+            logger.error(
+                "Download failed for %s: %s",
+                sanitize_for_logging(filename),
+                sanitize_for_logging(str(e)),
+            )
             return {
                 "type": MessageType.FILE_DOWNLOAD.value,
                 "filename": filename,
-                "error": str(e)
+                "error": "Unable to retrieve file content",
+                "error_code": DownloadError.STORAGE.value,
             }
 
     async def _update_session_from_tool_results(

@@ -1,6 +1,6 @@
 # Authentication & Authorization
 
-Last updated: 2026-09-04
+Last updated: 2026-09-15
 
 This page describes Atlas's **default** authentication mode: the application
 operates behind a reverse proxy and trusts an identity header injected by an
@@ -270,7 +270,51 @@ You can configure the application to call an external HTTP endpoint to check for
         }
         ```
 
-### Static Configuration: `ADMIN_USERS` / `AUTH_STATIC_GROUPS`
+### Admin Authorization: `ADMIN_GROUP` + `ADMIN_USERS`
+
+Admin access is granted when **either** of these is true:
+
+1. the identity is listed in `ADMIN_USERS`, or
+2. the identity is a member of `ADMIN_GROUP` according to the normal membership check (the external authorizer when one is configured, otherwise the static table or the debug mock table).
+
+That means a deployment that already resolves group membership elsewhere only has to name the group:
+
+```
+ADMIN_GROUP=my-org-atlas-admins
+```
+
+No static member enumeration is required, and `AUTH_STATIC_GROUPS` is **not** the place to put a bare group name — it only declares explicit `group:user1,user2` mappings, and an entry without a colon is skipped with a warning.
+
+Add a small hand-written override list when you also want an allowlist independent of that group logic:
+
+```
+ADMIN_GROUP=my-org-atlas-admins
+ADMIN_USERS=alice@example.org,bob@example.org
+```
+
+`ADMIN_USERS` is an **override, not a fallback**: it is honoured even when `AUTH_GROUP_CHECK_URL` is configured, and even when that endpoint denies, errors, or is unreachable. This is deliberate — it is the emergency path that has to keep working when the authorization service is the thing that broke. It only ever *grants*, it applies only to the configured `ADMIN_GROUP`, and it has no effect on any other group.
+
+Because it is a break-glass path, a grant that actually overrides the authorization service is logged as a warning naming the identity, the group, and `ADMIN_USERS` as the source — so after an incident an override grant is distinguishable from real group membership. The line is throttled to once per identity and group per hour, since admin-gated routes are polled and a line per request would bury the signal. (With no authorizer configured, `ADMIN_USERS` is simply how admins are set up, and it logs at info level instead.)
+
+What the two signals look like — the startup line, and a grant that overrode the authorization service:
+
+```
+WARNING  atlas.modules.config.settings  ADMIN_USERS is set alongside AUTH_GROUP_CHECK_URL: 2 identity/ies now hold admin ('admin') regardless of what the authorization service answers. Before issue #945 these entries were inert while an authorizer was configured -- review the list and remove anyone who should no longer have break-glass admin.
+WARNING  atlas.core.auth  Admin override: granting admin group 'admin' to user 'alice@example.org' via ADMIN_USERS, bypassing the configured authorization service.
+```
+
+> **Upgrading:** before this change, `ADMIN_USERS` was inert whenever `AUTH_GROUP_CHECK_URL` was configured. If your deployment sets both, those entries are now live admin grants — review the list and remove anyone, de-provisioned staff especially, who should no longer hold break-glass admin. Atlas logs a startup warning whenever both are set.
+
+
+The three mechanisms are distinct:
+
+| Setting | What it is | Honoured when an external authorizer is configured? |
+| --- | --- | --- |
+| `ADMIN_GROUP` | Name of the admin group; membership is resolved **dynamically** by the normal check | Yes — the authorizer answers |
+| `ADMIN_USERS` | Static admin **override list** | Yes — grants admin regardless of the authorizer's answer |
+| `AUTH_STATIC_GROUPS` | Explicit **static membership mappings** (`group:user1,user2`) | No — the authorizer stays authoritative |
+
+### Static Configuration Without an Authorization Service
 
 For deployments that do not run an authorization service, group membership can be configured statically. This is consulted **after** `AUTH_GROUP_CHECK_URL` and **before** the debug-only mock table, and — unlike the mock table — it works with `DEBUG_MODE=false`.
 
@@ -288,12 +332,12 @@ Everyone listed satisfies a check against `ADMIN_GROUP` (whatever it is named).
 AUTH_STATIC_GROUPS=admin:alice@example.org,bob@example.org;mcp_advanced:alice@example.org
 ```
 
-Semicolons separate groups, a colon separates the group name from its members, and commas separate members. `ADMIN_USERS` is exactly sugar for a single `<ADMIN_GROUP>:` entry; when both are set the memberships are unioned.
+Semicolons separate groups, a colon separates the group name from its members, and commas separate members. On this no-authorizer path `ADMIN_USERS` behaves like a single `<ADMIN_GROUP>:` entry; when both are set the memberships are unioned. (With an authorizer configured the two diverge: only `ADMIN_USERS` still grants.)
 
 Notes:
 
-- **Matching is case-insensitive and whitespace-tolerant** on both group names and identities, since the values come from IdP claims and hand-edited config.
-- **An external authorizer stays authoritative.** When `AUTH_GROUP_CHECK_URL` is configured, its verdict is final and the static config is not consulted as an additional grant. This holds even if `AUTH_GROUP_CHECK_API_KEY` is missing: an endpoint configured without a usable key fails closed rather than falling back to static grants.
+- **Matching is case-insensitive and whitespace-tolerant** on both group names and identities, since the values come from IdP claims and hand-edited config. This applies to every source Atlas evaluates itself — the `ADMIN_USERS` override, the static table, the `users` short-circuit and the debug mock table. It does **not** apply to `AUTH_GROUP_CHECK_URL`: that service is sent the identity and group exactly as received, because it owns its own matching rules and rewriting the values could change its answer.
+- **An external authorizer stays authoritative**, with one documented exception. When `AUTH_GROUP_CHECK_URL` is configured, its verdict is final and the `AUTH_STATIC_GROUPS` table is not consulted as an additional grant. This holds even if `AUTH_GROUP_CHECK_API_KEY` is missing: an endpoint configured without a usable key fails closed rather than falling back to static grants. The exception is `ADMIN_USERS`, which is an explicit admin override and grants `ADMIN_GROUP` either way — see the section above.
 - **Static config only ever grants.** Users not listed keep the existing behaviour — they are in `users` and nothing else.
 - A malformed `AUTH_STATIC_GROUPS` entry is skipped with a warning rather than failing startup; the effect is denial, not a partially-parsed grant.
 - If `DEBUG_MODE=false`, no `AUTH_GROUP_CHECK_URL` is set, and neither variable is configured, Atlas logs a startup warning: in that combination no user can be an admin and any group-restricted MCP server is hidden from everyone.
