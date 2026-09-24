@@ -283,6 +283,13 @@ class ConfigManager:
                     )
                     # Update to canonical name or None if invalid
                     model_config.compliance_level = validated
+            # A gateway's level applies to every model reached through it.
+            for gateway_name, gateway_config in self._llm_config.litellm_gateways.items():
+                if gateway_config.compliance_level:
+                    gateway_config.compliance_level = compliance_mgr.validate_compliance_level(
+                        gateway_config.compliance_level,
+                        context=f"for LiteLLM gateway '{gateway_name}'"
+                    )
         except Exception as e:
             logger.warning(f"Could not validate LLM compliance levels: {e}")
 

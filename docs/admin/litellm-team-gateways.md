@@ -47,7 +47,7 @@ litellm_gateways:
 | `base_url` | required | LiteLLM proxy root. `${ENV_VAR}` is expanded. |
 | `display_name`, `description` | gateway name | Shown in the model picker. |
 | `auth_type` | `system` | How Atlas authenticates to LiteLLM (see below). |
-| `api_key` | `""` | Service key for `auth_type: system` (`${ENV_VAR}` expanded). |
+| `api_key` | required for `system` | Service key for `auth_type: system` (`${ENV_VAR}` expanded). Required so LiteLLM's SDK never falls back to the server's own provider key. |
 | `delegation.scope` / `audience` / `resource` | - | Target of the delegated token for `auth_type: delegated`. One is required. |
 | `user_id_source` | `email` for `system`, `token_claim` for `delegated` | How the LiteLLM `user_id` for `/team/list` is derived. |
 | `user_id_claim` | `oid` | Claim read from the delegated token when `user_id_source: token_claim`. Entra puts the user's object id in `oid`. |
@@ -56,7 +56,7 @@ litellm_gateways:
 | `team_list_path` | `team/list` | Team listing endpoint, called with `?user_id=`. |
 | `models_path` | `models` | Model listing endpoint, called with `?team_id=`. |
 | `discovery_timeout_seconds` | `30` | Timeout for team and model listing. |
-| `discovery_cache_seconds` | `300` | How long a user's team and model lists are cached. |
+| `discovery_cache_seconds` | `300` | How long a user's team and model lists are cached. A forced refresh (`?refresh=true`, or a cache miss on a team) is only honored once the cached list is 10 seconds old. |
 | `groups` | `[]` | Atlas groups allowed to use the gateway, as for a model's `groups`. |
 | `compliance_level` | - | Compliance level of every model reached through the gateway. |
 | `extra_headers` | - | Static headers sent on every chat request. |
@@ -108,12 +108,18 @@ the proxy trusts Atlas as a service, or for local testing with the mock.
 - **Calls.** For such a model Atlas calls `POST <base_url>/chat/completions`
   with the model id, the gateway credential as the bearer token, and
   `x-litellm-team-id: <team_id>`.
-- **Team membership is checked on every call.** Before any request for a team
-  model, Atlas confirms the gateway lists that team for the user (cached for
-  `discovery_cache_seconds`, re-checked once on a miss so a newly granted team
-  works immediately). A hand-crafted model name for someone else's team is
-  refused with "You are not a member of the selected LiteLLM team", and no
-  request reaches LiteLLM.
+- **Team and model are checked on every call.** Before any request for a team
+  model, Atlas confirms the gateway lists that team for the user and that the
+  model is among the team's models (both cached for `discovery_cache_seconds`,
+  re-checked once on a miss so a newly granted team or model works). A
+  hand-crafted model name for someone else's team, or for a model outside the
+  team, is refused ("You are not a member of the selected LiteLLM team" /
+  "The selected model is not available to the selected LiteLLM team") and no
+  request reaches LiteLLM. With a shared service key this check is what keeps
+  users inside their teams, so removing a user from a team takes effect within
+  `discovery_cache_seconds`.
+- **Not yet covered:** `atlas_launch` sub-conversations and MCP sampling
+  choose from the statically configured models only.
 - **Access control** (`groups`) and **compliance** (`compliance_level`) apply
   to every gateway model exactly as they do to configured models. A gateway a
   user may not use is absent from `/api/config` and its endpoints answer 404.

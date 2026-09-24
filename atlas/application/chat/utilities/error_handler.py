@@ -10,6 +10,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
+    AuthenticationError,
+    AuthorizationError,
     ContextWindowExceededError,
     LLMAuthenticationError,
     LLMBadRequestError,
@@ -79,6 +81,8 @@ _ERROR_TYPE_BY_CLASS = (
     (RateLimitError, "rate_limit"),
     (LLMTimeoutError, "timeout"),
     (LLMAuthenticationError, "authentication"),
+    (AuthenticationError, "authentication"),
+    (AuthorizationError, "authorization"),
     (ContextWindowExceededError, "context_window_exceeded"),
     (ValidationError, "validation"),
     (LLMBadRequestError, "bad_request"),
@@ -186,6 +190,10 @@ async def safe_call_llm_with_tools(
                 f"content_length: {content_length}, model: {model_used}"
             )
         return llm_response
+    except (AuthenticationError, AuthorizationError):
+        # Already specific and user-safe (e.g. "not a member of the selected
+        # LiteLLM team"); reclassifying would turn it into a generic error.
+        raise
     except Exception as e:
         # Classify the error and raise appropriate error type
         error_class, user_msg, log_msg = classify_llm_error(e)

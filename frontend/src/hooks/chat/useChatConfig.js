@@ -278,8 +278,8 @@ export function useChatConfig() {
   // The current gateway model joins the list so every "look up the current
   // model's capabilities" call site finds it like any configured model.
   const modelsWithGateway = useMemo(
-    () => withGatewayModel(models, currentModel, llmGateways),
-    [models, currentModel, llmGateways]
+    () => withGatewayModel(models, currentModel, llmGateways, user),
+    [models, currentModel, llmGateways, user]
   )
 
   return {

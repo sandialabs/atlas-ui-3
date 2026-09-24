@@ -67,8 +67,9 @@ function setup({ currentModel = 'static-model', models } = {}) {
   const setCurrentModel = vi.fn()
   const gateways = [GATEWAY]
   useChat.mockReturnValue({
-    models: withGatewayModel(models || [{ name: 'static-model', supports_tools: true }], currentModel, gateways),
+    models: withGatewayModel(models || [{ name: 'static-model', supports_tools: true }], currentModel, gateways, 'test@test.com'),
     llmGateways: gateways,
+    user: 'test@test.com',
     currentModel,
     setCurrentModel,
     features: {},
@@ -93,9 +94,12 @@ describe('gateway model keys', () => {
   })
 
   it('builds a model entry labelled with the remembered team name', () => {
-    rememberTeamLabel('enterprise', 't1', 'Project One')
-    const entry = gatewayModelEntry('enterprise::t1::gpt-4o-mini', [GATEWAY])
+    rememberTeamLabel('enterprise', 't1', 'Project One', 'a@x.com')
+    const entry = gatewayModelEntry('enterprise::t1::gpt-4o-mini', [GATEWAY], 'a@x.com')
     expect(entry.display_name).toBe('gpt-4o-mini (Project One)')
+    // Another user on the same browser does not see it.
+    expect(gatewayModelEntry('enterprise::t1::gpt-4o-mini', [GATEWAY], 'b@x.com').display_name)
+      .toBe('gpt-4o-mini (t1)')
     expect(entry.supports_tools).toBe(true)
     expect(entry.gateway).toBe('enterprise')
   })
@@ -123,7 +127,7 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
   })
 
   it('keeps gateway models out of the flat list and labels the current one', async () => {
-    rememberTeamLabel('enterprise', 'team-alpha', 'Project Alpha')
+    rememberTeamLabel('enterprise', 'team-alpha', 'Project Alpha', 'test@test.com')
     setup({ currentModel: 'enterprise::team-alpha::claude-sonnet' })
     const trigger = screen.getByRole('button', { name: /select chat model/i })
     expect(trigger.textContent).toContain('claude-sonnet (Project Alpha)')

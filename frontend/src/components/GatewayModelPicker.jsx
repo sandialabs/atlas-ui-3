@@ -29,11 +29,11 @@ async function fetchJson(url) {
  * loads the models that team may call. Choosing a model selects its gateway
  * model key, which carries the team to the backend with every chat turn.
  */
-const GatewayModelPicker = ({ gateway, currentModel, onSelect }) => {
+const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
   const current = parseGatewayModelKey(currentModel, [gateway])
   const [teams, setTeams] = useState(null)
   const [teamsError, setTeamsError] = useState(null)
-  const [teamId, setTeamId] = useState(current?.teamId || lastTeamFor(gateway.name))
+  const [teamId, setTeamId] = useState(current?.teamId || lastTeamFor(gateway.name, user))
   const [models, setModels] = useState(null)
   const [modelsError, setModelsError] = useState(null)
   const base = `/api/llm/gateways/${encodeURIComponent(gateway.name)}`
@@ -69,12 +69,12 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect }) => {
 
   const handleTeamChange = (event) => {
     setTeamId(event.target.value)
-    if (event.target.value) rememberLastTeam(gateway.name, event.target.value)
+    if (event.target.value) rememberLastTeam(gateway.name, event.target.value, user)
   }
 
   const handleModelSelect = (model) => {
     const team = (teams || []).find(t => t.team_id === teamId)
-    rememberTeamLabel(gateway.name, teamId, team?.label || teamId)
+    rememberTeamLabel(gateway.name, teamId, team?.label || teamId, user)
     onSelect(model.name)
   }
 

@@ -35,6 +35,10 @@ from atlas.modules.config.models import LiteLLMGatewayConfig, resolve_env_var
 
 logger = logging.getLogger(__name__)
 
+# Minimum age of a cached team or model list before a user-triggered refresh
+# goes back to LiteLLM.
+FORCED_REFRESH_MIN_INTERVAL_SECONDS = 10.0
+
 
 @dataclass(frozen=True)
 class GatewayTeam:
@@ -117,6 +121,9 @@ class LiteLLMGatewayClient:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.name = name
+        # Gateway names come from configuration, but routes pass them through
+        # from the request path; log a sanitized copy.
+        self._log_name = sanitize_for_logging(name)
         self.config = config
         self._transport = transport
         self._clock = clock
@@ -136,10 +143,17 @@ class LiteLLMGatewayClient:
             try:
                 token = resolve_env_var(self.config.api_key) or ""
             except ValueError as exc:
-                logger.error("LiteLLM gateway '%s' API key is not configured: %s", self.name, exc)
+                logger.error(
+                "LiteLLM gateway '%s' API key is not configured: %s",
+                self._log_name, sanitize_for_logging(str(exc)),
+            )
                 raise LLMAuthenticationError(
                     f"LiteLLM gateway '{self.name}' is not configured with an API key."
                 ) from None
+        if not token:
+            raise LLMAuthenticationError(
+                f"LiteLLM gateway '{self.name}' has no credential to present."
+            )
         return GatewayCredential(bearer_token=token, litellm_user_id=self._litellm_user_id(user_email, token))
 
     async def _mint_delegated_token(self, user_email: str) -> str:
@@ -154,7 +168,7 @@ class LiteLLMGatewayClient:
         if manager is None:
             logger.error(
                 "LiteLLM gateway '%s' uses delegated auth but OIDC delegation is not configured",
-                self.name,
+                self._log_name,
             )
             raise LLMAuthenticationError(
                 f"LiteLLM gateway '{self.name}' requires delegated sign-in, which is not configured."
@@ -177,7 +191,10 @@ class LiteLLMGatewayClient:
         try:
             token = await manager.get_token(request)
         except DelegationError as exc:
-            logger.error("Delegated token exchange failed for LiteLLM gateway '%s': %s", self.name, exc)
+            logger.error(
+                "Delegated token exchange failed for LiteLLM gateway '%s': %s",
+                self._log_name, sanitize_for_logging(str(exc)),
+            )
             raise LLMAuthenticationError(
                 f"Could not obtain a token for LiteLLM gateway '{self.name}'. Please sign in again."
             ) from None
@@ -218,12 +235,15 @@ class LiteLLMGatewayClient:
             ) as client:
                 response = await client.get(url, params=params, headers=headers)
         except httpx.HTTPError as exc:
-            logger.error("LiteLLM gateway '%s' unreachable at %s: %s", self.name, path, type(exc).__name__)
+            logger.error(
+                "LiteLLM gateway '%s' unreachable at %s: %s",
+                self._log_name, sanitize_for_logging(path), type(exc).__name__,
+            )
             raise LLMServiceError(f"LiteLLM gateway '{self.name}' is unreachable.") from None
         elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(
             "LiteLLM gateway '%s' GET %s -> %s in %.0f ms",
-            self.name, path, response.status_code, elapsed_ms,
+            self._log_name, sanitize_for_logging(path), response.status_code, elapsed_ms,
         )
         if response.status_code in (401, 403):
             raise LLMAuthenticationError(
@@ -240,13 +260,24 @@ class LiteLLMGatewayClient:
 
     # -- discovery -----------------------------------------------------------
 
-    def _fresh(self, entry: Optional[Tuple[float, Any]]) -> bool:
-        return entry is not None and self._clock() - entry[0] < self.config.discovery_cache_seconds
+    def _fresh(self, entry: Optional[Tuple[float, Any]], refresh: bool = False) -> bool:
+        """Whether a cache entry may be served.
+
+        A forced refresh is honored only once the entry is a few seconds old:
+        refreshes are triggered by users (``?refresh=true``, a made-up team id)
+        and each one is an uncached call to LiteLLM.
+        """
+        if entry is None:
+            return False
+        age = self._clock() - entry[0]
+        if refresh:
+            return age < FORCED_REFRESH_MIN_INTERVAL_SECONDS
+        return age < self.config.discovery_cache_seconds
 
     async def list_teams(self, user_email: Optional[str], *, refresh: bool = False) -> List[GatewayTeam]:
         cache_key = (user_email or "").lower()
         cached = self._team_cache.get(cache_key)
-        if not refresh and self._fresh(cached):
+        if self._fresh(cached, refresh):
             return cached[1]
         credential = await self.get_credential(user_email)
         payload = await self._get_json(
@@ -259,10 +290,10 @@ class LiteLLMGatewayClient:
     async def list_models(
         self, user_email: Optional[str], team_id: str, *, refresh: bool = False
     ) -> List[str]:
-        await self.require_team(user_email, team_id)
+        await self.require_team(user_email, team_id, refresh=refresh)
         cache_key = ((user_email or "").lower(), team_id)
         cached = self._model_cache.get(cache_key)
-        if not refresh and self._fresh(cached):
+        if self._fresh(cached, refresh):
             return cached[1]
         credential = await self.get_credential(user_email)
         payload = await self._get_json(
@@ -272,18 +303,20 @@ class LiteLLMGatewayClient:
         self._model_cache[cache_key] = (self._clock(), models)
         return models
 
-    async def require_team(self, user_email: Optional[str], team_id: str) -> GatewayTeam:
+    async def require_team(
+        self, user_email: Optional[str], team_id: str, *, refresh: bool = False
+    ) -> GatewayTeam:
         """Return the team if the gateway lists it for this user, else refuse."""
-        teams = await self.list_teams(user_email)
+        teams = await self.list_teams(user_email, refresh=refresh)
         match = next((team for team in teams if team.team_id == team_id), None)
-        if match is None:
+        if match is None and not refresh:
             # The team may have been granted since the cache filled.
             teams = await self.list_teams(user_email, refresh=True)
             match = next((team for team in teams if team.team_id == team_id), None)
         if match is None:
             logger.warning(
                 "Refused LiteLLM gateway '%s' team %s for user %s: not a member",
-                self.name, sanitize_for_logging(team_id), sanitize_for_logging(user_email or ""),
+                self._log_name, sanitize_for_logging(team_id), sanitize_for_logging(user_email or ""),
             )
             raise AuthorizationError(
                 "You are not a member of the selected LiteLLM team. Choose another team.",
@@ -296,8 +329,25 @@ class LiteLLMGatewayClient:
     async def apply_request_auth(
         self, ref: GatewayModelRef, user_email: Optional[str], model_kwargs: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Add the bearer token and team header to LiteLLM call kwargs."""
+        """Add the bearer token and team header to LiteLLM call kwargs.
+
+        The team and the model are both checked: the model part of the key is
+        client-supplied, and with a shared service key LiteLLM may not apply
+        the header team's model allowlist itself.
+        """
         await self.require_team(user_email, ref.team_id)
+        models = await self.list_models(user_email, ref.team_id)
+        if ref.model_id not in models:
+            models = await self.list_models(user_email, ref.team_id, refresh=True)
+        if ref.model_id not in models:
+            logger.warning(
+                "Refused LiteLLM gateway '%s' model %s for team %s: not in the team's models",
+                self._log_name, sanitize_for_logging(ref.model_id), sanitize_for_logging(ref.team_id),
+            )
+            raise AuthorizationError(
+                "The selected model is not available to the selected LiteLLM team.",
+                code="LLM_TEAM_MODEL_DENIED",
+            )
         credential = await self.get_credential(user_email)
         if credential.bearer_token:
             model_kwargs["api_key"] = credential.bearer_token

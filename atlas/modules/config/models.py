@@ -13,11 +13,20 @@ primitive consumed by the loader.
 Dependency direction: ``config_loader`` -> ``settings`` -> ``models``.
 """
 
+import logging
 import os
 import re
 from typing import Any, ClassVar, Dict, List, Literal, Optional, get_args
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from atlas.modules.config.litellm_gateway_models import (
+    GATEWAY_KEY_SEPARATOR,
+    is_key_safe_part,
+    resolve_gateway_ref,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_env_var(value: Optional[str], required: bool = True) -> Optional[str]:
@@ -256,6 +265,10 @@ class LiteLLMGatewayConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_auth(self):
+        if self.auth_type == "system" and not self.api_key.strip():
+            # Without a key, LiteLLM's SDK would fall back to the server's own
+            # OPENAI_API_KEY and send it to this gateway.
+            raise ValueError("auth_type 'system' requires api_key")
         if self.auth_type == "delegated":
             delegation = self.delegation
             if not delegation or not (delegation.scope or delegation.audience or delegation.resource):
@@ -292,13 +305,11 @@ class LLMConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_gateway_names(self):
-        from atlas.modules.config.litellm_gateway_models import GATEWAY_KEY_SEPARATOR
-
         for gateway_name in self.litellm_gateways:
-            if not gateway_name or GATEWAY_KEY_SEPARATOR in gateway_name:
+            if not is_key_safe_part(gateway_name):
                 raise ValueError(
-                    f"LiteLLM gateway name {gateway_name!r} must be non-empty and "
-                    f"must not contain {GATEWAY_KEY_SEPARATOR!r}"
+                    f"LiteLLM gateway name {gateway_name!r} must be non-empty, must not "
+                    f"contain {GATEWAY_KEY_SEPARATOR!r}, and must not start or end with ':'"
                 )
             prefix = f"{gateway_name}{GATEWAY_KEY_SEPARATOR}"
             clashing = [name for name in self.models if name.startswith(prefix)]
@@ -314,9 +325,40 @@ class LLMConfig(BaseModel):
         model_config = self.models.get(model_name)
         if model_config is not None:
             return model_config
-        from atlas.modules.config.litellm_gateway_models import build_gateway_model_config
+        return self._build_gateway_model(model_name)
 
-        return build_gateway_model_config(self, model_name)
+    def _build_gateway_model(self, model_name: str) -> Optional[ModelConfig]:
+        """Synthesize the ModelConfig for a gateway model key.
+
+        Derived from the gateway configuration alone -- no network call -- so a
+        saved conversation or a restarted server resolves the same model
+        without rediscovery. Whether the user may use the team is checked
+        separately, per call, by the gateway client.
+        """
+        ref = resolve_gateway_ref(self, model_name)
+        if ref is None:
+            return None
+        gateway = self.litellm_gateways[ref.gateway]
+        gateway_label = gateway.display_name or ref.gateway
+        try:
+            base_url = gateway.resolved_base_url()
+        except ValueError:
+            # base_url names an unset ${ENV_VAR}: the gateway is unusable, so
+            # its models are unknown rather than an error on every lookup.
+            logger.error("LiteLLM gateway base_url is not configured (environment variable unset)")
+            return None
+        fields = {"description": f"{ref.model_id} via {gateway_label}", **gateway.model_defaults}
+        fields.update(
+            model_name=ref.model_id,
+            model_url=base_url,
+            # The gateway client supplies the bearer token per call (a service
+            # key or a delegated token), so no static key is resolved here.
+            api_key="",
+            groups=list(gateway.groups),
+            compliance_level=gateway.compliance_level,
+            extra_headers=dict(gateway.extra_headers) if gateway.extra_headers else None,
+        )
+        return ModelConfig(**fields)
 
 
 def lookup_model_config(llm_config: Any, model_name: str) -> Optional[ModelConfig]:

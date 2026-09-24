@@ -104,9 +104,10 @@ class TestGatewayModelKeys:
             "enterprise", ALPHA, "bedrock/anthropic.claude:v2",
         )
 
-    def test_rejects_team_ids_that_would_not_round_trip(self):
+    @pytest.mark.parametrize("team_id", ["a::b", "team:", ":team", ""])
+    def test_rejects_team_ids_that_would_not_round_trip(self, team_id):
         with pytest.raises(ValueError):
-            build_gateway_model_key("enterprise", "a::b", "gpt-4o-mini")
+            build_gateway_model_key("enterprise", team_id, "gpt-4o-mini")
 
     @pytest.mark.parametrize("name", ["gpt-4o", "a::b", "::team::model", "gw::::model"])
     def test_ordinary_names_are_not_gateway_keys(self, name):
@@ -117,7 +118,8 @@ class TestGatewayModelKeys:
         model = llm_config.get_model(f"enterprise::{ALPHA}::gpt-4o-mini")
         assert model.model_name == "gpt-4o-mini"
         assert model.model_url == "http://litellm.mock"
-        assert model.api_key == MASTER_KEY
+        # The key is supplied per call by the gateway client, never statically.
+        assert model.api_key == ""
         assert model.groups == ["engineering"]
         assert model.compliance_level == "Internal"
         assert model.max_tokens == 256
@@ -136,6 +138,16 @@ class TestGatewayModelKeys:
     def test_delegated_gateway_carries_no_static_key(self):
         llm_config = _llm_config(auth_type="delegated", delegation={"scope": "api://litellm/.default"})
         assert llm_config.get_model(f"enterprise::{ALPHA}::gpt-4o-mini").api_key == ""
+
+    def test_system_gateway_requires_a_key(self):
+        # An empty key would let LiteLLM fall back to the server's OPENAI_API_KEY.
+        with pytest.raises(ValueError, match="requires api_key"):
+            _llm_config(api_key="")
+
+    def test_unset_base_url_env_makes_models_unknown(self, monkeypatch):
+        monkeypatch.delenv("UNSET_GATEWAY_URL_FOR_TEST", raising=False)
+        llm_config = _llm_config(base_url="${UNSET_GATEWAY_URL_FOR_TEST}")
+        assert llm_config.get_model(f"enterprise::{ALPHA}::m") is None
 
     def test_delegated_gateway_requires_a_target(self):
         with pytest.raises(ValueError, match="delegation.scope"):
@@ -203,6 +215,24 @@ class TestGatewayDiscovery:
         await client.list_teams("test@test.com")
         await client.list_teams("test@test.com")
         assert calls == ["/team/list"]
+
+    @pytest.mark.asyncio
+    async def test_refresh_rechecks_membership_but_is_throttled(self):
+        now = [1000.0]
+        client = LiteLLMGatewayClient(
+            "enterprise", _llm_config().litellm_gateways["enterprise"],
+            transport=_mock_transport(), clock=lambda: now[0],
+        )
+        stale = [litellm_gateway_client.GatewayTeam(team_id=GAMMA, label="stale")]
+        client._team_cache["test@test.com"] = (now[0], stale)
+        # A refresh right after the cache filled is served from the cache...
+        assert await client.list_teams("test@test.com", refresh=True) == stale
+        # ...but once the throttle window passes it reaches LiteLLM, so a
+        # revoked membership is seen.
+        now[0] += litellm_gateway_client.FORCED_REFRESH_MIN_INTERVAL_SECONDS + 1
+        assert await client.list_models("test@test.com", ALPHA, refresh=True)
+        with pytest.raises(AuthorizationError):
+            await client.list_models("test@test.com", GAMMA)
 
     @pytest.mark.asyncio
     async def test_rejected_service_key_is_an_authentication_error(self):
@@ -308,6 +338,29 @@ class TestGatewayCallTarget:
         caller = _caller_with_mock_transport(_llm_config())
         with pytest.raises(AuthorizationError):
             await caller._resolve_call_target(f"enterprise::{GAMMA}::gpt-4o-mini", None, "test@test.com")
+
+    @pytest.mark.asyncio
+    async def test_crafted_key_for_a_model_outside_the_team_is_refused(self):
+        # Project Alpha is a team the user belongs to, but llama-3.3-70b is
+        # only on Project Beta. The check must hold even if the proxy would
+        # not enforce the team's allowlist for a service key.
+        caller = _caller_with_mock_transport(_llm_config())
+        with pytest.raises(AuthorizationError) as exc_info:
+            await caller._resolve_call_target(f"enterprise::{ALPHA}::llama-3.3-70b", None, "test@test.com")
+        assert exc_info.value.code == "LLM_TEAM_MODEL_DENIED"
+
+    @pytest.mark.asyncio
+    async def test_tools_path_keeps_the_team_error(self):
+        from atlas.application.chat.utilities.error_handler import safe_call_llm_with_tools
+
+        caller = _caller_with_mock_transport(_llm_config())
+        tools = [{"type": "function", "function": {"name": "noop", "parameters": {"type": "object"}}}]
+        with pytest.raises(AuthorizationError) as exc_info:
+            await safe_call_llm_with_tools(
+                caller, f"enterprise::{GAMMA}::gpt-4o-mini",
+                [{"role": "user", "content": "hi"}], tools, user_email="test@test.com",
+            )
+        assert exc_info.value.code == "LLM_TEAM_ACCESS_DENIED"
 
     @pytest.mark.asyncio
     async def test_static_models_are_untouched(self):
@@ -422,8 +475,29 @@ class TestGatewayRoutes:
         response = client.get("/api/llm/gateways/enterprise/models", params={"team_id": GAMMA})
         assert response.status_code == 403
 
+    def test_team_id_with_key_separator_is_rejected(self, routes_client):
+        client, _ = routes_client
+        response = client.get("/api/llm/gateways/enterprise/models", params={"team_id": "a::b"})
+        assert response.status_code == 400
+
     def test_unknown_and_restricted_gateways_look_the_same(self, routes_client):
         client, state = routes_client
         assert client.get("/api/llm/gateways/nope/teams").status_code == 404
         state["user"] = "outsider@example.com"
         assert client.get("/api/llm/gateways/enterprise/teams").status_code == 404
+
+
+class TestGatewayComplianceNormalization:
+    def test_gateway_level_is_canonicalized_at_load(self):
+        from atlas.modules.config import config_loader
+
+        loader = object.__new__(config_loader.ConfigManager)
+        loader._llm_config = _llm_config(compliance_level="internal-alias")
+
+        class Levels:
+            def validate_compliance_level(self, level, context=""):
+                return {"internal-alias": "Internal"}.get(level)
+
+        with patch("atlas.core.compliance.get_compliance_manager", return_value=Levels()):
+            loader._validate_llm_compliance_levels()
+        assert loader._llm_config.litellm_gateways["enterprise"].compliance_level == "Internal"

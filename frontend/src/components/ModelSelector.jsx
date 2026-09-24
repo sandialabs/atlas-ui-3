@@ -19,6 +19,7 @@ const ModelSelector = () => {
   const {
     models = [],
     llmGateways = [],
+    user,
     currentModel,
     setCurrentModel,
     features,
@@ -182,6 +183,7 @@ const ModelSelector = () => {
                 gateway={gateway}
                 currentModel={currentModel}
                 onSelect={handleModelSelect}
+                user={user}
               />
             ))}
           </div>

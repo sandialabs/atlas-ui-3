@@ -15,17 +15,13 @@ from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.domain.errors import AuthorizationError, LLMAuthenticationError, LLMServiceError
 from atlas.infrastructure.app_factory import app_factory
-from atlas.modules.config.litellm_gateway_models import GATEWAY_KEY_SEPARATOR, build_gateway_model_key
+from atlas.modules.config.litellm_gateway_models import build_gateway_model_key, is_key_safe_part
 from atlas.modules.config.models import LiteLLMGatewayConfig
 from atlas.modules.llm.litellm_gateway_client import get_gateway_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/llm/gateways", tags=["llm-gateways"])
-
-# ModelConfig capability flags the model picker needs for gateway models.
-_CAPABILITY_FIELDS = ("supports_vision", "supports_pdf", "supports_tools")
-
 
 async def build_gateway_summaries(llm_config: Any, current_user: str, app_settings: Any) -> List[Dict[str, Any]]:
     """Gateways the user may use, in the shape ``/api/config`` returns them."""
@@ -85,7 +81,7 @@ async def list_gateway_teams(
     except (AuthorizationError, LLMAuthenticationError, LLMServiceError) as exc:
         _raise_http(exc)
     # A team id containing the key separator cannot be carried in a model key.
-    usable = [team for team in teams if GATEWAY_KEY_SEPARATOR not in team.team_id]
+    usable = [team for team in teams if is_key_safe_part(team.team_id)]
     logger.info(
         "Listed %d LiteLLM team(s) on gateway %s for %s",
         len(usable), sanitize_for_logging(gateway_name), sanitize_for_logging(current_user),
@@ -104,10 +100,12 @@ async def list_gateway_models(
     current_user: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """The models one of the user's teams may call, as selectable model keys."""
+    if not is_key_safe_part(team_id):
+        raise HTTPException(status_code=400, detail="Invalid team_id")
     gateway = await _authorized_gateway(gateway_name, current_user)
     client = get_gateway_client(gateway_name, gateway)
     try:
-        team = await client.require_team(current_user, team_id)
+        team = await client.require_team(current_user, team_id, refresh=refresh)
         model_ids = await client.list_models(current_user, team_id, refresh=refresh)
     except (AuthorizationError, LLMAuthenticationError, LLMServiceError) as exc:
         _raise_http(exc)

@@ -28,6 +28,12 @@ export function parseGatewayModelKey(name, gateways) {
   return { gateway, teamId, modelId }
 }
 
+// Per-user so one person's teams never label or preselect another's picker
+// on a shared browser.
+function storageKey(base, user) {
+  return `${base}:${user || ''}`
+}
+
 function readJson(key) {
   try {
     const raw = localStorage.getItem(key)
@@ -47,35 +53,38 @@ function writeJson(key, value) {
 }
 
 /** Remember a team's display label so the chosen model can be shown by name. */
-export function rememberTeamLabel(gateway, teamId, label) {
-  const labels = readJson(TEAM_LABELS_STORAGE_KEY)
+export function rememberTeamLabel(gateway, teamId, label, user) {
+  const key = storageKey(TEAM_LABELS_STORAGE_KEY, user)
+  const labels = readJson(key)
   labels[`${gateway}${GATEWAY_KEY_SEPARATOR}${teamId}`] = label
-  writeJson(TEAM_LABELS_STORAGE_KEY, labels)
+  writeJson(key, labels)
 }
 
-export function teamLabelFor(gateway, teamId) {
-  return readJson(TEAM_LABELS_STORAGE_KEY)[`${gateway}${GATEWAY_KEY_SEPARATOR}${teamId}`] || teamId
+export function teamLabelFor(gateway, teamId, user) {
+  const labels = readJson(storageKey(TEAM_LABELS_STORAGE_KEY, user))
+  return labels[`${gateway}${GATEWAY_KEY_SEPARATOR}${teamId}`] || teamId
 }
 
-export function rememberLastTeam(gateway, teamId) {
-  const last = readJson(LAST_TEAM_STORAGE_KEY)
+export function rememberLastTeam(gateway, teamId, user) {
+  const key = storageKey(LAST_TEAM_STORAGE_KEY, user)
+  const last = readJson(key)
   last[gateway] = teamId
-  writeJson(LAST_TEAM_STORAGE_KEY, last)
+  writeJson(key, last)
 }
 
-export function lastTeamFor(gateway) {
-  return readJson(LAST_TEAM_STORAGE_KEY)[gateway] || ''
+export function lastTeamFor(gateway, user) {
+  return readJson(storageKey(LAST_TEAM_STORAGE_KEY, user))[gateway] || ''
 }
 
 /**
  * The model-list entry for a gateway model key, shaped like the entries in
  * /api/config `models` (capabilities come from the gateway's model defaults).
  */
-export function gatewayModelEntry(name, gateways) {
+export function gatewayModelEntry(name, gateways, user) {
   const ref = parseGatewayModelKey(name, gateways)
   if (!ref) return null
   const gateway = gateways.find(g => g.name === ref.gateway)
-  const teamLabel = teamLabelFor(ref.gateway, ref.teamId)
+  const teamLabel = teamLabelFor(ref.gateway, ref.teamId, user)
   return {
     name,
     gateway: ref.gateway,
@@ -92,8 +101,8 @@ export function gatewayModelEntry(name, gateways) {
 }
 
 /** The configured models plus an entry for the current gateway model, if any. */
-export function withGatewayModel(models, currentModel, gateways) {
-  const entry = gatewayModelEntry(currentModel, gateways || [])
+export function withGatewayModel(models, currentModel, gateways, user) {
+  const entry = gatewayModelEntry(currentModel, gateways || [], user)
   if (!entry) return models
   return [...models.filter(m => (m?.name || m) !== currentModel), entry]
 }
