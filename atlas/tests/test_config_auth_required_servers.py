@@ -181,6 +181,8 @@ def test_tool_approvals_include_authorized_prefixed_tool_names():
         tools={
             "remote-mcp_delete_file": ToolApprovalConfig(require_approval=True),
             "remote-mcp_read_file": ToolApprovalConfig(require_approval=True),
+            "other-mcp_delete_file": ToolApprovalConfig(require_approval=True),
+            "delete_file": ToolApprovalConfig(require_approval=True),
         }
     )
     try:
@@ -191,3 +193,5 @@ def test_tool_approvals_include_authorized_prefixed_tool_names():
     approvals = payload["tool_approvals"]["tools"]
     assert approvals["remote-mcp_delete_file"]["require_approval"] is True
     assert "remote-mcp_read_file" not in approvals
+    assert "other-mcp_delete_file" not in approvals
+    assert "delete_file" not in approvals

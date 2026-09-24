@@ -9,6 +9,7 @@ from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.config.models import qualified_tool_name
 from atlas.modules.config.settings import configured_agent_max_steps
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
@@ -526,7 +527,7 @@ async def get_config(
             # tools is a list of strings (tool names), not dicts
             for tool_name in tool_group.get('tools', []):
                 if isinstance(tool_name, str):
-                    authorized_tool_names.add(f"{server_name}_{tool_name}")
+                    authorized_tool_names.add(qualified_tool_name(server_name, tool_name))
 
     # Only include approval settings for tools the user has access to
     for tool_name, approval_config in tool_approvals_config.tools.items():
