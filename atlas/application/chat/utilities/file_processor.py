@@ -9,6 +9,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import warnings
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
@@ -37,6 +38,18 @@ _VISION_IMAGE_MIME_TYPES = _LLM_READY_IMAGE_MIME_TYPES | _TIFF_IMAGE_MIME_TYPES
 # in session context.  base64 ≈ 4/3 × raw, so 20 MB b64 ≈ 15 MB raw.
 _MAX_VISION_IMAGE_B64_BYTES = 20 * 1024 * 1024  # 20 MB base64
 _MAX_VISION_IMAGES_PER_REQUEST = 10
+
+# Upper bound on pixels Pillow will decode for a user-supplied image.  A
+# crafted header can declare a enormous raster whose decoded buffer would
+# exhaust backend memory; rehydration decodes stored images on *every*
+# follow-up turn, so the cap plus error-on-DecompressionBombWarning keeps
+# one crafted TIFF from turning empty follow-ups into an outage.
+_VISION_IMAGE_PIXEL_LIMIT = 64_000_000  # ~64 MP
+
+# Bounds concurrent rehydration work.  Each in-flight candidate holds a full
+# base64 image (up to _MAX_VISION_IMAGE_B64_BYTES) in memory while it is
+# fetched and normalized, so the gather fan-out must not be unbounded.
+_REHYDRATE_DECODE_CONCURRENCY = 4
 
 # Native PDF document input (LiteLLM "file" content block -> Bedrock document).
 _PDF_MIME_TYPE = "application/pdf"
@@ -107,12 +120,18 @@ def _convert_tiff_to_png_b64(image_b64: str) -> str:
     except ImportError as exc:
         raise RuntimeError("Pillow is required to convert TIFF images for vision input") from exc
 
+    # Pillow's stock bomb threshold only warns (and is tunable by anything
+    # that imported PIL earlier); pin it explicitly and fail the decode on
+    # the warning so an oversized raster is rejected instead of decoded.
+    Image.MAX_IMAGE_PIXELS = _VISION_IMAGE_PIXEL_LIMIT
     raw = base64.b64decode(image_b64, validate=True)
-    with Image.open(BytesIO(raw)) as image:
-        image.seek(0)
-        prepared = _prepare_image_for_png(image.copy())
-        output = BytesIO()
-        prepared.save(output, format="PNG")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        with Image.open(BytesIO(raw)) as image:
+            image.seek(0)
+            prepared = _prepare_image_for_png(image.copy())
+            output = BytesIO()
+            prepared.save(output, format="PNG")
     return base64.b64encode(output.getvalue()).decode()
 
 
@@ -171,6 +190,32 @@ def _normalize_vision_image_for_llm(filename: str, image_b64: str, mime_type: st
     return image_b64, mime_type
 
 
+def _is_rehydration_candidate(file_ref: Dict[str, Any]) -> bool:
+    """Return True when a stored ref needs its inline vision payload re-fetched.
+
+    A ref is a candidate when it can never carry a valid inline payload (no
+    storage key, not a user upload, not an image) or when the payload it
+    holds is stale: absent, no longer matching the stored object it came
+    from, or hashed to content other than what is stored.  The same
+    predicate must drive both the rehydration selection and the retained
+    budget so a payload is never counted as kept *and* as its replacement.
+    """
+    if (
+        not file_ref.get("key")
+        or file_ref.get("source") != "user"
+        or file_ref.get("content_type") not in _VISION_IMAGE_MIME_TYPES
+    ):
+        return False
+    image_b64 = file_ref.get("image_b64")
+    if not image_b64:
+        return True
+    return (
+        file_ref.get("image_source_key") != file_ref.get("key")
+        or hashlib.sha256(image_b64.encode()).hexdigest()
+        != file_ref.get("image_content_hash")
+    )
+
+
 async def _rehydrate_vision_images(
     session_files_ctx: Dict[str, Dict[str, Any]],
     user_email: str,
@@ -184,39 +229,34 @@ async def _rehydrate_vision_images(
         for filename, file_ref in reversed(list(session_files_ctx.items()))
         if (
             filename not in excluded_filenames
-            and (
-                not file_ref.get("image_b64")
-                or file_ref.get("image_source_key") != file_ref.get("key")
-                or hashlib.sha256(file_ref["image_b64"].encode()).hexdigest()
-                != file_ref.get("image_content_hash")
-            )
-            and file_ref.get("source") == "user"
-            and file_ref.get("content_type") in _VISION_IMAGE_MIME_TYPES
-            and file_ref.get("key")
+            and _is_rehydration_candidate(file_ref)
         )
     ][:max(0, available_slots)]
 
+    decode_slots = asyncio.Semaphore(_REHYDRATE_DECODE_CONCURRENCY)
+
     async def load_image(filename: str, file_ref: Dict[str, Any]):
-        try:
-            image_b64 = await file_manager.get_file_content(
-                user_email=user_email,
-                filename=filename,
-                s3_key=file_ref["key"],
-            )
-            if not image_b64 or len(image_b64) > _MAX_VISION_IMAGE_B64_BYTES:
+        async with decode_slots:
+            try:
+                image_b64 = await file_manager.get_file_content(
+                    user_email=user_email,
+                    filename=filename,
+                    s3_key=file_ref["key"],
+                )
+                if not image_b64 or len(image_b64) > _MAX_VISION_IMAGE_B64_BYTES:
+                    return filename, None
+                normalized = await asyncio.to_thread(
+                    _normalize_vision_image_for_llm,
+                    filename,
+                    image_b64,
+                    file_ref["content_type"],
+                )
+                if normalized is None or len(normalized[0]) > _MAX_VISION_IMAGE_B64_BYTES:
+                    return filename, None
+                return filename, normalized
+            except Exception:
+                logger.warning("Failed to rehydrate vision image %s", filename, exc_info=True)
                 return filename, None
-            normalized = await asyncio.to_thread(
-                _normalize_vision_image_for_llm,
-                filename,
-                image_b64,
-                file_ref["content_type"],
-            )
-            if normalized is None or len(normalized[0]) > _MAX_VISION_IMAGE_B64_BYTES:
-                return filename, None
-            return filename, normalized
-        except Exception:
-            logger.warning("Failed to rehydrate vision image %s", filename, exc_info=True)
-            return filename, None
 
     warnings = []
     total_inline_b64 = initial_inline_b64
@@ -253,7 +293,14 @@ def _enforce_vision_inline_limits(
     ]
     demoted = []
     vision_count = 0
-    total_inline_b64 = 0
+    # Native PDF document bytes already committed to the request share the
+    # same aggregate payload budget as inline images.  Seed the accumulator
+    # with them so the budget demotes historical *images* rather than
+    # pushing a just-uploaded PDF into the later PDF demotion pass.
+    total_inline_b64 = sum(
+        len(ref.get("pdf_b64", ""))
+        for ref in session_files_ctx.values()
+    )
     for name in priority_names + historical_names:
         ref = session_files_ctx[name]
         image_b64 = ref.get("image_b64")
@@ -314,8 +361,15 @@ async def handle_session_files(
 
     if not files_map or not file_manager or not user_email:
         if model_supports_vision and file_manager and user_email:
+            # Retained = refs holding a *valid* inline payload, i.e. not
+            # rehydration candidates: a stale payload must not count both
+            # as kept and as the replacement it is waiting for.  Newest
+            # first so cap demotion matches the newest-first rehydration
+            # selection -- the images the user most recently relied on win.
             retained_names = [
-                name for name, ref in session_files_ctx.items() if ref.get("image_b64")
+                name
+                for name, ref in reversed(list(session_files_ctx.items()))
+                if ref.get("image_b64") and not _is_rehydration_candidate(ref)
             ]
             rehydration_warnings = await _rehydrate_vision_images(
                 session_files_ctx,
@@ -324,8 +378,8 @@ async def handle_session_files(
                 set(),
                 _MAX_VISION_IMAGES_PER_REQUEST - len(retained_names),
                 sum(
-                    len(ref.get("image_b64", ""))
-                    for ref in session_files_ctx.values()
+                    len(session_files_ctx[name].get("image_b64", ""))
+                    for name in retained_names
                 ),
             )
             demoted_names = _enforce_vision_inline_limits(

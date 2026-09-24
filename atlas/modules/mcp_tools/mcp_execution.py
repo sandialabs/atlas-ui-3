@@ -456,7 +456,11 @@ class ExecutionMixin:
            retired server-side regardless of ``expires_at``). The failing
            token's fingerprint is passed along so concurrent 401s share one
            rotation instead of each forcing another (a second rotation would
-           retire the credential the first caller retries with).
+           retire the credential the first caller retries with). For
+           ``delegated`` servers the equivalent is a re-mint whose store is a
+           compare-and-swap against the failing token's fingerprint, so two
+           concurrent 401s cannot have the second mint overwrite the
+           credential the first caller retries with.
 
         If the forced refresh produces no new credential the retry re-presents
         the stored token; when that token is expired the rebuild path will
@@ -505,7 +509,8 @@ class ExecutionMixin:
                 refreshed = get_token_storage().get_valid_token(user_email, server_name)
             else:
                 refreshed = await self._mint_delegated_token(
-                    user_email, server_name, config
+                    user_email, server_name, config,
+                    expected_previous_fingerprint=failing_fingerprint,
                 )
         else:
             refreshed = await self._refresh_oauth_token(

@@ -441,6 +441,56 @@ class MCPTokenStorage:
         )
         return token
 
+    def store_token_if_unchanged(
+        self,
+        user_email: str,
+        server_name: str,
+        token_value: str,
+        expected_previous_fingerprint: Optional[str] = None,
+        token_type: str = "oauth_access",
+        expires_at: Optional[float] = None,
+        scopes: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[StoredToken]:
+        """Store a token only while the stored credential still matches a fingerprint.
+
+        Compare-and-store for 401 recovery: two concurrent recoveries can
+        both arrive with a fresh credential, and the second store must not
+        overwrite the credential the first caller is about to retry with.
+        Under the token-storage lock the currently stored record is
+        re-checked against ``expected_previous_fingerprint``; when it no
+        longer matches, another caller already rotated and the store is
+        skipped (returns ``None``).  Passing ``None`` (no fingerprint could
+        be recorded for the failing credential) stores unconditionally,
+        matching :meth:`store_token`.
+        """
+        token = StoredToken(
+            token_type=token_type,
+            token_value=token_value,
+            user_email=user_email.lower(),
+            server_name=server_name,
+            created_at=time.time(),
+            expires_at=expires_at,
+            scopes=scopes,
+            refresh_token=None,
+            metadata=metadata,
+        )
+
+        key = _make_token_key(user_email, server_name)
+        with self._lock:
+            if expected_previous_fingerprint is not None:
+                if token_fingerprint(self._tokens.get(key)) != expected_previous_fingerprint:
+                    return None
+            self._tokens[key] = token
+            self._save_tokens()
+
+        from atlas.core.log_sanitizer import sanitize_for_logging
+        logger.info(
+            f"Stored {token_type} token for user and server '{sanitize_for_logging(server_name)}' "
+            f"(expires: {'never' if expires_at is None else time.ctime(expires_at)})"
+        )
+        return token
+
     def get_token(self, user_email: str, server_name: str) -> Optional[StoredToken]:
         """Get stored token for a user and MCP server.
 
