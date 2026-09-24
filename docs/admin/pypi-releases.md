@@ -1,13 +1,13 @@
 # PyPI Release Guide
 
-Last updated: 2026-02-05
+Last updated: 2026-09-24
 
 This guide covers how to publish new versions of the `atlas-chat` package to PyPI.
 
 ## Prerequisites
 
 - Write access to the repository
-- `PYPI_API_TOKEN` secret configured in GitHub repository settings
+- Trusted publishers configured on PyPI and TestPyPI for this repository's `pypi-publish.yml` workflow and the `pypi` / `testpypi` GitHub environments
 - `gh` CLI installed (for CLI-based releases)
 
 ## Publishing a New Release
@@ -60,9 +60,8 @@ Follow semantic versioning (`MAJOR.MINOR.PATCH`):
 
 Before publishing to production PyPI, you can test with TestPyPI:
 
-1. Add `TEST_PYPI_API_TOKEN` secret to repository
-2. Run workflow with target: `testpypi`
-3. Test installation:
+1. Run workflow with target: `testpypi`
+2. Test installation:
    ```bash
    pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ atlas-chat
    ```
@@ -75,11 +74,11 @@ Before publishing to production PyPI, you can test with TestPyPI:
 
 ## Troubleshooting
 
-### "Invalid API token"
+### "invalid-publisher"
 
-- Verify `PYPI_API_TOKEN` is set in repository secrets
-- Ensure token has upload permissions for `atlas-chat`
-- Token should start with `pypi-`
+- Verify the trusted publisher exists on PyPI/TestPyPI for repository `sandialabs/atlas-ui-3`
+- Ensure the workflow file name is still `pypi-publish.yml`
+- Ensure the GitHub environment name still matches the publisher (`pypi` or `testpypi`)
 
 ### "Version already exists"
 
