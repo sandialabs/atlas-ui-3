@@ -14,6 +14,7 @@ from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.config.models import ToolApprovalConfig, ToolApprovalsConfig
 from atlas.modules.config.config_manager import config_manager
 from atlas.modules.mcp_tools.mcp_user_clients import UserClientMixin
 from atlas.modules.mcp_tools.mcp_user_discovery import UserDiscoveryMixin
@@ -165,3 +166,26 @@ def test_discovery_failure_does_not_break_the_config_payload():
 
     assert "remote-mcp" in servers
     assert servers["remote-mcp"]["tools"] == []
+
+
+def test_tool_approvals_include_authorized_prefixed_tool_names():
+    manager = _FakeManager(
+        {"remote-mcp": {}},
+        user_tools={"remote-mcp": [_tool("delete_file")]},
+    )
+    cm = app_factory.get_config_manager()
+    original_approvals = cm._tool_approvals_config
+    cm._tool_approvals_config = ToolApprovalsConfig(
+        tools={
+            "remote-mcp_delete_file": ToolApprovalConfig(require_approval=True),
+            "remote-mcp_read_file": ToolApprovalConfig(require_approval=True),
+        }
+    )
+    try:
+        payload = _run(manager)
+    finally:
+        cm._tool_approvals_config = original_approvals
+
+    approvals = payload["tool_approvals"]["tools"]
+    assert approvals["remote-mcp_delete_file"]["require_approval"] is True
+    assert "remote-mcp_read_file" not in approvals

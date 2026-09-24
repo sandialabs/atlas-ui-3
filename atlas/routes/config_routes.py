@@ -526,7 +526,7 @@ async def get_config(
             # tools is a list of strings (tool names), not dicts
             for tool_name in tool_group.get('tools', []):
                 if isinstance(tool_name, str):
-                    authorized_tool_names.add(tool_name)
+                    authorized_tool_names.add(f"{server_name}_{tool_name}")
 
     # Only include approval settings for tools the user has access to
     for tool_name, approval_config in tool_approvals_config.tools.items():
