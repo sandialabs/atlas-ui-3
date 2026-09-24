@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #971 - 2026-09-24
+- Add a CHANGELOG release-heading guard, make `atlas-chat` fail non-zero on streaming LLM errors, disable noisy demo MCP defaults on fresh installs, set the PyPI build title explicitly, and keep release automation checking and refreshing `uv.lock` (including the yanked `primp` refresh).
+
 ### PR #937 - 2026-09-14
 - Uploaded vision images are rehydrated from storage on follow-up and resubmitted turns so vision-capable models continue receiving the image.
 
@@ -13,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add `atlas_discover_launch_options` so sub-conversation launches use authorized, current workspaces and model names, and block clearly when discovery fails or returns no valid options. Deployments with `FEATURE_ATLAS_LAUNCH_ENABLED` should allow the agent to use the new discovery step before launching.
 
 ## [0.6.0] - 2026-09-22
+
+### Upgrade notes
+- Review new operator settings before upgrading: `ADMIN_GROUP`, the OIDC `FEATURE_OIDC_AUTH_ENABLED` / `OIDC_*` family, and the LLM timeout/retry knobs (`LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES`, `LLM_RETRY_MAX_WAIT_SECONDS`). No earlier env-var family was removed outright in 0.6.0, but these new settings can change startup and auth behavior once set.
+- Two defaults changed in ways operators are likely to notice immediately: `atlas_search` is no longer implied by picking data sources and must be selected explicitly (#930), and agent mode now defaults on for users without a saved preference (#932).
 
 ### PR #963 - 2026-09-20
 - Refreshing a conversation opened while its run was executing appends only the rows the view is missing instead of replacing the transcript, keeping the reader's scroll position and expanded tool rows (closes #959). Rows align by `tool_call_id`/role+content past live-only agent chrome; on divergence the previous full reload runs, and the backend session is re-seeded so the next message keeps the run's final turn in context.

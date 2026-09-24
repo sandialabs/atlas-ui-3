@@ -13,6 +13,7 @@ import pytest
 
 from atlas.application.chat.agent.streaming_final_answer import stream_final_answer
 from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
+from atlas.domain.errors import LLMAuthenticationError
 
 # -- Helpers -----------------------------------------------------------------
 
@@ -253,6 +254,27 @@ async def test_stream_and_accumulate_error_fallback_also_fails():
     assert "RuntimeError" not in result
     assert len(result) > 0
     pub.publish_chat_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_error_raises_for_cli_publishers():
+    """CLI publishers should surface stream failures as exceptions for non-zero exit codes."""
+    from atlas.infrastructure.events.cli_event_publisher import CLIEventPublisher
+
+    pub = CLIEventPublisher(streaming=False)
+
+    async def _auth_error():
+        raise RuntimeError("AuthenticationError: invalid api key")
+        yield  # makes this an async generator
+
+    with pytest.raises(LLMAuthenticationError, match="authentication issue"):
+        await stream_and_accumulate(
+            token_generator=_auth_error(),
+            event_publisher=pub,
+            context_label="test",
+        )
+
+    assert pub.get_result().message == ""
 
 
 @pytest.mark.asyncio

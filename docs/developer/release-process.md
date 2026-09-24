@@ -1,6 +1,6 @@
 # Release Process
 
-Last updated: 2026-08-16
+Last updated: 2026-09-24
 
 This document is the canonical runbook for cutting a release of Atlas
 UI 3. If you are about to publish a version, follow
@@ -125,11 +125,13 @@ git worktree add -b release/$V ../atlas-release-$V origin/main
 cd ../atlas-release-$V
 ```
 
-Three files change, in one commit:
+Four files change, in one commit:
 
 - `atlas/version.py` — `VERSION = "X.Y.Z"`
 - `pyproject.toml` — the top-level `version = "X.Y.Z"` (not a
   dependency pin that happens to match)
+- `uv.lock` — refreshed with `uv lock` so the release branch carries the
+  dependency state that CI validates and ships
 - `CHANGELOG.md` — the `## [Unreleased]` heading becomes
   `## [X.Y.Z] - YYYY-MM-DD`, with a fresh empty `## [Unreleased]`
   inserted above it. The entries themselves are not touched; they were
@@ -159,18 +161,21 @@ p.write_text(text[:m.start()] + "## [Unreleased]\n\n"
 print(f"bumped to {version} ({today})")
 PY
 
+uv lock
+
 git commit -am "chore(release): v$V"
 git push -u origin "release/$V"
 gh pr create --base main --title "release: $V" --body "Version bump for the $V release."
 ```
 
 The `pypi-publish.yml` build job re-checks that `atlas/version.py` and
-`pyproject.toml` agree and fails the publish if they do not, so a
-half-applied bump cannot ship.
+`pyproject.toml` agree and runs `uv lock --check`, so a half-applied
+version bump or stale lockfile cannot ship.
 
 ### 3. Merge
 
-CI on the bump PR is the gate. The diff is three lines of metadata on
+CI on the bump PR is the gate. The diff is a small set of release
+metadata on
 top of a `main` that was already green, so this is a formality — but do
 not skip it, because the changelog reshape can be malformed in ways
 only a build catches.

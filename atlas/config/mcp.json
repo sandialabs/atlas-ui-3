@@ -15,6 +15,7 @@
     "compliance_level": "Public"
   },
   "pptx_generator": {
+    "enabled": false,
     "command": [
       "python",
       "mcp/pptx_generator/main.py"
@@ -78,6 +79,7 @@
     "compliance_level": "Public"
   },
   "session_state_demo": {
+    "enabled": false,
     "url": "http://127.0.0.1:8010/mcp",
     "transport": "http",
     "groups": ["users"],

@@ -18,6 +18,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    - name: Guard CHANGELOG release headings
+      if: github.event_name == 'pull_request'
+      run: |
+        set -euo pipefail
+        git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+        git show FETCH_HEAD:CHANGELOG.md > /tmp/base-changelog.md
+        python scripts/check_changelog_release_headings.py /tmp/base-changelog.md CHANGELOG.md
+
     - name: Set up Node.js
       uses: actions/setup-node@v7
       with:

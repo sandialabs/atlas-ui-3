@@ -42,6 +42,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify uv.lock agreement
+        run: uv lock --check
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -51,6 +59,7 @@ jobs:
 
       - name: Build frontend
         env:
+          VITE_APP_NAME: "ATLAS"
           VITE_FEATURE_RAG_CITATIONS: "false"
         run: cd frontend && npm ci && npm run build
 

@@ -58,6 +58,15 @@ class TestConfigManager:
         assert isinstance(mcp_config, MCPConfig)
         assert hasattr(mcp_config, "servers")
 
+    def test_packaged_demo_servers_are_disabled_by_default(self):
+        """Fresh installs should not probe demo servers that need extra services or deps."""
+        cm = ConfigManager()
+
+        mcp_config = cm.mcp_config
+
+        assert mcp_config.servers["pptx_generator"].enabled is False
+        assert mcp_config.servers["session_state_demo"].enabled is False
+
     def test_config_manager_caches_settings(self):
         """ConfigManager should cache settings and return same instance."""
         cm = ConfigManager()
