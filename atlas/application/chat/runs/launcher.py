@@ -80,6 +80,19 @@ MAX_RESULT_CHARS = 20000
 LAUNCH_AGENT_MAX_STEPS = 10
 
 
+def _has_discovered_launch_options(state: Any) -> bool:
+    return (
+        isinstance(state, dict)
+        and bool(state.get("workspaces"))
+        and bool(state.get("models"))
+    )
+
+
+def _mark_discovery_failed(context: Optional[Dict[str, Any]]) -> None:
+    if context is not None:
+        context["launch_discovery"] = {"_failed": True}
+
+
 class LaunchRefused(Exception):
     """A launch that cannot proceed, with a message meant for the model.
 
@@ -161,19 +174,23 @@ async def discover_launch_options(
     config_manager = factory.get_config_manager()
     app_settings = getattr(config_manager, "app_settings", None)
     if not launch_tool_enabled(app_settings):
+        _mark_discovery_failed(context)
         raise LaunchRefused(
             "Launch discovery is unavailable because sub-conversations are disabled."
         )
     user_email = (context or {}).get("user_email")
     if not user_email:
+        _mark_discovery_failed(context)
         raise LaunchRefused("Launch discovery requires an authenticated user.")
     repository = getattr(factory, "workspace_repository", None)
     if repository is None:
+        _mark_discovery_failed(context)
         raise LaunchRefused("Launch discovery failed: workspaces are not configured.")
     try:
         workspaces = await asyncio.to_thread(repository.list_workspaces, user_email) or []
     except Exception as exc:
         logger.warning("Launch option discovery failed for workspaces", exc_info=True)
+        _mark_discovery_failed(context)
         raise LaunchRefused("Launch discovery failed while loading workspaces. Try again.") from exc
     auth_cache: Dict[str, bool] = {}
 
@@ -192,6 +209,7 @@ async def discover_launch_options(
         )
     except Exception as exc:
         logger.warning("Launch option discovery failed for models", exc_info=True)
+        _mark_discovery_failed(context)
         raise LaunchRefused("Launch discovery failed while loading models. Try again.") from exc
     workspace_options = [
         {"id": str(item.get("id")), "name": str(item.get("name"))}
@@ -205,6 +223,7 @@ async def discover_launch_options(
             missing.append("workspaces")
         if not model_options:
             missing.append("LLM models")
+        _mark_discovery_failed(context)
         raise LaunchRefused(
             "Launch discovery returned no valid "
             + " or ".join(missing)
@@ -225,16 +244,17 @@ async def discover_launch_options(
 
 
 def _require_discovered_option(options: Optional[Dict[str, Any]], workspace: str, model: str) -> None:
-    if not isinstance(options, dict):
+    if isinstance(options, dict) and options.get("_failed"):
+        raise LaunchRefused(
+            "Launch discovery previously failed in this turn. "
+            "Run atlas_discover_launch_options again after fixing the underlying issue."
+        )
+    if not _has_discovered_launch_options(options):
         raise LaunchRefused(
             "Launch is blocked until current workspaces and LLM models are discovered."
         )
     workspaces = options.get("workspaces")
     models = options.get("models")
-    if not workspaces or not models:
-        raise LaunchRefused(
-            "Launch is blocked until current workspaces and LLM models are discovered."
-        )
     workspace_names = {str(item.get("name", "")).casefold() for item in workspaces}
     workspace_ids = {str(item.get("id", "")) for item in workspaces}
     model_names = {str(item.get("name", "")) for item in models}
@@ -565,7 +585,7 @@ async def launch_sub_conversation(
         )
 
     state = (context or {}).get("launch_discovery")
-    if not isinstance(state, dict) or not state.get("workspaces") or not state.get("models"):
+    if state is None or not isinstance(state, dict) or not state:
         state = await discover_launch_options(context, factory=factory)
     _require_discovered_option(state, workspace_name, model_name)
 

@@ -442,6 +442,12 @@ class ToolsModeRunner:
 
                 def _is_fresh(tc) -> bool:
                     signature = self._tool_call_signature(tc)
+                    discovery_state = session_context.get("launch_discovery")
+                    has_discovery_options = (
+                        isinstance(discovery_state, dict)
+                        and bool(discovery_state.get("workspaces"))
+                        and bool(discovery_state.get("models"))
+                    )
                     if signature not in executed_signatures:
                         return True
                     # A discovery call that has not yet produced options is
@@ -450,7 +456,7 @@ class ToolsModeRunner:
                     # whole round budget on repeated retries.
                     return (
                         normalize_tool_name(signature[0]) == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
-                        and not session_context.get("launch_discovery")
+                        and not has_discovery_options
                         and signature not in exempted_discovery_retries
                     )
 
@@ -491,7 +497,11 @@ class ToolsModeRunner:
                     if (
                         signature in executed_signatures
                         and normalize_tool_name(signature[0]) == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
-                        and not session_context.get("launch_discovery")
+                        and not (
+                            isinstance(session_context.get("launch_discovery"), dict)
+                            and session_context["launch_discovery"].get("workspaces")
+                            and session_context["launch_discovery"].get("models")
+                        )
                     ):
                         exempted_discovery_retries.add(signature)
                     executed_signatures.add(signature)

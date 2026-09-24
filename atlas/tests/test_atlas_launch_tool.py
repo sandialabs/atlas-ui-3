@@ -223,9 +223,11 @@ async def test_discovery_publishes_workspace_ids_and_bare_model_names():
 @pytest.mark.asyncio
 async def test_launch_is_blocked_when_discovery_has_no_choices():
     factory = _Factory(lambda c: _ChatService(c), workspaces=_Workspaces(rows=[]), models={})
+    context = {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}
 
     with pytest.raises(LaunchRefused, match="no valid workspaces or LLM models"):
-        await discover_launch_options({"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}, factory=factory)
+        await discover_launch_options(context, factory=factory)
+    assert context["launch_discovery"] == {"_failed": True}
 
 
 @pytest.mark.asyncio
@@ -250,7 +252,7 @@ async def test_discovery_execution_primes_the_same_context_for_launch():
 @pytest.mark.asyncio
 async def test_launch_auto_discovers_when_context_has_no_discovery_state():
     factory = _Factory(lambda c: _ChatService(c))
-    context = {"user_email": "user@example.com", "launch_discovery": {}}
+    context = {"user_email": "user@example.com"}
 
     handle = await launch_sub_conversation(
         {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
@@ -261,6 +263,17 @@ async def test_launch_auto_discovers_when_context_has_no_discovery_state():
     assert handle["workspace"] == "Research"
     assert context["launch_discovery"]["workspaces"]
     factory.services[0].release.set()
+
+
+@pytest.mark.asyncio
+async def test_launch_fails_fast_when_discovery_state_marks_a_prior_failure():
+    factory = _Factory(lambda c: _ChatService(c))
+    with pytest.raises(LaunchRefused, match="discovery previously failed"):
+        await launch_sub_conversation(
+            {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+            {"user_email": "user@example.com", "launch_discovery": {"_failed": True}},
+            factory=factory,
+        )
 
 
 @pytest.mark.asyncio
