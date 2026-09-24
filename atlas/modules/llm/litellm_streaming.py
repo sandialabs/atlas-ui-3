@@ -77,8 +77,7 @@ class LiteLLMStreamingMixin:
     """Mixin providing streaming LLM methods for LiteLLMCaller.
 
     Expects the host class to provide:
-      - _get_litellm_model_name(model_name) -> str
-      - _get_model_kwargs(model_name, temperature, user_email) -> dict
+      - _resolve_call_target(model_name, temperature, user_email) -> (litellm_model, kwargs), async
       - _prepare_messages(model_name, messages) -> list
       - _is_retryable_error(exc) -> bool (retry policy for stream failures)
       - _query_all_rag_sources(data_sources, rag_service, user_email, messages) -> (successful, exclusions, failures)
@@ -102,8 +101,7 @@ class LiteLLMStreamingMixin:
 
         Yields string chunks as they arrive from the LLM provider.
         """
-        litellm_model = self._get_litellm_model_name(model_name)
-        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+        litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
         if max_tokens is not None:
             model_kwargs["max_tokens"] = max_tokens
@@ -113,8 +111,7 @@ class LiteLLMStreamingMixin:
         mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email)
         if mod is not None:
             model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages, user_email=user_email)
-            litellm_model = self._get_litellm_model_name(model_name)
-            model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+            litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
             if max_tokens is not None:
                 model_kwargs["max_tokens"] = max_tokens
 
@@ -358,8 +355,7 @@ class LiteLLMStreamingMixin:
                 yield chunk
             return
 
-        litellm_model = self._get_litellm_model_name(model_name)
-        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+        litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
         # PreLlmCall hook (GH #713)
         mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email, tools_schema=tools_schema)
@@ -367,8 +363,7 @@ class LiteLLMStreamingMixin:
             model_name, messages, tools_schema = await self._apply_pre_llm_modify(
                 mod, model_name, messages, tools_schema, user_email=user_email
             )
-            litellm_model = self._get_litellm_model_name(model_name)
-            model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+            litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
         provider, model_suffix = split_provider(litellm_model)
         span_attrs = {

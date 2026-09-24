@@ -28,6 +28,7 @@ from atlas.modules.mcp_tools.atlas_server import (
 )
 from atlas.modules.mcp_tools.sleep_tool import sleep_tool_enabled
 from atlas.routes.files_routes import get_file_upload_limit_config
+from atlas.routes.litellm_gateway_routes import build_gateway_summaries
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,7 @@ async def get_config_shell(
     return {
         "app_name": app_settings.app_name,
         "models": models_list,
+        "llm_gateways": await build_gateway_summaries(llm_config, current_user, app_settings),
         "user": current_user,
         "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
 "agent_mode_available": app_settings.agent_mode_available,
@@ -540,6 +542,7 @@ async def get_config(
     return {
         "app_name": app_settings.app_name,
         "models": models_list,
+        "llm_gateways": await build_gateway_summaries(llm_config, current_user, app_settings),
         "tools": tools_info,  # Only authorized servers are included
         "prompts": prompts_info,  # Available prompts from authorized servers
         "data_sources": rag_data_sources,  # RAG data sources for the user

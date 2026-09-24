@@ -28,6 +28,7 @@ from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.interfaces.transport import ChatConnectionProtocol
 from atlas.modules.config import ConfigManager
+from atlas.modules.config.models import lookup_model_config
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from .agent import AgentLoopFactory
@@ -477,7 +478,7 @@ class ChatService:
             from atlas.core.compliance import get_compliance_manager
             compliance_mgr = get_compliance_manager()
             try:
-                model_config = _config_manager.llm_config.models.get(model)
+                model_config = lookup_model_config(_config_manager.llm_config, model)
                 configured_level = (
                     getattr(model_config, "compliance_level", None)
                     if model_config

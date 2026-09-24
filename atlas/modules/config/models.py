@@ -15,7 +15,7 @@ Dependency direction: ``config_loader`` -> ``settings`` -> ``models``.
 
 import os
 import re
-from typing import ClassVar, Dict, List, Literal, Optional, get_args
+from typing import Any, ClassVar, Dict, List, Literal, Optional, get_args
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -184,9 +184,98 @@ class ModelConfig(BaseModel):
         return normalized
 
 
+class LiteLLMGatewayDelegation(BaseModel):
+    """Downstream token parameters for a gateway using ``auth_type: "delegated"``.
+
+    For Microsoft Entra On-Behalf-Of, ``scope`` is the LiteLLM app's delegated
+    scope (e.g. ``https://litellm.example.gov/user_impersonation``).
+    """
+    audience: Optional[str] = None
+    resource: Optional[str] = None
+    scope: Optional[str] = None
+
+
+class LiteLLMGatewayConfig(BaseModel):
+    """An enterprise LiteLLM proxy whose models are scoped to LiteLLM teams.
+
+    Instead of listing models statically, the user picks one of their LiteLLM
+    teams, then one of the models that team may use. Every LLM call for such a
+    model carries the chosen team in ``team_header`` so LiteLLM routes and
+    charges the request to that team. See docs/admin/litellm-team-gateways.md.
+    """
+    base_url: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    # "system": a single service key (api_key) calls LiteLLM; the user's teams
+    #   are looked up by their Atlas identity.
+    # "delegated": the logged-in user's OIDC token is exchanged (RFC 8693 or
+    #   Entra OBO, per OIDC_DELEGATION_PROVIDER) for a LiteLLM-scoped token.
+    auth_type: Literal["system", "delegated"] = "system"
+    api_key: str = ""
+    delegation: Optional[LiteLLMGatewayDelegation] = None
+    # How the LiteLLM user_id for /team/list is derived. "email" uses the Atlas
+    # user (optionally with user_id_strip_suffix removed); "token_claim" reads
+    # user_id_claim from the delegated token (Entra puts the object id in "oid").
+    user_id_source: Optional[Literal["email", "token_claim"]] = None
+    user_id_claim: str = "oid"
+    user_id_strip_suffix: Optional[str] = None
+    team_header: str = "x-litellm-team-id"
+    team_list_path: str = "team/list"
+    models_path: str = "models"
+    discovery_timeout_seconds: float = Field(default=30.0, gt=0)
+    discovery_cache_seconds: float = Field(default=300.0, ge=0)
+    # Access control and compliance apply to every model reached through the
+    # gateway, exactly as they do for a statically configured model.
+    groups: List[str] = Field(default_factory=list)
+    compliance_level: Optional[str] = None
+    # Static extra headers sent on every request (values may be ${ENV_VAR}).
+    extra_headers: Optional[Dict[str, str]] = None
+    # ModelConfig fields applied to every discovered model (max_tokens,
+    # temperature, supports_tools, supports_vision, pass_user_as_customer_id...).
+    model_defaults: Dict[str, Any] = Field(default_factory=dict)
+
+    # Fields that identify or authorize the model; they come from the gateway
+    # itself, so a model_defaults entry for them would be silently misleading.
+    RESERVED_MODEL_DEFAULT_KEYS: ClassVar[frozenset] = frozenset({
+        "model_name", "model_url", "api_key", "api_key_source", "globus_scope",
+        "groups", "compliance_level", "extra_headers",
+    })
+
+    @field_validator("model_defaults")
+    @classmethod
+    def validate_model_defaults(cls, v):
+        reserved = sorted(set(v) & cls.RESERVED_MODEL_DEFAULT_KEYS)
+        if reserved:
+            raise ValueError(
+                f"model_defaults may not set {', '.join(reserved)}; "
+                "configure these on the gateway itself"
+            )
+        # Surface a bad key or value at load time rather than on first use.
+        ModelConfig(model_name="probe", model_url="http://probe", **v)
+        return v
+
+    @model_validator(mode="after")
+    def validate_auth(self):
+        if self.auth_type == "delegated":
+            delegation = self.delegation
+            if not delegation or not (delegation.scope or delegation.audience or delegation.resource):
+                raise ValueError(
+                    "auth_type 'delegated' requires delegation.scope (or audience/resource)"
+                )
+        return self
+
+    def effective_user_id_source(self) -> str:
+        if self.user_id_source:
+            return self.user_id_source
+        return "token_claim" if self.auth_type == "delegated" else "email"
+
+
 class LLMConfig(BaseModel):
     """Configuration for all LLM models."""
     models: Dict[str, ModelConfig]
+    # Enterprise LiteLLM proxies with team-scoped model selection, keyed by a
+    # short gateway name that prefixes the gateway's model keys.
+    litellm_gateways: Dict[str, LiteLLMGatewayConfig] = Field(default_factory=dict)
 
     @field_validator('models', mode='before')
     @classmethod
@@ -196,6 +285,47 @@ class LLMConfig(BaseModel):
             return {name: ModelConfig(**config) if isinstance(config, dict) else config
                    for name, config in v.items()}
         return v
+
+    @model_validator(mode="after")
+    def validate_gateway_names(self):
+        from atlas.modules.config.litellm_gateway_models import GATEWAY_KEY_SEPARATOR
+
+        for gateway_name in self.litellm_gateways:
+            if not gateway_name or GATEWAY_KEY_SEPARATOR in gateway_name:
+                raise ValueError(
+                    f"LiteLLM gateway name {gateway_name!r} must be non-empty and "
+                    f"must not contain {GATEWAY_KEY_SEPARATOR!r}"
+                )
+            prefix = f"{gateway_name}{GATEWAY_KEY_SEPARATOR}"
+            clashing = [name for name in self.models if name.startswith(prefix)]
+            if clashing:
+                raise ValueError(
+                    f"Model name(s) {', '.join(clashing)} collide with LiteLLM gateway "
+                    f"'{gateway_name}' model keys; rename the model or the gateway"
+                )
+        return self
+
+    def get_model(self, model_name: str) -> Optional[ModelConfig]:
+        """Look up a model by name, including team-scoped gateway models."""
+        model_config = self.models.get(model_name)
+        if model_config is not None:
+            return model_config
+        from atlas.modules.config.litellm_gateway_models import build_gateway_model_config
+
+        return build_gateway_model_config(self, model_name)
+
+
+def lookup_model_config(llm_config: Any, model_name: str) -> Optional[ModelConfig]:
+    """Resolve a model name against an LLMConfig or a bare ``models`` holder.
+
+    Call sites receive whatever the config manager exposes; test doubles often
+    carry only a ``models`` dict, which cannot hold gateway models anyway.
+    """
+    if isinstance(llm_config, LLMConfig):
+        return llm_config.get_model(model_name)
+    # Deliberately not defaulted: a missing or broken registry must raise here
+    # so callers that fail open on a lookup error can still log it.
+    return llm_config.models.get(model_name)
 
 
 class OAuthConfig(BaseModel):

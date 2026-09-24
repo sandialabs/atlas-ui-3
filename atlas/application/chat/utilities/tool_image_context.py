@@ -41,6 +41,8 @@ import base64
 import logging
 from typing import Any, Dict, List, Optional
 
+from atlas.modules.config.models import lookup_model_config
+
 from .file_processor import _LLM_READY_IMAGE_MIME_TYPES
 
 logger = logging.getLogger(__name__)
@@ -95,7 +97,7 @@ def model_supports_vision(config_manager: Any, model: str) -> bool:
     if not config_manager:
         return False
     try:
-        model_config = config_manager.llm_config.models.get(model)
+        model_config = lookup_model_config(config_manager.llm_config, model)
         return bool(model_config and getattr(model_config, "supports_vision", False))
     except Exception:
         return False

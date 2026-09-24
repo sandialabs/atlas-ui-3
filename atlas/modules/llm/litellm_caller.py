@@ -41,6 +41,8 @@ from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
+    AuthenticationError,
+    AuthorizationError,
     ContextWindowExceededError,
     DataSourcePermissionError,
     LLMAuthenticationError,
@@ -52,7 +54,10 @@ from atlas.domain.errors import (
     RateLimitError,
 )
 from atlas.modules.config.config_manager import resolve_env_var
+from atlas.modules.config.litellm_gateway_models import resolve_gateway_ref
+from atlas.modules.config.models import LLMConfig, lookup_model_config
 
+from .litellm_gateway_client import get_gateway_client
 from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse, split_provider
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
@@ -258,6 +263,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             # the swap rather than assume the replacement is authorized.
             logger.warning("hooks: cannot verify PreLlmCall model swap (no llm_config); refusing")
             return False
+        if isinstance(self.llm_config, LLMConfig):
+            models = self.llm_config
         decision = await check_model_access(models, model_name, user_email, context="PreLlmCall hook")
         return decision is not ModelAccessDecision.DENIED
 
@@ -314,7 +321,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         # while accumulating the stream) carries a precise, user-safe message.
         # Re-running it through the keyword matching below would demote it to a
         # generic service error and match on its own wording, not the failure.
-        if isinstance(exc, LLMError):
+        if isinstance(exc, (LLMError, AuthenticationError, AuthorizationError)):
             raise exc
 
         error_str = str(exc)
@@ -770,13 +777,37 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         combined = "\n\n".join(parts)
         return combined, merged_metadata
 
+    def _require_model_config(self, model_name: str):
+        model_config = lookup_model_config(self.llm_config, model_name)
+        if model_config is None:
+            raise ValueError(f"Model {model_name} not found in configuration")
+        return model_config
+
+    async def _resolve_call_target(
+        self, model_name: str, temperature: Optional[float], user_email: Optional[str]
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Return the LiteLLM model id and call kwargs for one LLM call.
+
+        For a team-scoped LiteLLM gateway model this also confirms the user
+        belongs to the team and adds the team header and bearer token, which
+        needs network I/O the synchronous kwargs builder cannot do.
+        """
+        litellm_model = self._get_litellm_model_name(model_name)
+        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+        ref = resolve_gateway_ref(self.llm_config, model_name)
+        if ref is not None:
+            gateway = get_gateway_client(ref.gateway, self.llm_config.litellm_gateways[ref.gateway])
+            model_kwargs = await gateway.apply_request_auth(ref, user_email, model_kwargs)
+        return litellm_model, model_kwargs
+
     def _get_litellm_model_name(self, model_name: str) -> str:
         """Convert internal model name to LiteLLM compatible format."""
-        if model_name not in self.llm_config.models:
-            raise ValueError(f"Model {model_name} not found in configuration")
-
-        model_config = self.llm_config.models[model_name]
+        model_config = self._require_model_config(model_name)
         model_id = model_config.model_name
+
+        # A LiteLLM gateway is an OpenAI-compatible proxy reached via api_base.
+        if resolve_gateway_ref(self.llm_config, model_name) is not None:
+            return f"openai/{model_id}"
 
         # Map common providers to LiteLLM format.
         # Order matters: check specific providers (groq, openrouter) before
@@ -873,10 +904,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         self, model_name: str, temperature: Optional[float] = None, user_email: Optional[str] = None
     ) -> Dict[str, Any]:
         """Get LiteLLM kwargs for a specific model."""
-        if model_name not in self.llm_config.models:
-            raise ValueError(f"Model {model_name} not found in configuration")
-
-        model_config = self.llm_config.models[model_name]
+        model_config = self._require_model_config(model_name)
         from atlas.modules.config.config_manager import get_app_settings
 
         timeout = getattr(model_config, "request_timeout_seconds", None)
@@ -1057,8 +1085,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
     ) -> List[Dict[str, Any]]:
         """Sanitize messages and apply model-specific transformations."""
         messages = self._sanitize_messages(messages)
-        if model_name in self.llm_config.models:
-            model_config = self.llm_config.models[model_name]
+        model_config = lookup_model_config(self.llm_config, model_name)
+        if model_config is not None:
             if model_config.strict_role_ordering:
                 messages = self._enforce_strict_role_ordering(messages)
         return messages
@@ -1080,8 +1108,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             max_tokens: Optional max_tokens override (uses config default if None)
             user_email: Optional user email for metrics logging
         """
-        litellm_model = self._get_litellm_model_name(model_name)
-        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+        litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
         # Override max_tokens if provided
         if max_tokens is not None:
@@ -1096,8 +1123,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             mod = await self._fire_pre_llm_hook(model_name, messages, user_email=user_email)
             if mod is not None:
                 model_name, messages, _ = await self._apply_pre_llm_modify(mod, model_name, messages, user_email=user_email)
-                litellm_model = self._get_litellm_model_name(model_name)
-                model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+                litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
                 if max_tokens is not None:
                     model_kwargs["max_tokens"] = max_tokens
 
@@ -1317,8 +1343,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             content = await self.call_plain(model_name, messages, temperature=temperature, user_email=user_email)
             return LLMResponse(content=content, model_used=model_name)
 
-        litellm_model = self._get_litellm_model_name(model_name)
-        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+        litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
         try:
             total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
@@ -1330,8 +1355,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 model_name, messages, tools_schema = await self._apply_pre_llm_modify(
                     mod, model_name, messages, tools_schema, user_email=user_email
                 )
-                litellm_model = self._get_litellm_model_name(model_name)
-                model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
+                litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
             response = await self._acompletion_with_retry(
                 model=litellm_model,

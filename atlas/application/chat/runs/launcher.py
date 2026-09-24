@@ -136,8 +136,9 @@ async def resolve_model(config_manager: Any, model: str, user_email: str) -> str
     the model that a name it guessed exists but is off-limits would make
     ``atlas_launch`` a probe for the deployment's restricted model list.
     """
-    models = getattr(getattr(config_manager, "llm_config", None), "models", None) or {}
-    decision = await check_model_access(models, model, user_email, context="atlas_launch")
+    decision = await check_model_access(
+        getattr(config_manager, "llm_config", None), model, user_email, context="atlas_launch"
+    )
     if decision is ModelAccessDecision.ALLOWED:
         return model
     raise LaunchRefused(
