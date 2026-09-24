@@ -326,6 +326,15 @@ class TestGatewayCallTarget:
         assert kwargs["max_tokens"] == 256
 
     @pytest.mark.asyncio
+    async def test_api_base_is_the_gateway_even_if_it_names_a_provider(self):
+        llm_config = _llm_config(base_url="https://openrouter-proxy.internal.example")
+        caller = _caller_with_mock_transport(llm_config)
+        _, kwargs = await caller._resolve_call_target(
+            f"enterprise::{ALPHA}::gpt-4o-mini", None, "test@test.com"
+        )
+        assert kwargs["api_base"] == "https://openrouter-proxy.internal.example"
+
+    @pytest.mark.asyncio
     async def test_configured_team_header_name_is_used(self):
         caller = _caller_with_mock_transport(_llm_config(team_header="x-team"))
         _, kwargs = await caller._resolve_call_target(

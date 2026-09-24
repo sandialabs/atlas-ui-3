@@ -796,6 +796,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
         ref = resolve_gateway_ref(self.llm_config, model_name)
         if ref is not None:
+            # Always the gateway: the provider-URL heuristic in
+            # _get_model_kwargs skips api_base for URLs that merely mention a
+            # provider, which would send the gateway credential elsewhere.
+            model_kwargs["api_base"] = self._require_model_config(model_name).model_url
             gateway = get_gateway_client(ref.gateway, self.llm_config.litellm_gateways[ref.gateway])
             model_kwargs = await gateway.apply_request_auth(ref, user_email, model_kwargs)
         return litellm_model, model_kwargs
