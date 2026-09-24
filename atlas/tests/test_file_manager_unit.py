@@ -7,6 +7,8 @@ def test_file_manager_content_type_and_category():
 
     assert fm.get_content_type("report.pdf") == "application/pdf"
     assert fm.get_content_type("diagram.png") == "image/png"
+    assert fm.get_content_type("photo.webp") == "image/webp"
+    assert fm.get_content_type("photo.bmp") == "image/bmp"
     assert fm.get_content_type("unknown.bin") == "application/octet-stream"
 
     assert fm.categorize_file_type("main.py") == "code"

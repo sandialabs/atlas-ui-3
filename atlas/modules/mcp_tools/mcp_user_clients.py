@@ -95,17 +95,27 @@ class UserClientMixin:
             )
             return None
 
-    async def _mint_delegated_token(self, user_email, server_name, config):
+    async def _mint_delegated_token(
+        self, user_email, server_name, config, *, expected_previous_fingerprint=None,
+    ):
         """Obtain a delegated downstream token for a ``delegated`` MCP server.
 
         Returns the freshly stored token record, or None when delegation is
         not configured, the user has no OIDC session, or the exchange fails --
         all of which leave the caller reporting the server as unauthenticated,
         exactly as before.
+
+        With ``expected_previous_fingerprint`` the minted token is stored only
+        while the stored record still hashes to that fingerprint: the check
+        runs under the token-storage lock immediately before ``store_token``,
+        mirroring the forced OAuth refresh path.  Two concurrent 401
+        recoveries would otherwise both mint, and the second store would
+        overwrite the credential the first caller is about to retry with.
         """
         from atlas.core.oidc.mcp_delegation import (
             DELEGATION_METADATA_SOURCE,
             is_delegated_server,
+            loggable_server_name,
             mint_delegated_token_for_server,
         )
         from atlas.modules.mcp_tools.token_storage import get_token_storage
@@ -126,10 +136,11 @@ class UserClientMixin:
             expires_at = time.time() + _DELEGATED_TOKEN_DEFAULT_TTL_SECONDS
 
         token_storage = get_token_storage()
-        token_storage.store_token(
+        stored = token_storage.store_token_if_unchanged(
             user_email=user_email,
             server_name=server_name,
             token_value=delegated.access_token,
+            expected_previous_fingerprint=expected_previous_fingerprint,
             token_type="oauth_access",
             expires_at=expires_at,
             scopes=delegated.scope,
@@ -138,12 +149,17 @@ class UserClientMixin:
                 "audience": delegated.audience or "",
             },
         )
-        from atlas.core.oidc.mcp_delegation import loggable_server_name
-
-        logger.info(
-            "Stored a delegated downstream token for MCP server '%s'",
-            loggable_server_name(server_name),
-        )
+        if stored is None:
+            logger.info(
+                "Kept the delegated token a concurrent recovery already stored "
+                "for MCP server '%s' instead of overwriting it",
+                loggable_server_name(server_name),
+            )
+        else:
+            logger.info(
+                "Stored a delegated downstream token for MCP server '%s'",
+                loggable_server_name(server_name),
+            )
         return token_storage.get_valid_token(user_email, server_name)
 
     def _is_wormhole_server(self, server_name: str) -> bool:
@@ -490,6 +506,7 @@ class UserClientMixin:
                 k for k in self._user_clients
                 if k[0] == user_lc
                 and k[1] == server_name
+                and self._user_client_active_calls.get(k, 0) == 0
                 and (now - self._user_client_last_used.get(k, 0.0)) > in_use_window
             ]
             removed = self._pop_user_client_entries_locked(keys_to_remove)

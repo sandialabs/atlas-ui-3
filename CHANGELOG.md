@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #937 - 2026-09-14
+- Uploaded vision images are rehydrated from storage on follow-up and resubmitted turns so vision-capable models continue receiving the image.
+
 ### PR #949 - 2026-09-16
 - Add `atlas_discover_launch_options` so sub-conversation launches use authorized, current workspaces and model names, and block clearly when discovery fails or returns no valid options. Deployments with `FEATURE_ATLAS_LAUNCH_ENABLED` should allow the agent to use the new discovery step before launching.
 

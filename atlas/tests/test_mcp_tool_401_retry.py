@@ -20,7 +20,10 @@ import pytest
 from atlas.modules.mcp_tools.client import MCPToolManager
 from atlas.modules.mcp_tools.mcp_errors import _is_unauthorized_error
 from atlas.modules.mcp_tools.session_manager import MCPSessionManager
-from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
+from atlas.modules.mcp_tools.token_storage import (
+    AuthenticationRequiredException,
+    token_fingerprint,
+)
 
 SERVER = "oauth-server"
 USER = "user@example.com"
@@ -297,11 +300,11 @@ class TestUnauthorizedErrorDetection:
         wrapped.__cause__ = _http_401()
         assert _is_unauthorized_error(wrapped) is True
 
-    def test_non_httpx_wrapper_with_401_text(self):
+    def test_tool_result_text_is_not_transport_401(self):
         wrapped = RuntimeError(
-            "Client error '401 Unauthorized' for url 'https://upstream.example/mcp'"
+            "tool result: Client error '401 Unauthorized' for requested resource"
         )
-        assert _is_unauthorized_error(wrapped) is True
+        assert _is_unauthorized_error(wrapped) is False
 
     def test_non_401_status(self):
         request = httpx.Request("POST", "https://upstream.example/mcp")
@@ -504,6 +507,252 @@ class TestRefreshInvalidatesCachedClients:
         assert result is not None
 
 
+class TestDelegated401Recovery:
+    """auth_type=delegated servers re-mint on 401 with a compare-and-store."""
+
+    @pytest.fixture
+    def delegated_manager(self, manager):
+        manager.servers_config[SERVER] = {
+            "auth_type": "delegated",
+            "url": "https://upstream.example/mcp",
+        }
+        manager._ensure_user_client_cache_state()
+        # The fingerprint of the credential that just failed, as the call
+        # site records it on the cache entry that made the call.
+        manager._user_client_token_fingerprints[(USER, SERVER, CONV)] = "fp-failing"
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_delegated_server_takes_the_mint_path_on_401(self, delegated_manager):
+        from types import SimpleNamespace
+
+        failing_token = SimpleNamespace(token_value="failing-credential")
+        storage = MagicMock()
+        storage.get_token.return_value = failing_token
+        # The recovery's pre-read must still see the failing credential, so
+        # the seeded fingerprint matches what storage reports.
+        delegated_manager._user_client_token_fingerprints[(USER, SERVER, CONV)] = (
+            token_fingerprint(failing_token)
+        )
+
+        failing = _fake_client(call_side_effect=_http_401())
+        healed = _fake_client()
+        healed.call_tool = AsyncMock(return_value={"ok": True})
+
+        delegated_manager._get_user_client = AsyncMock(side_effect=[failing, healed])
+        delegated_manager._mint_delegated_token = AsyncMock(
+            return_value=MagicMock(token_value="minted")
+        )
+
+        with patch(
+            "atlas.modules.mcp_tools.token_storage.get_token_storage",
+            return_value=storage,
+        ):
+            result = await delegated_manager.call_tool(
+                SERVER, "my_tool", {}, user_email=USER, conversation_id=CONV
+            )
+
+        assert result == {"ok": True}
+        delegated_manager._mint_delegated_token.assert_awaited_once_with(
+            USER, SERVER, delegated_manager.servers_config[SERVER],
+            expected_previous_fingerprint=token_fingerprint(failing_token),
+        )
+
+    @pytest.mark.asyncio
+    async def test_delegated_recovery_skips_mint_when_fingerprint_moved(self, delegated_manager):
+        """Another caller already rotated the credential: reuse it, no second mint."""
+        from types import SimpleNamespace
+
+        moved = SimpleNamespace(token_value="token-v2")
+        storage = MagicMock()
+        storage.get_token.return_value = moved
+
+        delegated_manager._mint_delegated_token = AsyncMock()
+        with patch(
+            "atlas.modules.mcp_tools.token_storage.get_token_storage",
+            return_value=storage,
+        ):
+            await delegated_manager._recover_user_client_after_unauthorized(
+                USER, SERVER, CONV
+            )
+
+        delegated_manager._mint_delegated_token.assert_not_awaited()
+        storage.get_valid_token.assert_called_once_with(USER, SERVER)
+
+
+class TestDelegatedMintCompareAndStore:
+    """The delegated mint's store is a compare-and-swap under the storage lock."""
+
+    def _delegated_config(self, manager):
+        config = {"auth_type": "delegated", "url": "https://upstream.example/mcp"}
+        manager.servers_config[SERVER] = config
+        return config
+
+    @pytest.mark.asyncio
+    async def test_mint_does_not_overwrite_a_peer_rotation(self, manager):
+        """When the stored fingerprint moved while we were minting, the
+        minted token is not stored and the peer's credential is returned."""
+        from types import SimpleNamespace
+
+        config = self._delegated_config(manager)
+        delegated = SimpleNamespace(
+            access_token="minted-token",
+            expires_at=None,
+            scope="s",
+            audience="a",
+        )
+        storage = MagicMock()
+        storage.store_token_if_unchanged.return_value = None  # fingerprint moved
+        peers_token = MagicMock(token_value="stored-by-peer")
+        storage.get_valid_token.return_value = peers_token
+
+        with patch(
+            "atlas.core.oidc.mcp_delegation.is_delegated_server", return_value=True
+        ), patch(
+            "atlas.core.oidc.mcp_delegation.mint_delegated_token_for_server",
+            new=AsyncMock(return_value=delegated),
+        ), patch(
+            "atlas.modules.mcp_tools.token_storage.get_token_storage",
+            return_value=storage,
+        ):
+            result = await manager._mint_delegated_token(
+                USER, SERVER, config, expected_previous_fingerprint="fp-failing"
+            )
+
+        assert result is peers_token
+        storage.store_token_if_unchanged.assert_called_once()
+        kwargs = storage.store_token_if_unchanged.call_args.kwargs
+        assert kwargs["expected_previous_fingerprint"] == "fp-failing"
+        assert kwargs["token_value"] == "minted-token"
+        storage.store_token.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mint_stores_when_stored_token_still_matches(self, manager):
+        from types import SimpleNamespace
+
+        config = self._delegated_config(manager)
+        delegated = SimpleNamespace(
+            access_token="minted-token",
+            expires_at=1234.0,
+            scope="s",
+            audience="a",
+        )
+        storage = MagicMock()
+        storage.store_token_if_unchanged.return_value = MagicMock(
+            token_value="minted-token"
+        )
+        storage.get_valid_token.return_value = MagicMock(token_value="minted-token")
+
+        with patch(
+            "atlas.core.oidc.mcp_delegation.is_delegated_server", return_value=True
+        ), patch(
+            "atlas.core.oidc.mcp_delegation.mint_delegated_token_for_server",
+            new=AsyncMock(return_value=delegated),
+        ), patch(
+            "atlas.modules.mcp_tools.token_storage.get_token_storage",
+            return_value=storage,
+        ):
+            result = await manager._mint_delegated_token(
+                USER, SERVER, config, expected_previous_fingerprint="fp-failing"
+            )
+
+        assert result.token_value == "minted-token"
+        kwargs = storage.store_token_if_unchanged.call_args.kwargs
+        assert kwargs["expected_previous_fingerprint"] == "fp-failing"
+
+
+class TestStoreTokenIfUnchanged:
+    """The token-storage compare-and-store primitive itself."""
+
+    @pytest.fixture
+    def storage(self, tmp_path):
+        from atlas.modules.mcp_tools.token_storage import MCPTokenStorage
+
+        return MCPTokenStorage(
+            storage_dir=tmp_path,
+            encryption_key="test-encryption-key-12345-at-least-32-chars",
+        )
+
+    def test_stores_when_fingerprint_matches(self, storage):
+        storage.store_token(USER, SERVER, "token-v1", token_type="oauth_access")
+        fingerprint = token_fingerprint(storage.get_token(USER, SERVER))
+
+        stored = storage.store_token_if_unchanged(
+            USER, SERVER, "token-v2", expected_previous_fingerprint=fingerprint
+        )
+
+        assert stored is not None
+        assert stored.token_value == "token-v2"
+        assert storage.get_token(USER, SERVER).token_value == "token-v2"
+
+    def test_skips_store_when_fingerprint_moved(self, storage):
+        storage.store_token(USER, SERVER, "token-v1", token_type="oauth_access")
+        stale_fingerprint = token_fingerprint(storage.get_token(USER, SERVER))
+        # A peer rotated the credential while we were minting.
+        storage.store_token(USER, SERVER, "token-v2", token_type="oauth_access")
+
+        skipped = storage.store_token_if_unchanged(
+            USER, SERVER, "token-v3", expected_previous_fingerprint=stale_fingerprint
+        )
+
+        assert skipped is None
+        # The peer's credential is preserved, not overwritten.
+        assert storage.get_token(USER, SERVER).token_value == "token-v2"
+
+    def test_none_fingerprint_stores_unconditionally(self, storage):
+        stored = storage.store_token_if_unchanged(
+            USER, SERVER, "token-v1", expected_previous_fingerprint=None
+        )
+        assert stored is not None
+        assert storage.get_token(USER, SERVER).token_value == "token-v1"
+
+    def test_missing_stored_record_fails_closed(self, storage):
+        skipped = storage.store_token_if_unchanged(
+            USER, SERVER, "token-v1", expected_previous_fingerprint="fp-of-nothing"
+        )
+        assert skipped is None
+        assert storage.get_token(USER, SERVER) is None
+
+
+class TestRotationEvictionSparesInFlightCalls:
+    """Rotation eviction pops idle entries but never an in-flight call's client."""
+
+    @pytest.mark.asyncio
+    async def test_in_flight_entry_survives_while_idle_entry_is_evicted(self, manager):
+        manager._ensure_user_client_cache_state()
+        in_flight_key = (USER, SERVER, CONV)
+        idle_key = (USER, SERVER, "conv-2")
+        for key in (in_flight_key, idle_key):
+            manager._user_clients[key] = MagicMock()
+            manager._touch_user_client_locked(key)
+            manager._user_client_last_used[key] = (
+                time.monotonic() - manager._user_client_cache_in_use_window_seconds - 1
+            )
+        # The in-flight entry is beyond the idle window but has a live call.
+        manager._user_client_active_calls[in_flight_key] = 1
+
+        await manager._invalidate_user_clients_for_rotation(USER, SERVER)
+
+        assert in_flight_key in manager._user_clients, (
+            "An in-flight call's client must not be evicted from the cache"
+        )
+        assert idle_key not in manager._user_clients
+
+    @pytest.mark.asyncio
+    async def test_entry_without_active_calls_is_evicted_when_idle(self, manager):
+        manager._ensure_user_client_cache_state()
+        idle_key = (USER, SERVER, CONV)
+        manager._user_clients[idle_key] = MagicMock()
+        manager._touch_user_client_locked(idle_key)
+        manager._user_client_last_used[idle_key] = (
+            time.monotonic() - manager._user_client_cache_in_use_window_seconds - 1
+        )
+
+        await manager._invalidate_user_clients_for_rotation(USER, SERVER)
+
+        assert idle_key not in manager._user_clients
+
+
 class TestConcurrentForcedRefreshesShareRotation:
     """N concurrent 401s must produce one provider rotation, not N.
 
@@ -565,7 +814,6 @@ class TestConcurrentForcedRefreshesShareRotation:
             mock_factory.get_mcp_manager.return_value = None
 
             from atlas.modules.mcp_tools import mcp_oauth_service
-            from atlas.modules.mcp_tools.token_storage import token_fingerprint
 
             old_fp = token_fingerprint(shared_record)
 

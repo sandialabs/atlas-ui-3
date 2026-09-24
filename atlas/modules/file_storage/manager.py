@@ -70,6 +70,8 @@ class FileManager:
             'jpg': 'image/jpeg',
             'jpeg': 'image/jpeg',
             'gif': 'image/gif',
+            'webp': 'image/webp',
+            'bmp': 'image/bmp',
             'tif': 'image/tiff',
             'tiff': 'image/tiff',
             'py': 'text/x-python',
