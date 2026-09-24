@@ -419,6 +419,7 @@ class ToolsModeRunner:
         max_extra_rounds = self._max_extra_rounds()
         current_response = final_llm_response
         executed_signatures: set = set()
+        exempted_discovery_retries: set = set()
         extra_round = 0
         # Issue #909: one injector per turn tracks the rolling most-recent-N
         # cap across continuation rounds.
@@ -444,10 +445,13 @@ class ToolsModeRunner:
                     if signature not in executed_signatures:
                         return True
                     # A discovery call that has not yet produced options is
-                    # exempt from the anti-loop guard so the model can retry it.
+                    # exempt from the anti-loop guard once so the model can
+                    # recover from a transient failure without spinning the
+                    # whole round budget on repeated retries.
                     return (
                         normalize_tool_name(signature[0]) == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
                         and not session_context.get("launch_discovery")
+                        and signature not in exempted_discovery_retries
                     )
 
                 fresh = [tc for tc in tool_calls if _is_fresh(tc)]
@@ -483,7 +487,14 @@ class ToolsModeRunner:
                     skip_approval=self.skip_approval,
                 )
                 for tc in fresh:
-                    executed_signatures.add(self._tool_call_signature(tc))
+                    signature = self._tool_call_signature(tc)
+                    if (
+                        signature in executed_signatures
+                        and normalize_tool_name(signature[0]) == DISCOVER_LAUNCH_OPTIONS_TOOL_NAME
+                        and not session_context.get("launch_discovery")
+                    ):
+                        exempted_discovery_retries.add(signature)
+                    executed_signatures.add(signature)
                 result_by_id = {r.tool_call_id: r.content for r in results}
                 # Append tool results in the SAME order as the assistant tool_calls.
                 for tc in tool_calls:

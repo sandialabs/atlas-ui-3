@@ -763,6 +763,8 @@ async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note(
         ("discovering", [discovery_call("d1")]),
         # The identical call again -- same name, same arguments.
         ("retrying discovery", [discovery_call("d2")]),
+        # A third identical call in the same turn should be blocked by the cap.
+        ("retrying discovery again", [discovery_call("d3")]),
         ("Here are your options.", None),
     ])
     runner = _runner(llm, _config(max_extra_rounds=3))
@@ -798,7 +800,7 @@ async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note(
             selected_tools=[DISCOVER_LAUNCH_OPTIONS_TOOL_NAME],
         )
 
-    # The retry really was executed a second time.
+    # The retry was executed exactly once; the third identical call was capped.
     assert attempts["n"] == 2, "the exempted discovery retry was not re-executed"
 
     # The messages the model saw on its third turn must carry the options.
@@ -809,3 +811,8 @@ async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note(
     )
     assert retry_message["content"] == options_payload
     assert "already executed" not in retry_message["content"]
+    third_retry_message = next(
+        m for m in final_messages
+        if m.get("role") == "tool" and m.get("tool_call_id") == "d3"
+    )
+    assert "already executed" in third_retry_message["content"]

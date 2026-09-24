@@ -45,6 +45,7 @@ from atlas.application.chat.runs.registry import (
     RunStatus,
     get_run_registry,
 )
+from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.model_access import (
     ModelAccessDecision,
@@ -174,10 +175,20 @@ async def discover_launch_options(
     except Exception as exc:
         logger.warning("Launch option discovery failed for workspaces", exc_info=True)
         raise LaunchRefused("Launch discovery failed while loading workspaces. Try again.") from exc
+    auth_cache: Dict[str, bool] = {}
+
+    async def _cached_group_auth(email: str, group: str) -> bool:
+        if group in auth_cache:
+            return auth_cache[group]
+        allowed = await is_user_in_group(email, group)
+        auth_cache[group] = allowed
+        return allowed
+
     try:
         models = await filter_authorized_models(
             getattr(getattr(config_manager, "llm_config", None), "models", None) or {},
             user_email,
+            auth_check_func=_cached_group_auth,
         )
     except Exception as exc:
         logger.warning("Launch option discovery failed for models", exc_info=True)
@@ -213,19 +224,16 @@ async def discover_launch_options(
     return options
 
 
-def _require_discovered_option(context: Optional[Dict[str, Any]], workspace: str, model: str) -> None:
-    if context is None or "launch_discovery" not in context:
+def _require_discovered_option(options: Optional[Dict[str, Any]], workspace: str, model: str) -> None:
+    if not isinstance(options, dict):
         raise LaunchRefused(
-            "Run atlas_discover_launch_options successfully before atlas_launch; "
-            "launch is blocked until current workspaces and LLM models are discovered."
+            "Launch is blocked until current workspaces and LLM models are discovered."
         )
-    options = context.get("launch_discovery") or {}
     workspaces = options.get("workspaces")
     models = options.get("models")
     if not workspaces or not models:
         raise LaunchRefused(
-            "Run atlas_discover_launch_options successfully before atlas_launch; "
-            "launch is blocked until current workspaces and LLM models are discovered."
+            "Launch is blocked until current workspaces and LLM models are discovered."
         )
     workspace_names = {str(item.get("name", "")).casefold() for item in workspaces}
     workspace_ids = {str(item.get("id", "")) for item in workspaces}
@@ -556,7 +564,10 @@ async def launch_sub_conversation(
             f"{MAX_PROMPT_CHARS}. Summarize the task for the sub-conversation."
         )
 
-    _require_discovered_option(context, workspace_name, model_name)
+    state = (context or {}).get("launch_discovery")
+    if not isinstance(state, dict) or not state.get("workspaces") or not state.get("models"):
+        state = await discover_launch_options(context, factory=factory)
+    _require_discovered_option(state, workspace_name, model_name)
 
     repository = getattr(factory, "workspace_repository", None)
     if repository is None:

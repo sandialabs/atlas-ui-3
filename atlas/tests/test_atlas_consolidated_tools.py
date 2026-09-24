@@ -14,6 +14,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
+    LAUNCH_TOOL_NAME,
     MAX_SEARCH_RESULTS,
     SEARCH_TOOL_NAME,
     SLEEP_TOOL_NAME,
@@ -58,6 +59,10 @@ def test_normalize_tool_names_dedupes_aliases():
         "math_add",
     ]
     assert normalize_tool_names(None) == []
+
+
+def test_normalize_tool_names_does_not_auto_inject_discovery():
+    assert normalize_tool_names([LAUNCH_TOOL_NAME]) == [LAUNCH_TOOL_NAME]
 
 
 def test_search_takes_only_a_query():
