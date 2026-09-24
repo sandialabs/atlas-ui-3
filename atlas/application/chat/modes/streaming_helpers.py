@@ -86,7 +86,7 @@ async def stream_and_accumulate(
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
-        if getattr(event_publisher, "raise_on_stream_error", False):
+        if getattr(event_publisher, "atlas_chat_exit_on_stream_error", False):
             error_class, user_message, _log_message = classify_llm_error(exc)
             raise error_class(user_message) from exc
         if not accumulated:

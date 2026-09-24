@@ -32,7 +32,6 @@ class CLIEventPublisher:
     def __init__(self, streaming: bool = True, quiet: bool = False):
         self.streaming = streaming
         self.quiet = quiet
-        self.raise_on_stream_error = streaming
         self._collected = CLICollectedResult()
 
     def get_result(self) -> CLICollectedResult:

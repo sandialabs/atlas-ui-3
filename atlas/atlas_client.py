@@ -123,6 +123,7 @@ class AtlasClient:
             user_email = cfg.app_settings.test_user or "cli@atlas.local"
 
         event_publisher = CLIEventPublisher(streaming=streaming, quiet=quiet)
+        event_publisher.atlas_chat_exit_on_stream_error = streaming
         chat_service = self._factory.create_chat_service(connection=None)
         # Replace the default event publisher with our CLI one
         chat_service.event_publisher = event_publisher

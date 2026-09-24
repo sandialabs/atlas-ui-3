@@ -262,6 +262,7 @@ async def test_stream_and_accumulate_error_raises_for_cli_publishers():
     from atlas.infrastructure.events.cli_event_publisher import CLIEventPublisher
 
     pub = CLIEventPublisher(streaming=True)
+    pub.atlas_chat_exit_on_stream_error = True
 
     async def _auth_error():
         raise RuntimeError("AuthenticationError: invalid api key")
