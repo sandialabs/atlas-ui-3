@@ -10,6 +10,7 @@ conversations keep working.
 import pytest
 
 from atlas.domain.messages.models import ToolCall
+from atlas.hooks.models import HookConfig
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
@@ -24,7 +25,6 @@ from atlas.modules.mcp_tools.atlas_server import (
     search_kwargs_for,
 )
 from atlas.modules.mcp_tools.client import MCPToolManager, _drop_disabled_servers, _drop_reserved_servers
-from atlas.hooks.models import HookConfig
 
 
 def _manager() -> MCPToolManager:

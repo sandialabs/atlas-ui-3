@@ -29,8 +29,8 @@ from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
-from ..utilities.error_handler import classify_llm_error
 from ..utilities.dropped_calls import publish_dropped_call_warning
+from ..utilities.error_handler import classify_llm_error
 from ..utilities.tool_history import ToolCallRecorder
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from ..utilities.tool_selection import normalize_selected_tools
