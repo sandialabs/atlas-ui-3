@@ -200,7 +200,8 @@ class LiteLLMGatewayClient:
     # -- HTTP --------------------------------------------------------------
 
     def _url(self, path: str) -> str:
-        base = self.config.base_url if self.config.base_url.endswith("/") else self.config.base_url + "/"
+        base = self.config.resolved_base_url()
+        base = base if base.endswith("/") else base + "/"
         return urljoin(base, path.lstrip("/"))
 
     async def _get_json(self, path: str, params: Dict[str, str], bearer_token: str) -> Any:

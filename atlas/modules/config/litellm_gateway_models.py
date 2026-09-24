@@ -85,7 +85,7 @@ def build_gateway_model_config(llm_config: "LLMConfig", model_name: str) -> Opti
     fields = {"description": f"{ref.model_id} via {gateway_label}", **gateway.model_defaults}
     fields.update(
         model_name=ref.model_id,
-        model_url=gateway.base_url,
+        model_url=gateway.resolved_base_url(),
         # Delegated gateways get their bearer token per call; an empty key
         # here means "no static key".
         api_key=gateway.api_key if gateway.auth_type == "system" else "",

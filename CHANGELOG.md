@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #976 - 2026-09-24
+- Enterprise LiteLLM team gateways: configure `litellm_gateways` in `llmconfig.yml` so users pick a LiteLLM team and then one of its models; every call sends the team in `x-litellm-team-id` (service key or delegated/Entra OBO auth). Adds `mocks/litellm-mock`.
+
 ### PR #972 - 2026-09-24
 - `/api/config` now correctly includes per-tool approval entries by matching fully-qualified `<server>_<tool>` names against authorized tools.
 

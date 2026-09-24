@@ -264,6 +264,10 @@ class LiteLLMGatewayConfig(BaseModel):
                 )
         return self
 
+    def resolved_base_url(self) -> str:
+        """``base_url`` with a ``${ENV_VAR}`` value expanded."""
+        return resolve_env_var(self.base_url) or ""
+
     def effective_user_id_source(self) -> str:
         if self.user_id_source:
             return self.user_id_source

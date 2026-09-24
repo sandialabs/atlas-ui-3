@@ -123,6 +123,12 @@ class TestGatewayModelKeys:
         assert model.max_tokens == 256
         assert model.supports_tools is False
 
+    def test_base_url_expands_env_var(self, monkeypatch):
+        monkeypatch.setenv("TEST_GATEWAY_URL", "https://litellm.example.gov")
+        llm_config = _llm_config(base_url="${TEST_GATEWAY_URL}")
+        assert llm_config.get_model(f"enterprise::{ALPHA}::m").model_url == "https://litellm.example.gov"
+        assert _client(llm_config)._url("team/list") == "https://litellm.example.gov/team/list"
+
     def test_get_model_ignores_unknown_gateway(self):
         assert _llm_config().get_model(f"other::{ALPHA}::gpt-4o-mini") is None
         assert _llm_config().get_model("static-model").api_key == "sk-static"
