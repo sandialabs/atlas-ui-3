@@ -345,18 +345,20 @@ class MCPToolManager(
         Targeted counterpart of ``reload_config()``: re-reads mcp.json and
         installs (or removes) only ``server_name``'s entry, leaving every
         other server's config, clients, caches, and failure records exactly
-        as they are. Unlike the global reload, removed servers are *not*
-        cleaned up here -- a server being removed by a targeted refresh is
-        handled by ``refresh_server()`` after this returns False.
+        as they are. The entry is installed under the *disk-derived* key
+        (matched by equality), so a name that reached here from a request
+        body never becomes a dict key itself. Unlike the global reload,
+        removed servers are *not* cleaned up here -- a server being removed
+        by a targeted refresh is handled by ``refresh_server()`` after this
+        returns False.
 
         Returns:
             True if the server is configured on disk after the refresh.
         """
         new_mcp_config = self._read_mcp_config_from_disk()
-        if server_name in new_mcp_config.servers:
-            self.servers_config[server_name] = _drop_reserved_servers({
-                server_name: new_mcp_config.servers[server_name].model_dump()
-            })[server_name]
-            return True
+        for key, server in new_mcp_config.servers.items():
+            if key == server_name:
+                self.servers_config[key] = server.model_dump()
+                return True
         self.servers_config.pop(server_name, None)
         return False

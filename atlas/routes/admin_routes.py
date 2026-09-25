@@ -421,7 +421,11 @@ async def refresh_mcp_server(
     disk after the reload).
     """
     try:
-        if not _SERVER_NAME_PATTERN.fullmatch(action.server_name):
+        # Sanitize inline so CodeQL's py/log-injection query can trace the
+        # newline/CR removal as a sanitizer: this name flows into connection,
+        # lookup, and logging code downstream of the endpoint.
+        server_name = action.server_name.replace("\r", "").replace("\n", "")
+        if not _SERVER_NAME_PATTERN.fullmatch(server_name):
             raise HTTPException(
                 status_code=422,
                 detail="Invalid server name: expected up to 128 letters, digits, "
@@ -432,8 +436,8 @@ async def refresh_mcp_server(
         if mcp is None:
             raise HTTPException(status_code=503, detail="MCP manager is not available")
 
-        sanitized_server_name = sanitize_for_logging(action.server_name)
-        result = await mcp.refresh_server(action.server_name)
+        sanitized_server_name = sanitize_for_logging(server_name)
+        result = await mcp.refresh_server(server_name)
         if result.get("status") == "unknown":
             raise HTTPException(
                 status_code=404,
