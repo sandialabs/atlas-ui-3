@@ -93,16 +93,12 @@ async def stream_and_accumulate(
             token="", is_first=False, is_last=True,
         )
         if raise_on_stream_error:
-            if isinstance(exc, DomainError):
-                # Already a specific domain error (e.g. LLMEmptyStreamError or
-                # a hook denial): re-raise it unchanged instead of letting
-                # keyword classification re-generalize the message.
-                raise
-            error_class, user_message, _log_message = classify_llm_error(exc)
             if not accumulated and fallback_fn:
                 # A stream that failed before the first token still gets the
                 # non-streaming retry, so the CLI behaves like non-streaming
-                # runs: exit non-zero only when the fallback fails too.
+                # runs: exit non-zero only when the fallback fails too. This
+                # runs regardless of the stream error's type -- production
+                # LLM failures usually surface as DomainErrors already.
                 try:
                     accumulated = await fallback_fn()
                 except Exception as fallback_exc:
@@ -110,11 +106,23 @@ async def stream_and_accumulate(
                         "%s fallback after stream failure also failed: %s",
                         context_label, fallback_exc,
                     )
+                    # Surface the stream's own failure, not the fallback's: a
+                    # DomainError keeps its specific user-safe message, anything
+                    # else gets classified rather than re-generalized.
+                    if isinstance(exc, DomainError):
+                        raise exc from fallback_exc
+                    error_class, user_message, _log_message = classify_llm_error(exc)
                     raise error_class(user_message) from exc
                 await event_publisher.publish_chat_response(
                     message=accumulated, has_pending_tools=False,
                 )
                 return accumulated
+            if isinstance(exc, DomainError):
+                # Already a specific domain error (e.g. LLMEmptyStreamError or
+                # a hook denial): re-raise it unchanged instead of letting
+                # keyword classification re-generalize the message.
+                raise
+            error_class, user_message, _log_message = classify_llm_error(exc)
             raise error_class(user_message) from exc
         if not accumulated:
             def _error_message():

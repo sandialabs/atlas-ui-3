@@ -93,7 +93,10 @@ Before publishing to production PyPI, you can test with TestPyPI:
 ### "Version already exists"
 
 - PyPI doesn't allow overwriting versions
-- Bump the version number in `pyproject.toml`
+- Bump the version number in `pyproject.toml` **and** `atlas/version.py`
+  (the publish workflow fails when they disagree)
+- If the publish fails the `uv lock --check` step, run `uv lock`, commit the
+  refreshed `uv.lock`, and re-run
 
 ### Workflow not triggering
 
@@ -103,7 +106,8 @@ Before publishing to production PyPI, you can test with TestPyPI:
 
 ## Checklist for Releases
 
-- [ ] Update version in `pyproject.toml`
+- [ ] Update version in `pyproject.toml` and `atlas/version.py` (must agree)
+- [ ] Refresh `uv.lock` with `uv lock` (the publish workflow runs `uv lock --check`)
 - [ ] Update CHANGELOG.md
 - [ ] Commit and push changes
 - [ ] Create git tag matching version (`v0.2.0`)

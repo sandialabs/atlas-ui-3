@@ -57,17 +57,16 @@ async def stream_final_answer(
                     model, messages, temperature=temperature, user_email=user_email,
                 )
                 return accumulated
-            except Exception:
+            except Exception as fallback_exc:
                 if raise_on_stream_error:
                     # CLI failure policy: both the stream and the non-streaming
-                    # retry failed -- surface the classified error instead of
-                    # returning an error text as a successful answer. A
-                    # DomainError already carries its specific user-safe
-                    # message, so it is re-raised unchanged.
+                    # retry failed -- surface the STREAM's classified error, not
+                    # the fallback's. A DomainError already carries its specific
+                    # user-safe message, so it is re-raised unchanged.
                     if isinstance(exc, DomainError):
-                        raise
+                        raise exc from fallback_exc
                     _err_class, user_msg, _log_msg = classify_llm_error(exc)
-                    raise _err_class(user_msg) from exc
+                    raise _err_class(user_msg) from fallback_exc
                 _err_class, user_msg, _log_msg = classify_llm_error(exc)
                 accumulated = user_msg
         elif raise_on_stream_error:

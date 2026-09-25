@@ -13,7 +13,7 @@ import pytest
 
 from atlas.application.chat.agent.streaming_final_answer import stream_final_answer
 from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
-from atlas.domain.errors import LLMAuthenticationError
+from atlas.domain.errors import LLMAuthenticationError, LLMEmptyStreamError, LLMServiceError
 
 # -- Helpers -----------------------------------------------------------------
 
@@ -318,6 +318,96 @@ async def test_stream_and_accumulate_reraises_domain_errors_unchanged():
             token_generator=_empty_stream(),
             event_publisher=pub,
             context_label="test",
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_domain_error_tries_fallback_first():
+    """Production stream errors are usually DomainErrors -- the non-streaming
+    retry must still run before raising, so the CLI matches the web path."""
+    pub = AsyncMock()
+
+    async def _domain_error():
+        raise LLMEmptyStreamError("The model returned an empty stream.")
+        yield  # makes this an async generator
+
+    async def _fallback():
+        return "recovered via retry"
+
+    result = await stream_and_accumulate(
+        token_generator=_domain_error(),
+        event_publisher=pub,
+        fallback_fn=_fallback,
+        context_label="test",
+        raise_on_stream_error=True,
+    )
+
+    assert result == "recovered via retry"
+    pub.publish_chat_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_domain_error_raises_original_when_fallback_fails():
+    """When the fallback also fails, the stream's own DomainError surfaces."""
+    pub = AsyncMock()
+
+    async def _domain_error():
+        raise LLMEmptyStreamError("The model returned an empty stream.")
+        yield  # makes this an async generator
+
+    async def _fallback():
+        raise RuntimeError("fallback down too")
+
+    with pytest.raises(LLMEmptyStreamError, match="empty stream"):
+        await stream_and_accumulate(
+            token_generator=_domain_error(),
+            event_publisher=pub,
+            fallback_fn=_fallback,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_partial_text_raises_when_opted_in():
+    """Text the user already watched stream in must not exit zero on failure."""
+    pub = AsyncMock()
+
+    async def _partial_then_error():
+        yield "partial "
+        yield "answer"
+        raise RuntimeError("connection reset mid-stream")
+
+    with pytest.raises(LLMServiceError, match="LLM service"):
+        await stream_and_accumulate(
+            token_generator=_partial_then_error(),
+            event_publisher=pub,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+    # The open bubble is closed exactly once before the raise.
+    last_call = pub.publish_token_stream.await_args_list[-1]
+    assert last_call.kwargs["is_last"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_final_answer_partial_text_raises_when_opted_in():
+    """Agent closing answers obey the same partial-text CLI policy."""
+    llm = MagicMock()
+
+    async def _partial_then_error(*args, **kwargs):
+        yield "partial narration"
+        raise RuntimeError("provider dropped the connection")
+
+    llm.stream_plain = _partial_then_error
+    pub = _make_publisher()
+
+    with pytest.raises(LLMServiceError, match="LLM service"):
+        await stream_final_answer(
+            llm=llm, event_publisher=pub, model="test",
+            messages=[], temperature=0.7, user_email=None,
             raise_on_stream_error=True,
         )
 
