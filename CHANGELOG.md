@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Refresh a single MCP server from the admin panel (issue #879)
+- New `POST /admin/mcp/refresh` (`{"server_name": ...}`) re-reads `mcp.json`, reconnects, and re-discovers tools for just the named server -- instead of the all-servers reload -- and each server chip in the admin MCP card carries a per-server refresh button. Idle cached per-user clients for the server are rebuilt; in-flight calls are not torn down.
+
 ### PR #972 - 2026-09-24
 - `/api/config` now correctly includes per-tool approval entries by matching fully-qualified `<server>_<tool>` names against authorized tools.
 

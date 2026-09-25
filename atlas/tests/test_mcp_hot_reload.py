@@ -1,5 +1,6 @@
 """Tests for MCP hot reload and auto-reconnect functionality."""
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -175,6 +176,97 @@ class TestMCPAdminEndpoints:
         assert "failed_servers" in data
         assert "triggered_by" in data
 
+    def test_mcp_refresh_endpoint_requires_admin(self):
+        """Test that MCP refresh endpoint requires admin access."""
+        from main import app
+
+        client = TestClient(app)
+
+        # Non-admin user should be denied
+        r = client.post(
+            "/admin/mcp/refresh",
+            headers={"X-User-Email": "user@example.com"},
+            json={"server_name": "test-server"},
+        )
+        assert r.status_code in (302, 403)
+
+    def test_mcp_refresh_endpoint_returns_data(self):
+        """Test that MCP refresh endpoint returns expected data structure."""
+        from main import app
+
+        from atlas.infrastructure.app_factory import app_factory
+        from atlas.modules.config import config_manager
+
+        client = TestClient(app)
+
+        fake_manager = MagicMock()
+        fake_manager.refresh_server = AsyncMock(
+            return_value={
+                "server": "test-server",
+                "status": "connected",
+                "tools": 2,
+                "prompts": 1,
+                "error": None,
+                "config_changed": False,
+                "evicted_clients": 0,
+                "config_reload_error": None,
+            }
+        )
+        fake_manager.clients = {"test-server": MagicMock()}
+        fake_manager.servers_config = {"test-server": {"url": "https://mcp.example.com"}}
+        fake_manager.get_failed_servers.return_value = {}
+
+        with patch.object(app_factory, "get_mcp_manager", return_value=fake_manager):
+            r = client.post(
+                "/admin/mcp/refresh",
+                headers={"X-User-Email": config_manager.app_settings.admin_test_user},
+                json={"server_name": "test-server"},
+            )
+        assert r.status_code == 200
+
+        data = r.json()
+        assert "message" in data
+        assert data["result"]["status"] == "connected"
+        assert data["result"]["server"] == "test-server"
+        assert "servers" in data
+        assert "failed_servers" in data
+        assert "triggered_by" in data
+        fake_manager.refresh_server.assert_awaited_once_with("test-server")
+
+    def test_mcp_refresh_endpoint_unknown_server_returns_404(self):
+        """Refreshing a server that is not configured should 404."""
+        from main import app
+
+        from atlas.infrastructure.app_factory import app_factory
+        from atlas.modules.config import config_manager
+
+        client = TestClient(app)
+
+        fake_manager = MagicMock()
+        fake_manager.refresh_server = AsyncMock(
+            return_value={
+                "server": "nope",
+                "status": "unknown",
+                "tools": 0,
+                "prompts": 0,
+                "error": "Server 'nope' is not configured",
+                "config_changed": False,
+                "evicted_clients": 0,
+                "config_reload_error": None,
+            }
+        )
+        fake_manager.clients = {}
+        fake_manager.servers_config = {}
+        fake_manager.get_failed_servers.return_value = {}
+
+        with patch.object(app_factory, "get_mcp_manager", return_value=fake_manager):
+            r = client.post(
+                "/admin/mcp/refresh",
+                headers={"X-User-Email": config_manager.app_settings.admin_test_user},
+                json={"server_name": "nope"},
+            )
+        assert r.status_code == 404
+
     def test_admin_dashboard_includes_mcp_endpoints(self):
         """Test that admin dashboard lists MCP endpoints."""
         from main import app
@@ -189,6 +281,7 @@ class TestMCPAdminEndpoints:
         endpoints = data.get("available_endpoints", [])
         assert "/admin/mcp/reload" in endpoints
         assert "/admin/mcp/reconnect" in endpoints
+        assert "/admin/mcp/refresh" in endpoints
         assert "/admin/mcp/status" in endpoints
 
 
@@ -557,6 +650,202 @@ class TestMCPReconnection:
 
         assert "test-server" in result["attempted"]
         manager._initialize_single_client.assert_called_once()
+
+
+@pytest.mark.asyncio
+class TestMCPServerRefresh:
+    """Tests for single-server refresh (refresh_server)."""
+
+    @staticmethod
+    def _patch_config(mock_config_manager, servers: dict):
+        """Make config_manager.reload_mcp_config return the given server dict."""
+        mock_new_config = MagicMock()
+        mock_servers = {}
+        for name, cfg in servers.items():
+            server = MagicMock()
+            server.model_dump.return_value = cfg
+            mock_servers[name] = server
+        mock_new_config.servers = mock_servers
+        mock_config_manager.reload_mcp_config.return_value = mock_new_config
+
+    def _make_manager(self, servers_config):
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager.servers_config = dict(servers_config)
+        manager.clients = {}
+        manager._failed_servers = {}
+        manager.available_tools = {}
+        manager.available_prompts = {}
+        manager._user_clients_lock = asyncio.Lock()
+        return manager
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_connects_failed_server(self, mock_config_manager):
+        """A failed server refreshed with a reachable config becomes connected."""
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://host"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        manager._failed_servers = {"srv": {"last_attempt": time.time(), "attempt_count": 2, "error": "down"}}
+        new_client = AsyncMock()
+        manager._initialize_single_client = AsyncMock(return_value=new_client)
+        manager._discover_and_register_server = AsyncMock()
+        manager.available_tools = {"srv": {"tools": ["t1", "t2"]}}
+        manager.available_prompts = {"srv": {"prompts": ["p1"]}}
+
+        result = await manager.refresh_server("srv")
+
+        assert result["status"] == "connected"
+        assert result["tools"] == 2
+        assert result["prompts"] == 1
+        assert result["error"] is None
+        assert manager.clients["srv"] is new_client
+        assert "srv" not in manager._failed_servers
+        manager._discover_and_register_server.assert_awaited_once_with("srv", new_client)
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_detects_config_change(self, mock_config_manager):
+        """Refreshing after an mcp.json edit reports config_changed."""
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://new-url"}})
+        manager = self._make_manager({"srv": {"url": "http://old-url"}})
+        manager._initialize_single_client = AsyncMock(return_value=AsyncMock())
+        manager._discover_and_register_server = AsyncMock()
+
+        result = await manager.refresh_server("srv")
+
+        assert result["config_changed"] is True
+        assert manager.servers_config["srv"] == {"url": "http://new-url"}
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_failure_records_failure(self, mock_config_manager):
+        """When the client cannot be rebuilt the server stays tracked as failed."""
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://host"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        manager._initialize_single_client = AsyncMock(return_value=None)
+        manager._discover_and_register_server = AsyncMock()
+
+        result = await manager.refresh_server("srv")
+
+        assert result["status"] == "failed"
+        assert "srv" not in manager.clients
+        assert "srv" in manager._failed_servers
+        manager._discover_and_register_server.assert_not_awaited()
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_exception_records_failure(self, mock_config_manager):
+        """An exception while rebuilding the client becomes a failure record."""
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://host"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        manager._initialize_single_client = AsyncMock(side_effect=RuntimeError("boom"))
+        manager._discover_and_register_server = AsyncMock()
+
+        result = await manager.refresh_server("srv")
+
+        assert result["status"] == "failed"
+        assert "RuntimeError" in result["error"]
+        assert "srv" in manager._failed_servers
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_removed_server_cleans_catalogue(self, mock_config_manager):
+        """Refreshing a server that was dropped from mcp.json removes its state."""
+        self._patch_config(mock_config_manager, {"other": {"url": "http://other"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}, "other": {"url": "http://other"}})
+        manager.clients = {"srv": AsyncMock(), "other": AsyncMock()}
+        manager.available_tools = {"srv": {"tools": ["t1"]}}
+        manager.available_prompts = {"srv": {"prompts": []}}
+        manager._tool_index = {
+            "srv_t1": {"server": "srv", "tool": MagicMock()},
+            "other_t2": {"server": "other", "tool": MagicMock()},
+        }
+        manager._initialize_single_client = AsyncMock()
+        manager._discover_and_register_server = AsyncMock()
+
+        result = await manager.refresh_server("srv")
+
+        assert result["status"] == "removed"
+        assert "srv" not in manager.clients
+        assert "other" in manager.clients
+        assert "srv" not in manager.available_tools
+        assert "srv" not in manager.available_prompts
+        assert "srv_t1" not in manager._tool_index
+        assert "other_t2" in manager._tool_index
+        manager._initialize_single_client.assert_not_awaited()
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_unknown_server(self, mock_config_manager):
+        """Refreshing a server that was never configured reports unknown."""
+        self._patch_config(mock_config_manager, {"other": {"url": "http://other"}})
+        manager = self._make_manager({"other": {"url": "http://other"}})
+        manager._initialize_single_client = AsyncMock()
+
+        result = await manager.refresh_server("never-configured")
+
+        assert result["status"] == "unknown"
+        manager._initialize_single_client.assert_not_awaited()
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_tolerates_broken_config(self, mock_config_manager):
+        """A config parse error should not block reconnection from memory."""
+        mock_config_manager.reload_mcp_config.side_effect = ValueError("bad json")
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        manager._initialize_single_client = AsyncMock(return_value=AsyncMock())
+        manager._discover_and_register_server = AsyncMock()
+
+        result = await manager.refresh_server("srv")
+
+        assert result["status"] == "connected"
+        assert "ValueError" in result["config_reload_error"]
+        # The in-memory config is kept when the disk read fails
+        assert manager.servers_config == {"srv": {"url": "http://host"}}
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_closes_previous_client_and_stale_index(self, mock_config_manager):
+        """The old shared client is closed and its tool routing entries dropped."""
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://host"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        old_client = AsyncMock()
+        manager.clients = {"srv": old_client}
+        manager._tool_index = {
+            "srv_old_tool": {"server": "srv", "tool": MagicMock()},
+            "other_tool": {"server": "other", "tool": MagicMock()},
+        }
+        manager._initialize_single_client = AsyncMock(return_value=AsyncMock())
+        manager._discover_and_register_server = AsyncMock()
+
+        await manager.refresh_server("srv")
+
+        old_client.__aexit__.assert_awaited_once()
+        assert "srv_old_tool" not in manager._tool_index
+        assert "other_tool" in manager._tool_index
+
+    async def test_invalidate_user_clients_for_server(self):
+        """Idle clients are evicted; in-use clients keep their connection but lose their fingerprint."""
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager._user_clients_lock = asyncio.Lock()
+        manager._ensure_user_client_cache_state()
+        idle_client = AsyncMock()
+        in_use_client = AsyncMock()
+        other_client = AsyncMock()
+        manager._user_clients = {
+            ("u1", "srv", "c1"): idle_client,
+            ("u2", "srv", "c2"): in_use_client,
+            ("u1", "other", "c3"): other_client,
+        }
+        manager._user_client_active_calls = {("u2", "srv", "c2"): 1}
+        manager._user_client_token_fingerprints = {
+            ("u1", "srv", "c1"): "fp1",
+            ("u2", "srv", "c2"): "fp2",
+            ("u1", "other", "c3"): "fp3",
+        }
+
+        evicted = await manager._invalidate_user_clients_for_server("srv")
+
+        assert evicted == 1
+        assert ("u1", "srv", "c1") not in manager._user_clients
+        assert ("u2", "srv", "c2") in manager._user_clients
+        assert ("u1", "other", "c3") in manager._user_clients
+        idle_client.__aexit__.assert_awaited_once()
+        in_use_client.__aexit__.assert_not_awaited()
+        # In-use entry is marked stale so the next acquisition rebuilds it
+        assert ("u2", "srv", "c2") not in manager._user_client_token_fingerprints
+        assert manager._user_client_token_fingerprints[("u1", "other", "c3")] == "fp3"
 
 
 class TestConfigManagerMCPReload:

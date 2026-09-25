@@ -523,6 +523,39 @@ class UserClientMixin:
                 )
         await self._close_user_client_entries(removed)
 
+    async def _invalidate_user_clients_for_server(self, server_name: str) -> int:
+        """Evict idle cached per-user clients for one server across all users.
+
+        Admin single-server refresh path. Entries with no in-flight call are
+        popped and closed (releasing their persistent sessions); entries with
+        an in-flight call are left in place so a streaming call is never torn
+        down, but their token fingerprints are dropped so token-auth clients
+        rebuild against the refreshed connection on their next acquisition
+        (the same rebuild signal token rotation relies on).
+
+        Returns:
+            Number of cache entries evicted and closed.
+        """
+        async with self._user_clients_lock:
+            self._ensure_user_client_cache_state()
+            keys_to_remove = [
+                k for k in self._user_clients
+                if k[1] == server_name and self._user_client_active_calls.get(k, 0) == 0
+            ]
+            removed = self._pop_user_client_entries_locked(keys_to_remove)
+            retained = [k for k in self._user_clients if k[1] == server_name]
+            for key in retained:
+                self._user_client_token_fingerprints.pop(key, None)
+
+        await self._close_user_client_entries(removed)
+        if removed or retained:
+            logger.debug(
+                "Refresh invalidated %d and marked %d in-use user client(s) "
+                "stale for server '%s'",
+                len(removed), len(retained), sanitize_for_logging(server_name),
+            )
+        return len(removed)
+
     async def _get_or_create_user_http_client(
         self,
         server_name: str,

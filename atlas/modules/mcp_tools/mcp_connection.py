@@ -449,6 +449,181 @@ class ConnectionMixin:
             "skipped_backoff": skipped_backoff
         }
 
+    def _drop_server_tool_index_entries(self, server_name: str) -> None:
+        """Remove a server's entries from the shared tool routing index."""
+        if hasattr(self, "_tool_index"):
+            stale_names = [
+                full_name
+                for full_name, info in self._tool_index.items()
+                if info.get("server") == server_name
+            ]
+            for full_name in stale_names:
+                self._tool_index.pop(full_name, None)
+            if stale_names:
+                logger.debug(
+                    "Dropped %d stale tool index entries for server '%s'",
+                    len(stale_names),
+                    sanitize_for_logging(server_name),
+                )
+
+    async def refresh_server(self, server_name: str) -> Dict[str, Any]:
+        """Re-read the configuration for a single server and re-establish its connection.
+
+        Single-server counterpart of ``reload_config()`` +
+        ``initialize_clients()`` + ``discover_tools()``/``discover_prompts()``.
+        Unlike ``reconnect_failed_servers()``, which only retries servers that
+        are already tracked as failed, this also rebuilds servers that are
+        currently connected -- the maintenance case where the target server was
+        restarted, is wedged, or its ``mcp.json`` entry was edited and the
+        change should apply to just that one server.
+
+        Behaviour:
+        1. The server's shared client (if any) is closed before reconnecting.
+           In-flight calls still holding it may fail; that is inherent to
+           refreshing a connection and bounded by the close timeout.
+        2. ``mcp.json`` is re-read from disk so config edits apply. A broken
+           config file does not block reconnection: the in-memory config is
+           kept and the parse error is surfaced in the result.
+        3. Idle cached per-user clients for the server are evicted so later
+           calls rebuild against the refreshed connection. Entries with an
+           in-flight call are left alone so a streaming call is not torn down
+           mid-flight; token-auth clients among them are marked stale (token
+           fingerprint dropped) so they rebuild on their next acquisition.
+        4. The client is re-initialized with the refreshed config and that
+           server's tools and prompts are re-discovered.
+
+        Returns:
+            Dict with ``server``, ``status`` (``"connected"``, ``"failed"``,
+            ``"removed"``, or ``"unknown"``), ``tools``, ``prompts``,
+            ``error``, ``config_changed``, ``evicted_clients``, and
+            ``config_reload_error``.
+        """
+        safe_server_name = sanitize_for_logging(server_name)
+        previous_config = self.servers_config.get(server_name)
+        was_configured = previous_config is not None
+
+        # Close and drop the shared client first. reload_config() pops clients
+        # for servers removed from config without closing them; doing this
+        # before the reload guarantees the old connection is closed even when
+        # the server is being removed by this refresh.
+        old_client = self.clients.pop(server_name, None) if hasattr(self, "clients") else None
+        if old_client is not None:
+            await self._close_user_client_entry(
+                ("", server_name, None), old_client, release_session=False
+            )
+            logger.info("Closed previous client for server '%s' during refresh", safe_server_name)
+
+        config_reload_error: Optional[str] = None
+        try:
+            self.reload_config()
+        except Exception as e:  # noqa: BLE001
+            config_reload_error = f"{type(e).__name__}: {e}"
+            logger.warning(
+                "Config reload failed during refresh of server '%s'; "
+                "continuing with the in-memory configuration: %s",
+                safe_server_name,
+                config_reload_error,
+            )
+
+        new_config = self.servers_config.get(server_name)
+        config_changed = new_config != previous_config
+
+        evicted_clients = 0
+        invalidate = getattr(self, "_invalidate_user_clients_for_server", None)
+        if invalidate is not None:
+            try:
+                evicted_clients = await invalidate(server_name)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Could not evict cached user clients for server '%s': %s",
+                    safe_server_name,
+                    e,
+                )
+
+        if new_config is None:
+            if not was_configured:
+                return {
+                    "server": server_name,
+                    "status": "unknown",
+                    "tools": 0,
+                    "prompts": 0,
+                    "error": f"Server '{server_name}' is not configured",
+                    "config_changed": False,
+                    "evicted_clients": evicted_clients,
+                    "config_reload_error": config_reload_error,
+                }
+            # Removed from config: drop its catalogue, failure record, and
+            # routing entries so it stops being offered to users.
+            self._failed_servers.pop(server_name, None)
+            if hasattr(self, "available_tools"):
+                self.available_tools.pop(server_name, None)
+            if hasattr(self, "available_prompts"):
+                self.available_prompts.pop(server_name, None)
+            self._drop_server_tool_index_entries(server_name)
+            logger.info("Refresh removed server '%s': no longer configured", safe_server_name)
+            return {
+                "server": server_name,
+                "status": "removed",
+                "tools": 0,
+                "prompts": 0,
+                "error": None,
+                "config_changed": config_changed,
+                "evicted_clients": evicted_clients,
+                "config_reload_error": config_reload_error,
+            }
+
+        try:
+            client = await self._initialize_single_client(server_name, new_config)
+            if client is None:
+                error = "Refresh returned None"
+                self._record_server_failure(server_name, error)
+                return {
+                    "server": server_name,
+                    "status": "failed",
+                    "tools": 0,
+                    "prompts": 0,
+                    "error": error,
+                    "config_changed": config_changed,
+                    "evicted_clients": evicted_clients,
+                    "config_reload_error": config_reload_error,
+                }
+
+            self.clients[server_name] = client
+            self._clear_server_failure(server_name)
+            logger.info("Successfully refreshed MCP server: %s", safe_server_name)
+
+            # Re-discover just this server. Stale routing entries (tools that
+            # no longer exist on the refreshed server) are dropped first.
+            self._drop_server_tool_index_entries(server_name)
+            await self._discover_and_register_server(server_name, client)
+
+            tool_data = self.available_tools.get(server_name, {})
+            prompt_data = self.available_prompts.get(server_name, {})
+            return {
+                "server": server_name,
+                "status": "connected",
+                "tools": len(tool_data.get("tools", [])),
+                "prompts": len(prompt_data.get("prompts", [])),
+                "error": None,
+                "config_changed": config_changed,
+                "evicted_clients": evicted_clients,
+                "config_reload_error": config_reload_error,
+            }
+        except Exception as e:  # noqa: BLE001
+            error = f"{type(e).__name__}: {e}"
+            self._record_server_failure(server_name, error)
+            logger.warning("Failed to refresh MCP server %s: %s", safe_server_name, error)
+            return {
+                "server": server_name,
+                "status": "failed",
+                "tools": 0,
+                "prompts": 0,
+                "error": error,
+                "config_changed": config_changed,
+                "evicted_clients": evicted_clients,
+                "config_reload_error": config_reload_error,
+            }
+
     async def _discover_and_register_server(self, server_name: str, client: Client) -> None:
         """Discover tools and prompts for a single server and register them."""
         try:

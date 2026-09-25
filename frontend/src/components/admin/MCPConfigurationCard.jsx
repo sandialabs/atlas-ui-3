@@ -19,6 +19,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   const [statusLoading, setStatusLoading] = useState(false)
   const [reloadLoading, setReloadLoading] = useState(false)
   const [reconnectLoading, setReconnectLoading] = useState(false)
+  const [refreshingServer, setRefreshingServer] = useState(null)
 
   // Refs for polling state (avoid re-renders and stale closures)
   const failureCountRef = useRef(0)
@@ -198,6 +199,50 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
     }
   }
 
+  const refreshServer = async (serverName) => {
+    if (refreshingServer) return
+    try {
+      setRefreshingServer(serverName)
+      const response = await fetch('/admin/mcp/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ server_name: serverName }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.detail || `HTTP ${response.status}`)
+      }
+
+      const result = data.result || {}
+      if (result.status === 'connected') {
+        addNotification(
+          `MCP server '${serverName}' refreshed: ${result.tools} tools, ${result.prompts} prompts`,
+          'success'
+        )
+      } else if (result.status === 'removed') {
+        addNotification(`MCP server '${serverName}' is no longer configured and was removed`, 'info')
+      } else {
+        addNotification(
+          `Failed to refresh MCP server '${serverName}': ${result.error || 'unknown error'}`,
+          'error'
+        )
+      }
+      // Refresh inline status after the refresh attempt
+      loadMCPStatus()
+      // Refresh the main config to update tools list in sidebar
+      if (refreshConfig) {
+        refreshConfig().catch(err => {
+          console.error('Failed to refresh config:', err)
+        })
+      }
+    } catch (err) {
+      addNotification(`Error refreshing MCP server '${serverName}': ` + err.message, 'error')
+    } finally {
+      setRefreshingServer(null)
+    }
+  }
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'healthy': return 'text-green-400 bg-green-900/20'
@@ -235,10 +280,21 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
                 return (
                   <span
                     key={name}
-                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-900/40 text-green-300 border border-green-700/60"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-900/40 text-green-300 border border-green-700/60"
                     title={`${tools} tools, ${prompts} prompts`}
                   >
                     {name} ({tools}t/{prompts}p)
+                    <button
+                      onClick={() => refreshServer(name)}
+                      disabled={refreshingServer !== null}
+                      title={`Refresh connection to ${name}`}
+                      aria-label={`Refresh connection to ${name}`}
+                      className="rounded-full p-0.5 hover:bg-green-800/60 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 ${refreshingServer === name ? 'animate-spin' : ''}`}
+                      />
+                    </button>
                   </span>
                 )
               })}
@@ -252,7 +308,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
               {Object.entries(mcpStatus.failed_servers).map(([name, info]) => (
                 <span
                   key={name}
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
                     info?.auth_required
                       ? 'bg-yellow-900/40 text-yellow-300 border border-yellow-700/60'
                       : 'bg-red-900/40 text-red-300 border border-red-700/60'
@@ -262,6 +318,17 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
                   {info?.auth_required
                     ? `${name} (OAuth auth required)`
                     : `${name}${info?.attempt_count > 1 ? ` (${info.attempt_count} attempts)` : ''}`}
+                  <button
+                    onClick={() => refreshServer(name)}
+                    disabled={refreshingServer !== null}
+                    title={`Refresh connection to ${name}`}
+                    aria-label={`Refresh connection to ${name}`}
+                    className="rounded-full p-0.5 hover:bg-red-800/60 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <RefreshCw
+                      className={`w-3 h-3 ${refreshingServer === name ? 'animate-spin' : ''}`}
+                    />
+                  </button>
                 </span>
               ))}
             </div>

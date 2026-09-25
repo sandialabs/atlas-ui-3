@@ -205,6 +205,7 @@ async def admin_dashboard(admin_user: str = Depends(require_admin)):
             "/admin/logs/download",
             "/admin/mcp/reload",
             "/admin/mcp/reconnect",
+            "/admin/mcp/refresh",
             "/admin/mcp/status",
         ],
     }
@@ -392,6 +393,64 @@ async def reconnect_failed_mcp_servers(admin_user: str = Depends(require_admin))
         }
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error reconnecting MCP servers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/mcp/refresh")
+async def refresh_mcp_server(
+    action: MCPServerAction,
+    admin_user: str = Depends(require_admin),
+):
+    """Refresh the connection to a single MCP server.
+
+    Unlike POST /admin/mcp/reload (which rebuilds every server) or
+    POST /admin/mcp/reconnect (which retries only servers already tracked as
+    failed), this rebuilds just the named server: it re-reads mcp.json from
+    disk, closes the server's existing connection, evicts cached per-user
+    clients for it, reconnects, and re-discovers that server's tools and
+    prompts. Useful during maintenance or debugging of one server without
+    disturbing the connections of every other server.
+
+    Returns 404 when the server is not configured (neither in memory nor on
+    disk after the reload).
+    """
+    try:
+        mcp = app_factory.get_mcp_manager()
+        if mcp is None:
+            raise HTTPException(status_code=503, detail="MCP manager is not available")
+
+        result = await mcp.refresh_server(action.server_name)
+        if result.get("status") == "unknown":
+            raise HTTPException(
+                status_code=404,
+                detail=f"Server '{action.server_name}' is not configured",
+            )
+
+        sanitized_server_name = sanitize_for_logging(action.server_name)
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        logger.info(
+            "Admin %s refreshed MCP server '%s' (status=%s, tools=%s, prompts=%s)",
+            sanitized_admin_user,
+            sanitized_server_name,
+            result.get("status"),
+            result.get("tools"),
+            result.get("prompts"),
+        )
+
+        configured_set = set(mcp.servers_config.keys())
+        return {
+            "message": f"MCP server '{action.server_name}' refresh completed with "
+            f"status '{result.get('status')}'",
+            "result": result,
+            "servers": [s for s in mcp.clients.keys() if s in configured_set],
+            "failed_servers": mcp.get_failed_servers(),
+            "triggered_by": admin_user,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        sanitized_server_name = sanitize_for_logging(action.server_name)
+        logger.error(f"Error refreshing MCP server '{sanitized_server_name}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
