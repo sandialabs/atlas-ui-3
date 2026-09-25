@@ -109,6 +109,71 @@ describe('MCPConfigurationCard', () => {
       expect(screen.getByText('Unavailable servers (2)')).toBeInTheDocument()
     })
 
+    it('refreshes a single server from its chip and reports the result', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          configured_servers: ['live-server', 'down-server'],
+          connected_servers: ['live-server'],
+          failed_servers: {
+            'down-server': { error: 'connection refused' },
+          },
+        }),
+      })
+
+      await act(async () => {
+        render(
+          <MCPConfigurationCard
+            openModal={openModal}
+            addNotification={addNotification}
+            systemStatus={systemStatus}
+          />,
+        )
+        await vi.advanceTimersByTimeAsync(0)
+      })
+
+      const refreshButtons = screen.getAllByTitle('Refresh connection to down-server')
+      expect(refreshButtons).toHaveLength(1)
+
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          message: "MCP server 'down-server' refresh completed with status 'failed'",
+          result: {
+            server: 'down-server',
+            status: 'failed',
+            tools: 0,
+            prompts: 0,
+            error: 'connection refused',
+          },
+        }),
+      })
+      // loadMCPStatus() fires right after the refresh attempt
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          configured_servers: [],
+          connected_servers: [],
+          failed_servers: {},
+        }),
+      })
+
+      await act(async () => {
+        refreshButtons[0].click()
+        await vi.advanceTimersByTimeAsync(0)
+      })
+
+      const postCall = global.fetch.mock.calls.find(
+        ([url, options]) => url === '/admin/mcp/refresh' && options?.method === 'POST'
+      )
+      expect(postCall).toBeTruthy()
+      expect(JSON.parse(postCall[1].body)).toEqual({ server_name: 'down-server' })
+      expect(addNotification).toHaveBeenCalledWith(
+        "Failed to refresh MCP server 'down-server': connection refused",
+        'error'
+      )
+    })
+
     it('opens a combined MCP Details modal with config and status', async () => {
       global.fetch.mockResolvedValueOnce({
         ok: true,

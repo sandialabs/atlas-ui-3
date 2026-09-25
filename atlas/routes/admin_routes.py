@@ -40,6 +40,12 @@ class MCPServerAction(BaseModel):
     server_name: str
 
 
+# Server names are mcp.json keys. Restricting the admin-requested name to
+# identifier-ish characters keeps it from ever forming a traversal path or a
+# forged log entry as it flows into connection/lookup/logging code.
+_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\- ]{0,127}$")
+
+
 async def require_admin(current_user: str = Depends(get_current_user)) -> str:
     admin_group = config_manager.app_settings.admin_group
     if not await is_user_in_group(current_user, admin_group):
@@ -205,6 +211,7 @@ async def admin_dashboard(admin_user: str = Depends(require_admin)):
             "/admin/logs/download",
             "/admin/mcp/reload",
             "/admin/mcp/reconnect",
+            "/admin/mcp/refresh",
             "/admin/mcp/status",
         ],
     }
@@ -392,6 +399,79 @@ async def reconnect_failed_mcp_servers(admin_user: str = Depends(require_admin))
         }
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error reconnecting MCP servers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_router.post("/mcp/refresh")
+async def refresh_mcp_server(
+    action: MCPServerAction,
+    admin_user: str = Depends(require_admin),
+):
+    """Refresh the connection to a single MCP server.
+
+    Unlike POST /admin/mcp/reload (which rebuilds every server) or
+    POST /admin/mcp/reconnect (which retries only servers already tracked as
+    failed), this rebuilds just the named server: it re-reads mcp.json from
+    disk, closes the server's existing connection, evicts cached per-user
+    clients for it, reconnects, and re-discovers that server's tools and
+    prompts. Useful during maintenance or debugging of one server without
+    disturbing the connections of every other server.
+
+    Returns 404 when the server is not configured (neither in memory nor on
+    disk after the reload).
+    """
+    try:
+        # Sanitize inline so CodeQL's py/log-injection query can trace the
+        # newline/CR removal as a sanitizer: this name flows into connection,
+        # lookup, and logging code downstream of the endpoint.
+        server_name = action.server_name.replace("\r", "").replace("\n", "")
+        if not _SERVER_NAME_PATTERN.fullmatch(server_name):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid server name: expected up to 128 letters, digits, "
+                "dots, underscores, hyphens, or spaces",
+            )
+
+        mcp = app_factory.get_mcp_manager()
+        if mcp is None:
+            raise HTTPException(status_code=503, detail="MCP manager is not available")
+
+        sanitized_server_name = sanitize_for_logging(server_name)
+        result = await mcp.refresh_server(server_name)
+        if result.get("status") == "unknown":
+            raise HTTPException(
+                status_code=404,
+                detail=f"Server '{sanitized_server_name}' is not configured",
+            )
+
+        sanitized_admin_user = sanitize_for_logging(admin_user)
+        logger.info(
+            "Admin %s refreshed MCP server '%s' (status=%s, tools=%s, prompts=%s)",
+            sanitized_admin_user,
+            sanitized_server_name,
+            result.get("status"),
+            result.get("tools"),
+            result.get("prompts"),
+        )
+
+        configured_set = set(mcp.servers_config.keys())
+        return {
+            "message": f"MCP server '{sanitized_server_name}' refresh completed with "
+            f"status '{result.get('status')}'",
+            "result": {**result, "server": sanitized_server_name},
+            "servers": [s for s in mcp.clients.keys() if s in configured_set],
+            "failed_servers": mcp.get_failed_servers(),
+            "triggered_by": admin_user,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "Error refreshing MCP server '%s': %s",
+            sanitize_for_logging(action.server_name),
+            sanitize_for_logging(str(e)),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
