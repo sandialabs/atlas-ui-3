@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from atlas.application.chat.agent.agentic_loop import AgenticLoop
 from atlas.application.chat.agent.factory import AgentLoopFactory
 from atlas.application.chat.agent.protocols import AgentContext, AgentEvent
+from atlas.domain.errors import LLMServiceError
 from atlas.domain.messages.models import ConversationHistory, ToolResult
 from atlas.interfaces.llm import LLMResponse
 
@@ -633,6 +634,43 @@ class TestAgenticLoopStreamingErrorSurfacing:
         # The partial text is finalized by exactly one is_last close (the single
         # stream-close after the try/except), not a redundant double close from
         # the error handler as well.
+        assert [call["is_last"] for call in publisher.calls].count(True) == 1
+
+    @pytest.mark.asyncio
+    async def test_streaming_error_after_partial_text_raises_when_opted_in(self):
+        """CLI failure policy: partial streamed text must not exit zero.
+
+        With ``raise_on_stream_error`` the loop closes the open bubble once,
+        then surfaces the classified failure instead of returning the partial
+        answer as a successful turn.
+        """
+
+        class PartialThenBoomLLM(FakeLLM):
+            async def stream_with_tools(self, *a, **k):
+                yield "partial "
+                yield "answer"
+                raise RuntimeError("connection reset mid-stream")
+
+        events, handler = _collect_events()
+        publisher = _StreamErrorPublisher()
+        loop = _make_loop(PartialThenBoomLLM())
+
+        with pytest.raises(LLMServiceError, match="LLM service"):
+            await loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "Hi"}],
+                context=_make_context(),
+                selected_tools=["calc"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=handler,
+                streaming=True,
+                event_publisher=publisher,
+                raise_on_stream_error=True,
+            )
+
+        # The open bubble is closed exactly once before the raise.
         assert [call["is_last"] for call in publisher.calls].count(True) == 1
 
 

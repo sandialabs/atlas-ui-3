@@ -74,6 +74,10 @@ jobs:
           fetch-depth: 0
           token: ${{ env.RELEASE_TOKEN }}
 
+      - name: Install uv
+        # Pinned to a commit SHA so the install step is immutable.
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
       - name: Compute release metadata
         id: meta
         shell: bash
@@ -256,6 +260,12 @@ jobs:
           print(f"CHANGELOG.md: [Unreleased] -> [{new_version}] - {release_date}")
           PY
 
+      - name: Refresh uv.lock
+        if: steps.state.outputs.branch_exists == 'false'
+        run: |
+          set -euo pipefail
+          uv lock
+
       - name: Show diff
         if: steps.state.outputs.branch_exists == 'false'
         run: |
@@ -276,7 +286,7 @@ jobs:
           set -euo pipefail
           git config user.name "atlas-release-bot"
           git config user.email "atlas-release-bot@users.noreply.github.com"
-          git add atlas/version.py pyproject.toml CHANGELOG.md
+          git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md
           git commit -m "chore(release): cut ${YEAR_MONTH} at v${NEW_VERSION}"
 
       - name: Push release branch

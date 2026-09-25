@@ -9,6 +9,7 @@ import asyncio
 import logging
 from typing import AsyncGenerator
 
+from atlas.domain.errors import DomainError
 from atlas.interfaces.events import EventPublisher
 
 from ..utilities.error_handler import classify_llm_error
@@ -23,6 +24,7 @@ async def stream_and_accumulate(
     context_label: str = "LLM",
     on_error_message=None,
     partial_sink=None,
+    raise_on_stream_error: bool = False,
 ) -> str:
     """Consume a token async generator, publishing each chunk and accumulating the result.
 
@@ -38,6 +40,10 @@ async def stream_and_accumulate(
             is appended to it before the ``CancelledError`` propagates, so the
             caller can persist what the user already watched stream in instead
             of losing it with the frame (issue #755).
+        raise_on_stream_error: When True, a failed stream surfaces as a
+            classified LLM exception instead of a synthesized error message.
+            Opt-in for the CLI so ``atlas-chat`` exits non-zero on LLM
+            failures; headless/websocket callers keep the graceful behavior.
 
     Returns:
         The accumulated response text.
@@ -86,6 +92,38 @@ async def stream_and_accumulate(
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
+        if raise_on_stream_error:
+            if not accumulated and fallback_fn:
+                # A stream that failed before the first token still gets the
+                # non-streaming retry, so the CLI behaves like non-streaming
+                # runs: exit non-zero only when the fallback fails too. This
+                # runs regardless of the stream error's type -- production
+                # LLM failures usually surface as DomainErrors already.
+                try:
+                    accumulated = await fallback_fn()
+                except Exception as fallback_exc:
+                    logger.error(
+                        "%s fallback after stream failure also failed: %s",
+                        context_label, fallback_exc,
+                    )
+                    # Surface the stream's own failure, not the fallback's: a
+                    # DomainError keeps its specific user-safe message, anything
+                    # else gets classified rather than re-generalized.
+                    if isinstance(exc, DomainError):
+                        raise exc from fallback_exc
+                    error_class, user_message, _log_message = classify_llm_error(exc)
+                    raise error_class(user_message) from exc
+                await event_publisher.publish_chat_response(
+                    message=accumulated, has_pending_tools=False,
+                )
+                return accumulated
+            if isinstance(exc, DomainError):
+                # Already a specific domain error (e.g. LLMEmptyStreamError or
+                # a hook denial): re-raise it unchanged instead of letting
+                # keyword classification re-generalize the message.
+                raise
+            error_class, user_message, _log_message = classify_llm_error(exc)
+            raise error_class(user_message) from exc
         if not accumulated:
             def _error_message():
                 if on_error_message:

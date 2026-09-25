@@ -8,7 +8,7 @@ from atlas.domain.chat.citation_register import (
     CitationRegister,
     new_register,
 )
-from atlas.domain.errors import LLMMalformedToolCallError
+from atlas.domain.errors import DomainError, LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -77,6 +77,9 @@ class ToolsModeRunner:
         self.artifact_processor = artifact_processor
         self.config_manager = config_manager
         self.skip_approval = False
+        # Opt-in (CLI only): re-raise stream failures instead of synthesizing
+        # an error message, so `atlas-chat` exits non-zero on LLM failures.
+        self.raise_on_stream_error = False
 
         # Verify event_publisher has send_json for elicitation support
         if hasattr(event_publisher, 'send_json'):
@@ -314,6 +317,17 @@ class ToolsModeRunner:
             await self.event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )
+            if self.raise_on_stream_error:
+                # CLI failure policy: an LLM stream failure is a process
+                # failure, not a synthesized in-chat error message. A DomainError
+                # already carries its specific user-safe message -- re-raise it
+                # unchanged so keyword classification cannot re-generalize it.
+                if isinstance(exc, DomainError):
+                    raise
+                error_class, user_msg, _log_msg = error_handler.classify_llm_error(
+                    exc,
+                )
+                raise error_class(user_msg) from exc
 
         # If streaming failed and we got no content, send the error to the
         # frontend. A malformed tool call is reported even when narration was
@@ -706,6 +720,7 @@ class ToolsModeRunner:
             ),
             context_label="synthesis",
             on_error_message=self._synthesis_error_message,
+            raise_on_stream_error=self.raise_on_stream_error,
         )
 
     # -- Bounded tool-calling loop helpers ---------------------------------

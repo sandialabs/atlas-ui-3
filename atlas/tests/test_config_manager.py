@@ -58,6 +58,21 @@ class TestConfigManager:
         assert isinstance(mcp_config, MCPConfig)
         assert hasattr(mcp_config, "servers")
 
+    def test_packaged_demo_servers_are_disabled_by_default(self):
+        """Fresh installs should not probe demo servers that need extra services or deps."""
+        # Read the packaged defaults directly: the ambient ConfigManager view
+        # depends on APP_CONFIG_DIR / MCP_CONFIG_FILE (the test harness points
+        # MCP_CONFIG_FILE at an absent mcp-test.json), which would make this
+        # assertion environment-dependent instead of about the shipped file.
+        import json
+
+        packaged_mcp = Path(__file__).resolve().parents[1] / "config" / "mcp.json"
+        data = json.loads(packaged_mcp.read_text(encoding="utf-8"))
+        mcp_config = MCPConfig(**{"servers": data})
+
+        assert mcp_config.servers["pptx_generator"].enabled is False
+        assert mcp_config.servers["session_state_demo"].enabled is False
+
     def test_config_manager_caches_settings(self):
         """ConfigManager should cache settings and return same instance."""
         cm = ConfigManager()

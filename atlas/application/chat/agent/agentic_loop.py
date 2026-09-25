@@ -21,7 +21,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
-from atlas.domain.errors import LLMMalformedToolCallError
+from atlas.domain.errors import DomainError, LLMMalformedToolCallError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
@@ -30,6 +30,7 @@ from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import error_handler, tool_executor
 from ..utilities.dropped_calls import publish_dropped_call_warning
+from ..utilities.error_handler import classify_llm_error
 from ..utilities.tool_history import ToolCallRecorder
 from ..utilities.tool_image_context import ToolImageInjector, model_supports_vision
 from ..utilities.tool_selection import normalize_selected_tools
@@ -123,6 +124,7 @@ class AgenticLoop(AgentLoopProtocol):
         streaming: bool = False,
         event_publisher=None,
         steering: Optional[SteeringChannel] = None,
+        raise_on_stream_error: bool = False,
     ) -> AgentResult:
         await event_handler(AgentEvent(
             type="agent_start",
@@ -166,6 +168,7 @@ class AgenticLoop(AgentLoopProtocol):
                 recorder=recorder,
                 launch_discovery=launch_discovery,
                 steering=steering,
+                raise_on_stream_error=raise_on_stream_error,
             )
         except BaseException:
             # A stop, a client disconnect, or a mid-step failure leaves this
@@ -182,6 +185,7 @@ class AgenticLoop(AgentLoopProtocol):
                 final_answer = await stream_final_answer(
                     self.llm, event_publisher, model, messages,
                     temperature, context.user_email,
+                    raise_on_stream_error=raise_on_stream_error,
                 )
             else:
                 final_answer = await self.llm.call_plain(
@@ -217,6 +221,7 @@ class AgenticLoop(AgentLoopProtocol):
         recorder: ToolCallRecorder,
         launch_discovery: Dict[str, Any],
         steering: Optional[SteeringChannel] = None,
+        raise_on_stream_error: bool = False,
     ) -> Tuple[int, Optional[str]]:
         """Run the tool-calling steps, returning ``(steps, final_answer)``.
 
@@ -262,6 +267,7 @@ class AgenticLoop(AgentLoopProtocol):
             llm_response = await self._call_llm(
                 model, messages, tools_schema,
                 context, temperature, use_streaming, event_publisher,
+                raise_on_stream_error=raise_on_stream_error,
             )
 
             if not llm_response.has_tool_calls():
@@ -406,6 +412,7 @@ class AgenticLoop(AgentLoopProtocol):
         temperature: float,
         use_streaming: bool,
         event_publisher,
+        raise_on_stream_error: bool = False,
     ) -> LLMResponse:
         """Call the LLM once, optionally streaming text tokens to the UI.
 
@@ -418,6 +425,7 @@ class AgenticLoop(AgentLoopProtocol):
             return await self._call_llm_streaming(
                 model, messages, tools_schema,
                 context, temperature, event_publisher,
+                raise_on_stream_error=raise_on_stream_error,
             )
 
         # No RAG pre-injection: retrieval only happens if the model calls
@@ -438,6 +446,7 @@ class AgenticLoop(AgentLoopProtocol):
         context: AgentContext,
         temperature: float,
         event_publisher,
+        raise_on_stream_error: bool = False,
     ) -> LLMResponse:
         """Stream an LLM call, publishing tokens and returning the final response."""
         stream = self.llm.stream_with_tools(
@@ -486,7 +495,7 @@ class AgenticLoop(AgentLoopProtocol):
                     },
                 ))
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("Error during streaming LLM call in agentic loop")
             if not accumulated_content:
                 # Nothing was produced before the error. Surface it instead of
@@ -496,6 +505,18 @@ class AgenticLoop(AgentLoopProtocol):
                 # called a tool"). The caller's error handling publishes a
                 # user-visible message.
                 raise
+            if raise_on_stream_error:
+                # CLI failure policy: partial streamed text must not masquerade
+                # as a successful turn. Close the open bubble, then surface the
+                # classified failure so the process exits non-zero.
+                await event_publisher.publish_token_stream(
+                    token="", is_first=False, is_last=True,
+                )
+                if isinstance(exc, DomainError):
+                    # A specific domain error keeps its own message.
+                    raise
+                _err_class, user_msg, _log_msg = classify_llm_error(exc)
+                raise _err_class(user_msg) from exc
             # Partial text already streamed to the UI -- fall through to the
             # single stream-close below and return what we have rather than
             # discarding it.

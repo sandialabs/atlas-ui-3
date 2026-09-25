@@ -18,6 +18,19 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+
+    - name: Guard CHANGELOG release headings
+      if: github.event_name == 'pull_request'
+      run: |
+        set -euo pipefail
+        git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+        git show FETCH_HEAD:CHANGELOG.md > /tmp/base-changelog.md
+        python scripts/check_changelog_release_headings.py /tmp/base-changelog.md CHANGELOG.md
+
     - name: Set up Node.js
       uses: actions/setup-node@v7
       with:
@@ -25,19 +38,13 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
-    - name: Set up Python
-      uses: actions/setup-python@v7
-      with:
-        python-version: '3.12'
-
     - name: Validate documentation structure
       run: |
         bash scripts/check-docs.sh
 
     - name: Install uv
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+      # Pinned to a commit SHA so the install step is immutable.
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
     - name: Install frontend dependencies
       run: |
