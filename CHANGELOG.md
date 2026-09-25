@@ -61,7 +61,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Agent mode is on by default and its start banner is gone** (closes #849): the "Agent Mode Started (strategy: agentic, max steps: N)" transcript row is replaced by the small purple "Agent" box alone, and the Agent toggle now defaults to on everywhere for browsers with no stored choice -- an existing explicit off preference is still honored, and the toggle still works. The Max Agent Iterations slider in Tools and Settings is now bounded by the admin-configured `agent_max_steps` (exposed via `/api/config` and `/api/config/shell`) instead of a hardcoded 50, so the slider's upper end matches what the backend actually honors.
 
 ### PR #933 - 2026-09-13
-- Chat transcript exports (.json and .txt) now open in a new browser tab by default instead of forcing a file download (closes #908); the old download remains as the fallback when the browser blocks the popup tab, and saving is still available from the opened tab (Ctrl+S) or Print / Save as PDF.
+- Chat transcript exports (.json and .txt) now open in a new browser tab by default instead of forcing a file download; the old download remains as the fallback when the browser blocks the popup tab, and saving is still available from the opened tab (Ctrl+S) or Print / Save as PDF.
 
 ### PR #930 - 2026-09-13
 - **`atlas_search` is only available when the user selected it** (closes #921): selecting data sources no longer implies the built-in search tool (reversing the #862 compromise, which let "use search" prompts invoke `atlas_search` with no tools ticked). A source selection stays the ceiling on what the tool may read; a turn with sources but nothing to read them routes to plain RAG (no tools selected, `only_rag`) or warns the user (sources plus other tools, search tool not ticked). The chat-bar guard that blocked agent-mode sends with no tools selected became a persistent composer warning -- sends go through and the backend downgrades the turn with an in-chat note. The tools tab's Save button is now **Save and Close**: it commits and dismisses the whole panel. Design record: `docs/developer/design-notes/search-only-when-selected-2026-09-13.md`.
@@ -77,6 +77,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #920 - 2026-09-10
 - Transient LLM failures (rate limits, timeouts, 5xx) are now retried with exponential backoff on the streaming path (previously none) as well as the non-streaming path, with the retry count configurable via `LLM_MAX_RETRIES` (default 5) and a cumulative backoff cap via `LLM_RETRY_MAX_WAIT_SECONDS` (default 300s = 5 minutes); once a streaming response has yielded a token, failures surface instead of retrying (closes #919).
+
+### PR #918 - 2026-09-10
+- Remove server-initiated MCP sampling from `sampling_demo` and `tool_planner` so FastMCP 4.x works with client-driven model generation (#905).
+- Keep the root `fastmcp` dependency cap below 4.0 and retain the Dependabot major-version ignore until the remaining back-channel demos are migrated.
 
 ### PR #917 - 2026-09-10
 - A workspace selector now sits in the chat-bar footer next to the model/tools/prompt controls (gated on the workspaces feature). It shares the header switcher's active-workspace state, so switching context works from either control, and its panel opens upward to stay on screen above the chat bar (closes #916).
