@@ -256,6 +256,23 @@ class ConnectionMixin:
                         return client
                 else:
                     # Fallback to old behavior for backward compatibility
+                    # The fallback only ever serves mcp/<name>/main.py for a
+                    # name that is a configured server key. Reject names that
+                    # could form a traversal path before touching the
+                    # filesystem (the name reaches here from config files and,
+                    # via the admin refresh endpoint, from a request body).
+                    if (
+                        "/" in server_name
+                        or "\\" in server_name
+                        or ".." in server_name
+                        or os.path.isabs(server_name)
+                    ):
+                        logger.error(
+                            "Refusing fallback script path for server '%s': "
+                            "name must not contain path separators",
+                            safe_server_name,
+                        )
+                        return None
                     server_path = f"mcp/{server_name}/main.py"
                     logger.debug(f"Attempting to initialize {server_name} at path: {server_path}")
                     if os.path.exists(server_path):

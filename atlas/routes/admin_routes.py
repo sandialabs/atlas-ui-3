@@ -40,6 +40,12 @@ class MCPServerAction(BaseModel):
     server_name: str
 
 
+# Server names are mcp.json keys. Restricting the admin-requested name to
+# identifier-ish characters keeps it from ever forming a traversal path or a
+# forged log entry as it flows into connection/lookup/logging code.
+_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\- ]{0,127}$")
+
+
 async def require_admin(current_user: str = Depends(get_current_user)) -> str:
     admin_group = config_manager.app_settings.admin_group
     if not await is_user_in_group(current_user, admin_group):
@@ -415,6 +421,13 @@ async def refresh_mcp_server(
     disk after the reload).
     """
     try:
+        if not _SERVER_NAME_PATTERN.fullmatch(action.server_name):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid server name: expected up to 128 letters, digits, "
+                "dots, underscores, hyphens, or spaces",
+            )
+
         mcp = app_factory.get_mcp_manager()
         if mcp is None:
             raise HTTPException(status_code=503, detail="MCP manager is not available")
