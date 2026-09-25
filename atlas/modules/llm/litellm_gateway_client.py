@@ -217,7 +217,11 @@ class LiteLLMGatewayClient:
     # -- HTTP --------------------------------------------------------------
 
     def _url(self, path: str) -> str:
-        base = self.config.resolved_base_url()
+        try:
+            base = self.config.resolved_base_url()
+        except ValueError:
+            logger.error("LiteLLM gateway '%s' base_url names an unset environment variable", self._log_name)
+            raise LLMServiceError(f"LiteLLM gateway '{self.name}' is not configured.") from None
         base = base if base.endswith("/") else base + "/"
         return urljoin(base, path.lstrip("/"))
 

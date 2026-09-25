@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from atlas.core.log_sanitizer import get_current_user
 from atlas.core.model_access import ModelAccessDecision, check_model_access
-from atlas.domain.errors import AuthorizationError, LLMAuthenticationError
+from atlas.domain.errors import AuthorizationError, LLMAuthenticationError, LLMServiceError
 from atlas.modules.config.litellm_gateway_models import (
     build_gateway_model_key,
     parse_gateway_model_key,
@@ -148,6 +148,9 @@ class TestGatewayModelKeys:
         monkeypatch.delenv("UNSET_GATEWAY_URL_FOR_TEST", raising=False)
         llm_config = _llm_config(base_url="${UNSET_GATEWAY_URL_FOR_TEST}")
         assert llm_config.get_model(f"enterprise::{ALPHA}::m") is None
+        # Discovery reports a service error (502 from the routes), not a crash.
+        with pytest.raises(LLMServiceError):
+            _client(llm_config)._url("team/list")
 
     def test_delegated_gateway_requires_a_target(self):
         with pytest.raises(ValueError, match="delegation.scope"):
