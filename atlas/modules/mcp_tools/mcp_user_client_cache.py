@@ -50,6 +50,12 @@ class UserClientCacheMixin:
             self._user_client_token_fingerprints = {}
         if not hasattr(self, "_user_client_active_calls"):
             self._user_client_active_calls = {}
+        # Cache keys marked stale by a targeted server refresh while the
+        # entry had an in-flight call. Both acquisition paths rebuild the
+        # entry on next use and discard the marker; entries removed from the
+        # cache drop their marker with them.
+        if not hasattr(self, "_user_client_refresh_stale_keys"):
+            self._user_client_refresh_stale_keys = set()
 
     def _begin_user_client_call(self, cache_key: tuple) -> None:
         self._ensure_user_client_cache_state()
@@ -73,6 +79,10 @@ class UserClientCacheMixin:
         self._ensure_user_client_cache_state()
         self._user_client_last_used[cache_key] = time.monotonic()
 
+        self._ensure_user_client_cache_state()
+        if not hasattr(self, "_user_client_refresh_stale_keys"):
+            self._user_client_refresh_stale_keys = set()
+
     def _pop_user_client_entries_locked(self, keys: List[tuple]) -> List[tuple[tuple, Client]]:
         """Remove cache entries and return clients that need closing.
 
@@ -85,6 +95,7 @@ class UserClientCacheMixin:
             self._user_client_last_used.pop(key, None)
             self._wormhole_client_subtokens.pop(key, None)
             self._user_client_token_fingerprints.pop(key, None)
+            self._user_client_refresh_stale_keys.discard(key)
             if client is not None:
                 removed.append((key, client))
         return removed

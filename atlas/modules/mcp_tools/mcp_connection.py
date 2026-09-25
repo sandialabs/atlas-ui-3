@@ -477,20 +477,35 @@ class ConnectionMixin:
         restarted, is wedged, or its ``mcp.json`` entry was edited and the
         change should apply to just that one server.
 
+        Only the named server's state is touched: the targeted config read
+        installs just that server's new entry (other servers' edits in
+        ``mcp.json`` wait for a real global reload), and other servers'
+        clients, caches, and failure records are untouched.
+
+        Concurrent refreshes of the same server (two admins, or a refresh
+        racing the auto-reconnect loop) are serialized by
+        ``_server_refresh_lock`` so two clients for one server can never be
+        constructed and one silently overwrite the other.
+
         Behaviour:
         1. The server's shared client (if any) is closed before reconnecting.
            In-flight calls still holding it may fail; that is inherent to
            refreshing a connection and bounded by the close timeout.
-        2. ``mcp.json`` is re-read from disk so config edits apply. A broken
-           config file does not block reconnection: the in-memory config is
-           kept and the parse error is surfaced in the result.
-        3. Idle cached per-user clients for the server are evicted so later
-           calls rebuild against the refreshed connection. Entries with an
-           in-flight call are left alone so a streaming call is not torn down
-           mid-flight; token-auth clients among them are marked stale (token
-           fingerprint dropped) so they rebuild on their next acquisition.
+        2. The server's ``mcp.json`` entry is re-read from disk so config
+           edits apply. A broken config file does not block reconnection:
+           the in-memory config is kept and the parse error is surfaced in
+           the result.
+        3. Idle cached per-user clients for the server are evicted and the
+           per-user discovery caches for it cleared, so later calls rebuild
+           against the refreshed connection. Entries with an in-flight call
+           are left alone so a streaming call is not torn down mid-flight;
+           they are marked stale so both acquisition paths rebuild them on
+           their next use.
         4. The client is re-initialized with the refreshed config and that
-           server's tools and prompts are re-discovered.
+           server's tools and prompts are re-discovered. Because discovery
+           helpers swallow connection errors (they record the failure and
+           return an empty catalogue), a discovery failure is reported here
+           as ``status: "failed"`` rather than a hollow "connected".
 
         Returns:
             Dict with ``server``, ``status`` (``"connected"``, ``"failed"``,
@@ -498,14 +513,18 @@ class ConnectionMixin:
             ``error``, ``config_changed``, ``evicted_clients``, and
             ``config_reload_error``.
         """
+        async with self._server_refresh_lock:
+            return await self._refresh_server_locked(server_name)
+
+    async def _refresh_server_locked(self, server_name: str) -> Dict[str, Any]:
         safe_server_name = sanitize_for_logging(server_name)
         previous_config = self.servers_config.get(server_name)
         was_configured = previous_config is not None
 
-        # Close and drop the shared client first. reload_config() pops clients
-        # for servers removed from config without closing them; doing this
-        # before the reload guarantees the old connection is closed even when
-        # the server is being removed by this refresh.
+        # Close and drop the shared client first. The targeted config read
+        # below never touches other servers, and closing before it guarantees
+        # the old connection is closed even when the server is being removed
+        # by this refresh.
         old_client = self.clients.pop(server_name, None) if hasattr(self, "clients") else None
         if old_client is not None:
             await self._close_user_client_entry(
@@ -515,7 +534,7 @@ class ConnectionMixin:
 
         config_reload_error: Optional[str] = None
         try:
-            self.reload_config()
+            self._refresh_server_config_from_disk(server_name)
         except Exception as e:  # noqa: BLE001
             config_reload_error = f"{type(e).__name__}: {e}"
             logger.warning(
@@ -536,6 +555,20 @@ class ConnectionMixin:
             except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Could not evict cached user clients for server '%s': %s",
+                    safe_server_name,
+                    e,
+                )
+
+        # Drop cached per-user tool catalogues for this server so users are
+        # not offered tools from before the refresh against a routing index
+        # that no longer contains them.
+        clear_user_cache = getattr(self, "clear_user_tool_cache", None)
+        if clear_user_cache is not None:
+            try:
+                clear_user_cache(server_name=server_name)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Could not clear per-user tool cache for server '%s': %s",
                     safe_server_name,
                     e,
                 )
@@ -589,6 +622,9 @@ class ConnectionMixin:
                 }
 
             self.clients[server_name] = client
+            # Clear any stale failure record from before the refresh so the
+            # post-discovery check below only reacts to failures discovery
+            # records now (a successful discovery clears nothing itself).
             self._clear_server_failure(server_name)
             logger.info("Successfully refreshed MCP server: %s", safe_server_name)
 
@@ -596,6 +632,29 @@ class ConnectionMixin:
             # no longer exist on the refreshed server) are dropped first.
             self._drop_server_tool_index_entries(server_name)
             await self._discover_and_register_server(server_name, client)
+
+            # Discovery helpers catch connection errors themselves (recording
+            # the failure and returning an empty catalogue), so a client that
+            # built fine but cannot answer tools/list must surface as a
+            # failed refresh -- otherwise the admin sees success and the
+            # auto-reconnect loop skips a server that is in self.clients.
+            if server_name in self._failed_servers:
+                error = self._failed_servers[server_name].get("error", "Discovery failed")
+                logger.warning(
+                    "Refresh of MCP server %s connected but discovery failed: %s",
+                    safe_server_name,
+                    error,
+                )
+                return {
+                    "server": server_name,
+                    "status": "failed",
+                    "tools": 0,
+                    "prompts": 0,
+                    "error": error,
+                    "config_changed": config_changed,
+                    "evicted_clients": evicted_clients,
+                    "config_reload_error": config_reload_error,
+                }
 
             tool_data = self.available_tools.get(server_name, {})
             prompt_data = self.available_prompts.get(server_name, {})

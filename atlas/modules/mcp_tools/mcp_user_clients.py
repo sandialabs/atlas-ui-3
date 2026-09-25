@@ -305,14 +305,26 @@ class UserClientMixin:
                     recorded_fingerprint is not None
                     and recorded_fingerprint == token_fingerprint(stored_token)
                 )
-                if stored_token is not None and subtoken_unchanged and fingerprint_unchanged:
+                refresh_stale = cache_key in self._user_client_refresh_stale_keys
+                if (
+                    stored_token is not None
+                    and subtoken_unchanged
+                    and fingerprint_unchanged
+                    and not refresh_stale
+                ):
                     self._touch_user_client_locked(cache_key)
                     return self._user_clients[cache_key]
                 else:
-                    # Token expired/removed, the Wormhole subtoken rotated, or
-                    # the stored token was rotated under the cached client;
+                    # Token expired/removed, the Wormhole subtoken rotated,
+                    # the stored token was rotated under the cached client,
+                    # or a targeted server refresh marked the entry stale;
                     # invalidate the cached client so it is rebuilt below.
-                    if stored_token is not None and not subtoken_unchanged:
+                    if refresh_stale:
+                        logger.debug(
+                            "Server '%s' was refreshed; rebuilding client",
+                            sanitize_for_logging(server_name),
+                        )
+                    elif stored_token is not None and not subtoken_unchanged:
                         logger.debug(
                             "Wormhole subtoken changed for server '%s'; rebuilding client",
                             sanitize_for_logging(server_name),
@@ -529,9 +541,12 @@ class UserClientMixin:
         Admin single-server refresh path. Entries with no in-flight call are
         popped and closed (releasing their persistent sessions); entries with
         an in-flight call are left in place so a streaming call is never torn
-        down, but their token fingerprints are dropped so token-auth clients
-        rebuild against the refreshed connection on their next acquisition
-        (the same rebuild signal token rotation relies on).
+        down, but they are marked stale in
+        ``_user_client_refresh_stale_keys`` so both acquisition paths
+        (``_get_user_client`` and ``_get_or_create_user_http_client``)
+        rebuild them against the refreshed connection on their next use --
+        the plain-HTTP path ignores token fingerprints, so the marker is what
+        forces its rebuild.
 
         Returns:
             Number of cache entries evicted and closed.
@@ -546,6 +561,7 @@ class UserClientMixin:
             retained = [k for k in self._user_clients if k[1] == server_name]
             for key in retained:
                 self._user_client_token_fingerprints.pop(key, None)
+                self._user_client_refresh_stale_keys.add(key)
 
         await self._close_user_client_entries(removed)
         if removed or retained:
@@ -597,13 +613,22 @@ class UserClientMixin:
             self._ensure_user_client_cache_state()
             if cache_key in self._user_clients:
                 cached_subtoken = self._wormhole_client_subtokens.get(cache_key)
-                if cached_subtoken == current_subtoken:
+                # A targeted server refresh marks retained entries stale; the
+                # token fingerprint check is not consulted on this path, so
+                # the marker is what forces a rebuild here.
+                if cache_key not in self._user_client_refresh_stale_keys and (
+                    cached_subtoken == current_subtoken
+                ):
                     self._touch_user_client_locked(cache_key)
                     return self._user_clients[cache_key]
-                # Subtoken rotated: drop the stale client and fall through to rebuild.
+                # Subtoken rotated or the server was refreshed: drop the
+                # stale client and fall through to rebuild.
                 logger.debug(
-                    "Wormhole subtoken changed for server '%s'; rebuilding client",
+                    "Rebuilding cached client for server '%s' (%s)",
                     sanitize_for_logging(server_name),
+                    "server refreshed"
+                    if cache_key in self._user_client_refresh_stale_keys
+                    else "Wormhole subtoken changed",
                 )
                 stale_removed = self._pop_user_client_entries_locked([cache_key])
 

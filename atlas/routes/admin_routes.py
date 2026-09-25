@@ -419,14 +419,14 @@ async def refresh_mcp_server(
         if mcp is None:
             raise HTTPException(status_code=503, detail="MCP manager is not available")
 
+        sanitized_server_name = sanitize_for_logging(action.server_name)
         result = await mcp.refresh_server(action.server_name)
         if result.get("status") == "unknown":
             raise HTTPException(
                 status_code=404,
-                detail=f"Server '{action.server_name}' is not configured",
+                detail=f"Server '{sanitized_server_name}' is not configured",
             )
 
-        sanitized_server_name = sanitize_for_logging(action.server_name)
         sanitized_admin_user = sanitize_for_logging(admin_user)
         logger.info(
             "Admin %s refreshed MCP server '%s' (status=%s, tools=%s, prompts=%s)",
@@ -439,9 +439,9 @@ async def refresh_mcp_server(
 
         configured_set = set(mcp.servers_config.keys())
         return {
-            "message": f"MCP server '{action.server_name}' refresh completed with "
+            "message": f"MCP server '{sanitized_server_name}' refresh completed with "
             f"status '{result.get('status')}'",
-            "result": result,
+            "result": {**result, "server": sanitized_server_name},
             "servers": [s for s in mcp.clients.keys() if s in configured_set],
             "failed_servers": mcp.get_failed_servers(),
             "triggered_by": admin_user,

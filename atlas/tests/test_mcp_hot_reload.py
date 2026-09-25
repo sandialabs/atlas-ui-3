@@ -676,6 +676,7 @@ class TestMCPServerRefresh:
         manager.available_tools = {}
         manager.available_prompts = {}
         manager._user_clients_lock = asyncio.Lock()
+        manager._server_refresh_lock = asyncio.Lock()
         return manager
 
     @patch('atlas.modules.mcp_tools.client.config_manager')
@@ -815,8 +816,102 @@ class TestMCPServerRefresh:
         assert "srv_old_tool" not in manager._tool_index
         assert "other_tool" in manager._tool_index
 
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_leaves_other_servers_untouched(self, mock_config_manager):
+        """Refreshing server A must not install config edits made to server B.
+
+        The targeted config read installs only the named server's entry, so
+        an unrelated edit to B in mcp.json stays out of servers_config until
+        a real global reload.
+        """
+        # Disk config now has srv v2 AND a changed other-server, which the
+        # refresh of srv must NOT apply.
+        self._patch_config(
+            mock_config_manager,
+            {"srv": {"url": "http://srv-v2"}, "other": {"url": "http://other-v2"}},
+        )
+        manager = self._make_manager({"srv": {"url": "http://srv-v1"}})
+        manager._initialize_single_client = AsyncMock(return_value=AsyncMock())
+        manager._discover_and_register_server = AsyncMock()
+
+        result = await manager.refresh_server("srv")
+
+        assert result["status"] == "connected"
+        assert manager.servers_config["srv"] == {"url": "http://srv-v2"}
+        # The edit to 'other' is not applied by a targeted refresh
+        assert "other" not in manager.servers_config
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_reports_discovery_failure_as_failed(self, mock_config_manager):
+        """A client that builds but cannot complete discovery is a failed refresh.
+
+        Discovery helpers swallow connection errors (record the failure,
+        return an empty catalogue), so the failure record after discovery is
+        the only signal the server is still down.
+        """
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://host"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        manager._initialize_single_client = AsyncMock(return_value=AsyncMock())
+
+        async def failing_discovery(server_name, client):  # noqa: ARG001
+            manager._record_server_failure(server_name, "ConnectError: connection refused")
+
+        manager._discover_and_register_server = failing_discovery  # type: ignore[assignment]
+
+        result = await manager.refresh_server("srv")
+
+        assert result["status"] == "failed"
+        assert "connection refused" in result["error"]
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_serializes_concurrent_refreshes(self, mock_config_manager):
+        """Two concurrent refreshes of one server run one after the other."""
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://host"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        manager._initialize_single_client = AsyncMock(return_value=AsyncMock())
+        manager._discover_and_register_server = AsyncMock()
+
+        inside_lock = []
+
+        original_locked = manager._refresh_server_locked
+
+        async def tracking_locked(server_name):
+            inside_lock.append("enter")
+            await asyncio.sleep(0.01)
+            result = await original_locked(server_name)
+            inside_lock.append("exit")
+            return result
+
+        async def slow_discover(server_name, client):  # noqa: ARG001
+            # While one refresh is discovering, another must not be inside
+            assert inside_lock.count("enter") == inside_lock.count("exit") + 1
+
+        manager._discover_and_register_server = slow_discover  # type: ignore[assignment]
+        manager._refresh_server_locked = tracking_locked  # type: ignore[assignment]
+
+        results = await asyncio.gather(
+            manager.refresh_server("srv"),
+            manager.refresh_server("srv"),
+        )
+        assert all(r["status"] == "connected" for r in results)
+        assert inside_lock == ["enter", "exit", "enter", "exit"]
+
+    @patch('atlas.modules.mcp_tools.client.config_manager')
+    async def test_refresh_clears_per_user_tool_cache(self, mock_config_manager):
+        """Refresh drops cached per-user tool catalogues for the server."""
+        self._patch_config(mock_config_manager, {"srv": {"url": "http://host"}})
+        manager = self._make_manager({"srv": {"url": "http://host"}})
+        manager._initialize_single_client = AsyncMock(return_value=AsyncMock())
+        manager._discover_and_register_server = AsyncMock()
+        cleared = []
+        manager.clear_user_tool_cache = lambda server_name=None: cleared.append(server_name)  # type: ignore[method-assign]
+
+        await manager.refresh_server("srv")
+
+        assert cleared == ["srv"]
+
     async def test_invalidate_user_clients_for_server(self):
-        """Idle clients are evicted; in-use clients keep their connection but lose their fingerprint."""
+        """Idle clients are evicted; in-use clients keep their connection but are marked stale."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._user_clients_lock = asyncio.Lock()
         manager._ensure_user_client_cache_state()
@@ -843,9 +938,44 @@ class TestMCPServerRefresh:
         assert ("u1", "other", "c3") in manager._user_clients
         idle_client.__aexit__.assert_awaited_once()
         in_use_client.__aexit__.assert_not_awaited()
-        # In-use entry is marked stale so the next acquisition rebuilds it
+        # In-use entry is marked stale so both acquisition paths rebuild it
+        # (the plain-HTTP path ignores token fingerprints, so the marker is
+        # the signal it acts on).
+        assert ("u2", "srv", "c2") in manager._user_client_refresh_stale_keys
+        assert ("u1", "other", "c3") not in manager._user_client_refresh_stale_keys
         assert ("u2", "srv", "c2") not in manager._user_client_token_fingerprints
         assert manager._user_client_token_fingerprints[("u1", "other", "c3")] == "fp3"
+
+    async def test_refresh_stale_marker_forces_plain_http_rebuild(self):
+        """The plain-HTTP acquisition path rebuilds an entry the refresh marked stale."""
+        from unittest.mock import patch as mock_patch
+
+        manager = MCPToolManager.__new__(MCPToolManager)
+        manager._user_clients_lock = asyncio.Lock()
+        manager._ensure_user_client_cache_state()
+        stale_client = AsyncMock()
+        manager._user_clients = {("u1@example.com", "srv", "c1"): stale_client}
+        manager._user_client_refresh_stale_keys.add(("u1@example.com", "srv", "c1"))
+        manager.servers_config = {"srv": {"url": "http://localhost:1"}}
+        new_client = AsyncMock()
+        with mock_patch(
+            "atlas.modules.mcp_tools.client.Client", return_value=new_client
+        ), mock_patch.object(
+            manager, "_create_log_handler", return_value=None
+        ), mock_patch.object(
+            manager, "_create_elicitation_handler", return_value=None
+        ), mock_patch.object(
+            manager, "_create_sampling_handler", return_value=None
+        ), mock_patch.object(
+            manager, "_build_wormhole_headers", return_value={}
+        ):
+            client = await manager._get_or_create_user_http_client("srv", "u1@example.com", "c1")
+
+        assert client is new_client
+        # Old client was closed, marker consumed, fresh entry cached
+        stale_client.__aexit__.assert_awaited_once()
+        assert ("u1@example.com", "srv", "c1") not in manager._user_client_refresh_stale_keys
+        assert manager._user_clients[("u1@example.com", "srv", "c1")] is new_client
 
 
 class TestConfigManagerMCPReload:

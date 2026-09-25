@@ -163,6 +163,11 @@ class MCPToolManager(
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_running = False
 
+        # Serializes single-server refreshes (admin endpoint) so two
+        # concurrent refreshes of one server cannot each build a client and
+        # silently overwrite the other's work.
+        self._server_refresh_lock = asyncio.Lock()
+
         # Default log callback (used when no request-scoped callback is active).
         # Signature: (server_name, level, message, extra_data) -> None
         self._default_log_callback = log_callback
@@ -295,9 +300,7 @@ class MCPToolManager(
             Dict with previous and new server lists for comparison
         """
         previous_servers = set(self.servers_config.keys())
-
-        # Reload from config manager (which reads from disk)
-        new_mcp_config = config_manager.reload_mcp_config()
+        new_mcp_config = self._read_mcp_config_from_disk()
         self.servers_config = _drop_reserved_servers({
             name: server.model_dump()
             for name, server in new_mcp_config.servers.items()
@@ -331,3 +334,29 @@ class MCPToolManager(
             "removed": list(removed_servers),
             "unchanged": list(unchanged_servers)
         }
+
+    def _read_mcp_config_from_disk(self):
+        """Re-read mcp.json through the config manager and return the parsed config."""
+        return config_manager.reload_mcp_config()
+
+    def _refresh_server_config_from_disk(self, server_name: str) -> bool:
+        """Update one server's entry in ``servers_config`` from disk.
+
+        Targeted counterpart of ``reload_config()``: re-reads mcp.json and
+        installs (or removes) only ``server_name``'s entry, leaving every
+        other server's config, clients, caches, and failure records exactly
+        as they are. Unlike the global reload, removed servers are *not*
+        cleaned up here -- a server being removed by a targeted refresh is
+        handled by ``refresh_server()`` after this returns False.
+
+        Returns:
+            True if the server is configured on disk after the refresh.
+        """
+        new_mcp_config = self._read_mcp_config_from_disk()
+        if server_name in new_mcp_config.servers:
+            self.servers_config[server_name] = _drop_reserved_servers({
+                server_name: new_mcp_config.servers[server_name].model_dump()
+            })[server_name]
+            return True
+        self.servers_config.pop(server_name, None)
+        return False
