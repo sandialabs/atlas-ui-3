@@ -1,0 +1,15 @@
+# PR 976: a team-scoped LiteLLM gateway backed by mocks/litellm-mock.
+models:
+  static-model:
+    model_url: "${PR976_LITELLM_URL}"
+    model_name: "gpt-4o-mini"
+    api_key: "sk-mock-litellm-master"
+
+litellm_gateways:
+  enterprise:
+    display_name: "Enterprise LiteLLM (mock)"
+    base_url: "${PR976_LITELLM_URL}"
+    api_key: "sk-mock-litellm-master"
+    model_defaults:
+      supports_tools: false
+      max_tokens: 256

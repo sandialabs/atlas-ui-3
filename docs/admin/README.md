@@ -1,6 +1,6 @@
 # Administrator's Guide
 
-Last updated: 2026-06-22
+Last updated: 2026-09-24
 
 For administrators responsible for deploying, configuring, and managing Atlas UI 3.
 
@@ -9,6 +9,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 - [Configuration Architecture](configuration.md) - Understanding the layered configuration system
 - [MCP Server Configuration](mcp-servers.md) - Setting up and configuring MCP tool servers
 - [LLM Configuration](llm-config.md) - Configuring Large Language Models
+- [Enterprise LiteLLM Team Gateways](litellm-team-gateways.md) - Team-then-model selection for an enterprise LiteLLM proxy, with the team sent in `x-litellm-team-id`
 - [RAG Configuration](external-rag-api.md) - Configuring RAG providers (mock, ATLAS API, MCP)
 - [Lifecycle Hooks](hooks.md) - Config-driven bash/python hooks at chat lifecycle events (audit, redaction, approval gates)
 - [Hook Examples](hook-examples/README.md) - One runnable example hook per lifecycle event, plus a combined `hooks.json`

@@ -149,6 +149,8 @@ const ChatArea = () => {
   ) ?? false
 
   // Whether the currently selected model supports tool/function calling
+  // Gateway model keys are opaque; name the model and its team instead.
+  const currentModelLabel = models?.find(m => m?.name === currentModel)?.display_name || currentModel
   const currentModelSupportsTools = models?.some(
     m => m.name === currentModel && m.supports_tools !== false
   ) ?? true
@@ -990,7 +992,7 @@ const ChatArea = () => {
             <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
               <Wrench className="w-4 h-4 flex-shrink-0" />
               <span>
-                <strong>{currentModel}</strong> does not support tool/function calling. Selected tools will be ignored. Switch to a tool-capable model to use tools.
+                <strong>{currentModelLabel}</strong> does not support tool/function calling. Selected tools will be ignored. Switch to a tool-capable model to use tools.
               </span>
             </div>
           )}
@@ -1018,7 +1020,7 @@ const ChatArea = () => {
             <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
               <Image className="w-4 h-4 flex-shrink-0" />
               <span>
-                <strong>{currentModel}</strong> does not support vision/image input. Uploaded images will be listed as file references but cannot be visually analyzed. Switch to a vision-capable model for image analysis.
+                <strong>{currentModelLabel}</strong> does not support vision/image input. Uploaded images will be listed as file references but cannot be visually analyzed. Switch to a vision-capable model for image analysis.
               </span>
             </div>
           )}

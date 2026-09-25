@@ -60,7 +60,7 @@ async def suggest_followups(
     # models both return 404 so a restricted model is indistinguishable from a
     # nonexistent one (same policy as the /api/llm/auth endpoints).
     decision = await check_model_access(
-        config_manager.llm_config.models,
+        config_manager.llm_config,
         request.model,
         current_user,
         context="follow-up suggestions",

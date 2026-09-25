@@ -11,11 +11,13 @@ every membership decision through :func:`atlas.core.auth.is_user_in_group`.
 """
 
 import logging
+from collections.abc import Mapping
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.modules.config.models import LLMConfig, lookup_model_config
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +81,7 @@ class ModelAccessDecision(Enum):
 
 
 async def check_model_access(
-    models: Optional[Dict[str, Any]],
+    models: Union[None, Dict[str, Any], LLMConfig],
     model_name: str,
     user_email: Optional[str],
     *,
@@ -96,7 +98,12 @@ async def check_model_access(
     names are not leaked). Logs one sanitized warning on ``DENIED``, tagged with
     ``context`` (e.g. ``"chat"``, ``"follow-up suggestions"``).
     """
-    model_config = (models or {}).get(model_name)
+    if models is None or isinstance(models, Mapping):
+        model_config = (models or {}).get(model_name)
+    else:
+        # An LLMConfig (or anything carrying ``models``): also resolves
+        # team-scoped LiteLLM gateway model keys.
+        model_config = lookup_model_config(models, model_name)
     if model_config is None:
         return ModelAccessDecision.UNKNOWN
     if await is_model_allowed(model_config, user_email, auth_check_func):
