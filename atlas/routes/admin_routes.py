@@ -449,8 +449,12 @@ async def refresh_mcp_server(
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        sanitized_server_name = sanitize_for_logging(action.server_name)
-        logger.error(f"Error refreshing MCP server '{sanitized_server_name}': {e}", exc_info=True)
+        logger.error(
+            "Error refreshing MCP server '%s': %s",
+            sanitize_for_logging(action.server_name),
+            sanitize_for_logging(str(e)),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 

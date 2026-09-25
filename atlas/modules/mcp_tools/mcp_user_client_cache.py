@@ -14,6 +14,8 @@ from typing import List
 
 from fastmcp import Client
 
+from atlas.core.log_sanitizer import sanitize_for_logging
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_USER_CLIENT_CACHE_MAX_ENTRIES = 1000
@@ -173,7 +175,11 @@ class UserClientCacheMixin:
                     cache_key[2], cache_key[1], user_email=cache_key[0]
                 )
             except Exception as e:
-                logger.debug("Error releasing MCP session for evicted client %s: %s", cache_key, e)
+                logger.debug(
+                    "Error releasing MCP session for evicted client %s: %s",
+                    cache_key,
+                    sanitize_for_logging(str(e)),
+                )
 
         close = getattr(client, "__aexit__", None)
         if close is None:
@@ -192,7 +198,11 @@ class UserClientCacheMixin:
                 self._user_client_close_timeout_seconds,
             )
         except Exception as e:
-            logger.debug("Error closing cached MCP client %s: %s", cache_key, e)
+            logger.debug(
+                "Error closing cached MCP client %s: %s",
+                cache_key,
+                sanitize_for_logging(str(e)),
+            )
 
     async def _close_user_client_entries(
         self,

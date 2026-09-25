@@ -541,7 +541,7 @@ class ConnectionMixin:
                 "Config reload failed during refresh of server '%s'; "
                 "continuing with the in-memory configuration: %s",
                 safe_server_name,
-                config_reload_error,
+                sanitize_for_logging(config_reload_error),
             )
 
         new_config = self.servers_config.get(server_name)
@@ -556,7 +556,7 @@ class ConnectionMixin:
                 logger.warning(
                     "Could not evict cached user clients for server '%s': %s",
                     safe_server_name,
-                    e,
+                    sanitize_for_logging(str(e)),
                 )
 
         # Drop cached per-user tool catalogues for this server so users are
@@ -570,7 +570,7 @@ class ConnectionMixin:
                 logger.warning(
                     "Could not clear per-user tool cache for server '%s': %s",
                     safe_server_name,
-                    e,
+                    sanitize_for_logging(str(e)),
                 )
 
         if new_config is None:
@@ -643,7 +643,7 @@ class ConnectionMixin:
                 logger.warning(
                     "Refresh of MCP server %s connected but discovery failed: %s",
                     safe_server_name,
-                    error,
+                    sanitize_for_logging(str(error)),
                 )
                 return {
                     "server": server_name,
@@ -671,7 +671,11 @@ class ConnectionMixin:
         except Exception as e:  # noqa: BLE001
             error = f"{type(e).__name__}: {e}"
             self._record_server_failure(server_name, error)
-            logger.warning("Failed to refresh MCP server %s: %s", safe_server_name, error)
+            logger.warning(
+                "Failed to refresh MCP server %s: %s",
+                safe_server_name,
+                sanitize_for_logging(error),
+            )
             return {
                 "server": server_name,
                 "status": "failed",
@@ -704,12 +708,17 @@ class ConnectionMixin:
             self.available_prompts[server_name] = prompt_data
 
             logger.info(
-                f"Registered server {server_name}: "
-                f"{len(tool_data.get('tools', []))} tools, "
-                f"{len(prompt_data.get('prompts', []))} prompts"
+                "Registered server %s: %d tools, %d prompts",
+                sanitize_for_logging(server_name),
+                len(tool_data.get("tools", [])),
+                len(prompt_data.get("prompts", [])),
             )
         except Exception as e:
-            logger.error(f"Error discovering tools/prompts for {server_name}: {e}")
+            logger.error(
+                "Error discovering tools/prompts for %s: %s",
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(str(e)),
+            )
 
     async def start_auto_reconnect(self) -> None:
         """Start the background auto-reconnect task.

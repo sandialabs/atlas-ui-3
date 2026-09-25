@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Protocol, Tuple
 
 from fastmcp import Client
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
@@ -169,8 +170,8 @@ class MCPSessionManager:
             await session.close()
             logger.debug(
                 "Released MCP session for conversation=%s server=%s",
-                conversation_id,
-                server_name,
+                sanitize_for_logging(conversation_id),
+                sanitize_for_logging(server_name),
             )
 
     async def release_all(
