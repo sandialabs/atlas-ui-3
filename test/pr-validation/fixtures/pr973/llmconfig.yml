@@ -1,0 +1,12 @@
+# Fixture model for the PR #973 validation script: an OpenAI-compatible
+# endpoint that is guaranteed unreachable (nothing listens on TCP port 9),
+# so a chat turn fails fast with a connection error instead of needing a
+# real API key.
+models:
+  unreachable-fixture-model:
+    model_url: "http://127.0.0.1:9/v1/chat/completions"
+    model_name: "gpt-4o"
+    api_key: "fixture-not-a-real-key"
+    description: "Unreachable endpoint fixture for CLI failure exit-code checks"
+    compliance_level: "Public"
+    supports_tools: false

@@ -3,6 +3,7 @@
 import logging
 
 from atlas.application.chat.utilities.error_handler import classify_llm_error
+from atlas.domain.errors import DomainError
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 
@@ -60,12 +61,18 @@ async def stream_final_answer(
                 if raise_on_stream_error:
                     # CLI failure policy: both the stream and the non-streaming
                     # retry failed -- surface the classified error instead of
-                    # returning an error text as a successful answer.
+                    # returning an error text as a successful answer. A
+                    # DomainError already carries its specific user-safe
+                    # message, so it is re-raised unchanged.
+                    if isinstance(exc, DomainError):
+                        raise
                     _err_class, user_msg, _log_msg = classify_llm_error(exc)
                     raise _err_class(user_msg) from exc
                 _err_class, user_msg, _log_msg = classify_llm_error(exc)
                 accumulated = user_msg
         elif raise_on_stream_error:
+            if isinstance(exc, DomainError):
+                raise
             _err_class, user_msg, _log_msg = classify_llm_error(exc)
             raise _err_class(user_msg) from exc
     return accumulated

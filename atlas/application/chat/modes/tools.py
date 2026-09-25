@@ -8,7 +8,7 @@ from atlas.domain.chat.citation_register import (
     CitationRegister,
     new_register,
 )
-from atlas.domain.errors import LLMMalformedToolCallError
+from atlas.domain.errors import DomainError, LLMMalformedToolCallError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -319,7 +319,11 @@ class ToolsModeRunner:
             )
             if self.raise_on_stream_error:
                 # CLI failure policy: an LLM stream failure is a process
-                # failure, not a synthesized in-chat error message.
+                # failure, not a synthesized in-chat error message. A DomainError
+                # already carries its specific user-safe message -- re-raise it
+                # unchanged so keyword classification cannot re-generalize it.
+                if isinstance(exc, DomainError):
+                    raise
                 error_class, user_msg, _log_msg = error_handler.classify_llm_error(
                     exc,
                 )

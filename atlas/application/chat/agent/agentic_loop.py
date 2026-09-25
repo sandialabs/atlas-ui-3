@@ -21,7 +21,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
-from atlas.domain.errors import LLMMalformedToolCallError
+from atlas.domain.errors import DomainError, LLMMalformedToolCallError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
@@ -512,6 +512,9 @@ class AgenticLoop(AgentLoopProtocol):
                 await event_publisher.publish_token_stream(
                     token="", is_first=False, is_last=True,
                 )
+                if isinstance(exc, DomainError):
+                    # A specific domain error keeps its own message.
+                    raise
                 _err_class, user_msg, _log_msg = classify_llm_error(exc)
                 raise _err_class(user_msg) from exc
             # Partial text already streamed to the UI -- fall through to the

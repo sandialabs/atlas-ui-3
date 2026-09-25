@@ -244,6 +244,41 @@ else
 fi
 
 # ==========================================
+print_header "Check 7: atlas-chat exits non-zero at the process boundary"
+# ==========================================
+# The fixture llmconfig points at an unreachable endpoint, so the stream and
+# the fallback retry both fail immediately. Both the streaming and --json
+# invocations must exit 1, and --json must leave stdout empty.
+FIXTURE_CONFIG="$PROJECT_ROOT/test/pr-validation/fixtures/pr973"
+timeout 120 python3 atlas/atlas_chat_cli.py "hi" --model unreachable-fixture-model \
+    --config-dir "$FIXTURE_CONFIG" > /tmp/pr973_cli_stdout.txt 2>/tmp/pr973_cli_stderr.txt
+CLI_EXIT=$?
+if [ "$CLI_EXIT" -ne 0 ]; then
+    print_result 0 "streaming run exits non-zero on LLM failure (exit=$CLI_EXIT)"
+else
+    print_result 1 "streaming run exits non-zero on LLM failure (exit=$CLI_EXIT)"
+fi
+if tail -1 /tmp/pr973_cli_stderr.txt | grep -q "Error: The LLM service encountered an error"; then
+    print_result 0 "streaming failure surfaces the classified error, not a crash"
+else
+    print_result 1 "streaming failure surfaces the classified error, not a crash"
+fi
+
+timeout 120 python3 atlas/atlas_chat_cli.py "hi" --model unreachable-fixture-model \
+    --config-dir "$FIXTURE_CONFIG" --json > /tmp/pr973_cli_json_stdout.txt 2>/dev/null
+CLI_JSON_EXIT=$?
+if [ "$CLI_JSON_EXIT" -ne 0 ]; then
+    print_result 0 "--json run exits non-zero on LLM failure (exit=$CLI_JSON_EXIT)"
+else
+    print_result 1 "--json run exits non-zero on LLM failure (exit=$CLI_JSON_EXIT)"
+fi
+if [ ! -s /tmp/pr973_cli_json_stdout.txt ]; then
+    print_result 0 "--json failure prints nothing to stdout"
+else
+    print_result 1 "--json failure prints nothing to stdout"
+fi
+
+# ==========================================
 print_header "Final: backend unit tests"
 # ==========================================
 ./test/run_tests.sh backend > /dev/null 2>&1

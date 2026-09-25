@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #973 - 2026-09-24
 - Add a CHANGELOG release-heading guard, make `atlas-chat` fail non-zero on streaming LLM errors, disable noisy demo MCP defaults on fresh installs (and stop initializing disabled servers), set the PyPI build title explicitly, and keep release automation checking and refreshing `uv.lock` (including the yanked `primp` refresh).
+- Operator-visible changes to review before upgrading: the packaged `pptx_generator` and `session_state_demo` MCP entries now ship `enabled: false`, so fresh installs neither start nor list them until an operator re-enables them; and `atlas-chat` now exits with status 1 and writes a classified error to stderr when an LLM call fails (including `--json` and `--output` runs, which print nothing to stdout on failure).
 
 ### PR #972 - 2026-09-24
 - `/api/config` now correctly includes per-tool approval entries by matching fully-qualified `<server>_<tool>` names against authorized tools.

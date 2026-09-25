@@ -9,6 +9,7 @@ import asyncio
 import logging
 from typing import AsyncGenerator
 
+from atlas.domain.errors import DomainError
 from atlas.interfaces.events import EventPublisher
 
 from ..utilities.error_handler import classify_llm_error
@@ -92,6 +93,11 @@ async def stream_and_accumulate(
             token="", is_first=False, is_last=True,
         )
         if raise_on_stream_error:
+            if isinstance(exc, DomainError):
+                # Already a specific domain error (e.g. LLMEmptyStreamError or
+                # a hook denial): re-raise it unchanged instead of letting
+                # keyword classification re-generalize the message.
+                raise
             error_class, user_message, _log_message = classify_llm_error(exc)
             if not accumulated and fallback_fn:
                 # A stream that failed before the first token still gets the

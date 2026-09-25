@@ -303,6 +303,26 @@ async def test_stream_and_accumulate_error_tries_fallback_before_raising():
 
 
 @pytest.mark.asyncio
+async def test_stream_and_accumulate_reraises_domain_errors_unchanged():
+    """A DomainError from the stream keeps its specific message on the CLI path."""
+    from atlas.domain.errors import LLMEmptyStreamError
+
+    pub = AsyncMock()
+
+    async def _empty_stream():
+        raise LLMEmptyStreamError("The model returned an empty stream.")
+        yield  # makes this an async generator
+
+    with pytest.raises(LLMEmptyStreamError, match="empty stream"):
+        await stream_and_accumulate(
+            token_generator=_empty_stream(),
+            event_publisher=pub,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_stream_and_accumulate_error_raises_when_fallback_also_fails():
     """If the fallback retry also fails, the classified stream error is raised."""
     pub = AsyncMock()
