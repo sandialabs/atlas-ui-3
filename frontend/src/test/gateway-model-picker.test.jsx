@@ -140,6 +140,16 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     expect(screen.getAllByText('static-model')).toHaveLength(1)
   })
 
+  it('flags a saved selection whose team is gone and can refresh', async () => {
+    setup({ currentModel: 'enterprise::team-removed::gpt-4o-mini' })
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    expect(await screen.findByRole('status')).toHaveTextContent('selected team is no longer available')
+    fireEvent.click(screen.getByRole('button', { name: /refresh teams and models/i }))
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith('/api/llm/gateways/enterprise/teams?refresh=true')
+    )
+  })
+
   it('shows the gateway error when teams cannot be listed', async () => {
     global.fetch = vi.fn(async () => ({
       ok: false, status: 401, json: async () => ({ detail: 'Please sign in again.' }),

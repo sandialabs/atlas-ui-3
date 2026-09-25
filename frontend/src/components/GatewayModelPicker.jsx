@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, Wrench, Eye, Loader2 } from 'lucide-react'
+import { Users, Wrench, Eye, Loader2, RefreshCw } from 'lucide-react'
 import {
   parseGatewayModelKey,
   rememberTeamLabel,
@@ -36,12 +36,14 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
   const [teamId, setTeamId] = useState(current?.teamId || lastTeamFor(gateway.name, user))
   const [models, setModels] = useState(null)
   const [modelsError, setModelsError] = useState(null)
+  // Bumped by the refresh button; asks the backend to bypass its cache.
+  const [refreshCount, setRefreshCount] = useState(0)
   const base = `/api/llm/gateways/${encodeURIComponent(gateway.name)}`
 
   useEffect(() => {
     let cancelled = false
     setTeamsError(null)
-    fetchJson(`${base}/teams`)
+    fetchJson(`${base}/teams${refreshCount ? '?refresh=true' : ''}`)
       .then(body => {
         if (cancelled) return
         const list = body?.teams || []
@@ -51,7 +53,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
       })
       .catch(err => { if (!cancelled) setTeamsError(err.message) })
     return () => { cancelled = true }
-  }, [base])
+  }, [base, refreshCount])
 
   useEffect(() => {
     if (!teamId || !teams) {
@@ -61,11 +63,11 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
     let cancelled = false
     setModels(null)
     setModelsError(null)
-    fetchJson(`${base}/models?team_id=${encodeURIComponent(teamId)}`)
+    fetchJson(`${base}/models?team_id=${encodeURIComponent(teamId)}${refreshCount ? '&refresh=true' : ''}`)
       .then(body => { if (!cancelled) setModels(body?.models || []) })
       .catch(err => { if (!cancelled) setModelsError(err.message) })
     return () => { cancelled = true }
-  }, [base, teamId, teams])
+  }, [base, teamId, teams, refreshCount])
 
   const handleTeamChange = (event) => {
     setTeamId(event.target.value)
@@ -79,13 +81,32 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
   }
 
   const selectId = `gateway-team-${gateway.name}`
+  // The saved selection names a team the gateway no longer lists for this
+  // user (removed from the team, or the team was deleted).
+  const currentTeamGone = !!(current && teams && !teams.some(t => t.team_id === current.teamId))
+  const currentModelGone = !!(current && models && teamId === current.teamId &&
+    !models.some(m => m.name === currentModel))
 
   return (
     <div className="border-t border-gray-600 px-3 py-2 space-y-2" data-testid={`gateway-${gateway.name}`}>
       <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
         <Users className="w-3.5 h-3.5 text-purple-400" />
         <span className="truncate">{gateway.display_name || gateway.name}</span>
+        <button
+          type="button"
+          onClick={() => { setTeams(null); setRefreshCount(n => n + 1) }}
+          className="ml-auto p-0.5 text-gray-500 hover:text-gray-300"
+          title="Refresh teams and models"
+          aria-label="Refresh teams and models"
+        >
+          <RefreshCw className="w-3 h-3" />
+        </button>
       </div>
+      {(currentTeamGone || currentModelGone) && (
+        <p className="text-xs text-amber-400" role="status">
+          Your selected {currentTeamGone ? 'team' : 'model'} is no longer available to you. Choose another.
+        </p>
+      )}
       {gateway.description && (
         <p className="text-[11px] text-gray-500">{gateway.description}</p>
       )}

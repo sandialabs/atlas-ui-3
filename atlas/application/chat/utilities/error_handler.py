@@ -115,6 +115,10 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     # below would classify the message rather than the original failure.
     if isinstance(error, LLMBadRequestError):
         return (LLMBadRequestError, error.message, f"LLM rejected the request: {error.message}")
+    if isinstance(error, (AuthenticationError, AuthorizationError)):
+        # E.g. "not a member of the selected LiteLLM team" or "please sign in
+        # again": raised by Atlas itself with a message meant for the user.
+        return (type(error), error.message, f"{type(error).__name__}: {error.message}")
     if isinstance(error, LLMMalformedToolCallError):
         return (
             LLMMalformedToolCallError,

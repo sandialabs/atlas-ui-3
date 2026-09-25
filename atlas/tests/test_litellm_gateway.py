@@ -372,6 +372,22 @@ class TestGatewayCallTarget:
         assert exc_info.value.code == "LLM_TEAM_ACCESS_DENIED"
 
     @pytest.mark.asyncio
+    async def test_streaming_paths_keep_the_team_message(self):
+        from atlas.application.chat.utilities.error_handler import classify_llm_error, error_type_for
+
+        caller = _caller_with_mock_transport(_llm_config())
+        with pytest.raises(AuthorizationError) as exc_info:
+            async for _ in caller.stream_plain(
+                f"enterprise::{GAMMA}::gpt-4o-mini",
+                [{"role": "user", "content": "hi"}],
+                user_email="test@test.com",
+            ):
+                pass
+        error_class, user_msg, _ = classify_llm_error(exc_info.value)
+        assert "not a member of the selected LiteLLM team" in user_msg
+        assert error_type_for(error_class) == "authorization"
+
+    @pytest.mark.asyncio
     async def test_static_models_are_untouched(self):
         caller = _caller_with_mock_transport(_llm_config())
         model, kwargs = await caller._resolve_call_target("static-model", None, "test@test.com")
