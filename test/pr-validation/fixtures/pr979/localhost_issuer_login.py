@@ -113,17 +113,18 @@ class IdPHandler(BaseHTTPRequestHandler):
         path = _idp_path(self.path)
         if path == "/.well-known/openid-configuration":
             DISCOVERY_HITS.append(self.headers.get("Host"))
-            return self._json({
+            self._json({
                 "issuer": ISSUER,
                 "authorization_endpoint": f"{ISSUER}/authorize",
                 "token_endpoint": f"{ISSUER}/token",
                 "jwks_uri": f"{ISSUER}/jwks",
                 "code_challenge_methods_supported": ["S256"],
             })
-        if path == "/jwks":
-            return self._json(JWKS)
-        self.send_response(404)
-        self.end_headers()
+        elif path == "/jwks":
+            self._json(JWKS)
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def do_POST(self):
         if _idp_path(self.path) != "/token":
@@ -141,7 +142,7 @@ class IdPHandler(BaseHTTPRequestHandler):
             },
             _private_pem, algorithm="RS256", headers={"kid": "test-key"},
         )
-        return self._json({
+        self._json({
             "access_token": "user-access-token", "refresh_token": "user-refresh-token",
             "id_token": id_token, "token_type": "Bearer", "expires_in": 3600,
             "scope": "openid profile email",
