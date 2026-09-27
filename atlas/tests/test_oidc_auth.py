@@ -14,6 +14,7 @@ import base64
 import hashlib
 import time
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
 import jwt
 import pytest
@@ -126,8 +127,11 @@ class TestDiscovery:
         "http://localhost.evil.example/realms/atlas",
     ])
     def test_http_issuer_rejected_off_loopback(self, issuer):
-        with pytest.raises(OIDCDiscoveryError):
+        with pytest.raises(OIDCDiscoveryError) as excinfo:
             _validate_issuer_url(issuer)
+        message = str(excinfo.value)
+        assert f"'{urlparse(issuer).hostname}'" in message
+        assert "*.localhost" in message
 
     def test_pkce_assumed_when_not_advertised(self):
         document = {k: v for k, v in DISCOVERY_DOC.items()

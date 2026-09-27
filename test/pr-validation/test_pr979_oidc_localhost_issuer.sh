@@ -3,7 +3,7 @@
 #
 # Drives the real Atlas app through an OIDC login against a minimal IdP whose
 # issuer is http://keycloak.localhost:<port>/realms/atlas, checks that
-# look-alike hosts are still refused, then runs the backend unit tests.
+# look-alike hosts are still refused, then runs the OIDC unit tests.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -27,8 +27,9 @@ python "$SCRIPT_DIR/fixtures/pr979/localhost_issuer_login.py"
 E2E=$?
 
 echo ""
-./test/run_tests.sh backend > /dev/null 2>&1
+echo "OIDC unit tests (atlas/tests/test_oidc_auth.py):"
+python -m pytest atlas/tests/test_oidc_auth.py -q
 UNIT=$?
-if [ $UNIT -eq 0 ]; then echo "PASSED: Backend unit tests"; else echo "FAILED: Backend unit tests"; fi
+if [ $UNIT -eq 0 ]; then echo "PASSED: OIDC unit tests"; else echo "FAILED: OIDC unit tests"; fi
 
 [ $E2E -eq 0 ] && [ $UNIT -eq 0 ] && exit 0 || exit 1

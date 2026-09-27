@@ -81,9 +81,15 @@ configured issuer, so a redirect on the discovery URL cannot substitute another
 provider's endpoints.
 
 `OIDC_ISSUER` must be an `https://` URL. For local development, `http://` is
-also accepted on loopback hosts: `localhost`, `127.0.0.1`, `::1`, and any
+also accepted on loopback names: `localhost`, `127.0.0.1`, `::1`, and any
 RFC 6761 `*.localhost` name (for example `http://keycloak.localhost` behind a
 local ingress). Atlas logs a warning at login when it uses such an issuer.
+
+The check is on the name only. Browsers map `*.localhost` names to loopback,
+but Atlas fetches discovery and tokens through the server's own resolver, and
+many Linux hosts and containers don't resolve these names at all. Make sure
+the name resolves where Atlas runs, for example through a cluster DNS rewrite
+to your local ingress or an `/etc/hosts` entry in the container.
 
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to
