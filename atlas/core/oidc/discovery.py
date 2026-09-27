@@ -81,12 +81,13 @@ def _check_url_scheme(what: str, url: str, allow_http: bool = True) -> bool:
         )
     if parsed.scheme == "https":
         return False
-    if parsed.scheme == "http" and _is_loopback_name(hostname):
-        if allow_http:
-            return True
+    if allow_http and parsed.scheme == "http" and _is_loopback_name(hostname):
+        return True
+    if not allow_http:
+        # No loopback hint here: following it would only hit this error again.
         raise OIDCDiscoveryError(
             f"{what} must be an https:// URL because the issuer is https:// "
-            f"(got http:// on loopback name '{hostname}')"
+            f"(got {parsed.scheme} scheme on host '{hostname}')"
         )
     raise OIDCDiscoveryError(
         f"{what} must be an https:// URL (got {parsed.scheme} scheme on host "
