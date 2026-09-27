@@ -200,6 +200,12 @@ class TestDiscovery:
         with pytest.raises(OIDCDiscoveryError, match="not a valid URL"):
             _validate_issuer_url("http://[::1")
 
+    def test_error_message_escapes_control_characters(self):
+        with pytest.raises(OIDCDiscoveryError) as excinfo:
+            _validate_issuer_url("keycloak.localhost/realms\nFORGED LOG LINE")
+        assert "\n" not in str(excinfo.value)
+        assert "\\nFORGED" in str(excinfo.value)
+
     def test_malformed_endpoint_raises_discovery_error(self):
         document = dict(DISCOVERY_DOC, token_endpoint="https://[::1/token")
         with pytest.raises(OIDCDiscoveryError, match="token_endpoint is not a valid URL"):

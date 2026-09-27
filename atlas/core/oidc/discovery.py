@@ -69,15 +69,17 @@ def _check_url_scheme(what: str, url: str, allow_http: bool = True) -> bool:
     caller can warn. Raises :class:`OIDCDiscoveryError` otherwise, including
     for URLs ``urlparse`` cannot parse (such as an unclosed IPv6 bracket).
     """
+    # URLs can come from the IdP's discovery document, so messages quote them
+    # with repr() to escape control characters (no forged log lines).
     try:
         parsed = urlparse(url)
         hostname = parsed.hostname
     except ValueError as exc:
-        raise OIDCDiscoveryError(f"{what} is not a valid URL (got '{url}'): {exc}") from exc
+        raise OIDCDiscoveryError(f"{what} is not a valid URL (got {url!r}): {exc}") from exc
     if not hostname:
         raise OIDCDiscoveryError(
             f"{what} must be an absolute URL such as https://idp.example.gov/realms/atlas "
-            f"(got '{url}'); is the https:// scheme missing?"
+            f"(got {url!r}); is the https:// scheme missing?"
         )
     if parsed.scheme == "https":
         return False
@@ -87,11 +89,11 @@ def _check_url_scheme(what: str, url: str, allow_http: bool = True) -> bool:
         # No loopback hint here: following it would only hit this error again.
         raise OIDCDiscoveryError(
             f"{what} must be an https:// URL because the issuer is https:// "
-            f"(got {parsed.scheme} scheme on host '{hostname}')"
+            f"(got {parsed.scheme} scheme on host {hostname!r})"
         )
     raise OIDCDiscoveryError(
         f"{what} must be an https:// URL (got {parsed.scheme} scheme on host "
-        f"'{hostname}'); http:// is accepted only on localhost, 127.0.0.1, ::1 "
+        f"{hostname!r}); http:// is accepted only on localhost, 127.0.0.1, ::1 "
         "and *.localhost names"
     )
 
@@ -124,7 +126,7 @@ class ProviderMetadata:
 def _validate_issuer_url(issuer: str) -> None:
     if _check_url_scheme("OIDC issuer", issuer):
         logger.warning(
-            "OIDC issuer uses http:// on loopback name '%s'; this is for local development "
+            "OIDC issuer uses http:// on loopback name %r; this is for local development "
             "only (the client secret and tokens are sent unencrypted)",
             urlparse(issuer).hostname,
         )
