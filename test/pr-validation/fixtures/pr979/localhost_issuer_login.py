@@ -59,7 +59,8 @@ def ensure_localhost_name_resolves(name):
     real_getaddrinfo = socket.getaddrinfo
 
     def getaddrinfo(host, *args, **kwargs):
-        if host == name:
+        # httpx's async layer (anyio) passes the hostname as bytes, so match both forms.
+        if host in (name, name.encode("ascii")):
             host = "127.0.0.1"
         return real_getaddrinfo(host, *args, **kwargs)
 

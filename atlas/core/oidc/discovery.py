@@ -9,7 +9,9 @@ Security notes:
 - The issuer must be an ``https://`` URL (an ``http://`` issuer is accepted
   only on loopback names, including RFC 6761 ``*.localhost`` names, so local
   development against a mock or containerized IdP works). The check is on the
-  name, not on the address it resolves to.
+  name, not on the address it resolves to. The endpoints the discovery
+  document advertises are held to the same rule, so an https issuer cannot
+  hand out http endpoints.
 - The ``issuer`` claim in the returned document must match the configured
   issuer exactly, per OpenID Connect Discovery section 4.3. Skipping that
   check would let a redirect on the discovery URL substitute a different
@@ -46,12 +48,40 @@ def _is_loopback_name(hostname: str) -> bool:
     to a local ingress (a cluster DNS rewrite). The name is never delegated in
     public DNS, so only the operator's own resolver can give it an address.
     """
-    host = hostname.lower().rstrip(".")
-    return host in _LOOPBACK_HOSTS or host.endswith(".localhost")
+    host = hostname.lower()
+    if host.endswith("."):
+        host = host[:-1]
+    if host in _LOOPBACK_HOSTS:
+        return True
+    labels = host.split(".")
+    return len(labels) > 1 and labels[-1] == "localhost" and all(labels)
 
 
 class OIDCDiscoveryError(RuntimeError):
     """Raised when provider metadata cannot be fetched or fails validation."""
+
+
+def _check_url_scheme(what: str, url: str) -> bool:
+    """Require ``https://``, or ``http://`` on a loopback name.
+
+    Returns True when the URL is plain http (on a loopback name), so the
+    caller can warn. Raises :class:`OIDCDiscoveryError` otherwise.
+    """
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        raise OIDCDiscoveryError(
+            f"{what} must be an absolute URL such as https://idp.example.gov/realms/atlas "
+            f"(got '{url}'); is the https:// scheme missing?"
+        )
+    if parsed.scheme == "https":
+        return False
+    if parsed.scheme == "http" and _is_loopback_name(parsed.hostname):
+        return True
+    raise OIDCDiscoveryError(
+        f"{what} must be an https:// URL (got {parsed.scheme} scheme on host "
+        f"'{parsed.hostname}'); http:// is accepted only on localhost, 127.0.0.1, ::1 "
+        "and *.localhost names"
+    )
 
 
 @dataclass(frozen=True)
@@ -80,20 +110,12 @@ class ProviderMetadata:
 
 
 def _validate_issuer_url(issuer: str) -> None:
-    parsed = urlparse(issuer)
-    if parsed.scheme == "https":
-        return
-    host = parsed.hostname or ""
-    if parsed.scheme == "http" and _is_loopback_name(host):
+    if _check_url_scheme("OIDC issuer", issuer):
         logger.warning(
-            "OIDC issuer uses http:// on loopback name '%s'; this is for local development only",
-            host,
+            "OIDC issuer uses http:// on loopback name '%s'; this is for local development "
+            "only (the client secret and tokens are sent unencrypted)",
+            urlparse(issuer).hostname,
         )
-        return
-    raise OIDCDiscoveryError(
-        f"OIDC issuer must be an https:// URL (got {parsed.scheme or 'no'} scheme on host "
-        f"'{host}'); http:// is accepted only on localhost, 127.0.0.1, ::1 and *.localhost names"
-    )
 
 
 def discovery_url(issuer: str) -> str:
@@ -118,6 +140,11 @@ def parse_provider_metadata(issuer: str, document: Dict[str, Any]) -> ProviderMe
         raise OIDCDiscoveryError(
             f"OIDC discovery document is missing required field(s): {', '.join(missing)}"
         )
+
+    endpoints = required + ("userinfo_endpoint", "end_session_endpoint")
+    for key in endpoints:
+        if document.get(key):
+            _check_url_scheme(f"OIDC discovery document {key}", str(document[key]))
 
     def _string_list(key: str) -> List[str]:
         value = document.get(key) or []

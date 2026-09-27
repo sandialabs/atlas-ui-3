@@ -116,6 +116,9 @@ class TestDiscovery:
         "http://127.0.0.1:8080/realms/atlas",
         "http://keycloak.localhost/realms/atlas",
         "http://KEYCLOAK.LOCALHOST./realms/atlas",
+        "http://localhost./realms/atlas",
+        "http://[::1]:8080/realms/atlas",
+        "http://a.b.localhost/realms/atlas",
     ])
     def test_http_issuer_allowed_on_loopback(self, issuer):
         _validate_issuer_url(issuer)
@@ -125,6 +128,10 @@ class TestDiscovery:
         "http://localhost.example.gov/realms/atlas",
         "http://evil-localhost/realms/atlas",
         "http://localhost.evil.example/realms/atlas",
+        "http://.localhost/realms/atlas",
+        "http://localhost../realms/atlas",
+        "http://keycloak.localhost../realms/atlas",
+        "http://a..localhost/realms/atlas",
     ])
     def test_http_issuer_rejected_off_loopback(self, issuer):
         with pytest.raises(OIDCDiscoveryError) as excinfo:
@@ -132,6 +139,33 @@ class TestDiscovery:
         message = str(excinfo.value)
         assert f"'{urlparse(issuer).hostname}'" in message
         assert "*.localhost" in message
+
+    @pytest.mark.parametrize("issuer", [
+        "keycloak.localhost:8080/realms/atlas",
+        "idp.example.gov/realms/atlas",
+        "https:///realms/atlas",
+        "http://:8080/realms/atlas",
+        "",
+    ])
+    def test_issuer_without_host_rejected_as_not_absolute(self, issuer):
+        with pytest.raises(OIDCDiscoveryError, match="must be an absolute URL"):
+            _validate_issuer_url(issuer)
+
+    @pytest.mark.parametrize("key", [
+        "authorization_endpoint", "token_endpoint", "jwks_uri",
+        "userinfo_endpoint", "end_session_endpoint",
+    ])
+    def test_http_endpoint_rejected_for_https_issuer(self, key):
+        document = dict(DISCOVERY_DOC, **{key: "http://idp.example.gov/" + key})
+        with pytest.raises(OIDCDiscoveryError, match=key):
+            parse_provider_metadata("https://idp.example.gov", document)
+
+    def test_http_endpoints_allowed_on_loopback_names(self):
+        issuer = "http://keycloak.localhost/realms/atlas"
+        document = {k: (v.replace("https://idp.example.gov", issuer) if isinstance(v, str) else v)
+                    for k, v in DISCOVERY_DOC.items()}
+        metadata = parse_provider_metadata(issuer, document)
+        assert metadata.token_endpoint == f"{issuer}/token"
 
     def test_pkce_assumed_when_not_advertised(self):
         document = {k: v for k, v in DISCOVERY_DOC.items()

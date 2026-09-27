@@ -91,6 +91,18 @@ many Linux hosts and containers don't resolve these names at all. Make sure
 the name resolves where Atlas runs, for example through a cluster DNS rewrite
 to your local ingress or an `/etc/hosts` entry in the container.
 
+An `http://` issuer is for local development only. The client secret, the
+authorization code, and the tokens all travel unencrypted. That is harmless
+while the name resolves to loopback, but when it resolves to another address
+(such as the cluster DNS rewrite above), they cross that network in clear
+text. Never use one outside a single-user development setup.
+
+The endpoints advertised in the discovery document (`authorization_endpoint`,
+`token_endpoint`, `jwks_uri`, `userinfo_endpoint`, `end_session_endpoint`)
+must meet the same rule: `https://`, or `http://` only on a loopback name.
+An `https://` issuer that advertises an `http://` endpoint elsewhere is
+rejected.
+
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to
 header-based auth rather than starting a half-configured login flow.
