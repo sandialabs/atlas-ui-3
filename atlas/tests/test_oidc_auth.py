@@ -40,6 +40,7 @@ from atlas.core.oidc.delegation import (
 from atlas.core.oidc.discovery import (
     OIDCDiscoveryError,
     ProviderMetadata,
+    _validate_issuer_url,
     discovery_url,
     parse_provider_metadata,
 )
@@ -108,6 +109,25 @@ class TestDiscovery:
         document = {**DISCOVERY_DOC, "code_challenge_methods_supported": ["plain"]}
         metadata = parse_provider_metadata("https://idp.example.gov", document)
         assert not metadata.supports_pkce_s256()
+
+    @pytest.mark.parametrize("issuer", [
+        "http://localhost:8080/realms/atlas",
+        "http://127.0.0.1:8080/realms/atlas",
+        "http://keycloak.localhost/realms/atlas",
+        "http://KEYCLOAK.LOCALHOST./realms/atlas",
+    ])
+    def test_http_issuer_allowed_on_loopback(self, issuer):
+        _validate_issuer_url(issuer)
+
+    @pytest.mark.parametrize("issuer", [
+        "http://idp.example.gov/realms/atlas",
+        "http://localhost.example.gov/realms/atlas",
+        "http://evil-localhost/realms/atlas",
+        "http://localhost.evil.example/realms/atlas",
+    ])
+    def test_http_issuer_rejected_off_loopback(self, issuer):
+        with pytest.raises(OIDCDiscoveryError):
+            _validate_issuer_url(issuer)
 
     def test_pkce_assumed_when_not_advertised(self):
         document = {k: v for k, v in DISCOVERY_DOC.items()

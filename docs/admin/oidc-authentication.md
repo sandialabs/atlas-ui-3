@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-09-10
+Last updated: 2026-09-27
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -79,6 +79,11 @@ Endpoints are discovered from `<OIDC_ISSUER>/.well-known/openid-configuration`
 and cached for an hour. The document's own `issuer` claim must match the
 configured issuer, so a redirect on the discovery URL cannot substitute another
 provider's endpoints.
+
+`OIDC_ISSUER` must be an `https://` URL. For local development, `http://` is
+also accepted on loopback hosts: `localhost`, `127.0.0.1`, `::1`, and any
+RFC 6761 `*.localhost` name (for example `http://keycloak.localhost` behind a
+local ingress). Atlas logs a warning at login when it uses such an issuer.
 
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to

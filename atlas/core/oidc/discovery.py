@@ -7,7 +7,8 @@ in-process with a TTL because it changes rarely and is needed on every login.
 Security notes:
 
 - The issuer must be an ``https://`` URL (an ``http://`` issuer is accepted
-  only for loopback hosts, so local development against a mock IdP works).
+  only for loopback hosts, including RFC 6761 ``*.localhost`` names, so local
+  development against a mock or containerized IdP works).
 - The ``issuer`` claim in the returned document must match the configured
   issuer exactly, per OpenID Connect Discovery section 4.3. Skipping that
   check would let a redirect on the discovery URL substitute a different
@@ -29,6 +30,18 @@ DISCOVERY_TIMEOUT_SECONDS = 10.0
 DISCOVERY_CACHE_TTL_SECONDS = 3600.0
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "testserver"})
+
+
+def _is_loopback_host(hostname: str) -> bool:
+    """Whether ``hostname`` names the local machine.
+
+    Besides the fixed names, RFC 6761 section 6.3 reserves every ``*.localhost``
+    name for loopback, and browsers resolve them there without configuration.
+    Local setups use them to give each service its own origin (for example
+    ``keycloak.localhost`` behind a local ingress).
+    """
+    host = hostname.lower().rstrip(".")
+    return host in _LOOPBACK_HOSTS or host.endswith(".localhost")
 
 
 class OIDCDiscoveryError(RuntimeError):
@@ -64,7 +77,7 @@ def _validate_issuer_url(issuer: str) -> None:
     parsed = urlparse(issuer)
     if parsed.scheme == "https":
         return
-    if parsed.scheme == "http" and (parsed.hostname or "") in _LOOPBACK_HOSTS:
+    if parsed.scheme == "http" and _is_loopback_host(parsed.hostname or ""):
         logger.warning("OIDC issuer uses http:// on a loopback host; this is for local development only")
         return
     raise OIDCDiscoveryError("OIDC issuer must be an https:// URL")
