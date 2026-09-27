@@ -9,7 +9,10 @@ call. Before this change, every login failed with "OIDC issuer must be an
 https:// URL".
 
 It also checks that look-alike hosts are still refused before any network
-fetch, so only the reserved ``.localhost`` suffix is widened.
+fetch, so only the reserved ``.localhost`` suffix is widened, and that a
+discovery document advertising a plain-http endpoint off loopback is refused
+through the real login path (redirect with ``oidc_error=discovery_failed`` and
+a log line naming the endpoint).
 
 Nothing inside Atlas is mocked. Browsers and most resolvers map ``*.localhost``
 to loopback; where the host resolver does not (some Linux setups without
@@ -90,6 +93,7 @@ JWKS = {"keys": [{
 }]}
 
 DISCOVERY_HITS = []
+ENDPOINT_OVERRIDES = {}  # lets a step advertise a bad endpoint in discovery
 
 
 def _idp_path(raw_path):
@@ -120,6 +124,7 @@ class IdPHandler(BaseHTTPRequestHandler):
                 "token_endpoint": f"{ISSUER}/token",
                 "jwks_uri": f"{ISSUER}/jwks",
                 "code_challenge_methods_supported": ["S256"],
+                **ENDPOINT_OVERRIDES,
             })
         elif path == "/jwks":
             self._json(JWKS)
@@ -231,6 +236,42 @@ def main():
         except OIDCDiscoveryError:
             refused = True
         check(f"Refused {issuer}", refused)
+
+    print("\n4. A plain-http endpoint off loopback is refused through the login path")
+    import logging
+
+    from atlas.core.oidc.discovery import clear_metadata_cache
+
+    class _Capture(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.ERROR)
+            self.messages = []
+
+        def emit(self, record):
+            self.messages.append(record.getMessage())
+
+    capture = _Capture()
+    route_logger = logging.getLogger("atlas.routes.oidc_auth_routes")
+    route_logger.addHandler(capture)
+    ENDPOINT_OVERRIDES["token_endpoint"] = "http://idp.example.gov/token"
+    clear_metadata_cache()
+    response = TestClient(atlas_main.app).get("/auth/oidc/login", follow_redirects=False)
+    check("Login redirects with oidc_error=discovery_failed",
+          response.headers.get("location") == "/?oidc_error=discovery_failed",
+          f"(got {response.status_code} {response.headers.get('location')})")
+    logged = [m for m in capture.messages if m.startswith("OIDC discovery failed:")]
+    check("The discovery_failed log line names token_endpoint",
+          any("token_endpoint must be an https:// URL" in m for m in logged), str(logged))
+    if logged:
+        print(f"  log: {logged[-1]}")
+
+    ENDPOINT_OVERRIDES.clear()
+    clear_metadata_cache()
+    response = TestClient(atlas_main.app).get("/auth/oidc/login", follow_redirects=False)
+    check("Login works again once the IdP advertises a loopback endpoint",
+          response.headers.get("location", "").startswith(f"{ISSUER}/authorize"),
+          f"(got {response.status_code} {response.headers.get('location')})")
+    route_logger.removeHandler(capture)
 
     idp.shutdown()
 

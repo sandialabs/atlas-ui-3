@@ -99,9 +99,13 @@ text. Never use one outside a single-user development setup.
 
 The endpoints advertised in the discovery document (`authorization_endpoint`,
 `token_endpoint`, `jwks_uri`, `userinfo_endpoint`, `end_session_endpoint`)
-must meet the same rule: `https://`, or `http://` only on a loopback name.
-An `https://` issuer that advertises an `http://` endpoint elsewhere is
-rejected.
+must be `https://` too. `http://` endpoints are accepted only on a loopback
+name and only when the issuer is itself an `http://` loopback issuer, so an
+`https://` issuer that advertises any `http://` endpoint is rejected. This is
+checked at the first login, not at startup: a mismatch shows up as a redirect
+with `oidc_error=discovery_failed`, and the `OIDC discovery failed:` log line
+names the endpoint. Fix the URLs the IdP advertises (for Keycloak, its
+hostname settings).
 
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to

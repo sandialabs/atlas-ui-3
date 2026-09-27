@@ -160,6 +160,21 @@ class TestDiscovery:
         with pytest.raises(OIDCDiscoveryError, match=key):
             parse_provider_metadata("https://idp.example.gov", document)
 
+    @pytest.mark.parametrize("key", ["token_endpoint", "jwks_uri"])
+    def test_http_loopback_endpoint_rejected_for_https_issuer(self, key):
+        document = dict(DISCOVERY_DOC, **{key: "http://keycloak.localhost/" + key})
+        with pytest.raises(OIDCDiscoveryError, match="because the issuer is https://"):
+            parse_provider_metadata("https://idp.example.gov", document)
+
+    def test_malformed_issuer_raises_discovery_error(self):
+        with pytest.raises(OIDCDiscoveryError, match="not a valid URL"):
+            _validate_issuer_url("http://[::1")
+
+    def test_malformed_endpoint_raises_discovery_error(self):
+        document = dict(DISCOVERY_DOC, token_endpoint="https://[::1/token")
+        with pytest.raises(OIDCDiscoveryError, match="token_endpoint is not a valid URL"):
+            parse_provider_metadata("https://idp.example.gov", document)
+
     def test_http_endpoints_allowed_on_loopback_names(self):
         issuer = "http://keycloak.localhost/realms/atlas"
         document = {k: (v.replace("https://idp.example.gov", issuer) if isinstance(v, str) else v)

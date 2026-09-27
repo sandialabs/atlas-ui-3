@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #979 - 2026-09-27
 - Accept an `http://` OIDC issuer on RFC 6761 `*.localhost` names (e.g. `http://keycloak.localhost`), not only on `localhost` itself, for local development behind a local ingress.
-- OIDC discovery now rejects advertised endpoints that use `http://` off loopback names, and reports an issuer with no scheme or host as not an absolute URL.
+- **Breaking:** OIDC discovery now requires every advertised endpoint to be `https://` (`http://` only on loopback names, and only under an `http://` loopback issuer). The check runs at first login, not at startup: if login redirects with `oidc_error=discovery_failed`, the `OIDC discovery failed:` log line names the offending endpoint; fix the IdP's advertised URLs (e.g. its frontend/hostname setting).
 
 ### PR #972 - 2026-09-24
 - `/api/config` now correctly includes per-tool approval entries by matching fully-qualified `<server>_<tool>` names against authorized tools.
