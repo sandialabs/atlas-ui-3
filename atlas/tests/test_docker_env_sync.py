@@ -221,11 +221,10 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
 
     # All stages must use Chainguard images for a minimal CVE surface.
-    # Match by registry/name prefix so the recipe can later pin to a specific
+    # Match by registry prefix so the recipe can later pin to a specific
     # tag or digest without breaking this assertion.
-    assert 'FROM cgr.dev/chainguard/python:' in dockerfile_content, (
-        "Runtime stage must use a Chainguard Python image"
-    )
+    from_lines = [line for line in dockerfile_content.splitlines() if line.startswith('FROM ')]
+    assert all(line.startswith('FROM cgr.dev/chainguard/') for line in from_lines), from_lines
     assert 'FROM cgr.dev/chainguard/node:' in dockerfile_content, (
         "Frontend build stage must use a Chainguard Node image"
     )
@@ -242,19 +241,34 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     # Runtime install must tolerate Python upper-bound constraints in transitive deps.
     assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content
 
-    # The final stage must be the plain (non -dev) image: no shell, package
-    # manager, or compiler.
-    from_lines = [line for line in dockerfile_content.splitlines() if line.startswith('FROM ')]
-    assert from_lines[-1].startswith('FROM cgr.dev/chainguard/python:'), from_lines[-1]
-    assert '-dev' not in from_lines[-1], (
-        "Final stage must not use a -dev image"
+    # Join continuation lines so each instruction is one string.
+    instructions = dockerfile_content.replace('\\\n', ' ').splitlines()
+    final_stage = dockerfile_content[dockerfile_content.rindex('\nFROM '):]
+    build_stage = dockerfile_content[
+        dockerfile_content.index(' AS python-build'):dockerfile_content.rindex('\nFROM ')
+    ]
+
+    # The final stage is not a -dev image, keeps a shell (hooks and agent-portal
+    # commands can be shell scripts), and removes the package manager.
+    assert '-dev' not in from_lines[-1], "Final stage must not use a -dev image"
+    assert re.search(r'apk add .*\bbash\b.*\bbusybox\b', final_stage), (
+        "Final stage must install bash and busybox"
+    )
+    assert re.search(r'apk del .*\bapk-tools\b', final_stage.replace('\\\n', ' ')), (
+        "Final stage must remove apk-tools"
     )
 
-    # Ownership is set with COPY --chown; a `RUN chown -R` layer would store
-    # every file under /app a second time.
+    # Both Python stages must install the same Python, or the venv won't run.
+    build_python = set(re.findall(r'\bpython-3\.\d+\b', build_stage))
+    final_python = set(re.findall(r'\bpython-3\.\d+\b', final_stage))
+    assert len(final_python) == 1 and build_python == final_python, (build_python, final_python)
+
+    # The app is owned by nonroot via COPY --chown and runs as nonroot. A
+    # `RUN chown -R` layer would store every file under /app a second time.
+    assert 'COPY --from=python-build --chown=nonroot:nonroot /app /app' in final_stage
+    assert re.search(r'^USER nonroot$', final_stage, re.M), "Final stage must run as nonroot"
     assert not any(
-        line.startswith('RUN') and 'chown -R' in line
-        for line in dockerfile_content.splitlines()
+        line.startswith('RUN') and 'chown -R' in line for line in instructions
     ), "Use COPY --chown instead of a RUN chown -R layer"
 
 

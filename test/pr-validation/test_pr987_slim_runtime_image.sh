@@ -1,8 +1,9 @@
 #!/bin/bash
 # PR #987 Validation Script: Slim down Dockerfile.runtimeonly (issue #986)
-# Builds the runtime-only image and checks that the final stage is the plain
-# Chainguard python image (no shell), that /app is owned by nonroot without a
-# separate chown layer, and that the container serves /api/health and the UI.
+# Builds the runtime-only image and checks that the final image has a shell and
+# env but no package manager or compiler, that /app is owned by nonroot, that
+# the example hooks run by script path, and that the container serves
+# /api/health and the UI.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,18 +44,12 @@ trap cleanup EXIT
 echo ""
 echo "1. Check the Dockerfile structure"
 echo "---------------------------------"
-FINAL_FROM="$(grep '^FROM ' Dockerfile.runtimeonly | tail -1)"
-if [ "$FINAL_FROM" = "FROM cgr.dev/chainguard/python:latest" ]; then
-    echo "PASSED: final stage is the plain python image"
+if (cd atlas && python -m pytest -q tests/test_docker_env_sync.py -k runtime_only > /dev/null 2>&1); then
+    echo "PASSED: static Dockerfile checks (test_docker_env_sync.py)"
 else
-    echo "FAILED: final stage is '$FINAL_FROM'"
+    (cd atlas && python -m pytest -q tests/test_docker_env_sync.py -k runtime_only)
+    echo "FAILED: static Dockerfile checks"
     exit 1
-fi
-if grep -qE '^RUN .*chown -R' Dockerfile.runtimeonly; then
-    echo "FAILED: Dockerfile.runtimeonly still has a chown -R layer"
-    exit 1
-else
-    echo "PASSED: no chown -R layer"
 fi
 
 echo ""
@@ -71,19 +66,23 @@ echo "PASSED: image built"
 echo ""
 echo "3. Check the final image contents"
 echo "---------------------------------"
-if "$CLI" run --rm --entrypoint /bin/sh "$IMAGE" -c true > /dev/null 2>&1; then
-    echo "FAILED: /bin/sh exists in the final image"
-    exit 1
+CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, *[bool(shutil.which(b)) for b in ("sh", "bash", "env", "apk", "gcc")])')"
+if [ "$CHECK" = "65532 65532 /app/.venv True True True False False" ]; then
+    echo "PASSED: runs as 65532, /app/.venv owned by 65532, venv on PATH, sh/bash/env present, no apk or gcc"
 else
-    echo "PASSED: no shell in the final image"
-fi
-CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, shutil.which("gcc") is None)')"
-if [ "$CHECK" = "65532 65532 /app/.venv True" ]; then
-    echo "PASSED: runs as 65532, /app/.venv owned by 65532, venv on PATH, no gcc"
-else
-    echo "FAILED: unexpected uid/owner/tools: $CHECK"
+    echo "FAILED: unexpected uid/owner/tools (uid owner prefix sh bash env apk gcc): $CHECK"
     exit 1
 fi
+# Hooks are spawned without a shell, so a script-path hook needs its #! interpreter.
+EVENT='{"event": "PreToolUse", "tool_name": "filesystem__write_file", "arguments": {"path": "/tmp/x"}}'
+for hook in block_destructive.sh audit_tool.sh require_approval_network.py; do
+    if echo "$EVENT" | "$CLI" run --rm -i --entrypoint "/app/atlas/config/hooks-example/$hook" "$IMAGE" > /dev/null 2>&1; then
+        echo "PASSED: example hook $hook runs by script path"
+    else
+        echo "FAILED: example hook $hook did not run by script path"
+        exit 1
+    fi
+done
 
 echo ""
 echo "4. Start the container and exercise it"

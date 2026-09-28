@@ -1,9 +1,9 @@
 # Runtime-only container image for Atlas UI 3.
 # Node.js, pip and the compiler toolchain stay in separate build stages, so
-# the final image only contains the Python runtime and the application.
+# the final image only contains the Python runtime, a shell, and the
+# application.
 #
-# All stages use Chainguard images for a minimal CVE surface. The final stage
-# uses the plain python image, which has no shell or package manager.
+# All stages use Chainguard images for a minimal CVE surface.
 
 FROM cgr.dev/chainguard/node:latest-dev AS frontend-build
 
@@ -31,20 +31,13 @@ ENV APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 
-FROM cgr.dev/chainguard/python:latest-dev AS python-build
+# Both Python stages install the same Wolfi python-3.X package, so the venv
+# built here always matches the final image's Python. Bump them together.
+FROM cgr.dev/chainguard/wolfi-base AS python-build
 
-# Chainguard Python image defaults to the nonroot user (65532:65532).
-# Build as root; the final stage copies /app with nonroot ownership.
-USER root
+RUN apk add --no-cache python-3.14 python-3.14-dev build-base
 
 WORKDIR /app
-
-# Fail fast if the rolling `latest-dev` tag points at a Python version that
-# is older than what pyproject.toml requires (>=3.11). This avoids the
-# confusing "Package 'atlas-chat' requires a different Python" error from
-# `pip install` deep in the build.
-RUN python3 -c "import sys; assert sys.version_info >= (3, 11), \
-        f'Chainguard python:latest-dev is Python {sys.version_info.major}.{sys.version_info.minor}, but atlas-chat requires >=3.11. Pin a newer tag or digest.'"
 
 # Copy only runtime application files (skip docs/test/scripts).
 COPY pyproject.toml README.md ./
@@ -71,7 +64,7 @@ RUN mkdir -p \
 # servers (e.g. pptx_generator) referenced by the seeded default mcp.json
 # work out of the box. Users who want a truly minimal image can replace the
 # seeded config and drop the extra.
-RUN python3 -m venv /app/.venv
+RUN python3.14 -m venv /app/.venv
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -79,18 +72,20 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --ignore-requires-python ".[mcp-demos]"
 
 
-FROM cgr.dev/chainguard/python:latest
+# Final stage: Python, bash, and busybox (sh, env, and basic commands), so
+# hooks and agent-portal commands that are shell scripts or use an
+# `#!/usr/bin/env` line keep working. apk is removed afterwards: no package
+# manager or compiler ends up in the image.
+FROM cgr.dev/chainguard/wolfi-base
+
+RUN apk add --no-cache python-3.14 bash busybox && \
+    apk del --no-cache wolfi-base apk-tools
 
 ARG GIT_HASH="unknown"
 
 # --chown sets ownership during the copy. A separate `chown -R` layer would
 # store every file under /app a second time.
 COPY --from=python-build --chown=nonroot:nonroot /app /app
-
-# The venv's packages live under lib/pythonX.Y, which must match this image's
-# Python. latest and latest-dev are rebuilt separately, so check that they
-# agree. Exec form, because this image has no shell.
-RUN ["/app/.venv/bin/python", "-c", "import os, sys, sysconfig; assert os.path.isdir(sysconfig.get_path('purelib')), f'Chainguard python:latest is Python {sys.version_info.major}.{sys.version_info.minor}, but the venv was built with a different version from python:latest-dev. Rebuild once both tags match, or pin both by digest.'"]
 
 USER nonroot
 
@@ -109,8 +104,4 @@ ENV VIRTUAL_ENV=/app/.venv \
 
 WORKDIR /app/atlas
 
-# Chainguard Python images set ENTRYPOINT ["/usr/bin/python"], which would
-# prepend the system interpreter to CMD and break the exec form.  Clear it
-# so that our venv python is invoked directly.
-ENTRYPOINT []
 CMD ["/app/.venv/bin/python", "main.py"]
