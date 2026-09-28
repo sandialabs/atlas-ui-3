@@ -1,6 +1,6 @@
 # MCP Server Configuration
 
-Last updated: 2026-01-25
+Last updated: 2026-09-25
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
@@ -70,6 +70,7 @@ After editing `config/mcp.json`, you do **not** need to restart the backend. Adm
 - Call `POST /admin/mcp/reload` to reload `mcp.json`, reinitialize MCP clients, and rediscover tools/prompts.
 - Use `GET /admin/mcp/status` to see which servers are connected or failing.
 - Use `POST /admin/mcp/reconnect` (plus the auto-reconnect feature flag) to retry failed servers with exponential backoff.
+- Use `POST /admin/mcp/refresh` with `{"server_name": "<name>"}` to refresh just one server (re-read its config, reconnect, re-discover its tools) without disturbing every other server's connections. The admin panel's server chips each carry a refresh button for this.
 
 ## MCP Server Authentication
 
