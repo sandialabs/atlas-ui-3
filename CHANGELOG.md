@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #987 - 2026-09-28
+- `Dockerfile.runtimeonly` now ends in the plain Chainguard `python` image (no shell, package manager, or compiler) and sets ownership with `COPY --chown` instead of a `chown -R` layer that stored `/app` twice, shrinking the image from 919 MB to 357 MB compressed (issue #986).
+
 ### PR #982 - 2026-09-28
 - Accept an `http://` OIDC issuer on RFC 6761 `*.localhost` names (e.g. `http://keycloak.localhost`), not only on `localhost` itself, for local development.
 
