@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #982 - 2026-09-28
+- Accept an `http://` OIDC issuer on RFC 6761 `*.localhost` names (e.g. `http://keycloak.localhost`), not only on `localhost` itself, for local development.
+
 ### PR #977 - 2026-09-25
 - Refresh a single MCP server from the admin panel (issue #879): new `POST /admin/mcp/refresh` (`{"server_name": ...}`) re-reads that server's config, reconnects, and re-discovers its tools -- instead of the all-servers reload -- and each server chip in the admin MCP card carries a per-server refresh button. Only the named server's state is touched; idle cached per-user clients for it are rebuilt while in-flight calls are not torn down (retained entries are marked stale so both acquisition paths rebuild them).
 
