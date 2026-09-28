@@ -261,6 +261,13 @@ describe('mid-run live refresh of a joined conversation', () => {
       expect(bubble.content).toBe('Working on it')
       // The mid-run pass did not claim the run-end obligation.
       expect(result.current.runEndedConversationId).toBeNull()
+
+      // A later poll that finds nothing new dispatches nothing: the message
+      // list keeps its identity, so an idle poll does not re-render the
+      // transcript (or re-stamp the bubble's timestamp) every interval.
+      const settledMessages = result.current.messages
+      await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
+      expect(result.current.messages).toBe(settledMessages)
     } finally {
       vi.useRealTimers()
     }
@@ -299,6 +306,128 @@ describe('mid-run live refresh of a joined conversation', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
 
       expect(h.fetchMock.mock.calls.length).toBe(callsWhileRunning)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not poll the tab that owns the stream (no replay placeholder)', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      // A stored, idle load seeds no replay placeholder: this is the tab that
+      // started (or is live-streaming) the run, so it must not be polled.
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          messages: [storedChat('user', 'What is the weather')],
+          metadata: {},
+        })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+
+      expect(h.fetchMock.mock.calls.some(c => String(c[0]).includes('/api/conversations/'))).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a settled or errored record leaves the view untouched', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'seed text',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      const before = result.current.messages.map(m => m.content)
+
+      // The run settled between polls: applying a stored record here would
+      // discharge the run-end obligation early. The non-OK case backs off.
+      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(result.current.messages.map(m => m.content)).toEqual(before)
+
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', in_flight: false, metadata: {}, messages: [] }) }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+      expect(result.current.messages.map(m => m.content)).toEqual(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a stale response for the conversation the user left cannot touch the new view', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolveOld
+      h.fetchMock.mockImplementation((url) => {
+        if (String(url).includes('/api/conversations/conv-1')) {
+          return new Promise((resolve) => {
+            resolveOld = () => resolve({
+              ok: true,
+              json: async () => liveRecord(storedToolCall('call-late', 'atlas_sleep'), 'conv-1 late segment'),
+            })
+          })
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) })
+      })
+
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'conv-1 partial',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      // The immediate poll is now in flight against conv-1.
+      expect(typeof resolveOld).toBe('function')
+
+      // The user switches to another conversation before it resolves.
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-2',
+          in_flight: true,
+          run_id: 'run-2',
+          streaming_text: 'conv-2 partial',
+          metadata: {},
+          messages: [storedChat('user', 'A different question')],
+        })
+      })
+
+      await act(async () => {
+        resolveOld()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      // The stale conv-1 text and tool row must not appear in conv-2's view.
+      const contents = result.current.messages.map(m => m.content || '')
+      expect(contents.some(c => c.includes('conv-1 late'))).toBe(false)
+      expect(result.current.messages.some(m => m.tool_call_id === 'call-late')).toBe(false)
+      const bubble = result.current.messages.find(m => m._streaming)
+      expect(bubble.content).toBe('conv-2 partial')
     } finally {
       vi.useRealTimers()
     }

@@ -1367,6 +1367,21 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const storedIdx = alignTranscript(current, stored)
 		if (storedIdx === null) return false
 
+		// A live pass keeps the open bubble showing the segment the run is
+		// streaming now, or the marker-only seed while it is between segments.
+		// It runs only here -- after the active-conversation guard above and a
+		// successful alignment -- because a stale poll that resolves after the
+		// user switched conversations (or a diverged record) must not touch the
+		// view. Skipping the dispatch when the text has not moved keeps an idle
+		// poll from rebuilding the message list on every tick.
+		if (live) {
+			const placeholder = latestMessagesRef.current.find(m => m._streaming && m._replayed)
+			const segment = conversationData.streaming_text || ''
+			if (placeholder ? placeholder.content !== segment : segment !== '') {
+				streamToken(segment, true)
+			}
+		}
+
 		// The store had nothing beyond what the view already shows.
 		if (storedIdx >= stored.length) {
 			// Nothing to append. An open bubble is NOT settled here: with no
@@ -1399,7 +1414,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		restoreContext()
 		if (stillInFlight && !live) rearmJoinedRun(conversationData.id)
 		return true
-	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun])
+	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun, streamToken])
 
 	// Mid-run refresh for a conversation this tab joined (issue: parallel-run
 	// tool-call visibility). A joined view holds the snapshot the run had when
@@ -1433,13 +1448,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// transcript, and applying a stored record here could discharge the
 		// obligation early.
 		if (!data || data.error || data.in_flight !== true) return
-		// Keep the open bubble showing the segment the run is streaming now, or
-		// the marker-only seed while it is between segments. Without this the
-		// bubble would keep the text it was seeded with while the closed
-		// segment lands in the appended rows, showing it twice.
-		streamToken(data.streaming_text || '', true)
+		// A response can resolve after the view moved on -- the user switched
+		// conversations or started a new chat. `usePollingWithBackoff` clears
+		// only its timer when polling is disabled, not the in-flight request,
+		// so re-check here before anything below touches state. The reconcile
+		// below makes the same check; this keeps even a stale read from being
+		// applied, and keeps the bubble inside that guard.
+		if (activeConversationIdRef.current !== liveJoinedConversationId) return
 		refreshJoinedConversation(data, { live: true })
-	}, [liveJoinedConversationId, streamToken, refreshJoinedConversation])
+	}, [liveJoinedConversationId, refreshJoinedConversation])
 
 	usePollingWithBackoff(fetchLiveJoinedConversation, {
 		normalInterval: LIVE_REFRESH_INTERVAL_MS,
