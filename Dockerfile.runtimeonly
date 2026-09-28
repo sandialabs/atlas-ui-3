@@ -1,8 +1,9 @@
 # Runtime-only container image for Atlas UI 3.
-# This keeps Node.js and frontend build tooling in a separate stage so the
-# final image only contains runtime dependencies.
+# Node.js, pip and the compiler toolchain stay in separate build stages, so
+# the final image only contains the Python runtime and the application.
 #
-# Both stages use Chainguard images for a minimal CVE surface.
+# All stages use Chainguard images for a minimal CVE surface. The final stage
+# uses the plain python image, which has no shell or package manager.
 
 FROM cgr.dev/chainguard/node:latest-dev AS frontend-build
 
@@ -30,16 +31,13 @@ ENV APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 
-FROM cgr.dev/chainguard/python:latest-dev
+FROM cgr.dev/chainguard/python:latest-dev AS python-build
 
 # Chainguard Python image defaults to the nonroot user (65532:65532).
-# Switch to root for filesystem setup and package installation, then drop
-# back to nonroot before the final CMD.
+# Build as root; the final stage copies /app with nonroot ownership.
 USER root
 
 WORKDIR /app
-
-ARG GIT_HASH="unknown"
 
 # Fail fast if the rolling `latest-dev` tag points at a Python version that
 # is older than what pyproject.toml requires (>=3.11). This avoids the
@@ -80,12 +78,27 @@ RUN pip install --no-cache-dir --upgrade pip && \
     PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
     pip install --no-cache-dir --ignore-requires-python ".[mcp-demos]"
 
-RUN chown -R nonroot:nonroot /app
+
+FROM cgr.dev/chainguard/python:latest
+
+ARG GIT_HASH="unknown"
+
+# --chown sets ownership during the copy. A separate `chown -R` layer would
+# store every file under /app a second time.
+COPY --from=python-build --chown=nonroot:nonroot /app /app
+
+# The venv's packages live under lib/pythonX.Y, which must match this image's
+# Python. latest and latest-dev are rebuilt separately, so check that they
+# agree. Exec form, because this image has no shell.
+RUN ["/app/.venv/bin/python", "-c", "import os, sys, sysconfig; assert os.path.isdir(sysconfig.get_path('purelib')), f'Chainguard python:latest is Python {sys.version_info.major}.{sys.version_info.minor}, but the venv was built with a different version from python:latest-dev. Rebuild once both tags match, or pin both by digest.'"]
+
 USER nonroot
 
 EXPOSE 8000
 
-ENV NODE_ENV=production \
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    NODE_ENV=production \
     APP_CONFIG_DIR=/app/config \
     RUNTIME_LOG_DIR=/app/runtime/logs \
     RUNTIME_FEEDBACK_DIR=/app/runtime/feedback \

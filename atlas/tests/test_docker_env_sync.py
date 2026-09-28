@@ -220,7 +220,7 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
 
-    # Both stages must use Chainguard images for a minimal CVE surface.
+    # All stages must use Chainguard images for a minimal CVE surface.
     # Match by registry/name prefix so the recipe can later pin to a specific
     # tag or digest without breaking this assertion.
     assert 'FROM cgr.dev/chainguard/python:' in dockerfile_content, (
@@ -241,6 +241,21 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # Runtime install must tolerate Python upper-bound constraints in transitive deps.
     assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content
+
+    # The final stage must be the plain (non -dev) image: no shell, package
+    # manager, or compiler.
+    from_lines = [line for line in dockerfile_content.splitlines() if line.startswith('FROM ')]
+    assert from_lines[-1].startswith('FROM cgr.dev/chainguard/python:'), from_lines[-1]
+    assert '-dev' not in from_lines[-1], (
+        "Final stage must not use a -dev image"
+    )
+
+    # Ownership is set with COPY --chown; a `RUN chown -R` layer would store
+    # every file under /app a second time.
+    assert not any(
+        line.startswith('RUN') and 'chown -R' in line
+        for line in dockerfile_content.splitlines()
+    ), "Use COPY --chown instead of a RUN chown -R layer"
 
 
 def test_use_new_frontend_flag_is_gone():
