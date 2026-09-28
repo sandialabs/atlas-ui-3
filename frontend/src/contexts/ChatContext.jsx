@@ -14,6 +14,7 @@ import { useSettings } from '../hooks/useSettings'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
+import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
@@ -30,6 +31,12 @@ const RUN_END_RELOAD_GRACE_MS = 2500
 // turn the refresh into an open-ended poll; after this the caller's full
 // reload takes over.
 const MAX_JOINED_RUN_REARMS = 4
+// While a conversation is open whose run this tab did not start, the run's
+// tool rows and narration land in its own session and nowhere this view can
+// see until the run ends. Poll the live record on this cadence and append what
+// has appeared, so `atlas_sleep`'s row and its siblings show up while the
+// agent is still working instead of only after the final reload.
+const LIVE_REFRESH_INTERVAL_MS = 3000
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
@@ -1286,7 +1293,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
 
-	const refreshJoinedConversation = useCallback((conversationData) => {
+	const refreshJoinedConversation = useCallback((conversationData, { live = false } = {}) => {
 		if (!conversationData || !conversationData.messages) return false
 		// Only ever reconcile against the transcript actually on screen. The
 		// current caller checks this before it calls, but this is exported on the
@@ -1301,10 +1308,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// have -- the reader keeps their place -- but re-arm the obligation so the
 		// run-end path refreshes again when this run finishes.
 		const stillInFlight = conversationData.in_flight === true
-		// Budget spent on a record that still will not settle: refuse, so the
-		// caller falls back to the full reload rather than this returning `true`
-		// with no obligation left to discharge.
-		if (stillInFlight && !canRearmJoinedRun(conversationData.id)) return false
+		// A live pass is the periodic mid-run reconcile, not the run-end
+		// reconcile: it must not spend the bounded re-arm budget (whose whole
+		// purpose is to stop an *untracked* run from turning the refresh into an
+		// open-ended poll) nor claim the run-end obligation, which the load-time
+		// path already armed and the run-end effect is watching.
+		if (!live && stillInFlight && !canRearmJoinedRun(conversationData.id)) return false
 		// Metadata is spread first: it is stored data, and a stray `role`,
 		// `content` or `type` in it must not decide how an appended row renders.
 		const stored = conversationData.messages.map(msg => ({
@@ -1368,7 +1377,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// identity intact, so React does not remount the expanded tool rows
 			// and scroll anchor this refresh exists to preserve.
 			restoreContext()
-			if (stillInFlight) rearmJoinedRun(conversationData.id)
+			if (stillInFlight && !live) rearmJoinedRun(conversationData.id)
 			return true
 		}
 
@@ -1388,9 +1397,55 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// mid-answer -- but after the appended rows, not above them.
 		refreshAppend(appended, stillInFlight)
 		restoreContext()
-		if (stillInFlight) rearmJoinedRun(conversationData.id)
+		if (stillInFlight && !live) rearmJoinedRun(conversationData.id)
 		return true
 	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun])
+
+	// Mid-run refresh for a conversation this tab joined (issue: parallel-run
+	// tool-call visibility). A joined view holds the snapshot the run had when
+	// it was opened and receives none of the frames the run goes on to emit --
+	// they stay bound to the socket that started it -- so a tool call that
+	// lands afterwards (the `atlas_sleep` next to the `basic_fns_bash` already
+	// on screen) is invisible until the run ends and the final reload runs.
+	// Poll the run's live record and append what has appeared since, using the
+	// same reconciliation the run-end reload uses, so rows already on screen
+	// keep their identity and the reader's scroll position stands.
+	//
+	// Gated on the replay placeholder: only a joined view has one. The tab that
+	// owns the stream receives these rows live over the socket, so polling
+	// there would only race the frames it is already applying.
+	const liveJoinedConversationId = (
+		config.features?.chat_history &&
+		saveMode === 'server' &&
+		activeConversationId &&
+		isRunActive(runs.runsByConversation[activeConversationId]) &&
+		messages.some(m => m._streaming && m._replayed)
+	) ? activeConversationId : null
+
+	const fetchLiveJoinedConversation = useCallback(async () => {
+		if (!liveJoinedConversationId) return
+		const res = await fetch(`/api/conversations/${liveJoinedConversationId}`)
+		// Throw so usePollingWithBackoff backs off on a flaky server rather
+		// than hammering it every interval.
+		if (!res.ok) throw new Error(`live conversation refresh failed: ${res.status}`)
+		const data = await res.json()
+		// The run settled between polls: the run-end path owns the final
+		// transcript, and applying a stored record here could discharge the
+		// obligation early.
+		if (!data || data.error || data.in_flight !== true) return
+		// Keep the open bubble showing the segment the run is streaming now, or
+		// the marker-only seed while it is between segments. Without this the
+		// bubble would keep the text it was seeded with while the closed
+		// segment lands in the appended rows, showing it twice.
+		streamToken(data.streaming_text || '', true)
+		refreshJoinedConversation(data, { live: true })
+	}, [liveJoinedConversationId, streamToken, refreshJoinedConversation])
+
+	usePollingWithBackoff(fetchLiveJoinedConversation, {
+		normalInterval: LIVE_REFRESH_INTERVAL_MS,
+		enabled: !!liveJoinedConversationId,
+		deps: [liveJoinedConversationId],
+	})
 
 	// Undo's restore. Two shapes, because the backend cannot re-seed a
 	// conversation it has never stored:
