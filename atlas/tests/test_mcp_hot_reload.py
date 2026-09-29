@@ -267,6 +267,30 @@ class TestMCPAdminEndpoints:
             )
         assert r.status_code == 404
 
+    def test_mcp_refresh_endpoint_does_not_expose_exception_details(self):
+        """Unexpected refresh errors should not be returned to the client."""
+        from main import app
+
+        from atlas.infrastructure.app_factory import app_factory
+        from atlas.modules.config import config_manager
+
+        client = TestClient(app)
+        fake_manager = MagicMock()
+        fake_manager.refresh_server = AsyncMock(
+            side_effect=RuntimeError("internal connection details")
+        )
+
+        with patch.object(app_factory, "get_mcp_manager", return_value=fake_manager):
+            r = client.post(
+                "/admin/mcp/refresh",
+                headers={"X-User-Email": config_manager.app_settings.admin_test_user},
+                json={"server_name": "test-server"},
+            )
+
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to refresh MCP server"
+        assert "internal connection details" not in r.text
+
     def test_admin_dashboard_includes_mcp_endpoints(self):
         """Test that admin dashboard lists MCP endpoints."""
         from main import app

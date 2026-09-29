@@ -472,7 +472,7 @@ async def refresh_mcp_server(
             sanitize_for_logging(str(e)),
             exc_info=True,
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to refresh MCP server")
 
 
 @admin_router.get("/mcp/status")
