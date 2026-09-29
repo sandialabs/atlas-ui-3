@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #977 - 2026-09-25
+- Refresh a single MCP server from the admin panel (issue #879): new `POST /admin/mcp/refresh` (`{"server_name": ...}`) re-reads that server's config, reconnects, and re-discovers its tools -- instead of the all-servers reload -- and each server chip in the admin MCP card carries a per-server refresh button. Only the named server's state is touched; idle cached per-user clients for it are rebuilt while in-flight calls are not torn down (retained entries are marked stale so both acquisition paths rebuild them).
+
 ### PR #973 - 2026-09-24
 - Add a CHANGELOG release-heading guard, make `atlas-chat` fail non-zero on streaming LLM errors, disable noisy demo MCP defaults on fresh installs (and stop initializing disabled servers), set the PyPI build title explicitly, and keep release automation checking and refreshing `uv.lock` (including the yanked `primp` refresh).
 - Operator-visible changes to review before upgrading: the packaged `pptx_generator` and `session_state_demo` MCP entries now ship `enabled: false`, so fresh installs neither start nor list them until an operator re-enables them; and `atlas-chat` now exits with status 1 and writes a classified error to stderr when an LLM call fails (including `--json` and `--output` runs, which print nothing to stdout on failure).
