@@ -243,16 +243,16 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # Join continuation lines so each instruction is one string.
     instructions = dockerfile_content.replace('\\\n', ' ').splitlines()
-    # Split into stages keyed by their `AS` name (the unnamed last stage is
-    # 'final'), so reordering or adding stages doesn't break the lookups.
-    stages = {}
-    for chunk in re.split(r'^(?=FROM )', dockerfile_content, flags=re.M)[1:]:
-        name = re.match(r'FROM \S+(?:\s+AS\s+(\S+))?', chunk, re.I).group(1)
-        stages[(name or 'final').lower()] = chunk
-    assert 'python-build' in stages, f"Expected a 'python-build' stage, found {sorted(stages)}"
-    assert 'final' in stages, "Expected an unnamed final stage"
-    build_stage = stages['python-build']
-    final_stage = stages['final']
+    # Split into stages. The build stage is found by its `AS` name; the final
+    # stage is the last one, which is what `docker build` outputs by default.
+    chunks = re.split(r'^(?=FROM )', dockerfile_content, flags=re.M)[1:]
+    names = [
+        (re.match(r'FROM \S+(?:\s+AS\s+(\S+))?', chunk, re.I).group(1) or '').lower()
+        for chunk in chunks
+    ]
+    assert 'python-build' in names, f"Expected a 'python-build' stage, found {names}"
+    build_stage = chunks[names.index('python-build')]
+    final_stage = chunks[-1]
 
     def apk_packages(stage):
         """Package names from a stage's `apk add` commands (flags dropped)."""

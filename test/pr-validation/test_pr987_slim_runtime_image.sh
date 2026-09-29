@@ -66,8 +66,8 @@ echo "PASSED: image built"
 echo ""
 echo "3. Check the final image contents"
 echo "---------------------------------"
-CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, *[bool(shutil.which(b)) for b in ("sh", "bash", "env", "apk", "gcc")])' 2>&1)" || {
-    echo "FAILED: could not run the image: $CHECK"
+CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, *[bool(shutil.which(b)) for b in ("sh", "bash", "env", "apk", "gcc")])' 2> /tmp/pr987-run.err)" || {
+    echo "FAILED: could not run the image: $(cat /tmp/pr987-run.err)"
     exit 1
 }
 if [ "$CHECK" = "65532 65532 /app/.venv True True True False False" ]; then
@@ -76,11 +76,14 @@ else
     echo "FAILED: unexpected uid/owner/tools (uid owner prefix sh bash env apk gcc): $CHECK"
     exit 1
 fi
-CA="$("$CLI" run --rm "$IMAGE" python -c 'import os, ssl; p = ssl.get_default_verify_paths(); print(os.path.exists(p.cafile or p.openssl_cafile))' 2>&1)" || true
+CA="$("$CLI" run --rm "$IMAGE" python -c 'import os, ssl; p = ssl.get_default_verify_paths(); print(os.path.exists(p.cafile or p.openssl_cafile))' 2> /tmp/pr987-run.err)" || {
+    echo "FAILED: could not run the image: $(cat /tmp/pr987-run.err)"
+    exit 1
+}
 if [ "$CA" = "True" ]; then
     echo "PASSED: CA certificate bundle present"
 else
-    echo "FAILED: CA certificate bundle missing: $CA"
+    echo "FAILED: CA certificate bundle missing"
     exit 1
 fi
 
