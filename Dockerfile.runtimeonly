@@ -6,7 +6,8 @@
 # All stages use Chainguard images for a minimal CVE surface.
 
 # Wolfi Python package (python-X.Y) installed by both Python stages. The venv
-# is built against it, so both stages must use the same version.
+# is built against it, so both stages must use the same version. It must be
+# 3.11 or newer (pyproject.toml) and published as a Wolfi python-X.Y package.
 ARG PYTHON_VERSION=3.14
 
 FROM cgr.dev/chainguard/node:latest-dev AS frontend-build
@@ -39,6 +40,12 @@ FROM cgr.dev/chainguard/wolfi-base AS python-build
 
 ARG PYTHON_VERSION
 RUN apk add --no-cache python-${PYTHON_VERSION} python-${PYTHON_VERSION}-dev build-base
+
+# Fail fast if PYTHON_VERSION is older than pyproject.toml requires (>=3.11).
+# The `--ignore-requires-python` install below would otherwise build an image
+# that fails at runtime.
+RUN python${PYTHON_VERSION} -c "import sys; assert sys.version_info >= (3, 11), \
+        f'PYTHON_VERSION is {sys.version_info.major}.{sys.version_info.minor}, but atlas-chat requires >=3.11.'"
 
 WORKDIR /app
 

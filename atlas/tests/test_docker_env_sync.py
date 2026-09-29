@@ -275,6 +275,9 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
         assert re.search(r'^ARG PYTHON_VERSION$', stage, re.M), "Redeclare ARG PYTHON_VERSION"
         assert 'python-${PYTHON_VERSION}' in apk_packages(stage)
     assert 'RUN python${PYTHON_VERSION} -m venv /app/.venv' in build_stage
+    assert 'sys.version_info >= (3, 11)' in build_stage, (
+        "Build stage must check PYTHON_VERSION against pyproject.toml's >=3.11"
+    )
     assert not re.search(r'\bpython-?3\.\d+', build_stage + final_stage), (
         "Use ${PYTHON_VERSION}, not a hard-coded Python version"
     )
