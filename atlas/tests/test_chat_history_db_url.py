@@ -6,6 +6,7 @@ DB_USER, DB_PASSWORD, DB_DRIVER as an alternative to a full CHAT_HISTORY_DB_URL.
 
 import pytest
 
+from atlas.modules.chat_history import database as chat_history_database
 from atlas.modules.config.config_manager import AppSettings, build_db_url_from_parts
 
 
@@ -181,3 +182,24 @@ class TestChatHistoryDbUrlPrecedenceFromAllSources:
         monkeypatch.setenv("DB_NAME", "atlas")
         settings = _settings()
         assert settings.chat_history_db_url == "postgresql://db/atlas"
+
+
+class TestPostgresDriverInstalled:
+    """The driver SQLAlchemy picks for a postgresql URL must be installed (issue #988).
+
+    SQLAlchemy 2.1 changed the default driver for ``postgresql://`` from psycopg2
+    to psycopg (v3). ``get_engine`` loads the driver module without connecting,
+    so a missing driver fails here instead of at chat-history startup.
+    """
+
+    @pytest.mark.parametrize("driver", ["postgresql", "postgresql+psycopg", "postgresql+psycopg2"])
+    def test_chat_history_engine_loads_driver(self, monkeypatch, driver):
+        monkeypatch.setattr(chat_history_database, "_engine", None)
+        url = build_db_url_from_parts(
+            db_driver=driver, db_host="db.example.com", db_name="atlas", db_user="atlas", db_password="pw"
+        )
+        engine = chat_history_database.get_engine(url)
+        try:
+            assert engine.dialect.name == "postgresql"
+        finally:
+            engine.dispose()
