@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #987 - 2026-09-28
+- `Dockerfile.runtimeonly`'s final stage is now Chainguard `wolfi-base` with Python, `bash`, and busybox but no package manager or compiler, and it sets ownership with `COPY --chown` instead of a `chown -R` layer that stored `/app` twice. The image shrinks from 919 MB to 358 MB compressed (issue #986). `ARG PYTHON_VERSION` (default `3.14`) sets the Wolfi Python package for both Python stages.
+- The runtime-only image no longer ships `apk`, `git`, or a compiler, and its Python is set by `ARG PYTHON_VERSION` (default 3.14). Images that extend it with `RUN apk add` need to build from their own base instead. Setting `PYTHON_VERSION` below 3.11 (what `pyproject.toml` requires) fails the build.
+
 ### PR #981 - 2026-09-27
 - A conversation opened while its run is still executing now refreshes mid-run (closes #980): the run's frames stay bound to the socket that started it, so a joined view held the snapshot the run had when it was opened and showed nothing the run produced afterwards until the final reload -- an `atlas_sleep` landing next to the `basic_fns_bash` already on screen stayed invisible while the answer was still in progress. While the open conversation has an active run and the view holds the replay placeholder, the client polls the run's live record (`GET /api/conversations/{id}`) every few seconds and appends the tool rows and narration that have appeared since, using the same reconciliation as the run-end reload so rows already on screen keep their identity and the reader's scroll position stands; the partial bubble tracks the newest `streaming_text`. The poll does not spend the run-end re-arm budget, ignores a record that is no longer in flight, and leaves the tab that owns the stream to its live socket.
 

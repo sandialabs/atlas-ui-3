@@ -220,12 +220,11 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
 
-    # Both stages must use Chainguard images for a minimal CVE surface.
-    # Match by registry/name prefix so the recipe can later pin to a specific
+    # All stages must use Chainguard images for a minimal CVE surface.
+    # Match by registry prefix so the recipe can later pin to a specific
     # tag or digest without breaking this assertion.
-    assert 'FROM cgr.dev/chainguard/python:' in dockerfile_content, (
-        "Runtime stage must use a Chainguard Python image"
-    )
+    from_lines = [line for line in dockerfile_content.splitlines() if line.startswith('FROM ')]
+    assert all(line.startswith('FROM cgr.dev/chainguard/') for line in from_lines), from_lines
     assert 'FROM cgr.dev/chainguard/node:' in dockerfile_content, (
         "Frontend build stage must use a Chainguard Node image"
     )
@@ -241,6 +240,55 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # Runtime install must tolerate Python upper-bound constraints in transitive deps.
     assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content
+
+    # Join continuation lines so each instruction is one string.
+    instructions = dockerfile_content.replace('\\\n', ' ').splitlines()
+    final_stage = dockerfile_content[dockerfile_content.rindex('\nFROM '):]
+    build_stage = dockerfile_content[
+        dockerfile_content.index(' AS python-build'):dockerfile_content.rindex('\nFROM ')
+    ]
+
+    def apk_packages(stage):
+        """Package names from a stage's `apk add` commands (flags dropped)."""
+        packages = []
+        for command in re.findall(r'apk add ([^&;\n]*)', stage.replace('\\\n', ' ')):
+            packages += [word for word in command.split() if not word.startswith('-')]
+        return packages
+
+    final_packages = apk_packages(final_stage)
+
+    # The final stage is not a -dev image, keeps a shell (hooks and agent-portal
+    # commands can be shell scripts), and has no package manager or build tools.
+    assert '-dev' not in from_lines[-1], "Final stage must not use a -dev image"
+    assert {'bash', 'busybox'} <= set(final_packages), final_packages
+    build_tools = {'build-base', 'gcc', 'clang', 'make', 'git', 'apk-tools'}
+    denied = [p for p in final_packages if p in build_tools or p.endswith('-dev')]
+    assert not denied, f"Final stage must not install build tools: {denied}"
+    assert re.search(r'apk del .*\bapk-tools\b', final_stage.replace('\\\n', ' ')), (
+        "Final stage must remove apk-tools"
+    )
+
+    # One ARG sets the Python for both stages; the venv only runs on the Python
+    # it was built with.
+    assert re.search(r'^ARG PYTHON_VERSION=3\.\d+$', dockerfile_content, re.M)
+    for stage in (build_stage, final_stage):
+        assert re.search(r'^ARG PYTHON_VERSION$', stage, re.M), "Redeclare ARG PYTHON_VERSION"
+        assert 'python-${PYTHON_VERSION}' in apk_packages(stage)
+    assert 'RUN python${PYTHON_VERSION} -m venv /app/.venv' in build_stage
+    assert 'sys.version_info >= (3, 11)' in build_stage, (
+        "Build stage must check PYTHON_VERSION against pyproject.toml's >=3.11"
+    )
+    assert not re.search(r'\bpython-?3\.\d+', build_stage + final_stage), (
+        "Use ${PYTHON_VERSION}, not a hard-coded Python version"
+    )
+
+    # The app is owned by nonroot via COPY --chown and runs as nonroot. A
+    # `RUN chown -R` layer would store every file under /app a second time.
+    assert 'COPY --from=python-build --chown=nonroot:nonroot /app /app' in final_stage
+    assert re.search(r'^USER nonroot$', final_stage, re.M), "Final stage must run as nonroot"
+    assert not any(
+        line.startswith('RUN') and 'chown -R' in line for line in instructions
+    ), "Use COPY --chown instead of a RUN chown -R layer"
 
 
 def test_use_new_frontend_flag_is_gone():
