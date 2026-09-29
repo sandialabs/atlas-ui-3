@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #987 - 2026-09-28
 - `Dockerfile.runtimeonly`'s final stage is now Chainguard `wolfi-base` with Python, `bash`, and busybox but no package manager or compiler, and it sets ownership with `COPY --chown` instead of a `chown -R` layer that stored `/app` twice. The image shrinks from 919 MB to 358 MB compressed (issue #986). `ARG PYTHON_VERSION` (default `3.14`) sets the Wolfi Python package for both Python stages.
-- The runtime-only image no longer ships `apk`, `git`, or a compiler, and its Python is set by `ARG PYTHON_VERSION` (default 3.14). Images that extend it with `RUN apk add` need to build from their own base instead.
+- The runtime-only image no longer ships `apk`, `git`, or a compiler, and its Python is set by `ARG PYTHON_VERSION` (default 3.14). Images that extend it with `RUN apk add` need to build from their own base instead. Setting `PYTHON_VERSION` below 3.11 (what `pyproject.toml` requires) fails the build.
 
 ### PR #982 - 2026-09-28
 - Accept an `http://` OIDC issuer on RFC 6761 `*.localhost` names (e.g. `http://keycloak.localhost`), not only on `localhost` itself, for local development.

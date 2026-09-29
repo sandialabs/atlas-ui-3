@@ -152,8 +152,13 @@ echo ""
 echo "5. Run backend unit tests"
 echo "-------------------------"
 cd "$PROJECT_ROOT"
-bash ./test/run_tests.sh backend > /dev/null 2>&1 || bash ./test/run_tests.sh backend
-echo "PASSED: Backend tests passed"
+if bash ./test/run_tests.sh backend > /tmp/pr987-backend-tests.log 2>&1; then
+    echo "PASSED: Backend tests passed"
+else
+    tail -30 /tmp/pr987-backend-tests.log
+    echo "FAILED: Backend tests failed (full log in /tmp/pr987-backend-tests.log)"
+    exit 1
+fi
 
 echo ""
 echo "=========================================="
