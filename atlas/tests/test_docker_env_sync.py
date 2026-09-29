@@ -223,7 +223,12 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     # All stages must use Chainguard images for a minimal CVE surface.
     # Match by registry prefix so the recipe can later pin to a specific
     # tag or digest without breaking this assertion.
-    from_lines = [line for line in dockerfile_content.splitlines() if line.startswith('FROM ')]
+    # Drop FROM flags such as `--platform=$BUILDPLATFORM` so only the image is compared.
+    from_lines = [
+        re.sub(r'^FROM\s+(?:--\S+\s+)*', 'FROM ', line, flags=re.I)
+        for line in dockerfile_content.splitlines()
+        if re.match(r'FROM\s', line, re.I)
+    ]
     assert all(line.startswith('FROM cgr.dev/chainguard/') for line in from_lines), from_lines
     assert 'FROM cgr.dev/chainguard/node:' in dockerfile_content, (
         "Frontend build stage must use a Chainguard Node image"
@@ -245,9 +250,10 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     instructions = dockerfile_content.replace('\\\n', ' ').splitlines()
     # Split into stages. The build stage is found by its `AS` name; the final
     # stage is the last one, which is what `docker build` outputs by default.
-    chunks = re.split(r'^(?=FROM )', dockerfile_content, flags=re.M)[1:]
+    # `FROM` may carry flags such as `--platform=$BUILDPLATFORM`.
+    chunks = re.split(r'^(?=FROM\s)', dockerfile_content, flags=re.M | re.I)[1:]
     names = [
-        (re.match(r'FROM \S+(?:\s+AS\s+(\S+))?', chunk, re.I).group(1) or '').lower()
+        (re.match(r'FROM\s+(?:--\S+\s+)*\S+(?:\s+AS\s+(\S+))?', chunk, re.I).group(1) or '').lower()
         for chunk in chunks
     ]
     assert 'python-build' in names, f"Expected a 'python-build' stage, found {names}"
@@ -265,7 +271,8 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # The final stage is not a -dev image, keeps a shell (hooks and agent-portal
     # commands can be shell scripts), and has no package manager or build tools.
-    assert '-dev' not in final_stage.splitlines()[0], "Final stage must not use a -dev image"
+    final_from = final_stage.splitlines()[0]
+    assert '-dev' not in final_from, f"Final stage must not use a -dev image: {final_from}"
     assert {'bash', 'busybox'} <= set(final_packages), final_packages
     build_tools = {'build-base', 'gcc', 'clang', 'make', 'git', 'apk-tools'}
     denied = [p for p in final_packages if p in build_tools or p.endswith('-dev')]
@@ -279,10 +286,12 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     assert re.search(r'^ARG PYTHON_VERSION=3\.\d+$', dockerfile_content, re.M), (
         "Declare a global `ARG PYTHON_VERSION=3.X` default before the first FROM"
     )
-    for stage in (build_stage, final_stage):
-        assert re.search(r'^ARG PYTHON_VERSION$', stage, re.M), "Redeclare ARG PYTHON_VERSION"
+    for label, stage in (('python-build', build_stage), ('final', final_stage)):
+        assert re.search(r'^ARG PYTHON_VERSION$', stage, re.M), (
+            f"The {label} stage must redeclare ARG PYTHON_VERSION"
+        )
         assert 'python-${PYTHON_VERSION}' in apk_packages(stage), (
-            "Both Python stages must install the python-${PYTHON_VERSION} package"
+            f"The {label} stage must install the python-${{PYTHON_VERSION}} package"
         )
     assert 'RUN python${PYTHON_VERSION} -m venv /app/.venv' in build_stage, (
         "Build the venv with python${PYTHON_VERSION}"

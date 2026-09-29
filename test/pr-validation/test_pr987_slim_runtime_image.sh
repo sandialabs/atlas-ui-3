@@ -36,8 +36,10 @@ IMAGE="atlas-ui-3-runtime-pr987:test"
 CONTAINER="atlas-pr987-validation"
 PORT=8211
 
+RUN_ERR="$(mktemp)"
 cleanup() {
     "$CLI" rm -f "$CONTAINER" > /dev/null 2>&1 || true
+    rm -f "$RUN_ERR"
 }
 trap cleanup EXIT
 
@@ -66,8 +68,8 @@ echo "PASSED: image built"
 echo ""
 echo "3. Check the final image contents"
 echo "---------------------------------"
-CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, *[bool(shutil.which(b)) for b in ("sh", "bash", "env", "apk", "gcc")])' 2> /tmp/pr987-run.err)" || {
-    echo "FAILED: could not run the image: $(cat /tmp/pr987-run.err)"
+CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, *[bool(shutil.which(b)) for b in ("sh", "bash", "env", "apk", "gcc")])' 2> "$RUN_ERR")" || {
+    echo "FAILED: could not run the image: $(cat "$RUN_ERR")"
     exit 1
 }
 if [ "$CHECK" = "65532 65532 /app/.venv True True True False False" ]; then
@@ -76,8 +78,8 @@ else
     echo "FAILED: unexpected uid/owner/tools (uid owner prefix sh bash env apk gcc): $CHECK"
     exit 1
 fi
-CA="$("$CLI" run --rm "$IMAGE" python -c 'import os, ssl; p = ssl.get_default_verify_paths(); print(os.path.exists(p.cafile or p.openssl_cafile))' 2> /tmp/pr987-run.err)" || {
-    echo "FAILED: could not run the image: $(cat /tmp/pr987-run.err)"
+CA="$("$CLI" run --rm "$IMAGE" python -c 'import os, ssl; p = ssl.get_default_verify_paths(); print(os.path.exists(p.cafile or p.openssl_cafile))' 2> "$RUN_ERR")" || {
+    echo "FAILED: could not run the image: $(cat "$RUN_ERR")"
     exit 1
 }
 if [ "$CA" = "True" ]; then
@@ -125,8 +127,8 @@ echo "4. Start the container and exercise it"
 echo "--------------------------------------"
 KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 "$CLI" run -d --name "$CONTAINER" -p "127.0.0.1:$PORT:8000" \
-    -e MCP_TOKEN_ENCRYPTION_KEY="$KEY" -e DEBUG_MODE=true "$IMAGE" > /dev/null || {
-    echo "FAILED: could not start the container"
+    -e MCP_TOKEN_ENCRYPTION_KEY="$KEY" -e DEBUG_MODE=true "$IMAGE" > /dev/null 2> "$RUN_ERR" || {
+    echo "FAILED: could not start the container: $(cat "$RUN_ERR")"
     exit 1
 }
 HEALTHY=0
