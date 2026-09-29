@@ -2,7 +2,7 @@
 # PR #987 Validation Script: Slim down Dockerfile.runtimeonly (issue #986)
 # Builds the runtime-only image and checks that the final image has a shell and
 # env but no package manager or compiler, that /app is owned by nonroot, that
-# the example hooks run by script path, and that the container serves
+# the example hooks work when run by script path, and that the container serves
 # /api/health and the UI.
 
 set -e
@@ -73,16 +73,45 @@ else
     echo "FAILED: unexpected uid/owner/tools (uid owner prefix sh bash env apk gcc): $CHECK"
     exit 1
 fi
-# Hooks are spawned without a shell, so a script-path hook needs its #! interpreter.
-EVENT='{"event": "PreToolUse", "tool_name": "filesystem__write_file", "arguments": {"path": "/tmp/x"}}'
-for hook in block_destructive.sh audit_tool.sh require_approval_network.py; do
-    if echo "$EVENT" | "$CLI" run --rm -i --entrypoint "/app/atlas/config/hooks-example/$hook" "$IMAGE" > /dev/null 2>&1; then
-        echo "PASSED: example hook $hook runs by script path"
-    else
-        echo "FAILED: example hook $hook did not run by script path"
-        exit 1
-    fi
-done
+if [ "$("$CLI" run --rm "$IMAGE" python -c 'import os, ssl; p = ssl.get_default_verify_paths(); print(os.path.exists(p.cafile or p.openssl_cafile))')" = "True" ]; then
+    echo "PASSED: CA certificate bundle present"
+else
+    echo "FAILED: CA certificate bundle missing"
+    exit 1
+fi
+
+# Hooks are spawned without a shell, so a script-path hook needs its #!
+# interpreter. Run the shipped examples by path with real event envelopes.
+HOOKS=/app/atlas/config/hooks-example
+envelope() {  # envelope <event> <tool_name> <path>
+    printf '{"event": "%s", "payload": {"tool_name": "%s", "tool_args": {"path": "%s"}}}' "$1" "$2" "$3"
+}
+set +e
+envelope PreToolUse filesystem__write_file /etc/passwd | "$CLI" run --rm -i --entrypoint "$HOOKS/block_destructive.sh" "$IMAGE" > /dev/null 2> /tmp/pr987-hook.err
+RC=$?
+envelope PreToolUse filesystem__write_file /tmp/x | "$CLI" run --rm -i --entrypoint "$HOOKS/block_destructive.sh" "$IMAGE" > /dev/null 2>&1
+RC_ALLOW=$?
+APPROVAL="$(envelope PreToolUse http_get /tmp/x | "$CLI" run --rm -i --entrypoint "$HOOKS/require_approval_network.py" "$IMAGE" 2>&1)"
+AUDIT="$(envelope PostToolUse filesystem__write_file /tmp/x | "$CLI" run --rm -i -e ATLAS_PROJECT_DIR=/tmp --entrypoint bash "$IMAGE" -c "$HOOKS/audit_tool.sh && cat /tmp/logs/tool-audit.jsonl" 2>&1)"
+set -e
+if [ $RC -eq 2 ] && grep -q "blocked by policy" /tmp/pr987-hook.err && [ $RC_ALLOW -eq 0 ]; then
+    echo "PASSED: block_destructive.sh denies /etc/passwd (exit 2) and allows /tmp/x"
+else
+    echo "FAILED: block_destructive.sh exit $RC for /etc/passwd, $RC_ALLOW for /tmp/x: $(cat /tmp/pr987-hook.err)"
+    exit 1
+fi
+if echo "$APPROVAL" | grep -q '"decision": "require_approval"'; then
+    echo "PASSED: require_approval_network.py requires approval for http_get"
+else
+    echo "FAILED: require_approval_network.py returned: $APPROVAL"
+    exit 1
+fi
+if echo "$AUDIT" | grep -q '"tool_name": "filesystem__write_file"'; then
+    echo "PASSED: audit_tool.sh wrote an audit record"
+else
+    echo "FAILED: audit_tool.sh output: $AUDIT"
+    exit 1
+fi
 
 echo ""
 echo "4. Start the container and exercise it"
