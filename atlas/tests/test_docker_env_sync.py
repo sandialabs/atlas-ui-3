@@ -220,16 +220,21 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
 
+    # Split into stages and parse each stage's FROM line once:
+    # `FROM [--flag=...] <image> [AS <name>]` (flags such as --platform).
+    chunks = re.split(r'^(?=FROM\s)', dockerfile_content, flags=re.M | re.I)[1:]
+    stages = []  # (FROM line, image, lower-cased name or '', stage text)
+    for chunk in chunks:
+        from_line = chunk.splitlines()[0]
+        match = re.fullmatch(r'FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*', from_line, re.I)
+        assert match, f"Unparsed FROM line: {from_line}"
+        stages.append((from_line, match.group(1), (match.group(2) or '').lower(), chunk))
+
     # All stages must use Chainguard images for a minimal CVE surface.
     # Match by registry prefix so the recipe can later pin to a specific
     # tag or digest without breaking this assertion.
-    # Drop FROM flags such as `--platform=$BUILDPLATFORM` so only the image is compared.
-    from_lines = [
-        re.sub(r'^FROM\s+(?:--\S+\s+)*', 'FROM ', line, flags=re.I)
-        for line in dockerfile_content.splitlines()
-        if re.match(r'FROM\s', line, re.I)
-    ]
-    assert all(line.startswith('FROM cgr.dev/chainguard/') for line in from_lines), from_lines
+    non_chainguard = [line for line, image, _, _ in stages if not image.startswith('cgr.dev/chainguard/')]
+    assert not non_chainguard, f"Every stage must use a cgr.dev/chainguard/ image: {non_chainguard}"
     assert 'FROM cgr.dev/chainguard/node:' in dockerfile_content, (
         "Frontend build stage must use a Chainguard Node image"
     )
@@ -248,17 +253,12 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # Join continuation lines so each instruction is one string.
     instructions = dockerfile_content.replace('\\\n', ' ').splitlines()
-    # Split into stages. The build stage is found by its `AS` name; the final
-    # stage is the last one, which is what `docker build` outputs by default.
-    # `FROM` may carry flags such as `--platform=$BUILDPLATFORM`.
-    chunks = re.split(r'^(?=FROM\s)', dockerfile_content, flags=re.M | re.I)[1:]
-    names = [
-        (re.match(r'FROM\s+(?:--\S+\s+)*\S+(?:\s+AS\s+(\S+))?', chunk, re.I).group(1) or '').lower()
-        for chunk in chunks
-    ]
+    # The build stage is found by its `AS` name; the final stage is the last
+    # one, which is what `docker build` outputs by default.
+    names = [name for _, _, name, _ in stages]
     assert 'python-build' in names, f"Expected a 'python-build' stage, found {names}"
-    build_stage = chunks[names.index('python-build')]
-    final_stage = chunks[-1]
+    build_stage = stages[names.index('python-build')][3]
+    final_from, final_image, _, final_stage = stages[-1]
 
     def apk_packages(stage):
         """Package names from a stage's `apk add` commands (flags dropped)."""
@@ -271,9 +271,10 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # The final stage is not a -dev image, keeps a shell (hooks and agent-portal
     # commands can be shell scripts), and has no package manager or build tools.
-    final_from = final_stage.splitlines()[0]
-    assert '-dev' not in final_from, f"Final stage must not use a -dev image: {final_from}"
-    assert {'bash', 'busybox'} <= set(final_packages), final_packages
+    assert '-dev' not in final_image, f"Final stage must not use a -dev image: {final_from}"
+    assert {'bash', 'busybox'} <= set(final_packages), (
+        f"Final stage must install bash and busybox; it installs {final_packages}"
+    )
     build_tools = {'build-base', 'gcc', 'clang', 'make', 'git', 'apk-tools'}
     denied = [p for p in final_packages if p in build_tools or p.endswith('-dev')]
     assert not denied, f"Final stage must not install build tools: {denied}"

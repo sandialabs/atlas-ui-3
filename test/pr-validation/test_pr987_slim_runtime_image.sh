@@ -96,17 +96,17 @@ envelope() {  # envelope <event> <tool_name> <path>
     printf '{"event": "%s", "payload": {"tool_name": "%s", "tool_args": {"path": "%s"}}}' "$1" "$2" "$3"
 }
 set +e
-envelope PreToolUse filesystem__write_file /etc/passwd | "$CLI" run --rm -i --entrypoint "$HOOKS/block_destructive.sh" "$IMAGE" > /dev/null 2> /tmp/pr987-hook.err
+envelope PreToolUse filesystem__write_file /etc/passwd | "$CLI" run --rm -i --entrypoint "$HOOKS/block_destructive.sh" "$IMAGE" > /dev/null 2> "$RUN_ERR"
 RC=$?
 envelope PreToolUse filesystem__write_file /tmp/x | "$CLI" run --rm -i --entrypoint "$HOOKS/block_destructive.sh" "$IMAGE" > /dev/null 2>&1
 RC_ALLOW=$?
 APPROVAL="$(envelope PreToolUse http_get /tmp/x | "$CLI" run --rm -i --entrypoint "$HOOKS/require_approval_network.py" "$IMAGE" 2>&1)"
 AUDIT="$(envelope PostToolUse filesystem__write_file /tmp/x | "$CLI" run --rm -i -e ATLAS_PROJECT_DIR=/tmp --entrypoint bash "$IMAGE" -c "$HOOKS/audit_tool.sh && cat /tmp/logs/tool-audit.jsonl" 2>&1)"
 set -e
-if [ $RC -eq 2 ] && grep -q "blocked by policy" /tmp/pr987-hook.err && [ $RC_ALLOW -eq 0 ]; then
+if [ $RC -eq 2 ] && grep -q "blocked by policy" "$RUN_ERR" && [ $RC_ALLOW -eq 0 ]; then
     echo "PASSED: block_destructive.sh denies /etc/passwd (exit 2) and allows /tmp/x"
 else
-    echo "FAILED: block_destructive.sh exit $RC for /etc/passwd, $RC_ALLOW for /tmp/x: $(cat /tmp/pr987-hook.err)"
+    echo "FAILED: block_destructive.sh exit $RC for /etc/passwd, $RC_ALLOW for /tmp/x: $(cat "$RUN_ERR")"
     exit 1
 fi
 if echo "$APPROVAL" | grep -q '"decision": "require_approval"'; then
