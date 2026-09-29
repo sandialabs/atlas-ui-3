@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #990 - 2026-09-28
+- Postgres chat history works again with SQLAlchemy 2.1, which made psycopg (v3) the default driver for `postgresql://` URLs. Atlas now installs `psycopg[binary]` alongside `psycopg2-binary` (closes #988). With SQLAlchemy 2.1, `postgresql://` URLs therefore use psycopg instead of psycopg2; to keep psycopg2, set `DB_DRIVER=postgresql+psycopg2` or use a `postgresql+psycopg2://` URL.
+
 ### PR #989 - 2026-09-29
 - `test_runtime_only_dockerfile_keeps_runtime_surface_small` finds the runtime-only Dockerfile's stages by `AS` name and every assert says what failed; the #987 validation script prints a `FAILED:` line when a `docker run` fails instead of exiting silently under `set -e`.
 
