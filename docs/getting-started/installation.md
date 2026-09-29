@@ -48,7 +48,7 @@ docker run -p 8000:8000 \
 
 ### Option 3: Build a Runtime-only Image
 
-Use the runtime-only Dockerfile when you want a slimmer deployed image with only runtime dependencies. Its final stage is built from Chainguard's `wolfi-base` with Python, `bash`, and busybox (`sh`, `env`, and basic commands), but no package manager or compiler. Both Python stages install the same Wolfi `python-3.X` package; when moving to a new Python version, bump both together.
+Use the runtime-only Dockerfile when you want a slimmer deployed image with only runtime dependencies. Its final stage is built from Chainguard's `wolfi-base` with Python, `bash`, and busybox (`sh`, `env`, and basic commands), but no package manager or compiler. `ARG PYTHON_VERSION` (default `3.14`) sets the Wolfi Python package that both Python stages install.
 
 ```bash
 docker build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .

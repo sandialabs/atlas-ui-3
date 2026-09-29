@@ -248,20 +248,36 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
         dockerfile_content.index(' AS python-build'):dockerfile_content.rindex('\nFROM ')
     ]
 
+    def apk_packages(stage):
+        """Package names from a stage's `apk add` commands (flags dropped)."""
+        packages = []
+        for command in re.findall(r'apk add ([^&;\n]*)', stage.replace('\\\n', ' ')):
+            packages += [word for word in command.split() if not word.startswith('-')]
+        return packages
+
+    final_packages = apk_packages(final_stage)
+
     # The final stage is not a -dev image, keeps a shell (hooks and agent-portal
-    # commands can be shell scripts), and removes the package manager.
+    # commands can be shell scripts), and has no package manager or build tools.
     assert '-dev' not in from_lines[-1], "Final stage must not use a -dev image"
-    assert re.search(r'apk add .*\bbash\b.*\bbusybox\b', final_stage), (
-        "Final stage must install bash and busybox"
-    )
+    assert {'bash', 'busybox'} <= set(final_packages), final_packages
+    build_tools = {'build-base', 'gcc', 'clang', 'make', 'git', 'apk-tools'}
+    denied = [p for p in final_packages if p in build_tools or p.endswith('-dev')]
+    assert not denied, f"Final stage must not install build tools: {denied}"
     assert re.search(r'apk del .*\bapk-tools\b', final_stage.replace('\\\n', ' ')), (
         "Final stage must remove apk-tools"
     )
 
-    # Both Python stages must install the same Python, or the venv won't run.
-    build_python = set(re.findall(r'\bpython-3\.\d+\b', build_stage))
-    final_python = set(re.findall(r'\bpython-3\.\d+\b', final_stage))
-    assert len(final_python) == 1 and build_python == final_python, (build_python, final_python)
+    # One ARG sets the Python for both stages; the venv only runs on the Python
+    # it was built with.
+    assert re.search(r'^ARG PYTHON_VERSION=3\.\d+$', dockerfile_content, re.M)
+    for stage in (build_stage, final_stage):
+        assert re.search(r'^ARG PYTHON_VERSION$', stage, re.M), "Redeclare ARG PYTHON_VERSION"
+        assert 'python-${PYTHON_VERSION}' in apk_packages(stage)
+    assert 'RUN python${PYTHON_VERSION} -m venv /app/.venv' in build_stage
+    assert not re.search(r'\bpython-?3\.\d+', build_stage + final_stage), (
+        "Use ${PYTHON_VERSION}, not a hard-coded Python version"
+    )
 
     # The app is owned by nonroot via COPY --chown and runs as nonroot. A
     # `RUN chown -R` layer would store every file under /app a second time.

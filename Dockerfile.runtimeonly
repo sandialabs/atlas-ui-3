@@ -5,6 +5,10 @@
 #
 # All stages use Chainguard images for a minimal CVE surface.
 
+# Wolfi Python package (python-X.Y) installed by both Python stages. The venv
+# is built against it, so both stages must use the same version.
+ARG PYTHON_VERSION=3.14
+
 FROM cgr.dev/chainguard/node:latest-dev AS frontend-build
 
 # Chainguard node defaults to nonroot; switch to root for build operations.
@@ -31,11 +35,10 @@ ENV APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 
-# Both Python stages install the same Wolfi python-3.X package, so the venv
-# built here always matches the final image's Python. Bump them together.
 FROM cgr.dev/chainguard/wolfi-base AS python-build
 
-RUN apk add --no-cache python-3.14 python-3.14-dev build-base
+ARG PYTHON_VERSION
+RUN apk add --no-cache python-${PYTHON_VERSION} python-${PYTHON_VERSION}-dev build-base
 
 WORKDIR /app
 
@@ -64,7 +67,7 @@ RUN mkdir -p \
 # servers (e.g. pptx_generator) referenced by the seeded default mcp.json
 # work out of the box. Users who want a truly minimal image can replace the
 # seeded config and drop the extra.
-RUN python3.14 -m venv /app/.venv
+RUN python${PYTHON_VERSION} -m venv /app/.venv
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -78,7 +81,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # manager or compiler ends up in the image.
 FROM cgr.dev/chainguard/wolfi-base
 
-RUN apk add --no-cache python-3.14 bash busybox && \
+ARG PYTHON_VERSION
+RUN apk add --no-cache python-${PYTHON_VERSION} bash busybox && \
     apk del --no-cache wolfi-base apk-tools
 
 ARG GIT_HASH="unknown"
