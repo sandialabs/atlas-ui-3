@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-08-20
+Last updated: 2026-09-28
 
 ## Overview
 
@@ -51,6 +51,8 @@ The `docker-compose.yml` includes a pre-configured PostgreSQL service with:
 - Port: `5432`
 
 For production, change the credentials and use a persistent volume.
+
+Atlas installs both PostgreSQL drivers: `psycopg` (v3), which SQLAlchemy 2.1 and later use for `postgresql://` URLs, and `psycopg2`, which SQLAlchemy 2.0 used. To pick one explicitly, use `postgresql+psycopg://` or `postgresql+psycopg2://` (or set `DB_DRIVER` to the same scheme).
 
 ### Startup Behavior
 

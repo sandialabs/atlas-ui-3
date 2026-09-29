@@ -1073,6 +1073,79 @@ describe('refreshJoinedConversation (issue #959)', () => {
     }
   })
 
+  it('live mode keeps appending past the run-end re-arm budget without claiming the obligation', async () => {
+    // The periodic mid-run reconcile (live: true) runs far more often than the
+    // bounded run-end refresh. It must not spend that budget -- otherwise the
+    // live passes would exhaust it and every later pass would refuse -- nor
+    // schedule the run-end reload, which the load-time path already owns.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+    }
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, loaded)
+
+      const recordWith = (n) => ({
+        id: 'conv-1',
+        messages: [
+          storedChat('user', 'What is the weather'),
+          ...Array.from({ length: n }, (_, i) => storedToolCall(`call-${i}`, 'basic_fns_bash')),
+        ],
+        metadata: {},
+        in_flight: true,
+      })
+
+      const outcomes = []
+      for (let i = 1; i <= 7; i += 1) {
+        act(() => { outcomes.push(result.current.refreshJoinedConversation(recordWith(i), { live: true })) })
+      }
+      expect(outcomes.every(Boolean)).toBe(true)
+      const toolRows = result.current.messages.filter(m => m.type === 'tool_call')
+      expect(toolRows).toHaveLength(7)
+      expect(result.current.runEndedConversationId).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('live mode appends a tool row that appeared after the view was opened', async () => {
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedToolCall('call-bash', 'basic_fns_bash'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    const before = result.current.messages.filter(m => m.type === 'tool_call')
+    expect(before.map(m => m.tool_call_id)).toEqual(['call-bash'])
+
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        messages: [
+          storedChat('user', 'What is the weather'),
+          storedToolCall('call-bash', 'basic_fns_bash'),
+          storedToolCall('call-sleep', 'atlas_sleep'),
+        ],
+        metadata: {},
+        in_flight: true,
+      }, { live: true })
+    })
+    expect(ok).toBe(true)
+    const toolRows = result.current.messages.filter(m => m.type === 'tool_call')
+    // The row already on screen is kept as the same object (no duplicate) and
+    // the sibling that landed mid-run is appended after it.
+    expect(toolRows.map(m => m.tool_call_id)).toEqual(['call-bash', 'call-sleep'])
+    expect(toolRows[0]).toBe(before[0])
+  })
+
   it('rejects malformed input without touching the view', async () => {
     const loaded = {
       id: 'conv-1',

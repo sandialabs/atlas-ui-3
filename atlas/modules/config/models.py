@@ -361,6 +361,16 @@ class RAGSourcesConfig(BaseModel):
         return v
 
 
+def qualified_tool_name(server_name: str, tool_name: str) -> str:
+    """The fully-qualified name every server/tool pair maps to.
+
+    Approval config keys, the LLM-facing tool schema, and the tool index all
+    use this `<server>_<tool>` spelling, so any place that builds or looks up
+    one of those keys must go through here to stay in sync.
+    """
+    return f"{server_name}_{tool_name}"
+
+
 class ToolApprovalConfig(BaseModel):
     """Configuration for a single tool's approval settings."""
     require_approval: bool = False

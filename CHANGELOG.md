@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #990 - 2026-09-28
+- Postgres chat history works again with SQLAlchemy 2.1, which made psycopg (v3) the default driver for `postgresql://` URLs. Atlas now installs `psycopg[binary]` alongside `psycopg2-binary` (closes #988). With SQLAlchemy 2.1, `postgresql://` URLs therefore use psycopg instead of psycopg2; to keep psycopg2, set `DB_DRIVER=postgresql+psycopg2` or use a `postgresql+psycopg2://` URL.
+
+### PR #989 - 2026-09-29
+- `test_runtime_only_dockerfile_keeps_runtime_surface_small` finds the runtime-only Dockerfile's stages by `AS` name and every assert says what failed; the #987 validation script prints a `FAILED:` line when a `docker run` fails instead of exiting silently under `set -e`.
+
+### PR #987 - 2026-09-28
+- `Dockerfile.runtimeonly`'s final stage is now Chainguard `wolfi-base` with Python, `bash`, and busybox but no package manager or compiler, and it sets ownership with `COPY --chown` instead of a `chown -R` layer that stored `/app` twice. The image shrinks from 919 MB to 358 MB compressed (issue #986). `ARG PYTHON_VERSION` (default `3.14`) sets the Wolfi Python package for both Python stages.
+- The runtime-only image no longer ships `apk`, `git`, or a compiler, and its Python is set by `ARG PYTHON_VERSION` (default 3.14). Images that extend it with `RUN apk add` need to build from their own base instead. Setting `PYTHON_VERSION` below 3.11 (what `pyproject.toml` requires) fails the build.
+
+### PR #981 - 2026-09-27
+- A conversation opened while its run is still executing now refreshes mid-run (closes #980): the run's frames stay bound to the socket that started it, so a joined view held the snapshot the run had when it was opened and showed nothing the run produced afterwards until the final reload -- an `atlas_sleep` landing next to the `basic_fns_bash` already on screen stayed invisible while the answer was still in progress. While the open conversation has an active run and the view holds the replay placeholder, the client polls the run's live record (`GET /api/conversations/{id}`) every few seconds and appends the tool rows and narration that have appeared since, using the same reconciliation as the run-end reload so rows already on screen keep their identity and the reader's scroll position stands; the partial bubble tracks the newest `streaming_text`. The poll does not spend the run-end re-arm budget, ignores a record that is no longer in flight, and leaves the tab that owns the stream to its live socket.
+
+### PR #982 - 2026-09-28
+- Accept an `http://` OIDC issuer on RFC 6761 `*.localhost` names (e.g. `http://keycloak.localhost`), not only on `localhost` itself, for local development.
+
+### PR #977 - 2026-09-25
+- Refresh a single MCP server from the admin panel (issue #879): new `POST /admin/mcp/refresh` (`{"server_name": ...}`) re-reads that server's config, reconnects, and re-discovers its tools -- instead of the all-servers reload -- and each server chip in the admin MCP card carries a per-server refresh button. Only the named server's state is touched; idle cached per-user clients for it are rebuilt while in-flight calls are not torn down (retained entries are marked stale so both acquisition paths rebuild them).
+
+### PR #972 - 2026-09-24
+- `/api/config` now correctly includes per-tool approval entries by matching fully-qualified `<server>_<tool>` names against authorized tools.
+
 ### PR #969 - 2026-09-24
 - `atlas_launch` now self-discovers launch options when needed, tools execution no longer special-cases launch discovery, and launch discovery memoizes per-group model authorization checks within a single call. Tools mode now allows at most one exempted retry of failed `atlas_discover_launch_options` per turn.
 

@@ -208,7 +208,7 @@ The container seeds `/app/config` from package defaults at build time. Mounting 
 ### Runtime-only Image (smaller runtime footprint)
 
 Build the standard image (`Dockerfile`) when you need development-oriented files in the container.  
-Build the runtime-only recipe to keep Node.js, docs, and test trees out of the final image:
+Build the runtime-only recipe to keep Node.js, docs, and test trees out of the final image. Its final stage has Python, `bash`, and busybox (`sh`, `env`), but no package manager or compiler:
 
 ```bash
 podman build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .

@@ -27,6 +27,7 @@ from .models import (
     RAGSourcesConfig,
     ToolApprovalConfig,
     ToolApprovalsConfig,
+    qualified_tool_name,
     resolve_env_var,
 )
 from .settings import AppSettings
@@ -446,7 +447,7 @@ class ConfigManager:
                     require_approval_list = server_config.require_approval or []
 
                     for tool_name in require_approval_list:
-                        full_tool_name = f"{server_name}_{tool_name}"
+                        full_tool_name = qualified_tool_name(server_name, tool_name)
                         # Mark as explicitly requiring approval; allow_edit is moot for requirement
                         tools_config[full_tool_name] = ToolApprovalConfig(
                             require_approval=True,
