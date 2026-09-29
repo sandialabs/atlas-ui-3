@@ -66,17 +66,21 @@ echo "PASSED: image built"
 echo ""
 echo "3. Check the final image contents"
 echo "---------------------------------"
-CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, *[bool(shutil.which(b)) for b in ("sh", "bash", "env", "apk", "gcc")])')"
+CHECK="$("$CLI" run --rm "$IMAGE" python -c 'import os, shutil, sys; print(os.getuid(), os.stat("/app/.venv").st_uid, sys.prefix, *[bool(shutil.which(b)) for b in ("sh", "bash", "env", "apk", "gcc")])' 2>&1)" || {
+    echo "FAILED: could not run the image: $CHECK"
+    exit 1
+}
 if [ "$CHECK" = "65532 65532 /app/.venv True True True False False" ]; then
     echo "PASSED: runs as 65532, /app/.venv owned by 65532, venv on PATH, sh/bash/env present, no apk or gcc"
 else
     echo "FAILED: unexpected uid/owner/tools (uid owner prefix sh bash env apk gcc): $CHECK"
     exit 1
 fi
-if [ "$("$CLI" run --rm "$IMAGE" python -c 'import os, ssl; p = ssl.get_default_verify_paths(); print(os.path.exists(p.cafile or p.openssl_cafile))')" = "True" ]; then
+CA="$("$CLI" run --rm "$IMAGE" python -c 'import os, ssl; p = ssl.get_default_verify_paths(); print(os.path.exists(p.cafile or p.openssl_cafile))' 2>&1)" || true
+if [ "$CA" = "True" ]; then
     echo "PASSED: CA certificate bundle present"
 else
-    echo "FAILED: CA certificate bundle missing"
+    echo "FAILED: CA certificate bundle missing: $CA"
     exit 1
 fi
 
@@ -118,7 +122,10 @@ echo "4. Start the container and exercise it"
 echo "--------------------------------------"
 KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 "$CLI" run -d --name "$CONTAINER" -p "127.0.0.1:$PORT:8000" \
-    -e MCP_TOKEN_ENCRYPTION_KEY="$KEY" -e DEBUG_MODE=true "$IMAGE" > /dev/null
+    -e MCP_TOKEN_ENCRYPTION_KEY="$KEY" -e DEBUG_MODE=true "$IMAGE" > /dev/null || {
+    echo "FAILED: could not start the container"
+    exit 1
+}
 HEALTHY=0
 for i in $(seq 1 60); do
     if curl -sf "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1; then
