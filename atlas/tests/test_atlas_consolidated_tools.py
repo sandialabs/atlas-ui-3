@@ -10,6 +10,7 @@ conversations keep working.
 import pytest
 
 from atlas.domain.messages.models import ToolCall
+from atlas.hooks.models import HookConfig
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
@@ -23,8 +24,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     normalize_tool_names,
     search_kwargs_for,
 )
-from atlas.modules.mcp_tools.client import MCPToolManager, _drop_reserved_servers
-from atlas.hooks.models import HookConfig
+from atlas.modules.mcp_tools.client import MCPToolManager, _drop_disabled_servers, _drop_reserved_servers
 
 
 def _manager() -> MCPToolManager:
@@ -146,6 +146,24 @@ def test_drop_reserved_servers_leaves_a_clean_config_untouched():
     config = {"pptx_generator": {"url": "http://example"}}
 
     assert _drop_reserved_servers(config) is config
+
+
+def test_disabled_servers_are_dropped_from_mcp_config():
+    """``enabled: false`` means never started or probed, not merely hidden."""
+    kept = _drop_disabled_servers({
+        "pptx_generator": {"url": "http://example", "enabled": False},
+        "session_state_demo": {"url": "http://example", "enabled": False},
+        "calculator": {"command": ["python", "calc.py"], "enabled": True},
+        "prompts": {"url": "http://example"},
+    })
+
+    assert list(kept) == ["calculator", "prompts"]
+
+
+def test_drop_disabled_servers_leaves_a_clean_config_untouched():
+    config = {"calculator": {"command": ["python", "calc.py"]}}
+
+    assert _drop_disabled_servers(config) is config
 
 
 def test_discover_sources_is_advertised_again_under_the_atlas_server():
