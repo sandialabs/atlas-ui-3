@@ -222,7 +222,9 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     # Split into stages and parse each stage's FROM line once:
     # `FROM [--flag=...] <image> [AS <name>]` (flags such as --platform).
-    chunks = re.split(r'^(?=FROM\s)', dockerfile_content, flags=re.M | re.I)[1:]
+    # The split is case-sensitive so a column-0 `from ...` line inside a RUN
+    # heredoc (e.g. Python) isn't taken for a new stage.
+    chunks = re.split(r'^(?=FROM\s)', dockerfile_content, flags=re.M)[1:]
     stages = []  # (FROM line, image, lower-cased name or '', stage text)
     for chunk in chunks:
         from_line = chunk.splitlines()[0]
@@ -235,12 +237,14 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
     # tag or digest without breaking this assertion.
     non_chainguard = [line for line, image, _, _ in stages if not image.startswith('cgr.dev/chainguard/')]
     assert not non_chainguard, f"Every stage must use a cgr.dev/chainguard/ image: {non_chainguard}"
-    assert 'FROM cgr.dev/chainguard/node:' in dockerfile_content, (
+    assert any(image.startswith('cgr.dev/chainguard/node:') for _, image, _, _ in stages), (
         "Frontend build stage must use a Chainguard Node image"
     )
 
     # Runtime image should copy only built frontend assets, not the full frontend source tree.
-    assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content
+    assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content, (
+        "Copy only the built frontend (dist) into /app/atlas/static"
+    )
 
     # Runtime recipe should avoid pulling in extra top-level development/test trees.
     for excluded_copy in ('COPY docs/', 'COPY test/', 'COPY scripts/', 'COPY mocks/'):
@@ -249,7 +253,9 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
         )
 
     # Runtime install must tolerate Python upper-bound constraints in transitive deps.
-    assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content
+    assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content, (
+        'Install with --ignore-requires-python ".[mcp-demos]"'
+    )
 
     # Join continuation lines so each instruction is one string.
     instructions = dockerfile_content.replace('\\\n', ' ').splitlines()
