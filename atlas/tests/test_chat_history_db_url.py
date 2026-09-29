@@ -5,9 +5,13 @@ DB_USER, DB_PASSWORD, DB_DRIVER as an alternative to a full CHAT_HISTORY_DB_URL.
 """
 
 import pytest
+import sqlalchemy
 
 from atlas.modules.chat_history import database as chat_history_database
 from atlas.modules.config.config_manager import AppSettings, build_db_url_from_parts
+
+# SQLAlchemy 2.1 made psycopg (v3) the default driver for postgresql:// URLs.
+_SQLALCHEMY_2_1 = tuple(int(part) for part in sqlalchemy.__version__.split(".")[:2]) >= (2, 1)
 
 
 @pytest.fixture(autouse=True)
@@ -192,14 +196,25 @@ class TestPostgresDriverInstalled:
     so a missing driver fails here instead of at chat-history startup.
     """
 
-    @pytest.mark.parametrize("driver", ["postgresql", "postgresql+psycopg", "postgresql+psycopg2"])
-    def test_chat_history_engine_loads_driver(self, monkeypatch, driver):
-        monkeypatch.setattr(chat_history_database, "_engine", None)
+    @pytest.fixture(autouse=True)
+    def _fresh_engine(self):
+        chat_history_database.reset_engine()
+        yield
+        chat_history_database.reset_engine()
+
+    @pytest.mark.parametrize(
+        ("scheme", "expected_driver"),
+        [
+            # A bare postgresql:// URL uses SQLAlchemy's default driver.
+            ("postgresql", "psycopg" if _SQLALCHEMY_2_1 else "psycopg2"),
+            ("postgresql+psycopg", "psycopg"),
+            ("postgresql+psycopg2", "psycopg2"),
+        ],
+    )
+    def test_chat_history_engine_loads_driver(self, scheme, expected_driver):
         url = build_db_url_from_parts(
-            db_driver=driver, db_host="db.example.com", db_name="atlas", db_user="atlas", db_password="pw"
+            db_driver=scheme, db_host="db.example.com", db_name="atlas", db_user="atlas", db_password="pw"
         )
         engine = chat_history_database.get_engine(url)
-        try:
-            assert engine.dialect.name == "postgresql"
-        finally:
-            engine.dispose()
+        assert engine.dialect.name == "postgresql"
+        assert engine.dialect.driver == expected_driver
