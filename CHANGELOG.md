@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #989 - 2026-09-29
+- `test_runtime_only_dockerfile_keeps_runtime_surface_small` finds the runtime-only Dockerfile's stages by `AS` name and every assert says what failed; the #987 validation script prints a `FAILED:` line when a `docker run` fails instead of exiting silently under `set -e`.
+
 ### PR #987 - 2026-09-28
 - `Dockerfile.runtimeonly`'s final stage is now Chainguard `wolfi-base` with Python, `bash`, and busybox but no package manager or compiler, and it sets ownership with `COPY --chown` instead of a `chown -R` layer that stored `/app` twice. The image shrinks from 919 MB to 358 MB compressed (issue #986). `ARG PYTHON_VERSION` (default `3.14`) sets the Wolfi Python package for both Python stages.
 - The runtime-only image no longer ships `apk`, `git`, or a compiler, and its Python is set by `ARG PYTHON_VERSION` (default 3.14). Images that extend it with `RUN apk add` need to build from their own base instead. Setting `PYTHON_VERSION` below 3.11 (what `pyproject.toml` requires) fails the build.
