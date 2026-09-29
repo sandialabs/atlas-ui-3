@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-09-20
+Last updated: 2026-09-27
 
 Issue #884.
 
@@ -187,9 +187,29 @@ Reopen paths consume it in two shapes:
   an earlier snapshot of the same text) and the run's live stream continues
   on top, so the reply runs unbroken from its first word.
 
-Either way the partial bubble is marked "answer in progress -- it will
-refresh when the response finishes": once the run ends, the client reloads the
+Either way the partial bubble is marked "answer in progress -- it will refresh
+when the response finishes": once the run ends, the client reloads the
 conversation from the store and the marker goes with the placeholder.
+
+### A joined view refreshes while the run is still going
+
+A run's frames stay bound to the socket that started it, so a joined view --
+one that opened the conversation from another tab, or after a reload -- only
+holds the snapshot the run had when it was opened. Tool rows the run produces
+afterwards (the `atlas_sleep` that follows the `basic_fns_bash` already on
+screen, say) used to stay invisible until the run ended and the reload ran.
+
+While the open conversation has an active run and the view holds a replay
+placeholder, the client now polls the run's live record every few seconds
+(`LIVE_REFRESH_INTERVAL_MS` in `ChatContext.jsx`) and appends whatever has
+appeared since, using the same reconciliation as the run-end reload: rows
+already on screen keep their identity, so an expanded tool row and the
+reader's scroll position stand. The open bubble tracks the newest
+`streaming_text` (or collapses to the marker-only seed between segments), and
+a poll that comes back with the run already settled is ignored -- the run-end
+path owns the final transcript. The tab that owns the stream is not polled;
+it receives these rows live over its own socket.
+
 
 ### Auto-approve covers background runs
 
@@ -266,13 +286,17 @@ These are known and deliberate, not oversights:
   in `runs_snapshot` and, on reopening the conversation, the run's transcript so
   far (prompt and tool rows) plus the open segment streamed so far
   (`streaming_text` / the restore replay frame) — but the tokens that stream
-  *after* it reopens reach only the socket that started the run. The marker on
-  the partial bubble says it will refresh; once the run ends the client reloads
-  the conversation from the store, so the final answer appears without a manual
-  refresh. That refresh appends only the rows the view is missing, so a reader
-  who scrolled up keeps their position and their expanded tool rows; a
-  transcript that has diverged from the view (rewound or edited elsewhere)
-  falls back to a full reload (issue #959). Live re-attach is issue #760.
+  *after* it reopens reach only the socket that started the run. The view polls
+  the run's live record every few seconds while the run is active and appends
+  the tool rows and narration that have appeared, so recent activity shows up
+  without a manual refresh; the partial bubble keeps its marker and says it
+  will refresh. Once the run ends the client reloads the conversation from the
+  store, so the final answer appears without a manual refresh. That refresh
+  appends only the rows the view is missing, so a reader who scrolled up keeps
+  their position and their expanded tool rows; a transcript that has diverged
+  from the view (rewound or edited elsewhere) falls back to a full reload
+  (issue #959). Live re-attach (server-pushed frames to every connection) is
+  issue #760.
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
   Use a single worker, or sticky sessions, until the run store is shared.

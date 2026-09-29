@@ -44,6 +44,7 @@ COPY docker-compose.yml .
 COPY agent_start.sh .
 COPY ps_agent_start.ps1 .
 COPY Dockerfile-test .
+COPY Dockerfile.runtimeonly .
 
 # Copy and install frontend dependencies (keep all dependencies for testing)
 COPY frontend/package*.json ./frontend/

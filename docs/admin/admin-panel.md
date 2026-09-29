@@ -1,6 +1,6 @@
 # Admin Panel
 
-Last updated: 2026-03-07
+Last updated: 2026-09-25
 
 The application includes an admin panel that provides access to configuration values, MCP server controls, application logs, and user feedback.
 
@@ -9,7 +9,7 @@ The application includes an admin panel that provides access to configuration va
 *   **Features**:
     *   View the current application configuration.
     *   View the application logs (`app.jsonl`).
-    *   Inspect and manage MCP server connections (reload config, reconnect failed servers, view status).
+    *   Inspect and manage MCP server connections (reload config, reconnect or refresh individual servers, view status).
     *   View and download user feedback data.
 
 ## Admin Dashboard Polling
@@ -53,6 +53,20 @@ Manually triggers reconnection attempts for MCP servers that previously failed t
 - Returns which servers were attempted, which reconnected, and which are still failing.
 
 This is useful when you know a previously failing MCP server has been fixed and want to nudge reconnection from the admin panel.
+
+### `POST /admin/mcp/refresh`
+
+Refreshes the connection to a single MCP server without disturbing every other server's connections.
+
+Request body: `{"server_name": "<name>"}`
+
+- Re-reads `mcp.json` from disk so config edits to that server apply (a broken config file does not block the refresh; the in-memory config is kept).
+- Closes the server's existing shared connection, then rebuilds and re-registers its client.
+- Evicts idle cached per-user clients for that server so later calls rebuild against the refreshed connection. Entries with an in-flight call keep their connection but are marked stale and rebuild on their next acquisition.
+- Re-discovers that server's tools and prompts.
+- Returns 404 when the server is not configured; otherwise returns the refresh result (`status` of `connected`/`failed`/`removed`, `tools`, `prompts`, `config_changed`).
+
+In the admin UI, each server chip in the MCP Configuration & Controls card (connected and failed) carries a refresh button for exactly this. Useful during maintenance or debugging of one server — for example after restarting just that server, or after editing only its `mcp.json` entry.
 
 ### `GET /admin/mcp/status`
 
