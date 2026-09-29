@@ -504,6 +504,14 @@ class AgenticLoop(AgentLoopProtocol):
                 # mid-stream tool call with "tool_choice is none, but model
                 # called a tool"). The caller's error handling publishes a
                 # user-visible message.
+                if raise_on_stream_error and not isinstance(exc, DomainError):
+                    # CLI failure policy: a raw provider exception would be
+                    # swallowed by the ChatService fallback into an ordinary
+                    # error reply, so the CLI would still exit 0. Classify it
+                    # into a domain error (keeping domain errors as-is) before
+                    # re-raising so the failure propagates non-zero.
+                    _err_class, user_msg, _log_msg = classify_llm_error(exc)
+                    raise _err_class(user_msg) from exc
                 raise
             if raise_on_stream_error:
                 # CLI failure policy: partial streamed text must not masquerade

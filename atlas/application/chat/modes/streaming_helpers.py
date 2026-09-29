@@ -125,18 +125,18 @@ async def stream_and_accumulate(
             error_class, user_message, _log_message = classify_llm_error(exc)
             raise error_class(user_message) from exc
         if not accumulated:
-            def _error_message():
+            def _error_message(exc_value):
                 if on_error_message:
-                    return on_error_message(exc)
-                return classify_llm_error(exc)[1]
+                    return on_error_message(exc_value)
+                return classify_llm_error(exc_value)[1]
 
             if fallback_fn:
                 try:
                     accumulated = await fallback_fn()
                 except Exception:
-                    accumulated = _error_message()
+                    accumulated = _error_message(exc)
             else:
-                accumulated = _error_message()
+                accumulated = _error_message(exc)
             await event_publisher.publish_chat_response(
                 message=accumulated, has_pending_tools=False,
             )

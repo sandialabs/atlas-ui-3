@@ -673,6 +673,96 @@ class TestAgenticLoopStreamingErrorSurfacing:
         # The open bubble is closed exactly once before the raise.
         assert [call["is_last"] for call in publisher.calls].count(True) == 1
 
+    @pytest.mark.asyncio
+    async def test_no_content_stream_error_classified_when_opted_in(self):
+        """CLI failure policy: a no-content stream failure must surface as a
+        classified domain error, not the raw provider exception.
+
+        The ChatService fallback turns non-domain exceptions into an ordinary
+        error reply, which would let the CLI exit 0; classification makes the
+        failure a DomainError that propagates (and exits non-zero).
+        """
+
+        class BoomLLM(FakeLLM):
+            async def stream_with_tools(self, *a, **k):
+                raise RuntimeError("tool_choice is none, but model called a tool")
+                yield  # pragma: no cover -- makes this an async generator
+
+        events, handler = _collect_events()
+        loop = _make_loop(BoomLLM())
+
+        with pytest.raises(LLMServiceError, match="LLM service"):
+            await loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "Hi"}],
+                context=_make_context(),
+                selected_tools=["calc"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=handler,
+                streaming=True,
+                event_publisher=_StreamErrorPublisher(),
+                raise_on_stream_error=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_content_domain_error_passes_through_when_opted_in(self):
+        """A domain error with no streamed content keeps its own identity
+        under the CLI failure policy instead of being re-generalized."""
+
+        from atlas.domain.errors import LLMEmptyStreamError
+
+        class DomainBoomLLM(FakeLLM):
+            async def stream_with_tools(self, *a, **k):
+                raise LLMEmptyStreamError("stream produced no content")
+                yield  # pragma: no cover -- makes this an async generator
+
+        events, handler = _collect_events()
+        loop = _make_loop(DomainBoomLLM())
+
+        with pytest.raises(LLMEmptyStreamError, match="no content"):
+            await loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "Hi"}],
+                context=_make_context(),
+                selected_tools=["calc"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=handler,
+                streaming=True,
+                event_publisher=_StreamErrorPublisher(),
+                raise_on_stream_error=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_content_stream_error_stays_raw_without_opt_in(self):
+        """Without the CLI opt-in the no-content path keeps its raw
+        re-raise (the pre-existing non-CLI behavior)."""
+
+        class BoomLLM(FakeLLM):
+            async def stream_with_tools(self, *a, **k):
+                raise RuntimeError("raw provider failure")
+                yield  # pragma: no cover -- makes this an async generator
+
+        events, handler = _collect_events()
+        loop = _make_loop(BoomLLM())
+
+        with pytest.raises(RuntimeError, match="raw provider failure"):
+            await loop.run(
+                model="test-model",
+                messages=[{"role": "user", "content": "Hi"}],
+                context=_make_context(),
+                selected_tools=["calc"],
+                data_sources=None,
+                max_steps=5,
+                temperature=0.7,
+                event_handler=handler,
+                streaming=True,
+                event_publisher=_StreamErrorPublisher(),
+            )
+
 
 class TestAgenticLoopStreamingNarration:
 
