@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #981 - 2026-09-27
+- A conversation opened while its run is still executing now refreshes mid-run (closes #980): the run's frames stay bound to the socket that started it, so a joined view held the snapshot the run had when it was opened and showed nothing the run produced afterwards until the final reload -- an `atlas_sleep` landing next to the `basic_fns_bash` already on screen stayed invisible while the answer was still in progress. While the open conversation has an active run and the view holds the replay placeholder, the client polls the run's live record (`GET /api/conversations/{id}`) every few seconds and appends the tool rows and narration that have appeared since, using the same reconciliation as the run-end reload so rows already on screen keep their identity and the reader's scroll position stands; the partial bubble tracks the newest `streaming_text`. The poll does not spend the run-end re-arm budget, ignores a record that is no longer in flight, and leaves the tab that owns the stream to its live socket.
+
 ### PR #982 - 2026-09-28
 - Accept an `http://` OIDC issuer on RFC 6761 `*.localhost` names (e.g. `http://keycloak.localhost`), not only on `localhost` itself, for local development.
 
