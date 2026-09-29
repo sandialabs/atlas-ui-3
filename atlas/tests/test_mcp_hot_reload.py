@@ -206,15 +206,21 @@ class TestMCPAdminEndpoints:
                 "status": "connected",
                 "tools": 2,
                 "prompts": 1,
-                "error": None,
+                "error": "Sensitive transport exception details",
                 "config_changed": False,
                 "evicted_clients": 0,
-                "config_reload_error": None,
+                "config_reload_error": "Sensitive configuration exception details",
             }
         )
         fake_manager.clients = {"test-server": MagicMock()}
         fake_manager.servers_config = {"test-server": {"url": "https://mcp.example.com"}}
-        fake_manager.get_failed_servers.return_value = {}
+        fake_manager.get_failed_servers.return_value = {
+            "test-server": {
+                "last_attempt": 123.0,
+                "attempt_count": 1,
+                "error": "Sensitive failed-server exception details",
+            }
+        }
 
         with patch.object(app_factory, "get_mcp_manager", return_value=fake_manager):
             r = client.post(
@@ -228,6 +234,14 @@ class TestMCPAdminEndpoints:
         assert "message" in data
         assert data["result"]["status"] == "connected"
         assert data["result"]["server"] == "test-server"
+        assert data["result"]["error"] == "See server logs for details."
+        assert (
+            data["result"]["config_reload_error"] == "See server logs for details."
+        )
+        assert data["failed_servers"]["test-server"]["error"] == (
+            "See server logs for details."
+        )
+        assert "Sensitive" not in r.text
         assert "servers" in data
         assert "failed_servers" in data
         assert "triggered_by" in data

@@ -455,12 +455,29 @@ async def refresh_mcp_server(
         )
 
         configured_set = set(mcp.servers_config.keys())
+        safe_result = {
+            key: result.get(key)
+            for key in ("status", "tools", "prompts", "config_changed", "evicted_clients")
+        }
+        safe_result["server"] = sanitized_server_name
+        for error_key in ("error", "config_reload_error"):
+            safe_result[error_key] = (
+                "See server logs for details." if result.get(error_key) else None
+            )
+        safe_failed_servers = {
+            sanitize_for_logging(name): {
+                "last_attempt": failure.get("last_attempt"),
+                "attempt_count": failure.get("attempt_count"),
+                "error": "See server logs for details.",
+            }
+            for name, failure in mcp.get_failed_servers().items()
+        }
         return {
             "message": f"MCP server '{sanitized_server_name}' refresh completed with "
             f"status '{result.get('status')}'",
-            "result": {**result, "server": sanitized_server_name},
+            "result": safe_result,
             "servers": [s for s in mcp.clients.keys() if s in configured_set],
-            "failed_servers": mcp.get_failed_servers(),
+            "failed_servers": safe_failed_servers,
             "triggered_by": admin_user,
         }
     except HTTPException:
@@ -472,7 +489,10 @@ async def refresh_mcp_server(
             sanitize_for_logging(str(e)),
             exc_info=True,
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to refresh MCP server; check server logs for details.",
+        )
 
 
 @admin_router.get("/mcp/status")
