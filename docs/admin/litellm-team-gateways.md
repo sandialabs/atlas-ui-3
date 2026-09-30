@@ -1,6 +1,6 @@
 # Enterprise LiteLLM Team Gateways
 
-Last updated: 2026-09-24
+Last updated: 2026-09-30
 
 Some deployments reach their models through an enterprise
 [LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) where access and
@@ -13,6 +13,10 @@ list models in `llmconfig.yml`. Instead the user:
 
 and every LLM request for that model carries the team in the
 `x-litellm-team-id` header so LiteLLM routes and charges it to that team.
+
+LiteLLM only acts on that header in its JWT/OIDC auth mode, which is an
+Enterprise feature. Against OSS LiteLLM, see
+[Enterprise vs. OSS LiteLLM](#enterprise-vs-oss-litellm) before deploying.
 
 ## Configuration
 
@@ -94,6 +98,62 @@ Users without an OIDC session (for example header-authenticated users) see
 user's teams are looked up by their Atlas identity. LiteLLM cannot tell users
 apart with a shared key, so Atlas enforces membership (below). Use this when
 the proxy trusts Atlas as a service, or for local testing with the mock.
+
+### Enterprise vs. OSS LiteLLM
+
+Per-request team selection is a LiteLLM **Enterprise** feature. LiteLLM reads
+`x-litellm-team-id` only in its JWT/OIDC auth mode (`enable_jwt_auth`), and
+that mode requires an Enterprise license. With OSS LiteLLM virtual keys, each
+key belongs to exactly one team, and LiteLLM ignores the header.
+
+What that means for each auth type against **OSS** LiteLLM:
+
+- **`auth_type: system`** still works, but it doesn't select a team. Atlas's
+  own team and model check still passes or refuses the call, but every
+  request that goes through is charged to the service key's team, whatever
+  team the user picked.
+- **`auth_type: delegated`** straight to OSS LiteLLM doesn't work, because OSS
+  LiteLLM does not accept a JWT as a bearer credential.
+
+To get per-team routing and spend with OSS LiteLLM, put an identity-aware
+proxy in front of it. The proxy should:
+
+- accept the user's delegated token;
+- answer `team/list?user_id=` in LiteLLM's shape, and `models?team_id=`;
+- on chat requests, check that the user is in the team named by
+  `x-litellm-team-id`, then call LiteLLM with a virtual key for that user and
+  team.
+
+Point `base_url` at that proxy. If it uses other paths or header names, change
+`team_list_path`, `models_path`, and `team_header` to match. No Atlas changes
+are needed.
+
+### Keycloak (RFC 8693 token exchange)
+
+`auth_type: delegated` also works with `OIDC_DELEGATION_PROVIDER=token_exchange`.
+For Keycloak (standard token exchange v2):
+
+- Set `delegation.audience` to the client ID of a real Keycloak client.
+  Otherwise Keycloak answers `Audience not found`.
+- Make that audience available to Atlas's client: create a client scope with
+  an Audience mapper for the target client, add it to Atlas's client as an
+  optional scope, and request it in `delegation.scope`. Otherwise Keycloak
+  answers `Requested audience not available`.
+- Keycloak tokens have no `oid` claim. Set `user_id_claim` to the claim that
+  holds the user's LiteLLM `user_id`, for example `sub`.
+
+When those are in place, the exchanged token has `aud` set to the target
+client, `azp` set to Atlas's client, `sub` set to the user, and Keycloak's
+default lifetime of 300 s.
+
+### Validation status
+
+Testing of `auth_type: system` ran against the mock proxy, both in automated
+tests and in an end-to-end run as two users. `auth_type: delegated` has unit
+tests. The token exchange step was also run by hand against a real Keycloak.
+No run has yet gone through a real identity provider, then a real LiteLLM
+proxy (Enterprise JWT auth or an identity-aware front proxy), then a
+completion. Validate that path in staging before relying on it.
 
 ## How It Works
 

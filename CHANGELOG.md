@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #976 - 2026-09-24
 - Enterprise LiteLLM team gateways: configure `litellm_gateways` in `llmconfig.yml` so users pick a LiteLLM team and then one of its models; every call sends the team in `x-litellm-team-id` (service key or delegated/Entra OBO auth). Adds `mocks/litellm-mock`.
+- Per-request team selection needs LiteLLM Enterprise JWT auth, or an identity-aware proxy in front of OSS LiteLLM; the gateway admin doc explains the OSS behavior, Keycloak token-exchange setup, and what has been validated end to end.
 
 ### PR #973 - 2026-09-24
 - Add a CHANGELOG release-heading guard, make `atlas-chat` fail non-zero on streaming LLM errors, disable noisy demo MCP defaults on fresh installs (and stop initializing disabled servers), set the PyPI build title explicitly, and keep release automation checking and refreshing `uv.lock` (including the yanked `primp` refresh).
