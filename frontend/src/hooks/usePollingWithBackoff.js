@@ -20,7 +20,9 @@ function addJitter(delay) {
 export function calculateBackoffDelay(failures, baseDelay = 1000, maxDelay = 300000) {
   if (failures <= 0) return 0
   const raw = Math.min(baseDelay * Math.pow(2, failures - 1), maxDelay)
-  return addJitter(raw)
+  // Clamp after jitter too, or the positive half pushes a capped retry above
+  // maxDelay (a 30s cap could wait ~36s).
+  return Math.min(addJitter(raw), maxDelay)
 }
 
 /**

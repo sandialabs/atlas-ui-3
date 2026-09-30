@@ -31,6 +31,11 @@ describe('calculateBackoffDelay', () => {
     expect(calculateBackoffDelay(20, 1000, 300000)).toBe(300000)
   })
 
+  it('caps at maxDelay even with positive jitter', () => {
+    Math.random = () => 1.0 // jitter factor 1.2 would push past the cap
+    expect(calculateBackoffDelay(20, 1000, 300000)).toBe(300000)
+  })
+
   it('uses custom baseDelay', () => {
     expect(calculateBackoffDelay(1, 5000, 300000)).toBe(5000)
     expect(calculateBackoffDelay(2, 5000, 300000)).toBe(10000)

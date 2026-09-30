@@ -361,6 +361,45 @@ describe('mid-run live refresh of a joined conversation', () => {
     }
   })
 
+  it('caps the live poll backoff at 30s', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5) // no jitter
+    try {
+      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }))
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      const liveCalls = () => h.fetchMock.mock.calls
+        .filter(c => String(c[0]).includes('/api/conversations/')).length
+
+      // The immediate poll plus retries at 3s, 6s, 12s and 24s. The fifth
+      // failure's uncapped backoff would be 48s; the live poll caps at 30s.
+      for (const step of [3000, 6000, 12000, 24000]) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(step) })
+      }
+      const afterCap = liveCalls()
+      await act(async () => { await vi.advanceTimersByTimeAsync(29000) })
+      expect(liveCalls()).toBe(afterCap)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(liveCalls()).toBeGreaterThan(afterCap)
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('does not poll while the tab is hidden', async () => {
     vi.useFakeTimers()
     const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden')
