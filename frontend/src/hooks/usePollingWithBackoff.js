@@ -123,8 +123,11 @@ export function usePollingWithBackoff(fetchFn, {
       } catch {
         if (!isCurrent()) return
         failureCountRef.current += 1
-        retryAt = Date.now() + nextBackoffDelay()
-        scheduleNext(nextBackoffDelay())
+        // One draw: retryAt and the armed timer must agree on the jitter, or a
+        // resume after a hide could fire before or after what was scheduled.
+        const delay = nextBackoffDelay()
+        retryAt = Date.now() + delay
+        scheduleNext(delay)
       } finally {
         inFlight = false
       }

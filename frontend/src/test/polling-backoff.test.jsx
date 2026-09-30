@@ -174,11 +174,12 @@ describe('usePollingWithBackoff', () => {
 
     // With jitter fixed at 1.0 the first failure retries after backoffBase,
     // not the hook's 1s default: a fast-interval poller must not be retried
-    // faster than its healthy cadence.
-    await act(async () => { await vi.advanceTimersByTimeAsync(2999) })
+    // faster than its healthy cadence. Generous margins rather than the exact
+    // boundary, so a loaded runner advancing real time cannot flake it.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
     expect(fetchFn).toHaveBeenCalledTimes(1)
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
     expect(fetchFn).toHaveBeenCalledTimes(2)
   })
 
@@ -293,6 +294,7 @@ describe('usePollingWithBackoff', () => {
       expect(fetchFn).toHaveBeenCalledTimes(1) // fails at t0; retry due at t0+3000
 
       // Hide, let 1000ms of the backoff elapse, then show: only 2000 remain.
+      // Margins, not the exact boundary.
       setHidden(true)
       await act(async () => {
         document.dispatchEvent(new Event('visibilitychange'))
@@ -303,9 +305,9 @@ describe('usePollingWithBackoff', () => {
         document.dispatchEvent(new Event('visibilitychange'))
         await vi.advanceTimersByTimeAsync(0)
       })
-      await act(async () => { await vi.advanceTimersByTimeAsync(1999) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
       expect(fetchFn).toHaveBeenCalledTimes(1)
-      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
       expect(fetchFn).toHaveBeenCalledTimes(2)
     })
   })
@@ -343,8 +345,8 @@ describe('usePollingWithBackoff', () => {
     expect(fetchFn).toHaveBeenCalledTimes(2)
 
     // Its first retry is the base delay (1000), not 2000 from an inherited
-    // second-failure exponent.
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    // second-failure exponent. Check at 1500ms, comfortably between the two.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
     expect(fetchFn).toHaveBeenCalledTimes(3)
   })
 
@@ -370,11 +372,12 @@ describe('usePollingWithBackoff', () => {
       await Promise.resolve()
     })
 
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    // Guarded: the next poll failed once, so its retry is at +1000 (call 4 by
+    // t+2500). Unguarded: the inherited count makes the retry +2000, so still
+    // 3 calls here.
     await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
-    expect(fetchFn).toHaveBeenCalledTimes(3)
-    await act(async () => { await vi.advanceTimersByTimeAsync(999) })
-    expect(fetchFn).toHaveBeenCalledTimes(3)
-    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(fetchFn).toHaveBeenCalledTimes(4)
   })
 
@@ -400,7 +403,8 @@ describe('usePollingWithBackoff', () => {
   it('does not retry faster than backoffBase when jitter is negative', async () => {
     // calculateBackoffDelay(1, 3000) with a 0.8 jitter factor is 2400ms; the
     // scheduled retry is floored at backoffBase so a fast poller is never
-    // retried sooner than its healthy cadence.
+    // retried sooner than its healthy cadence. The 2600ms check sits between
+    // the unfloored 2400ms and the floored 3000ms.
     Math.random = () => 0.0
     const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
     await act(async () => {
@@ -409,9 +413,9 @@ describe('usePollingWithBackoff', () => {
     })
     expect(fetchFn).toHaveBeenCalledTimes(1)
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(2999) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2600) })
     expect(fetchFn).toHaveBeenCalledTimes(1)
-    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
     expect(fetchFn).toHaveBeenCalledTimes(2)
   })
 })

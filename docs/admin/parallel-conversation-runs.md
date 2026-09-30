@@ -212,11 +212,14 @@ it receives these rows live over its own socket.
 
 The poll is deliberately cheap to run and cheap to stop:
 
-- Polling pauses while the tab is hidden and fires one poll when it is shown
-  again; if the last passes were failing, showing the tab waits out the same
-  backoff delay rather than bypassing it.
+- Polling pauses while the tab is hidden and resumes when it is shown again;
+  if the last passes were failing, showing the tab waits out the remaining
+  backoff delay rather than bypassing or restarting it.
 - A failing server is retried on the same backoff base as the healthy
-  interval, so a 503 is not polled faster than the 3s cadence.
+  interval, so a 503 is not polled faster than the 3s cadence, and the live
+  poll caps its backoff at 30s so a temporary outage recovers within the
+  conversation. A poll request that hangs is aborted after 15s rather than
+  stalling the refresh.
 - A live pass only refreshes a bubble that already exists. It never creates
   one: a response that lands after the view has settled (the run ended
   between the fetch and the response) would otherwise strand an "in

@@ -37,6 +37,12 @@ const MAX_JOINED_RUN_REARMS = 4
 // has appeared, so `atlas_sleep`'s row and its siblings show up while the
 // agent is still working instead of only after the final reload.
 const LIVE_REFRESH_INTERVAL_MS = 3000
+// A poll request that hangs must not stall the refresh with no feedback: it is
+// aborted after this long, which surfaces as a failure and backs off.
+const LIVE_REFRESH_FETCH_TIMEOUT_MS = 15000
+// Cap the live poll's backoff well below the hook's 5-minute default: a
+// temporary server outage should recover within a conversation, not after it.
+const LIVE_REFRESH_MAX_BACKOFF_MS = 30000
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
@@ -1447,7 +1453,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 	const fetchLiveJoinedConversation = useCallback(async () => {
 		if (!liveJoinedConversationId) return
-		const res = await fetch(`/api/conversations/${liveJoinedConversationId}`)
+		// Abort a hung request so the poll's cadence resumes (and reports a
+		// failure) instead of waiting on it indefinitely.
+		const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+			? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
+			: undefined
+		const res = await fetch(
+			`/api/conversations/${liveJoinedConversationId}`,
+			timeoutSignal ? { signal: timeoutSignal } : undefined,
+		)
 		// Throw so usePollingWithBackoff backs off on a flaky server rather
 		// than hammering it every interval.
 		if (!res.ok) throw new Error(`live conversation refresh failed: ${res.status}`)
@@ -1483,6 +1497,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// cadence: the hook's 1s default backoff base would poll a 503 every
 		// second against a 3s healthy interval.
 		backoffBase: LIVE_REFRESH_INTERVAL_MS,
+		// A temporary outage recovers within the conversation, not after the
+		// hook's 5-minute default.
+		maxBackoffDelay: LIVE_REFRESH_MAX_BACKOFF_MS,
 		// A hidden tab gains nothing from these rows; stop downloading the
 		// run's session until it is shown again.
 		pauseWhenHidden: true,
