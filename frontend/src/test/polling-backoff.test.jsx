@@ -58,8 +58,8 @@ describe('usePollingWithBackoff', () => {
   })
 
   // Test component that uses the hook
-  function TestPoller({ fetchFn, normalInterval = 5000, maxBackoffDelay = 30000, enabled = true }) {
-    usePollingWithBackoff(fetchFn, { normalInterval, maxBackoffDelay, enabled })
+  function TestPoller({ fetchFn, normalInterval = 5000, maxBackoffDelay = 30000, enabled = true, backoffBase, pauseWhenHidden }) {
+    usePollingWithBackoff(fetchFn, { normalInterval, maxBackoffDelay, enabled, backoffBase, pauseWhenHidden })
     return <div>poller</div>
   }
 
@@ -160,5 +160,89 @@ describe('usePollingWithBackoff', () => {
       await vi.advanceTimersByTimeAsync(30000)
     })
     expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it('uses backoffBase as the first failure delay', async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await act(async () => {
+      render(<TestPoller fetchFn={fetchFn} normalInterval={3000} backoffBase={3000} />)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    // With jitter fixed at 1.0 the first failure retries after backoffBase,
+    // not the hook's 1s default: a fast-interval poller must not be retried
+    // faster than its healthy cadence.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2999) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  describe('pauseWhenHidden', () => {
+    let hiddenState
+    const setHidden = (value) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => value })
+    }
+
+    beforeEach(() => {
+      hiddenState = false
+      setHidden(hiddenState)
+    })
+
+    afterEach(() => {
+      delete document.hidden
+    })
+
+    it('does not poll while the document is hidden and polls once when shown again', async () => {
+      const fetchFn = vi.fn()
+      setHidden(true)
+      await act(async () => {
+        render(<TestPoller fetchFn={fetchFn} normalInterval={1000} pauseWhenHidden />)
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      // Hidden: not even the initial poll runs, and nothing is scheduled.
+      expect(fetchFn).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+      expect(fetchFn).not.toHaveBeenCalled()
+
+      // Shown again: one poll fires immediately and the cadence resumes.
+      setHidden(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(fetchFn).toHaveBeenCalledTimes(2)
+    })
+
+    it('stops a scheduled poll mid-interval when the tab is hidden', async () => {
+      const fetchFn = vi.fn()
+      await act(async () => {
+        render(<TestPoller fetchFn={fetchFn} normalInterval={1000} pauseWhenHidden />)
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+
+      // Hide before the next interval elapses: the pending poll is cancelled,
+      // so crossing its original deadline fires nothing.
+      setHidden(true)
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+
+      // Shown again: the fresh poll on show replaces the cancelled one.
+      setHidden(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchFn).toHaveBeenCalledTimes(2)
+    })
   })
 })

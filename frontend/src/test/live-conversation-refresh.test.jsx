@@ -268,6 +268,18 @@ describe('mid-run live refresh of a joined conversation', () => {
       const settledMessages = result.current.messages
       await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
       expect(result.current.messages).toBe(settledMessages)
+
+      // The skip keys on the streaming segment too: a changed segment with
+      // the same rows is real movement and must still reach the bubble.
+      h.fetchMock.mockImplementation(async (url) => {
+        if (String(url).includes('/api/conversations/conv-1')) {
+          return { ok: true, json: async () => liveRecord(sleepRow, 'Working on it some more') }
+        }
+        return { ok: false, status: 404, json: async () => ({}) }
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
+      const bubbleAfter = result.current.messages.find(m => m._streaming)
+      expect(bubbleAfter.content).toBe('Working on it some more')
     } finally {
       vi.useRealTimers()
     }
@@ -365,6 +377,119 @@ describe('mid-run live refresh of a joined conversation', () => {
       h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', in_flight: false, metadata: {}, messages: [] }) }))
       await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
       expect(result.current.messages.map(m => m.content)).toEqual(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a settled record holding the run\'s final rows is not applied mid-run', async () => {
+    // The `in_flight` guard exists so a record the run has settled belongs to
+    // the run-end path, not to the poll. A settled record whose transcript
+    // holds rows the view lacks must be refused whole: appending them here
+    // would discharge the run-end obligation against a record that was
+    // already final. (An empty transcript cannot pin this -- alignment would
+    // refuse it anyway -- so this record genuinely aligns.)
+    vi.useFakeTimers()
+    try {
+      h.fetchMock.mockImplementation(async (url) => {
+        if (String(url).includes('/api/conversations/conv-1')) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 'conv-1',
+              in_flight: false,
+              metadata: {},
+              streaming_text: '',
+              messages: [
+                storedChat('user', 'What is the weather'),
+                storedToolCall('call-bash', 'basic_fns_bash'),
+                storedChat('assistant', 'Done sleeping'),
+              ],
+            }),
+          }
+        }
+        return { ok: false, status: 404, json: async () => ({}) }
+      })
+
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      const before = result.current.messages
+      const restoreCountBefore = h.sendMessage.mock.calls.filter(c => c[0].type === 'restore_conversation').length
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(7000) })
+
+      // Neither the tool row nor the final answer may reach the view, and the
+      // final transcript must not be re-seeded into the backend session.
+      expect(result.current.messages.map(m => m.content || '')).toEqual(before.map(m => m.content || ''))
+      expect(result.current.messages.some(m => m.type === 'tool_call')).toBe(false)
+      expect(h.sendMessage.mock.calls.filter(c => c[0].type === 'restore_conversation').length).toBe(restoreCountBefore)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a poll response that resolves after the run went terminal leaves the view untouched', async () => {
+    // The run can reach a terminal state while a poll is in the air. The
+    // record in hand is the run's session as it stood at fetch time -- a
+    // snapshot, not the final transcript -- and the run-end path is already
+    // working from the tracker's terminal status. The poll must re-check the
+    // run state after the await instead of appending the snapshot.
+    vi.useFakeTimers()
+    try {
+      let resolvePoll
+      h.fetchMock.mockImplementation((url) => {
+        if (String(url).includes('/api/conversations/conv-1')) {
+          return new Promise((resolve) => {
+            resolvePoll = () => resolve({
+              ok: true,
+              json: async () => liveRecord(storedToolCall('call-late', 'atlas_sleep'), 'late segment'),
+            })
+          })
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) })
+      })
+
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      // The immediate poll is in the air when the run goes terminal.
+      expect(typeof resolvePoll).toBe('function')
+      dispatchFrame({ type: 'run_status', run: { run_id: 'run-1', conversation_id: 'conv-1', status: 'completed' } })
+
+      await act(async () => {
+        resolvePoll()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const contents = result.current.messages.map(m => m.content || '')
+      expect(contents.some(c => c.includes('late segment'))).toBe(false)
+      expect(result.current.messages.some(m => m.tool_call_id === 'call-late')).toBe(false)
     } finally {
       vi.useRealTimers()
     }
