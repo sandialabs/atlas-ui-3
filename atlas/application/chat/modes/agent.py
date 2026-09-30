@@ -85,6 +85,10 @@ class AgentModeRunner:
         self.event_publisher = event_publisher
         self.artifact_processor = artifact_processor
         self.default_strategy = default_strategy
+        # Opt-in (CLI only): re-raise stream failures instead of turning them
+        # into a successful answer, so `atlas-chat` exits non-zero on LLM
+        # failures.
+        self.raise_on_stream_error = False
 
     def _get_send_json(self) -> Optional[UpdateCallback]:
         """Get send_json callback from the event publisher if available.
@@ -205,6 +209,7 @@ class AgentModeRunner:
                 streaming=True,
                 event_publisher=self.event_publisher,
                 steering=steering,
+                raise_on_stream_error=self.raise_on_stream_error,
             )
         except asyncio.CancelledError:
             # Stop button, client disconnect, or reset_session (issue #755).

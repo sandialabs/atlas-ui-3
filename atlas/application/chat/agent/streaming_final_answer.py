@@ -3,6 +3,7 @@
 import logging
 
 from atlas.application.chat.utilities.error_handler import classify_llm_error
+from atlas.domain.errors import DomainError
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 
@@ -16,6 +17,7 @@ async def stream_final_answer(
     messages: list,
     temperature: float,
     user_email: str | None,
+    raise_on_stream_error: bool = False,
 ) -> str:
     """Stream the final answer token-by-token via event_publisher.
 
@@ -54,7 +56,22 @@ async def stream_final_answer(
                 accumulated = await llm.call_plain(
                     model, messages, temperature=temperature, user_email=user_email,
                 )
-            except Exception:
+                return accumulated
+            except Exception as fallback_exc:
+                if raise_on_stream_error:
+                    # CLI failure policy: both the stream and the non-streaming
+                    # retry failed -- surface the STREAM's classified error, not
+                    # the fallback's. A DomainError already carries its specific
+                    # user-safe message, so it is re-raised unchanged.
+                    if isinstance(exc, DomainError):
+                        raise exc from fallback_exc
+                    _err_class, user_msg, _log_msg = classify_llm_error(exc)
+                    raise _err_class(user_msg) from fallback_exc
                 _err_class, user_msg, _log_msg = classify_llm_error(exc)
                 accumulated = user_msg
+        elif raise_on_stream_error:
+            if isinstance(exc, DomainError):
+                raise
+            _err_class, user_msg, _log_msg = classify_llm_error(exc)
+            raise _err_class(user_msg) from exc
     return accumulated

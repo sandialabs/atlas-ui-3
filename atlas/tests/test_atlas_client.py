@@ -157,6 +157,46 @@ class TestCLIEventPublisher:
 # CLI arg parsing tests
 # ---------------------------------------------------------------------------
 
+class TestCLIExitCodeContract:
+    """atlas-chat must exit 1 -- with nothing JSON-shaped on stdout -- when the
+    LLM call fails, for both streaming and --json invocations (PR #973)."""
+
+    @staticmethod
+    async def _run_expecting_failure(monkeypatch, capsys, *extra_args):
+        import atlas_chat_cli
+
+        from atlas.domain.errors import LLMServiceError
+
+        class FailingClient:
+            async def chat(self, *args, **kwargs):
+                raise LLMServiceError("The LLM service encountered an error.")
+
+            async def cleanup(self):
+                pass
+
+        monkeypatch.setattr(atlas_chat_cli, "AtlasClient", lambda: FailingClient())
+        monkeypatch.setattr(
+            atlas_chat_cli, "initialize_logging", lambda *a, **k: None, raising=False,
+        )
+
+        parser = atlas_chat_cli.build_parser()
+        args = parser.parse_args(["hi", *extra_args])
+        return await atlas_chat_cli.run(args)
+
+    @pytest.mark.asyncio
+    async def test_streaming_run_returns_1(self, monkeypatch, capsys):
+        exit_code = await self._run_expecting_failure(monkeypatch, capsys)
+        assert exit_code == 1
+        assert capsys.readouterr().out == ""
+
+    @pytest.mark.asyncio
+    async def test_json_run_returns_1_and_prints_nothing(self, monkeypatch, capsys):
+        exit_code = await self._run_expecting_failure(monkeypatch, capsys, "--json")
+        assert exit_code == 1
+        # On failure --json must not emit a partial JSON document on stdout.
+        assert capsys.readouterr().out == ""
+
+
 class TestCLIArgParsing:
     """Tests for atlas_chat_cli argument parsing."""
 
@@ -340,3 +380,49 @@ class TestCaptureConsentWiring:
         chat_service.handle_chat_message.assert_awaited_once()
         _, kwargs = chat_service.handle_chat_message.call_args
         assert kwargs.get("capture_consent_implied") is True
+
+
+class TestRaiseOnLLMErrorWiring:
+    async def _client_with_mock_service(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from atlas_client import AtlasClient
+
+        client = AtlasClient()
+        client._initialized = True  # skip real AppFactory/MCP init
+        chat_service = MagicMock()
+        chat_service.handle_chat_message = AsyncMock(return_value={})
+        factory = MagicMock()
+        factory.create_chat_service.return_value = chat_service
+        client._factory = factory
+        return client, chat_service
+
+    async def test_raise_flag_defaults_off_for_library_callers(self):
+        """Programmatic callers keep graceful ChatResult behavior by default."""
+        client, chat_service = await self._client_with_mock_service()
+
+        await client.chat(prompt="hi", model="m", user_email="u@x")
+
+        for runner in (
+            chat_service.plain_mode,
+            chat_service.rag_mode,
+            chat_service.tools_mode,
+            chat_service.agent_mode,
+        ):
+            assert runner.raise_on_stream_error is False
+
+    async def test_raise_flag_opt_in_reaches_every_runner(self):
+        """The opt-in flag must cover plain, RAG, tools, and agent paths alike."""
+        client, chat_service = await self._client_with_mock_service()
+
+        await client.chat(
+            prompt="hi", model="m", user_email="u@x", raise_on_llm_error=True,
+        )
+
+        for runner in (
+            chat_service.plain_mode,
+            chat_service.rag_mode,
+            chat_service.tools_mode,
+            chat_service.agent_mode,
+        ):
+            assert runner.raise_on_stream_error is True

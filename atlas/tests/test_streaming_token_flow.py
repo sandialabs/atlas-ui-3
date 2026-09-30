@@ -13,6 +13,7 @@ import pytest
 
 from atlas.application.chat.agent.streaming_final_answer import stream_final_answer
 from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
+from atlas.domain.errors import LLMAuthenticationError, LLMEmptyStreamError, LLMServiceError
 
 # -- Helpers -----------------------------------------------------------------
 
@@ -256,6 +257,184 @@ async def test_stream_and_accumulate_error_fallback_also_fails():
 
 
 @pytest.mark.asyncio
+async def test_stream_and_accumulate_error_raises_when_opted_in():
+    """raise_on_stream_error surfaces stream failures as exceptions for non-zero CLI exits."""
+    from atlas.infrastructure.events.cli_event_publisher import CLIEventPublisher
+
+    pub = CLIEventPublisher(streaming=True)
+
+    async def _auth_error():
+        raise RuntimeError("AuthenticationError: invalid api key")
+        yield  # makes this an async generator
+
+    with pytest.raises(LLMAuthenticationError, match="authentication issue"):
+        await stream_and_accumulate(
+            token_generator=_auth_error(),
+            event_publisher=pub,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+    assert pub.get_result().message == ""
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_error_tries_fallback_before_raising():
+    """A stream failing before the first token still gets the non-streaming retry."""
+    pub = AsyncMock()
+
+    async def _stream_error():
+        raise RuntimeError("boom")
+        yield  # makes this an async generator
+
+    async def _fallback():
+        return "recovered answer"
+
+    result = await stream_and_accumulate(
+        token_generator=_stream_error(),
+        event_publisher=pub,
+        fallback_fn=_fallback,
+        context_label="test",
+        raise_on_stream_error=True,
+    )
+
+    assert result == "recovered answer"
+    pub.publish_chat_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_reraises_domain_errors_unchanged():
+    """A DomainError from the stream keeps its specific message on the CLI path."""
+    from atlas.domain.errors import LLMEmptyStreamError
+
+    pub = AsyncMock()
+
+    async def _empty_stream():
+        raise LLMEmptyStreamError("The model returned an empty stream.")
+        yield  # makes this an async generator
+
+    with pytest.raises(LLMEmptyStreamError, match="empty stream"):
+        await stream_and_accumulate(
+            token_generator=_empty_stream(),
+            event_publisher=pub,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_domain_error_tries_fallback_first():
+    """Production stream errors are usually DomainErrors -- the non-streaming
+    retry must still run before raising, so the CLI matches the web path."""
+    pub = AsyncMock()
+
+    async def _domain_error():
+        raise LLMEmptyStreamError("The model returned an empty stream.")
+        yield  # makes this an async generator
+
+    async def _fallback():
+        return "recovered via retry"
+
+    result = await stream_and_accumulate(
+        token_generator=_domain_error(),
+        event_publisher=pub,
+        fallback_fn=_fallback,
+        context_label="test",
+        raise_on_stream_error=True,
+    )
+
+    assert result == "recovered via retry"
+    pub.publish_chat_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_domain_error_raises_original_when_fallback_fails():
+    """When the fallback also fails, the stream's own DomainError surfaces."""
+    pub = AsyncMock()
+
+    async def _domain_error():
+        raise LLMEmptyStreamError("The model returned an empty stream.")
+        yield  # makes this an async generator
+
+    async def _fallback():
+        raise RuntimeError("fallback down too")
+
+    with pytest.raises(LLMEmptyStreamError, match="empty stream"):
+        await stream_and_accumulate(
+            token_generator=_domain_error(),
+            event_publisher=pub,
+            fallback_fn=_fallback,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_partial_text_raises_when_opted_in():
+    """Text the user already watched stream in must not exit zero on failure."""
+    pub = AsyncMock()
+
+    async def _partial_then_error():
+        yield "partial "
+        yield "answer"
+        raise RuntimeError("connection reset mid-stream")
+
+    with pytest.raises(LLMServiceError, match="LLM service"):
+        await stream_and_accumulate(
+            token_generator=_partial_then_error(),
+            event_publisher=pub,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+    # The open bubble is closed exactly once before the raise.
+    last_call = pub.publish_token_stream.await_args_list[-1]
+    assert last_call.kwargs["is_last"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_final_answer_partial_text_raises_when_opted_in():
+    """Agent closing answers obey the same partial-text CLI policy."""
+    llm = MagicMock()
+
+    async def _partial_then_error(*args, **kwargs):
+        yield "partial narration"
+        raise RuntimeError("provider dropped the connection")
+
+    llm.stream_plain = _partial_then_error
+    pub = _make_publisher()
+
+    with pytest.raises(LLMServiceError, match="LLM service"):
+        await stream_final_answer(
+            llm=llm, event_publisher=pub, model="test",
+            messages=[], temperature=0.7, user_email=None,
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_error_raises_when_fallback_also_fails():
+    """If the fallback retry also fails, the classified stream error is raised."""
+    pub = AsyncMock()
+
+    async def _stream_error():
+        raise RuntimeError("AuthenticationError: invalid api key")
+        yield  # makes this an async generator
+
+    async def _fallback():
+        raise RuntimeError("fallback down too")
+
+    with pytest.raises(LLMAuthenticationError, match="authentication issue"):
+        await stream_and_accumulate(
+            token_generator=_stream_error(),
+            event_publisher=pub,
+            fallback_fn=_fallback,
+            context_label="test",
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_stream_final_answer_both_stream_and_fallback_fail():
     """When streaming and fallback both fail, return a classified error message."""
     llm = MagicMock()
@@ -279,6 +458,49 @@ async def test_stream_final_answer_both_stream_and_fallback_fail():
     # Stream-end should still be sent
     last_call = pub.publish_token_stream.await_args_list[-1]
     assert last_call.kwargs["is_last"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_final_answer_raises_when_opted_in_and_fallback_fails():
+    """CLI policy: both the stream and the non-streaming retry failing raises."""
+    llm = MagicMock()
+
+    async def _err_stream(*args, **kwargs):
+        raise RuntimeError("Failed to stream LLM: AuthenticationError: invalid api key")
+        yield  # makes this an async generator
+
+    llm.stream_plain = _err_stream
+    llm.call_plain = AsyncMock(side_effect=RuntimeError("also fails"))
+    pub = _make_publisher()
+
+    with pytest.raises(LLMAuthenticationError, match="authentication issue"):
+        await stream_final_answer(
+            llm=llm, event_publisher=pub, model="test",
+            messages=[], temperature=0.7, user_email=None,
+            raise_on_stream_error=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_final_answer_opted_in_recovers_via_fallback():
+    """CLI policy still gets the non-streaming retry before raising."""
+    llm = MagicMock()
+
+    async def _err_stream(*args, **kwargs):
+        raise RuntimeError("provider hiccup")
+        yield  # makes this an async generator
+
+    llm.stream_plain = _err_stream
+    llm.call_plain = AsyncMock(return_value="fallback answer")
+    pub = _make_publisher()
+
+    result = await stream_final_answer(
+        llm=llm, event_publisher=pub, model="test",
+        messages=[], temperature=0.7, user_email=None,
+        raise_on_stream_error=True,
+    )
+
+    assert result == "fallback answer"
 
 
 @pytest.mark.asyncio
@@ -334,6 +556,46 @@ async def test_tools_run_streaming_auth_error_sends_error_to_frontend():
 
     # Result should contain the error message
     assert "authentication" in result.get("message", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_tools_run_streaming_raises_when_opted_in():
+    """CLI policy: the initial stream failure raises instead of an error frame."""
+    from atlas.application.chat.modes.tools import ToolsModeRunner
+
+    llm = MagicMock()
+
+    async def _err_stream(*args, **kwargs):
+        raise RuntimeError("Failed to stream LLM with tools: AuthenticationError: invalid api key")
+        yield  # makes this an async generator
+
+    llm.stream_with_tools = _err_stream
+
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema = MagicMock(return_value=[{"type": "function", "function": {"name": "test"}}])
+
+    pub = AsyncMock()
+    session = MagicMock()
+    session.history = MagicMock()
+
+    runner = ToolsModeRunner(
+        llm=llm,
+        tool_manager=tool_manager,
+        event_publisher=pub,
+    )
+    runner.raise_on_stream_error = True
+
+    with pytest.raises(LLMAuthenticationError, match="authentication issue"):
+        await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=[{"role": "user", "content": "hello"}],
+            selected_tools=["test_tool"],
+        )
+
+    # The stream-end marker is still published so no UI cursor is left open.
+    last_call = pub.publish_token_stream.await_args_list[-1]
+    assert last_call.kwargs["is_last"] is True
 
 
 @pytest.mark.asyncio

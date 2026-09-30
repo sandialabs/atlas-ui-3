@@ -83,6 +83,7 @@ class AtlasClient:
         temperature: float = 0.7,
         streaming: bool = False,
         quiet: bool = False,
+        raise_on_llm_error: bool = False,
     ) -> ChatResult:
         """
         Send a chat message and return the result.
@@ -100,6 +101,11 @@ class AtlasClient:
             temperature: LLM temperature.
             streaming: If True, stream tokens to stdout as they arrive.
             quiet: Suppress status output on stderr (only affects streaming mode).
+            raise_on_llm_error: If True, an LLM failure raises a classified
+                domain error instead of returning a ChatResult carrying the
+                error text. Opt-in for the CLI (``atlas-chat`` exits non-zero);
+                library callers keep the graceful ChatResult behavior by
+                default.
 
         Returns:
             ChatResult with assistant message, tool calls, files, etc.
@@ -133,6 +139,12 @@ class AtlasClient:
         chat_service.tools_mode.skip_approval = True
         chat_service.agent_mode.event_publisher = event_publisher
         chat_service.agent_mode.agent_loop_factory.skip_approval = True
+        # Opt-in CLI failure policy: LLM stream failures raise so `atlas-chat`
+        # exits non-zero. Library callers default to graceful ChatResults.
+        chat_service.plain_mode.raise_on_stream_error = raise_on_llm_error
+        chat_service.rag_mode.raise_on_stream_error = raise_on_llm_error
+        chat_service.tools_mode.raise_on_stream_error = raise_on_llm_error
+        chat_service.agent_mode.raise_on_stream_error = raise_on_llm_error
 
         await chat_service.handle_chat_message(
             session_id=session_id,
