@@ -18,7 +18,7 @@ import os
 import re
 from typing import Any, ClassVar, Dict, List, Literal, Optional, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from atlas.modules.config.litellm_gateway_models import (
     GATEWAY_KEY_SEPARATOR,
@@ -210,6 +210,9 @@ class LiteLLMGatewayModel(BaseModel):
 
     # Overrides the gateway's compliance_level for this model.
     compliance_level: Optional[str] = None
+    # Set at load when compliance_level names no known level: the model is
+    # then unleveled, never silently given the gateway's level instead.
+    _invalid_compliance_level: bool = PrivateAttr(default=False)
 
 
 class LiteLLMGatewayConfig(BaseModel):
@@ -317,8 +320,11 @@ class LiteLLMGatewayConfig(BaseModel):
     def model_compliance_level(self, model_id: str) -> Optional[str]:
         """The compliance level of one model: its own, else the gateway's."""
         entry = self.models.get(model_id)
-        if entry is not None and entry.compliance_level:
-            return entry.compliance_level
+        if entry is not None:
+            if entry._invalid_compliance_level:
+                return None
+            if entry.compliance_level:
+                return entry.compliance_level
         return self.compliance_level
 
     def effective_user_id_source(self) -> str:

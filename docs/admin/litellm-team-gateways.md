@@ -99,7 +99,8 @@ litellm_gateways:
   --model`, saved conversations), so no request for it reaches LiteLLM.
 - **Compliance.** Each model's level is its entry's `compliance_level`, or the
   gateway's when the entry sets none. Levels are validated like any other
-  model's. The level drives the server-side compliance checks. It also drives
+  model's. An unknown level (a typo such as `SOC-2`) leaves that model
+  unleveled, as it would for a static model. It does not inherit the gateway's level. The level drives the server-side compliance checks. It also drives
   the compliance filter in the model picker: the gateway stays listed while any
   of its models passes the filter, and models that don't pass are hidden.
 - Each entry accepts only `compliance_level`; other model settings still come

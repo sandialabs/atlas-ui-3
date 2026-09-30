@@ -293,10 +293,14 @@ class ConfigManager:
                     )
                 for model_id, model_entry in gateway_config.models.items():
                     if model_entry.compliance_level:
-                        model_entry.compliance_level = compliance_mgr.validate_compliance_level(
+                        validated = compliance_mgr.validate_compliance_level(
                             model_entry.compliance_level,
                             context=f"for model '{model_id}' of LiteLLM gateway '{gateway_name}'"
                         )
+                        # An unknown level leaves the model unleveled, as for
+                        # a static model; it must not inherit the gateway's.
+                        model_entry._invalid_compliance_level = validated is None
+                        model_entry.compliance_level = validated
         except Exception as e:
             logger.warning(f"Could not validate LLM compliance levels: {e}")
 

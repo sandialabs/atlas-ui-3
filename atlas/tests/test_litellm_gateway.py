@@ -661,3 +661,20 @@ class TestGatewayModelAllowlist:
             loader._validate_llm_compliance_levels()
         gateway = loader._llm_config.litellm_gateways["enterprise"]
         assert gateway.models["gpt-4o-mini"].compliance_level == "Public"
+
+    def test_unknown_per_model_level_does_not_inherit_the_gateway_level(self):
+        from atlas.modules.config import config_loader
+
+        loader = object.__new__(config_loader.ConfigManager)
+        loader._llm_config = _llm_config(
+            compliance_level="Internal", models={"gpt-4o-mini": {"compliance_level": "SOC-2"}}
+        )
+
+        class Levels:
+            def validate_compliance_level(self, level, context=""):
+                return {"Internal": "Internal"}.get(level)
+
+        with patch("atlas.core.compliance.get_compliance_manager", return_value=Levels()):
+            loader._validate_llm_compliance_levels()
+        # Treated like a static model with an unknown level: unleveled.
+        assert loader._llm_config.get_model(f"enterprise::{ALPHA}::gpt-4o-mini").compliance_level is None
