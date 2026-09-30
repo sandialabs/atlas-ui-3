@@ -303,7 +303,8 @@ class LiteLLMGatewayClient:
         payload = await self._get_json(
             self.config.models_path, {"team_id": team_id}, credential.bearer_token
         )
-        models = parse_model_list(payload)
+        # The admin allowlist narrows what a team offers; it never adds models.
+        models = [model_id for model_id in parse_model_list(payload) if self.config.allows_model(model_id)]
         self._model_cache[cache_key] = (self._clock(), models)
         return models
 

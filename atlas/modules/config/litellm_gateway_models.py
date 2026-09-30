@@ -66,11 +66,19 @@ def parse_gateway_model_key(model_name: str) -> Optional[GatewayModelRef]:
 
 
 def resolve_gateway_ref(llm_config: Any, model_name: str) -> Optional[GatewayModelRef]:
-    """Parse ``model_name`` and confirm it names a configured gateway."""
+    """Parse ``model_name`` and confirm it names a configured gateway.
+
+    A model outside the gateway's admin allowlist resolves to None too, so it
+    is an unknown model everywhere a model name is looked up.
+    """
     ref = parse_gateway_model_key(model_name)
     if ref is None:
         return None
     gateways = getattr(llm_config, "litellm_gateways", None) or {}
-    if ref.gateway not in gateways:
+    gateway = gateways.get(ref.gateway)
+    if gateway is None:
+        return None
+    allowed = getattr(gateway, "models", None)
+    if allowed and ref.model_id not in allowed:
         return None
     return ref

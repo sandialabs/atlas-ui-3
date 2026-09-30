@@ -38,8 +38,25 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
             "supports_pdf": bool(defaults.get("supports_pdf", False)),
             "supports_tools": bool(defaults.get("supports_tools", True)),
         }
-        if getattr(app_settings, "feature_compliance_levels_enabled", False) and gateway.compliance_level:
-            summary["compliance_level"] = gateway.compliance_level
+        if getattr(app_settings, "feature_compliance_levels_enabled", False):
+            if gateway.compliance_level:
+                summary["compliance_level"] = gateway.compliance_level
+            # Allowlisted models may set their own level; the picker needs
+            # them to filter models and to label a saved selection.
+            levels = {
+                model_id: level
+                for model_id in gateway.models
+                if (level := gateway.model_compliance_level(model_id))
+            }
+            if levels:
+                summary["model_compliance_levels"] = levels
+            # Every level a model on this gateway can have (None: unleveled),
+            # so a compliance filter shows the gateway if any model passes.
+            if gateway.models:
+                reachable = {gateway.model_compliance_level(model_id) for model_id in gateway.models}
+            else:
+                reachable = {gateway.compliance_level}
+            summary["compliance_levels"] = sorted(reachable, key=lambda level: (level is None, level or ""))
         summaries.append(summary)
     return summaries
 
@@ -109,13 +126,19 @@ async def list_gateway_models(
         model_ids = await client.list_models(current_user, team_id, refresh=refresh)
     except (AuthorizationError, LLMAuthenticationError, LLMServiceError) as exc:
         _raise_http(exc)
+    app_settings = getattr(app_factory.get_config_manager(), "app_settings", None)
+    compliance_enabled = getattr(app_settings, "feature_compliance_levels_enabled", False)
     models: List[Dict[str, Optional[str]]] = []
     for model_id in model_ids:
-        models.append({
+        entry: Dict[str, Optional[str]] = {
             "name": build_gateway_model_key(gateway_name, team.team_id, model_id),
             "model_id": model_id,
             "label": model_id,
-        })
+        }
+        level = gateway.model_compliance_level(model_id)
+        if compliance_enabled and level:
+            entry["compliance_level"] = level
+        models.append(entry)
     return {
         "gateway": gateway_name,
         "team_id": team.team_id,

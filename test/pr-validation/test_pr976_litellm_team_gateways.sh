@@ -13,6 +13,9 @@
 #   to the selected team, for two different users/teams
 # - atlas-chat with a hand-crafted key for someone else's team fails and no
 #   request for that team reaches the mock
+# - A gateway limited by a `models` allowlist offers only the allowlisted
+#   models (with per-model compliance levels), and a key for a model outside
+#   the allowlist is refused before reaching the mock
 # - Run the backend unit test suite
 
 set -uo pipefail
@@ -95,6 +98,7 @@ export USE_MOCK_S3=true
 export DEBUG_MODE=true
 export SKIP_AUTHORIZATION_CHECKS=true
 export FEATURE_CHAT_HISTORY_ENABLED=false
+export FEATURE_COMPLIANCE_LEVELS_ENABLED=true
 
 cd "$ATLAS_DIR"
 python main.py > "$WORK_DIR/backend.log" 2>&1 &
@@ -125,7 +129,7 @@ curl -s -H "$USER_HDR" "$API/api/config/shell" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 names = [g['name'] for g in d.get('llm_gateways', [])]
-assert names == ['enterprise'], names
+assert names == ['enterprise', 'restricted'], names
 assert all(not m['name'].startswith('enterprise::') for m in d['models'])
 print('llm_gateways:', d['llm_gateways'])
 "
@@ -184,12 +188,45 @@ FAILED_CLOSED=$?
 [ "$FAILED_CLOSED" -eq 0 ] && [ "$REQS" = "0" ]
 print_result $? "Crafted key for another user's team is refused before reaching LiteLLM (rc=$CLI_RC, gamma requests=$REQS)"
 
+# --- Admin allowlist with per-model compliance levels ----------------------
+print_header "PR #976: gateway limited to named models"
+curl -s -H "$USER_HDR" "$API/api/config/shell" | python3 -c "
+import sys, json
+g = {g['name']: g for g in json.load(sys.stdin)['llm_gateways']}['restricted']
+assert g['compliance_level'] == 'Internal', g
+assert g['model_compliance_levels'] == {'gpt-4o-mini': 'Public', 'llama-3.3-70b': 'Internal'}, g
+assert g['compliance_levels'] == ['Internal', 'Public'], g
+print(g)
+"
+print_result $? "Config lists per-model compliance levels for the allowlisted gateway"
+
+curl -s -H "$USER_HDR" "$API/api/llm/gateways/restricted/models?team_id=team-alpha-7f3a" | python3 -c "
+import sys, json
+models = json.load(sys.stdin)['models']
+got = [(m['model_id'], m.get('compliance_level')) for m in models]
+# Project Alpha lists gpt-4o-mini and claude-sonnet; only gpt-4o-mini is allowed.
+assert got == [('gpt-4o-mini', 'Public')], got
+print(got)
+"
+print_result $? "Models endpoint offers only allowlisted models, with their own level"
+
+curl -s -X DELETE "$MOCK_URL/mock/requests" > /dev/null
+OUT=$(cd "$ATLAS_DIR" && python atlas_chat_cli.py "hello" --model "restricted::team-alpha-7f3a::gpt-4o-mini" --user-email test@test.com 2>"$WORK_DIR/cli4.err")
+echo "$OUT" | grep -q "\[Project Alpha / gpt-4o-mini\]"
+print_result $? "atlas-chat through an allowlisted model reaches the team"
+
+(cd "$ATLAS_DIR" && python atlas_chat_cli.py "sneaky" --model "restricted::team-alpha-7f3a::claude-sonnet" --user-email test@test.com > "$WORK_DIR/cli5.out" 2>&1)
+CLI_RC=$?
+REQS=$(curl -s "$MOCK_URL/mock/requests" | python3 -c "import sys, json; print(sum(r['model'] == 'claude-sonnet' for r in json.load(sys.stdin)['requests']))")
+[ "$CLI_RC" -ne 0 ] && [ "$REQS" = "0" ]
+print_result $? "Key for a model outside the allowlist is refused before reaching LiteLLM (rc=$CLI_RC, requests=$REQS)"
+
 # --- Unit tests -------------------------------------------------------------
 print_header "Backend unit test suite"
 # Without this script's fixture environment: the suite's own e2e checks pick
 # the first configured model and would otherwise talk to the mock proxy.
 env -u APP_CONFIG_DIR -u APP_LOG_DIR -u PORT -u ATLAS_HOST -u PR976_LITELLM_URL \
-    -u SKIP_AUTHORIZATION_CHECKS -u FEATURE_CHAT_HISTORY_ENABLED \
+    -u SKIP_AUTHORIZATION_CHECKS -u FEATURE_CHAT_HISTORY_ENABLED -u FEATURE_COMPLIANCE_LEVELS_ENABLED \
     ./test/run_tests.sh backend > /dev/null 2>&1
 print_result $? "Backend unit tests (./test/run_tests.sh backend)"
 

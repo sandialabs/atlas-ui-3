@@ -13,3 +13,17 @@ litellm_gateways:
     model_defaults:
       supports_tools: false
       max_tokens: 256
+  # Same proxy, limited by the admin to two named models with their own
+  # compliance levels (PR 976 review: allowlist + per-model compliance).
+  restricted:
+    display_name: "Enterprise LiteLLM (allowlisted)"
+    base_url: "${PR976_LITELLM_URL}"
+    api_key: "sk-mock-litellm-master"
+    compliance_level: "Internal"
+    models:
+      gpt-4o-mini:
+        compliance_level: "Public"
+      llama-3.3-70b:
+    model_defaults:
+      supports_tools: false
+      max_tokens: 256

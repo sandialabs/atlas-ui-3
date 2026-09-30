@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, Wrench, Eye, Loader2, RefreshCw } from 'lucide-react'
+import { Users, Wrench, Eye, Loader2, RefreshCw, Shield } from 'lucide-react'
 import {
   parseGatewayModelKey,
   rememberTeamLabel,
@@ -28,8 +28,10 @@ async function fetchJson(url) {
  * The user's LiteLLM teams load when the section is shown; choosing a team
  * loads the models that team may call. Choosing a model selects its gateway
  * model key, which carries the team to the backend with every chat turn.
+ * `isModelVisible` (optional) hides models outside the active compliance
+ * filter; each model carries its own level when the admin set one.
  */
-const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
+const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisible, showCompliance }) => {
   const current = parseGatewayModelKey(currentModel, [gateway])
   const [teams, setTeams] = useState(null)
   const [teamsError, setTeamsError] = useState(null)
@@ -86,6 +88,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
   const currentTeamGone = !!(current && teams && !teams.some(t => t.team_id === current.teamId))
   const currentModelGone = !!(current && models && teamId === current.teamId &&
     !models.some(m => m.name === currentModel))
+  const shownModels = models && isModelVisible ? models.filter(isModelVisible) : models
 
   return (
     <div className="border-t border-gray-600 px-3 py-2 space-y-2" data-testid={`gateway-${gateway.name}`}>
@@ -147,9 +150,11 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
             </p>
           ) : models.length === 0 ? (
             <p className="text-xs text-gray-400">This team has no models available.</p>
+          ) : shownModels.length === 0 ? (
+            <p className="text-xs text-gray-400">None of this team&apos;s models match the compliance filter.</p>
           ) : (
             <div className="rounded border border-gray-700">
-              {models.map(model => {
+              {shownModels.map(model => {
                 const selected = model.name === currentModel
                 return (
                   <button
@@ -164,6 +169,12 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user }) => {
                   >
                     <span className="truncate">{model.label || model.model_id}</span>
                     <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                      {showCompliance && model.compliance_level && (
+                        <span className="inline-flex items-center gap-0.5 px-1 rounded text-[10px] bg-blue-600 text-white">
+                          <Shield className="w-2.5 h-2.5" />
+                          {model.compliance_level}
+                        </span>
+                      )}
                       <Eye className={`w-3.5 h-3.5 ${gateway.supports_vision ? 'text-green-400' : 'text-gray-600'}`} />
                       <Wrench className={`w-3.5 h-3.5 ${gateway.supports_tools !== false ? 'text-blue-400' : 'text-gray-600'}`} />
                     </span>

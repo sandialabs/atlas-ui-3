@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #976 - 2026-09-24
 - Enterprise LiteLLM team gateways: configure `litellm_gateways` in `llmconfig.yml` so users pick a LiteLLM team and then one of its models; every call sends the team in `x-litellm-team-id` (service key or delegated/Entra OBO auth). Adds `mocks/litellm-mock`.
+- Admins can limit a LiteLLM gateway to named models with a `models` allowlist in `llmconfig.yml` and give each model its own `compliance_level`; models outside the list are neither offered nor callable.
 - Per-request team selection needs LiteLLM Enterprise JWT auth, or an identity-aware proxy in front of OSS LiteLLM; the gateway admin doc explains the OSS behavior, Keycloak token-exchange setup, and what has been validated end to end.
 
 ### PR #973 - 2026-09-24

@@ -18,7 +18,7 @@ import os
 import re
 from typing import Any, ClassVar, Dict, List, Literal, Optional, get_args
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from atlas.modules.config.litellm_gateway_models import (
     GATEWAY_KEY_SEPARATOR,
@@ -204,6 +204,14 @@ class LiteLLMGatewayDelegation(BaseModel):
     scope: Optional[str] = None
 
 
+class LiteLLMGatewayModel(BaseModel):
+    """Admin settings for one named model in a gateway's ``models`` allowlist."""
+    model_config = ConfigDict(extra="forbid")
+
+    # Overrides the gateway's compliance_level for this model.
+    compliance_level: Optional[str] = None
+
+
 class LiteLLMGatewayConfig(BaseModel):
     """An enterprise LiteLLM proxy whose models are scoped to LiteLLM teams.
 
@@ -237,6 +245,11 @@ class LiteLLMGatewayConfig(BaseModel):
     # gateway, exactly as they do for a statically configured model.
     groups: List[str] = Field(default_factory=list)
     compliance_level: Optional[str] = None
+    # Optional allowlist of LiteLLM model ids, keyed by id. When set, only these
+    # models are offered or callable through the gateway (a team still has to
+    # list a model for it to appear); each entry may set its own
+    # compliance_level. Empty means every model a team lists.
+    models: Dict[str, LiteLLMGatewayModel] = Field(default_factory=dict)
     # Static extra headers sent on every request (values may be ${ENV_VAR}).
     extra_headers: Optional[Dict[str, str]] = None
     # ModelConfig fields applied to every discovered model (max_tokens,
@@ -249,6 +262,22 @@ class LiteLLMGatewayConfig(BaseModel):
         "model_name", "model_url", "api_key", "api_key_source", "globus_scope",
         "groups", "compliance_level", "extra_headers",
     })
+
+    @field_validator("models", mode="before")
+    @classmethod
+    def normalize_models(cls, v):
+        # A plain list names the allowed models without per-model settings; a
+        # mapping entry left empty in YAML (``gpt-4.1:``) arrives as None.
+        if v is None:
+            return {}
+        if isinstance(v, list):
+            v = {model_id: None for model_id in v}
+        if isinstance(v, dict):
+            for model_id in v:
+                if not isinstance(model_id, str) or not model_id.strip():
+                    raise ValueError("models entries must be non-empty LiteLLM model ids")
+            return {model_id: entry or {} for model_id, entry in v.items()}
+        return v
 
     @field_validator("model_defaults")
     @classmethod
@@ -280,6 +309,17 @@ class LiteLLMGatewayConfig(BaseModel):
     def resolved_base_url(self) -> str:
         """``base_url`` with a ``${ENV_VAR}`` value expanded."""
         return resolve_env_var(self.base_url) or ""
+
+    def allows_model(self, model_id: str) -> bool:
+        """Whether the admin allowlist (if any) permits this LiteLLM model id."""
+        return not self.models or model_id in self.models
+
+    def model_compliance_level(self, model_id: str) -> Optional[str]:
+        """The compliance level of one model: its own, else the gateway's."""
+        entry = self.models.get(model_id)
+        if entry is not None and entry.compliance_level:
+            return entry.compliance_level
+        return self.compliance_level
 
     def effective_user_id_source(self) -> str:
         if self.user_id_source:
@@ -355,7 +395,7 @@ class LLMConfig(BaseModel):
             # key or a delegated token), so no static key is resolved here.
             api_key="",
             groups=list(gateway.groups),
-            compliance_level=gateway.compliance_level,
+            compliance_level=gateway.model_compliance_level(ref.model_id),
             extra_headers=dict(gateway.extra_headers) if gateway.extra_headers else None,
         )
         return ModelConfig(**fields)

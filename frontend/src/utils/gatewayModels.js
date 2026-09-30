@@ -93,7 +93,8 @@ export function gatewayModelEntry(name, gateways, user) {
     model_id: ref.modelId,
     display_name: `${ref.modelId} (${teamLabel})`,
     description: gateway.description || `${ref.modelId} via ${gateway.display_name || gateway.name}`,
-    compliance_level: gateway.compliance_level,
+    // An allowlisted model may carry its own level (see llmconfig `models`).
+    compliance_level: gateway.model_compliance_levels?.[ref.modelId] ?? gateway.compliance_level,
     supports_vision: !!gateway.supports_vision,
     supports_pdf: !!gateway.supports_pdf,
     supports_tools: gateway.supports_tools !== false,

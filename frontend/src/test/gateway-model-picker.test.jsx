@@ -14,8 +14,10 @@ import {
   rememberTeamLabel,
 } from '../utils/gatewayModels'
 
+const mocks = vi.hoisted(() => ({ marketplace: null }))
+
 vi.mock('../contexts/ChatContext')
-vi.mock('../contexts/MarketplaceContext', () => ({ useOptionalMarketplace: () => null }))
+vi.mock('../contexts/MarketplaceContext', () => ({ useOptionalMarketplace: () => mocks.marketplace }))
 vi.mock('../hooks/useLLMAuthStatus', () => ({
   useLLMAuthStatus: () => ({
     fetchAuthStatus: vi.fn(),
@@ -63,17 +65,16 @@ function mockFetch() {
   })
 }
 
-function setup({ currentModel = 'static-model', models } = {}) {
+function setup({ currentModel = 'static-model', models, gateways = [GATEWAY], features = {}, complianceLevelFilter = null } = {}) {
   const setCurrentModel = vi.fn()
-  const gateways = [GATEWAY]
   useChat.mockReturnValue({
     models: withGatewayModel(models || [{ name: 'static-model', supports_tools: true }], currentModel, gateways, 'test@test.com'),
     llmGateways: gateways,
     user: 'test@test.com',
     currentModel,
     setCurrentModel,
-    features: {},
-    complianceLevelFilter: null,
+    features,
+    complianceLevelFilter,
   })
   render(<ModelSelector />)
   return { setCurrentModel }
@@ -159,3 +160,66 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Please sign in again.')
   })
 })
+
+describe('admin-allowlisted gateway models with their own compliance level', () => {
+  // A gateway whose llmconfig `models` allowlist gives gpt-4o-mini its own
+  // level; the others inherit the gateway's.
+  const LEVELED_GATEWAY = {
+    ...GATEWAY,
+    compliance_level: 'Internal',
+    model_compliance_levels: { 'gpt-4o-mini': 'Public', 'claude-sonnet': 'Internal' },
+    compliance_levels: ['Internal', 'Public'],
+  }
+  const LEVELED_MODELS = { models: [
+    { name: 'enterprise::team-alpha::gpt-4o-mini', model_id: 'gpt-4o-mini', label: 'gpt-4o-mini', compliance_level: 'Public' },
+    { name: 'enterprise::team-alpha::claude-sonnet', model_id: 'claude-sonnet', label: 'claude-sonnet', compliance_level: 'Internal' },
+  ] }
+
+  beforeEach(() => {
+    localStorage.clear()
+    global.fetch = vi.fn(async (url) => {
+      const parsed = new URL(url, 'http://localhost')
+      if (parsed.pathname.endsWith('/teams')) return { ok: true, status: 200, json: async () => TEAMS }
+      return { ok: true, status: 200, json: async () => LEVELED_MODELS }
+    })
+    // Only an exact match is accessible, which is enough to tell levels apart.
+    mocks.marketplace = { isComplianceAccessible: (filter, level) => level === filter }
+  })
+  afterEach(() => {
+    mocks.marketplace = null
+    vi.restoreAllMocks()
+  })
+
+  it('labels a saved selection with the model level, not the gateway level', () => {
+    expect(gatewayModelEntry('enterprise::t1::gpt-4o-mini', [LEVELED_GATEWAY], 'a@x.com').compliance_level)
+      .toBe('Public')
+    expect(gatewayModelEntry('enterprise::t1::other', [LEVELED_GATEWAY], 'a@x.com').compliance_level)
+      .toBe('Internal')
+  })
+
+  it('keeps the gateway listed when one model passes and hides the others', async () => {
+    lastTeam('team-alpha')
+    setup({
+      gateways: [LEVELED_GATEWAY],
+      features: { compliance_levels: true },
+      complianceLevelFilter: 'Public',
+    })
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    expect(await screen.findByRole('button', { name: /gpt-4o-mini/ })).toHaveTextContent('Public')
+    expect(screen.queryByRole('button', { name: /claude-sonnet/ })).toBeNull()
+  })
+
+  it('hides the gateway when none of its models pass the filter', () => {
+    setup({
+      gateways: [LEVELED_GATEWAY],
+      features: { compliance_levels: true },
+      complianceLevelFilter: 'Secret',
+    })
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    expect(screen.queryByTestId('gateway-enterprise')).toBeNull()
+  })
+})
+
+function lastTeam(teamId) {
+  localStorage.setItem('chatui-gateway-last-team:test@test.com', JSON.stringify({ enterprise: teamId }))
+}

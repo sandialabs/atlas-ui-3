@@ -529,3 +529,135 @@ class TestGatewayComplianceNormalization:
         with patch("atlas.core.compliance.get_compliance_manager", return_value=Levels()):
             loader._validate_llm_compliance_levels()
         assert loader._llm_config.litellm_gateways["enterprise"].compliance_level == "Internal"
+
+
+# -- admin allowlist of named gateway models ----------------------------------
+
+
+def _allowlisted_config(**overrides) -> LLMConfig:
+    return _llm_config(
+        compliance_level="Internal",
+        models={"gpt-4o-mini": {"compliance_level": "Public"}, "llama-3.3-70b": None},
+        **overrides,
+    )
+
+
+class TestGatewayModelAllowlist:
+    def test_list_form_names_models_without_settings(self):
+        gateway = _llm_config(models=["gpt-4o-mini", "claude-sonnet"]).litellm_gateways["enterprise"]
+        assert set(gateway.models) == {"gpt-4o-mini", "claude-sonnet"}
+        assert gateway.models["gpt-4o-mini"].compliance_level is None
+
+    def test_unknown_per_model_setting_is_rejected(self):
+        with pytest.raises(ValueError):
+            _llm_config(models={"gpt-4o-mini": {"complianc_level": "Public"}})
+
+    def test_per_model_compliance_overrides_the_gateway(self):
+        llm_config = _allowlisted_config()
+        assert llm_config.get_model(f"enterprise::{ALPHA}::gpt-4o-mini").compliance_level == "Public"
+        # An entry without its own level inherits the gateway's.
+        assert llm_config.get_model(f"enterprise::{BETA}::llama-3.3-70b").compliance_level == "Internal"
+
+    def test_model_outside_the_allowlist_is_unknown(self):
+        assert _allowlisted_config().get_model(f"enterprise::{ALPHA}::claude-sonnet") is None
+
+    def test_no_allowlist_allows_every_team_model(self):
+        assert _llm_config().get_model(f"enterprise::{ALPHA}::claude-sonnet") is not None
+
+    @pytest.mark.asyncio
+    async def test_discovery_offers_only_allowlisted_models(self):
+        client = _client(_allowlisted_config())
+        # Project Alpha lists gpt-4o-mini and claude-sonnet; only one is allowed.
+        assert await client.list_models("test@test.com", ALPHA) == ["gpt-4o-mini"]
+        # The allowlist narrows a team's models; it never adds any.
+        assert "llama-3.3-70b" not in await client.list_models("test@test.com", ALPHA)
+
+    @pytest.mark.asyncio
+    async def test_call_to_a_model_outside_the_allowlist_never_reaches_litellm(self):
+        caller = _caller_with_mock_transport(_allowlisted_config())
+        with pytest.raises(ValueError, match="not found"):
+            await caller._resolve_call_target(f"enterprise::{ALPHA}::claude-sonnet", None, "test@test.com")
+        assert litellm_mock._request_log == []
+
+    @pytest.mark.asyncio
+    async def test_allowlisted_model_still_gets_team_header(self):
+        caller = _caller_with_mock_transport(_allowlisted_config())
+        model, kwargs = await caller._resolve_call_target(
+            f"enterprise::{ALPHA}::gpt-4o-mini", None, "test@test.com"
+        )
+        assert model == "openai/gpt-4o-mini"
+        assert kwargs["extra_headers"]["x-litellm-team-id"] == ALPHA
+
+    @pytest.mark.asyncio
+    async def test_server_checks_see_per_model_level_and_unknown_model(self):
+        from atlas.modules.config.models import lookup_model_config
+
+        llm_config = _allowlisted_config()
+        # The chat service reads the trusted level through lookup_model_config.
+        assert lookup_model_config(llm_config, f"enterprise::{ALPHA}::gpt-4o-mini").compliance_level == "Public"
+        decision = await check_model_access(
+            llm_config, f"enterprise::{ALPHA}::claude-sonnet", "test@test.com",
+            auth_check_func=AsyncMock(return_value=True),
+        )
+        assert decision is ModelAccessDecision.UNKNOWN
+
+    @pytest.mark.asyncio
+    async def test_gateway_summary_reports_model_levels(self):
+        from atlas.routes.litellm_gateway_routes import build_gateway_summaries
+
+        settings = type("S", (), {"feature_compliance_levels_enabled": True})()
+        with patch("atlas.core.model_access.is_user_in_group", AsyncMock(return_value=True)):
+            (summary,) = await build_gateway_summaries(_allowlisted_config(), "test@test.com", settings)
+        assert summary["compliance_level"] == "Internal"
+        assert summary["model_compliance_levels"] == {"gpt-4o-mini": "Public", "llama-3.3-70b": "Internal"}
+        assert summary["compliance_levels"] == ["Internal", "Public"]
+
+    @pytest.mark.asyncio
+    async def test_gateway_summary_without_allowlist_has_one_level(self):
+        from atlas.routes.litellm_gateway_routes import build_gateway_summaries
+
+        settings = type("S", (), {"feature_compliance_levels_enabled": True})()
+        with patch("atlas.core.model_access.is_user_in_group", AsyncMock(return_value=True)):
+            (summary,) = await build_gateway_summaries(
+                _llm_config(compliance_level="Internal"), "test@test.com", settings
+            )
+        assert summary["compliance_levels"] == ["Internal"]
+        assert "model_compliance_levels" not in summary
+
+    def test_models_route_filters_and_labels_levels(self):
+        from atlas.routes import litellm_gateway_routes
+
+        llm_config = _allowlisted_config()
+        litellm_gateway_client._clients["enterprise"] = (
+            llm_config.litellm_gateways["enterprise"],
+            _client(llm_config),
+        )
+        settings = type("S", (), {"feature_compliance_levels_enabled": True})()
+        config_manager = type("CM", (), {"llm_config": llm_config, "app_settings": settings})()
+        app = FastAPI()
+        app.include_router(litellm_gateway_routes.router)
+        app.dependency_overrides[get_current_user] = lambda: "test@test.com"
+        with patch.object(litellm_gateway_routes.app_factory, "get_config_manager", return_value=config_manager):
+            response = TestClient(app).get("/api/llm/gateways/enterprise/models", params={"team_id": ALPHA})
+        assert response.status_code == 200
+        assert response.json()["models"] == [{
+            "name": f"enterprise::{ALPHA}::gpt-4o-mini",
+            "model_id": "gpt-4o-mini",
+            "label": "gpt-4o-mini",
+            "compliance_level": "Public",
+        }]
+
+    def test_per_model_level_is_canonicalized_at_load(self):
+        from atlas.modules.config import config_loader
+
+        loader = object.__new__(config_loader.ConfigManager)
+        loader._llm_config = _llm_config(models={"gpt-4o-mini": {"compliance_level": "public-alias"}})
+
+        class Levels:
+            def validate_compliance_level(self, level, context=""):
+                return {"public-alias": "Public"}.get(level)
+
+        with patch("atlas.core.compliance.get_compliance_manager", return_value=Levels()):
+            loader._validate_llm_compliance_levels()
+        gateway = loader._llm_config.litellm_gateways["enterprise"]
+        assert gateway.models["gpt-4o-mini"].compliance_level == "Public"

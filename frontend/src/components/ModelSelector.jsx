@@ -59,9 +59,16 @@ const ModelSelector = () => {
   const currentLabel = currentObj?.display_name || currentModel
   // Gateway models are chosen in their gateway's section, not the flat list.
   const listedModels = models.filter(m => typeof m === 'string' || !m.gateway)
-  const visibleGateways = complianceEnabled && complianceLevelFilter
-    ? llmGateways.filter(g => isComplianceAccessible(complianceLevelFilter, g.compliance_level))
+  const complianceFiltering = complianceEnabled && !!complianceLevelFilter
+  // A gateway stays listed while any of its models passes the filter; the
+  // picker then hides the individual models that do not.
+  const visibleGateways = complianceFiltering
+    ? llmGateways.filter(g => (g.compliance_levels || [g.compliance_level])
+      .some(level => isComplianceAccessible(complianceLevelFilter, level)))
     : llmGateways
+  const isGatewayModelVisible = complianceFiltering
+    ? model => isComplianceAccessible(complianceLevelFilter, model.compliance_level)
+    : null
 
   return (
     <div className="relative">
@@ -184,6 +191,8 @@ const ModelSelector = () => {
                 currentModel={currentModel}
                 onSelect={handleModelSelect}
                 user={user}
+                isModelVisible={isGatewayModelVisible}
+                showCompliance={complianceEnabled}
               />
             ))}
           </div>
