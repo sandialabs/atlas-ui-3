@@ -58,8 +58,8 @@ describe('usePollingWithBackoff', () => {
   })
 
   // Test component that uses the hook
-  function TestPoller({ fetchFn, normalInterval = 5000, maxBackoffDelay = 30000, enabled = true, backoffBase, pauseWhenHidden }) {
-    usePollingWithBackoff(fetchFn, { normalInterval, maxBackoffDelay, enabled, backoffBase, pauseWhenHidden })
+  function TestPoller({ fetchFn, normalInterval = 5000, maxBackoffDelay = 30000, enabled = true, backoffBase, pauseWhenHidden, deps = [] }) {
+    usePollingWithBackoff(fetchFn, { normalInterval, maxBackoffDelay, enabled, backoffBase, pauseWhenHidden, deps })
     return <div>poller</div>
   }
 
@@ -244,5 +244,42 @@ describe('usePollingWithBackoff', () => {
       })
       expect(fetchFn).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it('a new generation is not stalled by an in-flight request from the old one', async () => {
+    // Switching the polled subject (a dep change) while the old subject's
+    // request is still in the air must start the new subject's poll at once;
+    // the old request must not hold the new generation's in-flight guard.
+    let calls = 0
+    const fetchFn = vi.fn(() => {
+      calls += 1
+      if (calls === 1) return new Promise(() => {}) // never resolves
+      return Promise.resolve()
+    })
+    const { rerender } = render(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    rerender(<TestPoller fetchFn={fetchFn} deps={['B']} normalInterval={1000} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry faster than backoffBase when jitter is negative', async () => {
+    // calculateBackoffDelay(1, 3000) with a 0.8 jitter factor is 2400ms; the
+    // scheduled retry is floored at backoffBase so a fast poller is never
+    // retried sooner than its healthy cadence.
+    Math.random = () => 0.0
+    const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
+    await act(async () => {
+      render(<TestPoller fetchFn={fetchFn} normalInterval={3000} backoffBase={3000} />)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2999) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
   })
 })

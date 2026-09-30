@@ -159,7 +159,16 @@ vi.mock('../hooks/useWorkspaces', () => ({
   isStaleWorkspacePointer: () => false,
 }))
 
+// Spy through the real alignment rule: a poll that finds the record unchanged
+// must not re-run it. Wrapping (not replacing) keeps the shipped behavior, so
+// this only observes how many times the reconcile reached alignment.
+vi.mock('../utils/transcriptAlignment', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, alignTranscript: vi.fn(actual.alignTranscript) }
+})
+
 import { ChatProvider, useChat } from '../contexts/ChatContext'
+import { alignTranscript } from '../utils/transcriptAlignment'
 
 const wrapper = ({ children }) => <ChatProvider>{children}</ChatProvider>
 const renderChat = () => renderHook(() => useChat(), { wrapper })
@@ -266,8 +275,11 @@ describe('mid-run live refresh of a joined conversation', () => {
       // list keeps its identity, so an idle poll does not re-render the
       // transcript (or re-stamp the bubble's timestamp) every interval.
       const settledMessages = result.current.messages
+      const alignCallsAtSettle = alignTranscript.mock.calls.length
       await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
       expect(result.current.messages).toBe(settledMessages)
+      // The unchanged record is skipped before the alignment is re-run.
+      expect(alignTranscript.mock.calls.length).toBe(alignCallsAtSettle)
 
       // The skip keys on the streaming segment too: a changed segment with
       // the same rows is real movement and must still reach the bubble.

@@ -62,7 +62,21 @@ const run = (cmd, args, opts) => {
   return p
 }
 
+const runToCompletion = (cmd, args, opts) => new Promise((resolve, reject) => {
+  const p = spawn(cmd, args, { stdio: 'inherit', ...opts })
+  p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))))
+  p.on('error', reject)
+})
+
 try {
+  // The screenshots must exercise this commit, not whatever was last built.
+  // The repository requires a frontend build after UI changes before taking
+  // screenshots; the isolated backend below then serves the fresh dist/.
+  if (!process.env.SKIP_UI_BUILD) {
+    console.log('building frontend (set SKIP_UI_BUILD=1 to reuse dist/)')
+    await runToCompletion('npm', ['run', 'build'], { cwd: join(ROOT, 'frontend') })
+  }
+
   run('python', [join(FIXTURES, 'mock_llm.py')], {
     env: { ...process.env, MOCK_LLM_PORT: String(MOCK_PORT) },
   })
@@ -174,33 +188,43 @@ try {
   console.log('tab A: run paused on the first approval')
 
   // Tab B opens the conversation while the run is paused on the first
-  // approval. The run's live record already holds the first atlas_sleep row
-  // (the call was persisted when it was requested), so the snapshot itself
-  // shows it; the "answer in progress" marker is what marks this as the
-  // joined view.
+  // approval. The run's live record already holds the pending call (the
+  // approval row is replayed), and the "answer in progress" marker is what
+  // marks this as the joined view. No tool call has *completed* yet, which is
+  // what the next step waits on.
   await tabB.getByText(/UI981/).first().click({ timeout: 15000 })
   const marker = tabB.getByText('Answer in progress — it will refresh when the response finishes.')
   await marker.waitFor({ timeout: 15000 })
-  const firstRowCount = await tabB.getByText('atlas_sleep').count()
-  if (firstRowCount < 1) {
-    throw new Error('the first tool row was missing from the opened record; rerun')
+  // A completed tool row carries a status glyph with aria-label SUCCESS; the
+  // pending approval row does not. Counting them avoids mistaking a replayed
+  // approval label for the persisted row.
+  const successGlyphs = tabB.locator('[role="img"][aria-label="SUCCESS"]')
+  const completedBefore = await successGlyphs.count()
+  if (completedBefore !== 0) {
+    throw new Error('a tool row had already completed before the approval; rerun')
   }
   await tabB.screenshot({ path: join(FIXTURES, 'live-refresh-before-approval.png') })
-  console.log('PASS: joined tab opened the in-flight record (marker + first tool row)')
+  console.log('PASS: joined tab opened the in-flight record (marker, pending approval, no completed row)')
 
   // Approve the first call. The tool executes and the run pauses on the
   // second approval -- which nothing answers -- so the run stays in flight.
-  // Tab B's poll must append the SECOND atlas_sleep row without the run
+  // Tab B's poll must append the now-persisted completed row without the run
   // ending.
   await approveButton.click()
-  await tabB.getByText('atlas_sleep').nth(firstRowCount).waitFor({ timeout: 30000 })
+  // The next SUCCESS glyph is the first call's completed row.
+  await successGlyphs.nth(completedBefore).waitFor({ timeout: 30000 })
+  const completedRow = tabB.locator('button').filter({ has: tabB.locator('[role="img"][aria-label="SUCCESS"]') })
+  const completedText = await completedRow.nth(completedBefore).textContent()
+  if (!completedText.includes('atlas_sleep')) {
+    throw new Error(`the completing row was not atlas_sleep: ${completedText}`)
+  }
   // The run is still executing: the pending-approval marker is still on
   // screen, so this row arrived mid-run, not from the run-end reload.
   if (!(await marker.count())) {
-    throw new Error('the run had already ended when the second tool row appeared; rerun')
+    throw new Error('the run had already ended when the tool row appeared; rerun')
   }
   await tabB.screenshot({ path: join(FIXTURES, 'live-refresh-tool-row.png') })
-  console.log(`PASS: joined tab appended the ${firstRowCount + 1}th atlas_sleep row while the run was still in progress (screenshot: ${join(FIXTURES, 'live-refresh-tool-row.png')})`)
+  console.log(`PASS: joined tab appended a completed atlas_sleep row while the run was still in progress (screenshot: ${join(FIXTURES, 'live-refresh-tool-row.png')})`)
 
   await browser.close()
 } catch (err) {

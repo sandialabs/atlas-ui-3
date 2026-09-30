@@ -1445,14 +1445,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		messages.some(m => m._streaming && m._replayed)
 	) ? activeConversationId : null
 
-	// The record a live pass last reconciled, per conversation. Each poll
-	// otherwise re-downloads the run's whole session and re-runs the full
-	// alignment for a record that has not moved: an idle run (parked on a
-	// long tool call) would pay that every interval for the run's whole
-	// duration. Keyed by conversation id so switching views cannot inherit a
-	// previous conversation's signature, and reset when the joined view
-	// opens or closes (below), so a later run for the same conversation
-	// cannot inherit it either.
+	// The record a live pass last reconciled, per conversation. The fetch still
+	// runs every interval (the endpoint carries no revision to condition it
+	// on), but a record that has not moved since the last applied pass (same
+	// row count, same streaming segment) would re-run the whole alignment and
+	// dispatch nothing: an idle run parked on a long tool call would pay that
+	// every interval for the run's whole duration. Keyed by conversation id so
+	// switching views cannot inherit a previous conversation's signature, and
+	// reset when the joined view opens or closes (below), so a later run for
+	// the same conversation cannot inherit it either.
 	const livePollSignatureRef = useRef(null)
 	useEffect(() => {
 		livePollSignatureRef.current = null
