@@ -45,7 +45,8 @@ export function calculateBackoffDelay(failures, baseDelay = 1000, maxDelay = 300
  *   below it.
  * @param {boolean} options.enabled - Whether polling is active (default true)
  * @param {boolean} options.pauseWhenHidden - Suspend polling while the tab is
- *   hidden (default false); one immediate poll fires when it becomes visible.
+ *   hidden (default false); polling resumes when it becomes visible, honoring
+ *   any in-progress backoff delay rather than polling immediately.
  * @param {Array} options.deps - Additional dependency array items that should restart polling
  */
 export function usePollingWithBackoff(fetchFn, {
@@ -78,6 +79,10 @@ export function usePollingWithBackoff(fetchFn, {
     failureCountRef.current = 0
     let cancelled = false
     let inFlight = false
+    // When the next backoff retry is due, so a tab shown mid-backoff waits only
+    // the remaining delay instead of restarting the whole interval (repeated
+    // hides/shows must not keep pushing the retry out). 0 means no backoff.
+    let retryAt = 0
     const isCurrent = () => !cancelled && generationRef.current === generation
 
     const scheduleNext = (delay) => {
@@ -113,10 +118,12 @@ export function usePollingWithBackoff(fetchFn, {
         // dep changed); its result is stale and must not schedule the new one.
         if (!isCurrent()) return
         failureCountRef.current = 0
+        retryAt = 0
         scheduleNext(normalInterval)
       } catch {
         if (!isCurrent()) return
         failureCountRef.current += 1
+        retryAt = Date.now() + nextBackoffDelay()
         scheduleNext(nextBackoffDelay())
       } finally {
         inFlight = false
@@ -131,10 +138,10 @@ export function usePollingWithBackoff(fetchFn, {
           timeoutIdRef.current = null
         }
       } else if (enabled) {
-        // Showing the tab does not bypass an in-progress backoff: if the last
-        // passes failed, wait out the same delay the hidden tab had queued.
-        if (failureCountRef.current > 0) {
-          scheduleNext(nextBackoffDelay())
+        // Showing the tab does not bypass an in-progress backoff: wait only
+        // the remaining delay the hidden tab had queued, not a fresh one.
+        if (failureCountRef.current > 0 && retryAt) {
+          scheduleNext(Math.max(0, retryAt - Date.now()))
         } else {
           poll()
         }

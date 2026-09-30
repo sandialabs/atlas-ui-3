@@ -269,8 +269,8 @@ describe('mid-run live refresh of a joined conversation', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
       expect(result.current.messages).toBe(settledMessages)
 
-      // The skip keys on the streaming segment too: a changed segment with
-      // the same rows is real movement and must still reach the bubble.
+      // A changed streaming segment with the same rows is real movement and
+      // must still reach the bubble on the next pass.
       h.fetchMock.mockImplementation(async (url) => {
         if (String(url).includes('/api/conversations/conv-1')) {
           return { ok: true, json: async () => liveRecord(sleepRow, 'Working on it some more') }

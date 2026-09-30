@@ -276,6 +276,38 @@ describe('usePollingWithBackoff', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
       expect(fetchFn).toHaveBeenCalledTimes(2)
     })
+
+    it('showing after part of the backoff elapsed waits only the remainder', async () => {
+      Math.random = () => 0.5 // no jitter; retry is exactly backoffBase
+      const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
+      setHidden(true)
+      await act(async () => {
+        render(<TestPoller fetchFn={fetchFn} normalInterval={3000} backoffBase={3000} pauseWhenHidden />)
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      setHidden(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchFn).toHaveBeenCalledTimes(1) // fails at t0; retry due at t0+3000
+
+      // Hide, let 1000ms of the backoff elapse, then show: only 2000 remain.
+      setHidden(true)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(1000)
+      })
+      setHidden(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1999) })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(fetchFn).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('a new generation is not stalled by an in-flight request from the old one', async () => {
@@ -314,6 +346,55 @@ describe('usePollingWithBackoff', () => {
     // second-failure exponent.
     await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
     expect(fetchFn).toHaveBeenCalledTimes(3)
+  })
+
+  it('a late failure from a superseded generation does not affect the new one', async () => {
+    let rejectFirst
+    const fetchFn = vi.fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectFirst = reject }))
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error('fail'))
+    const { rerender } = render(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    rerender(<TestPoller fetchFn={fetchFn} deps={['B']} normalInterval={1000} backoffBase={1000} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+
+    // The superseded generation's request now fails. It must not bump the new
+    // generation's failure count (which would double its next retry).
+    await act(async () => {
+      rejectFirst(new Error('late'))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    await act(async () => { await vi.advanceTimersByTimeAsync(999) })
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(fetchFn).toHaveBeenCalledTimes(4)
+  })
+
+  it('does not start a second fetch while one is in flight', async () => {
+    let resolveFirst
+    const fetchFn = vi.fn(() => new Promise((resolve) => { resolveFirst = resolve }))
+    render(<TestPoller fetchFn={fetchFn} normalInterval={1000} pauseWhenHidden />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    // A visibility-triggered poll while the first is still in flight is
+    // dropped by the in-flight guard.
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    await act(async () => { resolveFirst(); await Promise.resolve() })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
   it('does not retry faster than backoffBase when jitter is negative', async () => {
