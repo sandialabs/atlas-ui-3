@@ -54,7 +54,7 @@ from atlas.domain.errors import (
     RateLimitError,
 )
 from atlas.modules.config.config_manager import resolve_env_var
-from atlas.modules.config.litellm_gateway_models import resolve_gateway_ref
+from atlas.modules.config.litellm_gateway_models import parse_gateway_model_key, resolve_gateway_ref
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 
 from .litellm_gateway_client import get_gateway_client
@@ -780,6 +780,16 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
     def _require_model_config(self, model_name: str):
         model_config = lookup_model_config(self.llm_config, model_name)
         if model_config is None:
+            ref = parse_gateway_model_key(model_name)
+            gateways = getattr(self.llm_config, "litellm_gateways", None) or {}
+            if ref is not None and ref.gateway in gateways:
+                # A configured gateway refused the key: the model is outside
+                # the admin allowlist (e.g. a saved selection since removed).
+                raise AuthorizationError(
+                    "The selected model is no longer available on this LiteLLM gateway. "
+                    "Choose another model.",
+                    code="LLM_GATEWAY_MODEL_NOT_ALLOWED",
+                )
             raise ValueError(f"Model {model_name} not found in configuration")
         return model_config
 

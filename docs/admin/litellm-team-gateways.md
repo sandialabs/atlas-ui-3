@@ -96,7 +96,10 @@ litellm_gateways:
   LiteLLM models are `gpt-4.1` and `llama-3.3-70b` sees only `gpt-4.1`.
 - **It is enforced on the server, not just hidden.** A model key naming a model
   outside the allowlist is an unknown model everywhere (chat, `atlas-chat
-  --model`, saved conversations), so no request for it reaches LiteLLM.
+  --model`, saved conversations), so no request for it reaches LiteLLM. A
+  call with such a key, such as a saved selection whose model has since been
+  removed from the list, fails with "The selected model is no longer available
+  on this LiteLLM gateway".
 - **Compliance.** Each model's level is its entry's `compliance_level`, or the
   gateway's when the entry sets none. Levels are validated like any other
   model's. An unknown level (a typo such as `SOC-2`) leaves that model

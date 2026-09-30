@@ -575,8 +575,10 @@ class TestGatewayModelAllowlist:
     @pytest.mark.asyncio
     async def test_call_to_a_model_outside_the_allowlist_never_reaches_litellm(self):
         caller = _caller_with_mock_transport(_allowlisted_config())
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(AuthorizationError) as exc_info:
             await caller._resolve_call_target(f"enterprise::{ALPHA}::claude-sonnet", None, "test@test.com")
+        assert exc_info.value.code == "LLM_GATEWAY_MODEL_NOT_ALLOWED"
+        assert "no longer available" in exc_info.value.message
         assert litellm_mock._request_log == []
 
     @pytest.mark.asyncio
@@ -691,3 +693,20 @@ class TestGatewayModelAllowlist:
         # Present with None, so the picker does not substitute the gateway's level.
         assert summary["model_compliance_levels"] == {"gpt-4o-mini": None, "llama-3.3-70b": "Internal"}
         assert summary["compliance_levels"] == ["Internal", None]
+
+    @pytest.mark.asyncio
+    async def test_removed_model_reports_a_clear_error_when_streaming(self):
+        from atlas.application.chat.utilities.error_handler import classify_llm_error, error_type_for
+
+        caller = _caller_with_mock_transport(_allowlisted_config())
+        with pytest.raises(AuthorizationError) as exc_info:
+            async for _ in caller.stream_plain(
+                f"enterprise::{ALPHA}::claude-sonnet",
+                [{"role": "user", "content": "hi"}],
+                user_email="test@test.com",
+            ):
+                pass
+        error_class, user_msg, _ = classify_llm_error(exc_info.value)
+        assert "no longer available on this LiteLLM gateway" in user_msg
+        assert error_type_for(error_class) == "authorization"
+        assert litellm_mock._request_log == []

@@ -218,7 +218,7 @@ print_result $? "atlas-chat through an allowlisted model reaches the team"
 (cd "$ATLAS_DIR" && python atlas_chat_cli.py "sneaky" --model "restricted::team-alpha-7f3a::claude-sonnet" --user-email test@test.com > "$WORK_DIR/cli5.out" 2>&1)
 CLI_RC=$?
 REQS=$(curl -s "$MOCK_URL/mock/requests" | python3 -c "import sys, json; print(sum(r['model'] == 'claude-sonnet' for r in json.load(sys.stdin)['requests']))")
-[ "$CLI_RC" -ne 0 ] && [ "$REQS" = "0" ]
+[ "$CLI_RC" -ne 0 ] && grep -qi "no longer available" "$WORK_DIR/cli5.out" && [ "$REQS" = "0" ]
 print_result $? "Key for a model outside the allowlist is refused before reaching LiteLLM (rc=$CLI_RC, requests=$REQS)"
 
 # --- Unit tests -------------------------------------------------------------
