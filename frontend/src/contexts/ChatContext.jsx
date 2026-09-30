@@ -1374,10 +1374,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// user switched conversations (or a diverged record) must not touch the
 		// view. Skipping the dispatch when the text has not moved keeps an idle
 		// poll from rebuilding the message list on every tick.
+		//
+		// Only ever *update* an existing placeholder, never create one: the
+		// poll is gated on a placeholder, so a live pass that finds none means
+		// the view moved on while this response was in the air -- the run-end
+		// reload settled the transcript, say. Creating a bubble then would
+		// strand an "in progress" fragment nothing clears, because the run
+		// whose segment this text belongs to has already ended. `findLast`
+		// targets the same row the reducer's replace branch does.
 		if (live) {
-			const placeholder = latestMessagesRef.current.find(m => m._streaming && m._replayed)
+			const placeholder = latestMessagesRef.current.findLast(m => m._streaming && m._replayed)
 			const segment = conversationData.streaming_text || ''
-			if (placeholder ? placeholder.content !== segment : segment !== '') {
+			if (placeholder && placeholder.content !== segment) {
 				streamToken(segment, true)
 			}
 		}
@@ -1437,6 +1445,19 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		messages.some(m => m._streaming && m._replayed)
 	) ? activeConversationId : null
 
+	// The record a live pass last reconciled, per conversation. Each poll
+	// otherwise re-downloads the run's whole session and re-runs the full
+	// alignment for a record that has not moved: an idle run (parked on a
+	// long tool call) would pay that every interval for the run's whole
+	// duration. Keyed by conversation id so switching views cannot inherit a
+	// previous conversation's signature, and reset when the joined view
+	// opens or closes (below), so a later run for the same conversation
+	// cannot inherit it either.
+	const livePollSignatureRef = useRef(null)
+	useEffect(() => {
+		livePollSignatureRef.current = null
+	}, [liveJoinedConversationId])
+
 	const fetchLiveJoinedConversation = useCallback(async () => {
 		if (!liveJoinedConversationId) return
 		const res = await fetch(`/api/conversations/${liveJoinedConversationId}`)
@@ -1455,11 +1476,32 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// below makes the same check; this keeps even a stale read from being
 		// applied, and keeps the bubble inside that guard.
 		if (activeConversationIdRef.current !== liveJoinedConversationId) return
-		refreshJoinedConversation(data, { live: true })
+		// The run can also settle between the fetch and this response without
+		// the view changing: the tracker already holds the terminal status the
+		// run-end path is working from, and the record in hand is the run's
+		// session as it stood at fetch time -- a snapshot, not the final
+		// transcript. Leave the view to that path.
+		if (!isRunActive(runsByConversationRef.current[liveJoinedConversationId])) return
+		// Nothing has moved since the last reconciled pass (same row count,
+		// same streaming segment): the record is byte-identical to what the
+		// previous pass already applied, so re-running the alignment would
+		// dispatch nothing. Skip the work instead.
+		const signature = `${liveJoinedConversationId}:${data.messages?.length ?? 0}:${data.streaming_text || ''}`
+		if (livePollSignatureRef.current === signature) return
+		if (refreshJoinedConversation(data, { live: true })) {
+			livePollSignatureRef.current = signature
+		}
 	}, [liveJoinedConversationId, refreshJoinedConversation])
 
 	usePollingWithBackoff(fetchLiveJoinedConversation, {
 		normalInterval: LIVE_REFRESH_INTERVAL_MS,
+		// A failing server must not be retried faster than the healthy
+		// cadence: the hook's 1s default backoff base would poll a 503 every
+		// second against a 3s healthy interval.
+		backoffBase: LIVE_REFRESH_INTERVAL_MS,
+		// A hidden tab gains nothing from these rows; stop downloading the
+		// run's session until it is shown again.
+		pauseWhenHidden: true,
 		enabled: !!liveJoinedConversationId,
 		deps: [liveJoinedConversationId],
 	})

@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-09-27
+Last updated: 2026-09-30
 
 Issue #884.
 
@@ -210,6 +210,18 @@ a poll that comes back with the run already settled is ignored -- the run-end
 path owns the final transcript. The tab that owns the stream is not polled;
 it receives these rows live over its own socket.
 
+The poll is deliberately cheap to run and cheap to stop:
+
+- A pass whose record has not moved since the last one it applied (same row
+  count, same streaming segment) is skipped without re-running the alignment.
+- Polling pauses while the tab is hidden and fires one poll when it is shown
+  again.
+- A failing server is retried on the same backoff base as the healthy
+  interval, so a 503 is not polled faster than the 3s cadence.
+- A live pass only refreshes a bubble that already exists. It never creates
+  one: a response that lands after the view has settled (the run ended
+  between the fetch and the response) would otherwise strand an "in
+  progress" fragment nothing clears.
 
 ### Auto-approve covers background runs
 
