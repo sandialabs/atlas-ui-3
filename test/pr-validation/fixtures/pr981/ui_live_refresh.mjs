@@ -11,18 +11,22 @@
  *      approval.
  *   2. Tab B (a second page -- the shape that receives none of the run's
  *      frames) opens the conversation from history while the run is paused.
- *      The transcript shows the "answer in progress" marker and the run's
- *      first tool row (it was persisted when the call was requested).
+ *      The transcript shows the "answer in progress" marker and the pending
+ *      approval, with no completed tool row yet.
  *   3. Tab A approves the first call; the tool executes and the run pauses on
  *      the second. Without waiting for the run to end, tab B's periodic poll
- *      appends the second atlas_sleep row.
+ *      appends the first call's completed atlas_sleep row.
  *
- * Screenshots land in the run's temp directory (live-refresh-before-approval.png,
- * live-refresh-tool-row.png), captured while the run is still in flight.
+ * Screenshots are written beside this script
+ * (live-refresh-before-approval.png, live-refresh-tool-row.png), captured
+ * while the run is still in flight; debug screenshots on failure go to the
+ * run's temp directory.
+ *
+ * The frontend is rebuilt first (opt out with SKIP_UI_BUILD=1), so the
+ * screenshots exercise the commit under test rather than a stale dist/.
  *
  * Prerequisites: `cd test_e2e && npm install && npx playwright install
- * chromium` (the only playwright install in the repo), and the frontend
- * built (`cd frontend && npm run build`). Run from the repo root:
+ * chromium` (the only playwright install in the repo). Run from the repo root:
  *
  *   node test/pr-validation/fixtures/pr981/ui_live_refresh.mjs
  */

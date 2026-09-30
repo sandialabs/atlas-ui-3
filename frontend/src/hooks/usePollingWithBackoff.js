@@ -73,6 +73,9 @@ export function usePollingWithBackoff(fetchFn, {
     // in-flight guard -- the two are per-generation closures, not shared refs.
     const generation = generationRef.current + 1
     generationRef.current = generation
+    // A new polled subject starts healthy; a failure from the subject this
+    // generation replaced must not make the new one back off immediately.
+    failureCountRef.current = 0
     let cancelled = false
     let inFlight = false
     const isCurrent = () => !cancelled && generationRef.current === generation
@@ -85,6 +88,14 @@ export function usePollingWithBackoff(fetchFn, {
         if (isCurrent()) poll()
       }, delay)
     }
+
+    // The next retry delay for the current failure count, floored at the base
+    // so the jitter's negative half cannot retry a fast poller sooner than its
+    // healthy cadence.
+    const nextBackoffDelay = () => Math.max(
+      calculateBackoffDelay(failureCountRef.current, backoffBase, maxBackoffDelay),
+      backoffBase,
+    )
 
     const poll = async () => {
       if (!isCurrent() || !enabled) return
@@ -106,13 +117,7 @@ export function usePollingWithBackoff(fetchFn, {
       } catch {
         if (!isCurrent()) return
         failureCountRef.current += 1
-        // Floor at the base so the jitter's negative half cannot retry a
-        // fast-interval poller sooner than its healthy cadence.
-        const delay = Math.max(
-          calculateBackoffDelay(failureCountRef.current, backoffBase, maxBackoffDelay),
-          backoffBase,
-        )
-        scheduleNext(delay)
+        scheduleNext(nextBackoffDelay())
       } finally {
         inFlight = false
       }
@@ -126,7 +131,13 @@ export function usePollingWithBackoff(fetchFn, {
           timeoutIdRef.current = null
         }
       } else if (enabled) {
-        poll()
+        // Showing the tab does not bypass an in-progress backoff: if the last
+        // passes failed, wait out the same delay the hidden tab had queued.
+        if (failureCountRef.current > 0) {
+          scheduleNext(nextBackoffDelay())
+        } else {
+          poll()
+        }
       }
     }
 

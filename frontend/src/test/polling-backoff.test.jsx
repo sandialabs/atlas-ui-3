@@ -244,6 +244,38 @@ describe('usePollingWithBackoff', () => {
       })
       expect(fetchFn).toHaveBeenCalledTimes(2)
     })
+
+    it('showing the tab during backoff waits out the delay instead of polling at once', async () => {
+      Math.random = () => 0.0 // negative jitter, floored to backoffBase below
+      const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
+      setHidden(true)
+      await act(async () => {
+        render(<TestPoller fetchFn={fetchFn} normalInterval={3000} backoffBase={3000} pauseWhenHidden />)
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchFn).not.toHaveBeenCalled()
+
+      // Show: the first poll fails and queues a 3000ms backoff.
+      setHidden(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+
+      // Hide mid-backoff, then show: no immediate poll may bypass the backoff.
+      setHidden(true)
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+      setHidden(false)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(fetchFn).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('a new generation is not stalled by an in-flight request from the old one', async () => {
@@ -263,6 +295,25 @@ describe('usePollingWithBackoff', () => {
     rerender(<TestPoller fetchFn={fetchFn} deps={['B']} normalInterval={1000} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('a new generation starts with a clean backoff count', async () => {
+    // A failure from the subject a generation replaced must not make the new
+    // subject's first retry use the old backoff exponent.
+    const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
+    const { rerender } = render(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    rerender(<TestPoller fetchFn={fetchFn} deps={['B']} normalInterval={1000} backoffBase={1000} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    // Immediate poll (count reset), not a wait on the old generation's timer.
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+
+    // Its first retry is the base delay (1000), not 2000 from an inherited
+    // second-failure exponent.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(fetchFn).toHaveBeenCalledTimes(3)
   })
 
   it('does not retry faster than backoffBase when jitter is negative', async () => {

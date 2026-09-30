@@ -212,10 +212,9 @@ it receives these rows live over its own socket.
 
 The poll is deliberately cheap to run and cheap to stop:
 
-- A pass whose record has not moved since the last one it applied (same row
-  count, same streaming segment) is skipped without re-running the alignment.
 - Polling pauses while the tab is hidden and fires one poll when it is shown
-  again.
+  again; if the last passes were failing, showing the tab waits out the same
+  backoff delay rather than bypassing it.
 - A failing server is retried on the same backoff base as the healthy
   interval, so a 503 is not polled faster than the 3s cadence.
 - A live pass only refreshes a bubble that already exists. It never creates

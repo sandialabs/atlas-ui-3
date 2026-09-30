@@ -1445,20 +1445,6 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		messages.some(m => m._streaming && m._replayed)
 	) ? activeConversationId : null
 
-	// The record a live pass last reconciled, per conversation. The fetch still
-	// runs every interval (the endpoint carries no revision to condition it
-	// on), but a record that has not moved since the last applied pass (same
-	// row count, same streaming segment) would re-run the whole alignment and
-	// dispatch nothing: an idle run parked on a long tool call would pay that
-	// every interval for the run's whole duration. Keyed by conversation id so
-	// switching views cannot inherit a previous conversation's signature, and
-	// reset when the joined view opens or closes (below), so a later run for
-	// the same conversation cannot inherit it either.
-	const livePollSignatureRef = useRef(null)
-	useEffect(() => {
-		livePollSignatureRef.current = null
-	}, [liveJoinedConversationId])
-
 	const fetchLiveJoinedConversation = useCallback(async () => {
 		if (!liveJoinedConversationId) return
 		const res = await fetch(`/api/conversations/${liveJoinedConversationId}`)
@@ -1483,15 +1469,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// session as it stood at fetch time -- a snapshot, not the final
 		// transcript. Leave the view to that path.
 		if (!isRunActive(runsByConversationRef.current[liveJoinedConversationId])) return
-		// Nothing has moved since the last reconciled pass (same row count,
-		// same streaming segment): the record is byte-identical to what the
-		// previous pass already applied, so re-running the alignment would
-		// dispatch nothing. Skip the work instead.
-		const signature = `${liveJoinedConversationId}:${data.messages?.length ?? 0}:${data.streaming_text || ''}`
-		if (livePollSignatureRef.current === signature) return
-		if (refreshJoinedConversation(data, { live: true })) {
-			livePollSignatureRef.current = signature
-		}
+		// The reconcile is idempotent when the record has not moved: the
+		// alignment matches, there is no tail to append, and the bubble is
+		// already on the segment. It is left to run every pass because a cheap
+		// signature cannot see an in-place row change (a tool row gaining its
+		// result, say) and would defer it until the next row or segment.
+		refreshJoinedConversation(data, { live: true })
 	}, [liveJoinedConversationId, refreshJoinedConversation])
 
 	usePollingWithBackoff(fetchLiveJoinedConversation, {
