@@ -678,3 +678,16 @@ class TestGatewayModelAllowlist:
             loader._validate_llm_compliance_levels()
         # Treated like a static model with an unknown level: unleveled.
         assert loader._llm_config.get_model(f"enterprise::{ALPHA}::gpt-4o-mini").compliance_level is None
+
+    @pytest.mark.asyncio
+    async def test_summary_reports_an_unleveled_model_as_none(self):
+        from atlas.routes.litellm_gateway_routes import build_gateway_summaries
+
+        llm_config = _allowlisted_config()
+        llm_config.litellm_gateways["enterprise"].models["gpt-4o-mini"]._invalid_compliance_level = True
+        settings = type("S", (), {"feature_compliance_levels_enabled": True})()
+        with patch("atlas.core.model_access.is_user_in_group", AsyncMock(return_value=True)):
+            (summary,) = await build_gateway_summaries(llm_config, "test@test.com", settings)
+        # Present with None, so the picker does not substitute the gateway's level.
+        assert summary["model_compliance_levels"] == {"gpt-4o-mini": None, "llama-3.3-70b": "Internal"}
+        assert summary["compliance_levels"] == ["Internal", None]

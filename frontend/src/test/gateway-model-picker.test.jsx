@@ -195,6 +195,10 @@ describe('admin-allowlisted gateway models with their own compliance level', () 
       .toBe('Public')
     expect(gatewayModelEntry('enterprise::t1::other', [LEVELED_GATEWAY], 'a@x.com').compliance_level)
       .toBe('Internal')
+    // Unleveled on the server (unknown level at load): no gateway fallback.
+    const unleveled = { ...LEVELED_GATEWAY, model_compliance_levels: { 'gpt-4o-mini': null } }
+    expect(gatewayModelEntry('enterprise::t1::gpt-4o-mini', [unleveled], 'a@x.com').compliance_level)
+      .toBeNull()
   })
 
   it('keeps the gateway listed when one model passes and hides the others', async () => {

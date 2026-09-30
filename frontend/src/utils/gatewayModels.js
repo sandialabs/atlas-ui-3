@@ -85,6 +85,7 @@ export function gatewayModelEntry(name, gateways, user) {
   if (!ref) return null
   const gateway = gateways.find(g => g.name === ref.gateway)
   const teamLabel = teamLabelFor(ref.gateway, ref.teamId, user)
+  const modelLevels = gateway.model_compliance_levels
   return {
     name,
     gateway: ref.gateway,
@@ -93,8 +94,11 @@ export function gatewayModelEntry(name, gateways, user) {
     model_id: ref.modelId,
     display_name: `${ref.modelId} (${teamLabel})`,
     description: gateway.description || `${ref.modelId} via ${gateway.display_name || gateway.name}`,
-    // An allowlisted model may carry its own level (see llmconfig `models`).
-    compliance_level: gateway.model_compliance_levels?.[ref.modelId] ?? gateway.compliance_level,
+    // An allowlisted model carries its own effective level, possibly null
+    // (unleveled); only models the map does not name use the gateway's.
+    compliance_level: modelLevels && Object.hasOwn(modelLevels, ref.modelId)
+      ? modelLevels[ref.modelId]
+      : gateway.compliance_level,
     supports_vision: !!gateway.supports_vision,
     supports_pdf: !!gateway.supports_pdf,
     supports_tools: gateway.supports_tools !== false,

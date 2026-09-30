@@ -41,15 +41,13 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
         if getattr(app_settings, "feature_compliance_levels_enabled", False):
             if gateway.compliance_level:
                 summary["compliance_level"] = gateway.compliance_level
-            # Allowlisted models may set their own level; the picker needs
-            # them to filter models and to label a saved selection.
-            levels = {
-                model_id: level
-                for model_id in gateway.models
-                if (level := gateway.model_compliance_level(model_id))
-            }
-            if levels:
-                summary["model_compliance_levels"] = levels
+            # Every allowlisted model's effective level (None: unleveled), so
+            # the picker labels a saved selection exactly as the server
+            # checks it instead of falling back to the gateway's level.
+            if gateway.models:
+                summary["model_compliance_levels"] = {
+                    model_id: gateway.model_compliance_level(model_id) for model_id in gateway.models
+                }
             # Every level a model on this gateway can have (None: unleveled),
             # so a compliance filter shows the gateway if any model passes.
             if gateway.models:

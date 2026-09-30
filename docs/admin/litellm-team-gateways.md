@@ -226,7 +226,7 @@ completion. Validate that path in staging before relying on it.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/config`, `GET /api/config/shell` | `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, compliance_level?, compliance_levels?, model_compliance_levels?}]`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps allowlisted model ids to their levels. |
+| `GET /api/config`, `GET /api/config/shell` | `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, compliance_level?, compliance_levels?, model_compliance_levels?}]`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps each allowlisted model id to its level (`null` when the model is unleveled). |
 | `GET /api/llm/gateways/{gateway}/teams[?refresh=true]` | `{gateway, teams: [{team_id, label}]}` |
 | `GET /api/llm/gateways/{gateway}/models?team_id=...[&refresh=true]` | `{gateway, team_id, team_label, models: [{name, model_id, label, compliance_level?}]}`, limited to the allowlist when one is set |
 
