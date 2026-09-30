@@ -450,6 +450,26 @@ class TestGatewayChatAgainstMock:
         assert litellm_mock._request_log[-1]["team_header"] == ALPHA
         assert litellm_mock._request_log[-1]["stream"] is True
 
+    @pytest.mark.asyncio
+    async def test_model_outside_the_allowlist_never_reaches_the_proxy(self, live_mock_url):
+        # Project Alpha may call both models on the proxy, so the mock would
+        # answer claude-sonnet; only Atlas's allowlist stops it.
+        caller = LiteLLMCaller(llm_config=_allowlisted_config(base_url=live_mock_url))
+        messages = [{"role": "user", "content": "hi"}]
+        # Positive control: an allowlisted model on the same team is served.
+        content = await caller.call_plain(f"enterprise::{ALPHA}::gpt-4o-mini", messages, user_email="test@test.com")
+        assert content.startswith("[Project Alpha / gpt-4o-mini]")
+        assert [r["model"] for r in litellm_mock._request_log] == ["gpt-4o-mini"]
+
+        with pytest.raises(AuthorizationError):
+            await caller.call_plain(f"enterprise::{ALPHA}::claude-sonnet", messages, user_email="test@test.com")
+        with pytest.raises(AuthorizationError):
+            async for _ in caller.stream_plain(
+                f"enterprise::{ALPHA}::claude-sonnet", messages, user_email="test@test.com"
+            ):
+                pass
+        assert [r["model"] for r in litellm_mock._request_log] == ["gpt-4o-mini"]
+
 
 # -- routes -----------------------------------------------------------------------
 
@@ -573,13 +593,14 @@ class TestGatewayModelAllowlist:
         assert "llama-3.3-70b" not in await client.list_models("test@test.com", ALPHA)
 
     @pytest.mark.asyncio
-    async def test_call_to_a_model_outside_the_allowlist_never_reaches_litellm(self):
+    async def test_call_target_for_a_model_outside_the_allowlist_is_refused(self):
+        # That nothing reaches the proxy is shown over a real socket in
+        # TestGatewayChatAgainstMock.test_model_outside_the_allowlist_never_reaches_the_proxy.
         caller = _caller_with_mock_transport(_allowlisted_config())
         with pytest.raises(AuthorizationError) as exc_info:
             await caller._resolve_call_target(f"enterprise::{ALPHA}::claude-sonnet", None, "test@test.com")
         assert exc_info.value.code == "LLM_GATEWAY_MODEL_NOT_ALLOWED"
         assert "no longer available" in exc_info.value.message
-        assert litellm_mock._request_log == []
 
     @pytest.mark.asyncio
     async def test_allowlisted_model_still_gets_team_header(self):
@@ -709,4 +730,3 @@ class TestGatewayModelAllowlist:
         error_class, user_msg, _ = classify_llm_error(exc_info.value)
         assert "no longer available on this LiteLLM gateway" in user_msg
         assert error_type_for(error_class) == "authorization"
-        assert litellm_mock._request_log == []
