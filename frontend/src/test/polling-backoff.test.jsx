@@ -400,9 +400,9 @@ describe('usePollingWithBackoff', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
-  it('does not reset the failure count when enabled toggles', async () => {
-    // An inactive/active flip is the same subject: it keeps whatever backoff
-    // it accumulated, so a failing endpoint is not hammered on every resume.
+  it('resuming after an enabled toggle honors the saved backoff', async () => {
+    // An inactive/active flip is the same subject: it keeps its accumulated
+    // backoff and does not immediate-poll a failing endpoint on every resume.
     const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
     const { rerender } = render(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
@@ -411,13 +411,13 @@ describe('usePollingWithBackoff', () => {
     rerender(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} enabled={false} />)
     rerender(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} enabled />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(fetchFn).toHaveBeenCalledTimes(2) // immediate poll on resume fails; count 2
+    // Resuming waits out the remaining backoff; no immediate request.
+    expect(fetchFn).toHaveBeenCalledTimes(1)
 
-    // Retry is 2000 (second failure), not 1000: the count survived the toggle.
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(fetchFn).toHaveBeenCalledTimes(2)
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
-    expect(fetchFn).toHaveBeenCalledTimes(3)
   })
 
   it('clamps backoffBase to maxBackoffDelay', async () => {

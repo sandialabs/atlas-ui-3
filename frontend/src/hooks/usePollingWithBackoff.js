@@ -43,11 +43,15 @@ export function calculateBackoffDelay(failures, baseDelay = 1000, maxDelay = 300
  *   server is not retried faster than the healthy cadence; the scheduled
  *   backoff delay is floored at this value (clamped by maxBackoffDelay), so
  *   jitter cannot pull a retry below it.
- * @param {boolean} options.enabled - Whether polling is active (default true)
+ * @param {boolean} options.enabled - Whether polling is active (default true).
+ *   Re-enabling resumes rather than immediate-polling when a backoff is still
+ *   pending, so a failing endpoint is not hit on every idle/active flip.
  * @param {boolean} options.pauseWhenHidden - Suspend polling while the tab is
  *   hidden (default false); polling resumes when it becomes visible, honoring
  *   any in-progress backoff delay rather than polling immediately.
- * @param {Array} options.deps - Additional dependency array items that should restart polling
+ * @param {Array} options.deps - Additional dependency array items that
+ *   identify the polled subject; a change resets the failure count. Compared
+ *   element-wise with Object.is, so functions and undefined are fine.
  */
 export function usePollingWithBackoff(fetchFn, {
   normalInterval = 60000,
@@ -63,15 +67,19 @@ export function usePollingWithBackoff(fetchFn, {
   const fetchFnRef = useRef(fetchFn)
   // Keep fetchFn ref current so scheduled polls always call the latest version
   fetchFnRef.current = fetchFn
-  // The deps that identify the polled subject. The failure count resets only
-  // when these change, not when `enabled` toggles: an inactive/active flip is
-  // the same subject and must keep whatever backoff it had accumulated, or a
-  // failing endpoint is hammered afresh on every resume.
-  const depsKey = JSON.stringify(deps)
-  const depsKeyRef = useRef(depsKey)
+  // The deps that identify the polled subject. The failure count and the
+  // pending retry reset only when these change, not when `enabled` toggles: an
+  // inactive/active flip is the same subject and keeps its backoff, so a
+  // failing endpoint is not hammered afresh on every resume.
+  const depsRef = useRef(deps)
+  // When the next backoff retry is due (epoch ms). A ref so it survives an
+  // `enabled` toggle: re-enabling resumes after the remaining delay instead of
+  // polling immediately. 0 means no backoff is pending.
+  const retryAtRef = useRef(0)
 
   const resetBackoff = useCallback(() => {
     failureCountRef.current = 0
+    retryAtRef.current = 0
   }, [])
 
   useEffect(() => {
@@ -83,16 +91,15 @@ export function usePollingWithBackoff(fetchFn, {
     // A new polled subject starts healthy; a failure from the subject this
     // generation replaced must not make the new one back off immediately. Only
     // a deps change is a new subject -- `enabled` toggling is the same one.
-    if (depsKeyRef.current !== depsKey) {
-      depsKeyRef.current = depsKey
+    const sameSubject = deps.length === depsRef.current.length
+      && deps.every((d, i) => Object.is(d, depsRef.current[i]))
+    if (!sameSubject) {
+      depsRef.current = deps
       failureCountRef.current = 0
+      retryAtRef.current = 0
     }
     let cancelled = false
     let inFlight = false
-    // When the next backoff retry is due, so a tab shown mid-backoff waits only
-    // the remaining delay instead of restarting the whole interval (repeated
-    // hides/shows must not keep pushing the retry out). 0 means no backoff.
-    let retryAt = 0
     const isCurrent = () => !cancelled && generationRef.current === generation
 
     // The floor cannot exceed the cap: a caller that sets `backoffBase` above
@@ -116,6 +123,17 @@ export function usePollingWithBackoff(fetchFn, {
       backoffFloor,
     )
 
+    // If a backoff retry is still pending, wait only the remaining delay;
+    // otherwise poll now. Used both when the effect starts (mount or a resume)
+    // and when a hidden tab is shown again.
+    const resumeOrPoll = () => {
+      if (failureCountRef.current > 0 && retryAtRef.current) {
+        scheduleNext(Math.max(0, retryAtRef.current - Date.now()))
+      } else {
+        poll()
+      }
+    }
+
     const poll = async () => {
       if (!isCurrent() || !enabled) return
       // A hidden tab gains nothing from the response: skip this pass and the
@@ -132,7 +150,7 @@ export function usePollingWithBackoff(fetchFn, {
         // dep changed); its result is stale and must not schedule the new one.
         if (!isCurrent()) return
         failureCountRef.current = 0
-        retryAt = 0
+        retryAtRef.current = 0
         scheduleNext(normalInterval)
       } catch {
         if (!isCurrent()) return
@@ -140,7 +158,7 @@ export function usePollingWithBackoff(fetchFn, {
         // One draw: retryAt and the armed timer must agree on the jitter, or a
         // resume after a hide could fire before or after what was scheduled.
         const delay = nextBackoffDelay()
-        retryAt = Date.now() + delay
+        retryAtRef.current = Date.now() + delay
         scheduleNext(delay)
       } finally {
         inFlight = false
@@ -155,18 +173,12 @@ export function usePollingWithBackoff(fetchFn, {
           timeoutIdRef.current = null
         }
       } else if (enabled) {
-        // Showing the tab does not bypass an in-progress backoff: wait only
-        // the remaining delay the hidden tab had queued, not a fresh one.
-        if (failureCountRef.current > 0 && retryAt) {
-          scheduleNext(Math.max(0, retryAt - Date.now()))
-        } else {
-          poll()
-        }
+        resumeOrPoll()
       }
     }
 
     if (enabled) {
-      poll()
+      resumeOrPoll()
     }
     if (pauseWhenHidden) {
       document.addEventListener('visibilitychange', handleVisibility)

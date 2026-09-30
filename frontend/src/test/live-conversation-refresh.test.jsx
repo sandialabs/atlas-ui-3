@@ -326,6 +326,9 @@ describe('mid-run live refresh of a joined conversation', () => {
   it('wires the fetch timeout, the backoff base and the backoff cap', async () => {
     vi.useFakeTimers()
     try {
+      // Fail from the first poll: then the retry delay is the backoff, not the
+      // normal interval, so this actually pins backoffBase.
+      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }))
       const { result } = renderChat()
       dispatchFrame({
         type: 'runs_snapshot',
@@ -342,14 +345,12 @@ describe('mid-run live refresh of a joined conversation', () => {
         })
       })
       // The request carries an abort signal (the 15s hang guard).
-      const firstOptions = h.fetchMock.mock.calls.find(c => String(c[0]).includes('/api/conversations/'))?.[1]
-      expect(firstOptions?.signal).toBeTruthy()
-      expect(typeof firstOptions.signal.aborted).toBe('boolean')
+      const firstCall = h.fetchMock.mock.calls.find(c => String(c[0]).includes('/api/conversations/'))
+      expect(firstCall?.[1]?.signal).toBeTruthy()
+      expect(typeof firstCall[1].signal.aborted).toBe('boolean')
 
-      // A 503 must not be retried on the hook's 1s default: the live poll
-      // passes backoffBase = 3s. At 1.5s there is no second attempt; by 3.5s
-      // there is.
-      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }))
+      // The 503 is retried on the live poll's 3s backoffBase, not the hook's
+      // 1s default: at 1.5s there is no second attempt; by 3.5s there is.
       const callsAtStart = h.fetchMock.mock.calls.length
       await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
       expect(h.fetchMock.mock.calls.length).toBe(callsAtStart)
