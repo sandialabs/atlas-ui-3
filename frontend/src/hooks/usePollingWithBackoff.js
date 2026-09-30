@@ -41,8 +41,8 @@ export function calculateBackoffDelay(failures, baseDelay = 1000, maxDelay = 300
  * @param {number} options.backoffBase - First failure delay in ms (default 1000).
  *   A fast-interval poller should pass its normalInterval here so a failing
  *   server is not retried faster than the healthy cadence; the scheduled
- *   backoff delay is floored at this value, so jitter cannot pull a retry
- *   below it.
+ *   backoff delay is floored at this value (clamped by maxBackoffDelay), so
+ *   jitter cannot pull a retry below it.
  * @param {boolean} options.enabled - Whether polling is active (default true)
  * @param {boolean} options.pauseWhenHidden - Suspend polling while the tab is
  *   hidden (default false); polling resumes when it becomes visible, honoring
@@ -63,6 +63,12 @@ export function usePollingWithBackoff(fetchFn, {
   const fetchFnRef = useRef(fetchFn)
   // Keep fetchFn ref current so scheduled polls always call the latest version
   fetchFnRef.current = fetchFn
+  // The deps that identify the polled subject. The failure count resets only
+  // when these change, not when `enabled` toggles: an inactive/active flip is
+  // the same subject and must keep whatever backoff it had accumulated, or a
+  // failing endpoint is hammered afresh on every resume.
+  const depsKey = JSON.stringify(deps)
+  const depsKeyRef = useRef(depsKey)
 
   const resetBackoff = useCallback(() => {
     failureCountRef.current = 0
@@ -75,8 +81,12 @@ export function usePollingWithBackoff(fetchFn, {
     const generation = generationRef.current + 1
     generationRef.current = generation
     // A new polled subject starts healthy; a failure from the subject this
-    // generation replaced must not make the new one back off immediately.
-    failureCountRef.current = 0
+    // generation replaced must not make the new one back off immediately. Only
+    // a deps change is a new subject -- `enabled` toggling is the same one.
+    if (depsKeyRef.current !== depsKey) {
+      depsKeyRef.current = depsKey
+      failureCountRef.current = 0
+    }
     let cancelled = false
     let inFlight = false
     // When the next backoff retry is due, so a tab shown mid-backoff waits only
@@ -84,6 +94,10 @@ export function usePollingWithBackoff(fetchFn, {
     // hides/shows must not keep pushing the retry out). 0 means no backoff.
     let retryAt = 0
     const isCurrent = () => !cancelled && generationRef.current === generation
+
+    // The floor cannot exceed the cap: a caller that sets `backoffBase` above
+    // `maxBackoffDelay` still backs off no further than the cap.
+    const backoffFloor = Math.min(backoffBase, maxBackoffDelay)
 
     const scheduleNext = (delay) => {
       if (!isCurrent()) return
@@ -99,7 +113,7 @@ export function usePollingWithBackoff(fetchFn, {
     // healthy cadence.
     const nextBackoffDelay = () => Math.max(
       calculateBackoffDelay(failureCountRef.current, backoffBase, maxBackoffDelay),
-      backoffBase,
+      backoffFloor,
     )
 
     const poll = async () => {

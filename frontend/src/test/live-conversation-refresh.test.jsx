@@ -323,6 +323,72 @@ describe('mid-run live refresh of a joined conversation', () => {
     }
   })
 
+  it('wires the fetch timeout, the backoff base and the backoff cap', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      // The request carries an abort signal (the 15s hang guard).
+      const firstOptions = h.fetchMock.mock.calls.find(c => String(c[0]).includes('/api/conversations/'))?.[1]
+      expect(firstOptions?.signal).toBeTruthy()
+      expect(typeof firstOptions.signal.aborted).toBe('boolean')
+
+      // A 503 must not be retried on the hook's 1s default: the live poll
+      // passes backoffBase = 3s. At 1.5s there is no second attempt; by 3.5s
+      // there is.
+      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }))
+      const callsAtStart = h.fetchMock.mock.calls.length
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      expect(h.fetchMock.mock.calls.length).toBe(callsAtStart)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(h.fetchMock.mock.calls.length).toBeGreaterThan(callsAtStart)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not poll while the tab is hidden', async () => {
+    vi.useFakeTimers()
+    const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden')
+    try {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+      expect(h.fetchMock.mock.calls.some(c => String(c[0]).includes('/api/conversations/'))).toBe(false)
+    } finally {
+      if (originalHidden) Object.defineProperty(document, 'hidden', originalHidden)
+      else delete document.hidden
+      vi.useRealTimers()
+    }
+  })
+
   it('does not poll the tab that owns the stream (no replay placeholder)', async () => {
     vi.useFakeTimers()
     try {

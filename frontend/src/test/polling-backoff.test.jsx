@@ -400,6 +400,41 @@ describe('usePollingWithBackoff', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
+  it('does not reset the failure count when enabled toggles', async () => {
+    // An inactive/active flip is the same subject: it keeps whatever backoff
+    // it accumulated, so a failing endpoint is not hammered on every resume.
+    const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
+    const { rerender } = render(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(1) // count 1, retry due at +1000
+
+    rerender(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} enabled={false} />)
+    rerender(<TestPoller fetchFn={fetchFn} deps={['A']} normalInterval={1000} backoffBase={1000} enabled />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(fetchFn).toHaveBeenCalledTimes(2) // immediate poll on resume fails; count 2
+
+    // Retry is 2000 (second failure), not 1000: the count survived the toggle.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+  })
+
+  it('clamps backoffBase to maxBackoffDelay', async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error('fail'))
+    await act(async () => {
+      render(<TestPoller fetchFn={fetchFn} normalInterval={5000} backoffBase={5000} maxBackoffDelay={2000} />)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    // The retry is capped at 2000, not the 5000 base.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
   it('does not retry faster than backoffBase when jitter is negative', async () => {
     // calculateBackoffDelay(1, 3000) with a 0.8 jitter factor is 2400ms; the
     // scheduled retry is floored at backoffBase so a fast poller is never
