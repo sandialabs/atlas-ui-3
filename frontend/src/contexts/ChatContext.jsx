@@ -37,6 +37,12 @@ const MAX_JOINED_RUN_REARMS = 4
 // has appeared, so `atlas_sleep`'s row and its siblings show up while the
 // agent is still working instead of only after the final reload.
 const LIVE_REFRESH_INTERVAL_MS = 3000
+// A poll request that hangs must not stall the refresh with no feedback: it is
+// aborted after this long, which surfaces as a failure and backs off.
+const LIVE_REFRESH_FETCH_TIMEOUT_MS = 15000
+// Cap the live poll's backoff well below the hook's 5-minute default: a
+// temporary server outage should recover within a conversation, not after it.
+const LIVE_REFRESH_MAX_BACKOFF_MS = 30000
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
@@ -1374,10 +1380,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// user switched conversations (or a diverged record) must not touch the
 		// view. Skipping the dispatch when the text has not moved keeps an idle
 		// poll from rebuilding the message list on every tick.
+		//
+		// Only ever *update* an existing placeholder, never create one: the
+		// poll is gated on a placeholder, so a live pass that finds none means
+		// the view moved on while this response was in the air -- the run-end
+		// reload settled the transcript, say. Creating a bubble then would
+		// strand an "in progress" fragment nothing clears, because the run
+		// whose segment this text belongs to has already ended. `findLast`
+		// targets the same row the reducer's replace branch does.
 		if (live) {
-			const placeholder = latestMessagesRef.current.find(m => m._streaming && m._replayed)
+			const placeholder = latestMessagesRef.current.findLast(m => m._streaming && m._replayed)
 			const segment = conversationData.streaming_text || ''
-			if (placeholder ? placeholder.content !== segment : segment !== '') {
+			if (placeholder && placeholder.content !== segment) {
 				streamToken(segment, true)
 			}
 		}
@@ -1439,7 +1453,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 	const fetchLiveJoinedConversation = useCallback(async () => {
 		if (!liveJoinedConversationId) return
-		const res = await fetch(`/api/conversations/${liveJoinedConversationId}`)
+		// Abort a hung request so the poll's cadence resumes (and reports a
+		// failure) instead of waiting on it indefinitely.
+		const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+			? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
+			: undefined
+		const res = await fetch(
+			`/api/conversations/${liveJoinedConversationId}`,
+			timeoutSignal ? { signal: timeoutSignal } : undefined,
+		)
 		// Throw so usePollingWithBackoff backs off on a flaky server rather
 		// than hammering it every interval.
 		if (!res.ok) throw new Error(`live conversation refresh failed: ${res.status}`)
@@ -1455,11 +1477,32 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// below makes the same check; this keeps even a stale read from being
 		// applied, and keeps the bubble inside that guard.
 		if (activeConversationIdRef.current !== liveJoinedConversationId) return
+		// The run can also settle between the fetch and this response without
+		// the view changing: the tracker already holds the terminal status the
+		// run-end path is working from, and the record in hand is the run's
+		// session as it stood at fetch time -- a snapshot, not the final
+		// transcript. Leave the view to that path.
+		if (!isRunActive(runsByConversationRef.current[liveJoinedConversationId])) return
+		// The reconcile is idempotent when the record has not moved: the
+		// alignment matches, there is no tail to append, and the bubble is
+		// already on the segment. It is left to run every pass because a cheap
+		// signature cannot see an in-place row change (a tool row gaining its
+		// result, say) and would defer it until the next row or segment.
 		refreshJoinedConversation(data, { live: true })
 	}, [liveJoinedConversationId, refreshJoinedConversation])
 
 	usePollingWithBackoff(fetchLiveJoinedConversation, {
 		normalInterval: LIVE_REFRESH_INTERVAL_MS,
+		// A failing server must not be retried faster than the healthy
+		// cadence: the hook's 1s default backoff base would poll a 503 every
+		// second against a 3s healthy interval.
+		backoffBase: LIVE_REFRESH_INTERVAL_MS,
+		// A temporary outage recovers within the conversation, not after the
+		// hook's 5-minute default.
+		maxBackoffDelay: LIVE_REFRESH_MAX_BACKOFF_MS,
+		// A hidden tab gains nothing from these rows; stop downloading the
+		// run's session until it is shown again.
+		pauseWhenHidden: true,
 		enabled: !!liveJoinedConversationId,
 		deps: [liveJoinedConversationId],
 	})

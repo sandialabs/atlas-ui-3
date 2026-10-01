@@ -1146,6 +1146,58 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(toolRows[0]).toBe(before[0])
   })
 
+  it('live mode never creates a bubble when the view has no placeholder', async () => {
+    // A poll response can land after the view has settled: the record was
+    // fetched while the run streamed, but by the time it resolves the segment
+    // has closed and the bubble is gone (the run-end reload, a stop, a
+    // disconnect). Creating a bubble here would strand an "in progress"
+    // fragment nothing clears, because the run whose segment this text is has
+    // already moved on. A live pass may only *refresh* a placeholder that
+    // exists -- which is also all the poll gate promises it will find.
+    const loaded = {
+      id: 'conv-1',
+      messages: [storedChat('user', 'What is the weather')],
+      metadata: {},
+    }
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, loaded)
+
+      // A live segment opens and then closes: the row is settled, not
+      // streaming, and no replay placeholder remains in the view.
+      dispatchFrame({ type: 'token_stream', conversation_id: 'conv-1', run_id: 'r1', is_first: true, token: 'Clear sk' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(60) })
+      dispatchFrame({ type: 'response_complete', conversation_id: 'conv-1', run_id: 'r1' })
+      const settled = result.current.messages
+      expect(settled.some(m => m._streaming)).toBe(false)
+      expect(settled.some(m => m._replayed)).toBe(false)
+
+      // The poll that was in the air resolves now: the record still reports
+      // the run in flight and carries the segment it was streaming.
+      let ok
+      act(() => {
+        ok = result.current.refreshJoinedConversation({
+          id: 'conv-1',
+          messages: [
+            storedChat('user', 'What is the weather'),
+            storedChat('assistant', 'Clear sk'),
+          ],
+          metadata: {},
+          in_flight: true,
+          streaming_text: 'Clear sk extended past the settled row',
+        }, { live: true })
+      })
+      // The record matched the view row for row, so the reconcile succeeded --
+      // and still must not have conjured a streaming bubble out of it.
+      expect(ok).toBe(true)
+      expect(result.current.messages).toBe(settled)
+      expect(result.current.messages.some(m => m._streaming)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rejects malformed input without touching the view', async () => {
     const loaded = {
       id: 'conv-1',
