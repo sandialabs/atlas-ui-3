@@ -45,6 +45,7 @@ COPY agent_start.sh .
 COPY ps_agent_start.ps1 .
 COPY Dockerfile-test .
 COPY Dockerfile.runtimeonly .
+COPY .github/workflows/ci.yml .github/workflows/quay-publish.yml ./.github/workflows/
 
 # Copy and install frontend dependencies (keep all dependencies for testing)
 COPY frontend/package*.json ./frontend/

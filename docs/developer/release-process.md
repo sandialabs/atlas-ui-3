@@ -48,6 +48,30 @@ unrelated work keeps landing on `main`. It is now manual-only, the
 exception, not the default; see
 [When to use a stabilization branch instead](#when-to-use-a-stabilization-branch-instead).
 
+### Container platforms
+
+[`ci.yml`](../../.github/workflows/ci.yml) publishes
+`ghcr.io/sandialabs/atlas-ui-3` on pushes to `main` and `develop`.
+[`quay-publish.yml`](../../.github/workflows/quay-publish.yml) publishes
+`quay.io/<QUAY_NAMESPACE>/atlas-ui-3` on pushes to `main`, `develop`, and
+`quay`, version tags, and manual dispatches. Both publish a multi-platform
+index containing `linux/amd64` and `linux/arm64` under the existing tags.
+Container runtimes select the native image on Apple Silicon and arm64
+Kubernetes nodes without requiring host-side emulation.
+
+Publishing uses QEMU for the arm64 build on the amd64 runner, so publishing
+builds take longer. PR builds remain amd64-only and do not install QEMU;
+the test and runtime-only validation images also remain single-platform.
+Arm64 build failures therefore surface during publishing, not PR validation.
+The production Dockerfile resolves Python dependencies from `pyproject.toml`,
+not `uv.lock`; a dependency without an aarch64 wheel may require compilation
+and fail because the image has no compiler.
+
+To verify a published tag, run
+`docker buildx imagetools inspect ghcr.io/sandialabs/atlas-ui-3:main`
+or the same command with the Quay image and tag, and confirm both platforms
+are present. Attestation manifests may also appear in the index.
+
 ### Changelog fragments
 
 Normal PRs do not edit `CHANGELOG.md`; they add a small
