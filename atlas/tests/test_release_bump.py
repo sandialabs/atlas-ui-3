@@ -117,3 +117,66 @@ def test_notes_errors_for_unknown_version(release_bump, sandbox):
     _write_changelog(sandbox, "### PR #1 - 2026-10-01\n- A change.")
     with pytest.raises(release_bump.ReleaseBumpError):
         release_bump.release_notes("9.9.9")
+
+
+def test_notes_can_read_a_custom_changelog(release_bump, sandbox, tmp_path):
+    other = tmp_path / "changelog-at-merge.md"
+    other.write_text("## [0.7.0] - 2026-10-06\n\n### PR #1 - 2026-10-01\n- From the merge commit.\n")
+    notes = release_bump.release_notes("0.7.0", other)
+    assert "From the merge commit." in notes
+
+
+def test_notes_changelog_option(release_bump, sandbox, tmp_path):
+    other = tmp_path / "changelog-at-merge.md"
+    other.write_text("## [0.7.0] - 2026-10-06\n\n- Merge-commit note.\n")
+    assert release_bump.main(
+        ["notes", "--version", "0.7.0", "--changelog", str(other)]
+    ) == 0
+
+
+def _checks(**by_name):
+    return [{"name": name, "bucket": bucket} for name, bucket in by_name.items()]
+
+
+def test_check_verdict_ok_when_required_present_and_green(release_bump):
+    payload = _checks(**{"build-and-test": "pass", "CodeQL": "pass"})
+    assert release_bump.check_verdict(payload, ["build-and-test"]) == "OK"
+
+
+def test_check_verdict_pending_names_missing_required(release_bump):
+    payload = _checks(**{"build-artifacts": "pass"})
+    verdict = release_bump.check_verdict(payload, ["build-and-test"])
+    assert verdict.startswith("PENDING: missing required checks:")
+    assert "build-and-test" in verdict
+
+
+def test_check_verdict_fails_when_required_skipped(release_bump):
+    payload = _checks(**{"build-and-test": "skipping"})
+    verdict = release_bump.check_verdict(payload, ["build-and-test"])
+    assert verdict.startswith("FAIL: required checks not green:")
+    assert "build-and-test" in verdict
+
+
+def test_check_verdict_fails_on_any_failing_check(release_bump):
+    payload = _checks(**{"build-and-test": "pass", "Trivy": "fail"})
+    verdict = release_bump.check_verdict(payload, ["build-and-test"])
+    assert verdict.startswith("FAIL: failing checks:")
+    assert "Trivy" in verdict
+
+
+def test_check_verdict_pending_while_a_check_runs(release_bump):
+    payload = _checks(**{"build-and-test": "pass", "build-artifacts": "pending"})
+    verdict = release_bump.check_verdict(payload, ["build-and-test"])
+    assert verdict.startswith("PENDING: checks still running:")
+
+
+def test_check_verdict_pending_when_no_checks_reported(release_bump):
+    assert release_bump.check_verdict(None, ["build-and-test"]).startswith("PENDING")
+
+
+def test_checks_subcommand_reads_a_file(release_bump, sandbox, tmp_path):
+    payload = tmp_path / "checks.json"
+    payload.write_text('[{"name": "build-and-test", "bucket": "pass"}]')
+    assert release_bump.main(
+        ["checks", "--file", str(payload), "--required", "build-and-test"]
+    ) == 0

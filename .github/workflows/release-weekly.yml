@@ -53,9 +53,9 @@ jobs:
     env:
       # The PAT is required: the release PR must trigger CI, and tags/Releases
       # created with the default GITHUB_TOKEN do not trigger the publish
-      # workflows. It is exported as RELEASE_TOKEN for checkout/push and as
-      # GH_TOKEN only on the steps that call `gh`.
-      RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+      # workflows. The token itself is passed only to the checkout and the
+      # steps that push or call `gh`, so it is never visible to `uv lock` or
+      # third-party build backends.
       HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
     steps:
       - name: Note PAT requirement when unset
@@ -69,7 +69,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ env.RELEASE_TOKEN }}
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # Do not leave the PAT in .git/config for every later step; the two
           # steps that need git write access configure it themselves.
           persist-credentials: false
@@ -86,7 +86,7 @@ jobs:
         shell: bash
         env:
           DRY_RUN: ${{ github.event.inputs.dry_run }}
-          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           current="$(python3 scripts/release_bump.py current)"
@@ -220,7 +220,8 @@ jobs:
         if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
         env:
           BRANCH: ${{ steps.meta.outputs.branch }}
-          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -242,6 +243,7 @@ jobs:
         env:
           BRANCH: ${{ steps.meta.outputs.branch }}
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "atlas-release-bot"
@@ -261,7 +263,7 @@ jobs:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
           OLD_VERSION: ${{ steps.meta.outputs.current_version }}
           RELEASE_DATE: ${{ steps.meta.outputs.release_date }}
-          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cat > /tmp/release-pr-body.md <<EOF
@@ -285,7 +287,7 @@ jobs:
         env:
           PR: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
-          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # A fixed list of gates that must all be present and green before the
           # irreversible merge. `gh pr checks --watch` alone only waits on the
           # checks that happen to be registered, so a slow-to-start workflow
@@ -297,46 +299,20 @@ jobs:
           verdict="PENDING"
           while [ "$SECONDS" -lt "$deadline" ]; do
             if gh pr checks "$PR" --json name,bucket > /tmp/checks.json 2>/tmp/checks.err; then
-              verdict="$(python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          try:
-              checks = json.load(open("/tmp/checks.json"))
-          except Exception:
-              print("PENDING")
-              sys.exit()
-
-          required = [c for c in os.environ["REQUIRED_CHECKS"].split(",") if c]
-          buckets = {c.get("name"): c.get("bucket") for c in checks}
-          missing = [r for r in required if r not in buckets]
-
-          if any(b in ("fail", "cancel") for b in buckets.values()):
-              print("FAIL")
-          elif missing:
-              print("PENDING")
-          elif any(b == "pending" for b in buckets.values()):
-              print("PENDING")
-          elif any(buckets[r] not in ("pass", "skipping") for r in required):
-              print("FAIL")
-          else:
-              print("OK")
-          PY
-          )"
+              verdict="$(python3 scripts/release_bump.py checks --file /tmp/checks.json --required "$REQUIRED_CHECKS")"
             fi
             case "$verdict" in
               OK)
                 echo "All required checks are present and green."
                 break
                 ;;
-              FAIL)
-                echo "::error::Release PR #$PR has a failing check; leaving it open for review."
+              FAIL*)
+                echo "::error::Release PR #$PR has a failing check; leaving it open for review. $verdict"
                 gh pr checks "$PR" 2>&1 || true
                 exit 1
                 ;;
               *)
-                echo "Waiting for required checks (${SECONDS}s elapsed)..."
+                echo "Waiting for required checks (${SECONDS}s elapsed): $verdict"
                 sleep 30
                 ;;
             esac
@@ -368,6 +344,7 @@ jobs:
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
           MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -386,6 +363,13 @@ jobs:
             echo "::error::Merge commit ${MERGE_SHA} is at version ${remote_version}, expected ${NEW_VERSION}; tag aborted."
             exit 1
           fi
+          # Build the Release notes from the merge commit's CHANGELOG rather
+          # than the possibly stale working tree, and write them before the tag
+          # exists so a tag is never pushed without notes to publish.
+          git show "${MERGE_SHA}:CHANGELOG.md" > /tmp/changelog-at-merge.md
+          python3 scripts/release_bump.py notes \
+            --version "$NEW_VERSION" \
+            --changelog /tmp/changelog-at-merge.md > /tmp/release-notes.md
           git tag -a "v${NEW_VERSION}" -m "Atlas UI 3 v${NEW_VERSION}" "$MERGE_SHA"
           git push origin "v${NEW_VERSION}"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
@@ -394,10 +378,13 @@ jobs:
         if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
-          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python3 scripts/release_bump.py notes --version "$NEW_VERSION" > /tmp/release-notes.md
+          if [[ ! -s /tmp/release-notes.md ]]; then
+            echo "::error::Release notes were not generated at tag time; run aborted before publishing."
+            exit 1
+          fi
           gh release create "v${NEW_VERSION}" \
             --title "v${NEW_VERSION}" \
             --verify-tag \
@@ -409,7 +396,7 @@ jobs:
         # relying on someone noticing a red run.
         if: failure() && github.event.inputs.dry_run != 'true'
         env:
-          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail

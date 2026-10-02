@@ -101,6 +101,13 @@ if grep -q "REQUIRED_CHECKS" "$WORKFLOW" \
 else
     print_result 1 "merge waits on a fixed check set, PAT is not persisted, and failures alert"
 fi
+if grep -q "release_bump.py checks" "$WORKFLOW" \
+    && grep -q 'git show "${MERGE_SHA}:CHANGELOG.md"' "$WORKFLOW" \
+    && grep -q 'token: ${{ secrets.RELEASE_PAT' "$WORKFLOW"; then
+    print_result 0 "check verdict is scripted, notes come from the merge commit, token is scoped"
+else
+    print_result 1 "check verdict is scripted, notes come from the merge commit, token is scoped"
+fi
 
 # ==========================================
 print_header "Check 3: change detection distinguishes empty vs populated"

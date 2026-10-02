@@ -21,12 +21,19 @@ apply --version X.Y.Z [--date YYYY-MM-DD] [--force]
     ``## [X.Y.Z] - YYYY-MM-DD`` with a fresh empty ``[Unreleased]`` above it.
 notes --version X.Y.Z
     Print the changelog section for ``X.Y.Z`` (the GitHub Release body).
+    ``--changelog PATH`` reads from a different file, e.g. the blob at the
+    merge commit rather than a possibly stale working tree.
+checks --file PATH --required a,b,c
+    Given ``gh pr checks --json name,bucket`` output, print ``OK``, or
+    ``FAIL``/``PENDING`` with the offending check names. Required checks
+    must be exactly ``pass`` -- a ``skipping`` required check is not green.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import pathlib
 import re
 import sys
@@ -144,16 +151,55 @@ def apply_bump(version: str, date: str, force: bool) -> None:
     print(f"{CHANGELOG_FILE}: [Unreleased] -> [{version}] - {date}")
 
 
-def release_notes(version: str) -> str:
-    text = CHANGELOG_FILE.read_text(encoding="utf-8")
+def release_notes(version: str, changelog_path: pathlib.Path | str = CHANGELOG_FILE) -> str:
+    text = pathlib.Path(changelog_path).read_text(encoding="utf-8")
     pattern = re.compile(
         rf"^## \[{re.escape(version)}\][^\n]*\n.*?(?=^## \[|\Z)",
         re.MULTILINE | re.DOTALL,
     )
     match = pattern.search(text)
     if not match:
-        raise ReleaseBumpError(f"no '## [{version}]' section in {CHANGELOG_FILE}")
+        raise ReleaseBumpError(f"no '## [{version}]' section in {changelog_path}")
     return match.group(0).rstrip() + "\n"
+
+
+def check_verdict(checks: object, required: list[str]) -> str:
+    """Return OK/FAIL/PENDING for a parsed ``gh pr checks --json`` payload.
+
+    Required checks must be exactly ``pass``; a skipped required check is not
+    a green gate. Any non-required check that failed or was cancelled fails
+    the whole gate, and any still-pending check keeps it pending.
+    """
+    if not isinstance(checks, list):
+        return "PENDING: no checks reported"
+
+    buckets = {
+        str(check.get("name")): str(check.get("bucket"))
+        for check in checks
+        if isinstance(check, dict)
+    }
+    missing = sorted(name for name in required if name not in buckets)
+    failed = sorted(
+        name for name, bucket in buckets.items() if bucket in ("fail", "cancel")
+    )
+    not_pass = sorted(
+        name
+        for name in required
+        if buckets.get(name) not in (None, "pass", "pending")
+    )
+    pending = sorted(
+        name for name, bucket in buckets.items() if bucket == "pending"
+    )
+
+    if failed:
+        return "FAIL: failing checks: " + ", ".join(failed)
+    if missing:
+        return "PENDING: missing required checks: " + ", ".join(missing)
+    if not_pass:
+        return "FAIL: required checks not green: " + ", ".join(not_pass)
+    if pending:
+        return "PENDING: checks still running: " + ", ".join(pending)
+    return "OK"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -178,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     notes = sub.add_parser("notes", help="print the release notes")
     notes.add_argument("--version", required=True)
+    notes.add_argument("--changelog", default=str(CHANGELOG_FILE))
+
+    checks = sub.add_parser("checks", help="verdict for a gh pr checks JSON file")
+    checks.add_argument("--file", required=True)
+    checks.add_argument("--required", required=True)
     return parser
 
 
@@ -197,7 +248,16 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "apply":
             apply_bump(args.version, args.date, args.force)
         elif args.command == "notes":
-            sys.stdout.write(release_notes(args.version))
+            sys.stdout.write(release_notes(args.version, args.changelog))
+        elif args.command == "checks":
+            try:
+                payload = json.loads(
+                    pathlib.Path(args.file).read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                payload = None
+            required = [name for name in args.required.split(",") if name]
+            print(check_verdict(payload, required))
     except ReleaseBumpError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
