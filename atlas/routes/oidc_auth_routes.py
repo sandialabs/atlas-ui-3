@@ -266,7 +266,12 @@ async def oidc_logout(request: Request):
     if settings.oidc_issuer:
         try:
             metadata = await get_provider_metadata(settings.oidc_issuer)
-        except OIDCDiscoveryError:
+        except OIDCDiscoveryError as exc:
+            # The local session is already gone; only the IdP sign-out is
+            # skipped, so the user may still have a session at the provider.
+            logger.warning(
+                "OIDC logout: provider discovery failed, skipping IdP sign-out: %s", exc
+            )
             metadata = None
         if metadata and metadata.end_session_endpoint:
             params = {"client_id": settings.oidc_client_id or ""}

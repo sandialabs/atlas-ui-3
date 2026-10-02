@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #1001 - 2026-10-02
+- Follow-up to #1000: MCP OAuth checks the host httpx actually connects to, so Unicode-dot spellings (`169。254。169。254`, `a．localhost`) can no longer slip past the internal-address refusal; `testserver` no longer gets loopback trust in production; adds a refresh test and corrects #1000's breaking-change note (Atlas sessions last to `OIDC_SESSION_MAX_AGE_SECONDS`; access-token refresh and discovered-endpoint delegation are what stop).
+
+### PR #1000 - 2026-10-02
+- OIDC discovery hardening and one shared loopback-host helper (closes #983): a malformed `OIDC_ISSUER` (e.g. `http://[::1`) now fails login as `oidc_error=discovery_failed` instead of an HTTP 500, and discovery errors name the field, host and reason with URLs quoted by `repr()`. New `atlas/core/loopback.py` replaces three drifting loopback checks: MCP OAuth also refuses `*.localhost` names and legacy dotted IPv4 forms (`127.1`, `0x7f.1`) from remote discovery documents and rejects host-less or bad-port endpoint URLs, and the Wormhole cleartext warning no longer treats names like `127.example.com` as loopback.
+- **Breaking:** endpoints advertised by the OIDC discovery document must be `https://` (plaintext only under an `http://` loopback issuer, on loopback hosts). A provider whose `https://` issuer advertises an `http://` endpoint is refused at login, token refresh, logout and delegation (when `OIDC_DELEGATION_TOKEN_ENDPOINT` is unset), so new logins fail, existing sessions can no longer refresh their access token (delegated MCP credentials stop once it expires) and IdP sign-out is skipped; fix the provider's frontend URL (usually a proxy not forwarding `X-Forwarded-Proto`) before upgrading.
+
+### PR #999 - 2026-10-02
+- Restore shared per-turn launch discovery state and align launch gating and retry regression tests with launch-owned discovery.
+
+### PR #997 - 2026-10-02
+- Weekly automated releases (#994): a new `release-weekly.yml` workflow runs every Monday, skips any week whose `## [Unreleased]` section is empty, otherwise bumps the SemVer version, opens and (once CI is green) merges the bump PR, tags the merge commit, and publishes a GitHub Release -- shipping both the `atlas-chat` Python package (`pypi-publish.yml`) and the container images (`quay-publish.yml`). The bump, "anything to release?" check, and release-note extraction live in `scripts/release_bump.py`; the monthly `release-cut.yml` cron is removed and left as a manual-only stabilization escape hatch.
+
+### PR #995 - 2026-09-30
+- Hardening for the joined-conversation live poll (#981): a live pass now only refreshes a streaming bubble that already exists -- a response that lands after the view has settled can no longer strand an "in progress" fragment nothing clears -- and re-checks that the run is still active after the fetch so a mid-air snapshot is not applied once the tracker is terminal. `usePollingWithBackoff` gains `backoffBase` (a fast poller's failures back off from its healthy cadence instead of 1 s, with the scheduled retry floored at that base so jitter cannot pull it lower) and `pauseWhenHidden` (a hidden tab stops polling and resumes when shown, honoring the remaining backoff delay rather than bypassing or restarting it); its in-flight guard and mounted state are now scoped to each effect generation, so switching to a new polled subject is not stalled behind a request still in the air from the old one, and a new generation starts with a clean backoff count only when the polled subject changes (an enabled toggle keeps it). The live poll aborts a hung request after 15 s and caps its backoff at 30 s so a stalled request or temporary outage recovers within the conversation. Adds the Playwright two-tab driver and screenshots showing a joined tab render the next `atlas_sleep` row while the run is still paused on approval, and restores the `### PR #981` changelog entry dropped from `main` by a later changelog rewrite.
+
+### PR #981 - 2026-09-27
+- A conversation opened while its run is still executing now refreshes mid-run (closes #980): the run's frames stay bound to the socket that started it, so a joined view held the snapshot the run had when it was opened and showed nothing the run produced afterwards until the final reload -- an `atlas_sleep` landing next to the `basic_fns_bash` already on screen stayed invisible while the answer was still in progress. While the open conversation has an active run and the view holds the replay placeholder, the client polls the run's live record (`GET /api/conversations/{id}`) every few seconds and appends the tool rows and narration that have appeared since, using the same reconciliation as the run-end reload so rows already on screen keep their identity and the reader's scroll position stands; the partial bubble tracks the newest `streaming_text`. The poll does not spend the run-end re-arm budget, ignores a record that is no longer in flight, and leaves the tab that owns the stream to its live socket.
+
 ### PR #977 - 2026-09-25
 - Refresh a single MCP server from the admin panel (issue #879): new `POST /admin/mcp/refresh` (`{"server_name": ...}`) re-reads that server's config, reconnects, and re-discovers its tools -- instead of the all-servers reload -- and each server chip in the admin MCP card carries a per-server refresh button. Only the named server's state is touched; idle cached per-user clients for it are rebuilt while in-flight calls are not torn down (retained entries are marked stale so both acquisition paths rebuild them).
 
@@ -20,6 +39,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### PR #972 - 2026-09-24
 - `/api/config` now correctly includes per-tool approval entries by matching fully-qualified `<server>_<tool>` names against authorized tools.
+
+### PR #969 - 2026-09-24
+- `atlas_launch` now self-discovers launch options when needed, tools execution no longer special-cases launch discovery, and launch discovery memoizes per-group model authorization checks within a single call. Tools mode now allows at most one exempted retry of failed `atlas_discover_launch_options` per turn.
 
 ### PR #937 - 2026-09-14
 - Uploaded vision images are rehydrated from storage on follow-up and resubmitted turns so vision-capable models continue receiving the image.

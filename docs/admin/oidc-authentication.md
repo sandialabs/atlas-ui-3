@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-09-28
+Last updated: 2026-10-02
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -80,9 +80,30 @@ and cached for an hour. The document's own `issuer` claim must match the
 configured issuer, so a redirect on the discovery URL cannot substitute another
 provider's endpoints.
 
-`OIDC_ISSUER` must be `https://`. For local development only, `http://` is also
-accepted on `localhost`, `127.0.0.1`, `::1`, and RFC 6761 `*.localhost` names
-(for example `http://keycloak.localhost` behind a local ingress).
+`OIDC_ISSUER` must be an absolute `https://` URL. For local development only,
+`http://` is also accepted on `localhost`, loopback addresses (`127.0.0.0/8`,
+`::1`), and RFC 6761 `*.localhost` names (for example `http://keycloak.localhost`
+behind a local ingress); Atlas logs a warning at login when it is used. The
+check is on the name, not on the address it resolves to.
+
+The endpoints the discovery document advertises (`authorization_endpoint`,
+`token_endpoint`, `jwks_uri`, `userinfo_endpoint`, `end_session_endpoint`) are
+held to the same rule: under an `https://` issuer every one of them must be
+`https://`, and `http://` endpoints are accepted only under an `http://`
+loopback issuer and only on loopback hosts. A provider that advertises a
+plaintext endpoint behind an `https://` issuer (usually a reverse proxy that
+does not forward `X-Forwarded-Proto`) is refused, because the token request
+carries the client secret; fix the provider's frontend URL rather than the
+issuer. The rule applies wherever Atlas reads the discovery document -- login,
+access-token refresh, logout, and delegated credentials when
+`OIDC_DELEGATION_TOKEN_ENDPOINT` is unset. After upgrading against such a
+provider, new logins are refused; existing Atlas sessions stay valid until
+`OIDC_SESSION_MAX_AGE_SECONDS`, but their access tokens can no longer be
+refreshed, so delegated MCP credentials stop once the current access token
+expires, and logout skips the IdP sign-out. Each case logs the discovery error
+naming the field and host. A malformed or rejected issuer or endpoint makes login fail with
+`oidc_error=discovery_failed`, and the server log names the field, the host,
+and the reason.
 
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to
@@ -222,7 +243,7 @@ A tool call never fails with a delegation stack trace.
 | Symptom | Cause |
 | --- | --- |
 | `/auth/oidc/login` returns 404 | `FEATURE_OIDC_AUTH_ENABLED` is false, or startup disabled it -- check the log for the reason. |
-| Redirect to `/?oidc_error=discovery_failed` | The issuer's discovery document is unreachable or its `issuer` claim does not match. |
+| Redirect to `/?oidc_error=discovery_failed` | The issuer's discovery document is unreachable, its `issuer` claim does not match, `OIDC_ISSUER` is malformed or not `https://`, or the document advertises a non-`https://` endpoint under an `https://` issuer (check that the proxy in front of the IdP forwards `X-Forwarded-Proto`). The server log names the field and host. |
 | Redirect to `/?oidc_error=invalid_state` | The session cookie was lost between login and callback (secret changed, or the process restarted). |
 | Redirect to `/?oidc_error=token_exchange_failed` | Client authentication was rejected, or the ID token failed validation. Check the redirect URI is registered exactly. |
 | Redirect to `/?oidc_error=misconfigured` | Client credentials could not be built -- e.g. `private_key_jwt` with an unreadable key file. |

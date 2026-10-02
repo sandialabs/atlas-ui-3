@@ -42,7 +42,9 @@ def check(label, condition, detail=""):
 ORIGIN = None  # filled in once the port is known
 SERVER_NAME = "validation-oauth-mcp"
 USER_EMAIL = "test@example.com"
-ATLAS_BASE = "http://testserver"
+# A real loopback host: since #1001, Starlette's ``testserver`` is no longer
+# treated as loopback, so an http:// callback base on it would be refused.
+ATLAS_BASE = "http://localhost"
 EXPECTED_REDIRECT = f"{ATLAS_BASE}/api/mcp/auth/{SERVER_NAME}/oauth/callback"
 
 REGISTRATIONS = []          # RFC 7591 registration bodies received
@@ -251,7 +253,7 @@ def main():
         "enabled": True,
     }
 
-    client = TestClient(atlas_main.app, headers={"X-User-Email": USER_EMAIL})
+    client = TestClient(atlas_main.app, base_url=ATLAS_BASE, headers={"X-User-Email": USER_EMAIL})
 
     print("\n1. The server reports as requiring OAuth and advertises a start URL")
     response = client.get("/api/mcp/auth/status")
@@ -377,7 +379,9 @@ def main():
           entry.get("has_refresh_token") is True, str(entry))
 
     print("\n9. Another user is unaffected (per-user isolation)")
-    stranger = TestClient(atlas_main.app, headers={"X-User-Email": "other@example.com"})
+    stranger = TestClient(
+        atlas_main.app, base_url=ATLAS_BASE, headers={"X-User-Email": "other@example.com"}
+    )
     stranger_entry = {
         row["server_name"]: row
         for row in stranger.get("/api/mcp/auth/status").json()["servers"]

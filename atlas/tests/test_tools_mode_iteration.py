@@ -43,6 +43,7 @@ class ScriptedToolsLLM:
         self._turns = list(turns)
         self.tool_stream_calls = 0
         self.seen_messages: List[List[dict]] = []
+        self.synthesis_messages: List[List[dict]] = []
         self.synthesis = synthesis
         self.synthesis_error = synthesis_error
 
@@ -60,6 +61,7 @@ class ScriptedToolsLLM:
         yield LLMResponse(content=text or "", tool_calls=tool_calls)
 
     async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+        self.synthesis_messages.append([dict(m) for m in messages])
         if self.synthesis_error:
             raise self.synthesis_error
         yield self.synthesis
@@ -763,6 +765,8 @@ async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note(
         ("discovering", [discovery_call("d1")]),
         # The identical call again -- same name, same arguments.
         ("retrying discovery", [discovery_call("d2")]),
+        # A third identical call in the same turn should be blocked by the cap.
+        ("retrying discovery again", [discovery_call("d3")]),
         ("Here are your options.", None),
     ])
     runner = _runner(llm, _config(max_extra_rounds=3))
@@ -798,7 +802,7 @@ async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note(
             selected_tools=[DISCOVER_LAUNCH_OPTIONS_TOOL_NAME],
         )
 
-    # The retry really was executed a second time.
+    # The retry was executed exactly once; the third identical call was capped.
     assert attempts["n"] == 2, "the exempted discovery retry was not re-executed"
 
     # The messages the model saw on its third turn must carry the options.
@@ -809,3 +813,8 @@ async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note(
     )
     assert retry_message["content"] == options_payload
     assert "already executed" not in retry_message["content"]
+    third_retry_message = next(
+        m for m in llm.synthesis_messages[-1]
+        if m.get("role") == "tool" and m.get("tool_call_id") == "d3"
+    )
+    assert "already executed" in third_retry_message["content"]

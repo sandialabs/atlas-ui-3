@@ -8,7 +8,14 @@ Security notes:
 
 - The issuer must be an ``https://`` URL (an ``http://`` issuer is accepted
   only for loopback hosts, including RFC 6761 ``*.localhost`` names, so local
-  development against a mock IdP works).
+  development against a mock IdP works). The check is on the name, not on the
+  address it resolves to.
+- The endpoints the discovery document advertises must be ``https://`` too.
+  ``http://`` endpoints are accepted only on loopback hosts and only when the
+  issuer itself is ``http://``, so an https issuer cannot downgrade the token
+  exchange (which carries the client secret) to plaintext.
+- Error messages quote URLs and hosts with ``repr()``: endpoint URLs come from
+  the IdP, and escaping control characters keeps them from forging log lines.
 - The ``issuer`` claim in the returned document must match the configured
   issuer exactly, per OpenID Connect Discovery section 4.3. Skipping that
   check would let a redirect on the discovery URL substitute a different
@@ -24,27 +31,31 @@ from urllib.parse import urlparse
 
 import httpx
 
+from atlas.core.loopback import is_loopback_host
+
 logger = logging.getLogger(__name__)
 
 DISCOVERY_TIMEOUT_SECONDS = 10.0
 DISCOVERY_CACHE_TTL_SECONDS = 3600.0
 
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "testserver"})
+# Endpoints the discovery document may advertise; each one is scheme-checked.
+_ENDPOINT_FIELDS = (
+    "authorization_endpoint",
+    "token_endpoint",
+    "jwks_uri",
+    "userinfo_endpoint",
+    "end_session_endpoint",
+)
 
 
 def _is_loopback_host(hostname: str) -> bool:
     """Whether ``hostname`` is a loopback host, including ``*.localhost`` names.
 
-    RFC 6761 section 6.3 reserves every ``*.localhost`` name for loopback;
-    local setups use them to give each service its own origin (for example
-    ``keycloak.localhost`` behind a local ingress). Allows one trailing dot
-    and rejects empty labels, so ``.localhost`` and ``a..localhost`` fail.
+    The issuer is configured by the operator, so RFC 6761 ``*.localhost``
+    names (for example ``keycloak.localhost`` behind a local ingress) are
+    accepted alongside ``localhost`` and loopback addresses.
     """
-    host = hostname.lower().removesuffix(".")
-    labels = host.split(".")
-    return host in _LOOPBACK_HOSTS or (
-        len(labels) > 1 and labels[-1] == "localhost" and all(labels)
-    )
+    return is_loopback_host(hostname, localhost_subdomains=True)
 
 
 class OIDCDiscoveryError(RuntimeError):
@@ -76,14 +87,49 @@ class ProviderMetadata:
         return not methods or "S256" in methods
 
 
-def _validate_issuer_url(issuer: str) -> None:
-    parsed = urlparse(issuer)
+def _check_url(what: str, url: Any, *, allow_http: bool) -> bool:
+    """Require an absolute ``https://`` URL, or ``http://`` on loopback when allowed.
+
+    Returns True when the URL is plain ``http://`` on a loopback host, so the
+    caller can warn. Raises :class:`OIDCDiscoveryError` otherwise, including
+    for URLs ``urlparse`` cannot parse (such as an unclosed IPv6 bracket),
+    which would otherwise escape as a ``ValueError``.
+    """
+    if not isinstance(url, str):
+        raise OIDCDiscoveryError(f"{what} must be a URL string (got {type(url).__name__})")
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        parsed.port  # noqa: B018 -- raises ValueError on a malformed port
+    except ValueError as exc:
+        raise OIDCDiscoveryError(f"{what} is not a valid URL (got {url!r}): {exc}") from exc
+    if parsed.scheme not in ("http", "https") or not hostname:
+        raise OIDCDiscoveryError(
+            f"{what} must be an absolute https:// URL such as "
+            f"https://idp.example.gov/realms/atlas (got {url!r}); is the scheme missing?"
+        )
     if parsed.scheme == "https":
-        return
-    if parsed.scheme == "http" and _is_loopback_host(parsed.hostname or ""):
-        logger.warning("OIDC issuer uses http:// on a loopback host; this is for local development only")
-        return
-    raise OIDCDiscoveryError("OIDC issuer must be an https:// URL")
+        return False
+    if not allow_http:
+        raise OIDCDiscoveryError(
+            f"{what} must be an https:// URL because the issuer is https:// "
+            f"(got http:// on host {hostname!r})"
+        )
+    if _is_loopback_host(hostname):
+        return True
+    raise OIDCDiscoveryError(
+        f"{what} must be an https:// URL (got http:// on host {hostname!r}); "
+        "http:// is accepted only on localhost, *.localhost names and loopback addresses"
+    )
+
+
+def _validate_issuer_url(issuer: str) -> None:
+    if _check_url("OIDC issuer", issuer, allow_http=True):
+        logger.warning(
+            "OIDC issuer uses http:// on loopback host %r; this is for local "
+            "development only (the client secret and tokens are sent unencrypted)",
+            urlparse(issuer).hostname,
+        )
 
 
 def discovery_url(issuer: str) -> str:
@@ -99,7 +145,8 @@ def parse_provider_metadata(issuer: str, document: Dict[str, Any]) -> ProviderMe
     advertised_issuer = document.get("issuer")
     if advertised_issuer != issuer.rstrip("/") and advertised_issuer != issuer:
         raise OIDCDiscoveryError(
-            "OIDC discovery document issuer does not match the configured issuer"
+            "OIDC discovery document issuer does not match the configured issuer "
+            f"(document says {advertised_issuer!r}, configured {issuer!r})"
         )
 
     required = ("authorization_endpoint", "token_endpoint", "jwks_uri")
@@ -108,6 +155,16 @@ def parse_provider_metadata(issuer: str, document: Dict[str, Any]) -> ProviderMe
         raise OIDCDiscoveryError(
             f"OIDC discovery document is missing required field(s): {', '.join(missing)}"
         )
+
+    # http:// endpoints are tolerated only under an http:// (loopback) issuer,
+    # and then only on loopback hosts. An https:// issuer must not hand out
+    # plain-http endpoints: the token request carries the client secret.
+    issuer_is_http = issuer.strip().lower().startswith("http://")
+    for key in _ENDPOINT_FIELDS:
+        # Absent, null and "" mean "not advertised"; any other value (even a
+        # falsy one like 0 or []) must be a valid URL.
+        if document.get(key) not in (None, ""):
+            _check_url(f"OIDC discovery document {key}", document[key], allow_http=issuer_is_http)
 
     def _string_list(key: str) -> List[str]:
         value = document.get(key) or []

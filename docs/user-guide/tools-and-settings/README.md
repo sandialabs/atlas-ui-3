@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-09-13
+Last updated: 2026-10-02
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -129,9 +129,9 @@ says so.
 When your administrator has enabled it, the built-in `atlas_launch` tool lets a
 conversation start other conversations to work on pieces of a task. Tick
 `atlas_launch` in the tools list, then ask for the work to be split up. ATLAS
-also offers `atlas_discover_launch_options`; the agent must call it first to
-receive the current workspaces and model names. Ticking `atlas_launch` enables
-the discovery tool automatically, so there is nothing extra to select. Launch is
+discovers the current authorized workspaces and model names inside `atlas_launch`
+when needed. You can separately select `atlas_discover_launch_options` to inspect
+those choices, but ticking `atlas_launch` does not add that tool automatically. Launch is
 blocked with an actionable error if discovery fails, returns no choices, or the
 launch arguments are not in the discovered options.
 

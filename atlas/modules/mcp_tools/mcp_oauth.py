@@ -46,6 +46,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.loopback import is_loopback_host, normalize_host, parse_ip
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,8 @@ DISCOVERY_CACHE_TTL_SECONDS = 3600.0
 # whatever memory the sender feels like consuming.
 MAX_RESPONSE_BYTES = 512 * 1024
 
-# Mirrors atlas.core.oidc.discovery: an http:// endpoint is only tolerated on a
-# loopback host so local development against a mock provider works.
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "testserver"})
+# An http:// endpoint is only tolerated on a loopback host (see
+# atlas.core.loopback) so local development against a mock provider works.
 
 # Default scope requested when neither the server config nor the
 # protected-resource metadata says anything. Empty means "whatever the
@@ -82,41 +82,15 @@ class MCPOAuthError(RuntimeError):
 
 
 def _is_loopback(host: str) -> bool:
-    host = (host or "").lower().strip("[]")
-    if host in _LOOPBACK_HOSTS:
-        return True
-    address = _parse_ip(host)
-    return address is not None and address.is_loopback
+    """Whether ``host`` is loopback for the purposes of the MCP OAuth flow.
 
-
-def _parse_ip(host: str):
-    """Parse a host as an IP address, or None when it is a name.
-
-    ``ipaddress`` is what normalizes the encodings an allowlist written by
-    hand would miss: ``0x7f.1``, ``2130706433``, ``::ffff:127.0.0.1`` and
-    ``0.0.0.0`` all resolve to addresses this rejects.
+    Deliberately narrower than the OIDC issuer check: RFC 6761 ``*.localhost``
+    names are not included. A loopback MCP server is trusted to name loopback
+    and internal endpoints in its discovery documents, and a ``*.localhost``
+    name resolves through the operator's resolver (often to a shared local
+    ingress), which is not the same trust as this process's own loopback.
     """
-    import ipaddress
-
-    host = (host or "").strip("[]")
-    if not host:
-        return None
-    try:
-        return ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    # Integer and other legacy IPv4 encodings that ip_address rejects but
-    # resolvers and HTTP clients still accept.
-    try:
-        packed = int(host, 0)
-    except (TypeError, ValueError):
-        return None
-    if 0 <= packed <= 0xFFFFFFFF:
-        try:
-            return ipaddress.ip_address(packed)
-        except ValueError:
-            return None
-    return None
+    return is_loopback_host(host)
 
 
 def _is_internal_address(host: str) -> bool:
@@ -129,9 +103,15 @@ def _is_internal_address(host: str) -> bool:
     network. DNS-based attacks are a deployment-level concern (egress
     controls), noted in the admin documentation.
     """
-    address = _parse_ip(host)
+    # A trailing-dot literal such as ``127.0.0.1.`` is a DNS name to the
+    # resolver, so it is not loopback, but it is refused here all the same:
+    # a resolver may well answer it with the address it spells.
+    address = parse_ip(host) or parse_ip(normalize_host(host).removesuffix("."))
     if address is None:
-        return (host or "").lower() in _LOOPBACK_HOSTS
+        # Names are not resolved, but loopback names (``*.localhost``
+        # included) are refused outright: they can only reach this machine
+        # or the operator's local ingress.
+        return is_loopback_host(host, localhost_subdomains=True)
     # An IPv4-mapped IPv6 address hides the v4 properties, so unwrap it.
     mapped = getattr(address, "ipv4_mapped", None)
     if mapped is not None:
@@ -152,9 +132,31 @@ def origin_of(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}".lower()
 
 
+def _connect_host(url: str) -> str:
+    """The host httpx will actually connect to for ``url``.
+
+    httpx applies IDNA/UTS-46 mapping, which turns the full-width and
+    ideographic dots in ``169。254。169。254`` or ``a．localhost`` into ASCII
+    ones. Checking ``urlsplit``'s raw hostname instead would let those
+    spellings past the address checks. Raises ValueError for a URL httpx
+    cannot parse.
+
+    ``raw_host`` is the ASCII (punycode) form httpx puts on the wire. The
+    decoded ``.host`` would be wrong here: it re-validates the label under
+    IDNA2008 and raises on valid hosts such as ``xn--ls8h.la``.
+    """
+    try:
+        return httpx.URL(url).raw_host.decode("ascii")
+    except httpx.InvalidURL as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def is_loopback_url(url: str) -> bool:
     """Whether a URL points at a loopback host."""
-    return _is_loopback(urlsplit(url).hostname or "")
+    try:
+        return _is_loopback(_connect_host(url))
+    except ValueError:
+        return False
 
 
 def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -> str:
@@ -172,8 +174,16 @@ def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -
     """
     if not url or not isinstance(url, str):
         raise MCPOAuthError(f"{what} is missing")
-    parsed = urlsplit(url)
-    host = parsed.hostname or ""
+    try:
+        parsed = urlsplit(url)
+        parsed.port  # noqa: B018 -- raises ValueError on a malformed port
+        host = _connect_host(url) if parsed.hostname else ""
+    except ValueError as exc:
+        # An unclosed IPv6 bracket or a non-numeric port, for example; it
+        # must not escape as a bare ValueError.
+        raise MCPOAuthError(f"{what} is not a valid URL (got {url!r}): {exc}") from exc
+    if not host:
+        raise MCPOAuthError(f"{what} must be an absolute URL with a host")
 
     if parsed.scheme not in ("https", "http"):
         raise MCPOAuthError(f"{what} must be an https:// URL")

@@ -1,19 +1,22 @@
 # Release Process
 
-Last updated: 2026-09-24
+Last updated: 2026-10-02
 
 This document is the canonical runbook for cutting a release of Atlas
-UI 3. If you are about to publish a version, follow
-[Cutting a release](#cutting-a-release) top-to-bottom.
+UI 3. Normal releases are **fully automated on a weekly schedule**; if you
+are about to publish a version by hand, follow
+[Cutting a release manually](#cutting-a-release-manually).
 
 ---
 
 ## Philosophy
 
-Atlas UI 3 **ships from `main`**. A release is a version-bump PR, a tag
-on the resulting commit, and a GitHub Release — the rest is automation.
-Roughly monthly is the habit, not a rule; ship when there is something
-worth shipping.
+Atlas UI 3 **ships from `main` on a weekly cadence, automatically.** A
+release is a version bump, a tag on the resulting commit, and a GitHub
+Release — every step is driven by
+[`release-weekly.yml`](../../.github/workflows/release-weekly.yml). A week
+with no entries under `## [Unreleased]` is skipped, so quiet weeks do not
+manufacture empty versions.
 
 The model is small and deliberately boring:
 
@@ -26,15 +29,91 @@ The model is small and deliberately boring:
   from a `v*.*.*` tag) triggers `pypi-publish.yml`; pushing a `v*.*.*` tag
   triggers `quay-publish.yml`. This is the intended release path.
 
-A stabilization branch (`release/YYYY.MM`, cut by `release-cut.yml`)
-remains available for the case it actually solves — freezing a release
-while unrelated work keeps landing on `main`. It is the exception, not
-the default; see
+The versioning scheme is **SemVer**, and the automated weekly bump defaults
+to MINOR (see [Versioning](#versioning)). The workflow accepts a `bump`
+input or an explicit `version` when a week warrants a PATCH or MAJOR bump.
+
+Humans are out of the normal loop: the workflow merges its own bump PR once
+CI is green, then tags and publishes. Because publishing to PyPI is
+irreversible — a version can be yanked but never replaced — the go/no-go
+call is still the tag, it is just made by the automation rather than a
+person.
+
+A stabilization branch (`release/YYYY.MM`, cut by `release-cut.yml`) remains
+available for the case it actually solves — freezing a release while
+unrelated work keeps landing on `main`. It is now manual-only, the
+exception, not the default; see
 [When to use a stabilization branch instead](#when-to-use-a-stabilization-branch-instead).
 
-Humans make the go/no-go call and push the tag. Publishing to PyPI is
-irreversible — a version can be yanked but never replaced — so treat
-`gh release create` as the point of no return.
+### Automated weekly releases
+
+`release-weekly.yml` runs **Mondays at 14:00 UTC** and on
+`workflow_dispatch`. Each run:
+
+1. **Checks for changes.** If `CHANGELOG.md`'s `## [Unreleased]` section is
+   empty, the run stops immediately and nothing is released.
+2. **Bumps the version.** `atlas/version.py`, `pyproject.toml`, and a
+   reshaped `CHANGELOG.md` (`## [Unreleased]` becomes
+   `## [X.Y.Z] - YYYY-MM-DD` with a fresh empty `[Unreleased]` above it),
+   plus a refreshed `uv.lock`. This file work lives in
+   [`scripts/release_bump.py`](../../scripts/release_bump.py), which the PR
+   validation script exercises directly.
+3. **Opens a PR** from `release/vX.Y.Z` to `main`.
+4. **Waits for CI**, then squash-merges the exact commit it watched
+   (`--match-head-commit`). The gate waits for a fixed set of checks
+   (`build-and-test`, `build-artifacts`, and the security scans) to be
+   present and green — not merely for whatever happened to register — and
+   if any check fails the workflow stops and leaves the PR open for a
+   human. `RELEASE_PAT` is required for a real release: a tag or Release
+   created with the default `GITHUB_TOKEN` does not trigger
+   `pypi-publish.yml` or `quay-publish.yml`, so the run fails before
+   creating any branch rather than tagging a version that never ships.
+   `dry_run: true` still works without the secret.
+5. **Tags** the squashed merge commit on `main` as `vX.Y.Z` (read back
+   from the PR, not the moving tip of `main`).
+6. **Publishes a GitHub Release** with the changelog section as its body.
+
+Before planning, the run verifies that the version currently on `main` has
+a matching `vX.Y.Z` tag. If a previous release was merged but never tagged
+(for example a run that died between merge and tag), it fails loudly
+instead of planning past the vanished version; tag and publish that commit
+by hand, then let the schedule resume.
+
+`release-weekly` and `release-cut` share a single concurrency group, so the
+two paths cannot plan the same version at the same time. If `main` advances
+while the weekly bump PR is waiting for CI, the run closes the bump PR and
+defers — the next run re-cuts from the new `main` rather than merging a
+changelog whose `[Unreleased]` section has moved underneath it.
+
+Steps 1 and 2 are idempotent in the sense that a week with nothing to
+release is a no-op; a version tag that already exists aborts the run.
+
+Run it by hand with **Actions → Release - weekly automated → Run
+workflow**. Blank `version` auto-bumps (default `minor`); `dry_run: true`
+prints the plan and diff without pushing anything.
+
+### Recovering a failed weekly release
+
+A scheduled run can die after it has merged the bump PR or pushed the tag,
+leaving a version that is half-published. When any step fails the workflow
+opens (or comments on) a GitHub issue titled "Weekly release automation
+failed", and its step summary never claims a release shipped on a failed run.
+Recover by hand:
+
+- **Merged but not tagged.** The bump is on `main` but `atlas/version.py`
+  is ahead of the newest tag. The next run refuses to start (the
+  precondition checks that the version on `main` has a tag). Tag the merge
+  commit and create the Release for it.
+- **Tagged but no Release.** `pypi-publish.yml` only runs when the Release
+  is published, so nothing reached PyPI. Create the Release for the
+  existing tag: `gh release create vX.Y.Z --verify-tag --notes-file <notes>`.
+- **Release published but a publish workflow failed.** Re-run it from the
+  Actions tab, or use the `pypi-publish.yml` `workflow_dispatch` escape
+  hatch for the Python package. The tag already exists, so
+  `quay-publish.yml` can be re-run directly.
+
+Never delete or move a published tag: rolling forward with a patch release
+is always safer than rewriting history.
 
 ### Other publish paths (non-release)
 
@@ -70,7 +149,8 @@ The project uses **SemVer**: `MAJOR.MINOR.PATCH`.
 
 | Change                                            | Bump                   |
 |---------------------------------------------------|------------------------|
-| Normal monthly release                            | MINOR (`0.1.5 → 0.2.0`) |
+| Normal weekly release (automated)                 | MINOR (`0.1.5 → 0.2.0`) |
+| Weekly release with only fixes (dispatch `patch`) | PATCH (`0.2.0 → 0.2.1`) |
 | Hotfix on an already-shipped release branch       | PATCH (`0.2.0 → 0.2.1`) |
 | Breaking API or config change                     | MAJOR                  |
 | Pre-1.0: still use MINOR for breaking changes     | MINOR                  |
@@ -91,12 +171,16 @@ args.
 
 ---
 
-## Cutting a release
+## Cutting a release manually
 
-A release is three things: a version-bump commit on `main`, a tag on
-that commit, and a GitHub Release. Everything after the tag is
-automation. There is no stabilization branch and no back-merge — the
-bump lands on `main` directly, so `main` is never behind what shipped.
+Normal releases are automated by
+[`release-weekly.yml`](../../.github/workflows/release-weekly.yml). Use
+this path only as a fallback — if the automation is broken, or you need to
+ship out of band. It is the same three things the automation does: a
+version-bump commit on `main`, a tag on that commit, and a GitHub Release.
+Everything after the tag is automation. There is no stabilization branch
+and no back-merge — the bump lands on `main` directly, so `main` is never
+behind what shipped.
 
 Budget about ten minutes of hands-on work, plus the publish runs.
 
@@ -249,12 +333,12 @@ no branch to keep alive.
 
 ## When to use a stabilization branch instead
 
-`release-cut.yml` (cron, 14:00 UTC on the 22nd) opens a draft
+`release-cut.yml` (manual `workflow_dispatch` only) opens a draft
 `release/YYYY.MM` PR: it creates the branch from `main`, applies the
 same three-file bump, reshapes the changelog, and fills the PR body
 from [.github/release-checklist.md](../../.github/release-checklist.md).
-Run it by hand with **Actions → Release: cut monthly branch → Run
-workflow** (`version` overrides the computed bump; `dry_run: true`
+Run it by hand with **Actions → Release - cut stabilization branch →
+Run workflow** (`version` overrides the computed bump; `dry_run: true`
 prints the plan without pushing).
 
 Reach for it only when a release genuinely needs a **freeze**: work you
@@ -305,7 +389,8 @@ draft PR without rewriting the branch.
 
 Because releases ship from `main`, an urgent fix is an ordinary
 release at a PATCH version: land the fix on `main` as a normal PR, then
-run [Cutting a release](#cutting-a-release) bumping `0.2.0 → 0.2.1`.
+run [Cutting a release manually](#cutting-a-release-manually) bumping
+`0.2.0 → 0.2.1`.
 Nothing special is required.
 
 That works as long as everything else sitting on `main` is also
@@ -424,12 +509,10 @@ when one is made.
    to CalVer (`2026.8.0`), the PyPI version jumps and downstreams
    pinning `atlas-chat<1.0` will break. Recommendation: keep SemVer,
    revisit at 1.0.
-2. **Keep the monthly cron?** `release-cut.yml` still fires on the
-   22nd and opens a draft `release/YYYY.MM` PR that nobody is
-   obligated to use. It is harmless (it never publishes) but it does
-   manufacture a branch and a PR every month. Options: leave it,
-   restrict it to `workflow_dispatch`, or delete it and keep the
-   stabilization path as a documented manual procedure.
+2. ~~**Keep the monthly cron?**~~ **Resolved (issue #994):** the monthly
+   cron is gone. Normal releases are automated weekly by
+   `release-weekly.yml`; `release-cut.yml` is now manual-only and exists
+   solely for the freeze case above.
 3. **Should the bump PR require a review?** `main` currently requires
    a PR but zero approvals, which is what makes the four-step flow
    fast. A release is exactly when a second pair of eyes is cheapest
@@ -445,7 +528,9 @@ when one is made.
 
 ## Related files
 
-- [.github/workflows/release-cut.yml](../../.github/workflows/release-cut.yml) — the cron automation, used only by the stabilization-branch path
+- [.github/workflows/release-weekly.yml](../../.github/workflows/release-weekly.yml) — the weekly automated release; bumps, opens/merges the PR, tags, and publishes the Release
+- [scripts/release_bump.py](../../scripts/release_bump.py) — version bump, "anything to release?" check, and release-note extraction used by the weekly workflow
+- [.github/workflows/release-cut.yml](../../.github/workflows/release-cut.yml) — the manual stabilization-branch escape hatch
 - [.github/workflows/pypi-publish.yml](../../.github/workflows/pypi-publish.yml) — publishes on GitHub Release; also has a `workflow_dispatch` escape hatch (`target: testpypi` for a pre-tag smoke artifact)
 - [.github/workflows/quay-publish.yml](../../.github/workflows/quay-publish.yml) — publishes semver-tagged images on `v*.*.*` tag push, and branch-named images on push to `main`/`develop`/`quay`
 - [.github/release-checklist.md](../../.github/release-checklist.md) — PR body used by automation

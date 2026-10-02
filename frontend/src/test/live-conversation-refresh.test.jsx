@@ -268,6 +268,18 @@ describe('mid-run live refresh of a joined conversation', () => {
       const settledMessages = result.current.messages
       await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
       expect(result.current.messages).toBe(settledMessages)
+
+      // A changed streaming segment with the same rows is real movement and
+      // must still reach the bubble on the next pass.
+      h.fetchMock.mockImplementation(async (url) => {
+        if (String(url).includes('/api/conversations/conv-1')) {
+          return { ok: true, json: async () => liveRecord(sleepRow, 'Working on it some more') }
+        }
+        return { ok: false, status: 404, json: async () => ({}) }
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3200) })
+      const bubbleAfter = result.current.messages.find(m => m._streaming)
+      expect(bubbleAfter.content).toBe('Working on it some more')
     } finally {
       vi.useRealTimers()
     }
@@ -307,6 +319,112 @@ describe('mid-run live refresh of a joined conversation', () => {
 
       expect(h.fetchMock.mock.calls.length).toBe(callsWhileRunning)
     } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('wires the fetch timeout, the backoff base and the backoff cap', async () => {
+    vi.useFakeTimers()
+    try {
+      // Fail from the first poll: then the retry delay is the backoff, not the
+      // normal interval, so this actually pins backoffBase.
+      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }))
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      // The request carries an abort signal (the 15s hang guard).
+      const firstCall = h.fetchMock.mock.calls.find(c => String(c[0]).includes('/api/conversations/'))
+      expect(firstCall?.[1]?.signal).toBeTruthy()
+      expect(typeof firstCall[1].signal.aborted).toBe('boolean')
+
+      // The 503 is retried on the live poll's 3s backoffBase, not the hook's
+      // 1s default: at 1.5s there is no second attempt; by 3.5s there is.
+      const callsAtStart = h.fetchMock.mock.calls.length
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      expect(h.fetchMock.mock.calls.length).toBe(callsAtStart)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(h.fetchMock.mock.calls.length).toBeGreaterThan(callsAtStart)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('caps the live poll backoff at 30s', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5) // no jitter
+    try {
+      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }))
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      const liveCalls = () => h.fetchMock.mock.calls
+        .filter(c => String(c[0]).includes('/api/conversations/')).length
+
+      // The immediate poll plus retries at 3s, 6s, 12s and 24s. The fifth
+      // failure's uncapped backoff would be 48s; the live poll caps at 30s.
+      for (const step of [3000, 6000, 12000, 24000]) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(step) })
+      }
+      const afterCap = liveCalls()
+      await act(async () => { await vi.advanceTimersByTimeAsync(29000) })
+      expect(liveCalls()).toBe(afterCap)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(liveCalls()).toBeGreaterThan(afterCap)
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not poll while the tab is hidden', async () => {
+    vi.useFakeTimers()
+    const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden')
+    try {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+      expect(h.fetchMock.mock.calls.some(c => String(c[0]).includes('/api/conversations/'))).toBe(false)
+    } finally {
+      if (originalHidden) Object.defineProperty(document, 'hidden', originalHidden)
+      else delete document.hidden
       vi.useRealTimers()
     }
   })
@@ -365,6 +483,119 @@ describe('mid-run live refresh of a joined conversation', () => {
       h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', in_flight: false, metadata: {}, messages: [] }) }))
       await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
       expect(result.current.messages.map(m => m.content)).toEqual(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a settled record holding the run\'s final rows is not applied mid-run', async () => {
+    // The `in_flight` guard exists so a record the run has settled belongs to
+    // the run-end path, not to the poll. A settled record whose transcript
+    // holds rows the view lacks must be refused whole: appending them here
+    // would discharge the run-end obligation against a record that was
+    // already final. (An empty transcript cannot pin this -- alignment would
+    // refuse it anyway -- so this record genuinely aligns.)
+    vi.useFakeTimers()
+    try {
+      h.fetchMock.mockImplementation(async (url) => {
+        if (String(url).includes('/api/conversations/conv-1')) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 'conv-1',
+              in_flight: false,
+              metadata: {},
+              streaming_text: '',
+              messages: [
+                storedChat('user', 'What is the weather'),
+                storedToolCall('call-bash', 'basic_fns_bash'),
+                storedChat('assistant', 'Done sleeping'),
+              ],
+            }),
+          }
+        }
+        return { ok: false, status: 404, json: async () => ({}) }
+      })
+
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      const before = result.current.messages
+      const restoreCountBefore = h.sendMessage.mock.calls.filter(c => c[0].type === 'restore_conversation').length
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(7000) })
+
+      // Neither the tool row nor the final answer may reach the view, and the
+      // final transcript must not be re-seeded into the backend session.
+      expect(result.current.messages.map(m => m.content || '')).toEqual(before.map(m => m.content || ''))
+      expect(result.current.messages.some(m => m.type === 'tool_call')).toBe(false)
+      expect(h.sendMessage.mock.calls.filter(c => c[0].type === 'restore_conversation').length).toBe(restoreCountBefore)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a poll response that resolves after the run went terminal leaves the view untouched', async () => {
+    // The run can reach a terminal state while a poll is in the air. The
+    // record in hand is the run's session as it stood at fetch time -- a
+    // snapshot, not the final transcript -- and the run-end path is already
+    // working from the tracker's terminal status. The poll must re-check the
+    // run state after the await instead of appending the snapshot.
+    vi.useFakeTimers()
+    try {
+      let resolvePoll
+      h.fetchMock.mockImplementation((url) => {
+        if (String(url).includes('/api/conversations/conv-1')) {
+          return new Promise((resolve) => {
+            resolvePoll = () => resolve({
+              ok: true,
+              json: async () => liveRecord(storedToolCall('call-late', 'atlas_sleep'), 'late segment'),
+            })
+          })
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) })
+      })
+
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1',
+          in_flight: true,
+          run_id: 'run-1',
+          streaming_text: 'Working',
+          metadata: {},
+          messages: [storedChat('user', 'What is the weather')],
+        })
+      })
+      // The immediate poll is in the air when the run goes terminal.
+      expect(typeof resolvePoll).toBe('function')
+      dispatchFrame({ type: 'run_status', run: { run_id: 'run-1', conversation_id: 'conv-1', status: 'completed' } })
+
+      await act(async () => {
+        resolvePoll()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const contents = result.current.messages.map(m => m.content || '')
+      expect(contents.some(c => c.includes('late segment'))).toBe(false)
+      expect(result.current.messages.some(m => m.tool_call_id === 'call-late')).toBe(false)
     } finally {
       vi.useRealTimers()
     }
