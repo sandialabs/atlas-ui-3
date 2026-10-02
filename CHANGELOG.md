@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #1001 - 2026-10-02
+- Follow-up to #1000: MCP OAuth checks the host httpx actually connects to, so Unicode-dot spellings (`169。254。169。254`, `a．localhost`) can no longer slip past the internal-address refusal; `testserver` no longer gets loopback trust in production; adds a refresh test and corrects #1000's breaking-change note (Atlas sessions last to `OIDC_SESSION_MAX_AGE_SECONDS`; access-token refresh and discovered-endpoint delegation are what stop).
+
 ### PR #1000 - 2026-10-02
 - OIDC discovery hardening and one shared loopback-host helper (closes #983): a malformed `OIDC_ISSUER` (e.g. `http://[::1`) now fails login as `oidc_error=discovery_failed` instead of an HTTP 500, and discovery errors name the field, host and reason with URLs quoted by `repr()`. New `atlas/core/loopback.py` replaces three drifting loopback checks: MCP OAuth also refuses `*.localhost` names and legacy dotted IPv4 forms (`127.1`, `0x7f.1`) from remote discovery documents and rejects host-less or bad-port endpoint URLs, and the Wormhole cleartext warning no longer treats names like `127.example.com` as loopback.
-- **Breaking:** endpoints advertised by the OIDC discovery document must be `https://` (plaintext only under an `http://` loopback issuer, on loopback hosts). A provider whose `https://` issuer advertises an `http://` endpoint is refused at login, token refresh and logout, so existing sessions end when their access token next expires and IdP sign-out is skipped; fix the provider's frontend URL (usually a proxy not forwarding `X-Forwarded-Proto`) before upgrading.
+- **Breaking:** endpoints advertised by the OIDC discovery document must be `https://` (plaintext only under an `http://` loopback issuer, on loopback hosts). A provider whose `https://` issuer advertises an `http://` endpoint is refused at login, token refresh, logout and delegation (when `OIDC_DELEGATION_TOKEN_ENDPOINT` is unset), so new logins fail, existing sessions can no longer refresh their access token (delegated MCP credentials stop once it expires) and IdP sign-out is skipped; fix the provider's frontend URL (usually a proxy not forwarding `X-Forwarded-Proto`) before upgrading.
 
 ### PR #999 - 2026-10-02
 - Restore shared per-turn launch discovery state and align launch gating and retry regression tests with launch-owned discovery.

@@ -24,7 +24,7 @@ are checks on the *name*, never on what it resolves to.
 
 import ipaddress
 import re
-from typing import Iterable, Optional, Union
+from typing import Optional, Union
 
 IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
@@ -128,7 +128,6 @@ def is_loopback_host(
     host: Optional[str],
     *,
     localhost_subdomains: bool = False,
-    extra_names: Iterable[str] = (),
 ) -> bool:
     """Whether ``host`` names the local machine.
 
@@ -136,15 +135,10 @@ def is_loopback_host(
     Leave it off where loopback grants extra trust to something a remote
     party controls; those names resolve through the operator's resolver,
     which may point them at a local ingress rather than this process.
-
-    ``extra_names`` adds fixed names, such as the ``testserver`` host
-    Starlette's TestClient uses.
     """
     name = _name_form(host)
     if not name:
         return False
-    if name in {_name_form(extra) for extra in extra_names}:
-        return True
     if is_localhost_name(host, localhost_subdomains=localhost_subdomains):
         return True
     return is_loopback_ip(parse_ip(host))

@@ -786,8 +786,7 @@ class TestDiscoverySSRFConstraints:
 
     @pytest.mark.parametrize(
         "url",
-        ["https://keycloak.localhost/x", "https://a.b.localhost./x", "https://localhost/x",
-         "https://testserver/x"],
+        ["https://keycloak.localhost/x", "https://a.b.localhost./x", "https://localhost/x"],
     )
     def test_loopback_names_are_refused_from_remote_documents(self, url):
         with pytest.raises(MCPOAuthError, match="internal address"):
@@ -804,17 +803,77 @@ class TestDiscoverySSRFConstraints:
             validate_endpoint_url(url, what="test")
 
     @pytest.mark.parametrize(
-        "url", ["https://127.1/x", "https://0x7f.1/x", "https://0177.0.0.1/x", "https://10.1/x"]
+        "url", ["https://127.1/x", "https://0x7f.1/x", "https://10.1/x"]
     )
     def test_legacy_dotted_ipv4_forms_are_internal(self, url):
         with pytest.raises(MCPOAuthError, match="internal address"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
+
+    def test_octal_ipv4_form_is_an_invalid_url(self):
+        """httpx refuses ``0177.0.0.1`` outright, so it is never requested."""
+        with pytest.raises(MCPOAuthError, match="not a valid URL"):
+            validate_endpoint_url("https://0177.0.0.1/x", what="test", allow_loopback=False)
+
+    def test_testserver_gets_no_loopback_trust(self):
+        assert is_loopback_url("http://testserver/mcp") is False
+        with pytest.raises(MCPOAuthError, match="https"):
+            validate_endpoint_url("http://testserver/x", what="test")
+
+    def test_invalid_url_error_quotes_url_and_reason(self):
+        with pytest.raises(MCPOAuthError) as excinfo:
+            validate_endpoint_url("https://idp.example:notaport/x\nFORGED", what="token endpoint")
+        message = str(excinfo.value)
+        assert "token endpoint is not a valid URL (got 'https://idp.example:notaport/x\\nFORGED')" in message
+        assert "\n" not in message
+
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    def test_origins_keep_the_raw_spelling_and_so_fail_closed(self, dot):
+        """Characterization: origin_of uses urlsplit, not httpx's mapping, so a
+        Unicode-dot spelling never *matches* its ASCII origin. Same-origin
+        checks therefore refuse (never widen) when the spellings differ."""
+        unicode_url = f"https://mcp{dot}example{dot}com/mcp"
+        assert origin_of(unicode_url) != origin_of("https://mcp.example.com/mcp")
+        assert origin_of(unicode_url) == origin_of(f"https://mcp{dot}example{dot}com/other")
+
+    def test_unparseable_url_is_not_loopback(self):
+        assert is_loopback_url("http://0177.0.0.1/mcp") is False
+        assert is_loopback_url("http://[::1/mcp") is False
 
     @pytest.mark.parametrize("url", ["https://127.0.0.1./x", "https://10.0.0.1./x"])
     def test_trailing_dot_literals_are_internal_but_not_trusted(self, url):
         with pytest.raises(MCPOAuthError, match="internal address"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
         assert is_loopback_url(url.replace("https", "http")) is False
+
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    @pytest.mark.parametrize("labels", [
+        ("169", "254", "169", "254"), ("127", "0", "0", "1"), ("10", "0", "0", "1"),
+        ("a", "localhost"),
+    ])
+    def test_unicode_dot_separators_are_normalized_before_the_check(self, dot, labels):
+        """httpx maps full-width/ideographic dots to '.', so the check must too."""
+        url = f"https://{dot.join(labels)}/x"
+        with pytest.raises(MCPOAuthError, match="internal address"):
+            validate_endpoint_url(url, what="test", allow_loopback=False)
+
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    def test_unicode_dot_public_host_is_still_accepted(self, dot):
+        url = f"https://mcp{dot}example{dot}com/x"
+        assert validate_endpoint_url(url, what="test", allow_loopback=False) == url
+
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    def test_unicode_dot_loopback_is_accepted_when_loopback_is_allowed(self, dot):
+        url = f"http://127{dot}0{dot}0{dot}1:8931/x"
+        assert validate_endpoint_url(url, what="test", allow_loopback=True) == url
+
+    @pytest.mark.parametrize("url", ["https://xn--ls8h.la/x", "https://xn--bcher-kva.example/x",
+                                     "https://b\u00fccher.example/x"])
+    def test_punycode_and_idn_public_hosts_are_accepted(self, url):
+        """Checked as the ASCII host httpx sends; no IDNA2008 re-validation."""
+        assert validate_endpoint_url(url, what="test", allow_loopback=False) == url
+
+    def test_unicode_dot_loopback_server_is_recognized(self):
+        assert is_loopback_url("http://127\u30020\u30020\u30021:8931/mcp") is True
 
     def test_huge_numeric_host_does_not_raise_valueerror(self):
         url = "https://" + "9" * 5000 + "/x"

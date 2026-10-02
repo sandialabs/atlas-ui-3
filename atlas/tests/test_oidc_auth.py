@@ -136,6 +136,10 @@ class TestDiscovery:
         assert "OIDC issuer uses http:// on loopback host 'keycloak.localhost'" in message
         assert "local development only" in message
 
+    def test_testserver_issuer_is_not_loopback(self):
+        with pytest.raises(OIDCDiscoveryError, match="on host 'testserver'"):
+            _validate_issuer_url("http://testserver/realms/atlas")
+
     def test_https_issuer_logs_no_warning(self, caplog):
         with caplog.at_level(logging.WARNING, logger="atlas.core.oidc.discovery"):
             _validate_issuer_url("https://idp.example.gov/realms/atlas")
@@ -630,6 +634,58 @@ class _Settings:
 
 
 @pytest.fixture
+def discovery_stub(monkeypatch):
+    """Serve ``document`` as the IdP's discovery document, scoped to discovery.py.
+
+    Only ``atlas.core.oidc.discovery`` sees the stub (its ``httpx`` name is
+    replaced, not the httpx module), the only URL it answers is the issuer's
+    discovery URL, and the metadata cache is cleared before and after.
+    """
+    from types import SimpleNamespace
+
+    import httpx as real_httpx
+
+    requested = []
+
+    def install(document, issuer="https://idp.example.gov"):
+        expected = f"{issuer}/.well-known/openid-configuration"
+
+        class _Response:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return document
+
+        class _Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, **kwargs):
+                requested.append(url)
+                assert url == expected, f"unexpected discovery fetch: {url}"
+                return _Response()
+
+        monkeypatch.setattr(
+            "atlas.core.oidc.discovery.httpx",
+            SimpleNamespace(AsyncClient=_Client, HTTPError=real_httpx.HTTPError),
+        )
+        return requested
+
+    clear_metadata_cache()
+    try:
+        yield install
+    finally:
+        clear_metadata_cache()
+
+
+@pytest.fixture
 def oidc_app():
     """A tiny app carrying only the OIDC routers plus session middleware."""
     from atlas.routes import oidc_auth_routes
@@ -698,41 +754,42 @@ class TestOIDCRoutes:
         assert response.headers["location"] == "/?oidc_error=discovery_failed"
 
     @pytest.mark.parametrize("key", ["token_endpoint", "end_session_endpoint"])
-    def test_login_refuses_http_endpoint_under_https_issuer(self, oidc_app, monkeypatch, caplog, key):
+    def test_login_refuses_http_endpoint_under_https_issuer(
+        self, oidc_app, discovery_stub, caplog, key
+    ):
         """Real discovery (only the HTTP fetch is stubbed) through the login route."""
-        document = dict(DISCOVERY_DOC, **{key: f"http://idp.example.gov/{key}"})
-
-        class _Response:
-            def raise_for_status(self):
-                pass
-
-            def json(self):
-                return document
-
-        class _Client:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *exc):
-                return False
-
-            async def get(self, url, **kwargs):
-                assert url == "https://idp.example.gov/.well-known/openid-configuration"
-                return _Response()
-
-        monkeypatch.setattr("atlas.core.oidc.discovery.httpx.AsyncClient", _Client)
-        clear_metadata_cache()
+        requested = discovery_stub(dict(DISCOVERY_DOC, **{key: f"http://idp.example.gov/{key}"}))
         with _patch_settings(_Settings()), caplog.at_level(logging.ERROR):
             response = TestClient(oidc_app).get("/auth/oidc/login", follow_redirects=False)
-        clear_metadata_cache()
 
+        assert requested == ["https://idp.example.gov/.well-known/openid-configuration"]
         assert response.status_code == 302
         assert response.headers["location"] == "/?oidc_error=discovery_failed"
         assert any(key in r.getMessage() and "because the issuer is https://" in r.getMessage()
                    for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_refresh_under_http_token_endpoint_fails_cleanly(self, discovery_stub, caplog):
+        """Refresh hits the same rule: no exception, no token, a logged reason,
+        and the token endpoint is never called with the client secret."""
+        from atlas.core.oidc import session_refresh
+        from atlas.core.oidc.session import OIDCSession
+
+        requested = discovery_stub(dict(DISCOVERY_DOC, token_endpoint="http://idp.example.gov/token"))
+        refresh = AsyncMock()
+        session = OIDCSession(
+            session_id="s1", user_id="user@example.gov", access_token="old",
+            refresh_token="r1", access_token_expires_at=time.time() - 1,
+        )
+        with patch.object(session_refresh, "refresh_access_token", refresh), \
+                caplog.at_level(logging.WARNING, logger="atlas.core.oidc.session_refresh"):
+            token = await session_refresh.ensure_fresh_access_token(session, settings=_Settings())
+
+        assert requested == ["https://idp.example.gov/.well-known/openid-configuration"]
+        assert token is None
+        refresh.assert_not_called()
+        assert any("token_endpoint" in r.getMessage() and "because the issuer is https://"
+                   in r.getMessage() for r in caplog.records)
 
     def test_login_is_404_when_disabled(self, oidc_app):
         with _patch_settings(_Settings(feature_oidc_auth_enabled=False)):
