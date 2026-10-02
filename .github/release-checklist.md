@@ -39,8 +39,8 @@ This PR stays open for the rest of the month. During that window:
 - Fix on `main` first, then cherry-pick to the release branch:
   `git cherry-pick -x <sha>`.
 - Each cherry-pick gets a `changes/<id>.<type>.md` fragment, composed
-  into the `## [{{VERSION}}]` section on the release branch
-  (`python3 scripts/changelog_fragments.py collect`).
+  into the already-cut `## [{{VERSION}}]` section on the release branch
+  (`python3 scripts/changelog_fragments.py collect --section {{VERSION}}`).
 
 ## Pre-tag checklist
 

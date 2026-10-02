@@ -15,14 +15,19 @@ validate [--dir changes]
     first problem, 2 on a usage/IO error.
 check [--dir changes]
     Exit 0 when at least one fragment is present, 1 when none are.
-collect [--dir changes] [--changelog CHANGELOG.md] [--dry-run]
-    Compose every fragment into ``## [Unreleased]`` grouped by type, then
-    delete the consumed fragment files. ``--dry-run`` prints the composed
-    block without writing anything.
-guard --changed-files FILE [--allow-changelog]
-    CI guard: fail when a normal PR edits ``CHANGELOG.md``. The changed-file
-    list is one path per line (``git diff --name-only``). Release branches
-    pass ``--allow-changelog`` because the bump must rewrite the changelog.
+collect [--dir changes] [--changelog CHANGELOG.md] [--section Unreleased] [--dry-run]
+    Compose every fragment into the named section grouped by type, then
+    delete the consumed fragment files. ``--section`` defaults to
+    ``Unreleased``; a stabilization branch pairs it with the already-cut
+    version heading (``--section X.Y.Z``) so post-cut fixes stay under the
+    versioned release notes. ``--dry-run`` prints the composed block without
+    writing anything.
+guard --changed-files FILE [--allow-changelog] [--require-fragment]
+    CI guard: fail when a normal PR edits ``CHANGELOG.md``, or (with
+    ``--require-fragment``) when a normal PR adds no fragment at all. The
+    changed-file list is one path per line (``git diff --name-only``).
+    Release branches pass ``--allow-changelog`` because the bump must rewrite
+    the changelog.
 """
 
 from __future__ import annotations
@@ -49,7 +54,6 @@ TYPE_HEADINGS = {
 FRAGMENT_RE = re.compile(
     r"^(?P<id>\d+)\.(?P<type>" + "|".join(TYPES) + r")\.md$"
 )
-UNRELEASED_RE = re.compile(r"^## \[Unreleased\][ \t]*$", re.MULTILINE)
 COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
@@ -134,11 +138,15 @@ def compose(fragments: list[Fragment]) -> str:
     return "\n\n".join(sections)
 
 
-def insert_unreleased(text: str, block: str) -> str:
-    """Insert composed sections immediately below ``## [Unreleased]``."""
-    match = UNRELEASED_RE.search(text)
+def insert_section(text: str, section: str, block: str) -> str:
+    """Insert composed sections immediately below ``## [<section>]``."""
+    pattern = re.compile(
+        rf"^## \[{re.escape(section)}\](?:\s+-\s+\d{{4}}-\d{{2}}-\d{{2}})?[ \t]*$",
+        re.MULTILINE,
+    )
+    match = pattern.search(text)
     if not match:
-        raise FragmentError(f"{CHANGELOG_FILE} has no '## [Unreleased]' section")
+        raise FragmentError(f"{CHANGELOG_FILE} has no '## [{section}]' section")
     rest = text[match.end():].lstrip("\n")
     return text[: match.end()] + "\n\n" + block + "\n\n" + rest
 
@@ -147,6 +155,7 @@ def collect(
     directory: pathlib.Path | str,
     changelog: pathlib.Path | str,
     dry_run: bool = False,
+    section: str = "Unreleased",
 ) -> int:
     fragments = iter_fragments(directory)
     if not fragments:
@@ -162,16 +171,36 @@ def collect(
         text = changelog_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise FragmentError(f"{changelog_path}: could not read: {exc}") from exc
-    changelog_path.write_text(insert_unreleased(text, block), encoding="utf-8")
+    changelog_path.write_text(insert_section(text, section, block), encoding="utf-8")
 
     for frag in fragments:
         frag.path.unlink()
     names = ", ".join(frag.path.name for frag in fragments)
-    print(f"Composed {len(fragments)} fragment(s) into {changelog_path}: {names}")
+    print(
+        f"Composed {len(fragments)} fragment(s) into "
+        f"{changelog_path} '## [{section}]': {names}"
+    )
     return 0
 
 
-def guard(changed_files: pathlib.Path | str, allow_changelog: bool) -> int:
+def _added_fragment(changed: list[str]) -> bool:
+    """True when the changed-file list adds a fragment file that exists."""
+    for path in changed:
+        candidate = pathlib.Path(path)
+        if (
+            candidate.parent.name == FRAGMENTS_DIR.name
+            and FRAGMENT_RE.match(candidate.name)
+            and candidate.is_file()
+        ):
+            return True
+    return False
+
+
+def guard(
+    changed_files: pathlib.Path | str,
+    allow_changelog: bool,
+    require_fragment: bool = False,
+) -> int:
     try:
         changed = [
             line.strip()
@@ -182,21 +211,28 @@ def guard(changed_files: pathlib.Path | str, allow_changelog: bool) -> int:
         print(f"could not read changed-files list: {exc}", file=sys.stderr)
         return 2
 
-    if changelog_file_name() not in changed:
-        print("CHANGELOG.md untouched; fragment guard passed.")
-        return 0
     if allow_changelog:
         print("Release branch exempt from the fragment guard; CHANGELOG.md may be rewritten.")
         return 0
-
-    print(
-        "CHANGELOG.md was edited directly. It is generated at release time from "
-        "changes/ fragments, so normal PRs must not touch it -- add "
-        "changes/<id>.<type>.md (types: " + ", ".join(TYPES) + ") instead. "
-        "Release branches (release/*, hotfix/*) are exempt.",
-        file=sys.stderr,
-    )
-    return 1
+    if changelog_file_name() in changed:
+        print(
+            "CHANGELOG.md was edited directly. It is generated at release time from "
+            "changes/ fragments, so normal PRs must not touch it -- add "
+            "changes/<id>.<type>.md (types: " + ", ".join(TYPES) + ") instead. "
+            "Release branches (release/*, hotfix/*) are exempt.",
+            file=sys.stderr,
+        )
+        return 1
+    if require_fragment and not _added_fragment(changed):
+        print(
+            "No changelog fragment found. Add changes/<id>.<type>.md "
+            "(types: " + ", ".join(TYPES) + ") so the change appears in the "
+            "next release notes.",
+            file=sys.stderr,
+        )
+        return 1
+    print("Fragment guard passed.")
+    return 0
 
 
 def changelog_file_name() -> str:
@@ -216,6 +252,11 @@ def build_parser() -> argparse.ArgumentParser:
     collect_cmd = sub.add_parser("collect", help="compose fragments into CHANGELOG.md")
     collect_cmd.add_argument("--dir", default=str(FRAGMENTS_DIR))
     collect_cmd.add_argument("--changelog", default=str(CHANGELOG_FILE))
+    collect_cmd.add_argument(
+        "--section",
+        default="Unreleased",
+        help="changelog section to compose into (default: Unreleased)",
+    )
     collect_cmd.add_argument("--dry-run", action="store_true")
 
     guard_cmd = sub.add_parser("guard", help="fail when a normal PR edits CHANGELOG.md")
@@ -224,6 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-changelog",
         action="store_true",
         help="exempt release branches that rewrite the changelog",
+    )
+    guard_cmd.add_argument(
+        "--require-fragment",
+        action="store_true",
+        help="fail normal PRs that add no fragment at all",
     )
     return parser
 
@@ -241,9 +287,9 @@ def main(argv: list[str] | None = None) -> int:
             print("No changelog fragments present")
             return 1
         if args.command == "collect":
-            return collect(args.dir, args.changelog, args.dry_run)
+            return collect(args.dir, args.changelog, args.dry_run, args.section)
         if args.command == "guard":
-            return guard(args.changed_files, args.allow_changelog)
+            return guard(args.changed_files, args.allow_changelog, args.require_fragment)
     except FragmentError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

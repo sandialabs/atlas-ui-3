@@ -67,10 +67,15 @@ Examples: `changes/1042.feature.md`, `changes/1047.fix.md`,
 
 At release time `scripts/changelog_fragments.py collect` composes the
 fragments into `## [Unreleased]` grouped by type and deletes the consumed
-files; the bump then reshapes that section as described below. CI
-(`build-artifacts`) validates fragment names and types, and fails a normal
-PR that edits `CHANGELOG.md` directly. Release branches (`release/*`,
-`hotfix/*`) are exempt because the bump must rewrite the changelog.
+files; the bump then reshapes that section as described below. On a
+stabilization branch whose `## [X.Y.Z]` section already exists, target that
+section directly with `collect --section X.Y.Z`.
+
+CI (`build-artifacts`) validates fragment names and types, requires a normal
+PR to add a fragment, and fails a normal PR that edits `CHANGELOG.md`
+directly. Release branches (`release/*`, `hotfix/*`) are exempt because the
+bump must rewrite the changelog; the exemption applies only to branches in
+this repository, not forks.
 
 ### Automated weekly releases
 
@@ -416,8 +421,9 @@ If you do take this path, the details that bite:
   install/import failures, and regressions since the last release
   qualify. Features, refactors, and docs-only changes stay on `main`.
   Land the fix on `main` first, then `git cherry-pick -x <sha>` onto
-  `release/YYYY.MM`, and add it under that release's CHANGELOG section
-  on the branch.
+  `release/YYYY.MM`, and add a `changes/<id>.fix.md` fragment composed
+  into that release's already-cut section:
+  `python3 scripts/changelog_fragments.py collect --section X.Y.Z`.
 
 The workflow will **never** push a tag, create a non-draft PR, publish
 to any registry, or touch a branch other than `release/YYYY.MM`.

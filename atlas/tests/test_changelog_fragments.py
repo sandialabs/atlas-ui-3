@@ -201,6 +201,56 @@ def test_guard_errors_when_changed_file_is_missing(tmp_path):
     assert changelog_fragments.guard(tmp_path / "missing.txt", allow_changelog=False) == 2
 
 
+def test_collect_targets_a_named_section(tmp_path):
+    _fragment(tmp_path, "12.fix.md", "Fixed post-cut.\n")
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "# Changelog\n\n## [Unreleased]\n\n"
+        "## [0.7.0] - 2026-10-06\n\n- Existing.\n\n"
+        "## [0.6.0] - 2026-09-22\n",
+        encoding="utf-8",
+    )
+
+    assert changelog_fragments.collect(tmp_path / "changes", changelog, section="0.7.0") == 0
+
+    text = changelog.read_text(encoding="utf-8")
+    note = text.index("- **#12:** Fixed post-cut.")
+    assert text.index("## [0.7.0]") < note < text.index("## [0.6.0]")
+    unreleased = text[text.index("## [Unreleased]"):text.index("## [0.7.0]")]
+    assert "- **#" not in unreleased
+
+
+def test_collect_errors_for_missing_section(tmp_path):
+    _fragment(tmp_path, "12.fix.md", "Fixed.\n")
+    with pytest.raises(changelog_fragments.FragmentError):
+        changelog_fragments.collect(
+            tmp_path / "changes", _changelog(tmp_path), section="9.9.9"
+        )
+
+
+def test_guard_requires_a_fragment_on_normal_prs(tmp_path, capsys):
+    changed = tmp_path / "changed.txt"
+    changed.write_text("atlas/modules/llm/client.py\n", encoding="utf-8")
+    assert changelog_fragments.guard(changed, allow_changelog=False, require_fragment=True) == 1
+    assert "No changelog fragment found" in capsys.readouterr().err
+
+
+def test_guard_require_fragment_passes_with_an_added_fragment(tmp_path):
+    changes = tmp_path / "changes"
+    changes.mkdir()
+    fragment = changes / "12.feature.md"
+    fragment.write_text("Added the thing.\n", encoding="utf-8")
+    changed = tmp_path / "changed.txt"
+    changed.write_text(f"atlas/app.py\n{fragment}\n", encoding="utf-8")
+    assert changelog_fragments.guard(changed, allow_changelog=False, require_fragment=True) == 0
+
+
+def test_guard_release_exemption_skips_the_fragment_requirement(tmp_path):
+    changed = tmp_path / "changed.txt"
+    changed.write_text("CHANGELOG.md\n", encoding="utf-8")
+    assert changelog_fragments.guard(changed, allow_changelog=True, require_fragment=True) == 0
+
+
 def test_main_returns_2_on_malformed_fragment(tmp_path, capsys):
     _fragment(tmp_path, "12.chore.md", "A change.\n")
     assert (

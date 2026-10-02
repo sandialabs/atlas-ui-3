@@ -191,6 +191,41 @@ else
     print_result 1 "guard passes when CHANGELOG.md is untouched"
 fi
 
+printf 'atlas/modules/llm/client.py\n' > "$SANDBOX/nofrag.txt"
+python3 "$FRAGMENTS" guard --changed-files "$SANDBOX/nofrag.txt" --require-fragment >/dev/null 2>&1
+if [ $? -eq 1 ]; then
+    print_result 0 "guard --require-fragment fails a normal PR with no fragment"
+else
+    print_result 1 "guard --require-fragment fails a normal PR with no fragment"
+fi
+
+# ==========================================
+print_header "Check 6b: collect targets an already-cut version section"
+# ==========================================
+SECTION_DIR="$SANDBOX/section"
+mkdir -p "$SECTION_DIR/changes"
+cp "$FRAGMENTS" "$SECTION_DIR/"
+printf 'Fixed after the cut.\n' > "$SECTION_DIR/changes/1099.fix.md"
+cat > "$SECTION_DIR/CHANGELOG.md" <<'EOF'
+# Changelog
+
+## [Unreleased]
+
+## [0.7.0] - 2026-10-06
+
+- Existing.
+
+## [0.6.0] - 2026-09-22
+EOF
+( cd "$SECTION_DIR" && python3 changelog_fragments.py collect --section 0.7.0 ) >/dev/null 2>&1
+SECTION_RC=$?
+if [ "$SECTION_RC" -eq 0 ] \
+    && awk '/^## \[0.7.0\]/{f=1} /^## \[0.6.0\]/{f=0} f && /- \*\*#1099:\*\*/{print; found=1} END{exit !found}' "$SECTION_DIR/CHANGELOG.md" >/dev/null; then
+    print_result 0 "collect --section 0.7.0 lands the fix under the versioned section"
+else
+    print_result 1 "collect --section 0.7.0 lands the fix under the versioned section"
+fi
+
 # ==========================================
 print_header "Check 7: workflows compose and guard fragments"
 # ==========================================
@@ -219,10 +254,13 @@ else
     print_result 1 "release-cut.yml composes fragments and stages changes/"
 fi
 if grep -q "changelog_fragments.py validate" "$ARTIFACTS" \
-    && grep -q "changelog_fragments.py guard" "$ARTIFACTS"; then
-    print_result 0 "build-artifacts.yml validates and guards fragments"
+    && grep -q "changelog_fragments.py guard" "$ARTIFACTS" \
+    && grep -q -- "--require-fragment" "$ARTIFACTS" \
+    && grep -q "HEAD_REPO" "$ARTIFACTS" \
+    && grep -q "THIS_REPO" "$ARTIFACTS"; then
+    print_result 0 "build-artifacts.yml validates and guards fragments (incl. fork-safe exemption)"
 else
-    print_result 1 "build-artifacts.yml validates and guards fragments"
+    print_result 1 "build-artifacts.yml validates and guards fragments (incl. fork-safe exemption)"
 fi
 
 # ==========================================

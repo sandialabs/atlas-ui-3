@@ -33,6 +33,8 @@ jobs:
       if: github.event_name == 'pull_request'
       env:
         HEAD_REF: ${{ github.head_ref }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        THIS_REPO: ${{ github.repository }}
         BASE_REF: ${{ github.base_ref }}
       run: |
         set -euo pipefail
@@ -41,8 +43,12 @@ jobs:
         git fetch --no-tags origin "$BASE_REF"
         base="$(git merge-base FETCH_HEAD HEAD)"
         git diff --name-only "$base" HEAD > /tmp/changed-files.txt
-        args=()
-        if [[ "$HEAD_REF" == release/* || "$HEAD_REF" == hotfix/* ]]; then
+        args=(--require-fragment)
+        # Only this repository's own release/hotfix branches may rewrite the
+        # changelog; a fork could otherwise name its branch release/* to
+        # bypass the guard.
+        if [[ "$HEAD_REPO" == "$THIS_REPO" \
+              && ( "$HEAD_REF" == release/* || "$HEAD_REF" == hotfix/* ) ]]; then
           args+=(--allow-changelog)
         fi
         python scripts/changelog_fragments.py guard \

@@ -38,11 +38,13 @@ Fixed OAuth token refresh when accessing MCP servers.
 At release time `scripts/changelog_fragments.py collect` composes every
 fragment into the `## [Unreleased]` section of `CHANGELOG.md`, grouped by type,
 and deletes the consumed files. `scripts/release_bump.py apply` then renames
-that section to `## [X.Y.Z] - YYYY-MM-DD` as usual.
+that section to `## [X.Y.Z] - YYYY-MM-DD` as usual. On a stabilization branch
+whose version section already exists, target it directly with
+`collect --section X.Y.Z`.
 
-CI validates the filename and type, and rejects direct edits to `CHANGELOG.md`
-on normal PRs (release branches are exempt). Do not edit `CHANGELOG.md`
-yourself.
+CI validates the filename and type, requires a normal PR to add a fragment,
+and rejects direct edits to `CHANGELOG.md` (release branches are exempt). Do
+not edit `CHANGELOG.md` yourself.
 
 See [docs/developer/release-process.md](../docs/developer/release-process.md)
 for the full release runbook.
