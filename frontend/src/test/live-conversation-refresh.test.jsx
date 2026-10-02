@@ -374,6 +374,40 @@ describe('same-conversation WebSocket reconnect (issue #1005)', () => {
     expect(h.fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/conversations/'))).toHaveLength(0)
     unmount()
   })
+
+  it.each([true, false])('invalidates a pending reconnect snapshot only when a new turn is sent (sent=%s)', async (sent) => {
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1', messages: [storedChat('user', 'Original')],
+      })
+    })
+    await setConnected(rerender, false)
+    let resolveFetch
+    h.fetchMock.mockImplementation(() => new Promise(resolve => { resolveFetch = resolve }))
+    await setConnected(rerender, true)
+    h.sendMessage.mockReturnValue(sent)
+    act(() => {
+      expect(result.current.sendChatMessage('New turn')).toBe(sent)
+    })
+    const before = result.current.messages
+    await act(async () => {
+      resolveFetch({
+        ok: true, json: async () => ({
+          id: 'conv-1',
+          messages: [storedChat('user', 'Original'), storedChat('assistant', 'Old answer')],
+        }),
+      })
+    })
+    if (sent) {
+      expect(result.current.messages).toBe(before)
+      expect(result.current.messages.at(-1).content).toBe('New turn')
+      expect(result.current.isThinking).toBe(true)
+    } else {
+      expect(result.current.messages.at(-1).content).toBe('Old answer')
+    }
+    unmount()
+  })
 })
 
 describe('mid-run live refresh of a joined conversation', () => {
