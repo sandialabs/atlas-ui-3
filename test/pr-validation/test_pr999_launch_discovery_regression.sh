@@ -6,6 +6,11 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
 source .venv/bin/activate
 
+if pgrep -f '[u]vicorn main:app' > /dev/null; then
+    echo "Refusing to restart an existing backend; stop it before running this validation."
+    exit 1
+fi
+
 WORK="$(mktemp -d)"
 FIXTURES="$PROJECT_ROOT/test/pr-validation/fixtures/pr949"
 BACKEND_PID=""
