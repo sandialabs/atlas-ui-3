@@ -177,7 +177,7 @@ def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -
     except ValueError as exc:
         # An unclosed IPv6 bracket or a non-numeric port, for example; it
         # must not escape as a bare ValueError.
-        raise MCPOAuthError(f"{what} is not a valid URL") from exc
+        raise MCPOAuthError(f"{what} is not a valid URL (got {url!r}): {exc}") from exc
     if not host:
         raise MCPOAuthError(f"{what} must be an absolute URL with a host")
 

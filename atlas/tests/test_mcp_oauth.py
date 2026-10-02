@@ -819,6 +819,22 @@ class TestDiscoverySSRFConstraints:
         with pytest.raises(MCPOAuthError, match="https"):
             validate_endpoint_url("http://testserver/x", what="test")
 
+    def test_invalid_url_error_quotes_url_and_reason(self):
+        with pytest.raises(MCPOAuthError) as excinfo:
+            validate_endpoint_url("https://idp.example:notaport/x\nFORGED", what="token endpoint")
+        message = str(excinfo.value)
+        assert "token endpoint is not a valid URL (got 'https://idp.example:notaport/x\\nFORGED')" in message
+        assert "\n" not in message
+
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    def test_origins_keep_the_raw_spelling_and_so_fail_closed(self, dot):
+        """Characterization: origin_of uses urlsplit, not httpx's mapping, so a
+        Unicode-dot spelling never *matches* its ASCII origin. Same-origin
+        checks therefore refuse (never widen) when the spellings differ."""
+        unicode_url = f"https://mcp{dot}example{dot}com/mcp"
+        assert origin_of(unicode_url) != origin_of("https://mcp.example.com/mcp")
+        assert origin_of(unicode_url) == origin_of(f"https://mcp{dot}example{dot}com/other")
+
     def test_unparseable_url_is_not_loopback(self):
         assert is_loopback_url("http://0177.0.0.1/mcp") is False
         assert is_loopback_url("http://[::1/mcp") is False
