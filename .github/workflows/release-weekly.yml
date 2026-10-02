@@ -38,6 +38,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 concurrency:
   group: release-weekly
@@ -50,12 +51,12 @@ jobs:
     # Guardrail: scheduled runs only fire on the canonical repository.
     if: github.event_name != 'schedule' || github.repository == 'sandialabs/atlas-ui-3'
     env:
-      # A PAT is required for the release PR to trigger CI. With the default
-      # GITHUB_TOKEN the PR opens but no pull_request workflows run, and the
-      # merge waits for nothing -- the fallback is documented and warned about.
+      # The PAT is required: the release PR must trigger CI, and tags/Releases
+      # created with the default GITHUB_TOKEN do not trigger the publish
+      # workflows. It is exported as RELEASE_TOKEN for checkout/push and as
+      # GH_TOKEN only on the steps that call `gh`.
       RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
       HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
-      GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
     steps:
       - name: Note PAT requirement when unset
         if: env.HAS_RELEASE_PAT != 'true'
@@ -64,11 +65,14 @@ jobs:
           echo "::warning::A real (non-dry-run) release stops before creating a branch; only dry_run dispatches can proceed."
 
       - name: Checkout main
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
           token: ${{ env.RELEASE_TOKEN }}
+          # Do not leave the PAT in .git/config for every later step; the two
+          # steps that need git write access configure it themselves.
+          persist-credentials: false
 
       - name: Install uv
         # Pinned to a commit SHA so the install step is immutable.
@@ -82,11 +86,22 @@ jobs:
         shell: bash
         env:
           DRY_RUN: ${{ github.event.inputs.dry_run }}
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
           current="$(python3 scripts/release_bump.py current)"
           if git rev-parse -q --verify "refs/tags/v${current}" >/dev/null; then
             echo "::notice::Current version ${current} is tagged."
+            # The tag alone does not publish: pypi-publish.yml runs on Release
+            # published. A tag without a Release would silently skip PyPI.
+            if gh release view "v${current}" --json tagName >/dev/null 2>&1; then
+              echo "::notice::GitHub Release v${current} exists."
+            elif [[ "${DRY_RUN}" == "true" ]]; then
+              echo "::warning::Tag v${current} exists but has no GitHub Release; a real run would stop so PyPI publishing is not skipped."
+            else
+              echo "::error::Tag v${current} exists but there is no GitHub Release for it; pypi-publish.yml will not run. Publish the Release before the next weekly run."
+              exit 1
+            fi
           elif [[ "${DRY_RUN}" == "true" ]]; then
             echo "::warning::Version ${current} has no tag v${current}; a real run would stop so it can be published."
           else
@@ -205,8 +220,10 @@ jobs:
         if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
         env:
           BRANCH: ${{ steps.meta.outputs.branch }}
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             open_prs="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
             if [[ "$open_prs" != "0" ]]; then
@@ -217,6 +234,7 @@ jobs:
             git push origin --delete "$BRANCH"
           fi
           git checkout -b "$BRANCH"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Commit and push bump
         id: commit
@@ -230,7 +248,9 @@ jobs:
           git config user.email "atlas-release-bot@users.noreply.github.com"
           git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md
           git commit -m "chore(release): weekly v${NEW_VERSION}"
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --set-upstream origin "$BRANCH"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
           echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Open release PR
@@ -241,6 +261,7 @@ jobs:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
           OLD_VERSION: ${{ steps.meta.outputs.current_version }}
           RELEASE_DATE: ${{ steps.meta.outputs.release_date }}
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
           cat > /tmp/release-pr-body.md <<EOF
@@ -264,25 +285,65 @@ jobs:
         env:
           PR: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          # A fixed list of gates that must all be present and green before the
+          # irreversible merge. `gh pr checks --watch` alone only waits on the
+          # checks that happen to be registered, so a slow-to-start workflow
+          # could be missed.
+          REQUIRED_CHECKS: "build-and-test,build-artifacts,Secrets Scanning,Static Application Security Testing,Dependency Vulnerability Scan,Container Security Scan"
         run: |
           set -euo pipefail
-          wait_ok=false
-          for attempt in $(seq 1 10); do
-            if gh pr checks "$PR" --watch --fail-fast --interval 30 > /tmp/pr-checks.log 2>&1; then
-              wait_ok=true
-              break
+          deadline=$((SECONDS + 2700))
+          verdict="PENDING"
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if gh pr checks "$PR" --json name,bucket > /tmp/checks.json 2>/tmp/checks.err; then
+              verdict="$(python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          try:
+              checks = json.load(open("/tmp/checks.json"))
+          except Exception:
+              print("PENDING")
+              sys.exit()
+
+          required = [c for c in os.environ["REQUIRED_CHECKS"].split(",") if c]
+          buckets = {c.get("name"): c.get("bucket") for c in checks}
+          missing = [r for r in required if r not in buckets]
+
+          if any(b in ("fail", "cancel") for b in buckets.values()):
+              print("FAIL")
+          elif missing:
+              print("PENDING")
+          elif any(b == "pending" for b in buckets.values()):
+              print("PENDING")
+          elif any(buckets[r] not in ("pass", "skipping") for r in required):
+              print("FAIL")
+          else:
+              print("OK")
+          PY
+          )"
             fi
-            if grep -qi "no checks reported" /tmp/pr-checks.log && [[ "$attempt" -lt 10 ]]; then
-              echo "No checks registered yet (attempt ${attempt}); waiting 20s..."
-              sleep 20
-              continue
-            fi
-            echo "::error::Release PR #$PR checks did not pass; leaving it open for review."
-            cat /tmp/pr-checks.log
-            exit 1
+            case "$verdict" in
+              OK)
+                echo "All required checks are present and green."
+                break
+                ;;
+              FAIL)
+                echo "::error::Release PR #$PR has a failing check; leaving it open for review."
+                gh pr checks "$PR" 2>&1 || true
+                exit 1
+                ;;
+              *)
+                echo "Waiting for required checks (${SECONDS}s elapsed)..."
+                sleep 30
+                ;;
+            esac
           done
-          if [[ "$wait_ok" != "true" ]]; then
-            echo "::error::Timed out waiting for checks on PR #$PR."
+          if [ "$verdict" != "OK" ]; then
+            echo "::error::Timed out waiting for the required checks on PR #$PR (verdict: $verdict). Required: $REQUIRED_CHECKS."
+            gh pr checks "$PR" 2>&1 || true
             exit 1
           fi
           # Pin the merge to the exact commit whose checks we just watched, so a
@@ -309,6 +370,7 @@ jobs:
           MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
         run: |
           set -euo pipefail
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Tag the exact merge commit, never the moving tip of main: a PR that
           # lands between the merge and the fetch must not be published under
           # this version.
@@ -326,11 +388,13 @@ jobs:
           fi
           git tag -a "v${NEW_VERSION}" -m "Atlas UI 3 v${NEW_VERSION}" "$MERGE_SHA"
           git push origin "v${NEW_VERSION}"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Publish GitHub Release
         if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
           python3 scripts/release_bump.py notes --version "$NEW_VERSION" > /tmp/release-notes.md
@@ -338,6 +402,29 @@ jobs:
             --title "v${NEW_VERSION}" \
             --verify-tag \
             --notes-file /tmp/release-notes.md
+
+      - name: Alert on failure
+        # A scheduled run can die after the merge or after the tag, leaving a
+        # half-published version. Open (or bump) a tracking issue rather than
+        # relying on someone noticing a red run.
+        if: failure() && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ env.RELEASE_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Weekly release automation failed"
+          existing="$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty' || true)"
+          body="The \`release-weekly\` workflow failed. Review the run and, if a version was merged or tagged but not published, finish it by hand before the next scheduled run.
+
+          Run: ${RUN_URL}
+
+          See docs/developer/release-process.md -> \"Recovering a failed weekly release\"."
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label release
+          fi
 
       - name: Summary
         if: always()
@@ -361,12 +448,12 @@ jobs:
             echo "- RELEASE_PAT configured: \`$HAS_PAT\`"
             echo "- Job status: \`$JOB_STATUS\`"
             echo ""
-            if [[ "$CHANGES" != "true" ]]; then
+            if [[ "$JOB_STATUS" != "success" ]]; then
+              echo "Run ended with status \`$JOB_STATUS\` before the release completed. Nothing is claimed as published. If the bump PR was merged but not tagged, tag its merge commit manually before the next run."
+            elif [[ "$CHANGES" != "true" ]]; then
               echo "No entries under \`## [Unreleased]\` -- this week's release was skipped."
             elif [[ "$DRY" == "true" ]]; then
               echo "Dry run only -- nothing was pushed or published."
-            elif [[ "$JOB_STATUS" != "success" ]]; then
-              echo "Run ended with status \`$JOB_STATUS\` before the release completed. Nothing is claimed as published. If the bump PR was merged but not tagged, tag its merge commit manually before the next run."
             else
               echo "Tag \`v${NEW}\` pushed on \`${MERGE_SHA:-the merge commit}\` and GitHub Release published. Watch pypi-publish.yml and quay-publish.yml for the artifacts."
             fi

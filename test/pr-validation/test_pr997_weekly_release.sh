@@ -94,6 +94,13 @@ if grep -q "Verify the current version has a release tag" "$WORKFLOW"; then
 else
     print_result 1 "an untagged version already on main is detected"
 fi
+if grep -q "REQUIRED_CHECKS" "$WORKFLOW" \
+    && grep -q "persist-credentials: false" "$WORKFLOW" \
+    && grep -q "Alert on failure" "$WORKFLOW"; then
+    print_result 0 "merge waits on a fixed check set, PAT is not persisted, and failures alert"
+else
+    print_result 1 "merge waits on a fixed check set, PAT is not persisted, and failures alert"
+fi
 
 # ==========================================
 print_header "Check 3: change detection distinguishes empty vs populated"

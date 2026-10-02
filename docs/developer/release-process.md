@@ -60,13 +60,15 @@ exception, not the default; see
    validation script exercises directly.
 3. **Opens a PR** from `release/vX.Y.Z` to `main`.
 4. **Waits for CI**, then squash-merges the exact commit it watched
-   (`--match-head-commit`). If any check fails, the workflow stops and
-   leaves the PR open for a human — it never merges through red.
-   `RELEASE_PAT` is required for a real release: a tag or Release created
-   with the default `GITHUB_TOKEN` does not trigger `pypi-publish.yml` or
-   `quay-publish.yml`, so the run fails before creating any branch rather
-   than tagging a version that never ships. `dry_run: true` still works
-   without the secret.
+   (`--match-head-commit`). The gate waits for a fixed set of checks
+   (`build-and-test`, `build-artifacts`, and the security scans) to be
+   present and green — not merely for whatever happened to register — and
+   if any check fails the workflow stops and leaves the PR open for a
+   human. `RELEASE_PAT` is required for a real release: a tag or Release
+   created with the default `GITHUB_TOKEN` does not trigger
+   `pypi-publish.yml` or `quay-publish.yml`, so the run fails before
+   creating any branch rather than tagging a version that never ships.
+   `dry_run: true` still works without the secret.
 5. **Tags** the squashed merge commit on `main` as `vX.Y.Z` (read back
    from the PR, not the moving tip of `main`).
 6. **Publishes a GitHub Release** with the changelog section as its body.
@@ -83,6 +85,29 @@ release is a no-op; a version tag that already exists aborts the run.
 Run it by hand with **Actions → Release - weekly automated → Run
 workflow**. Blank `version` auto-bumps (default `minor`); `dry_run: true`
 prints the plan and diff without pushing anything.
+
+### Recovering a failed weekly release
+
+A scheduled run can die after it has merged the bump PR or pushed the tag,
+leaving a version that is half-published. When any step fails the workflow
+opens (or comments on) a GitHub issue titled "Weekly release automation
+failed", and its step summary never claims a release shipped on a failed run.
+Recover by hand:
+
+- **Merged but not tagged.** The bump is on `main` but `atlas/version.py`
+  is ahead of the newest tag. The next run refuses to start (the
+  precondition checks that the version on `main` has a tag). Tag the merge
+  commit and create the Release for it.
+- **Tagged but no Release.** `pypi-publish.yml` only runs when the Release
+  is published, so nothing reached PyPI. Create the Release for the
+  existing tag: `gh release create vX.Y.Z --verify-tag --notes-file <notes>`.
+- **Release published but a publish workflow failed.** Re-run it from the
+  Actions tab, or use the `pypi-publish.yml` `workflow_dispatch` escape
+  hatch for the Python package. The tag already exists, so
+  `quay-publish.yml` can be re-run directly.
+
+Never delete or move a published tag: rolling forward with a patch release
+is always safer than rewriting history.
 
 ### Other publish paths (non-release)
 
