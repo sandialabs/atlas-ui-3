@@ -627,7 +627,6 @@ async def test_the_model_is_not_offered_launch_when_the_deployment_disables_it(m
 
     monkeypatch.setattr(mcp_discovery, "_atlas_tool_flags", lambda: (True, True, True))
     assert [s["function"]["name"] for s in manager.get_tools_schema([LAUNCH_TOOL_NAME])] == [
-        "atlas_discover_launch_options",
         LAUNCH_TOOL_NAME,
     ]
 
@@ -1006,14 +1005,17 @@ async def test_the_three_launch_gates_agree_on_the_same_flag():
             s["function"]["name"]
             for s in atlas_tool_schemas(gated_names, launch_enabled=enabled)
         ]
-        expected = (
-            [DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME]
-            if enabled
-            else []
-        )
+        expected = gated_names if enabled else []
         assert offered == expected
         allowed = await service.filter_authorized_tools(gated_names, "user@example.com")
         assert allowed == expected
+        discovery_names = [DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, *gated_names]
+        expected = discovery_names if enabled else []
+        assert [
+            s["function"]["name"]
+            for s in atlas_tool_schemas(discovery_names, launch_enabled=enabled)
+        ] == expected
+        assert await service.filter_authorized_tools(discovery_names, "user@example.com") == expected
 
 
 @pytest.mark.asyncio
@@ -1329,7 +1331,7 @@ def _llm_tool_call(call_id: str, name: str, arguments: str):
 class _LaunchToolManager:
     """Routes only the two atlas launch tools, the way the real manager does.
 
-    What is under test is the executor's ordering, not MCP dispatch, so this
+    What is under test is the executor's shared state, not MCP dispatch, so this
     stands in for ``MCPToolManager`` and forwards to the real handlers -- most
     importantly with the same ``context`` the executor builds, whose
     ``launch_discovery`` entry is the shared dict the two tools communicate
@@ -1346,7 +1348,8 @@ class _LaunchToolManager:
 
 
 @pytest.mark.asyncio
-async def test_a_step_holding_both_calls_discovers_before_it_launches():
+@pytest.mark.parametrize("discovery_first", [False, True])
+async def test_a_step_holding_both_calls_discovers_before_it_launches(discovery_first):
     """The review's missing artifact: ``[launch, discovery]`` driven through
     ``execute_multiple_tools`` against one fresh ``session_context``.
 
@@ -1359,16 +1362,19 @@ async def test_a_step_holding_both_calls_discovers_before_it_launches():
     _install_registry()
     factory = _Factory(lambda c: _ChatService(c))
     session_context = {"user_email": "user@example.com"}
+    tool_calls = [
+        _llm_tool_call(
+            "launch-1",
+            LAUNCH_TOOL_NAME,
+            '{"workspace": "Research", "model": "gpt-4o", "prompt": "go"}',
+        ),
+        _llm_tool_call("discover-1", DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, "{}"),
+    ]
+    if discovery_first:
+        tool_calls.reverse()
 
     results = await tool_executor.execute_multiple_tools(
-        tool_calls=[
-            _llm_tool_call(
-                "launch-1",
-                LAUNCH_TOOL_NAME,
-                '{"workspace": "Research", "model": "gpt-4o", "prompt": "go"}',
-            ),
-            _llm_tool_call("discover-1", DISCOVER_LAUNCH_OPTIONS_TOOL_NAME, "{}"),
-        ],
+        tool_calls=tool_calls,
         session_context=session_context,
         tool_manager=_LaunchToolManager(factory),
         skip_approval=True,
@@ -1376,7 +1382,7 @@ async def test_a_step_holding_both_calls_discovers_before_it_launches():
 
     by_id = {r.tool_call_id: r for r in results}
     # Results still come back in the caller's order, whatever ran first.
-    assert [r.tool_call_id for r in results] == ["launch-1", "discover-1"]
+    assert [r.tool_call_id for r in results] == [tc.id for tc in tool_calls]
     assert by_id["discover-1"].success
     assert by_id["launch-1"].success, by_id["launch-1"].content
     assert "discover_launch_options" not in by_id["launch-1"].content
