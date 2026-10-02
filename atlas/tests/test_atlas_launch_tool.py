@@ -9,6 +9,7 @@ stopping the parent stops it.
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -222,9 +223,11 @@ async def test_discovery_publishes_workspace_ids_and_bare_model_names():
 @pytest.mark.asyncio
 async def test_launch_is_blocked_when_discovery_has_no_choices():
     factory = _Factory(lambda c: _ChatService(c), workspaces=_Workspaces(rows=[]), models={})
+    context = {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}
 
     with pytest.raises(LaunchRefused, match="no valid workspaces or LLM models"):
-        await discover_launch_options({"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}, factory=factory)
+        await discover_launch_options(context, factory=factory)
+    assert context["launch_discovery"] == {"_failed": True}
 
 
 @pytest.mark.asyncio
@@ -247,14 +250,47 @@ async def test_discovery_execution_primes_the_same_context_for_launch():
 
 
 @pytest.mark.asyncio
-async def test_launch_requires_discovery_when_tool_context_supplies_state():
+async def test_launch_auto_discovers_when_context_has_no_discovery_state():
     factory = _Factory(lambda c: _ChatService(c))
-    with pytest.raises(LaunchRefused, match="discover_launch_options"):
+    context = {"user_email": "user@example.com"}
+
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        context,
+        factory=factory,
+    )
+
+    assert handle["workspace"] == "Research"
+    assert context["launch_discovery"]["workspaces"]
+    factory.services[0].release.set()
+
+
+@pytest.mark.asyncio
+async def test_launch_fails_fast_when_discovery_state_marks_a_prior_failure():
+    factory = _Factory(lambda c: _ChatService(c))
+    with pytest.raises(LaunchRefused, match="discovery previously failed"):
         await launch_sub_conversation(
             {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
-            {"user_email": "user@example.com", "launch_discovery": {}},
+            {"user_email": "user@example.com", "launch_discovery": {"_failed": True}},
             factory=factory,
         )
+
+
+@pytest.mark.asyncio
+async def test_launch_discovery_memoizes_group_checks_within_one_call():
+    models = {
+        "gpt-4o": SimpleNamespace(groups=["g1"]),
+        "gpt-4.1": SimpleNamespace(groups=["g1"]),
+        "gpt-5": SimpleNamespace(groups=["g2"]),
+    }
+    factory = _Factory(lambda c: _ChatService(c), models=models)
+    auth = AsyncMock(side_effect=lambda _email, group: group == "g1")
+
+    with patch("atlas.application.chat.runs.launcher.is_user_in_group", auth):
+        options = await discover_launch_options({"user_email": "user@example.com"}, factory=factory)
+
+    assert options["models"] == [{"name": "gpt-4.1"}, {"name": "gpt-4o"}]
+    assert auth.await_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1314,11 +1350,9 @@ async def test_a_step_holding_both_calls_discovers_before_it_launches():
     """The review's missing artifact: ``[launch, discovery]`` driven through
     ``execute_multiple_tools`` against one fresh ``session_context``.
 
-    ``execute_multiple_tools`` gathers a step's calls concurrently, so without
-    the discovery-first pre-pass a step that contains both tools would refuse
-    the launch or not depending on scheduling order -- and with the launch
-    listed first it would essentially always refuse. Nothing pre-seeds
-    ``launch_discovery`` here; the discovery call has to produce it.
+    ``execute_multiple_tools`` gathers a step's calls concurrently. The launch
+    call must succeed regardless of order by self-running discovery when the
+    shared state is still empty.
     """
     from atlas.application.chat.utilities import tool_executor
 

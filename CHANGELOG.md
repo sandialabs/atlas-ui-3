@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #972 - 2026-09-24
 - `/api/config` now correctly includes per-tool approval entries by matching fully-qualified `<server>_<tool>` names against authorized tools.
 
+### PR #969 - 2026-09-24
+- `atlas_launch` now self-discovers launch options when needed, tools execution no longer special-cases launch discovery, and launch discovery memoizes per-group model authorization checks within a single call. Tools mode now allows at most one exempted retry of failed `atlas_discover_launch_options` per turn.
+
 ### PR #937 - 2026-09-14
 - Uploaded vision images are rehydrated from storage on follow-up and resubmitted turns so vision-capable models continue receiving the image.
 
