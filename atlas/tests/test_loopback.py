@@ -64,10 +64,6 @@ def test_empty_labels_never_match(host):
     assert not is_loopback_host(host, localhost_subdomains=True)
 
 
-def test_extra_names():
-    assert is_loopback_host("TestServer", extra_names=("testserver",))
-    assert not is_loopback_host("testserver")
-
 
 def test_normalize_host():
     assert normalize_host(" [::1] ") == "::1"

@@ -803,13 +803,25 @@ class TestDiscoverySSRFConstraints:
             validate_endpoint_url(url, what="test")
 
     @pytest.mark.parametrize(
-        "url", ["https://127.1/x", "https://0x7f.1/x", "https://0177.0.0.1/x", "https://10.1/x"]
+        "url", ["https://127.1/x", "https://0x7f.1/x", "https://10.1/x"]
     )
     def test_legacy_dotted_ipv4_forms_are_internal(self, url):
-        # httpx itself rejects some forms (0177.0.0.1) as invalid URLs; either
-        # refusal is fine as long as the request is never made.
-        with pytest.raises(MCPOAuthError, match="internal address|not a valid URL"):
+        with pytest.raises(MCPOAuthError, match="internal address"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
+
+    def test_octal_ipv4_form_is_an_invalid_url(self):
+        """httpx refuses ``0177.0.0.1`` outright, so it is never requested."""
+        with pytest.raises(MCPOAuthError, match="not a valid URL"):
+            validate_endpoint_url("https://0177.0.0.1/x", what="test", allow_loopback=False)
+
+    def test_testserver_gets_no_loopback_trust(self):
+        assert is_loopback_url("http://testserver/mcp") is False
+        with pytest.raises(MCPOAuthError, match="https"):
+            validate_endpoint_url("http://testserver/x", what="test")
+
+    def test_unparseable_url_is_not_loopback(self):
+        assert is_loopback_url("http://0177.0.0.1/mcp") is False
+        assert is_loopback_url("http://[::1/mcp") is False
 
     @pytest.mark.parametrize("url", ["https://127.0.0.1./x", "https://10.0.0.1./x"])
     def test_trailing_dot_literals_are_internal_but_not_trusted(self, url):

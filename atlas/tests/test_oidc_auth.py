@@ -136,6 +136,10 @@ class TestDiscovery:
         assert "OIDC issuer uses http:// on loopback host 'keycloak.localhost'" in message
         assert "local development only" in message
 
+    def test_testserver_issuer_is_not_loopback(self):
+        with pytest.raises(OIDCDiscoveryError, match="on host 'testserver'"):
+            _validate_issuer_url("http://testserver/realms/atlas")
+
     def test_https_issuer_logs_no_warning(self, caplog):
         with caplog.at_level(logging.WARNING, logger="atlas.core.oidc.discovery"):
             _validate_issuer_url("https://idp.example.gov/realms/atlas")
