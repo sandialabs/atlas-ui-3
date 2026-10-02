@@ -180,9 +180,9 @@ We have created a set of comprehensive guides to help you get the most out of At
 
 ## Releases
 
-Atlas UI 3 ships on a **monthly cadence**. During the last week of each calendar month the `release-cut` workflow opens a draft release PR from a new `release/YYYY.MM` branch, bumps `atlas/version.py` and `pyproject.toml`, refreshes `uv.lock`, and finalizes the `CHANGELOG.md` section for that release. A maintainer (the release captain) runs the smoke test, pushes a `vX.Y.Z` tag, and publishes — the `release-cut` workflow itself never tags or publishes.
+Atlas UI 3 ships on a **weekly, fully automated cadence**. Every Monday the `release-weekly` workflow checks `CHANGELOG.md` and, when there are unreleased entries, bumps `atlas/version.py` and `pyproject.toml`, refreshes `uv.lock`, finalizes the `CHANGELOG.md` section, opens a version-bump PR, waits for CI to go green, merges it, tags the merge commit `vX.Y.Z`, and publishes a GitHub Release. A week with no unreleased changes is skipped. The tag builds the container images and the Release publishes the Python package — no human step is required. `release-cut` remains available as a manual-only escape hatch for a genuine stabilization freeze.
 
-The full runbook — branch strategy, versioning (SemVer), stabilization window, hotfix flow, rollback — lives in **[docs/developer/release-process.md](./docs/developer/release-process.md)**. Published versions land on [PyPI](https://pypi.org/project/atlas-chat/) and as container images on Quay.io.
+The full runbook — versioning (SemVer), the automation, failure recovery, the manual/stabilization/hotfix flows, rollback — lives in **[docs/developer/release-process.md](./docs/developer/release-process.md)**. Published versions land on [PyPI](https://pypi.org/project/atlas-chat/) and as container images on Quay.io.
 
 ## Docker / Podman
 

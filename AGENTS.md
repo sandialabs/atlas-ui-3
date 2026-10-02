@@ -74,16 +74,18 @@ cd atlas && python main.py  # don't use uvicorn --reload
 
 **Changelog**: Add a 1-2 line entry to `CHANGELOG.md` for every PR. Format: `### PR #<number> - YYYY-MM-DD`. Always add the entry under the `## [Unreleased]` section — cutting a release renames that heading, so anything above a prior release heading has already shipped.
 
-**Releases**: Atlas ships from `main`. A release is a version-bump PR, then a tag, then a GitHub Release — no stabilization branch, no back-merge. Full runbook at [docs/developer/release-process.md](./docs/developer/release-process.md).
+**Releases**: Atlas ships from `main` on a weekly, fully automated cadence via `release-weekly.yml` (Mondays 14:00 UTC, plus `workflow_dispatch`). A release is a version-bump PR, then a tag, then a GitHub Release — no stabilization branch, no back-merge. The workflow skips a week with no `## [Unreleased]` entries. Full runbook at [docs/developer/release-process.md](./docs/developer/release-process.md).
 
-1. Determine the next version from the **highest *published* release** (`gh release list` / git tags / PyPI), not from `pyproject.toml` on `main` — the bump lands on `main`, so `main` already equals the *last shipped* version.
-2. One commit bumping `atlas/version.py` and `pyproject.toml` together, plus `CHANGELOG.md`: `## [Unreleased]` becomes `## [X.Y.Z] - YYYY-MM-DD` with a fresh empty `## [Unreleased]` above it. PR it into `main` and merge.
+What the automation does each week (and the manual fallback, if it is broken):
+
+1. Determine the next version from the **highest *published* release** (`gh release list` / git tags / PyPI), not from `pyproject.toml` on `main` — the bump lands on `main`, so `main` already equals the *last shipped* version. The automated bump defaults to MINOR.
+2. One commit bumping `atlas/version.py` and `pyproject.toml` together, plus `CHANGELOG.md`: `## [Unreleased]` becomes `## [X.Y.Z] - YYYY-MM-DD` with a fresh empty `## [Unreleased]` above it, plus a refreshed `uv.lock`. The workflow opens this as a PR and merges it once CI is green.
 3. Tag the merge commit `vX.Y.Z` and push the tag. This triggers `quay-publish.yml`.
 4. `gh release create vX.Y.Z --verify-tag --notes-file <that CHANGELOG section>`. Publishing the Release triggers `pypi-publish.yml`, which builds the frontend, bundles it into the wheel, uploads to PyPI, and attaches the dists to the Release.
 
-CI on the bump PR is the gate. `pypi-publish.yml` builds the artifact that actually ships, so **don't build a wheel locally** — the only manual confidence step beyond CI is the optional real-LLM smoke test in the runbook. Publishing is one-way: PyPI versions cannot be replaced, only yanked and superseded by a patch release.
+CI on the bump PR is the gate. The version bump, change check, and release-note extraction live in `scripts/release_bump.py`. `pypi-publish.yml` builds the artifact that actually ships, so **don't build a wheel locally** — the only manual confidence step beyond CI is the optional real-LLM smoke test in the runbook. Publishing is one-way: PyPI versions cannot be replaced, only yanked and superseded by a patch release.
 
-`release-cut.yml` (cron on the 22nd) still exists and opens a draft `release/YYYY.MM` PR with a checklist. Use it only when a release genuinely needs a stabilization window — a freeze with cherry-picks while `main` keeps moving. For an ordinary release, the four steps above are the flow; the branch, the checklist PR, and the back-merge are overhead that buys nothing when `main` is already shippable.
+`release-cut.yml` is now manual-only and opens a draft `release/YYYY.MM` PR with a checklist. Use it only when a release genuinely needs a stabilization window — a freeze with cherry-picks while `main` keeps moving. For an ordinary release, the weekly automation is the flow; the branch, the checklist PR, and the back-merge are overhead that buys nothing when `main` is already shippable.
 
 **Date Stamps**: Point-in-time records (anything in `developer/design-notes/` or `archive/`) carry a `YYYY-MM-DD` date in the filename (`topic-YYYY-MM-DD.md`). Evergreen reference docs instead carry a `Last updated: YYYY-MM-DD` line near the top — don't date their filenames, so links stay stable as they're revised.
 
