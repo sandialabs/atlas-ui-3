@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #1000 - 2026-10-02
+- OIDC discovery hardening and one shared loopback-host helper (closes #983): a malformed `OIDC_ISSUER` (e.g. `http://[::1`) now fails login as `oidc_error=discovery_failed` instead of an HTTP 500; endpoints advertised by the discovery document must be `https://` (plaintext only under an `http://` loopback issuer, on loopback hosts), so an `https://` issuer advertising an `http://` endpoint is now refused at login; error messages name the field, host and reason with URLs quoted by `repr()`. New `atlas/core/loopback.py` replaces three drifting loopback checks: MCP OAuth also refuses `*.localhost` names from remote discovery documents, and the Wormhole cleartext warning no longer treats names like `127.example.com` as loopback.
+
 ### PR #999 - 2026-10-02
 - Restore shared per-turn launch discovery state and align launch gating and retry regression tests with launch-owned discovery.
 
