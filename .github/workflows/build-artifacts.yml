@@ -17,11 +17,42 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
+      with:
+        # Full history so the fragment guard can diff against the merge base.
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
         python-version: '3.12'
+
+    - name: Validate changelog fragments
+      run: python scripts/changelog_fragments.py validate
+
+    - name: Guard against direct CHANGELOG edits
+      if: github.event_name == 'pull_request'
+      env:
+        HEAD_REF: ${{ github.head_ref }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        THIS_REPO: ${{ github.repository }}
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        set -euo pipefail
+        # Merge-base diff, so only the PR's own changes count even when main
+        # has advanced since the branch point.
+        git fetch --no-tags origin "$BASE_REF"
+        base="$(git merge-base FETCH_HEAD HEAD)"
+        git diff --name-only "$base" HEAD > /tmp/changed-files.txt
+        args=(--require-fragment)
+        # Only this repository's own release/hotfix branches may rewrite the
+        # changelog; a fork could otherwise name its branch release/* to
+        # bypass the guard.
+        if [[ "$HEAD_REPO" == "$THIS_REPO" \
+              && ( "$HEAD_REF" == release/* || "$HEAD_REF" == hotfix/* ) ]]; then
+          args+=(--allow-changelog)
+        fi
+        python scripts/changelog_fragments.py guard \
+          --changed-files /tmp/changed-files.txt "${args[@]}"
 
     - name: Guard CHANGELOG release headings
       if: github.event_name == 'pull_request'

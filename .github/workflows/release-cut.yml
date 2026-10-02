@@ -160,6 +160,14 @@ jobs:
           set -euo pipefail
           git checkout -b "$BRANCH"
 
+      - name: Compose changelog fragments
+        if: steps.state.outputs.branch_exists == 'false'
+        run: |
+          set -euo pipefail
+          # Fold changes/<id>.<type>.md fragments into `## [Unreleased]` before
+          # the bump reshapes it; a no-op when only legacy direct entries exist.
+          python3 scripts/changelog_fragments.py collect
+
       - name: Bump version files and reshape CHANGELOG
         if: steps.state.outputs.branch_exists == 'false'
         env:
@@ -202,7 +210,8 @@ jobs:
           set -euo pipefail
           git config user.name "atlas-release-bot"
           git config user.email "atlas-release-bot@users.noreply.github.com"
-          git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md
+          # `changes` stages the deletions of the fragments composed above.
+          git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md changes
           git commit -m "chore(release): cut ${YEAR_MONTH} at v${NEW_VERSION}"
 
       - name: Push release branch

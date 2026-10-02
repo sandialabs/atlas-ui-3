@@ -114,23 +114,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # A release is worth cutting when either the legacy direct
+          # `## [Unreleased]` entries exist or new-style changes/ fragments
+          # do. Both are consumed by the bump below.
           set +e
           python3 scripts/release_bump.py check
-          rc=$?
+          bump_rc=$?
+          python3 scripts/changelog_fragments.py check
+          frag_rc=$?
           set -e
-          case "$rc" in
-            0)
-              echo "changes=true" >> "$GITHUB_OUTPUT"
-              ;;
-            1)
-              echo "changes=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::No entries under '## [Unreleased]' -- skipping this week's release."
-              ;;
-            *)
-              echo "::error::Could not evaluate the changelog (release_bump.py check exit $rc)."
-              exit "$rc"
-              ;;
-          esac
+          if [[ "$bump_rc" == "2" || "$frag_rc" == "2" ]]; then
+            echo "::error::Could not evaluate the changelog/fragments (release_bump.py=$bump_rc, changelog_fragments.py=$frag_rc)."
+            exit 1
+          fi
+          if [[ "$bump_rc" == "0" || "$frag_rc" == "0" ]]; then
+            echo "changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changes=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No entries under '## [Unreleased]' and no changes/ fragments -- skipping this week's release."
+          fi
 
       - name: Stop when there is nothing to release
         if: steps.changes.outputs.changes != 'true'
@@ -195,6 +197,16 @@ jobs:
 
           echo "::notice::Planning release ${current} -> ${new_version} (last tag ${last_tag:-none})"
 
+      - name: Compose changelog fragments
+        if: steps.changes.outputs.changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fold changes/<id>.<type>.md fragments into `## [Unreleased]` so the
+          # bump below sees a populated section, then delete the consumed
+          # files. A no-op when a week has only legacy direct entries.
+          python3 scripts/changelog_fragments.py collect
+
       - name: Apply version bump
         if: steps.changes.outputs.changes == 'true'
         shell: bash
@@ -254,7 +266,8 @@ jobs:
           set -euo pipefail
           git config user.name "atlas-release-bot"
           git config user.email "atlas-release-bot@users.noreply.github.com"
-          git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md
+          # `changes` stages the deletions of the fragments composed above.
+          git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md changes
           git commit -m "chore(release): weekly v${NEW_VERSION}"
           git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           trap 'git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git" || true' EXIT

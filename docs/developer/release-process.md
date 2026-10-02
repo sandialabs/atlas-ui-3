@@ -21,7 +21,10 @@ manufacture empty versions.
 The model is small and deliberately boring:
 
 - **`main`** is trunk. It is always deployable. Every PR on `main` must
-  pass CI and add a `CHANGELOG.md` entry under `## [Unreleased]`.
+  pass CI and add a changelog fragment at `changes/<id>.<type>.md` (see
+  [Changelog fragments](#changelog-fragments)) rather than editing
+  `CHANGELOG.md`, so independent PRs do not conflict on the same region of
+  the changelog.
 - **The version bump lands on `main`** like any other PR, so `main`
   always equals the last shipped version. There is nothing to back-merge
   and no release branch to keep alive.
@@ -45,21 +48,55 @@ unrelated work keeps landing on `main`. It is now manual-only, the
 exception, not the default; see
 [When to use a stabilization branch instead](#when-to-use-a-stabilization-branch-instead).
 
+### Changelog fragments
+
+Normal PRs do not edit `CHANGELOG.md`; they add a small
+`changes/<id>.<type>.md` fragment instead. Each PR writes its own file, so
+independent PRs no longer conflict in the same region at the top of the
+changelog.
+
+- `<id>` is the issue or pull request number.
+- `<type>` is one of `breaking`, `feature`, `fix`, `security`, `internal`.
+- The body is 1-2 sentences of user-facing release notes; Markdown is
+  allowed.
+
+Examples: `changes/1042.feature.md`, `changes/1047.fix.md`,
+`changes/1051.security.md`. See
+[`changes/README.md`](../../changes/README.md) and
+[`scripts/changelog_fragments.py`](../../scripts/changelog_fragments.py).
+
+At release time `scripts/changelog_fragments.py collect` composes the
+fragments into `## [Unreleased]` grouped by type and deletes the consumed
+files; the bump then reshapes that section as described below. On a
+stabilization branch whose `## [X.Y.Z]` section already exists, target that
+section directly with `collect --section X.Y.Z`.
+
+CI (`build-artifacts`) validates fragment names and types, requires a normal
+PR to add a fragment, and fails a normal PR that edits `CHANGELOG.md`
+directly. Release branches (`release/*`, `hotfix/*`) are exempt because the
+bump must rewrite the changelog; the exemption applies only to branches in
+this repository, not forks.
+
 ### Automated weekly releases
 
 `release-weekly.yml` runs **Mondays at 14:00 UTC** and on
 `workflow_dispatch`. Each run:
 
-1. **Checks for changes.** If `CHANGELOG.md`'s `## [Unreleased]` section is
-   empty, the run stops immediately and nothing is released.
-2. **Bumps the version.** `atlas/version.py`, `pyproject.toml`, and a
+1. **Checks for changes.** If there are no `changes/` fragments and
+   `CHANGELOG.md`'s `## [Unreleased]` section is empty, the run stops
+   immediately and nothing is released.
+2. **Composes the fragments.** `changes/<id>.<type>.md` fragments are
+   folded into `## [Unreleased]` grouped by type and the consumed files are
+   deleted. This file work lives in
+   [`scripts/changelog_fragments.py`](../../scripts/changelog_fragments.py),
+   which the PR validation script exercises directly.
+3. **Bumps the version.** `atlas/version.py`, `pyproject.toml`, and a
    reshaped `CHANGELOG.md` (`## [Unreleased]` becomes
    `## [X.Y.Z] - YYYY-MM-DD` with a fresh empty `[Unreleased]` above it),
-   plus a refreshed `uv.lock`. This file work lives in
-   [`scripts/release_bump.py`](../../scripts/release_bump.py), which the PR
-   validation script exercises directly.
-3. **Opens a PR** from `release/vX.Y.Z` to `main`.
-4. **Waits for CI**, then squash-merges the exact commit it watched
+   plus a refreshed `uv.lock`. This lives in
+   [`scripts/release_bump.py`](../../scripts/release_bump.py).
+4. **Opens a PR** from `release/vX.Y.Z` to `main`.
+5. **Waits for CI**, then squash-merges the exact commit it watched
    (`--match-head-commit`). The gate waits for a fixed set of checks
    (`build-and-test`, `build-artifacts`, and the security scans) to be
    present and green — not merely for whatever happened to register — and
@@ -69,9 +106,9 @@ exception, not the default; see
    `pypi-publish.yml` or `quay-publish.yml`, so the run fails before
    creating any branch rather than tagging a version that never ships.
    `dry_run: true` still works without the secret.
-5. **Tags** the squashed merge commit on `main` as `vX.Y.Z` (read back
+6. **Tags** the squashed merge commit on `main` as `vX.Y.Z` (read back
    from the PR, not the moving tip of `main`).
-6. **Publishes a GitHub Release** with the changelog section as its body.
+7. **Publishes a GitHub Release** with the changelog section as its body.
 
 Before planning, the run verifies that the version currently on `main` has
 a matching `vX.Y.Z` tag. If a previous release was merged but never tagged
@@ -209,6 +246,13 @@ git worktree add -b release/$V ../atlas-release-$V origin/main
 cd ../atlas-release-$V
 ```
 
+Before bumping, compose any outstanding fragments so they land in the
+release (a no-op when only legacy direct entries exist):
+
+```bash
+python3 scripts/changelog_fragments.py collect
+```
+
 Four files change, in one commit:
 
 - `atlas/version.py` — `VERSION = "X.Y.Z"`
@@ -219,7 +263,11 @@ Four files change, in one commit:
 - `CHANGELOG.md` — the `## [Unreleased]` heading becomes
   `## [X.Y.Z] - YYYY-MM-DD`, with a fresh empty `## [Unreleased]`
   inserted above it. The entries themselves are not touched; they were
-  written by the PRs that landed them.
+  composed from the PRs' `changes/` fragments (or written directly before
+  fragments were adopted).
+
+`collect` also deletes the consumed `changes/*.md` files, so stage both
+`CHANGELOG.md` and `changes/` in the same commit.
 
 ```bash
 python3 - "$V" <<'PY'
@@ -373,8 +421,9 @@ If you do take this path, the details that bite:
   install/import failures, and regressions since the last release
   qualify. Features, refactors, and docs-only changes stay on `main`.
   Land the fix on `main` first, then `git cherry-pick -x <sha>` onto
-  `release/YYYY.MM`, and add it under that release's CHANGELOG section
-  on the branch.
+  `release/YYYY.MM`, and add a `changes/<id>.fix.md` fragment composed
+  into that release's already-cut section:
+  `python3 scripts/changelog_fragments.py collect --section X.Y.Z`.
 
 The workflow will **never** push a tag, create a non-draft PR, publish
 to any registry, or touch a branch other than `release/YYYY.MM`.
@@ -530,6 +579,8 @@ when one is made.
 
 - [.github/workflows/release-weekly.yml](../../.github/workflows/release-weekly.yml) — the weekly automated release; bumps, opens/merges the PR, tags, and publishes the Release
 - [scripts/release_bump.py](../../scripts/release_bump.py) — version bump, "anything to release?" check, and release-note extraction used by the weekly workflow
+- [scripts/changelog_fragments.py](../../scripts/changelog_fragments.py) — validate, check, compose, and guard the `changes/` fragments
+- [changes/README.md](../../changes/README.md) — fragment naming convention and content guidance
 - [.github/workflows/release-cut.yml](../../.github/workflows/release-cut.yml) — the manual stabilization-branch escape hatch
 - [.github/workflows/pypi-publish.yml](../../.github/workflows/pypi-publish.yml) — publishes on GitHub Release; also has a `workflow_dispatch` escape hatch (`target: testpypi` for a pre-tag smoke artifact)
 - [.github/workflows/quay-publish.yml](../../.github/workflows/quay-publish.yml) — publishes semver-tagged images on `v*.*.*` tag push, and branch-named images on push to `main`/`develop`/`quay`
