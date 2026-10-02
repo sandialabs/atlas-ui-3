@@ -43,6 +43,10 @@ def test_loopback_hosts(host):
     "08.0.0.1",
     "127.0.0.256",
     "1.2.3.4.5",
+    # Trailing-dot IP literals go to DNS as names.
+    "127.0.0.1.",
+    "0x7f000001.",
+    "127.1.",
 ])
 def test_non_loopback_hosts(host):
     assert not is_loopback_host(host)
@@ -67,7 +71,7 @@ def test_extra_names():
 
 def test_normalize_host():
     assert normalize_host(" [::1] ") == "::1"
-    assert normalize_host("Example.COM.") == "example.com"
+    assert normalize_host("Example.COM.") == "example.com."
     assert normalize_host(None) == ""
 
 
@@ -96,3 +100,10 @@ def test_parse_ip_legacy_dotted_forms(host, expected):
 ])
 def test_parse_ip_rejects_non_inet_aton_forms(host):
     assert parse_ip(host) is None
+
+
+def test_parse_ip_rejects_huge_digit_strings_without_raising():
+    """int() raises past CPython's 4300-digit limit; the parser must not."""
+    assert parse_ip("1" * 5000) is None
+    assert parse_ip("127." + "0" * 5000 + ".1") is None
+    assert not is_loopback_host("9" * 5000)

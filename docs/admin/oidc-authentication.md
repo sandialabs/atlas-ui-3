@@ -94,7 +94,10 @@ loopback issuer and only on loopback hosts. A provider that advertises a
 plaintext endpoint behind an `https://` issuer (usually a reverse proxy that
 does not forward `X-Forwarded-Proto`) is refused, because the token request
 carries the client secret; fix the provider's frontend URL rather than the
-issuer. A malformed or rejected issuer or endpoint makes login fail with
+issuer. The rule applies wherever Atlas reads the discovery document -- login,
+access-token refresh and logout -- so after upgrading, existing sessions
+against such a provider end when their access token next expires, and logout
+skips the IdP sign-out (with a warning in the log). A malformed or rejected issuer or endpoint makes login fail with
 `oidc_error=discovery_failed`, and the server log names the field, the host,
 and the reason.
 

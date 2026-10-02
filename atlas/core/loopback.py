@@ -16,8 +16,10 @@ What counts as loopback here:
 - with ``localhost_subdomains=True``, any RFC 6761 ``*.localhost`` name such as
   ``keycloak.localhost``.
 
-Hosts are compared case-insensitively, with IPv6 brackets and one trailing dot
-removed. These are checks on the *name*, never on what it resolves to.
+Hosts are compared case-insensitively with IPv6 brackets removed. One trailing
+(root) dot is allowed on *names* (``localhost.``) but not on IP literals:
+resolvers send ``127.0.0.1.`` to DNS as a name, so it is not loopback. These
+are checks on the *name*, never on what it resolves to.
 """
 
 import ipaddress
@@ -29,13 +31,23 @@ IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 # One part of a legacy IPv4 literal: hex, octal (leading zero) or decimal.
 _LEGACY_IPV4_PART = re.compile(r"0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*", re.ASCII)
 
+# Longest legacy IPv4 part worth converting. Real values fit in 12 characters
+# (037777777777); the cap also keeps attacker-sized digit strings away from
+# int(), which raises ValueError past CPython's 4300-digit limit.
+_MAX_LEGACY_IPV4_PART = 32
+
 
 def normalize_host(host: Optional[str]) -> str:
-    """Lowercase ``host`` and drop IPv6 brackets and one trailing dot."""
+    """Lowercase ``host`` and drop surrounding whitespace and IPv6 brackets."""
     host = (host or "").strip().lower()
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
-    return host.removesuffix(".")
+    return host
+
+
+def _name_form(host: Optional[str]) -> str:
+    """Normalized ``host`` with one trailing root dot removed, for name matching."""
+    return normalize_host(host).removesuffix(".")
 
 
 def parse_ip(host: Optional[str]) -> Optional[IPAddress]:
@@ -68,7 +80,7 @@ def _parse_legacy_ipv4(host: str) -> Optional[ipaddress.IPv4Address]:
         return None
     values = []
     for part in parts:
-        if not _LEGACY_IPV4_PART.fullmatch(part):
+        if len(part) > _MAX_LEGACY_IPV4_PART or not _LEGACY_IPV4_PART.fullmatch(part):
             return None
         if part[:2].lower() == "0x":
             values.append(int(part[2:], 16))
@@ -92,9 +104,10 @@ def is_localhost_name(host: Optional[str], *, localhost_subdomains: bool = False
     RFC 6761 section 6.3 reserves every ``*.localhost`` name for loopback;
     local setups use them to give each service its own origin (for example
     ``keycloak.localhost`` behind a local ingress). Empty labels are rejected,
-    so ``.localhost`` and ``a..localhost`` do not match.
+    so ``.localhost`` and ``a..localhost`` do not match. One trailing root
+    dot is allowed (``localhost.``).
     """
-    host = normalize_host(host)
+    host = _name_form(host)
     if host == "localhost":
         return True
     if not localhost_subdomains:
@@ -127,13 +140,11 @@ def is_loopback_host(
     ``extra_names`` adds fixed names, such as the ``testserver`` host
     Starlette's TestClient uses.
     """
-    normalized = normalize_host(host)
-    if not normalized:
+    name = _name_form(host)
+    if not name:
         return False
-    if normalized in {normalize_host(name) for name in extra_names}:
+    if name in {_name_form(extra) for extra in extra_names}:
         return True
-    # The helpers normalize ``host`` themselves; normalizing twice would strip
-    # two trailing dots and let ``localhost..`` through.
     if is_localhost_name(host, localhost_subdomains=localhost_subdomains):
         return True
     return is_loopback_ip(parse_ip(host))

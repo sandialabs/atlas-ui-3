@@ -46,7 +46,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.core.loopback import is_loopback_host, parse_ip
+from atlas.core.loopback import is_loopback_host, normalize_host, parse_ip
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,10 @@ def _is_internal_address(host: str) -> bool:
     network. DNS-based attacks are a deployment-level concern (egress
     controls), noted in the admin documentation.
     """
-    address = parse_ip(host)
+    # A trailing-dot literal such as ``127.0.0.1.`` is a DNS name to the
+    # resolver, so it is not loopback, but it is refused here all the same:
+    # a resolver may well answer it with the address it spells.
+    address = parse_ip(host) or parse_ip(normalize_host(host).removesuffix("."))
     if address is None:
         # Names are not resolved, but loopback names (``*.localhost``
         # included) are refused outright: they can only reach this machine

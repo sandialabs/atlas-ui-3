@@ -810,6 +810,16 @@ class TestDiscoverySSRFConstraints:
         with pytest.raises(MCPOAuthError, match="internal address"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
 
+    @pytest.mark.parametrize("url", ["https://127.0.0.1./x", "https://10.0.0.1./x"])
+    def test_trailing_dot_literals_are_internal_but_not_trusted(self, url):
+        with pytest.raises(MCPOAuthError, match="internal address"):
+            validate_endpoint_url(url, what="test", allow_loopback=False)
+        assert is_loopback_url(url.replace("https", "http")) is False
+
+    def test_huge_numeric_host_does_not_raise_valueerror(self):
+        url = "https://" + "9" * 5000 + "/x"
+        validate_endpoint_url(url, what="test", allow_loopback=False)
+
     def test_localhost_subdomain_is_not_a_trusted_loopback_server(self):
         """``*.localhost`` resolves via the operator's resolver, not this process."""
         assert is_loopback_url("http://mcp.localhost:8931/mcp") is False

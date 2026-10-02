@@ -697,6 +697,43 @@ class TestOIDCRoutes:
         assert response.status_code == 302
         assert response.headers["location"] == "/?oidc_error=discovery_failed"
 
+    @pytest.mark.parametrize("key", ["token_endpoint", "end_session_endpoint"])
+    def test_login_refuses_http_endpoint_under_https_issuer(self, oidc_app, monkeypatch, caplog, key):
+        """Real discovery (only the HTTP fetch is stubbed) through the login route."""
+        document = dict(DISCOVERY_DOC, **{key: f"http://idp.example.gov/{key}"})
+
+        class _Response:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return document
+
+        class _Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, **kwargs):
+                assert url == "https://idp.example.gov/.well-known/openid-configuration"
+                return _Response()
+
+        monkeypatch.setattr("atlas.core.oidc.discovery.httpx.AsyncClient", _Client)
+        clear_metadata_cache()
+        with _patch_settings(_Settings()), caplog.at_level(logging.ERROR):
+            response = TestClient(oidc_app).get("/auth/oidc/login", follow_redirects=False)
+        clear_metadata_cache()
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/?oidc_error=discovery_failed"
+        assert any(key in r.getMessage() and "because the issuer is https://" in r.getMessage()
+                   for r in caplog.records)
+
     def test_login_is_404_when_disabled(self, oidc_app):
         with _patch_settings(_Settings(feature_oidc_auth_enabled=False)):
             client = TestClient(oidc_app)
