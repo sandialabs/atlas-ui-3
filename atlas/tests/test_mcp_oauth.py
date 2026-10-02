@@ -856,6 +856,22 @@ class TestDiscoverySSRFConstraints:
         with pytest.raises(MCPOAuthError, match="internal address"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
 
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    def test_unicode_dot_public_host_is_still_accepted(self, dot):
+        url = f"https://mcp{dot}example{dot}com/x"
+        assert validate_endpoint_url(url, what="test", allow_loopback=False) == url
+
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    def test_unicode_dot_loopback_is_accepted_when_loopback_is_allowed(self, dot):
+        url = f"http://127{dot}0{dot}0{dot}1:8931/x"
+        assert validate_endpoint_url(url, what="test", allow_loopback=True) == url
+
+    @pytest.mark.parametrize("url", ["https://xn--ls8h.la/x", "https://xn--bcher-kva.example/x",
+                                     "https://b\u00fccher.example/x"])
+    def test_punycode_and_idn_public_hosts_are_accepted(self, url):
+        """Checked as the ASCII host httpx sends; no IDNA2008 re-validation."""
+        assert validate_endpoint_url(url, what="test", allow_loopback=False) == url
+
     def test_unicode_dot_loopback_server_is_recognized(self):
         assert is_loopback_url("http://127\u30020\u30020\u30021:8931/mcp") is True
 

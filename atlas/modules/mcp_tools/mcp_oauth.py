@@ -140,9 +140,13 @@ def _connect_host(url: str) -> str:
     ones. Checking ``urlsplit``'s raw hostname instead would let those
     spellings past the address checks. Raises ValueError for a URL httpx
     cannot parse.
+
+    ``raw_host`` is the ASCII (punycode) form httpx puts on the wire. The
+    decoded ``.host`` would be wrong here: it re-validates the label under
+    IDNA2008 and raises on valid hosts such as ``xn--ls8h.la``.
     """
     try:
-        return httpx.URL(url).host
+        return httpx.URL(url).raw_host.decode("ascii")
     except httpx.InvalidURL as exc:
         raise ValueError(str(exc)) from exc
 
