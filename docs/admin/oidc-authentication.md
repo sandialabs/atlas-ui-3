@@ -80,9 +80,23 @@ and cached for an hour. The document's own `issuer` claim must match the
 configured issuer, so a redirect on the discovery URL cannot substitute another
 provider's endpoints.
 
-`OIDC_ISSUER` must be `https://`. For local development only, `http://` is also
-accepted on `localhost`, `127.0.0.1`, `::1`, and RFC 6761 `*.localhost` names
-(for example `http://keycloak.localhost` behind a local ingress).
+`OIDC_ISSUER` must be an absolute `https://` URL. For local development only,
+`http://` is also accepted on `localhost`, loopback addresses (`127.0.0.0/8`,
+`::1`), and RFC 6761 `*.localhost` names (for example `http://keycloak.localhost`
+behind a local ingress); Atlas logs a warning at login when it is used. The
+check is on the name, not on the address it resolves to.
+
+The endpoints the discovery document advertises (`authorization_endpoint`,
+`token_endpoint`, `jwks_uri`, `userinfo_endpoint`, `end_session_endpoint`) are
+held to the same rule: under an `https://` issuer every one of them must be
+`https://`, and `http://` endpoints are accepted only under an `http://`
+loopback issuer and only on loopback hosts. A provider that advertises a
+plaintext endpoint behind an `https://` issuer (usually a reverse proxy that
+does not forward `X-Forwarded-Proto`) is refused, because the token request
+carries the client secret; fix the provider's frontend URL rather than the
+issuer. A malformed or rejected issuer or endpoint makes login fail with
+`oidc_error=discovery_failed`, and the server log names the field, the host,
+and the reason.
 
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to

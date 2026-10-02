@@ -46,6 +46,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.loopback import is_loopback_host, parse_ip
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,10 @@ DISCOVERY_CACHE_TTL_SECONDS = 3600.0
 # whatever memory the sender feels like consuming.
 MAX_RESPONSE_BYTES = 512 * 1024
 
-# Mirrors atlas.core.oidc.discovery: an http:// endpoint is only tolerated on a
-# loopback host so local development against a mock provider works.
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "testserver"})
+# An http:// endpoint is only tolerated on a loopback host (see
+# atlas.core.loopback) so local development against a mock provider works.
+# Starlette's TestClient sends requests to ``testserver``.
+_EXTRA_LOOPBACK_NAMES = ("testserver",)
 
 # Default scope requested when neither the server config nor the
 # protected-resource metadata says anything. Empty means "whatever the
@@ -82,41 +84,15 @@ class MCPOAuthError(RuntimeError):
 
 
 def _is_loopback(host: str) -> bool:
-    host = (host or "").lower().strip("[]")
-    if host in _LOOPBACK_HOSTS:
-        return True
-    address = _parse_ip(host)
-    return address is not None and address.is_loopback
+    """Whether ``host`` is loopback for the purposes of the MCP OAuth flow.
 
-
-def _parse_ip(host: str):
-    """Parse a host as an IP address, or None when it is a name.
-
-    ``ipaddress`` is what normalizes the encodings an allowlist written by
-    hand would miss: ``0x7f.1``, ``2130706433``, ``::ffff:127.0.0.1`` and
-    ``0.0.0.0`` all resolve to addresses this rejects.
+    Deliberately narrower than the OIDC issuer check: RFC 6761 ``*.localhost``
+    names are not included. A loopback MCP server is trusted to name loopback
+    and internal endpoints in its discovery documents, and a ``*.localhost``
+    name resolves through the operator's resolver (often to a shared local
+    ingress), which is not the same trust as this process's own loopback.
     """
-    import ipaddress
-
-    host = (host or "").strip("[]")
-    if not host:
-        return None
-    try:
-        return ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    # Integer and other legacy IPv4 encodings that ip_address rejects but
-    # resolvers and HTTP clients still accept.
-    try:
-        packed = int(host, 0)
-    except (TypeError, ValueError):
-        return None
-    if 0 <= packed <= 0xFFFFFFFF:
-        try:
-            return ipaddress.ip_address(packed)
-        except ValueError:
-            return None
-    return None
+    return is_loopback_host(host, extra_names=_EXTRA_LOOPBACK_NAMES)
 
 
 def _is_internal_address(host: str) -> bool:
@@ -129,9 +105,14 @@ def _is_internal_address(host: str) -> bool:
     network. DNS-based attacks are a deployment-level concern (egress
     controls), noted in the admin documentation.
     """
-    address = _parse_ip(host)
+    address = parse_ip(host)
     if address is None:
-        return (host or "").lower() in _LOOPBACK_HOSTS
+        # Names are not resolved, but loopback names (``*.localhost``
+        # included) are refused outright: they can only reach this machine
+        # or the operator's local ingress.
+        return is_loopback_host(
+            host, localhost_subdomains=True, extra_names=_EXTRA_LOOPBACK_NAMES
+        )
     # An IPv4-mapped IPv6 address hides the v4 properties, so unwrap it.
     mapped = getattr(address, "ipv4_mapped", None)
     if mapped is not None:
@@ -172,8 +153,12 @@ def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -
     """
     if not url or not isinstance(url, str):
         raise MCPOAuthError(f"{what} is missing")
-    parsed = urlsplit(url)
-    host = parsed.hostname or ""
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname or ""
+    except ValueError as exc:
+        # An unclosed IPv6 bracket, for example; it must not escape as a 500.
+        raise MCPOAuthError(f"{what} is not a valid URL") from exc
 
     if parsed.scheme not in ("https", "http"):
         raise MCPOAuthError(f"{what} must be an https:// URL")

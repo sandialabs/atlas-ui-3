@@ -784,6 +784,25 @@ class TestDiscoverySSRFConstraints:
             with pytest.raises(MCPOAuthError):
                 validate_endpoint_url(url, what="test")
 
+    @pytest.mark.parametrize(
+        "url",
+        ["https://keycloak.localhost/x", "https://a.b.localhost./x", "https://localhost/x",
+         "https://testserver/x"],
+    )
+    def test_loopback_names_are_refused_from_remote_documents(self, url):
+        with pytest.raises(MCPOAuthError, match="internal address"):
+            validate_endpoint_url(url, what="test", allow_loopback=False)
+
+    def test_malformed_url_is_an_oauth_error(self):
+        with pytest.raises(MCPOAuthError, match="not a valid URL"):
+            validate_endpoint_url("https://[::1/x", what="test")
+
+    def test_localhost_subdomain_is_not_a_trusted_loopback_server(self):
+        """``*.localhost`` resolves via the operator's resolver, not this process."""
+        assert is_loopback_url("http://mcp.localhost:8931/mcp") is False
+        with pytest.raises(MCPOAuthError, match="https"):
+            validate_endpoint_url("http://mcp.localhost/x", what="test")
+
     def test_a_loopback_mcp_server_may_still_use_loopback(self):
         """Local development against a mock provider keeps working."""
         assert is_loopback_url("http://127.0.0.1:8931/mcp") is True
