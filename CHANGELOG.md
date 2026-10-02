@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### PR #999 - 2026-10-02
 - Restore shared per-turn launch discovery state and align launch gating and retry regression tests with launch-owned discovery.
 
-### PR #994 - 2026-10-02
+### PR #997 - 2026-10-02
 - Weekly automated releases (#994): a new `release-weekly.yml` workflow runs every Monday, skips any week whose `## [Unreleased]` section is empty, otherwise bumps the SemVer version, opens and (once CI is green) merges the bump PR, tags the merge commit, and publishes a GitHub Release -- shipping both the `atlas-chat` Python package (`pypi-publish.yml`) and the container images (`quay-publish.yml`). The bump, "anything to release?" check, and release-note extraction live in `scripts/release_bump.py`; the monthly `release-cut.yml` cron is removed and left as a manual-only stabilization escape hatch.
 
 ### PR #995 - 2026-09-30

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test script for PR #994: weekly automated releases
+# Test script for PR #997 (issue #994): weekly automated releases
 #
 # What this validates end to end:
 # - The weekly workflow is scheduled, drives the bump through
@@ -29,7 +29,7 @@ print_result() {
     fi
 }
 
-echo "=== PR #994 Validation: weekly automated releases ==="
+echo "=== PR #997 Validation: weekly automated releases ==="
 
 if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     # shellcheck disable=SC1091
@@ -141,7 +141,7 @@ print_header "Check 6: release notes contain only the released section"
 NOTES_RC=$?
 if [ "$NOTES_RC" -eq 0 ] \
     && head -1 "$SANDBOX/notes.md" | grep -q '^## \[0.7.0\] - 2026-10-06$' \
-    && grep -q 'PR #994' "$SANDBOX/notes.md" \
+    && grep -q 'release-weekly.yml' "$SANDBOX/notes.md" \
     && ! grep -q '^## \[0.6.0\]' "$SANDBOX/notes.md"; then
     print_result 0 "notes --version 0.7.0 returns only the 0.7.0 section"
 else
