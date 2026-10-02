@@ -20,7 +20,8 @@ branch — see the runbook at
   `{{COMMIT_SHA}}`.
 - `atlas/version.py` and `pyproject.toml` bumped from
   `{{OLD_VERSION}}` → `{{VERSION}}`.
-- `CHANGELOG.md`: `## [Unreleased]` section finalized as
+- `CHANGELOG.md`: `changes/` fragments composed into `## [Unreleased]`
+  (grouped by type, consumed files deleted), then finalized as
   `## [{{VERSION}}] - {{RELEASE_DATE}}`; new empty `[Unreleased]`
   prepended.
 
@@ -37,8 +38,9 @@ This PR stays open for the rest of the month. During that window:
   refactors continue to land on `main` as normal.
 - Fix on `main` first, then cherry-pick to the release branch:
   `git cherry-pick -x <sha>`.
-- Each cherry-pick gets a CHANGELOG note under the
-  `## [{{VERSION}}]` section on the release branch.
+- Each cherry-pick gets a `changes/<id>.<type>.md` fragment, composed
+  into the `## [{{VERSION}}]` section on the release branch
+  (`python3 scripts/changelog_fragments.py collect`).
 
 ## Pre-tag checklist
 
