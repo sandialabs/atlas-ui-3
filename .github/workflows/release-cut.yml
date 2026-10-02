@@ -34,7 +34,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: release-cut
+  group: release
   cancel-in-progress: false
 
 jobs:

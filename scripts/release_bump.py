@@ -100,6 +100,16 @@ def next_version(current: str, bump: str) -> str:
     raise ReleaseBumpError(f"unknown bump kind {bump!r}")
 
 
+def read_pyproject_version() -> str:
+    text = PYPROJECT_FILE.read_text(encoding="utf-8")
+    match = re.search(
+        r'(?ms)^\[project\][^\[]*?^version\s*=\s*"([^"]+)"', text
+    )
+    if not match:
+        raise ReleaseBumpError(f"no version under [project] in {PYPROJECT_FILE}")
+    return match.group(1)
+
+
 def apply_bump(version: str, date: str, force: bool) -> None:
     if not SEMVER_RE.match(version):
         raise ReleaseBumpError(f"version must look like X.Y.Z, got {version!r}")
@@ -109,6 +119,12 @@ def apply_bump(version: str, date: str, force: bool) -> None:
         )
 
     old = read_current_version()
+    pyproject_old = read_pyproject_version()
+    if pyproject_old != old:
+        raise ReleaseBumpError(
+            f"version drift: {VERSION_FILE} is {old} but {PYPROJECT_FILE} is "
+            f"{pyproject_old}; reconcile them before releasing"
+        )
 
     auth_text, count = re.subn(
         r'^VERSION\s*=\s*"[^"]+"',
@@ -120,15 +136,17 @@ def apply_bump(version: str, date: str, force: bool) -> None:
     if count != 1:
         raise ReleaseBumpError(f"expected exactly one VERSION line in {VERSION_FILE}")
 
-    pyproject_text, count = re.subn(
-        r'(?m)^version\s*=\s*"[^"]+"',
-        f'version = "{version}"',
+    pyproject_pattern = re.compile(
+        r'(?ms)(^\[project\][^\[]*?^version\s*=\s*")[^"]+(")'
+    )
+    pyproject_text, count = pyproject_pattern.subn(
+        lambda m: f"{m.group(1)}{version}{m.group(2)}",
         PYPROJECT_FILE.read_text(encoding="utf-8"),
         count=1,
     )
     if count != 1:
         raise ReleaseBumpError(
-            f"expected exactly one top-level version line in {PYPROJECT_FILE}"
+            f"expected exactly one version line under [project] in {PYPROJECT_FILE}"
         )
 
     changelog_text = CHANGELOG_FILE.read_text(encoding="utf-8")
@@ -173,22 +191,29 @@ def check_verdict(checks: object, required: list[str]) -> str:
     if not isinstance(checks, list):
         return "PENDING: no checks reported"
 
-    buckets = {
-        str(check.get("name")): str(check.get("bucket"))
-        for check in checks
-        if isinstance(check, dict)
-    }
-    missing = sorted(name for name in required if name not in buckets)
+    by_name: dict[str, list[str]] = {}
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        name = str(check.get("name"))
+        by_name.setdefault(name, []).append(str(check.get("bucket")))
+
+    missing = sorted(name for name in required if name not in by_name)
     failed = sorted(
-        name for name, bucket in buckets.items() if bucket in ("fail", "cancel")
+        name
+        for name, buckets in by_name.items()
+        if any(bucket in ("fail", "cancel") for bucket in buckets)
     )
     not_pass = sorted(
         name
         for name in required
-        if buckets.get(name) not in (None, "pass", "pending")
+        if name in by_name
+        and any(bucket not in ("pass", "pending") for bucket in by_name[name])
     )
     pending = sorted(
-        name for name, bucket in buckets.items() if bucket == "pending"
+        name
+        for name, buckets in by_name.items()
+        if any(bucket == "pending" for bucket in buckets)
     )
 
     if failed:
@@ -258,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
                 payload = None
             required = [name for name in args.required.split(",") if name]
             print(check_verdict(payload, required))
-    except ReleaseBumpError as exc:
+    except (ReleaseBumpError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 0

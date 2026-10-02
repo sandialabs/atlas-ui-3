@@ -108,6 +108,15 @@ if grep -q "release_bump.py checks" "$WORKFLOW" \
 else
     print_result 1 "check verdict is scripted, notes come from the merge commit, token is scoped"
 fi
+if grep -qE '^  group: release$' "$WORKFLOW" \
+    && grep -qE '^  group: release$' "$CUT" \
+    && grep -q "base_sha" "$WORKFLOW" \
+    && grep -q "deferred=true" "$WORKFLOW" \
+    && grep -q "gh label create release" "$WORKFLOW"; then
+    print_result 0 "both workflows share a concurrency group; races defer and the alert label is created"
+else
+    print_result 1 "both workflows share a concurrency group; races defer and the alert label is created"
+fi
 
 # ==========================================
 print_header "Check 3: change detection distinguishes empty vs populated"

@@ -180,3 +180,48 @@ def test_checks_subcommand_reads_a_file(release_bump, sandbox, tmp_path):
     assert release_bump.main(
         ["checks", "--file", str(payload), "--required", "build-and-test"]
     ) == 0
+
+
+def test_check_verdict_a_fail_after_a_pass_still_fails(release_bump):
+    payload = [
+        {"name": "build-and-test", "bucket": "fail"},
+        {"name": "build-and-test", "bucket": "pass"},
+    ]
+    verdict = release_bump.check_verdict(payload, ["build-and-test"])
+    assert verdict.startswith("FAIL"), verdict
+
+
+def test_check_verdict_a_pending_after_a_pass_is_still_pending(release_bump):
+    payload = [
+        {"name": "build-and-test", "bucket": "pending"},
+        {"name": "build-and-test", "bucket": "pass"},
+    ]
+    verdict = release_bump.check_verdict(payload, ["build-and-test"])
+    assert verdict.startswith("PENDING"), verdict
+
+
+def test_apply_refuses_on_version_drift(release_bump, sandbox):
+    _write_changelog(sandbox, "### PR #1 - 2026-10-01\n- A change.")
+    (sandbox / "pyproject.toml").write_text('[project]\nversion = "0.5.0"\n')
+    assert release_bump.main(["apply", "--version", "0.7.0", "--date", "2026-10-06"]) == 2
+    assert 'VERSION = "0.6.0"' in (sandbox / "atlas" / "version.py").read_text()
+
+
+def test_apply_scopes_pyproject_to_the_project_table(release_bump, sandbox):
+    _write_changelog(sandbox, "### PR #1 - 2026-10-01\n- A change.")
+    (sandbox / "pyproject.toml").write_text(
+        '[project]\nversion = "0.6.0"\n\n[tool.other]\nversion = "0.6.0"\n'
+    )
+    assert release_bump.main(["apply", "--version", "0.7.0", "--date", "2026-10-06"]) == 0
+    text = (sandbox / "pyproject.toml").read_text()
+    assert '[project]\nversion = "0.7.0"' in text
+    assert '[tool.other]\nversion = "0.6.0"' in text
+
+
+def test_main_returns_2_when_changelog_is_missing(release_bump, sandbox):
+    assert release_bump.main(["check"]) == 2
+
+
+def test_main_returns_2_when_changelog_is_not_utf8(release_bump, sandbox):
+    (sandbox / "CHANGELOG.md").write_bytes(b"\xff\xfe\x00bad")
+    assert release_bump.main(["check"]) == 2

@@ -41,7 +41,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: release-weekly
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -182,6 +182,7 @@ jobs:
           last_tag="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
           release_date="$(date -u +%Y-%m-%d)"
           branch="release/v${new_version}"
+          base_sha="$(git rev-parse HEAD)"
 
           {
             echo "current_version=$current"
@@ -189,6 +190,7 @@ jobs:
             echo "last_tag=$last_tag"
             echo "release_date=$release_date"
             echo "branch=$branch"
+            echo "base_sha=$base_sha"
           } >> "$GITHUB_OUTPUT"
 
           echo "::notice::Planning release ${current} -> ${new_version} (last tag ${last_tag:-none})"
@@ -225,14 +227,18 @@ jobs:
         run: |
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          trap 'git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git" || true' EXIT
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            open_prs="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
-            if [[ "$open_prs" != "0" ]]; then
-              echo "::error::Branch $BRANCH already has an open PR; resolve it before retrying."
-              exit 1
+            open_prs="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number' || true)"
+            if [[ -n "$open_prs" ]]; then
+              echo "Closing stale release PR(s) for $BRANCH left by a previous failed run: $(echo "$open_prs" | tr '\n' ' ')"
+              for pr in $open_prs; do
+                gh pr close "$pr" --delete-branch || true
+              done
+            else
+              echo "Removing stale branch $BRANCH left by a previous failed run."
+              git push origin --delete "$BRANCH"
             fi
-            echo "Removing stale branch $BRANCH left by a previous failed run."
-            git push origin --delete "$BRANCH"
           fi
           git checkout -b "$BRANCH"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
@@ -251,6 +257,7 @@ jobs:
           git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md
           git commit -m "chore(release): weekly v${NEW_VERSION}"
           git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          trap 'git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git" || true' EXIT
           git push --set-upstream origin "$BRANCH"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
           echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -287,6 +294,7 @@ jobs:
         env:
           PR: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
+          BASE_SHA: ${{ steps.meta.outputs.base_sha }}
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # A fixed list of gates that must all be present and green before the
           # irreversible merge. `gh pr checks --watch` alone only waits on the
@@ -322,9 +330,23 @@ jobs:
             gh pr checks "$PR" 2>&1 || true
             exit 1
           fi
+          # If main advanced while the bump waited for CI, its Unreleased
+          # section has moved; merging now would produce a messy or dropped
+          # release section. Close the bump and let the next run re-cut from
+          # the new main instead of failing forever on a conflicted PR.
+          git fetch --no-tags origin main >/dev/null 2>&1 || true
+          current_main="$(git rev-parse origin/main 2>/dev/null || true)"
+          if [[ -n "$current_main" && "$current_main" != "$BASE_SHA" ]]; then
+            echo "::notice::main moved from ${BASE_SHA} to ${current_main} while the release PR waited; closing the bump PR and deferring to the next run."
+            gh pr close "$PR" --delete-branch || true
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "deferred=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Pin the merge to the exact commit whose checks we just watched, so a
           # commit pushed to the branch after the checks cannot slip through.
           gh pr merge "$PR" --squash --delete-branch --match-head-commit "$HEAD_SHA"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
 
           merge_sha=""
           for attempt in $(seq 1 10); do
@@ -340,7 +362,7 @@ jobs:
           echo "::notice::Merged PR #$PR as ${merge_sha}"
 
       - name: Tag the merged commit
-        if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
+        if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true' && steps.merge.outputs.merged == 'true'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
           MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
@@ -348,6 +370,7 @@ jobs:
         run: |
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          trap 'git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git" || true' EXIT
           # Tag the exact merge commit, never the moving tip of main: a PR that
           # lands between the merge and the fetch must not be published under
           # this version.
@@ -375,7 +398,7 @@ jobs:
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Publish GitHub Release
-        if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
+        if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true' && steps.merge.outputs.merged == 'true'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
@@ -400,6 +423,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          gh label create release --description "Release automation" --color "0e8a16" 2>/dev/null || true
           title="Weekly release automation failed"
           existing="$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty' || true)"
           body="The \`release-weekly\` workflow failed. Review the run and, if a version was merged or tagged but not published, finish it by hand before the next scheduled run.
@@ -421,6 +445,8 @@ jobs:
           NEW: ${{ steps.meta.outputs.new_version }}
           LAST_TAG: ${{ steps.meta.outputs.last_tag }}
           MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+          DEFERRED: ${{ steps.merge.outputs.deferred }}
           DRY: ${{ github.event.inputs.dry_run }}
           HAS_PAT: ${{ env.HAS_RELEASE_PAT }}
           JOB_STATUS: ${{ job.status }}
@@ -441,7 +467,11 @@ jobs:
               echo "No entries under \`## [Unreleased]\` -- this week's release was skipped."
             elif [[ "$DRY" == "true" ]]; then
               echo "Dry run only -- nothing was pushed or published."
-            else
+            elif [[ "$DEFERRED" == "true" ]]; then
+              echo "\`main\` advanced while the bump PR waited for CI; the PR was closed and this run deferred. The next scheduled run re-cuts the release."
+            elif [[ "$MERGED" == "true" ]]; then
               echo "Tag \`v${NEW}\` pushed on \`${MERGE_SHA:-the merge commit}\` and GitHub Release published. Watch pypi-publish.yml and quay-publish.yml for the artifacts."
+            else
+              echo "Run finished without merging; see the log above."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

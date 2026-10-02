@@ -79,6 +79,12 @@ a matching `vX.Y.Z` tag. If a previous release was merged but never tagged
 instead of planning past the vanished version; tag and publish that commit
 by hand, then let the schedule resume.
 
+`release-weekly` and `release-cut` share a single concurrency group, so the
+two paths cannot plan the same version at the same time. If `main` advances
+while the weekly bump PR is waiting for CI, the run closes the bump PR and
+defers — the next run re-cuts from the new `main` rather than merging a
+changelog whose `[Unreleased]` section has moved underneath it.
+
 Steps 1 and 2 are idempotent in the sense that a week with nothing to
 release is a no-op; a version tag that already exists aborts the run.
 
