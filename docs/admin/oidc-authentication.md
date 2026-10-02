@@ -236,7 +236,7 @@ A tool call never fails with a delegation stack trace.
 | Symptom | Cause |
 | --- | --- |
 | `/auth/oidc/login` returns 404 | `FEATURE_OIDC_AUTH_ENABLED` is false, or startup disabled it -- check the log for the reason. |
-| Redirect to `/?oidc_error=discovery_failed` | The issuer's discovery document is unreachable or its `issuer` claim does not match. |
+| Redirect to `/?oidc_error=discovery_failed` | The issuer's discovery document is unreachable, its `issuer` claim does not match, `OIDC_ISSUER` is malformed or not `https://`, or the document advertises a non-`https://` endpoint under an `https://` issuer (check that the proxy in front of the IdP forwards `X-Forwarded-Proto`). The server log names the field and host. |
 | Redirect to `/?oidc_error=invalid_state` | The session cookie was lost between login and callback (secret changed, or the process restarted). |
 | Redirect to `/?oidc_error=token_exchange_failed` | Client authentication was rejected, or the ID token failed validation. Check the redirect URI is registered exactly. |
 | Redirect to `/?oidc_error=misconfigured` | Client credentials could not be built -- e.g. `private_key_jwt` with an unreadable key file. |

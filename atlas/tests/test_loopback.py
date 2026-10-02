@@ -91,7 +91,7 @@ def test_parse_ip_legacy_dotted_forms(host, expected):
 
 
 @pytest.mark.parametrize("host", [
-    "0x", "08", "1e3", "+1", "1_0", "256.1", "0x100.1", "1.0x1000000",
+    "0x", "08", "1e3", "+1", "1_0", "2_130_706_433", "0b1", "0o177", "-1", "256.1", "0x100.1", "1.0x1000000",
     "4294967296", "\uff11\uff12\uff17.0.0.1",
 ])
 def test_parse_ip_rejects_non_inet_aton_forms(host):

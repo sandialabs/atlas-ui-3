@@ -822,6 +822,16 @@ class TestOIDCRoutes:
             response = client.get("/auth/oidc/logout", follow_redirects=False)
         assert response.headers["location"].startswith("https://idp.example.gov/logout?")
 
+    def test_logout_warns_when_discovery_fails(self, oidc_app, caplog):
+        with _patch_settings(_Settings()), patch(
+            "atlas.routes.oidc_auth_routes.get_provider_metadata",
+            AsyncMock(side_effect=OIDCDiscoveryError("OIDC issuer is not a valid URL")),
+        ), caplog.at_level(logging.WARNING, logger="atlas.routes.oidc_auth_routes"):
+            response = TestClient(oidc_app).get("/auth/oidc/logout", follow_redirects=False)
+        assert response.headers["location"] == "/?oidc_auth=logged_out"
+        assert any("skipping IdP sign-out" in r.getMessage() and "not a valid URL" in r.getMessage()
+                   for r in caplog.records if r.levelno == logging.WARNING)
+
 
 # -- Middleware integration -------------------------------------------------
 
