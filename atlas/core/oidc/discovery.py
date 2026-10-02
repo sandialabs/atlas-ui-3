@@ -166,7 +166,9 @@ def parse_provider_metadata(issuer: str, document: Dict[str, Any]) -> ProviderMe
     # plain-http endpoints: the token request carries the client secret.
     issuer_is_http = issuer.strip().lower().startswith("http://")
     for key in _ENDPOINT_FIELDS:
-        if document.get(key):
+        # Absent, null and "" mean "not advertised"; any other value (even a
+        # falsy one like 0 or []) must be a valid URL.
+        if document.get(key) not in (None, ""):
             _check_url(f"OIDC discovery document {key}", document[key], allow_http=issuer_is_http)
 
     def _string_list(key: str) -> List[str]:

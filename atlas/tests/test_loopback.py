@@ -17,6 +17,10 @@ from atlas.core.loopback import is_localhost_name, is_loopback_host, normalize_h
     "::ffff:127.0.0.1",
     "2130706433",
     "0x7f000001",
+    "127.1",
+    "0x7f.1",
+    "0177.0.0.1",
+    "0x7f.0x0.0.1",
 ])
 def test_loopback_hosts(host):
     assert is_loopback_host(host)
@@ -35,6 +39,10 @@ def test_loopback_hosts(host):
     "testserver",
     "keycloak.localhost",
     "localhost..",
+    "0x",
+    "08.0.0.1",
+    "127.0.0.256",
+    "1.2.3.4.5",
 ])
 def test_non_loopback_hosts(host):
     assert not is_loopback_host(host)
@@ -67,3 +75,24 @@ def test_parse_ip():
     assert str(parse_ip("2130706433")) == "127.0.0.1"
     assert parse_ip("example.com") is None
     assert parse_ip(str(2**40)) is None
+
+
+@pytest.mark.parametrize("host,expected", [
+    ("127.1", "127.0.0.1"),
+    ("0x7f.1", "127.0.0.1"),
+    ("0177.0.0.1", "127.0.0.1"),
+    ("10.1", "10.0.0.1"),
+    ("1.0xffffff", "1.255.255.255"),
+    ("4294967295", "255.255.255.255"),
+])
+def test_parse_ip_legacy_dotted_forms(host, expected):
+    """Matches what inet_aton (and so HTTP clients) would connect to."""
+    assert str(parse_ip(host)) == expected
+
+
+@pytest.mark.parametrize("host", [
+    "0x", "08", "1e3", "+1", "1_0", "256.1", "0x100.1", "1.0x1000000",
+    "4294967296", "\uff11\uff12\uff17.0.0.1",
+])
+def test_parse_ip_rejects_non_inet_aton_forms(host):
+    assert parse_ip(host) is None

@@ -11,7 +11,8 @@ What counts as loopback here:
 - the name ``localhost``;
 - any loopback IP literal: ``127.0.0.0/8``, ``::1`` and IPv4-mapped forms such
   as ``::ffff:127.0.0.1``, including the legacy integer and hex IPv4
-  encodings HTTP clients still accept (``2130706433``, ``0x7f000001``);
+  encodings HTTP clients still accept (``2130706433``, ``0x7f000001``,
+  ``127.1``, ``0x7f.1``, ``0177.0.0.1``);
 - with ``localhost_subdomains=True``, any RFC 6761 ``*.localhost`` name such as
   ``keycloak.localhost``.
 
@@ -20,9 +21,13 @@ removed. These are checks on the *name*, never on what it resolves to.
 """
 
 import ipaddress
+import re
 from typing import Iterable, Optional, Union
 
 IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+
+# One part of a legacy IPv4 literal: hex, octal (leading zero) or decimal.
+_LEGACY_IPV4_PART = re.compile(r"0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*", re.ASCII)
 
 
 def normalize_host(host: Optional[str]) -> str:
@@ -47,15 +52,38 @@ def parse_ip(host: Optional[str]) -> Optional[IPAddress]:
         return ipaddress.ip_address(host)
     except ValueError:
         pass
-    # Integer and other legacy IPv4 encodings that ip_address rejects but
-    # resolvers and HTTP clients still accept.
-    try:
-        packed = int(host, 0)
-    except (TypeError, ValueError):
+    return _parse_legacy_ipv4(host)
+
+
+def _parse_legacy_ipv4(host: str) -> Optional[ipaddress.IPv4Address]:
+    """Parse the BSD ``inet_aton`` IPv4 forms that ``ipaddress`` rejects.
+
+    Resolvers and HTTP clients still accept one to four dot-separated parts,
+    each decimal, ``0x`` hex or leading-zero octal, with the last part filling
+    the remaining bytes: ``2130706433``, ``0x7f000001``, ``127.1``,
+    ``0x7f.1`` and ``0177.0.0.1`` are all ``127.0.0.1``.
+    """
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4:
         return None
-    if 0 <= packed <= 0xFFFFFFFF:
-        return ipaddress.ip_address(packed)
-    return None
+    values = []
+    for part in parts:
+        if not _LEGACY_IPV4_PART.fullmatch(part):
+            return None
+        if part[:2].lower() == "0x":
+            values.append(int(part[2:], 16))
+        elif len(part) > 1 and part[0] == "0":
+            values.append(int(part, 8))
+        else:
+            values.append(int(part, 10))
+    *head, last = values
+    if any(v > 0xFF for v in head) or last >= 1 << (8 * (4 - len(head))):
+        return None
+    packed = 0
+    for v in head:
+        packed = (packed << 8) | v
+    packed = (packed << (8 * (4 - len(head)))) | last
+    return ipaddress.IPv4Address(packed)
 
 
 def is_localhost_name(host: Optional[str], *, localhost_subdomains: bool = False) -> bool:

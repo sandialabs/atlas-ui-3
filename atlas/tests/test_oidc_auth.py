@@ -235,6 +235,18 @@ class TestDiscovery:
         metadata = parse_provider_metadata("http://localhost:8080", document)
         assert metadata.token_endpoint == "https://idp.example.gov/token"
 
+    @pytest.mark.parametrize("key", ["userinfo_endpoint", "end_session_endpoint"])
+    @pytest.mark.parametrize("value", [0, [], False, {}])
+    def test_falsy_malformed_optional_endpoint_rejected(self, key, value):
+        document = dict(DISCOVERY_DOC, **{key: value})
+        with pytest.raises(OIDCDiscoveryError, match=f"{key} must be a URL string"):
+            parse_provider_metadata("https://idp.example.gov", document)
+
+    @pytest.mark.parametrize("value", [None, ""])
+    def test_absent_optional_endpoint_is_allowed(self, value):
+        document = dict(DISCOVERY_DOC, userinfo_endpoint=value)
+        assert parse_provider_metadata("https://idp.example.gov", document)
+
     @pytest.mark.parametrize("value", ["/token", "https://[::1/token", 42])
     def test_malformed_endpoint_rejected(self, value):
         document = dict(DISCOVERY_DOC, token_endpoint=value)

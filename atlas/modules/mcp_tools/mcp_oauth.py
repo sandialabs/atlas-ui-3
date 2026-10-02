@@ -156,9 +156,13 @@ def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -
     try:
         parsed = urlsplit(url)
         host = parsed.hostname or ""
+        parsed.port  # noqa: B018 -- raises ValueError on a malformed port
     except ValueError as exc:
-        # An unclosed IPv6 bracket, for example; it must not escape as a 500.
+        # An unclosed IPv6 bracket or a non-numeric port, for example; it
+        # must not escape as a bare ValueError.
         raise MCPOAuthError(f"{what} is not a valid URL") from exc
+    if not host:
+        raise MCPOAuthError(f"{what} must be an absolute URL with a host")
 
     if parsed.scheme not in ("https", "http"):
         raise MCPOAuthError(f"{what} must be an https:// URL")

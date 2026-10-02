@@ -793,9 +793,22 @@ class TestDiscoverySSRFConstraints:
         with pytest.raises(MCPOAuthError, match="internal address"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
 
-    def test_malformed_url_is_an_oauth_error(self):
+    @pytest.mark.parametrize("url", ["https://[::1/x", "https://idp.example:notaport/x"])
+    def test_malformed_url_is_an_oauth_error(self, url):
         with pytest.raises(MCPOAuthError, match="not a valid URL"):
-            validate_endpoint_url("https://[::1/x", what="test")
+            validate_endpoint_url(url, what="test")
+
+    @pytest.mark.parametrize("url", ["https:///x", "http://:8080/x"])
+    def test_url_without_host_is_refused(self, url):
+        with pytest.raises(MCPOAuthError, match="absolute URL with a host"):
+            validate_endpoint_url(url, what="test")
+
+    @pytest.mark.parametrize(
+        "url", ["https://127.1/x", "https://0x7f.1/x", "https://0177.0.0.1/x", "https://10.1/x"]
+    )
+    def test_legacy_dotted_ipv4_forms_are_internal(self, url):
+        with pytest.raises(MCPOAuthError, match="internal address"):
+            validate_endpoint_url(url, what="test", allow_loopback=False)
 
     def test_localhost_subdomain_is_not_a_trusted_loopback_server(self):
         """``*.localhost`` resolves via the operator's resolver, not this process."""
