@@ -1,15 +1,12 @@
-name: Release - cut monthly branch
+name: Release - cut stabilization branch
 
-# Cuts a release branch, bumps versions, reshapes CHANGELOG, and opens
-# a draft PR. Does NOT publish. Full runbook:
+# Manual escape hatch: cuts a release branch, bumps versions, reshapes
+# CHANGELOG, and opens a draft PR. Does NOT publish. Normal releases are
+# automated by release-weekly.yml; use this only when a release genuinely
+# needs a freeze of work landing on main. Full runbook:
 # docs/developer/release-process.md
 
 on:
-  schedule:
-    # 14:00 UTC on the 22nd of every month. Day 22 is the earliest
-    # date guaranteed to fall within the last 10 days of any month,
-    # which we treat as "the last week" for scheduling purposes.
-    - cron: '0 14 22 * *'
   workflow_dispatch:
     inputs:
       version:
@@ -44,9 +41,9 @@ jobs:
   cut:
     name: Cut release branch
     runs-on: ubuntu-latest
-    # Guardrail: do not run scheduled cuts on forks. workflow_dispatch
-    # is allowed on any repo so maintainers can dry-run from a fork.
-    if: github.event_name != 'schedule' || github.repository == 'sandialabs/atlas-ui-3'
+    # Manual-only, but keep the canonical-repo guard so a dispatch from a
+    # fork does not attempt to push branches into the upstream repository.
+    if: github.repository == 'sandialabs/atlas-ui-3'
     env:
       # Prefer a PAT so the branch push and PR creation trigger
       # downstream workflows (CI/CD Pipeline, Security Checks). PRs
@@ -453,7 +450,7 @@ jobs:
           # Idempotent label create. gh exits non-zero if the label
           # already exists; swallow that specific case only.
           if ! gh label create "release" \
-               --description "Monthly release cut PR" \
+               --description "Stabilization release cut PR" \
                --color "0e8a16" 2>/tmp/label-err; then
             if grep -qi "already exists" /tmp/label-err; then
               echo "Label 'release' already exists — continuing."

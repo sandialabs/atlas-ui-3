@@ -12,7 +12,14 @@ This guide covers how to publish new versions of the `atlas-chat` package to PyP
 
 ## Publishing a New Release
 
-### Option A: GitHub CLI (Recommended)
+Normal releases are automated. The `release-weekly` workflow bumps the
+version, tags it, and publishes the GitHub Release, which triggers
+`pypi-publish.yml`. See
+[docs/developer/release-process.md](../developer/release-process.md).
+The manual options below are fallbacks for when the automation is broken or
+you need to ship out of band.
+
+### Option A: GitHub CLI (Recommended for manual releases)
 
 ```bash
 # 1. Update version in BOTH sources the publish workflow cross-checks

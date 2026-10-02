@@ -43,7 +43,7 @@ built live under [design-notes/](design-notes/README.md).
 
 ## Releases & Documentation
 
-- [Release Process](release-process.md) - Monthly release cadence, versioning, hotfix flow, rollback
+- [Release Process](release-process.md) - Weekly automated release cadence, versioning, manual/stabilization/hotfix flows, rollback
 - [Documentation Bundling](documentation-bundling.md) - Automated documentation bundle for CI/CD and AI agents
 
 ## Design Notes

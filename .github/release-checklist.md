@@ -1,11 +1,12 @@
 <!--
-This file is used as the body of the draft release PR opened by
-.github/workflows/release-cut.yml. Keep it actionable and
-review-friendly. Full process docs live at
-docs/developer/release-process.md.
+This file is used as the body of the draft release PR opened by the
+`release-cut` workflow's stabilization path. Normal releases are
+automated by `release-weekly.yml`, so this checklist only applies when a
+release genuinely needs a freeze. Keep it actionable and review-friendly.
+Full process docs live at docs/developer/release-process.md.
 -->
 
-# Release {{VERSION}} ({{YEAR_MONTH}})
+# Stabilization release {{VERSION}} ({{YEAR_MONTH}})
 
 This PR was opened by the `release-cut` automation. It cuts
 `release/{{YEAR_MONTH}}` from `main` and bumps the version. Nothing
