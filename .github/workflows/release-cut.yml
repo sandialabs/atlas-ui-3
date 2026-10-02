@@ -78,20 +78,19 @@ jobs:
       - name: Compute release metadata
         id: meta
         shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_BUMP: ${{ github.event.inputs.bump }}
         run: |
           set -euo pipefail
 
-          current="$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)"
-          if [[ -z "$current" ]]; then
-            echo "::error::Could not read VERSION from atlas/version.py"
-            exit 1
-          fi
-          IFS='.' read -r cur_major cur_minor cur_patch <<< "$current"
+          current="$(python3 scripts/release_bump.py current)"
 
-          input_version="${{ github.event.inputs.version }}"
-          bump_kind="${{ github.event.inputs.bump }}"
-          if [[ -z "$bump_kind" ]]; then
-            bump_kind="minor"
+          input_version="${INPUT_VERSION:-}"
+          bump_kind="${INPUT_BUMP:-minor}"
+          if [[ ! "$bump_kind" =~ ^(major|minor|patch)$ ]]; then
+            echo "::error::bump input must be major, minor, or patch; got '$bump_kind'"
+            exit 1
           fi
 
           if [[ -n "$input_version" ]]; then
@@ -101,12 +100,7 @@ jobs:
             fi
             new_version="$input_version"
           else
-            case "$bump_kind" in
-              major) new_version="$((cur_major + 1)).0.0" ;;
-              minor) new_version="${cur_major}.$((cur_minor + 1)).0" ;;
-              patch) new_version="${cur_major}.${cur_minor}.$((cur_patch + 1))" ;;
-              *) echo "::error::Unknown bump kind '$bump_kind'"; exit 1 ;;
-            esac
+            new_version="$(python3 scripts/release_bump.py plan --bump "$bump_kind")"
           fi
 
           year_month="$(date -u +%Y.%m)"
@@ -166,62 +160,7 @@ jobs:
           set -euo pipefail
           git checkout -b "$BRANCH"
 
-      - name: Bump atlas/version.py
-        if: steps.state.outputs.branch_exists == 'false'
-        env:
-          OLD_VERSION: ${{ steps.meta.outputs.current_version }}
-          NEW_VERSION: ${{ steps.meta.outputs.new_version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import os, re, pathlib
-          path = pathlib.Path("atlas/version.py")
-          text = path.read_text()
-          old, new = os.environ["OLD_VERSION"], os.environ["NEW_VERSION"]
-          replaced, n = re.subn(
-              rf'^VERSION\s*=\s*"{re.escape(old)}"',
-              f'VERSION = "{new}"',
-              text,
-              flags=re.MULTILINE,
-          )
-          if n != 1:
-              raise SystemExit(
-                  f"Expected exactly 1 VERSION line matching {old!r} in atlas/version.py, found {n}"
-              )
-          path.write_text(replaced)
-          print(f"atlas/version.py: {old} -> {new}")
-          PY
-
-      - name: Bump pyproject.toml
-        if: steps.state.outputs.branch_exists == 'false'
-        env:
-          OLD_VERSION: ${{ steps.meta.outputs.current_version }}
-          NEW_VERSION: ${{ steps.meta.outputs.new_version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import os, re, pathlib
-          path = pathlib.Path("pyproject.toml")
-          text = path.read_text()
-          old, new = os.environ["OLD_VERSION"], os.environ["NEW_VERSION"]
-          # Match the first occurrence of `version = "X.Y.Z"` in the
-          # top-level [project] table; we do not want to touch
-          # dependency pin strings that happen to match the version.
-          pattern = re.compile(
-              rf'(?m)^(?P<prefix>version\s*=\s*")' + re.escape(old) + r'(?P<suffix>")'
-          )
-          replaced, n = pattern.subn(lambda m: f'{m.group("prefix")}{new}{m.group("suffix")}', text, count=1)
-          if n != 1:
-              raise SystemExit(
-                  f"Expected exactly 1 top-level version={old!r} in pyproject.toml, found {n}"
-              )
-          path.write_text(replaced)
-          print(f"pyproject.toml: {old} -> {new}")
-          PY
-
-      - name: Update CHANGELOG.md
+      - name: Bump version files and reshape CHANGELOG
         if: steps.state.outputs.branch_exists == 'false'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
@@ -229,33 +168,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import os, pathlib, re
-          path = pathlib.Path("CHANGELOG.md")
-          text = path.read_text()
-          new_version = os.environ["NEW_VERSION"]
-          release_date = os.environ["RELEASE_DATE"]
-
-          # Rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and
-          # insert a fresh empty Unreleased section above it.
-          # Use [ \t]* rather than \s* so the regex does not consume
-          # the terminating newline of the heading line; otherwise the
-          # blank line between the new version heading and the first
-          # entry would be eaten.
-          unreleased_re = re.compile(r'^## \[Unreleased\][ \t]*$', re.MULTILINE)
-          m = unreleased_re.search(text)
-          if not m:
-              raise SystemExit(
-                  "CHANGELOG.md is missing a '## [Unreleased]' section; refusing to touch it."
-              )
-          new_heading = f"## [{new_version}] - {release_date}"
-          fresh_unreleased = "## [Unreleased]\n\n"
-          before = text[:m.start()]
-          after = text[m.end():]
-          text_out = before + fresh_unreleased + new_heading + after
-          path.write_text(text_out)
-          print(f"CHANGELOG.md: [Unreleased] -> [{new_version}] - {release_date}")
-          PY
+          # Shared with release-weekly.yml so the two paths cannot drift.
+          # --force preserves this workflow's long-standing behaviour of
+          # cutting even when the Unreleased section is sparse.
+          python3 scripts/release_bump.py apply \
+            --version "$NEW_VERSION" \
+            --date "$RELEASE_DATE" \
+            --force
 
       - name: Refresh uv.lock
         if: steps.state.outputs.branch_exists == 'false'

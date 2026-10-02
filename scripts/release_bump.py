@@ -71,11 +71,12 @@ def has_unreleased_changes() -> bool:
         raise ReleaseBumpError(
             f"{CHANGELOG_FILE} is missing a '## [Unreleased]' section"
         )
+    # Strip HTML comments, including multi-line placeholders, so a commented
+    # template does not read as a release-worthy change.
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
     for line in body.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("<!--"):
-            continue
-        return True
+        if line.strip():
+            return True
     return False
 
 

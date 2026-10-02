@@ -66,6 +66,36 @@ else
 fi
 
 # ==========================================
+print_header "Check 2b: release workflow hardening"
+# ==========================================
+if grep -q 'INPUT_VERSION:' "$WORKFLOW" \
+    && grep -q 'INPUT_BUMP:' "$WORKFLOW" \
+    && grep -q 'INPUT_VERSION:-\|INPUT_BUMP:-' "$WORKFLOW" \
+    && ! grep -qE 'input_version="\$\{\{ github\.event\.inputs' "$WORKFLOW"; then
+    print_result 0 "dispatch inputs are passed through env, not interpolated into shell"
+else
+    print_result 1 "dispatch inputs are passed through env, not interpolated into shell"
+fi
+if grep -q "Require RELEASE_PAT for a real release" "$WORKFLOW" \
+    && grep -q "RELEASE_PAT is required to publish" "$WORKFLOW"; then
+    print_result 0 "a real release without RELEASE_PAT fails before branching"
+else
+    print_result 1 "a real release without RELEASE_PAT fails before branching"
+fi
+if grep -q -- "--match-head-commit" "$WORKFLOW" \
+    && grep -q "mergeCommit" "$WORKFLOW" \
+    && grep -q 'git tag -a "v${NEW_VERSION}" -m "Atlas UI 3 v${NEW_VERSION}" "$MERGE_SHA"' "$WORKFLOW"; then
+    print_result 0 "merge is pinned to the checked head and the merge commit is tagged"
+else
+    print_result 1 "merge is pinned to the checked head and the merge commit is tagged"
+fi
+if grep -q "Verify the current version has a release tag" "$WORKFLOW"; then
+    print_result 0 "an untagged version already on main is detected"
+else
+    print_result 1 "an untagged version already on main is detected"
+fi
+
+# ==========================================
 print_header "Check 3: change detection distinguishes empty vs populated"
 # ==========================================
 python3 scripts/release_bump.py check > /dev/null 2>&1

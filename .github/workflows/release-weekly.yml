@@ -57,11 +57,11 @@ jobs:
       HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
       GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
     steps:
-      - name: Warn if no PAT is configured
+      - name: Note PAT requirement when unset
         if: env.HAS_RELEASE_PAT != 'true'
         run: |
-          echo "::warning::RELEASE_PAT is not configured; falling back to GITHUB_TOKEN."
-          echo "::warning::The release PR will not trigger CI, so it will be merged without waiting for checks."
+          echo "::warning::RELEASE_PAT is not configured."
+          echo "::warning::A real (non-dry-run) release stops before creating a branch; only dry_run dispatches can proceed."
 
       - name: Checkout main
         uses: actions/checkout@v7
@@ -73,6 +73,26 @@ jobs:
       - name: Install uv
         # Pinned to a commit SHA so the install step is immutable.
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Verify the current version has a release tag
+        # A version merged to main but never tagged (for example, a prior run
+        # that died between merge and tag) would otherwise be silently skipped:
+        # its changelog entries already moved under a released heading, so
+        # `[Unreleased]` looks empty and the next run would plan past it.
+        shell: bash
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          current="$(python3 scripts/release_bump.py current)"
+          if git rev-parse -q --verify "refs/tags/v${current}" >/dev/null; then
+            echo "::notice::Current version ${current} is tagged."
+          elif [[ "${DRY_RUN}" == "true" ]]; then
+            echo "::warning::Version ${current} has no tag v${current}; a real run would stop so it can be published."
+          else
+            echo "::error::main is at version ${current} but tag v${current} is missing -- a prior release was merged without being tagged. Tag and publish it before the next weekly run."
+            exit 1
+          fi
 
       - name: Check for unreleased changes
         id: changes
@@ -101,18 +121,32 @@ jobs:
         if: steps.changes.outputs.changes != 'true'
         run: echo "Nothing to release; exiting without changing anything."
 
+      - name: Require RELEASE_PAT for a real release
+        # Tags and Releases created with the default GITHUB_TOKEN do not
+        # trigger other workflows, so pypi-publish.yml and quay-publish.yml
+        # would never run and the version would be tagged but never shipped.
+        if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true' && env.HAS_RELEASE_PAT != 'true'
+        run: |
+          set -euo pipefail
+          echo "::error::RELEASE_PAT is required to publish: with GITHUB_TOKEN the tag and Release would not trigger the publish workflows. Configure RELEASE_PAT (or dispatch with dry_run: true)."
+          exit 1
+
       - name: Compute release metadata
         id: meta
         if: steps.changes.outputs.changes == 'true'
         shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_BUMP: ${{ github.event.inputs.bump }}
         run: |
           set -euo pipefail
           current="$(python3 scripts/release_bump.py current)"
 
-          input_version="${{ github.event.inputs.version }}"
-          bump_kind="${{ github.event.inputs.bump }}"
-          if [[ -z "$bump_kind" ]]; then
-            bump_kind="minor"
+          input_version="${INPUT_VERSION:-}"
+          bump_kind="${INPUT_BUMP:-minor}"
+          if [[ ! "$bump_kind" =~ ^(major|minor|patch)$ ]]; then
+            echo "::error::bump input must be major, minor, or patch; got '$bump_kind'"
+            exit 1
           fi
 
           if [[ -n "$input_version" ]]; then
@@ -147,11 +181,14 @@ jobs:
       - name: Apply version bump
         if: steps.changes.outputs.changes == 'true'
         shell: bash
+        env:
+          NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+          RELEASE_DATE: ${{ steps.meta.outputs.release_date }}
         run: |
           set -euo pipefail
           python3 scripts/release_bump.py apply \
-            --version "${{ steps.meta.outputs.new_version }}" \
-            --date "${{ steps.meta.outputs.release_date }}"
+            --version "$NEW_VERSION" \
+            --date "$RELEASE_DATE"
           uv lock
 
       - name: Show diff
@@ -182,6 +219,7 @@ jobs:
           git checkout -b "$BRANCH"
 
       - name: Commit and push bump
+        id: commit
         if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
         env:
           BRANCH: ${{ steps.meta.outputs.branch }}
@@ -193,6 +231,7 @@ jobs:
           git add atlas/version.py pyproject.toml uv.lock CHANGELOG.md
           git commit -m "chore(release): weekly v${NEW_VERSION}"
           git push --set-upstream origin "$BRANCH"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Open release PR
         id: pr
@@ -220,49 +259,72 @@ jobs:
           echo "number=$(basename "$pr_url")" >> "$GITHUB_OUTPUT"
 
       - name: Wait for checks and merge
+        id: merge
         if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
         env:
           PR: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
         run: |
           set -euo pipefail
-          if [[ "$HAS_RELEASE_PAT" == "true" ]]; then
-            merged=false
-            for attempt in $(seq 1 10); do
-              if gh pr checks "$PR" --watch --fail-fast --interval 30 > /tmp/pr-checks.log 2>&1; then
-                merged=true
-                break
-              fi
-              if grep -qi "no checks reported" /tmp/pr-checks.log && [[ "$attempt" -lt 10 ]]; then
-                echo "No checks registered yet (attempt ${attempt}); waiting 20s..."
-                sleep 20
-                continue
-              fi
-              echo "::error::Release PR #$PR checks did not pass; leaving it open for review."
-              cat /tmp/pr-checks.log
-              exit 1
-            done
-            if [[ "$merged" != "true" ]]; then
-              echo "::error::Timed out waiting for checks on PR #$PR."
-              exit 1
+          wait_ok=false
+          for attempt in $(seq 1 10); do
+            if gh pr checks "$PR" --watch --fail-fast --interval 30 > /tmp/pr-checks.log 2>&1; then
+              wait_ok=true
+              break
             fi
-          else
-            echo "::warning::RELEASE_PAT not set; merging PR #$PR without waiting for CI."
+            if grep -qi "no checks reported" /tmp/pr-checks.log && [[ "$attempt" -lt 10 ]]; then
+              echo "No checks registered yet (attempt ${attempt}); waiting 20s..."
+              sleep 20
+              continue
+            fi
+            echo "::error::Release PR #$PR checks did not pass; leaving it open for review."
+            cat /tmp/pr-checks.log
+            exit 1
+          done
+          if [[ "$wait_ok" != "true" ]]; then
+            echo "::error::Timed out waiting for checks on PR #$PR."
+            exit 1
           fi
-          gh pr merge "$PR" --squash --delete-branch
+          # Pin the merge to the exact commit whose checks we just watched, so a
+          # commit pushed to the branch after the checks cannot slip through.
+          gh pr merge "$PR" --squash --delete-branch --match-head-commit "$HEAD_SHA"
+
+          merge_sha=""
+          for attempt in $(seq 1 10); do
+            merge_sha="$(gh pr view "$PR" --json mergeCommit --jq '.mergeCommit.oid // empty' 2>/dev/null || true)"
+            [[ -n "$merge_sha" ]] && break
+            sleep 6
+          done
+          if [[ -z "$merge_sha" ]]; then
+            echo "::error::Could not read the merge commit for PR #$PR; refusing to tag."
+            exit 1
+          fi
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+          echo "::notice::Merged PR #$PR as ${merge_sha}"
 
       - name: Tag the merged commit
         if: steps.changes.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
         env:
           NEW_VERSION: ${{ steps.meta.outputs.new_version }}
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
         run: |
           set -euo pipefail
-          git fetch origin main
-          remote_version="$(git show origin/main:atlas/version.py | grep '^VERSION' | cut -d'"' -f2)"
-          if [[ "$remote_version" != "$NEW_VERSION" ]]; then
-            echo "::error::origin/main is at ${remote_version}, expected ${NEW_VERSION}; tag aborted."
+          # Tag the exact merge commit, never the moving tip of main: a PR that
+          # lands between the merge and the fetch must not be published under
+          # this version.
+          if ! git cat-file -e "${MERGE_SHA}^{commit}" 2>/dev/null; then
+            git fetch origin "$MERGE_SHA" 2>/dev/null || git fetch origin main
+          fi
+          if ! git cat-file -e "${MERGE_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::Merge commit ${MERGE_SHA} is not available locally; refusing to tag."
             exit 1
           fi
-          git tag -a "v${NEW_VERSION}" -m "Atlas UI 3 v${NEW_VERSION}" origin/main
+          remote_version="$(git show "${MERGE_SHA}:atlas/version.py" | grep '^VERSION' | cut -d'"' -f2)"
+          if [[ "$remote_version" != "$NEW_VERSION" ]]; then
+            echo "::error::Merge commit ${MERGE_SHA} is at version ${remote_version}, expected ${NEW_VERSION}; tag aborted."
+            exit 1
+          fi
+          git tag -a "v${NEW_VERSION}" -m "Atlas UI 3 v${NEW_VERSION}" "$MERGE_SHA"
           git push origin "v${NEW_VERSION}"
 
       - name: Publish GitHub Release
@@ -284,8 +346,10 @@ jobs:
           OLD: ${{ steps.meta.outputs.current_version }}
           NEW: ${{ steps.meta.outputs.new_version }}
           LAST_TAG: ${{ steps.meta.outputs.last_tag }}
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
           DRY: ${{ github.event.inputs.dry_run }}
           HAS_PAT: ${{ env.HAS_RELEASE_PAT }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           {
             echo "## Weekly release summary"
@@ -295,12 +359,15 @@ jobs:
             echo "- Previous tag: \`${LAST_TAG:-none}\`"
             echo "- Dry run: \`${DRY:-false}\`"
             echo "- RELEASE_PAT configured: \`$HAS_PAT\`"
+            echo "- Job status: \`$JOB_STATUS\`"
             echo ""
             if [[ "$CHANGES" != "true" ]]; then
               echo "No entries under \`## [Unreleased]\` -- this week's release was skipped."
             elif [[ "$DRY" == "true" ]]; then
               echo "Dry run only -- nothing was pushed or published."
+            elif [[ "$JOB_STATUS" != "success" ]]; then
+              echo "Run ended with status \`$JOB_STATUS\` before the release completed. Nothing is claimed as published. If the bump PR was merged but not tagged, tag its merge commit manually before the next run."
             else
-              echo "Tag \`v${NEW}\` pushed and GitHub Release published. Watch pypi-publish.yml and quay-publish.yml for the artifacts."
+              echo "Tag \`v${NEW}\` pushed on \`${MERGE_SHA:-the merge commit}\` and GitHub Release published. Watch pypi-publish.yml and quay-publish.yml for the artifacts."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

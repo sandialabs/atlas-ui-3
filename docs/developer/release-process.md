@@ -59,14 +59,23 @@ exception, not the default; see
    [`scripts/release_bump.py`](../../scripts/release_bump.py), which the PR
    validation script exercises directly.
 3. **Opens a PR** from `release/vX.Y.Z` to `main`.
-4. **Waits for CI**, then squash-merges. If any check fails, the workflow
-   stops and leaves the PR open for a human — it never merges through red.
-   Without the `RELEASE_PAT` secret the PR is opened with `GITHUB_TOKEN`,
-   which does not trigger `pull_request` workflows, so the fallback merges
-   without waiting (the run logs a warning and the step summary calls it
-   out). Configure `RELEASE_PAT` for the safe path.
-5. **Tags** the squashed commit on `main` as `vX.Y.Z`.
+4. **Waits for CI**, then squash-merges the exact commit it watched
+   (`--match-head-commit`). If any check fails, the workflow stops and
+   leaves the PR open for a human — it never merges through red.
+   `RELEASE_PAT` is required for a real release: a tag or Release created
+   with the default `GITHUB_TOKEN` does not trigger `pypi-publish.yml` or
+   `quay-publish.yml`, so the run fails before creating any branch rather
+   than tagging a version that never ships. `dry_run: true` still works
+   without the secret.
+5. **Tags** the squashed merge commit on `main` as `vX.Y.Z` (read back
+   from the PR, not the moving tip of `main`).
 6. **Publishes a GitHub Release** with the changelog section as its body.
+
+Before planning, the run verifies that the version currently on `main` has
+a matching `vX.Y.Z` tag. If a previous release was merged but never tagged
+(for example a run that died between merge and tag), it fails loudly
+instead of planning past the vanished version; tag and publish that commit
+by hand, then let the schedule resume.
 
 Steps 1 and 2 are idempotent in the sense that a week with nothing to
 release is a no-op; a version tag that already exists aborts the run.
