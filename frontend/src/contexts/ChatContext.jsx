@@ -210,6 +210,7 @@ export const ChatProvider = ({ children }) => {
 	// it was built.
 	const activeConversationIdRef = useRef(null)
 	activeConversationIdRef.current = activeConversationId
+	const reconnectResyncGenerationRef = useRef(0)
 	const localSaveTimerRef = useRef(null)
 
 	// Method to add a file to attachments
@@ -924,6 +925,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			toast.error('Not connected. Waiting to reconnect before sending.')
 			return false
 		}
+		// A reconnect snapshot fetched before this turn must not erase it.
+		reconnectResyncGenerationRef.current += 1
 		// Sending a turn is the only user action that re-binds a conversation to
 		// the active workspace; opening one must not. Only once the frame is
 		// actually on the wire -- a send that failed must not leave a durable
@@ -1298,6 +1301,37 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// every streaming frame.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
+
+	// A new socket cannot receive the old run's stream. Reuse the reopen path
+	// to replace missed rows and arm the joined view's polling/final refresh.
+	const loadSavedConversationRef = useRef(loadSavedConversation)
+	loadSavedConversationRef.current = loadSavedConversation
+	const wasConnectedRef = useRef(isConnected)
+	useEffect(() => {
+		const reconnected = !wasConnectedRef.current && isConnected
+		wasConnectedRef.current = isConnected
+		if (!reconnected || !config.features?.chat_history || saveMode !== 'server' || !activeConversationId) return
+		let cancelled = false
+		const id = activeConversationId
+		const generation = reconnectResyncGenerationRef.current
+		const resync = async () => {
+			try {
+				const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+					? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
+					: undefined
+				const res = await fetch(`/api/conversations/${id}`, timeoutSignal ? { signal: timeoutSignal } : undefined)
+				if (!res.ok) throw new Error(`conversation reconnect refresh failed: ${res.status}`)
+				const data = await res.json()
+				if (cancelled || reconnectResyncGenerationRef.current !== generation ||
+					activeConversationIdRef.current !== id || data?.id !== id || data.error) return
+				await loadSavedConversationRef.current(data)
+			} catch (error) {
+				if (!cancelled) console.error('Could not resync conversation after reconnect:', error)
+			}
+		}
+		resync()
+		return () => { cancelled = true }
+	}, [isConnected, config.features?.chat_history, saveMode, activeConversationId])
 
 	const refreshJoinedConversation = useCallback((conversationData, { live = false } = {}) => {
 		if (!conversationData || !conversationData.messages) return false
