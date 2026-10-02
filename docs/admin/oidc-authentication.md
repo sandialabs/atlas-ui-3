@@ -95,9 +95,13 @@ plaintext endpoint behind an `https://` issuer (usually a reverse proxy that
 does not forward `X-Forwarded-Proto`) is refused, because the token request
 carries the client secret; fix the provider's frontend URL rather than the
 issuer. The rule applies wherever Atlas reads the discovery document -- login,
-access-token refresh and logout -- so after upgrading, existing sessions
-against such a provider end when their access token next expires, and logout
-skips the IdP sign-out (with a warning in the log). A malformed or rejected issuer or endpoint makes login fail with
+access-token refresh, logout, and delegated credentials when
+`OIDC_DELEGATION_TOKEN_ENDPOINT` is unset. After upgrading against such a
+provider, new logins are refused; existing Atlas sessions stay valid until
+`OIDC_SESSION_MAX_AGE_SECONDS`, but their access tokens can no longer be
+refreshed, so delegated MCP credentials stop once the current access token
+expires, and logout skips the IdP sign-out. Each case logs the discovery error
+naming the field and host. A malformed or rejected issuer or endpoint makes login fail with
 `oidc_error=discovery_failed`, and the server log names the field, the host,
 and the reason.
 

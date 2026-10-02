@@ -38,9 +38,6 @@ logger = logging.getLogger(__name__)
 DISCOVERY_TIMEOUT_SECONDS = 10.0
 DISCOVERY_CACHE_TTL_SECONDS = 3600.0
 
-# Starlette's TestClient sends requests to ``testserver``.
-_EXTRA_LOOPBACK_NAMES = ("testserver",)
-
 # Endpoints the discovery document may advertise; each one is scheme-checked.
 _ENDPOINT_FIELDS = (
     "authorization_endpoint",
@@ -58,9 +55,7 @@ def _is_loopback_host(hostname: str) -> bool:
     names (for example ``keycloak.localhost`` behind a local ingress) are
     accepted alongside ``localhost`` and loopback addresses.
     """
-    return is_loopback_host(
-        hostname, localhost_subdomains=True, extra_names=_EXTRA_LOOPBACK_NAMES
-    )
+    return is_loopback_host(hostname, localhost_subdomains=True)
 
 
 class OIDCDiscoveryError(RuntimeError):

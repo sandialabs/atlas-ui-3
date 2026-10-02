@@ -786,8 +786,7 @@ class TestDiscoverySSRFConstraints:
 
     @pytest.mark.parametrize(
         "url",
-        ["https://keycloak.localhost/x", "https://a.b.localhost./x", "https://localhost/x",
-         "https://testserver/x"],
+        ["https://keycloak.localhost/x", "https://a.b.localhost./x", "https://localhost/x"],
     )
     def test_loopback_names_are_refused_from_remote_documents(self, url):
         with pytest.raises(MCPOAuthError, match="internal address"):
@@ -807,7 +806,9 @@ class TestDiscoverySSRFConstraints:
         "url", ["https://127.1/x", "https://0x7f.1/x", "https://0177.0.0.1/x", "https://10.1/x"]
     )
     def test_legacy_dotted_ipv4_forms_are_internal(self, url):
-        with pytest.raises(MCPOAuthError, match="internal address"):
+        # httpx itself rejects some forms (0177.0.0.1) as invalid URLs; either
+        # refusal is fine as long as the request is never made.
+        with pytest.raises(MCPOAuthError, match="internal address|not a valid URL"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
 
     @pytest.mark.parametrize("url", ["https://127.0.0.1./x", "https://10.0.0.1./x"])
@@ -815,6 +816,20 @@ class TestDiscoverySSRFConstraints:
         with pytest.raises(MCPOAuthError, match="internal address"):
             validate_endpoint_url(url, what="test", allow_loopback=False)
         assert is_loopback_url(url.replace("https", "http")) is False
+
+    @pytest.mark.parametrize("dot", ["\u3002", "\uff0e", "\uff61"])
+    @pytest.mark.parametrize("labels", [
+        ("169", "254", "169", "254"), ("127", "0", "0", "1"), ("10", "0", "0", "1"),
+        ("a", "localhost"),
+    ])
+    def test_unicode_dot_separators_are_normalized_before_the_check(self, dot, labels):
+        """httpx maps full-width/ideographic dots to '.', so the check must too."""
+        url = f"https://{dot.join(labels)}/x"
+        with pytest.raises(MCPOAuthError, match="internal address"):
+            validate_endpoint_url(url, what="test", allow_loopback=False)
+
+    def test_unicode_dot_loopback_server_is_recognized(self):
+        assert is_loopback_url("http://127\u30020\u30020\u30021:8931/mcp") is True
 
     def test_huge_numeric_host_does_not_raise_valueerror(self):
         url = "https://" + "9" * 5000 + "/x"

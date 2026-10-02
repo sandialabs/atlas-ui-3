@@ -66,8 +66,6 @@ MAX_RESPONSE_BYTES = 512 * 1024
 
 # An http:// endpoint is only tolerated on a loopback host (see
 # atlas.core.loopback) so local development against a mock provider works.
-# Starlette's TestClient sends requests to ``testserver``.
-_EXTRA_LOOPBACK_NAMES = ("testserver",)
 
 # Default scope requested when neither the server config nor the
 # protected-resource metadata says anything. Empty means "whatever the
@@ -92,7 +90,7 @@ def _is_loopback(host: str) -> bool:
     name resolves through the operator's resolver (often to a shared local
     ingress), which is not the same trust as this process's own loopback.
     """
-    return is_loopback_host(host, extra_names=_EXTRA_LOOPBACK_NAMES)
+    return is_loopback_host(host)
 
 
 def _is_internal_address(host: str) -> bool:
@@ -113,9 +111,7 @@ def _is_internal_address(host: str) -> bool:
         # Names are not resolved, but loopback names (``*.localhost``
         # included) are refused outright: they can only reach this machine
         # or the operator's local ingress.
-        return is_loopback_host(
-            host, localhost_subdomains=True, extra_names=_EXTRA_LOOPBACK_NAMES
-        )
+        return is_loopback_host(host, localhost_subdomains=True)
     # An IPv4-mapped IPv6 address hides the v4 properties, so unwrap it.
     mapped = getattr(address, "ipv4_mapped", None)
     if mapped is not None:
@@ -136,9 +132,27 @@ def origin_of(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}".lower()
 
 
+def _connect_host(url: str) -> str:
+    """The host httpx will actually connect to for ``url``.
+
+    httpx applies IDNA/UTS-46 mapping, which turns the full-width and
+    ideographic dots in ``169。254。169。254`` or ``a．localhost`` into ASCII
+    ones. Checking ``urlsplit``'s raw hostname instead would let those
+    spellings past the address checks. Raises ValueError for a URL httpx
+    cannot parse.
+    """
+    try:
+        return httpx.URL(url).host
+    except httpx.InvalidURL as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def is_loopback_url(url: str) -> bool:
     """Whether a URL points at a loopback host."""
-    return _is_loopback(urlsplit(url).hostname or "")
+    try:
+        return _is_loopback(_connect_host(url))
+    except ValueError:
+        return False
 
 
 def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -> str:
@@ -158,8 +172,8 @@ def validate_endpoint_url(url: str, *, what: str, allow_loopback: bool = True) -
         raise MCPOAuthError(f"{what} is missing")
     try:
         parsed = urlsplit(url)
-        host = parsed.hostname or ""
         parsed.port  # noqa: B018 -- raises ValueError on a malformed port
+        host = _connect_host(url) if parsed.hostname else ""
     except ValueError as exc:
         # An unclosed IPv6 bracket or a non-numeric port, for example; it
         # must not escape as a bare ValueError.

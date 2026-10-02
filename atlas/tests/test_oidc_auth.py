@@ -734,6 +734,52 @@ class TestOIDCRoutes:
         assert any(key in r.getMessage() and "because the issuer is https://" in r.getMessage()
                    for r in caplog.records)
 
+    @pytest.mark.asyncio
+    async def test_refresh_under_http_token_endpoint_fails_cleanly(self, monkeypatch, caplog):
+        """Refresh hits the same rule: no exception, no token, a logged reason,
+        and the token endpoint is never called with the client secret."""
+        from atlas.core.oidc import session_refresh
+        from atlas.core.oidc.session import OIDCSession
+
+        document = dict(DISCOVERY_DOC, token_endpoint="http://idp.example.gov/token")
+
+        class _Response:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return document
+
+        class _Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, **kwargs):
+                return _Response()
+
+        refresh = AsyncMock()
+        monkeypatch.setattr("atlas.core.oidc.discovery.httpx.AsyncClient", _Client)
+        monkeypatch.setattr(session_refresh, "refresh_access_token", refresh)
+        session = OIDCSession(
+            session_id="s1", user_id="user@example.gov", access_token="old",
+            refresh_token="r1", access_token_expires_at=time.time() - 1,
+        )
+        clear_metadata_cache()
+        with caplog.at_level(logging.WARNING, logger="atlas.core.oidc.session_refresh"):
+            token = await session_refresh.ensure_fresh_access_token(session, settings=_Settings())
+        clear_metadata_cache()
+
+        assert token is None
+        refresh.assert_not_called()
+        assert any("token_endpoint" in r.getMessage() and "because the issuer is https://"
+                   in r.getMessage() for r in caplog.records)
+
     def test_login_is_404_when_disabled(self, oidc_app):
         with _patch_settings(_Settings(feature_oidc_auth_enabled=False)):
             client = TestClient(oidc_app)
