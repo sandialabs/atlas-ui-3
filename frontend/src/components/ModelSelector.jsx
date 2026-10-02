@@ -5,6 +5,7 @@ import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
+import GatewayModelPicker from './GatewayModelPicker'
 
 /**
  * Chat model picker.
@@ -17,6 +18,8 @@ import TokenInputModal from './TokenInputModal'
 const ModelSelector = () => {
   const {
     models = [],
+    llmGateways = [],
+    user,
     currentModel,
     setCurrentModel,
     features,
@@ -52,6 +55,20 @@ const ModelSelector = () => {
   const complianceEnabled = features?.compliance_levels && !!isComplianceAccessible
   const currentEntry = models.find(m => (typeof m === 'string' ? m : m.name) === currentModel)
   const currentObj = typeof currentEntry === 'string' ? { name: currentEntry } : currentEntry
+  // A gateway model key is long and opaque; show the model and its team.
+  const currentLabel = currentObj?.display_name || currentModel
+  // Gateway models are chosen in their gateway's section, not the flat list.
+  const listedModels = models.filter(m => typeof m === 'string' || !m.gateway)
+  const complianceFiltering = complianceEnabled && !!complianceLevelFilter
+  // A gateway stays listed while any of its models passes the filter; the
+  // picker then hides the individual models that do not.
+  const visibleGateways = complianceFiltering
+    ? llmGateways.filter(g => (g.compliance_levels || [g.compliance_level])
+      .some(level => isComplianceAccessible(complianceLevelFilter, level)))
+    : llmGateways
+  const isGatewayModelVisible = complianceFiltering
+    ? model => isComplianceAccessible(complianceLevelFilter, model.compliance_level)
+    : null
 
   return (
     <div className="relative">
@@ -60,12 +77,12 @@ const ModelSelector = () => {
         ref={triggerRef}
         onClick={() => setDropdownOpen(!dropdownOpen)}
         className="flex items-center gap-1 px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors max-w-[16rem]"
-        title={currentModel ? `Model: ${currentModel}` : 'Select a model'}
-        aria-label={currentModel ? `Select chat model, currently ${currentModel}` : 'Select chat model'}
+        title={currentModel ? `Model: ${currentLabel}` : 'Select a model'}
+        aria-label={currentModel ? `Select chat model, currently ${currentLabel}` : 'Select chat model'}
         aria-expanded={dropdownOpen}
         aria-haspopup="true"
       >
-        <span className="text-xs truncate min-w-0">{currentModel || 'Model...'}</span>
+        <span className="text-xs truncate min-w-0">{currentLabel || 'Model...'}</span>
         {currentObj?.api_key_source === 'user' && (
           <Key className={`w-3 h-3 flex-shrink-0 ${
             currentObj.user_has_key || llmAuth.getModelAuth(currentModel)?.authenticated
@@ -80,15 +97,15 @@ const ModelSelector = () => {
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }} />
           <div className="absolute bottom-full left-0 mb-1 w-72 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
-            {models.length === 0 ? (
+            {listedModels.length === 0 && visibleGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
             ) : (
               (complianceEnabled && complianceLevelFilter
-                ? models.filter(m => {
+                ? listedModels.filter(m => {
                     const model = typeof m === 'string' ? { name: m } : m
                     return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
                   })
-                : models
+                : listedModels
               ).map(m => {
                 const model = typeof m === 'string' ? { name: m } : m
                 const modelName = model.name || m
@@ -167,6 +184,17 @@ const ModelSelector = () => {
                 )
               })
             )}
+            {visibleGateways.map(gateway => (
+              <GatewayModelPicker
+                key={gateway.name}
+                gateway={gateway}
+                currentModel={currentModel}
+                onSelect={handleModelSelect}
+                user={user}
+                isModelVisible={isGatewayModelVisible}
+                showCompliance={complianceEnabled}
+              />
+            ))}
           </div>
         </>
       )}

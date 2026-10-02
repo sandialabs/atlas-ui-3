@@ -12,6 +12,7 @@ from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
+from atlas.modules.config.models import LLMConfig, lookup_model_config
 from atlas.modules.config.settings import agent_mode_available, configured_agent_max_steps
 from atlas.modules.mcp_tools.atlas_server import SEARCH_TOOL_NAME, normalize_tool_name
 from atlas.modules.prompts.prompt_provider import PromptProvider
@@ -124,7 +125,7 @@ class ChatOrchestrator:
         if not self.config_manager:
             return False
         try:
-            model_config = self.config_manager.llm_config.models.get(model)
+            model_config = lookup_model_config(self.config_manager.llm_config, model)
             return bool(model_config and getattr(model_config, "supports_vision", False))
         except Exception:
             return False
@@ -134,7 +135,7 @@ class ChatOrchestrator:
         if not self.config_manager:
             return False
         try:
-            model_config = self.config_manager.llm_config.models.get(model)
+            model_config = lookup_model_config(self.config_manager.llm_config, model)
             return bool(model_config and getattr(model_config, "supports_pdf", False))
         except Exception:
             return False
@@ -144,7 +145,7 @@ class ChatOrchestrator:
         if not self.config_manager:
             return True  # Default to True for backward compat
         try:
-            model_config = self.config_manager.llm_config.models.get(model)
+            model_config = lookup_model_config(self.config_manager.llm_config, model)
             if not model_config:
                 return True  # Unknown models default to tool-capable
             return bool(getattr(model_config, "supports_tools", True))
@@ -203,7 +204,9 @@ class ChatOrchestrator:
         if not self.config_manager:
             return
         try:
-            models = self.config_manager.llm_config.models
+            models = self.config_manager.llm_config
+            if not isinstance(models, LLMConfig):
+                models = models.models
         except Exception:
             return
         decision = await check_model_access(models, model, user_email, context="chat")

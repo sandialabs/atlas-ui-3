@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-09-11
+Last updated: 2026-09-24
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -131,6 +131,14 @@ models:
 - **Never**: Commit API keys to `atlas/config/llmconfig.yml` or any version-controlled files
 
 This environment variable expansion system works identically to the MCP server `auth_token` field, providing consistent behavior across all authentication and configuration mechanisms in the application.
+
+## Team-Scoped Models on an Enterprise LiteLLM Proxy
+
+When models live behind an enterprise LiteLLM proxy organized by team, add a
+`litellm_gateways` section instead of listing each model: users pick one of
+their LiteLLM teams, then one of that team's models, and every request carries
+the team in `x-litellm-team-id`. See
+[Enterprise LiteLLM Team Gateways](litellm-team-gateways.md).
 
 ## Per-User API Keys (2026-02-08)
 

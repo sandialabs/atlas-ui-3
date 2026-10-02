@@ -87,7 +87,7 @@ def _find_session(user_email: str):
     return None
 
 
-async def _resolve_subject_token(user_email: str) -> Optional[str]:
+async def resolve_subject_token(user_email: str) -> Optional[str]:
     """The access token to exchange, refreshed first if it is at or past expiry.
 
     An Atlas session outlives the IdP's access token by hours, so exchanging
@@ -127,7 +127,7 @@ async def mint_delegated_token_for_server(
         )
         return None
 
-    subject_token = await _resolve_subject_token(user_email)
+    subject_token = await resolve_subject_token(user_email)
     if not subject_token:
         logger.debug(
             "No OIDC session token available to delegate for MCP server '%s'",

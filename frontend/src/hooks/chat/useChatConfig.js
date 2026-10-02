@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { parseGatewayModelKey, withGatewayModel } from '../../utils/gatewayModels'
 
 const DEFAULT_FEATURES = {
   workspaces: false,
@@ -91,6 +92,9 @@ export function useChatConfig() {
   const [appName, setAppName] = useState(cached.current?.app_name || 'Chat UI')
   const [user, setUser] = useState('Unknown')
   const [models, setModels] = useState(cached.current?.models || [])
+  // Enterprise LiteLLM gateways whose models are chosen by team (see
+  // utils/gatewayModels.js); their models are not part of `models`.
+  const [llmGateways, setLlmGateways] = useState(cached.current?.llm_gateways || [])
   const [tools, setTools] = useState([])
   const [prompts, setPrompts] = useState([])
   const [dataSources, setDataSources] = useState([])
@@ -149,6 +153,7 @@ export function useChatConfig() {
   const applyConfig = useCallback((cfg, isShell = false) => {
     setAppName(cfg.app_name || 'Chat UI')
     setModels(cfg.models || [])
+    setLlmGateways(cfg.llm_gateways || [])
     setUser(cfg.user || 'Unknown')
     setFeatures(prev => ({ ...DEFAULT_FEATURES, ...(cfg.features || prev) }))
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
@@ -220,6 +225,7 @@ export function useChatConfig() {
       if (!configReadyRef.current) {
         setAppName('Chat UI (Unauthenticated)')
         setModels([])
+        setLlmGateways([])
         setTools([])
         setDataSources([])
         setUser('Unauthenticated')
@@ -258,7 +264,8 @@ export function useChatConfig() {
         // Validate saved model is still available
         else if (currentModel && cfg.models?.length) {
           const modelNames = cfg.models.map(m => m.name || m)
-          if (!modelNames.includes(currentModel)) {
+          const isGatewayModel = !!parseGatewayModelKey(currentModel, cfg.llm_gateways || [])
+          if (!modelNames.includes(currentModel) && !isGatewayModel) {
             const defaultModel = cfg.models[0].name || cfg.models[0]
             setCurrentModel(defaultModel)
             localStorage.setItem('chatui-current-model', defaultModel)
@@ -268,10 +275,18 @@ export function useChatConfig() {
     })()
   }, [currentModel, fetchConfig])
 
+  // The current gateway model joins the list so every "look up the current
+  // model's capabilities" call site finds it like any configured model.
+  const modelsWithGateway = useMemo(
+    () => withGatewayModel(models, currentModel, llmGateways, user),
+    [models, currentModel, llmGateways, user]
+  )
+
   return {
     appName,
     user,
-    models,
+    models: modelsWithGateway,
+    llmGateways,
     tools,
     prompts,
     dataSources,

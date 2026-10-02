@@ -10,6 +10,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
+    AuthenticationError,
+    AuthorizationError,
     ContextWindowExceededError,
     LLMAuthenticationError,
     LLMBadRequestError,
@@ -79,6 +81,8 @@ _ERROR_TYPE_BY_CLASS = (
     (RateLimitError, "rate_limit"),
     (LLMTimeoutError, "timeout"),
     (LLMAuthenticationError, "authentication"),
+    (AuthenticationError, "authentication"),
+    (AuthorizationError, "authorization"),
     (ContextWindowExceededError, "context_window_exceeded"),
     (ValidationError, "validation"),
     (LLMBadRequestError, "bad_request"),
@@ -111,6 +115,10 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     # below would classify the message rather than the original failure.
     if isinstance(error, LLMBadRequestError):
         return (LLMBadRequestError, error.message, f"LLM rejected the request: {error.message}")
+    if isinstance(error, (AuthenticationError, AuthorizationError)):
+        # E.g. "not a member of the selected LiteLLM team" or "please sign in
+        # again": raised by Atlas itself with a message meant for the user.
+        return (type(error), error.message, f"{type(error).__name__}: {error.message}")
     if isinstance(error, LLMMalformedToolCallError):
         return (
             LLMMalformedToolCallError,
@@ -186,6 +194,10 @@ async def safe_call_llm_with_tools(
                 f"content_length: {content_length}, model: {model_used}"
             )
         return llm_response
+    except (AuthenticationError, AuthorizationError):
+        # Already specific and user-safe (e.g. "not a member of the selected
+        # LiteLLM team"); reclassifying would turn it into a generic error.
+        raise
     except Exception as e:
         # Classify the error and raise appropriate error type
         error_class, user_msg, log_msg = classify_llm_error(e)
