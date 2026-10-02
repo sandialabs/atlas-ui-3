@@ -43,6 +43,7 @@ class ScriptedToolsLLM:
         self._turns = list(turns)
         self.tool_stream_calls = 0
         self.seen_messages: List[List[dict]] = []
+        self.synthesis_messages: List[List[dict]] = []
         self.synthesis = synthesis
         self.synthesis_error = synthesis_error
 
@@ -60,6 +61,7 @@ class ScriptedToolsLLM:
         yield LLMResponse(content=text or "", tool_calls=tool_calls)
 
     async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+        self.synthesis_messages.append([dict(m) for m in messages])
         if self.synthesis_error:
             raise self.synthesis_error
         yield self.synthesis
@@ -812,7 +814,7 @@ async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note(
     assert retry_message["content"] == options_payload
     assert "already executed" not in retry_message["content"]
     third_retry_message = next(
-        m for m in final_messages
+        m for m in llm.synthesis_messages[-1]
         if m.get("role") == "tool" and m.get("tool_call_id") == "d3"
     )
     assert "already executed" in third_retry_message["content"]

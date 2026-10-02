@@ -71,16 +71,6 @@ class ToolAuthorizationService:
 
         try:
             user = user_email or ""
-            resolved_tools = [normalize_tool_name(tool) for tool in selected_tools]
-            if (
-                LAUNCH_TOOL_NAME in resolved_tools
-                and DISCOVER_LAUNCH_OPTIONS_TOOL_NAME not in resolved_tools
-            ):
-                selected_tools = list(selected_tools)
-                selected_tools.insert(
-                    resolved_tools.index(LAUNCH_TOOL_NAME),
-                    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
-                )
 
             # Get authorized servers for this user
             authorized_servers = await self._get_authorized_servers(user)
