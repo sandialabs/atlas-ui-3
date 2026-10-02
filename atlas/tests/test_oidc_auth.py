@@ -42,10 +42,10 @@ from atlas.core.oidc.delegation import (
 from atlas.core.oidc.discovery import (
     OIDCDiscoveryError,
     ProviderMetadata,
-    clear_metadata_cache,
-    get_provider_metadata,
     _validate_issuer_url,
+    clear_metadata_cache,
     discovery_url,
+    get_provider_metadata,
     parse_provider_metadata,
 )
 from atlas.core.oidc.oidc_client import (
