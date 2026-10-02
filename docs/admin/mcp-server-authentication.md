@@ -1,7 +1,7 @@
 # MCP API Key Authentication
 
 **Created:** 2025-01-21
-**Updated:** 2026-01-25
+**Updated:** 2026-10-02
 **PR:** #253
 
 ## Overview
@@ -193,7 +193,9 @@ Every URL Atlas fetches during discovery must be `https://`, and any URL that
 came out of a remote server's document is rejected when it names an internal
 *literal* address (loopback, RFC 1918, IPv6 ULA, link-local -- including
 `169.254.169.254` -- reserved, multicast, and the IPv4-mapped IPv6 forms of
-all of them). Atlas does **not** resolve hostnames, so a DNS name that
+all of them, plus the legacy IPv4 spellings HTTP clients accept such as
+`127.1`, `0x7f.1` and `2130706433`). The names `localhost` and RFC 6761
+`*.localhost` are refused the same way. Atlas does **not** resolve hostnames, so a DNS name that
 resolves to an internal address still passes this check. A hostile or
 compromised MCP server can therefore steer one unauthenticated `GET` at an
 internal HTTPS endpoint; the response is parsed as OAuth metadata and is never

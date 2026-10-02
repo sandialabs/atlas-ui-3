@@ -460,3 +460,17 @@ def test_no_insecure_warning_for_loopback_or_https(manager, caplog):
         manager._build_wormhole_headers("loop", "alice@test.com")
         manager._build_wormhole_headers("tls", "alice@test.com")
     assert "plaintext http" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.example.gov/mcp", "http://mcp.localhost/mcp"],
+)
+def test_insecure_warning_for_names_that_only_look_loopback(manager, caplog, url):
+    """A name starting with ``127.`` is a remote host, and ``*.localhost`` may
+    resolve to a shared ingress, so both still warn."""
+    manager.servers_config["wh"] = {"url": url, "transport": "http", "wormhole": True}
+    get_wormhole_store().set_subtoken("alice@test.com", "sub")
+    with caplog.at_level(logging.WARNING):
+        manager._build_wormhole_headers("wh", "alice@test.com")
+    assert "plaintext http" in caplog.text

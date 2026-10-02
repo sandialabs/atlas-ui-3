@@ -12,8 +12,10 @@ Covers:
 
 import base64
 import hashlib
+import logging
 import time
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
 import jwt
 import pytest
@@ -41,7 +43,9 @@ from atlas.core.oidc.discovery import (
     OIDCDiscoveryError,
     ProviderMetadata,
     _validate_issuer_url,
+    clear_metadata_cache,
     discovery_url,
+    get_provider_metadata,
     parse_provider_metadata,
 )
 from atlas.core.oidc.oidc_client import (
@@ -114,12 +118,28 @@ class TestDiscovery:
         "http://localhost:8080/realms/atlas",
         "http://127.0.0.1:8080/realms/atlas",
         "http://[::1]:8080/realms/atlas",
+        "http://127.0.0.2:8080/realms/atlas",
         "http://keycloak.localhost/realms/atlas",
         "http://KEYCLOAK.LOCALHOST./realms/atlas",
+        "http://localhost./realms/atlas",
         "http://a.b.localhost/realms/atlas",
     ])
     def test_http_issuer_allowed_on_loopback(self, issuer):
         _validate_issuer_url(issuer)
+
+    def test_http_issuer_on_loopback_logs_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="atlas.core.oidc.discovery"):
+            _validate_issuer_url("http://keycloak.localhost/realms/atlas")
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        message = warnings[0].getMessage()
+        assert "OIDC issuer uses http:// on loopback host 'keycloak.localhost'" in message
+        assert "local development only" in message
+
+    def test_https_issuer_logs_no_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="atlas.core.oidc.discovery"):
+            _validate_issuer_url("https://idp.example.gov/realms/atlas")
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     @pytest.mark.parametrize("issuer", [
         "http://idp.example.gov/realms/atlas",
@@ -129,10 +149,116 @@ class TestDiscovery:
         "http://.localhost/realms/atlas",
         "http://localhost../realms/atlas",
         "http://a..localhost/realms/atlas",
+        "http://127.example.gov/realms/atlas",
     ])
     def test_http_issuer_rejected_off_loopback(self, issuer):
-        with pytest.raises(OIDCDiscoveryError):
+        with pytest.raises(OIDCDiscoveryError) as excinfo:
             _validate_issuer_url(issuer)
+        message = str(excinfo.value)
+        # Names the host and says why it was refused.
+        assert f"on host {urlparse(issuer).hostname!r}" in message
+        assert "*.localhost" in message
+
+    @pytest.mark.parametrize("issuer", [
+        "keycloak.localhost:8080/realms/atlas",
+        "idp.example.gov/realms/atlas",
+        "https:///realms/atlas",
+        "http://:8080/realms/atlas",
+        "ftp://idp.example.gov/realms/atlas",
+        "",
+    ])
+    def test_issuer_without_scheme_or_host_rejected(self, issuer):
+        with pytest.raises(OIDCDiscoveryError, match="must be an absolute https:// URL") as excinfo:
+            _validate_issuer_url(issuer)
+        assert repr(issuer) in str(excinfo.value)
+
+    @pytest.mark.parametrize("issuer", ["http://[::1", "https://[::1/realms/atlas",
+                                        "https://idp.example.gov:notaport/realms"])
+    def test_malformed_issuer_raises_discovery_error(self, issuer):
+        with pytest.raises(OIDCDiscoveryError, match="OIDC issuer is not a valid URL"):
+            _validate_issuer_url(issuer)
+
+    def test_error_message_escapes_control_characters(self):
+        with pytest.raises(OIDCDiscoveryError) as excinfo:
+            _validate_issuer_url("keycloak.localhost/realms\nFORGED LOG LINE")
+        assert "\n" not in str(excinfo.value)
+        assert "\\nFORGED" in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_malformed_issuer_surfaces_as_discovery_error(self):
+        clear_metadata_cache()
+        with pytest.raises(OIDCDiscoveryError, match="not a valid URL"):
+            await get_provider_metadata("http://[::1")
+
+    @pytest.mark.parametrize("key", [
+        "authorization_endpoint", "token_endpoint", "jwks_uri",
+        "userinfo_endpoint", "end_session_endpoint",
+    ])
+    def test_http_endpoint_rejected_for_https_issuer(self, key):
+        document = dict(DISCOVERY_DOC, **{key: "http://idp.example.gov/" + key})
+        with pytest.raises(OIDCDiscoveryError, match=key) as excinfo:
+            parse_provider_metadata("https://idp.example.gov", document)
+        assert "because the issuer is https://" in str(excinfo.value)
+        assert "'idp.example.gov'" in str(excinfo.value)
+
+    @pytest.mark.parametrize("key", ["token_endpoint", "jwks_uri"])
+    def test_http_loopback_endpoint_rejected_for_https_issuer(self, key):
+        document = dict(DISCOVERY_DOC, **{key: "http://keycloak.localhost/" + key})
+        with pytest.raises(OIDCDiscoveryError, match="because the issuer is https://"):
+            parse_provider_metadata("https://idp.example.gov", document)
+
+    @staticmethod
+    def _loopback_document(issuer):
+        return {k: (v.replace("https://idp.example.gov", issuer) if isinstance(v, str) else v)
+                for k, v in DISCOVERY_DOC.items()}
+
+    @pytest.mark.parametrize("key", [
+        "authorization_endpoint", "token_endpoint", "jwks_uri",
+        "userinfo_endpoint", "end_session_endpoint",
+    ])
+    def test_off_loopback_http_endpoint_rejected_for_http_issuer(self, key):
+        issuer = "http://keycloak.localhost/realms/atlas"
+        document = self._loopback_document(issuer)
+        document[key] = "http://idp.example.gov/" + key
+        with pytest.raises(OIDCDiscoveryError, match=key) as excinfo:
+            parse_provider_metadata(issuer, document)
+        assert "'idp.example.gov'" in str(excinfo.value)
+
+    def test_http_endpoints_allowed_on_loopback_for_http_issuer(self):
+        issuer = "http://keycloak.localhost/realms/atlas"
+        metadata = parse_provider_metadata(issuer, self._loopback_document(issuer))
+        assert metadata.token_endpoint == f"{issuer}/token"
+
+    def test_https_endpoints_allowed_for_http_issuer(self):
+        document = self._loopback_document("http://localhost:8080")
+        document["token_endpoint"] = "https://idp.example.gov/token"
+        metadata = parse_provider_metadata("http://localhost:8080", document)
+        assert metadata.token_endpoint == "https://idp.example.gov/token"
+
+    @pytest.mark.parametrize("key", ["userinfo_endpoint", "end_session_endpoint"])
+    @pytest.mark.parametrize("value", [0, [], False, {}])
+    def test_falsy_malformed_optional_endpoint_rejected(self, key, value):
+        document = dict(DISCOVERY_DOC, **{key: value})
+        with pytest.raises(OIDCDiscoveryError, match=f"{key} must be a URL string"):
+            parse_provider_metadata("https://idp.example.gov", document)
+
+    @pytest.mark.parametrize("value", [None, ""])
+    def test_absent_optional_endpoint_is_allowed(self, value):
+        document = dict(DISCOVERY_DOC, userinfo_endpoint=value)
+        assert parse_provider_metadata("https://idp.example.gov", document)
+
+    @pytest.mark.parametrize("value", ["/token", "https://[::1/token", 42])
+    def test_malformed_endpoint_rejected(self, value):
+        document = dict(DISCOVERY_DOC, token_endpoint=value)
+        with pytest.raises(OIDCDiscoveryError, match="token_endpoint"):
+            parse_provider_metadata("https://idp.example.gov", document)
+
+    def test_issuer_mismatch_names_both_issuers(self):
+        document = dict(DISCOVERY_DOC, issuer="https://evil.example")
+        with pytest.raises(OIDCDiscoveryError) as excinfo:
+            parse_provider_metadata("https://idp.example.gov", document)
+        assert "'https://evil.example'" in str(excinfo.value)
+        assert "'https://idp.example.gov'" in str(excinfo.value)
 
     def test_pkce_assumed_when_not_advertised(self):
         document = {k: v for k, v in DISCOVERY_DOC.items()
@@ -563,6 +689,51 @@ class TestOIDCRoutes:
         assert "code_challenge_method=S256" in location
         assert "client_id=atlas" in location
 
+    def test_login_with_malformed_issuer_redirects_instead_of_500(self, oidc_app):
+        clear_metadata_cache()
+        with _patch_settings(_Settings(oidc_issuer="http://[::1")):
+            response = TestClient(oidc_app).get("/auth/oidc/login", follow_redirects=False)
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/?oidc_error=discovery_failed"
+
+    @pytest.mark.parametrize("key", ["token_endpoint", "end_session_endpoint"])
+    def test_login_refuses_http_endpoint_under_https_issuer(self, oidc_app, monkeypatch, caplog, key):
+        """Real discovery (only the HTTP fetch is stubbed) through the login route."""
+        document = dict(DISCOVERY_DOC, **{key: f"http://idp.example.gov/{key}"})
+
+        class _Response:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return document
+
+        class _Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, **kwargs):
+                assert url == "https://idp.example.gov/.well-known/openid-configuration"
+                return _Response()
+
+        monkeypatch.setattr("atlas.core.oidc.discovery.httpx.AsyncClient", _Client)
+        clear_metadata_cache()
+        with _patch_settings(_Settings()), caplog.at_level(logging.ERROR):
+            response = TestClient(oidc_app).get("/auth/oidc/login", follow_redirects=False)
+        clear_metadata_cache()
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/?oidc_error=discovery_failed"
+        assert any(key in r.getMessage() and "because the issuer is https://" in r.getMessage()
+                   for r in caplog.records)
+
     def test_login_is_404_when_disabled(self, oidc_app):
         with _patch_settings(_Settings(feature_oidc_auth_enabled=False)):
             client = TestClient(oidc_app)
@@ -687,6 +858,16 @@ class TestOIDCRoutes:
             client = TestClient(oidc_app)
             response = client.get("/auth/oidc/logout", follow_redirects=False)
         assert response.headers["location"].startswith("https://idp.example.gov/logout?")
+
+    def test_logout_warns_when_discovery_fails(self, oidc_app, caplog):
+        with _patch_settings(_Settings()), patch(
+            "atlas.routes.oidc_auth_routes.get_provider_metadata",
+            AsyncMock(side_effect=OIDCDiscoveryError("OIDC issuer is not a valid URL")),
+        ), caplog.at_level(logging.WARNING, logger="atlas.routes.oidc_auth_routes"):
+            response = TestClient(oidc_app).get("/auth/oidc/logout", follow_redirects=False)
+        assert response.headers["location"] == "/?oidc_auth=logged_out"
+        assert any("skipping IdP sign-out" in r.getMessage() and "not a valid URL" in r.getMessage()
+                   for r in caplog.records if r.levelno == logging.WARNING)
 
 
 # -- Middleware integration -------------------------------------------------

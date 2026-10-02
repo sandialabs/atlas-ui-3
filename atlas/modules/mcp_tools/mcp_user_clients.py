@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.loopback import is_loopback_host
 from atlas.core.user_identity import normalize_user_email
 from atlas.modules.config.config_manager import resolve_env_var
 from atlas.modules.mcp_tools.token_storage import token_fingerprint
@@ -223,9 +224,13 @@ class UserClientMixin:
 
     @staticmethod
     def _is_loopback_host(host: str) -> bool:
-        """Return True for localhost / IPv4 127.0.0.0/8 / IPv6 ::1."""
-        host = (host or "").lower().strip("[]")
-        return host in ("localhost", "::1") or host.startswith("127.")
+        """Return True for localhost and loopback addresses (127.0.0.0/8, ::1).
+
+        A name such as ``127.example.com`` is not loopback. ``*.localhost``
+        names are left out: they resolve through the operator's resolver,
+        possibly to a shared ingress, so the cleartext warning still applies.
+        """
+        return is_loopback_host(host)
 
     def _warn_if_insecure_wormhole_url(self, server_name: str) -> None:
         """Warn when the Wormhole subtoken would ride plaintext http:// to a
