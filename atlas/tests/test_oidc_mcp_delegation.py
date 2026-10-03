@@ -199,6 +199,74 @@ class TestSubjectTokenRefresh:
         assert manager.requests == []
 
 
+class TestSubjectTokenSessionChoice:
+    """A user signed in more than once: the newest session with a usable token wins.
+
+    An older session's IdP session can end (idle timeout) while the Atlas session
+    lives on for hours; its refresh is then refused. Picking it would block every
+    delegated call, even right after the user signs in again.
+    """
+
+    @pytest.fixture
+    def two_sessions(self):
+        store = get_session_store()
+        store.clear()
+        old = store.create(user_id="user@example.gov", access_token="OLD-TOKEN", refresh_token="OLD-REFRESH")
+        new = store.create(user_id="user@example.gov", access_token="NEW-TOKEN", refresh_token="NEW-REFRESH")
+        old.created_at, new.created_at = 1000.0, 2000.0
+        yield old, new
+        store.clear()
+
+    @pytest.mark.asyncio
+    async def test_the_newest_session_is_used(self, two_sessions):
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager):
+            await mint_delegated_token_for_server("user@example.gov", "tools", DELEGATED_CONFIG)
+
+        assert manager.requests[0].subject_token == "NEW-TOKEN"
+
+    @pytest.mark.asyncio
+    async def test_an_older_session_with_an_ended_idp_session_is_not_tried(self, two_sessions):
+        old, _ = two_sessions
+        old.access_token_expires_at = time.time() - 1
+        metadata = AsyncMock()
+        refresh = AsyncMock(return_value={"access_token": "SHOULD-NOT-BE-USED"})
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager), patch(
+            "atlas.core.oidc.session_refresh.get_provider_metadata", metadata
+        ), patch("atlas.core.oidc.session_refresh.refresh_access_token", refresh):
+            await mint_delegated_token_for_server("user@example.gov", "tools", DELEGATED_CONFIG)
+
+        assert manager.requests[0].subject_token == "NEW-TOKEN"
+        refresh.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_newer_session_that_cannot_refresh_is_passed_over(self, two_sessions):
+        _, new = two_sessions
+        new.access_token_expires_at = time.time() - 1
+        new.refresh_token = None
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager):
+            await mint_delegated_token_for_server("user@example.gov", "tools", DELEGATED_CONFIG)
+
+        assert manager.requests[0].subject_token == "OLD-TOKEN"
+
+    @pytest.mark.asyncio
+    async def test_none_when_no_session_has_a_usable_token(self, two_sessions):
+        for session in two_sessions:
+            session.access_token_expires_at = time.time() - 1
+            session.refresh_token = None
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager):
+            token = await mint_delegated_token_for_server("user@example.gov", "tools", DELEGATED_CONFIG)
+
+        assert token is None
+        assert manager.requests == []
+
+
 class TestRevokeDelegatedCredentials:
     """Revocation must reach every place a delegated credential is held."""
 
