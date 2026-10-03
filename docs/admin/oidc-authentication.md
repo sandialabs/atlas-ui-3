@@ -169,6 +169,13 @@ fewer than `OIDC_DELEGATION_MIN_TTL_SECONDS` remain. A token whose issuer
 advertises no expiry is never cached across calls. Logging out discards the
 user's cached delegated tokens along with the session.
 
+The token Atlas exchanges comes from the user's newest login session that still
+has a usable access token, whichever browser the request comes from. A user
+signed in more than once (two browsers, an old tab) can have an older session
+whose IdP session has ended, so its refresh is refused; that session is passed
+over rather than blocking the newer sign-in. Signing out in one browser ends only
+that browser's session; later calls use the newest session left.
+
 ### Delegated MCP servers
 
 Give an MCP server `auth_type: "delegated"` in `mcp.json` and Atlas mints its

@@ -68,23 +68,28 @@ def _delegation_settings(server_config: Dict[str, Any]) -> Dict[str, Any]:
     return delegation if isinstance(delegation, dict) else {}
 
 
-def _find_session(user_email: str):
-    """Find this user's live OIDC session, if they have one.
+def _find_sessions(user_email: str) -> list:
+    """This user's live OIDC sessions that hold an access token, newest first.
 
     The store is keyed by session, not by user, so this walks live sessions.
-    Returns None when the user has no OIDC login -- a header-authenticated user
-    has no token Atlas may delegate from, and the caller degrades to the normal
-    "not authenticated for this server" path rather than inventing one.
+    A user may be signed in more than once (two browsers, an old tab), and an
+    older session's IdP session can end while the Atlas session lives on.
+    Returns an empty list when the user has no OIDC login -- a
+    header-authenticated user has no token Atlas may delegate from, and the
+    caller degrades to the normal "not authenticated for this server" path
+    rather than inventing one.
     """
     normalized = (user_email or "").strip().lower()
     if not normalized:
-        return None
+        return []
     # Access the sessions through the store's public surface; the store keeps
     # its map private, so ask it for a snapshot.
-    for session in get_session_store().iter_sessions():
-        if session.user_id.strip().lower() == normalized and session.access_token:
-            return session
-    return None
+    sessions = [
+        session
+        for session in get_session_store().iter_sessions()
+        if session.user_id.strip().lower() == normalized and session.access_token
+    ]
+    return sorted(sessions, key=lambda session: session.created_at, reverse=True)
 
 
 async def resolve_subject_token(user_email: str) -> Optional[str]:
@@ -92,14 +97,21 @@ async def resolve_subject_token(user_email: str) -> Optional[str]:
 
     An Atlas session outlives the IdP's access token by hours, so exchanging
     whatever token the session happens to hold would start failing partway
-    through an otherwise healthy session.
+    through an otherwise healthy session. The user's newest session that still
+    has a usable token is used: one whose refresh the IdP refuses (its IdP
+    session ended) is passed over, so it can't block a newer sign-in.
     """
-    session = _find_session(user_email)
-    if session is None:
-        return None
     from atlas.core.oidc.session_refresh import ensure_fresh_access_token
 
-    return await ensure_fresh_access_token(session)
+    for session in _find_sessions(user_email):
+        # A newer session's refresh awaits the IdP; an older one may have
+        # signed out meanwhile, and its token must not be used.
+        if get_session_store().get(session.session_id) is not session:
+            continue
+        token = await ensure_fresh_access_token(session)
+        if token:
+            return token
+    return None
 
 
 async def mint_delegated_token_for_server(
