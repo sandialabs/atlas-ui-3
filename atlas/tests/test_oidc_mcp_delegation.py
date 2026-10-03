@@ -254,6 +254,42 @@ class TestSubjectTokenSessionChoice:
         assert manager.requests[0].subject_token == "OLD-TOKEN"
 
     @pytest.mark.asyncio
+    async def test_a_newer_session_whose_refresh_is_refused_is_passed_over(self, two_sessions):
+        from atlas.core.oidc.oidc_client import OIDCFlowError
+
+        _, new = two_sessions
+        new.access_token_expires_at = time.time() - 1
+        refresh = AsyncMock(side_effect=OIDCFlowError("invalid_grant"))
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager), patch(
+            "atlas.core.oidc.session_refresh.get_provider_metadata", AsyncMock()
+        ), patch(
+            "atlas.core.oidc.session_refresh.build_client_credentials_from_settings"
+        ), patch("atlas.core.oidc.session_refresh.refresh_access_token", refresh):
+            await mint_delegated_token_for_server("user@example.gov", "tools", DELEGATED_CONFIG)
+
+        refresh.assert_awaited_once()
+        assert refresh.await_args.kwargs["refresh_token"] == "NEW-REFRESH"
+        assert manager.requests[0].subject_token == "OLD-TOKEN"
+
+    @pytest.mark.asyncio
+    async def test_another_users_newer_session_is_never_used(self, two_sessions):
+        old, new = two_sessions
+        for session in two_sessions:
+            session.access_token_expires_at = time.time() - 1
+            session.refresh_token = None
+        other = get_session_store().create(user_id="someone-else@example.gov", access_token="OTHER-TOKEN")
+        other.created_at = 3000.0
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager):
+            token = await mint_delegated_token_for_server("user@example.gov", "tools", DELEGATED_CONFIG)
+
+        assert token is None
+        assert manager.requests == []
+
+    @pytest.mark.asyncio
     async def test_none_when_no_session_has_a_usable_token(self, two_sessions):
         for session in two_sessions:
             session.access_token_expires_at = time.time() - 1

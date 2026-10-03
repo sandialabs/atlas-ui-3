@@ -95,12 +95,13 @@ class IdPHandler(BaseHTTPRequestHandler):
             return self._json(JWKS)
         self.send_response(404)
         self.end_headers()
+        return None
 
     def do_POST(self):
         if urlparse(self.path).path != "/token":
             self.send_response(404)
             self.end_headers()
-            return
+            return None
         length = int(self.headers.get("Content-Length", 0))
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode()).items()}
         grant = form.get("grant_type")
@@ -152,7 +153,7 @@ def login(client, label):
     params = parse_qs(urlparse(response.headers.get("location", "")).query)
     NONCE_HOLDER["nonce"] = params.get("nonce", [None])[0]
     state = params.get("state", [""])[0]
-    response = client.get(f"/auth/oidc/callback?code={label}&state={state}", follow_redirects=False)
+    client.get(f"/auth/oidc/callback?code={label}&state={state}", follow_redirects=False)
     status = client.get("/api/auth/oidc/status").json()
     check(f"{label}: signed in as the user",
           (status.get("session") or {}).get("user") == USER_EMAIL, str(status))
