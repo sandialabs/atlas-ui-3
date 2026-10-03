@@ -104,6 +104,10 @@ async def resolve_subject_token(user_email: str) -> Optional[str]:
     from atlas.core.oidc.session_refresh import ensure_fresh_access_token
 
     for session in _find_sessions(user_email):
+        # A newer session's refresh awaits the IdP; an older one may have
+        # signed out meanwhile, and its token must not be used.
+        if get_session_store().get(session.session_id) is not session:
+            continue
         token = await ensure_fresh_access_token(session)
         if token:
             return token

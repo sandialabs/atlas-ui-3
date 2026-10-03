@@ -274,8 +274,32 @@ class TestSubjectTokenSessionChoice:
         assert manager.requests[0].subject_token == "OLD-TOKEN"
 
     @pytest.mark.asyncio
-    async def test_another_users_newer_session_is_never_used(self, two_sessions):
+    async def test_an_older_session_signed_out_during_a_refresh_is_not_used(self, two_sessions):
+        from atlas.core.oidc.oidc_client import OIDCFlowError
+
         old, new = two_sessions
+        new.access_token_expires_at = time.time() - 1
+
+        async def refused_while_the_older_session_signs_out(**_):
+            get_session_store().remove(old.session_id)
+            raise OIDCFlowError("invalid_grant")
+
+        manager = _StubManager(DelegatedToken(access_token="DOWNSTREAM"))
+        with _patch_manager(manager), patch(
+            "atlas.core.oidc.session_refresh.get_provider_metadata", AsyncMock()
+        ), patch(
+            "atlas.core.oidc.session_refresh.build_client_credentials_from_settings"
+        ), patch(
+            "atlas.core.oidc.session_refresh.refresh_access_token",
+            AsyncMock(side_effect=refused_while_the_older_session_signs_out),
+        ):
+            token = await mint_delegated_token_for_server("user@example.gov", "tools", DELEGATED_CONFIG)
+
+        assert token is None
+        assert manager.requests == []
+
+    @pytest.mark.asyncio
+    async def test_another_users_newer_session_is_never_used(self, two_sessions):
         for session in two_sessions:
             session.access_token_expires_at = time.time() - 1
             session.refresh_token = None
