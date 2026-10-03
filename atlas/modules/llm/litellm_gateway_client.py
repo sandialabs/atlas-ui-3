@@ -157,48 +157,14 @@ class LiteLLMGatewayClient:
         return GatewayCredential(bearer_token=token, litellm_user_id=self._litellm_user_id(user_email, token))
 
     async def _mint_delegated_token(self, user_email: str) -> str:
-        from atlas.core.oidc import mcp_delegation
-        from atlas.core.oidc.delegation import (
-            DelegationError,
-            DelegationRequest,
-            get_delegation_manager_async,
-        )
+        from atlas.modules.llm.delegated_auth import mint_delegated_llm_token
 
-        manager = await get_delegation_manager_async()
-        if manager is None:
-            logger.error(
-                "LiteLLM gateway '%s' uses delegated auth but OIDC delegation is not configured",
-                self._log_name,
-            )
-            raise LLMAuthenticationError(
-                f"LiteLLM gateway '{self.name}' requires delegated sign-in, which is not configured."
-            )
-        subject_token = await mcp_delegation.resolve_subject_token(user_email)
-        if not subject_token:
-            raise LLMAuthenticationError(
-                "Your sign-in session has no token to present to the LiteLLM gateway. "
-                "Please sign in again."
-            )
-        delegation = self.config.delegation
-        request = DelegationRequest(
-            user_id=user_email,
-            subject_token=subject_token,
-            audience=delegation.audience if delegation else None,
-            resource=delegation.resource if delegation else None,
-            scope=delegation.scope if delegation else None,
+        return await mint_delegated_llm_token(
+            user_email,
+            self.config.delegation,
+            endpoint=f"LiteLLM gateway '{self.name}'",
             actor=f"litellm-gateway:{self.name}",
         )
-        try:
-            token = await manager.get_token(request)
-        except DelegationError as exc:
-            logger.error(
-                "Delegated token exchange failed for LiteLLM gateway '%s': %s",
-                self._log_name, sanitize_for_logging(str(exc)),
-            )
-            raise LLMAuthenticationError(
-                f"Could not obtain a token for LiteLLM gateway '{self.name}'. Please sign in again."
-            ) from None
-        return token.access_token
 
     def _litellm_user_id(self, user_email: str, token: str) -> str:
         if self.config.effective_user_id_source() == "token_claim":

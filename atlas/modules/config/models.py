@@ -89,6 +89,18 @@ ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 REASONING_EFFORT_VALUES: tuple = get_args(ReasoningEffort)
 
 
+class LiteLLMGatewayDelegation(BaseModel):
+    """Downstream token parameters for delegated LLM credentials: a gateway using
+    ``auth_type: "delegated"``, or a model using ``api_key_source: "delegated"``.
+
+    For Microsoft Entra On-Behalf-Of, ``scope`` is the LiteLLM app's delegated
+    scope (e.g. ``https://litellm.example.gov/user_impersonation``).
+    """
+    audience: Optional[str] = None
+    resource: Optional[str] = None
+    scope: Optional[str] = None
+
+
 class ModelConfig(BaseModel):
     """Configuration for a single LLM model."""
     model_name: str
@@ -111,12 +123,18 @@ class ModelConfig(BaseModel):
     # ``groups`` access-control convention used by MCPServerConfig / RAGSourceConfig.
     groups: List[str] = Field(default_factory=list)
     # API key source: "system" uses env var resolution, "user" requires per-user key from token storage,
-    # "globus" uses Globus OAuth token for the configured scope (requires globus_scope)
+    # "globus" uses Globus OAuth token for the configured scope (requires globus_scope),
+    # "delegated" exchanges the logged-in user's OIDC token for a short-lived token for the
+    # endpoint on every call (requires `delegation` and FEATURE_OIDC_DELEGATION_ENABLED)
     api_key_source: str = "system"
     # Globus scope identifier for models using api_key_source: "globus"
     # This is the resource_server UUID from the Globus token response other_tokens
     # Example for ALCF: "681c10cc-f684-4540-bcd7-0b4df3bc26ef"
     globus_scope: Optional[str] = None
+    # Downstream token parameters for api_key_source: "delegated", as for a LiteLLM
+    # gateway with auth_type: "delegated" (OIDC_DELEGATION_PROVIDER: RFC 8693 token
+    # exchange or Entra On-Behalf-Of).
+    delegation: Optional[LiteLLMGatewayDelegation] = None
     # Whether this model supports vision (multimodal image input).
     # When true, attached image files are sent as inline image content blocks
     # instead of being listed in the files manifest.
@@ -157,6 +175,19 @@ class ModelConfig(BaseModel):
     # with the suffix; otherwise the value is sent unchanged.
     customer_id_strip_suffix: Optional[str] = None
 
+    @model_validator(mode="after")
+    def validate_delegation(self):
+        """A delegated model must say what its token is for, checked when the config
+        loads rather than on a user's first message."""
+        if self.api_key_source == "delegated":
+            delegation = self.delegation
+            if not delegation or not (delegation.scope or delegation.audience or delegation.resource):
+                raise ValueError(
+                    f"Model '{self.model_name}': api_key_source 'delegated' requires "
+                    "delegation.scope (or audience/resource)"
+                )
+        return self
+
     @field_validator('reasoning_effort', mode='before')
     @classmethod
     def validate_reasoning_effort(cls, v):
@@ -191,17 +222,6 @@ class ModelConfig(BaseModel):
                 f"or omitted; got {v!r}.{hint}"
             )
         return normalized
-
-
-class LiteLLMGatewayDelegation(BaseModel):
-    """Downstream token parameters for a gateway using ``auth_type: "delegated"``.
-
-    For Microsoft Entra On-Behalf-Of, ``scope`` is the LiteLLM app's delegated
-    scope (e.g. ``https://litellm.example.gov/user_impersonation``).
-    """
-    audience: Optional[str] = None
-    resource: Optional[str] = None
-    scope: Optional[str] = None
 
 
 class LiteLLMGatewayModel(BaseModel):
