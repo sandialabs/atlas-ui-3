@@ -4,7 +4,7 @@ Last updated: 2026-10-04
 
 ## Complete Error Handling Flow
 
-Mode runners now enter through `run_streaming`; the unused non-streaming
+Plain, RAG, and tools mode runners enter through `run_streaming`; their unused non-streaming
 runner methods and their `safe_call_llm_with_tools` wrapper have been removed.
 The diagram shows errors that propagate to the WebSocket boundary. Streaming
 helpers can instead preserve partial text or use a non-streaming fallback;

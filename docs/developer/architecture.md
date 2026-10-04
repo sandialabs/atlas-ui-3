@@ -16,8 +16,9 @@ The backend follows a clean architecture pattern, separating concerns into disti
 
 ### Chat mode entry points
 
-The chat orchestrator dispatches plain, RAG, tools, and agent turns through each
-mode runner's `run_streaming` entry point. Buffered CLI output uses the same turn
+The chat orchestrator dispatches plain, RAG, and tools turns through each
+mode runner's `run_streaming` entry point. Agent mode retains its live `run`
+entry point into the agent loop. Buffered CLI output uses the same turn
 pipeline; it does not require a second non-streaming mode implementation.
 Non-streaming LLM calls remain available as fallbacks inside the streaming
 helpers and for active synthesis paths.
