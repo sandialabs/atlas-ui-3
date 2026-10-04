@@ -122,7 +122,8 @@ this repository, not forks.
 4. **Opens a PR** from `release/vX.Y.Z` to `main`.
 5. **Waits for CI**, then squash-merges the exact commit it watched
    (`--match-head-commit`). The gate waits for a fixed set of checks
-   (`build-and-test`, `build-artifacts`, and the security scans) to be
+   (`test`, `production-image`, `runtime-only-image`, `build-artifacts`, and
+   the security scans) to be
    present and green — not merely for whatever happened to register — and
    if any check fails the workflow stops and leaves the PR open for a
    human. `RELEASE_PAT` is required for a real release: a tag or Release

@@ -50,11 +50,14 @@ The test scripts are designed to run inside Docker containers with the following
 The CI/CD pipeline (`.github/workflows/ci.yml`) builds and tests in parallel:
 1. The test job builds the test image, runs all suites with debug mode enabled,
    then runs the backend suite in production mode.
-2. The production and runtime-only images are built in separate jobs.
-3. The non-blocking reverse-order backend run happens on pushes to `main`, not
+2. The production and runtime-only images are validated in separate jobs.
+3. On branch pushes a separate publish job pushes the multi-platform production
+   image only after the test and runtime-only jobs pass.
+4. The non-blocking reverse-order backend run happens on pushes to `main`, not
    on pull requests.
 
-The CI status checks are `test`, `production-image`, and `runtime-only-image`.
+The pull-request status checks are `test`, `production-image`, and
+`runtime-only-image`.
 
 ## Local Testing
 
