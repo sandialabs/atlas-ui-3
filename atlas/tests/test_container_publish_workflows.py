@@ -79,14 +79,12 @@ def test_branch_publishing_is_gated_on_validation():
     # stays green.
     for dep in publish["needs"]:
         assert "if" not in workflow["jobs"][dep]
-    # Supersede older push runs so an older commit cannot clobber `latest` after
-    # a newer commit has published.
+    # Supersede older runs for the same branch/PR so an older commit cannot
+    # clobber `latest` after a newer commit has published.
     assert workflow["concurrency"]["group"] == (
         "${{ github.workflow }}-${{ github.ref }}"
     )
-    assert workflow["concurrency"]["cancel-in-progress"] == (
-        "${{ github.event_name == 'push' }}"
-    )
+    assert workflow["concurrency"]["cancel-in-progress"] is True
 
 
 def test_pr_and_publish_builds_share_inputs():
@@ -100,8 +98,12 @@ def test_pr_and_publish_builds_share_inputs():
 
     validation = build("production-image", "Build production Docker image")
     publish = build("publish-image", "Build and push production Docker image")
-    for key in ("context", "build-args", "cache-from", "cache-to"):
-        assert validation.get(key) == publish.get(key), key
+    # Only platforms and push may differ; every other input (context, file,
+    # build-args, cache scopes, tags, labels, ...) must match so a PR cannot
+    # validate a different image than the one that ships.
+    assert set(validation) == set(publish)
+    for key in sorted(set(validation) - {"platforms", "push"}):
+        assert validation[key] == publish[key], key
     assert validation["platforms"] == "linux/amd64"
     assert validation["push"] is False
     assert publish["platforms"] == "linux/amd64,linux/arm64"

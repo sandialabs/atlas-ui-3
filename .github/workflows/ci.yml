@@ -11,11 +11,11 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 concurrency:
-  # Supersede older push runs so an older commit's publish-image job cannot
-  # overwrite `:latest`/`:<branch>` after a newer commit has published. Pull
-  # requests keep their own per-PR group and are left running.
+  # Supersede older runs for the same branch or PR: a newer commit makes the
+  # older run's results moot, and this stops an older push's publish-image job
+  # from overwriting `:latest`/`:<branch>` after a newer commit has published.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: true
 
 jobs:
   test:
