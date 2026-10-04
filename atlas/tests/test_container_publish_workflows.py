@@ -79,12 +79,14 @@ def test_branch_publishing_is_gated_on_validation():
     # stays green.
     for dep in publish["needs"]:
         assert "if" not in workflow["jobs"][dep]
-    # Supersede older runs for the same branch/PR so an older commit cannot
-    # clobber `latest` after a newer commit has published.
+    # Cancel superseded PR runs; do not cancel a running publish on branch
+    # pushes, so every merged commit still publishes its sha tag.
     assert workflow["concurrency"]["group"] == (
         "${{ github.workflow }}-${{ github.ref }}"
     )
-    assert workflow["concurrency"]["cancel-in-progress"] is True
+    assert workflow["concurrency"]["cancel-in-progress"] == (
+        "${{ github.event_name == 'pull_request' }}"
+    )
 
 
 def test_pr_and_publish_builds_share_inputs():
@@ -110,13 +112,20 @@ def test_pr_and_publish_builds_share_inputs():
     assert publish["push"] is True
 
     # The metadata tag lists legitimately differ by event (PR vs branch), but
-    # both jobs must build the same image reference and derive labels from the
-    # same build metadata, so a drift cannot ship a different image.
-    def meta_images(job_name):
+    # every other `Extract metadata` input must match, so a drift cannot ship a
+    # different image reference or label set than the one validated.
+    def metadata_with(job_name):
         return next(
             step for step in jobs[job_name]["steps"]
             if step.get("name") == "Extract metadata"
-        )["with"]["images"]
+        )["with"]
+
+    validation_meta = metadata_with("production-image")
+    publish_meta = metadata_with("publish-image")
+    assert set(validation_meta) == set(publish_meta)
+    for key in sorted(set(validation_meta) - {"tags"}):
+        assert validation_meta[key] == publish_meta[key], key
+    assert validation_meta["images"] == "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
     def build_meta_run(job_name):
         return next(
@@ -124,9 +133,6 @@ def test_pr_and_publish_builds_share_inputs():
             if step.get("name") == "Get build metadata"
         )["run"]
 
-    assert meta_images("production-image") == meta_images("publish-image") == (
-        "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-    )
     assert build_meta_run("production-image") == build_meta_run("publish-image")
 
 
