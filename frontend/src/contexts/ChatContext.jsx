@@ -45,6 +45,26 @@ const LIVE_REFRESH_FETCH_TIMEOUT_MS = 15000
 const LIVE_REFRESH_MAX_BACKOFF_MS = 30000
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
+// Read one conversation record. The reconnect resync and the joined-run live
+// poll hit the same endpoint under the same hang guard, so the timeout -- and
+// any caller-supplied abort signal -- live in one place. `AbortSignal.any`
+// combines them when available; otherwise the caller's signal wins, since a
+// stale response from a view that moved on is the more important one to cut.
+const fetchConversationRecord = async (id, { signal } = {}) => {
+	const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+		? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
+		: undefined
+	const signals = [signal, timeoutSignal].filter(Boolean)
+	const combined = signals.length === 0
+		? undefined
+		: signals.length === 1
+			? signals[0]
+			: (typeof AbortSignal.any === 'function' ? AbortSignal.any(signals) : signals[0])
+	const res = await fetch(`/api/conversations/${id}`, combined ? { signal: combined } : undefined)
+	if (!res.ok) throw new Error(`conversation refresh failed: ${res.status}`)
+	return res.json()
+}
+
 // Stored metadata is data the store round-tripped, some of it shaped by a
 // model's tool output. The renderer's own flags all start with an underscore
 // (`_streaming`, `_replayed`, `_transcriptRefresh`, `_agentInput`, `_seed`),
@@ -1137,11 +1157,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer])
 
 	// Load a saved conversation from history into the chat view
-	const loadSavedConversation = useCallback(async (conversationData) => {
+	const loadSavedConversation = useCallback(async (conversationData, { origin = 'open' } = {}) => {
 		if (!conversationData || !conversationData.messages) return
+		// A reconnect resync is not navigation: the same conversation stays on
+		// screen, so it must not dismiss a pending undo offer, wipe canvas /
+		// custom-UI / session files, drop an agent's pending question, re-bind
+		// the workspace, or ask for a run snapshot the socket's own
+		// `runs_snapshot` already carries. It only replaces the transcript and
+		// re-arms the joined view.
+		const reconnecting = origin === 'reconnect'
 
 		// Whatever was on offer refers to a chat that is no longer on screen.
-		invalidateUndoOffer()
+		if (!reconnecting) invalidateUndoOffer()
 
 		// Clear current state. The per-turn flags and the token buffer belong
 		// to the conversation being left: a run there continues (issue #884),
@@ -1155,7 +1182,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setIsSynthesizing(false)
 		setIsAgentRunning(false)
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
-		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
+		if (agent?.setAgentPendingQuestion && !reconnecting) agent.setAgentPendingQuestion(null)
 		// Opened while its run is executing: the live stream is not replayed,
 		// so remember to reload from the store once the run ends. The record's
 		// own `in_flight` flag decides this, not the run tracker: the snapshot
@@ -1176,8 +1203,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (runInFlight) {
 			// Ask for a fresh run snapshot: this tab may not have received
 			// `run_started`/`run_status` for a run its tracker has never seen,
-			// and the reload-on-run-end below keys off that tracker.
-			sendMessage?.({ type: 'list_runs', conversation_id: conversationData.id })
+			// and the reload-on-run-end below keys off that tracker. A reconnect
+			// is the exception: the socket answers the new connection with its
+			// own `runs_snapshot`, so asking again would be a duplicate.
+			if (!reconnecting) sendMessage?.({ type: 'list_runs', conversation_id: conversationData.id })
 			// The run already ended while the view was being loaded: schedule the
 			// same delayed refresh the run-end path runs, so the store's final
 			// rows are appended once the save has settled.
@@ -1217,9 +1246,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				joinedRunTimerRef.current = setTimeout(tick, RUN_END_RELOAD_GRACE_MS)
 			}
 		}
-		files.setCanvasContent('')
-		files.setCustomUIContent(null)
-		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
+		if (!reconnecting) {
+			files.setCanvasContent('')
+			files.setCustomUIContent(null)
+			files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
+		}
 
 		// Track the loaded conversation. The ref is set synchronously too: the
 		// replay frame answering the restore below is tagged with the run's ids
@@ -1289,12 +1320,17 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Best effort: a workspace that has since been deleted is silently
 		// skipped, and if the list has not loaded yet the switch is deferred
 		// until it does. A conversation with no recorded workspace leaves the
-		// currently active workspace untouched.
+		// currently active workspace untouched. A reconnect skips this whole
+		// block: the conversation did not change, and a transient socket blip
+		// must not yank the user back to the stored workspace after they
+		// deliberately switched or cleared it.
 		const meta = conversationData.metadata || {}
-		// Remember the binding as loaded so the local autosave re-persists *this*
-		// conversation's workspace rather than whatever is active at save time.
-		conversationWorkspaceIdRef.current = meta.workspace_id || null
-		restoreWorkspace(meta.workspace_id)
+		if (!reconnecting) {
+			// Remember the binding as loaded so the local autosave re-persists *this*
+			// conversation's workspace rather than whatever is active at save time.
+			conversationWorkspaceIdRef.current = meta.workspace_id || null
+			restoreWorkspace(meta.workspace_id)
+		}
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
 		// new token frame rebuilds, so the objects themselves would tear this
 		// callback down -- and re-subscribe everything that depends on it -- on
@@ -1303,35 +1339,58 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
 
 	// A new socket cannot receive the old run's stream. Reuse the reopen path
-	// to replace missed rows and arm the joined view's polling/final refresh.
+	// to replace missed rows and arm the joined view's polling/final refresh --
+	// but only when the store may actually differ from what is on screen, and
+	// without the navigation-only resets (canvas, session files, workspace,
+	// pending undo and agent prompts) that a socket blip must not trigger.
 	const loadSavedConversationRef = useRef(loadSavedConversation)
 	loadSavedConversationRef.current = loadSavedConversation
+	// `hasConnectedRef` separates the first connection from a reconnect:
+	// `wasConnectedRef` alone starts `false`, so a conversation opened before
+	// the first connect would be treated as a reconnect and reloaded at once.
+	const hasConnectedRef = useRef(false)
 	const wasConnectedRef = useRef(isConnected)
+	// Does the fetched record hold anything the view does not already show? An
+	// idle conversation that matches what is on screen should not pay for a
+	// full transcript replacement and a `restore_conversation` re-upload on
+	// every reconnect. A tracked or reported in-flight run always qualifies,
+	// because its streaming bubble and rows move without a message-count
+	// change. Otherwise compare the stored transcript to the on-screen one
+	// (live-only and streaming rows have no stored counterpart).
+	const reconnectSnapshotChanged = useCallback((data, id) => {
+		if (isRunActive(runsByConversationRef.current[id])) return true
+		if (data.in_flight === true) return true
+		const stored = Array.isArray(data.messages) ? data.messages : []
+		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
+		if (stored.length !== current.length) return true
+		const lastStored = stored[stored.length - 1]
+		if (!lastStored) return false
+		const lastCurrent = current[current.length - 1]
+		return (lastStored.timestamp ?? null) !== (lastCurrent?.timestamp ?? null)
+	}, [])
 	useEffect(() => {
-		const reconnected = !wasConnectedRef.current && isConnected
+		const reconnected = hasConnectedRef.current && !wasConnectedRef.current && isConnected
 		wasConnectedRef.current = isConnected
+		if (isConnected) hasConnectedRef.current = true
 		if (!reconnected || !config.features?.chat_history || saveMode !== 'server' || !activeConversationId) return
 		let cancelled = false
 		const id = activeConversationId
 		const generation = reconnectResyncGenerationRef.current
+		const controller = new AbortController()
 		const resync = async () => {
 			try {
-				const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-					? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
-					: undefined
-				const res = await fetch(`/api/conversations/${id}`, timeoutSignal ? { signal: timeoutSignal } : undefined)
-				if (!res.ok) throw new Error(`conversation reconnect refresh failed: ${res.status}`)
-				const data = await res.json()
+				const data = await fetchConversationRecord(id, { signal: controller.signal })
 				if (cancelled || reconnectResyncGenerationRef.current !== generation ||
 					activeConversationIdRef.current !== id || data?.id !== id || data.error) return
-				await loadSavedConversationRef.current(data)
+				if (!reconnectSnapshotChanged(data, id)) return
+				await loadSavedConversationRef.current(data, { origin: 'reconnect' })
 			} catch (error) {
 				if (!cancelled) console.error('Could not resync conversation after reconnect:', error)
 			}
 		}
 		resync()
-		return () => { cancelled = true }
-	}, [isConnected, config.features?.chat_history, saveMode, activeConversationId])
+		return () => { cancelled = true; controller.abort() }
+	}, [isConnected, config.features?.chat_history, saveMode, activeConversationId, reconnectSnapshotChanged])
 
 	const refreshJoinedConversation = useCallback((conversationData, { live = false } = {}) => {
 		if (!conversationData || !conversationData.messages) return false
@@ -1406,6 +1465,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// case table instead of each restating it.
 		const storedIdx = alignTranscript(current, stored)
 		if (storedIdx === null) return false
+
+		// This reconcile is the transcript-replacement path: any reconnect
+		// snapshot still in the air was fetched before these rows and must not
+		// overwrite them (nor the live bubble updated below). Bumping here, not
+		// only on a send, covers the rows the run-end refresh and the live poll
+		// commit while a reconnect fetch is outstanding.
+		reconnectResyncGenerationRef.current += 1
 
 		// A live pass keeps the open bubble showing the segment the run is
 		// streaming now, or the marker-only seed while it is between segments.
@@ -1487,19 +1553,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 	const fetchLiveJoinedConversation = useCallback(async () => {
 		if (!liveJoinedConversationId) return
-		// Abort a hung request so the poll's cadence resumes (and reports a
-		// failure) instead of waiting on it indefinitely.
-		const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-			? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
-			: undefined
-		const res = await fetch(
-			`/api/conversations/${liveJoinedConversationId}`,
-			timeoutSignal ? { signal: timeoutSignal } : undefined,
-		)
-		// Throw so usePollingWithBackoff backs off on a flaky server rather
+		// The shared helper carries the hang guard and throws on a non-OK
+		// response, so usePollingWithBackoff backs off on a flaky server rather
 		// than hammering it every interval.
-		if (!res.ok) throw new Error(`live conversation refresh failed: ${res.status}`)
-		const data = await res.json()
+		const data = await fetchConversationRecord(liveJoinedConversationId)
 		// The run settled between polls: the run-end path owns the final
 		// transcript, and applying a stored record here could discharge the
 		// obligation early.

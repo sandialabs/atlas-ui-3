@@ -193,13 +193,25 @@ conversation from the store and the marker goes with the placeholder.
 
 ### Reconnecting resynchronizes the open conversation
 
-When the WebSocket reconnects, the client reloads the currently visible
-server-saved conversation through the same path used to reopen it from history.
-Missed messages and tool rows replace the stale transcript without duplicating
-overlapping local rows. If the run is still active, its `streaming_text` seeds a
-replay placeholder and the joined-view polling and final refresh described below
-take over. If it finished while disconnected, the completed transcript appears
-immediately. No navigation away and back is required.
+When the WebSocket reconnects, the client revisits the currently visible
+server-saved conversation. This applies only to server-saved conversations (the
+`server` save mode); browser-only and incognito conversations are left exactly
+as they are. It also only reloads when something may have changed -- a tracked
+or reported in-flight run, a different message count, or a newer last message --
+so an idle conversation that already matches the screen is not re-fetched and
+re-seeded on every blip.
+
+When a reload does run, missed messages and tool rows replace the stale
+transcript without duplicating overlapping local rows. If the run is still
+active, its `streaming_text` seeds a replay placeholder and the joined-view
+polling and final refresh described below take over. If it finished while
+disconnected, the completed transcript appears immediately. Unlike opening a
+conversation from history, a reconnect does not clear the canvas, custom UI or
+session files, does not dismiss a pending undo offer or agent question, and does
+not re-bind the workspace: the user stays where they were. No navigation away
+and back is required. If the reconnect fetch fails, the view keeps whatever it
+had -- the same stale transcript as before this behavior existed -- until the
+next reconnect or a manual reload.
 
 ### A joined view refreshes while the run is still going
 

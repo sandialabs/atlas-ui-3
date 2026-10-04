@@ -30,7 +30,11 @@ const h = vi.hoisted(() => ({
   setActiveWorkspaceId: vi.fn(),
   configReady: true,
   chatHistoryEnabled: true,
+  workspacesEnabled: false,
   isConnected: true,
+  setCanvasContent: vi.fn(),
+  setCustomUIContent: vi.fn(),
+  setSessionFiles: vi.fn(),
   saveLocalConv: vi.fn(() => Promise.resolve()),
   saveMode: 'server',
   fetchMock: vi.fn(),
@@ -58,7 +62,7 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
     ragServers: [],
     tools: [{ server: 'files', tools: ['read', 'write'] }],
     configReady: h.configReady,
-    features: { chat_history: h.chatHistoryEnabled, workspaces: false },
+    features: { chat_history: h.chatHistoryEnabled, workspaces: h.workspacesEnabled },
     prompts: [],
     appName: 'Atlas',
     isInAdminGroup: false,
@@ -117,11 +121,11 @@ vi.mock('../hooks/chat/useAgentMode', () => ({
 vi.mock('../hooks/chat/useFiles', () => ({
   useFiles: () => ({
     getTaggedFilesContent: () => ({}),
-    setCanvasContent: vi.fn(),
+    setCanvasContent: h.setCanvasContent,
     setCanvasFiles: vi.fn(),
     setCurrentCanvasFileIndex: vi.fn(),
-    setCustomUIContent: vi.fn(),
-    setSessionFiles: vi.fn(),
+    setCustomUIContent: h.setCustomUIContent,
+    setSessionFiles: h.setSessionFiles,
     getFileType: vi.fn(),
     canvasContent: null,
     sessionFiles: { files: [], total_files: 0, categories: {} },
@@ -216,6 +220,7 @@ beforeEach(() => {
   h.activeWorkspaceId = null
   h.configReady = true
   h.chatHistoryEnabled = true
+  h.workspacesEnabled = false
   h.isConnected = true
   h.saveMode = 'server'
   h.saveLocalConv.mockImplementation(() => Promise.resolve())
@@ -270,7 +275,12 @@ describe('same-conversation WebSocket reconnect (issue #1005)', () => {
       expect(result.current.messages.find(m => m._streaming)).toMatchObject({
         content: 'Working on it', _replayed: true,
       })
-      expect(h.sendMessage).toHaveBeenCalledWith({ type: 'list_runs', conversation_id: 'conv-1' })
+      // The socket answers a reconnect with its own `runs_snapshot`, so the
+      // resync must not add a second `list_runs` on top of the one the
+      // connect-up effect already sends.
+      expect(h.sendMessage.mock.calls.filter(
+        c => c[0]?.type === 'list_runs' && c[0]?.conversation_id === 'conv-1',
+      )).toHaveLength(1)
       expect(h.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
         type: 'restore_conversation', conversation_id: 'conv-1',
       }))
@@ -372,6 +382,93 @@ describe('same-conversation WebSocket reconnect (issue #1005)', () => {
     h.fetchMock.mockClear()
     await setConnected(rerender, true)
     expect(h.fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/conversations/'))).toHaveLength(0)
+    unmount()
+  })
+
+  it('preserves canvas, session files and the current workspace across a reconnect', async () => {
+    h.workspacesEnabled = true
+    h.wsState.workspaces = [{ id: 'ws-saved', name: 'Saved workspace', config: {} }]
+    h.activeWorkspaceId = 'ws-current'
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        metadata: { workspace_id: 'ws-saved' },
+        messages: [storedChat('user', 'Original')],
+      })
+    })
+    // Drop the load's own calls so only the reconnect can dirty them.
+    h.setCanvasContent.mockClear()
+    h.setCustomUIContent.mockClear()
+    h.setSessionFiles.mockClear()
+    h.applyWorkspace.mockClear()
+    h.setActiveWorkspaceId.mockClear()
+
+    await setConnected(rerender, false)
+    // A changed record so the resync actually runs.
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'conv-1',
+        in_flight: false,
+        metadata: { workspace_id: 'ws-saved' },
+        messages: [storedChat('user', 'Original'), storedChat('assistant', 'Missed answer')],
+      }),
+    })
+    await setConnected(rerender, true)
+    await act(async () => {})
+
+    expect(result.current.messages.at(-1).content).toBe('Missed answer')
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
+    expect(h.setCustomUIContent).not.toHaveBeenCalled()
+    expect(h.setSessionFiles).not.toHaveBeenCalled()
+    // The user's deliberate switch away from the stored workspace stands.
+    expect(h.applyWorkspace).not.toHaveBeenCalled()
+    expect(h.setActiveWorkspaceId).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it.each([
+    ['non-OK response', { ok: false, status: 500, json: async () => ({}) }],
+    ['rejection', new Error('network down')],
+    ['error payload', { ok: true, json: async () => ({ error: 'gone' }) }],
+    ['mismatched id', { ok: true, json: async () => ({ id: 'conv-2', messages: [storedChat('assistant', 'Wrong')] }) }],
+  ])('leaves messages unchanged when the reconnect fetch returns a %s', async (_label, response) => {
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1', messages: [storedChat('user', 'Original')],
+      })
+    })
+    await setConnected(rerender, false)
+    if (response instanceof Error) h.fetchMock.mockRejectedValue(response)
+    else h.fetchMock.mockResolvedValue(response)
+    const before = result.current.messages
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(result.current.messages).toBe(before)
+    unmount()
+  })
+
+  it('skips the resync when an idle conversation matches what is on screen', async () => {
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1', messages: [storedChat('user', 'Original')],
+      })
+    })
+    await setConnected(rerender, false)
+    // Same transcript the view already shows: no reload, no re-seed.
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'conv-1', in_flight: false, metadata: {}, messages: [storedChat('user', 'Original')] }),
+    })
+    h.sendMessage.mockClear()
+    h.setCanvasContent.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(h.sendMessage.mock.calls.filter(c => c[0]?.type === 'restore_conversation')).toHaveLength(0)
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
     unmount()
   })
 
