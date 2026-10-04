@@ -26,6 +26,12 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     
+    - name: Set up QEMU
+      if: github.event_name != 'pull_request'
+      uses: docker/setup-qemu-action@v4
+      with:
+        platforms: arm64
+
     - name: Set up Docker Buildx
       # The docker-container driver can export to the GHA cache; the default
       # docker driver cannot ("Cache export is not supported for the docker
@@ -93,13 +99,14 @@ jobs:
         echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
 
     - name: Build and push production Docker image
-      # Single build. On branch pushes it pushes to the registry; on PRs it
-      # neither pushes nor loads (no ephemeral pr-NNN tags, no wasteful daemon
+      # On branch pushes it publishes amd64 and arm64; on PRs it builds only
+      # amd64, neither pushing nor loading (no ephemeral pr-NNN tags or daemon
       # export) -- the build still runs to validate the Dockerfile and to
       # populate the GHA cache.
       uses: docker/build-push-action@v7
       with:
         context: .
+        platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
         push: ${{ github.event_name != 'pull_request' }}
         build-args: |
           VITE_APP_NAME=ATLAS
