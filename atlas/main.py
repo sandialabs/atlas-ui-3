@@ -1083,12 +1083,11 @@ async def lifespan(app: FastAPI):
     config = app_factory.get_config_manager()
 
     from atlas.core.security_config import (
+        resolve_bind_host,
         validate_capability_secret,
         validate_debug_configuration,
     )
-    validate_debug_configuration(
-        config.app_settings, os.getenv("ATLAS_HOST", "127.0.0.1")
-    )
+    validate_debug_configuration(config.app_settings, resolve_bind_host())
     validate_capability_secret(config.app_settings.capability_token_secret)
 
     # CONFIG: Validate the MCP token encryption key at startup.

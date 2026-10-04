@@ -100,7 +100,6 @@ when required credentials are missing:
 export MINIO_ROOT_USER=atlas-local
 export MINIO_ROOT_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
 export POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
-mkdir -p data
 docker compose up
 ```
 
@@ -110,11 +109,13 @@ including revoking the old anonymous-download policy on an existing bucket.
 Keep storage credentials stable for existing volumes. Changing environment
 variables alone does not rotate an existing PostgreSQL database password.
 
-The `./data` bind mount preserves DuckDB history across container recreation;
-make it writable by UID/GID `10001:10001` without granting world-write
-access. Use separately managed storage, backups, and least-privilege
-credentials in production. Do not enable debug mode to bypass proxy setup in
-this container: it listens on a non-loopback address inside its network.
+The `atlas-data`, `atlas-logs`, and `minio-data` named volumes preserve DuckDB
+history, logs, and uploaded files across container recreation. The image runs
+as UID/GID `10001:10001`, so Docker-managed volumes are used instead of host
+bind mounts for writable state; mount `./config` for operator overrides. Use
+separately managed storage, backups, and least-privilege credentials in
+production. Do not enable debug mode to bypass proxy setup in this container:
+it listens on a non-loopback address inside its network.
 
 ## Local Development Setup
 

@@ -54,9 +54,8 @@ The Compose file is development-only and persists PostgreSQL in a named
 volume. Supply all required Compose secrets as described in the
 [installation guide](../getting-started/installation.md#option-4-docker-compose).
 For production, provision a separately secured database with backups and
-least-privilege credentials. Compose also mounts `./data` at `/data` for
-persistent DuckDB history; ensure the directory is writable by the container's
-nonroot user.
+least-privilege credentials. Compose also persists DuckDB history in the
+`atlas-data` named volume, which the container's nonroot user owns.
 
 Atlas installs both PostgreSQL drivers: `psycopg` (v3), which SQLAlchemy 2.1 and later use for `postgresql://` URLs, and `psycopg2`, which SQLAlchemy 2.0 used. To pick one explicitly, use `postgresql+psycopg://` or `postgresql+psycopg2://` (or set `DB_DRIVER` to the same scheme).
 

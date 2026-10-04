@@ -53,7 +53,11 @@ def test_compose_is_loopback_only_with_private_persistent_storage():
             assert re.search(r"@sha256:[a-f0-9]{64}$", service["image"])
     atlas = services["atlas-ui"]
     assert atlas["labels"]["org.atlas.deployment"] == "development-only"
-    assert "./data:/data" in atlas["volumes"]
+    # Logs and data must be Docker-managed volumes: the runtime UID (10001)
+    # cannot write host-owned bind mounts, so a bind mount here fails startup.
+    assert "atlas-data:/data" in atlas["volumes"]
+    assert "atlas-logs:/app/logs" in atlas["volumes"]
+    assert set(compose["volumes"]) >= {"atlas-data", "atlas-logs"}
     env = dict(entry.split("=", 1) for entry in atlas["environment"])
     assert "DEBUG_MODE" not in env
     assert "AGENT_LOOP_STRATEGY" not in env

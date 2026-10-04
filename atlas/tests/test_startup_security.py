@@ -11,6 +11,7 @@ import pytest
 
 from atlas.core.security_config import (
     _CAPABILITY_SECRET_PLACEHOLDERS,
+    resolve_bind_host,
     validate_capability_secret,
     validate_debug_configuration,
 )
@@ -179,6 +180,35 @@ def test_server_cli_local_host_overrides_nonloopback_environment(monkeypatch):
     assert server_cli.run_server(args) == 0
     assert run.call_args.kwargs["host"] == "127.0.0.1"
     assert os.environ["ATLAS_HOST"] == "127.0.0.1"
+
+
+@pytest.mark.parametrize(
+    "environ, argv, expected",
+    [
+        ({"ATLAS_HOST": "0.0.0.0"}, ["uvicorn", "main:app"], "0.0.0.0"),
+        ({"UVICORN_HOST": "::"}, ["uvicorn", "main:app"], "::"),
+        ({}, ["uvicorn", "main:app", "--host", "0.0.0.0"], "0.0.0.0"),
+        ({}, ["uvicorn", "main:app", "--host=0.0.0.0"], "0.0.0.0"),
+        ({}, ["uvicorn", "main:app"], "127.0.0.1"),
+    ],
+)
+def test_resolve_bind_host_sees_env_and_uvicorn_flags(monkeypatch, environ, argv, expected):
+    for name in ("ATLAS_HOST", "UVICORN_HOST"):
+        monkeypatch.delenv(name, raising=False)
+    for key, value in environ.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(sys, "argv", argv)
+    assert resolve_bind_host() == expected
+
+
+def test_direct_uvicorn_public_bind_cannot_bypass_debug_guard(monkeypatch):
+    # `uvicorn main:app --host 0.0.0.0` sets neither ATLAS_HOST nor the app's
+    # own CLI host, which previously let the lifespan default to 127.0.0.1.
+    for name in ("ATLAS_HOST", "UVICORN_HOST"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(sys, "argv", ["uvicorn", "atlas.main:app", "--host", "0.0.0.0"])
+    with pytest.raises(ValueError, match="DEBUG_MODE"):
+        validate_debug_configuration(_settings(), resolve_bind_host())
 
 
 @pytest.mark.parametrize(
