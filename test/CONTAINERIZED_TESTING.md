@@ -34,8 +34,9 @@ validation in parallel:
    production image after the test and runtime-only jobs pass, so a failed
    validation never pushes the image (or the `latest` tag on `main`).
 
-The non-blocking reverse-order backend run and the production-mode e2e run are
-limited to pushes to `main`. The pull-request status checks are `test`,
+The non-blocking reverse-order backend run is limited to pushes to `main`. The
+production-mode e2e run stays on the PR path because debug mode changes the live
+server's auth behaviour. The pull-request status checks are `ci-test`,
 `production-image`, and
 `runtime-only-image`.
 

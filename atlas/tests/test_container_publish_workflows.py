@@ -95,15 +95,15 @@ def test_pr_and_publish_builds_share_inputs():
     assert publish["push"] is True
 
 
-def test_production_e2e_runs_on_main_only():
-    # The debug-mode suite already runs e2e; DEBUG_MODE changes auth behaviour,
-    # so keep a production-mode e2e run, but only on pushes to main.
+def test_production_e2e_runs_on_the_pr_path():
+    # The debug-mode suite already runs e2e, but DEBUG_MODE changes auth
+    # behaviour, so a production-mode e2e run must also gate PRs (and develop).
     test_job = _load("ci.yml")["jobs"]["test"]
     step = next(
         s for s in test_job["steps"]
         if s.get("name") == "Run e2e tests in production mode"
     )
-    assert step["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert "if" not in step
     assert "run_tests.sh e2e" in step["run"]
 
 
@@ -147,4 +147,4 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
         if "REQUIRED_CHECKS" in step.get("env", {})
     )
     required_checks = checks_step["env"]["REQUIRED_CHECKS"].split(",")
-    assert {"test", "production-image", "runtime-only-image"} <= set(required_checks)
+    assert {"ci-test", "production-image", "runtime-only-image"} <= set(required_checks)

@@ -53,10 +53,11 @@ The CI/CD pipeline (`.github/workflows/ci.yml`) builds and tests in parallel:
 2. The production and runtime-only images are validated in separate jobs.
 3. On branch pushes a separate publish job pushes the multi-platform production
    image only after the test and runtime-only jobs pass.
-4. The non-blocking reverse-order backend run and the production-mode e2e run
-   happen on pushes to `main`, not on pull requests.
+4. The non-blocking reverse-order backend run happens on pushes to `main`, not
+   on pull requests. The production-mode e2e run stays on the PR path because
+   debug mode changes the live server's auth behaviour.
 
-The pull-request status checks are `test`, `production-image`, and
+The pull-request status checks are `ci-test`, `production-image`, and
 `runtime-only-image`.
 
 ## Local Testing

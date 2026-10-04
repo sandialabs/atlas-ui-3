@@ -12,6 +12,10 @@ env:
 
 jobs:
   test:
+    # Distinct display name: the release gate matches checks by bare name, so a
+    # generic `test` could collide with a future job of the same name in another
+    # workflow. `needs:` elsewhere still refers to the `test` job id.
+    name: ci-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -59,9 +63,7 @@ jobs:
     - name: Run e2e tests in production mode
       # DEBUG_MODE changes the live server's auth behaviour (test-user fallback,
       # proxy-secret handling), so the production-mode e2e run is not a duplicate
-      # of the debug-mode suite. Kept off the PR path, like the reverse-order
-      # guard, so pull requests stay fast.
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # of the debug-mode suite and stays on the PR path for coverage.
       run: |
         echo "Running e2e tests in production mode (DEBUG_MODE=false)"
         docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh e2e

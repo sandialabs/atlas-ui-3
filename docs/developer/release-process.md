@@ -122,7 +122,7 @@ this repository, not forks.
 4. **Opens a PR** from `release/vX.Y.Z` to `main`.
 5. **Waits for CI**, then squash-merges the exact commit it watched
    (`--match-head-commit`). The gate waits for a fixed set of checks
-   (`test`, `production-image`, `runtime-only-image`, `build-artifacts`, and
+   (`ci-test`, `production-image`, `runtime-only-image`, `build-artifacts`, and
    the security scans) to be
    present and green — not merely for whatever happened to register — and
    if any check fails the workflow stops and leaves the PR open for a
@@ -131,6 +131,9 @@ this repository, not forks.
    `pypi-publish.yml` or `quay-publish.yml`, so the run fails before
    creating any branch rather than tagging a version that never ships.
    `dry_run: true` still works without the secret.
+   Branch protection on `main` must require the same check names — `ci-test`,
+   `production-image`, and `runtime-only-image` in place of the retired
+   `build-and-test` — or PRs will hang on a check that never reports.
 6. **Tags** the squashed merge commit on `main` as `vX.Y.Z` (read back
    from the PR, not the moving tip of `main`).
 7. **Publishes a GitHub Release** with the changelog section as its body.

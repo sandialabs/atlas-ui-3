@@ -313,7 +313,7 @@ jobs:
           # irreversible merge. `gh pr checks --watch` alone only waits on the
           # checks that happen to be registered, so a slow-to-start workflow
           # could be missed.
-          REQUIRED_CHECKS: "test,production-image,runtime-only-image,build-artifacts,Secrets Scanning,Static Application Security Testing,Dependency Vulnerability Scan,Container Security Scan"
+          REQUIRED_CHECKS: "ci-test,production-image,runtime-only-image,build-artifacts,Secrets Scanning,Static Application Security Testing,Dependency Vulnerability Scan,Container Security Scan"
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 2700))
