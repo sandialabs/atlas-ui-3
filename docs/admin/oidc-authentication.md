@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-10-02
+Last updated: 2026-10-04
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -108,6 +108,37 @@ and the reason.
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to
 header-based auth rather than starting a half-configured login flow.
+
+### Session lifetime and refresh-on-use
+
+With OIDC login enabled, authenticated HTTP requests, WebSocket handshakes, and
+incoming messages on OIDC-authenticated sockets refresh the access token when
+it is expired or within the existing 60-second refresh margin. Concurrent uses
+share a per-session refresh lock, including delegated calls. This is the default
+behavior, with no separate setting or background refresh task: a request needing
+refresh waits for the IdP. Static files and unauthenticated health checks do not
+refresh sessions.
+
+An `invalid_grant` client-error response ends that Atlas session and discards the
+user's cached delegated credentials using the same cleanup as logout. The current
+request is no longer authenticated by that session: browsers return to sign-in,
+APIs receive 401, and an open chat socket closes on its next incoming message.
+The existing trusted-header authentication fallback is unchanged. Reloading the
+browser can start a new login without manually visiting the logout URL.
+
+Network failures, IdP 5xx responses, and other refresh errors retain the Atlas
+session and retry on later use; delegated calls cannot use an expired token.
+Configure the IdP to issue refresh tokens and report access-token expiry.
+Without a refresh token or known expiry, Atlas cannot track the IdP session this
+way; the Atlas maximum age remains the limit. Refresh does not extend
+`OIDC_SESSION_MAX_AGE_SECONDS`.
+
+An active session normally detects IdP revocation by the next refresh, provided
+the IdP refuses the grant. This is not immediate logout propagation: idle
+browsers are checked only when used again, already-running work is not cancelled,
+and back-channel/front-channel logout endpoints are not implemented. Choose an
+access-token lifetime shorter than the IdP idle timeout if active Atlas use
+should keep the IdP session alive.
 
 ## Confidential-client authentication
 

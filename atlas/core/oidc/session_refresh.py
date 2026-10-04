@@ -14,6 +14,7 @@ import asyncio
 import logging
 import time
 from typing import Optional
+from weakref import WeakValueDictionary
 
 from atlas.core.oidc.client_authentication import (
     ClientAuthenticationError,
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # One in-flight refresh per session. Several concurrent tool calls can notice
 # the same expiring token at once; without this they would each burn the
 # refresh token, and providers that rotate it would invalidate the others.
-_refresh_locks: dict = {}
+_refresh_locks: WeakValueDictionary = WeakValueDictionary()
 _refresh_locks_guard = asyncio.Lock()
 
 
@@ -50,10 +51,12 @@ async def ensure_fresh_access_token(
 ) -> Optional[str]:
     """Return a usable access token for ``session``, refreshing if needed.
 
-    Returns None when the token has expired and cannot be refreshed -- the
-    caller must then treat the user as having no delegatable credential rather
-    than presenting a dead token downstream.
+    Returns None when the token cannot be refreshed. An invalid grant also
+    removes the login session and its delegated credentials; transient failures
+    leave the session available for a later retry.
     """
+    if get_session_store().get(session.session_id) is not session:
+        return None
     if not session.access_token_needs_refresh():
         return session.access_token
 
@@ -68,6 +71,10 @@ async def ensure_fresh_access_token(
 
     lock = await _lock_for(session.session_id)
     async with lock:
+        # Logout or a refused refresh may have removed it while we waited.
+        if get_session_store().get(session.session_id) is not session:
+            _forget_lock(session.session_id)
+            return None
         # Another coroutine may have refreshed while we waited.
         if not session.access_token_needs_refresh():
             return session.access_token
@@ -83,6 +90,24 @@ async def ensure_fresh_access_token(
                 credentials=credentials,
             )
         except (OIDCDiscoveryError, ClientAuthenticationError, OIDCFlowError) as exc:
+            if (
+                isinstance(exc, OIDCFlowError)
+                and exc.error_code == "invalid_grant"
+                and exc.status_code is not None
+                and 400 <= exc.status_code < 500
+            ):
+                from atlas.core.oidc.mcp_delegation import revoke_delegated_credentials
+
+                # Remove first: cleanup must never leave an authenticatable
+                # session behind, even if a credential store is unavailable.
+                get_session_store().remove(session.session_id)
+                _forget_lock(session.session_id)
+                try:
+                    await revoke_delegated_credentials(session.user_id)
+                except Exception:
+                    logger.exception("Could not revoke delegated credentials after OIDC session ended")
+                logger.info("OIDC session ended because the IdP refused its refresh grant")
+                return None
             logger.warning("Could not refresh the OIDC access token: %s", exc)
             return None
         except Exception as exc:  # pragma: no cover - network surprises
@@ -97,6 +122,9 @@ async def ensure_fresh_access_token(
             if isinstance(expires_in, (int, float)) and expires_in > 0
             else None
         )
+        if get_session_store().get(session.session_id) is not session:
+            _forget_lock(session.session_id)
+            return None
         updated = get_session_store().update_tokens(
             session.session_id,
             access_token=response.get("access_token"),
@@ -110,3 +138,14 @@ async def ensure_fresh_access_token(
             return None
         logger.info("Refreshed the OIDC access token for a live session")
         return updated.access_token
+
+
+async def get_refreshed_session(session_id: Optional[str], settings=None) -> Optional[OIDCSession]:
+    """Refresh on authenticated use, retaining sessions during transient outages."""
+    session = get_session_store().get(session_id)
+    if session is None:
+        return None
+    await ensure_fresh_access_token(session, settings)
+    # A failed refresh can mean either a transient outage or a removed session.
+    # Re-read after awaiting rather than authenticating from a stale reference.
+    return get_session_store().get(session_id)

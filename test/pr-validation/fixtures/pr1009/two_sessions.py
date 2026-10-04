@@ -153,10 +153,13 @@ def login(client, label):
     params = parse_qs(urlparse(response.headers.get("location", "")).query)
     NONCE_HOLDER["nonce"] = params.get("nonce", [None])[0]
     state = params.get("state", [""])[0]
-    client.get(f"/auth/oidc/callback?code={label}&state={state}", follow_redirects=False)
-    status = client.get("/api/auth/oidc/status").json()
-    check(f"{label}: signed in as the user",
-          (status.get("session") or {}).get("user") == USER_EMAIL, str(status))
+    response = client.get(
+        f"/auth/oidc/callback?code={label}&state={state}", follow_redirects=False,
+    )
+    # Do not make an authenticated request from the stale browser: refresh-on-use
+    # would correctly end its session before we can test delegation's selection.
+    check(f"{label}: login completed",
+          response.status_code == 302 and response.headers.get("location") == "/")
 
 
 def main():

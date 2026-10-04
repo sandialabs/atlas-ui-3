@@ -1452,8 +1452,8 @@ def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
     )
 
 
-def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
-    """Resolve the OIDC login session behind a WebSocket handshake.
+async def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
+    """Refresh and resolve the OIDC login behind a handshake or incoming frame.
 
     Starlette's SessionMiddleware populates ``scope["session"]`` for websocket
     scopes as well as HTTP ones, so the browser's existing login cookie
@@ -1464,13 +1464,14 @@ def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
     """
     if not getattr(app_settings, "feature_oidc_auth_enabled", False):
         return None
-    from atlas.core.oidc.session import SESSION_COOKIE_KEY, get_session_store
+    from atlas.core.oidc.session import SESSION_COOKIE_KEY
+    from atlas.core.oidc.session_refresh import get_refreshed_session
 
     try:
         session_id = websocket.session.get(SESSION_COOKIE_KEY)
     except (AssertionError, KeyError):
         return None
-    oidc_session = get_session_store().get(session_id)
+    oidc_session = await get_refreshed_session(session_id, app_settings)
     return oidc_session.user_id if oidc_session else None
 
 
@@ -1533,7 +1534,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # An established OIDC login session authenticates the socket on its own,
     # exactly as it does for HTTP in AuthMiddleware. Checked before the proxy
     # secret because an OIDC deployment may have no reverse proxy at all.
-    oidc_ws_user = _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
+    oidc_ws_user = await _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
@@ -1677,6 +1678,11 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+            if oidc_ws_user and (
+                await _resolve_oidc_websocket_user(websocket, app_settings)
+            ) != oidc_ws_user:
+                await websocket.close(code=1008, reason="OIDC session ended. Please sign in again.")
+                break
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages

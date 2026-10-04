@@ -769,16 +769,16 @@ class TestOIDCRoutes:
                    for r in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_refresh_under_http_token_endpoint_fails_cleanly(self, discovery_stub, caplog):
+    async def test_refresh_under_http_token_endpoint_fails_cleanly(self, discovery_stub, caplog, monkeypatch):
         """Refresh hits the same rule: no exception, no token, a logged reason,
         and the token endpoint is never called with the client secret."""
         from atlas.core.oidc import session_refresh
-        from atlas.core.oidc.session import OIDCSession
-
         requested = discovery_stub(dict(DISCOVERY_DOC, token_endpoint="http://idp.example.gov/token"))
         refresh = AsyncMock()
-        session = OIDCSession(
-            session_id="s1", user_id="user@example.gov", access_token="old",
+        store = OIDCSessionStore()
+        monkeypatch.setattr(session_refresh, "get_session_store", lambda: store)
+        session = store.create(
+            user_id="user@example.gov", access_token="old",
             refresh_token="r1", access_token_expires_at=time.time() - 1,
         )
         with patch.object(session_refresh, "refresh_access_token", refresh), \
