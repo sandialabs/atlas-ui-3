@@ -147,4 +147,12 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
         if "REQUIRED_CHECKS" in step.get("env", {})
     )
     required_checks = checks_step["env"]["REQUIRED_CHECKS"].split(",")
-    assert {"ci-test", "production-image", "runtime-only-image"} <= set(required_checks)
+    # The release gate must require the renamed PR jobs, and must no longer wait
+    # on the retired serial check.
+    pr_job_names = {
+        step_job.get("name", job_id)
+        for job_id, step_job in jobs.items()
+        if job_id != "publish-image"
+    }
+    assert pr_job_names <= set(required_checks)
+    assert "build-and-test" not in required_checks
