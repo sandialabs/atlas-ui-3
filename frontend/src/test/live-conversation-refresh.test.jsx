@@ -612,6 +612,9 @@ describe('mid-run live refresh of a joined conversation', () => {
 
   it('wires the fetch timeout, the backoff base and the backoff cap', async () => {
     vi.useFakeTimers()
+    // Pin jitter out: the retry delay otherwise spans 3.0-3.6s and the 3.5s
+    // assertion below would be a coin flip.
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
     try {
       // Fail from the first poll: then the retry delay is the backoff, not the
       // normal interval, so this actually pins backoffBase.
@@ -644,6 +647,7 @@ describe('mid-run live refresh of a joined conversation', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
       expect(h.fetchMock.mock.calls.length).toBeGreaterThan(callsAtStart)
     } finally {
+      randomSpy.mockRestore()
       vi.useRealTimers()
     }
   })
