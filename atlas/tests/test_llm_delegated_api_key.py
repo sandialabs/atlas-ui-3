@@ -6,7 +6,7 @@ and never with some other key: every failure to obtain one must fail the call.
 """
 
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -15,6 +15,7 @@ from atlas.core.oidc.delegation import DelegatedToken, DelegationError
 from atlas.core.oidc.session import get_session_store
 from atlas.domain.errors import LLMAuthenticationError
 from atlas.modules.config.models import LiteLLMGatewayDelegation, LLMConfig, ModelConfig
+from atlas.modules.llm import litellm_caller as caller_module
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 from atlas.modules.llm.litellm_gateway_client import mint_delegated_llm_token
 
@@ -167,3 +168,34 @@ class TestCallTarget:
         caller = _caller(_model("gw"))
         with pytest.raises(ValueError, match="no delegated token was obtained"):
             caller._get_model_kwargs("gw", user_email=USER)
+
+
+class TestWhatReachesTheModel:
+    """What a whole call hands LiteLLM's SDK, with a server provider key in the
+    environment that the SDK would fall back to."""
+
+    MESSAGES = [{"role": "user", "content": "hello"}]
+
+    @pytest.mark.asyncio
+    async def test_the_minted_token_is_sent_not_the_server_key(self, user_session, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-server-env-key")
+        response = MagicMock()
+        response.choices[0].message.content = "a reply"
+        acompletion = AsyncMock(return_value=response)
+        with _patch_manager(_minted()), patch.object(caller_module, "acompletion", acompletion):
+            reply = await _caller(_model("gw")).call_plain("gw", self.MESSAGES, user_email=USER)
+
+        assert reply == "a reply"
+        sent = acompletion.await_args.kwargs
+        assert sent["api_key"] == "DELEGATED"
+        assert sent["api_base"] == GATEWAY_URL
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_sent_when_no_token_can_be_obtained(self, user_session, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-server-env-key")
+        acompletion = AsyncMock()
+        with _patch_manager(None), patch.object(caller_module, "acompletion", acompletion), \
+                pytest.raises(LLMAuthenticationError):
+            await _caller(_model("gw")).call_plain("gw", self.MESSAGES, user_email=USER)
+
+        acompletion.assert_not_awaited()
