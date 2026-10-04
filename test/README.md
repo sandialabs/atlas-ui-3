@@ -47,10 +47,18 @@ The test scripts are designed to run inside Docker containers with the following
 
 ## CI/CD Integration
 
-The CI/CD pipeline (`.github/workflows/ci.yml`) uses this approach:
-1. Build Docker image with all dependencies
-2. Run `bash /app/test/run_tests.sh all` inside the container
-3. Push image only if all tests pass
+The CI/CD pipeline (`.github/workflows/ci.yml`) builds and tests in parallel:
+1. The `ci-test` job builds the test image, runs all suites with debug mode
+   enabled, then runs the backend and e2e suites in production mode.
+2. The production and runtime-only images are validated in separate jobs.
+3. On branch pushes a separate publish job pushes the multi-platform production
+   image only after the test and runtime-only jobs pass.
+4. The non-blocking reverse-order backend run happens on pushes to `main`, not
+   on pull requests. The production-mode e2e run stays on the PR path because
+   debug mode changes the live server's auth behaviour.
+
+The pull-request status checks are `ci-test`, `production-image`, and
+`runtime-only-image`.
 
 ## Local Testing
 
