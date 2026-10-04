@@ -24,10 +24,16 @@ test/
 ## Usage
 
 ### CI/CD Pipeline
-The GitHub Actions workflow (`.github/workflows/ci.yml`) now:
-1. **Builds** the Docker image with all dependencies
-2. **Tests** by running `bash /app/test/run_tests.sh all` in the container
-3. **Pushes** the image only if all tests pass
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs three jobs in
+parallel:
+1. **Test** builds the Docker image with test dependencies and runs all suites
+   in debug mode, followed by the backend suite in production mode.
+2. **Production image** validates the production Dockerfile (and publishes on
+   branch pushes).
+3. **Runtime-only image** validates `Dockerfile.runtimeonly`.
+
+The non-blocking reverse-order backend run is limited to pushes to `main`. The
+CI status checks are `test`, `production-image`, and `runtime-only-image`.
 
 ### Local Testing
 
