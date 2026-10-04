@@ -1,18 +1,22 @@
+# Local development only. Never expose this stack directly to an untrusted network.
+# Public deployments require an authenticated reverse proxy and operator-managed storage.
 services:
   minio:
-    image: minio/minio:latest
+    # Archival images are for this loopback-only development stack, not production.
+    image: docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
     container_name: atlas-minio
     ports:
-      - "9000:9000"  # S3 API
-      - "9001:9001"  # Web Console
+      - "127.0.0.1:9000:9000"  # S3 API
+      - "127.0.0.1:9001:9001"  # Web Console
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in your environment or .env}
     volumes:
       - ./data/minio:/data
+    entrypoint: ["/opt/bitnami/minio/bin/minio"]
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "mc", "ready", "http://127.0.0.1:9000"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -20,29 +24,32 @@ services:
       - atlas-network
 
   minio-init:
-    image: minio/mc:latest
+    image: docker.io/bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
     container_name: atlas-minio-init
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set myminio http://minio:9000 minioadmin minioadmin;
-      mc mb myminio/atlas-files --ignore-existing;
-      mc anonymous set download myminio/atlas-files;
-      echo 'MinIO initialization complete';
-      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in your environment or .env}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set myminio http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb myminio/atlas-files --ignore-existing
+        mc anonymous set none myminio/atlas-files
+        echo 'MinIO initialization complete'
     networks:
       - atlas-network
 
   postgres:
-    image: postgres:16-alpine
+    image: docker.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: atlas-postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: atlas
-      POSTGRES_PASSWORD: atlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or .env}
       POSTGRES_DB: atlas_chat_history
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -61,23 +68,24 @@ services:
       args:
         VITE_APP_NAME: "Chat UI"
     container_name: atlas-ui-3
+    labels:
+      org.atlas.deployment: development-only
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       # Core / Development
-      - DEBUG_MODE=true
       - PORT=8000
       - APP_NAME=ATLAS
       - ATLAS_HOST=0.0.0.0  # Required for Docker container to accept external connections
       - ENVIRONMENT=development
       
       # API Keys for LLM services
-      - OPENAI_API_KEY=sk-pro
-      - ANTHROPIC_API_KEY=your_anthropic_api_key_here
-      - GOOGLE_API_KEY=your_google_api_key_here
-      - OPENROUTER_API_KEY=sk-or
-      - CEREBRAS_API_KEY=your_cerebras_api_key_here
-      - GROQ_API_KEY=your-groq_api_key_here
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
       
       # Banner system configuration
       - BANNER_ENABLED=true
@@ -114,7 +122,7 @@ services:
       - SESSION_REPOSITORY_TYPE=memory
       # Chat history DB (choose one):
       # DuckDB (default, no extra services required):
-      - CHAT_HISTORY_DB_URL=duckdb:///data/chat_history.db
+      - CHAT_HISTORY_DB_URL=duckdb:////data/chat_history.db
       # PostgreSQL (production / multi-user):
       # - CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@postgres:5432/atlas_chat_history
       - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
@@ -152,7 +160,6 @@ services:
       - FEATURE_AGENT_MODE_AVAILABLE=true
       - FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=false
       - FEATURE_FINETUNE_CAPTURE_ENABLED=false
-      - AGENT_LOOP_STRATEGY=think-act
       
       # Tool approval configuration
       - REQUIRE_TOOL_APPROVAL_BY_DEFAULT=false
@@ -160,21 +167,23 @@ services:
       
       - APP_LOG_DIR=/app/logs
       
-      - CAPABILITY_TOKEN_SECRET=blablah
+      - CAPABILITY_TOKEN_SECRET=${CAPABILITY_TOKEN_SECRET:?set CAPABILITY_TOKEN_SECRET (>=32 chars) in your environment or .env}
       
       # S3/MinIO Storage Configuration
       - S3_ENDPOINT=http://minio:9000
       - S3_BUCKET_NAME=atlas-files
-      - S3_ACCESS_KEY=minioadmin
-      - S3_SECRET_KEY=minioadmin
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-atlas-minio}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in your environment or .env}
       - S3_REGION=us-east-1
       - S3_USE_SSL=false
+      - USE_MOCK_S3=false
       
       # Content Security Policy (CSP) configuration
       - "SECURITY_CSP_VALUE=default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self' blob: data: https://www.sandia.gov; frame-ancestors 'self'"
     volumes:
-      - ./logs:/app/logs:U
-      - ./config:/app/config:U
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./data:/data
     depends_on:
       minio:
         condition: service_healthy

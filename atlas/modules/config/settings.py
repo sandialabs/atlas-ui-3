@@ -4,8 +4,10 @@ import logging
 import sys
 from typing import Dict, FrozenSet, Optional
 
-from pydantic import AliasChoices, Field, PrivateAttr, model_validator
+from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+from atlas.core.security_config import validate_capability_secret
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +143,10 @@ class AppSettings(BaseSettings):
     app_name: str = "ATLAS"
     port: int = 8000
     debug_mode: bool = False
+    allow_debug_non_loopback: bool = Field(
+        default=False,
+        description="Explicitly permit debug authentication bypass in production or on non-loopback binds",
+    )
     llm_request_timeout_seconds: float = Field(
         default=120.0,
         gt=0,
@@ -843,6 +849,11 @@ class AppSettings(BaseSettings):
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
     capability_token_ttl_seconds: int = 3600
+
+    @field_validator("capability_token_secret")
+    @classmethod
+    def validate_capability_token_secret(cls, value: str) -> str:
+        return validate_capability_secret(value)
 
     # Backend URL configuration for MCP server file access
     # This should be the publicly accessible URL of the backend API

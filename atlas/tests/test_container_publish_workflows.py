@@ -24,6 +24,8 @@ def publishing_steps(request):
 def test_publishing_platforms(publishing_steps):
     filename, _, build = publishing_steps
     inputs = build["with"]
+    assert inputs["file"] == "./Dockerfile"
+    assert inputs["target"] == "runtime"
     if filename == "ci.yml":
         assert inputs["platforms"] == (
             "${{ github.event_name == 'pull_request' && 'linux/amd64' "
@@ -52,6 +54,13 @@ def test_qemu_precedes_buildx(publishing_steps):
         assert qemu["if"] == "github.event_name != 'pull_request'"
     else:
         assert "if" not in qemu
+
+
+def test_runtime_smoke_gates_publishing(publishing_steps):
+    _, steps, publishing_build = publishing_steps
+    smoke = next(step for step in steps if step.get("name") == "Validate runtime image")
+    assert steps.index(smoke) < steps.index(publishing_build)
+    assert "test_pr1017_container_runtime.sh" in smoke["run"]
 
 
 def test_validation_images_stay_single_platform(publishing_steps):

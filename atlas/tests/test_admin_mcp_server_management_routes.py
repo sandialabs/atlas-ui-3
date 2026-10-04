@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from main import app
-from atlas.modules.config import config_manager
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
@@ -39,12 +38,27 @@ def test_admin_mcp_available_servers_returns_inventory(monkeypatch, tmp_path):
 
     # Repo should ship at least one example server.
     assert len(data["available_servers"]) > 0
+    assert "code-executor" not in data["available_servers"]
+    assert "code_executor_v2" in data["available_servers"]
 
     # Spot-check expected shape.
     first_name = next(iter(data["available_servers"]))
     first = data["available_servers"][first_name]
     assert "config" in first
     assert "source_file" in first
+
+
+@pytest.mark.skipif(_IS_PRODUCTION, reason="Requires debug mode for mock admin access")
+def test_admin_cannot_install_legacy_code_executor(monkeypatch, tmp_path):
+    _configure_test_overrides(tmp_path, monkeypatch)
+    response = TestClient(app).post(
+        "/admin/mcp/add-server",
+        headers={"X-User-Email": config_manager.app_settings.admin_test_user},
+        json={"server_name": "code-executor"},
+    )
+    assert response.status_code == 404
+    assert "not found in example configurations" in response.json()["detail"]
+    assert not (tmp_path / "mcp.json").exists()
 
 
 @pytest.mark.skipif(_IS_PRODUCTION, reason="Requires debug mode for mock admin access")

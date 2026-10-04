@@ -1,6 +1,6 @@
 # Troubleshooting File Access for MCP Servers
 
-Last updated: 2026-04-12
+Last updated: 2026-10-04
 
 This guide helps resolve issues with MCP servers accessing attached files in Atlas UI.
 
@@ -92,6 +92,13 @@ CAPABILITY_TOKEN_SECRET=<paste-the-64-char-hex-output-here>
 Restart the backend. The warning should stop appearing and tokens will
 survive restarts and be verifiable across workers.
 
+Startup rejects nonempty secrets shorter than 32 UTF-8 bytes and known public
+placeholders, including the former `.env.example` value. Use random output,
+not a padded placeholder. `atlas-init` generates a capability secret for both
+full and minimal installations; Compose requires you to supply one explicitly.
+Keep it independent of `PROXY_SECRET` and `MCP_TOKEN_ENCRYPTION_KEY`. Rotating
+it invalidates outstanding file-download links.
+
 ### Issue 4: Token Expiration Errors
 
 **Symptoms:**
@@ -132,9 +139,9 @@ Increase the token TTL in your configuration:
    ```
 
 2. Check that the URL matches your actual deployment:
-   - ✅ Correct: `https://atlas.mycompany.com`
-   - ❌ Wrong: `http://localhost:8000`
-   - ❌ Wrong: Missing entirely
+   - Correct: `https://atlas.mycompany.com`
+   - Wrong: `http://localhost:8000`
+   - Wrong: Missing entirely
 
 3. Ensure load balancer or reverse proxy properly forwards requests to the backend
 

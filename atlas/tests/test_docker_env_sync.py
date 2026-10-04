@@ -117,6 +117,8 @@ def test_docker_compose_has_required_env_vars():
         'VITE_FEATURE_POWERED_BY_ATLAS',  # Build-time arg, not runtime env var in docker-compose
         'VITE_FEATURE_ANIMATED_LOGO',  # Build-time arg, not runtime env var in docker-compose
         'VITE_FEATURE_RAG_CITATIONS',  # Build-time arg, not runtime env var in docker-compose
+        'DEBUG_MODE',  # Never enable authentication bypass in the Compose stack
+        'AGENT_LOOP_STRATEGY',  # Removed strategy selector; native agent loop is always used
         # Note: The following are in .env.example as commented out, not as active vars,
         # so they won't appear in env_example_vars and don't need to be listed here:
         # - ATLAS_HOST (Docker-specific, set to 0.0.0.0 for container networking)
@@ -207,7 +209,7 @@ def test_docker_specific_vars_present():
 
 
 def test_runtime_only_dockerfile_keeps_runtime_surface_small():
-    """Ensure the optional runtime-only container build recipe stays minimal."""
+    """The old filename must delegate to an explicitly selected runtime image."""
     repo_root = Path(__file__).parent.parent.parent
     dockerfile_path = repo_root / 'Dockerfile.runtimeonly'
 
@@ -218,107 +220,11 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
             "not COPY top-level Dockerfiles)."
         )
 
-    dockerfile_content = dockerfile_path.read_text(encoding='utf-8')
-
-    # Split into stages and parse each stage's FROM line once:
-    # `FROM [--flag=...] <image> [AS <name>]` (flags such as --platform).
-    # The split is case-sensitive so a column-0 `from ...` line inside a RUN
-    # heredoc (e.g. Python) isn't taken for a new stage.
-    chunks = re.split(r'^(?=FROM\s)', dockerfile_content, flags=re.M)[1:]
-    stages = []  # (FROM line, image, lower-cased name or '', stage text)
-    for chunk in chunks:
-        from_line = chunk.splitlines()[0]
-        match = re.fullmatch(r'FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*', from_line, re.I)
-        assert match, f"Unparsed FROM line: {from_line}"
-        stages.append((from_line, match.group(1), (match.group(2) or '').lower(), chunk))
-
-    # All stages must use Chainguard images for a minimal CVE surface.
-    # Match by registry prefix so the recipe can later pin to a specific
-    # tag or digest without breaking this assertion.
-    non_chainguard = [line for line, image, _, _ in stages if not image.startswith('cgr.dev/chainguard/')]
-    assert not non_chainguard, f"Every stage must use a cgr.dev/chainguard/ image: {non_chainguard}"
-    assert any(image.startswith('cgr.dev/chainguard/node:') for _, image, _, _ in stages), (
-        "Frontend build stage must use a Chainguard Node image"
-    )
-
-    # Runtime image should copy only built frontend assets, not the full frontend source tree.
-    assert 'COPY --from=frontend-build /app/frontend/dist /app/atlas/static' in dockerfile_content, (
-        "Copy only the built frontend (dist) into /app/atlas/static"
-    )
-
-    # Runtime recipe should avoid pulling in extra top-level development/test trees.
-    for excluded_copy in ('COPY docs/', 'COPY test/', 'COPY scripts/', 'COPY mocks/'):
-        assert excluded_copy not in dockerfile_content, (
-            f"Runtime-only image should not include '{excluded_copy}'"
-        )
-
-    # Runtime install must tolerate Python upper-bound constraints in transitive deps.
-    assert '--ignore-requires-python ".[mcp-demos]"' in dockerfile_content, (
-        'Install with --ignore-requires-python ".[mcp-demos]"'
-    )
-
-    # Join continuation lines so each instruction is one string.
-    instructions = dockerfile_content.replace('\\\n', ' ').splitlines()
-    # The build stage is found by its `AS` name; the final stage is the last
-    # one, which is what `docker build` outputs by default.
-    names = [name for _, _, name, _ in stages]
-    assert 'python-build' in names, f"Expected a 'python-build' stage, found {names}"
-    build_stage = stages[names.index('python-build')][3]
-    final_from, final_image, _, final_stage = stages[-1]
-
-    def apk_packages(stage):
-        """Package names from a stage's `apk add` commands (flags dropped)."""
-        packages = []
-        for command in re.findall(r'apk add ([^&;\n]*)', stage.replace('\\\n', ' ')):
-            packages += [word for word in command.split() if not word.startswith('-')]
-        return packages
-
-    final_packages = apk_packages(final_stage)
-
-    # The final stage is not a -dev image, keeps a shell (hooks and agent-portal
-    # commands can be shell scripts), and has no package manager or build tools.
-    assert '-dev' not in final_image, f"Final stage must not use a -dev image: {final_from}"
-    assert {'bash', 'busybox'} <= set(final_packages), (
-        f"Final stage must install bash and busybox; it installs {final_packages}"
-    )
-    build_tools = {'build-base', 'gcc', 'clang', 'make', 'git', 'apk-tools'}
-    denied = [p for p in final_packages if p in build_tools or p.endswith('-dev')]
-    assert not denied, f"Final stage must not install build tools: {denied}"
-    assert re.search(r'apk del .*\bapk-tools\b', final_stage.replace('\\\n', ' ')), (
-        "Final stage must remove apk-tools"
-    )
-
-    # One ARG sets the Python for both stages; the venv only runs on the Python
-    # it was built with.
-    assert re.search(r'^ARG PYTHON_VERSION=3\.\d+$', dockerfile_content, re.M), (
-        "Declare a global `ARG PYTHON_VERSION=3.X` default before the first FROM"
-    )
-    for label, stage in (('python-build', build_stage), ('final', final_stage)):
-        assert re.search(r'^ARG PYTHON_VERSION$', stage, re.M), (
-            f"The {label} stage must redeclare ARG PYTHON_VERSION"
-        )
-        assert 'python-${PYTHON_VERSION}' in apk_packages(stage), (
-            f"The {label} stage must install the python-${{PYTHON_VERSION}} package"
-        )
-    assert 'RUN python${PYTHON_VERSION} -m venv /app/.venv' in build_stage, (
-        "Build the venv with python${PYTHON_VERSION}"
-    )
-    assert 'sys.version_info >= (3, 11)' in build_stage, (
-        "Build stage must check PYTHON_VERSION against pyproject.toml's >=3.11"
-    )
-    assert not re.search(r'\bpython-?3\.\d+', build_stage + final_stage), (
-        "Use ${PYTHON_VERSION}, not a hard-coded Python version"
-    )
-
-    # The app is owned by nonroot via COPY --chown and runs as nonroot. A
-    # `RUN chown -R` layer would store every file under /app a second time.
-    assert 'COPY --from=python-build --chown=nonroot:nonroot /app /app' in final_stage, (
-        "Final stage must copy /app from python-build with --chown=nonroot:nonroot"
-    )
-    assert re.search(r'^USER nonroot$', final_stage, re.M), "Final stage must run as nonroot"
-    assert not any(
-        line.startswith('RUN') and 'chown -R' in line for line in instructions
-    ), "Use COPY --chown instead of a RUN chown -R layer"
+    instructions = [
+        line.strip() for line in dockerfile_path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert instructions == ["ARG ATLAS_RUNTIME_IMAGE", "FROM ${ATLAS_RUNTIME_IMAGE}"]
 
 
 def test_use_new_frontend_flag_is_gone():

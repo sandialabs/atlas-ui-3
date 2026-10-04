@@ -1,6 +1,6 @@
 # Authentication & Authorization
 
-Last updated: 2026-09-15
+Last updated: 2026-10-04
 
 This page describes Atlas's **default** authentication mode: the application
 operates behind a reverse proxy and trusts an identity header injected by an
@@ -43,6 +43,18 @@ This configuration will decode the base64-encoded JWT passed in the x-amzn-oidc-
 ## Development Behavior
 
 In a local development environment (when `DEBUG_MODE=true` in the `.env` file), the system falls back to using a default `test@test.com` user if the configured authentication header is not present.
+
+Debug is off in shipped templates and newly initialized installations. To opt in
+for local development, set `DEBUG_MODE=true`, `ENVIRONMENT=development`, and
+`ATLAS_HOST=127.0.0.1` (or another loopback address). Startup rejects debug mode
+when the environment is `production` or the effective bind address is not
+loopback, including an address supplied with `atlas-server --host`.
+
+`ALLOW_DEBUG_NON_LOOPBACK=true` explicitly overrides those debug checks. It
+does not restore authentication: anyone reaching that listener can impersonate
+users and gain debug administrator access. Never use this override on an
+untrusted network. Debug mode always logs a security warning; the separate
+Agent Portal and authorization-bypass guards still apply.
 
 **Production Mode (`DEBUG_MODE=false`):** HTTP routes raise HTTP 401 ("Not authenticated: missing user identity") if `user_email` is not set on the request state. There is no fallback to a default user — requests that bypass auth middleware are rejected.
 

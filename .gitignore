@@ -3,6 +3,8 @@
 .ruff_cache
 # Environment variables
 .env
+.env.*
+!.env.example
 # Auto-copied during build from root .env.example
 atlas/.env.example
 .claude
@@ -74,9 +76,6 @@ backend/configfilesadmin/
 # Temporary files
 *.tmp
 *.temp
-
-# Docker
-.dockerignore
 
 # E2E Test Screenshots (local testing only)
 test_e2e/screenshots/
