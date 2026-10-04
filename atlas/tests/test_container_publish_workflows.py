@@ -74,6 +74,9 @@ def test_branch_publishing_is_gated_on_validation():
     publish = _load("ci.yml")["jobs"]["publish-image"]
     assert publish["if"] == "github.event_name != 'pull_request'"
     assert set(publish["needs"]) == {"test", "runtime-only-image"}
+    # Serialise publishers per branch so an older run cannot clobber `latest`.
+    assert publish["concurrency"]["group"] == "publish-${{ github.ref }}"
+    assert publish["concurrency"]["cancel-in-progress"] is True
 
 
 def test_pr_and_publish_builds_share_inputs():
@@ -87,12 +90,32 @@ def test_pr_and_publish_builds_share_inputs():
 
     validation = build("production-image", "Build production Docker image")
     publish = build("publish-image", "Build and push production Docker image")
-    for key in ("context", "build-args", "cache-from", "cache-to", "labels"):
+    for key in ("context", "build-args", "cache-from", "cache-to"):
         assert validation.get(key) == publish.get(key), key
     assert validation["platforms"] == "linux/amd64"
     assert validation["push"] is False
     assert publish["platforms"] == "linux/amd64,linux/arm64"
     assert publish["push"] is True
+
+    # The metadata tag lists legitimately differ by event (PR vs branch), but
+    # both jobs must build the same image reference and derive labels from the
+    # same build metadata, so a drift cannot ship a different image.
+    def meta_images(job_name):
+        return next(
+            step for step in jobs[job_name]["steps"]
+            if step.get("name") == "Extract metadata"
+        )["with"]["images"]
+
+    def build_meta_run(job_name):
+        return next(
+            step for step in jobs[job_name]["steps"]
+            if step.get("name") == "Get build metadata"
+        )["run"]
+
+    assert meta_images("production-image") == meta_images("publish-image") == (
+        "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+    )
+    assert build_meta_run("production-image") == build_meta_run("publish-image")
 
 
 def test_production_e2e_runs_on_the_pr_path():
