@@ -57,7 +57,7 @@ from atlas.modules.config.config_manager import resolve_env_var
 from atlas.modules.config.litellm_gateway_models import parse_gateway_model_key, resolve_gateway_ref
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 
-from .litellm_gateway_client import get_gateway_client
+from .litellm_gateway_client import get_gateway_client, mint_delegated_llm_token
 from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse, split_provider
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
@@ -807,8 +807,6 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         ref = resolve_gateway_ref(self.llm_config, model_name)
         model_config = lookup_model_config(self.llm_config, model_name) if ref is None else None
         if model_config is not None and getattr(model_config, "api_key_source", "system") == "delegated":
-            from atlas.modules.llm.delegated_auth import mint_delegated_llm_token
-
             token = await mint_delegated_llm_token(
                 user_email, model_config.delegation, endpoint=f"Model '{model_name}'", actor=f"llm:{model_name}"
             )

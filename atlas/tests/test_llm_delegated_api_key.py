@@ -15,8 +15,8 @@ from atlas.core.oidc.delegation import DelegatedToken, DelegationError
 from atlas.core.oidc.session import get_session_store
 from atlas.domain.errors import LLMAuthenticationError
 from atlas.modules.config.models import LiteLLMGatewayDelegation, LLMConfig, ModelConfig
-from atlas.modules.llm.delegated_auth import mint_delegated_llm_token
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
+from atlas.modules.llm.litellm_gateway_client import mint_delegated_llm_token
 
 GATEWAY_URL = "https://llm-gateway.example.gov/v1"
 DELEGATION = {"audience": "llm-api"}
