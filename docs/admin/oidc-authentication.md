@@ -263,7 +263,9 @@ A tool call never fails with a delegation stack trace.
   `DELETE /api/auth/oidc/delegated-tokens` clear all three places a delegated
   credential is held: the delegation cache, the encrypted token store, and any
   MCP client already built around it. Tokens the user uploaded themselves are
-  left alone.
+  left alone. Session termination on `invalid_grant` uses the same cleanup.
+  Pending delegated-token exchanges are invalidated too, so a late IdP response
+  cannot restore a credential after revocation.
 - **Sessions are per-process.** The session store is in memory, so a restart or
   a second uvicorn worker forces a fresh (silent) IdP round trip rather than
   putting long-lived credentials into shared storage. Run a single worker, or

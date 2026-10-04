@@ -176,6 +176,74 @@ async def test_logout_during_refresh_does_not_authenticate_stale_reference(sessi
     assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is None
 
 
+@pytest.mark.asyncio
+async def test_refused_refresh_fences_off_inflight_and_queued_delegation(session, refresh):
+    from atlas.core.oidc.delegation import DelegatedToken, DelegationManager
+    from atlas.core.oidc.mcp_delegation import mint_delegated_token_for_server
+
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    async def exchange(request):
+        started.set()
+        await finish.wait()
+        return DelegatedToken(access_token="downstream", expires_at=time.time() + 300)
+
+    provider = SimpleNamespace(name="test", exchange=AsyncMock(side_effect=exchange))
+    manager = DelegationManager(provider)
+    session.access_token_expires_at = time.time() + 300
+    server = {"auth_type": "delegated", "url": "https://tools.example.gov/mcp"}
+    with patch("atlas.core.oidc.mcp_delegation.get_delegation_manager_async",
+               AsyncMock(return_value=manager)), \
+            patch("atlas.core.oidc.delegation.get_delegation_manager", return_value=manager):
+        first = asyncio.create_task(mint_delegated_token_for_server(session.user_id, "tools", server))
+        await started.wait()
+        second = asyncio.create_task(mint_delegated_token_for_server(session.user_id, "tools", server))
+        await asyncio.sleep(0)
+        session.access_token_expires_at = time.time() - 1
+        refresh.side_effect = refused_grant()
+        assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is None
+        finish.set()
+        assert await asyncio.gather(first, second) == [None, None]
+    provider.exchange.assert_awaited_once()
+    assert manager.invalidate_user(session.user_id) == 0
+    assert not manager._pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalidate", ["other-user", "clear"])
+async def test_pending_delegation_revocation_scope(invalidate):
+    from atlas.core.oidc.delegation import (
+        DelegatedToken,
+        DelegationError,
+        DelegationManager,
+        DelegationRequest,
+    )
+
+    started, finish = asyncio.Event(), asyncio.Event()
+    token = DelegatedToken(access_token="downstream", expires_at=time.time() + 300)
+
+    async def exchange(request):
+        started.set()
+        await finish.wait()
+        return token
+
+    manager = DelegationManager(SimpleNamespace(name="test", exchange=exchange))
+    request = DelegationRequest(user_id="user@example.gov", subject_token="test-access")
+    task = asyncio.create_task(manager.get_token(request))
+    await started.wait()
+    if invalidate == "clear":
+        manager.clear()
+    else:
+        manager.invalidate_user("other@example.gov")
+    finish.set()
+    if invalidate == "clear":
+        with pytest.raises(DelegationError, match="revoked"):
+            await task
+    else:
+        assert await task is token
+    assert not manager._pending
+
+
 @pytest.fixture
 def client(session):
     app = FastAPI()
