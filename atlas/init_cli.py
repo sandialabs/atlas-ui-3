@@ -185,7 +185,7 @@ def _ensure_env_value(env_path: Path, name: str, value: str) -> None:
         lines.append(assignment)
 
     _write_env_securely(env_path, "".join(lines))
-    print(f"  Set {name} in {env_path}")
+    print(f"  Updated {env_path}")
 
 
 def create_minimal_env(

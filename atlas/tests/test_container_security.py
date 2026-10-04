@@ -108,7 +108,8 @@ def test_build_context_excludes_secrets_but_preserves_example():
     ignore = (ROOT / ".dockerignore").read_text().splitlines()
     for pattern in (
         ".git", ".env", ".env.*", "**/.env", "**/.env.*", "**/node_modules",
-        "**/.venv", "/config", "/data", "/logs", "/runtime",
+        "**/.venv", "**/dist", "**/minio-data", "**/MagicMock*",
+        "/config", "/data", "/logs", "/runtime",
     ):
         assert pattern in ignore
     assert ignore.index("!.env.example") > ignore.index("**/.env.*")

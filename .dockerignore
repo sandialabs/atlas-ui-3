@@ -6,6 +6,9 @@
 !.env.example
 !atlas/.env.example
 **/node_modules
+**/dist
+**/minio-data
+**/MagicMock*
 **/.venv
 **/venv
 **/__pycache__
@@ -21,10 +24,10 @@
 /logs
 /runtime
 /scratch
+/.tools
+/.test-work
 /build
 /build-artifacts
-/dist
-/frontend/dist
 /atlas/static
 /atlas/logs
 /atlas/runtime
