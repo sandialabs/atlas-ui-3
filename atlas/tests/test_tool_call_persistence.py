@@ -291,14 +291,14 @@ class TestToolCallRecorder:
 
 
 class TestToolsModeRunnerWiring:
-    """End-to-end: prove ``run()`` actually installs the recorder, captures the
+    """End-to-end: prove ``run_streaming()`` installs the recorder, captures the
     real streamed tool events, and flushes history as user -> tool_call -> assistant.
 
     The unit tests above exercise the recorder in isolation; this one exercises
     the seam in ``ToolsModeRunner`` where it is wired into the tool workflow.
     """
 
-    def test_run_installs_recorder_and_persists_in_order(self):
+    def test_run_streaming_installs_recorder_and_persists_in_order(self):
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from atlas.application.chat.modes.tools import ToolsModeRunner
@@ -331,7 +331,13 @@ class TestToolsModeRunnerWiring:
                       "arguments": {"a": 1, "b": 2}})
             await cb({"type": "tool_complete", "tool_call_id": "tc1",
                       "tool_name": "calc_add", "success": True, "result": "3"})
-            return "The answer is 3", []
+            return []
+
+        async def stream(*args, **kwargs):
+            yield llm_response
+
+        async def synthesize(*args, **kwargs):
+            yield "The answer is 3"
 
         publisher = AsyncMock()
         runner = ToolsModeRunner(
@@ -342,13 +348,13 @@ class TestToolsModeRunnerWiring:
 
         with patch("atlas.application.chat.modes.tools.error_handler.safe_get_tools_schema",
                    new=AsyncMock(return_value=[])), \
-             patch("atlas.application.chat.modes.tools.error_handler.safe_call_llm_with_tools",
-                   new=AsyncMock(return_value=llm_response)), \
+             patch.object(runner.llm, "stream_with_tools", new=stream), \
+             patch.object(runner.llm, "stream_plain", new=synthesize), \
              patch("atlas.application.chat.modes.tools.build_session_context",
                    return_value={}), \
-             patch("atlas.application.chat.modes.tools.tool_executor.execute_tools_workflow",
+             patch("atlas.application.chat.modes.tools.tool_executor.execute_multiple_tools",
                    new=fake_workflow):
-            _run(runner.run(
+            _run(runner.run_streaming(
                 session=session,
                 model="test-model",
                 messages=[{"role": "user", "content": "add 1 and 2"}],
@@ -368,7 +374,9 @@ class TestToolsModeRunnerWiring:
         assert tool_msg.metadata["result"] == "3"
         assert session.history.messages[2].content == "The answer is 3"
         # The recorder forwarded the live events to the original callback.
-        assert [p["type"] for p in forwarded] == ["tool_start", "tool_complete"]
+        assert [p["type"] for p in forwarded] == [
+            "tool_start", "tool_complete", "tool_synthesis_start",
+        ]
         # The persisted tool row is excluded from the LLM context.
         llm_msgs = session.history.get_messages_for_llm()
         assert {m["role"] for m in llm_msgs} == {"user", "assistant"}

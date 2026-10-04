@@ -8,6 +8,8 @@ same way across every entry point.
 
 from pathlib import Path
 
+import pytest
+
 
 def _load_resolver(tmp_path, monkeypatch):
     """Import atlas_chat_cli with a valid env file so module init succeeds.
@@ -61,3 +63,30 @@ class TestChatCliEnvFile:
 
         assert is_custom is True
         assert path == Path("~/.atlasrc").expanduser()
+
+
+def test_legacy_approval_file_option_is_rejected(tmp_path, monkeypatch, capsys):
+    _load_resolver(tmp_path, monkeypatch)
+    from atlas.atlas_chat_cli import build_parser
+
+    with pytest.raises(SystemExit) as raised:
+        build_parser().parse_args(["--tool-approvals-config", "unused.json"])
+    assert raised.value.code == 2
+    assert "unrecognized arguments: --tool-approvals-config" in capsys.readouterr().err
+
+
+def test_mcp_config_override_remains_supported(tmp_path, monkeypatch):
+    _load_resolver(tmp_path, monkeypatch)
+    from atlas.atlas_chat_cli import _apply_config_overrides_from_args, build_parser
+
+    monkeypatch.setattr("sys.argv", ["atlas-chat", "--mcp-config", "custom-mcp.json"])
+    monkeypatch.delenv("MCP_CONFIG_FILE", raising=False)
+    monkeypatch.delenv("TOOL_APPROVALS_CONFIG_FILE", raising=False)
+    # Register restoration before the override writes directly to os.environ.
+    monkeypatch.setenv("MCP_CONFIG_FILE", "")
+    _apply_config_overrides_from_args()
+    assert build_parser().parse_args(["--mcp-config", "custom-mcp.json"]).mcp_config == "custom-mcp.json"
+    from os import environ
+
+    assert environ["MCP_CONFIG_FILE"] == "custom-mcp.json"
+    assert "TOOL_APPROVALS_CONFIG_FILE" not in environ

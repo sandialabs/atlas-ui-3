@@ -84,6 +84,7 @@ test_e2e/screenshots/
 # E2E Test Results (local testing only)
 test_e2e/test-results/
 test_e2e/playwright-report/
+frontend/playwright-report/
 
 # Test Results (any location)
 test-results/
@@ -117,7 +118,5 @@ screenshots/
 docs/planning/improvements1.md
 scripts/_e2e_artifacts/
 
-# Node dependencies and local build caches (never committed; test_e2e/node_modules
-# predates this and stays tracked)
-/node_modules/
-frontend/node_modules/
+# Node dependencies (any location)
+node_modules/

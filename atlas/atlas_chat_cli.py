@@ -119,7 +119,6 @@ def _apply_config_overrides_from_args() -> None:
     _apply_config_file_override("--llm-config", "LLM_CONFIG_FILE")
     _apply_config_file_override("--help-config", "HELP_CONFIG_FILE")
     _apply_config_file_override("--messages-config", "MESSAGES_CONFIG_FILE")
-    _apply_config_file_override("--tool-approvals-config", "TOOL_APPROVALS_CONFIG_FILE")
     _apply_config_file_override("--splash-config", "SPLASH_CONFIG_FILE")
     _apply_config_file_override("--file-extractors-config", "FILE_EXTRACTORS_CONFIG_FILE")
 
@@ -221,11 +220,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--messages-config",
         default=None,
         help="Override messages config file (sets MESSAGES_CONFIG_FILE). Accepts a filename or path.",
-    )
-    parser.add_argument(
-        "--tool-approvals-config",
-        default=None,
-        help="Override tool approvals config file (sets TOOL_APPROVALS_CONFIG_FILE). Accepts a filename or path.",
     )
     parser.add_argument(
         "--splash-config",

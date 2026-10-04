@@ -722,29 +722,32 @@ async def test_the_requesting_user_reaches_the_schema_scoping_api():
 
 
 @pytest.mark.asyncio
-async def test_the_requesting_user_reaches_the_schema_scoping_api_non_streaming():
-    llm = ScriptedToolsLLM(turns=[("Done.", None)])
+async def test_the_requesting_user_reaches_schema_scoping_with_unstreamed_content():
+    class FinalResponseOnlyLLM:
+        async def stream_with_tools(self, *args, **kwargs):
+            yield LLMResponse(content="Done.")
+
+    llm = FinalResponseOnlyLLM()
     runner = _runner(llm, _config(max_extra_rounds=3))
 
     with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
         mock_te.execute_multiple_tools = AsyncMock(return_value=[])
         mock_te.build_files_manifest = MagicMock(return_value=None)
-        try:
-            await runner.run(
-                session=_session(),
-                model="test-model",
-                messages=[{"role": "user", "content": "hi"}],
-                selected_tools=["calc"],
-                user_email="owner@example.gov",
-            )
-        except Exception:
-            # Expected: schemas are resolved before the LLM call, and this
-            # scripted double does not implement the non-streaming call path.
-            # What is under test is the argument that already went out.
-            pass
+        result = await runner.run_streaming(
+            session=_session(),
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            selected_tools=["calc"],
+            user_email="owner@example.gov",
+        )
 
     args, kwargs = runner.tool_manager.get_tools_schema.call_args
     assert (kwargs.get("user_email") or (args[1] if len(args) > 1 else None)) == "owner@example.gov"
+    assert result["message"] == "Done."
+    runner.event_publisher.publish_chat_response.assert_awaited_once_with(
+        message="Done.", has_pending_tools=False,
+    )
+    runner.event_publisher.publish_response_complete.assert_awaited_once()
 
 
 @pytest.mark.asyncio

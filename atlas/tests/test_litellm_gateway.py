@@ -363,15 +363,14 @@ class TestGatewayCallTarget:
 
     @pytest.mark.asyncio
     async def test_tools_path_keeps_the_team_error(self):
-        from atlas.application.chat.utilities.error_handler import safe_call_llm_with_tools
-
         caller = _caller_with_mock_transport(_llm_config())
         tools = [{"type": "function", "function": {"name": "noop", "parameters": {"type": "object"}}}]
         with pytest.raises(AuthorizationError) as exc_info:
-            await safe_call_llm_with_tools(
-                caller, f"enterprise::{GAMMA}::gpt-4o-mini",
+            async for _ in caller.stream_with_tools(
+                f"enterprise::{GAMMA}::gpt-4o-mini",
                 [{"role": "user", "content": "hi"}], tools, user_email="test@test.com",
-            )
+            ):
+                pass
         assert exc_info.value.code == "LLM_TEAM_ACCESS_DENIED"
 
     @pytest.mark.asyncio

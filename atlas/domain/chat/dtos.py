@@ -49,39 +49,3 @@ class ChatResponse:
             "message": self.message,
             **self.metadata
         }
-
-
-@dataclass
-class LLMMessage:
-    """
-    Type-safe message format for LLM interactions.
-
-    Normalizes message structure across different chat modes.
-    """
-    role: str  # "user", "assistant", "system", "tool"
-    content: str
-    name: Optional[str] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-    tool_call_id: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary format for LLM API."""
-        result = {"role": self.role, "content": self.content}
-        if self.name:
-            result["name"] = self.name
-        if self.tool_calls:
-            result["tool_calls"] = self.tool_calls
-        if self.tool_call_id:
-            result["tool_call_id"] = self.tool_call_id
-        return result
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LLMMessage":
-        """Create from dictionary format."""
-        return cls(
-            role=data["role"],
-            content=data.get("content", ""),
-            name=data.get("name"),
-            tool_calls=data.get("tool_calls"),
-            tool_call_id=data.get("tool_call_id"),
-        )
