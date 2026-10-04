@@ -76,6 +76,37 @@ def test_branch_publishing_is_gated_on_validation():
     assert set(publish["needs"]) == {"test", "runtime-only-image"}
 
 
+def test_pr_and_publish_builds_share_inputs():
+    jobs = _load("ci.yml")["jobs"]
+
+    def build(job_name, step_name):
+        return next(
+            step for step in jobs[job_name]["steps"]
+            if step.get("name") == step_name
+        )["with"]
+
+    validation = build("production-image", "Build production Docker image")
+    publish = build("publish-image", "Build and push production Docker image")
+    for key in ("context", "build-args", "cache-from", "cache-to", "labels"):
+        assert validation.get(key) == publish.get(key), key
+    assert validation["platforms"] == "linux/amd64"
+    assert validation["push"] is False
+    assert publish["platforms"] == "linux/amd64,linux/arm64"
+    assert publish["push"] is True
+
+
+def test_production_e2e_runs_on_main_only():
+    # The debug-mode suite already runs e2e; DEBUG_MODE changes auth behaviour,
+    # so keep a production-mode e2e run, but only on pushes to main.
+    test_job = _load("ci.yml")["jobs"]["test"]
+    step = next(
+        s for s in test_job["steps"]
+        if s.get("name") == "Run e2e tests in production mode"
+    )
+    assert step["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert "run_tests.sh e2e" in step["run"]
+
+
 def test_validation_images_stay_single_platform():
     publication_names = {"Build and push production Docker image"}
     validation_builds = [

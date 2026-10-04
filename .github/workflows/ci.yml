@@ -56,6 +56,16 @@ jobs:
         echo "Running backend tests in production mode (DEBUG_MODE=false)"
         docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh atlas
 
+    - name: Run e2e tests in production mode
+      # DEBUG_MODE changes the live server's auth behaviour (test-user fallback,
+      # proxy-secret handling), so the production-mode e2e run is not a duplicate
+      # of the debug-mode suite. Kept off the PR path, like the reverse-order
+      # guard, so pull requests stay fast.
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        echo "Running e2e tests in production mode (DEBUG_MODE=false)"
+        docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh e2e
+
   production-image:
     # PR validation only: build the production Dockerfile for amd64 without
     # publishing. Branch pushes publish from the `publish-image` job below,
