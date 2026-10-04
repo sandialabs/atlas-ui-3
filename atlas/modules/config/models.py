@@ -186,6 +186,13 @@ class ModelConfig(BaseModel):
                     f"Model '{self.model_name}': api_key_source 'delegated' requires "
                     "delegation.scope (or audience/resource)"
                 )
+        elif self.delegation is not None:
+            # Most likely a mistyped api_key_source, which would otherwise send the
+            # system key where a per-user token was meant.
+            raise ValueError(
+                f"Model '{self.model_name}': delegation is set but api_key_source is "
+                f"{self.api_key_source!r}, not 'delegated'"
+            )
         return self
 
     @field_validator('reasoning_effort', mode='before')
@@ -283,7 +290,7 @@ class LiteLLMGatewayConfig(BaseModel):
     # itself, so a model_defaults entry for them would be silently misleading.
     RESERVED_MODEL_DEFAULT_KEYS: ClassVar[frozenset] = frozenset({
         "model_name", "model_url", "api_key", "api_key_source", "globus_scope",
-        "groups", "compliance_level", "extra_headers",
+        "groups", "compliance_level", "extra_headers", "delegation",
     })
 
     @field_validator("models", mode="before")

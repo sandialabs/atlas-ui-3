@@ -270,6 +270,8 @@ class TestGatewayDiscovery:
         request = manager.get_token.await_args.args[0]
         assert request.subject_token == "user-login-token"
         assert request.scope == "https://litellm.example/user_impersonation"
+        assert request.audience is None
+        assert request.actor == "litellm-gateway:enterprise"
 
     @pytest.mark.asyncio
     async def test_delegated_without_oidc_session_asks_user_to_sign_in(self):

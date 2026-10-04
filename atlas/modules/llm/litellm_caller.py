@@ -813,6 +813,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             model_kwargs = self._get_model_kwargs(
                 model_name, temperature, user_email=user_email, delegated_api_key=token
             )
+            # Always the configured endpoint, as for gateways: the provider-URL
+            # heuristic in _get_model_kwargs skips api_base for URLs that merely
+            # mention a provider, which would send the user's token elsewhere.
+            model_kwargs["api_base"] = model_config.model_url
         else:
             model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
         if ref is not None:

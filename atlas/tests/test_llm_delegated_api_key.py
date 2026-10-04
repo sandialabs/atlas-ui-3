@@ -88,6 +88,18 @@ class TestModelConfigDelegation:
         with pytest.raises(ValidationError, match="requires delegation.scope"):
             _model("gw", delegation=delegation)
 
+    @pytest.mark.parametrize("source", ["system", "delegate", "Delegated"])
+    def test_a_delegation_block_needs_the_delegated_source(self, source):
+        with pytest.raises(ValidationError, match="delegation is set but api_key_source"):
+            _model("gw", api_key_source=source)
+
+    def test_gateway_model_defaults_may_not_set_delegation(self):
+        with pytest.raises(ValidationError, match="model_defaults may not set delegation"):
+            LLMConfig(litellm_gateways={"gw": {
+                "base_url": GATEWAY_URL, "auth_type": "delegated", "delegation": DELEGATION,
+                "model_defaults": {"delegation": DELEGATION},
+            }})
+
     def test_system_model_needs_no_delegation(self):
         assert ModelConfig(model_name="sys", model_url=GATEWAY_URL, api_key="k").delegation is None
 
@@ -147,6 +159,15 @@ class TestCallTarget:
         assert kwargs["api_key"] == "DELEGATED"
         assert kwargs["api_base"] == GATEWAY_URL
         assert manager.requests[0].actor == "llm:gw"
+
+    @pytest.mark.asyncio
+    async def test_a_url_naming_a_provider_still_goes_to_the_configured_endpoint(self, user_session):
+        url = "https://llm-gateway.example.gov/openrouter/v1"
+        caller = _caller(_model("gw", model_url=url))
+        with _patch_manager(_minted()):
+            _, kwargs = await caller._resolve_call_target("gw", None, USER)
+
+        assert kwargs["api_base"] == url
 
     @pytest.mark.asyncio
     async def test_no_token_means_no_call(self, user_session):
