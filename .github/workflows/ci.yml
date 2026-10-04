@@ -10,35 +10,93 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+concurrency:
+  # Cancel superseded pull-request runs so a new push does not queue behind the
+  # stale one. Push runs are deliberately serialised, not cancelled: a
+  # running publish-image must finish so every merged commit still publishes
+  # its `<branch>-<sha>` tag. The trade-off is that on rapid back-to-back merges
+  # an older publish can briefly win the race for `:latest`; a newer merge
+  # republishes it.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build-and-test:
+  test:
+    # Distinct display name: the release gate matches checks by bare name, so a
+    # generic `test` could collide with a future job of the same name in another
+    # workflow. `needs:` elsewhere still refers to the `test` job id.
+    name: ci-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
     - uses: actions/checkout@v7
-    
-    - name: Log in to Container Registry
-      if: github.event_name != 'pull_request'
-      uses: docker/login-action@v4
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Set up QEMU
-      if: github.event_name != 'pull_request'
-      uses: docker/setup-qemu-action@v4
-      with:
-        platforms: arm64
 
     - name: Set up Docker Buildx
-      # The docker-container driver can export to the GHA cache; the default
-      # docker driver cannot ("Cache export is not supported for the docker
-      # driver"). load: true still works with this driver for docker run.
       uses: docker/setup-buildx-action@v4
-    
+
+    - name: Build test Docker image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile-test
+        load: true
+        tags: test-image:latest
+        cache-from: type=gha,scope=atlas-test
+        cache-to: type=gha,scope=atlas-test,mode=max
+
+    - name: Run tests in debug mode
+      # DEBUG_MODE is baked into /app/.env at build time (default true). pydantic
+      # BaseSettings reads the OS env var with higher priority than .env, so
+      # `docker run -e DEBUG_MODE=...` overrides it without rebuilding.
+      run: |
+        echo "Running tests in debug mode (DEBUG_MODE=true)"
+        docker run --rm --workdir /app -e DEBUG_MODE=true test-image:latest bash /app/test/run_tests.sh all
+
+    - name: Run tests in reverse collection order
+      # The suite runs in one process, so a test that leaks state can be masked
+      # by the alphabetical order CI happens to use. Re-running it reversed is
+      # what caught the process-manager leak fixed in #818. Non-blocking (it
+      # shares the suite's existing flakes) and not needed on PRs, but the
+      # failure is still surfaced as a warning annotation.
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      continue-on-error: true
+      run: |
+        echo "Re-running the suite in reverse order (test-isolation guard)"
+        docker run --rm --workdir /app/atlas \
+          -e ATLAS_TEST_ORDER=reverse \
+          -e PYTHONPATH=/app:/app/scripts \
+          test-image:latest \
+          python -m pytest tests -q --tb=short -p pytest_test_order \
+          || echo "::warning::reverse-order test-isolation run failed (non-blocking; see #818)"
+
+    - name: Run backend tests in production mode
+      run: |
+        echo "Running backend tests in production mode (DEBUG_MODE=false)"
+        docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh atlas
+
+    - name: Run e2e tests in production mode
+      # DEBUG_MODE changes the live server's auth behaviour (test-user fallback,
+      # proxy-secret handling), so the production-mode e2e run is not a duplicate
+      # of the debug-mode suite and stays on the PR path for coverage.
+      run: |
+        echo "Running e2e tests in production mode (DEBUG_MODE=false)"
+        docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh e2e
+
+  production-image:
+    # PR validation only: build the production Dockerfile for amd64 without
+    # publishing. Branch pushes publish from the `publish-image` job below,
+    # which waits for the test and runtime-image validation jobs to pass.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v6
@@ -51,47 +109,6 @@ jobs:
           type=sha,enable=true,prefix=${{ github.ref_name }}-
           type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-    
-    - name: Build test Docker image
-      uses: docker/build-push-action@v7
-      with:
-        context: .
-        file: ./Dockerfile-test
-        load: true
-        tags: test-image:latest
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha,scope=atlas-test
-        cache-to: type=gha,scope=atlas-test,mode=max
-    
-    - name: Run tests in debug mode
-      # DEBUG_MODE is baked into /app/.env at build time (default true). pydantic
-      # BaseSettings reads the OS env var with higher priority than .env, so
-      # `docker run -e DEBUG_MODE=...` overrides it without rebuilding.
-      run: |
-        echo "Running tests in debug mode (DEBUG_MODE=true)"
-        docker run --rm --workdir /app -e DEBUG_MODE=true test-image:latest bash /app/test/run_tests.sh all
-    
-    - name: Run tests in reverse collection order
-      # The suite runs in one process, so a test that leaks state can be
-      # masked by the alphabetical order CI happens to use. Re-running it
-      # reversed is what caught the process-manager leak fixed in #818.
-      # Non-blocking for now: it shares the suite's existing flakes (see the
-      # wall-clock assertion in test_calculator_tool), and this leg is here to
-      # surface *isolation* regressions, not to gate on timing noise. Flip to
-      # blocking once it has a clean track record.
-      continue-on-error: true
-      run: |
-        echo "Re-running the suite in reverse order (test-isolation guard)"
-        docker run --rm --workdir /app/atlas \
-          -e ATLAS_TEST_ORDER=reverse \
-          -e PYTHONPATH=/app:/app/scripts \
-          test-image:latest \
-          python -m pytest tests -q --tb=short -p pytest_test_order
-    
-    - name: Run tests in production mode
-      run: |
-        echo "Running tests in production mode (DEBUG_MODE=false)"
-        docker run --rm --workdir /app -e DEBUG_MODE=false test-image:latest bash /app/test/run_tests.sh all
 
     - name: Get build metadata
       id: build_meta
@@ -99,8 +116,59 @@ jobs:
         echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
         echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
 
-    - name: Build runtime-only Docker image
-      # Load the exact published recipe for executable runtime/security checks.
+    - name: Build production Docker image
+      # Validation build: no push and no load -- it only checks the Dockerfile
+      # and warms the GHA cache scope shared with the publish-image job.
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile
+        target: runtime
+        platforms: linux/amd64
+        push: false
+        build-args: |
+          VITE_APP_NAME=ATLAS
+          VITE_FEATURE_ANIMATED_LOGO=true
+          VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=false
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha,scope=atlas-prod
+        cache-to: type=gha,scope=atlas-prod,mode=max
+
+  runtime-only-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,enable=true,prefix=${{ github.ref_name }}-
+          type=sha,enable=${{ github.event_name == 'pull_request' }},prefix=pr-
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+    - name: Get build metadata
+      id: build_meta
+      run: |
+        echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
+    - name: Build runtime validation image
+      # Load the exact published recipe (canonical Dockerfile, runtime target)
+      # so the security checks below run against the image users receive.
       uses: docker/build-push-action@v7
       with:
         context: .
@@ -125,15 +193,60 @@ jobs:
     - name: Validate compatibility recipe
       run: docker build --build-arg ATLAS_RUNTIME_IMAGE=runtime-only-image:latest -f Dockerfile.runtimeonly .
 
+  publish-image:
+    # Branch pushes only: the PR path validates the production build in the
+    # `production-image` job. Waiting on the test and runtime-image jobs keeps a
+    # failing validation from publishing the production image -- including the
+    # `latest` tag on main -- to the registry.
+    if: github.event_name != 'pull_request'
+    needs: [test, runtime-only-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4
+      with:
+        platforms: arm64
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          # Add SHA tags safely for branches without generating an invalid leading '-'
+          type=sha,enable=true,prefix=${{ github.ref_name }}-
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+    - name: Get build metadata
+      id: build_meta
+      run: |
+        echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
     - name: Build and push production Docker image
-      # Publish only after the runtime checks; PRs validate without pushing.
       uses: docker/build-push-action@v7
       with:
         context: .
         file: ./Dockerfile
         target: runtime
-        platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-        push: ${{ github.event_name != 'pull_request' }}
+        platforms: linux/amd64,linux/arm64
+        push: true
         build-args: |
           VITE_APP_NAME=ATLAS
           VITE_FEATURE_ANIMATED_LOGO=true

@@ -8,6 +8,8 @@
 # Auto-copied during build from root .env.example
 atlas/.env.example
 .claude
+# Local scratch/validation worktrees
+.work/
 
 .pytest_cache
 # Python

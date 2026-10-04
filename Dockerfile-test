@@ -46,7 +46,6 @@ COPY ps_agent_start.ps1 .
 COPY Dockerfile-test .
 COPY Dockerfile .dockerignore .gitignore .
 COPY Dockerfile.runtimeonly .
-COPY .github/workflows/ci.yml .github/workflows/quay-publish.yml ./.github/workflows/
 
 # Copy and install frontend dependencies (keep all dependencies for testing)
 COPY frontend/package*.json ./frontend/
@@ -71,6 +70,11 @@ COPY test_e2e/ ./test_e2e/
 COPY mocks/ ./mocks/
 COPY prompts/ ./prompts/
 COPY scripts/ ./scripts/
+
+# Workflow files are only read at test runtime, so copy them after the heavy
+# dependency installs: a workflow edit then only invalidates this layer instead
+# of the cached npm/uv layers above.
+COPY .github/workflows/ci.yml .github/workflows/quay-publish.yml .github/workflows/release-weekly.yml ./.github/workflows/
 
 # Fix line endings for the entire app directory and set permissions BEFORE any npm/npx commands
 RUN find /app -type f \( -name "*.js" -o -name "*.json" -o -name "*.sh" -o -name "*.md" -o -name "*.txt" -o -name "*.py" \) -exec dos2unix {} \;

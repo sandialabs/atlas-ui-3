@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### PR #1003 - 2026-10-02
+- Replace expected delegated MCP startup discovery HTTP 401 errors with warnings explaining the lack of a user session and the authenticated tool-discovery retry; preserve other failure diagnostics (closes #996).
+
 ### PR #1001 - 2026-10-02
 - Follow-up to #1000: MCP OAuth checks the host httpx actually connects to, so Unicode-dot spellings (`169。254。169。254`, `a．localhost`) can no longer slip past the internal-address refusal; `testserver` no longer gets loopback trust in production; adds a refresh test and corrects #1000's breaking-change note (Atlas sessions last to `OIDC_SESSION_MAX_AGE_SECONDS`; access-token refresh and discovered-endpoint delegation are what stop).
 

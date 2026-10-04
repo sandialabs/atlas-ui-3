@@ -206,6 +206,19 @@ token for the attempt, and caches the result per (user, server). The tools
 appear once a user with a valid OIDC session has loaded the app; until then
 the server is listed with no tools rather than being hidden.
 
+An HTTP 401 during startup tool or prompt discovery for an
+`auth_type: "delegated"` server is logged as a **warning**, explaining that the
+process-level client has no user session for OBO. Startup discovery does **not**
+need to succeed before delegated tool discovery can work; do not grant anonymous
+access to the MCP server just to eliminate this warning. The retry after login
+is for tools, not prompt discovery. Other failures (such as connection errors,
+HTTP 403, or HTTP 500) retain their existing diagnostics.
+
+If tools remain unavailable after login, check that the user has a valid OIDC
+session, delegation is enabled, and the configured audience, scope, and IdP
+permissions allow the token exchange. A startup 401 alone does not establish
+whether the OBO configuration is correct.
+
 If delegation is disabled,
 the user has no OIDC session, or the exchange fails, the server simply reports
 as unauthenticated -- exactly as an unauthenticated bearer server does today.
