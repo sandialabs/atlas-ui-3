@@ -26,8 +26,8 @@ test/
 ### CI/CD Pipeline
 The GitHub Actions workflow (`.github/workflows/ci.yml`) runs its pull-request
 validation in parallel:
-1. **Test** builds the Docker image with test dependencies and runs all suites
-   in debug mode, followed by the backend suite in production mode.
+1. **ci-test** builds the Docker image with test dependencies, runs all suites
+   in debug mode, then runs the backend and e2e suites in production mode.
 2. **Production image** validates the production Dockerfile on pull requests.
 3. **Runtime-only image** validates `Dockerfile.runtimeonly`.
 4. **Publish image** runs only on branch pushes and publishes the multi-platform

@@ -71,12 +71,22 @@ def test_pr_production_build_is_validation_only():
 
 
 def test_branch_publishing_is_gated_on_validation():
-    publish = _load("ci.yml")["jobs"]["publish-image"]
+    workflow = _load("ci.yml")
+    publish = workflow["jobs"]["publish-image"]
     assert publish["if"] == "github.event_name != 'pull_request'"
     assert set(publish["needs"]) == {"test", "runtime-only-image"}
-    # Serialise publishers per branch so an older run cannot clobber `latest`.
-    assert publish["concurrency"]["group"] == "publish-${{ github.ref }}"
-    assert publish["concurrency"]["cancel-in-progress"] is True
+    # Every dependency must run on push, or publishing stops silently while CI
+    # stays green.
+    for dep in publish["needs"]:
+        assert "if" not in workflow["jobs"][dep]
+    # Supersede older push runs so an older commit cannot clobber `latest` after
+    # a newer commit has published.
+    assert workflow["concurrency"]["group"] == (
+        "${{ github.workflow }}-${{ github.ref }}"
+    )
+    assert workflow["concurrency"]["cancel-in-progress"] == (
+        "${{ github.event_name == 'push' }}"
+    )
 
 
 def test_pr_and_publish_builds_share_inputs():
@@ -128,6 +138,17 @@ def test_production_e2e_runs_on_the_pr_path():
     )
     assert "if" not in step
     assert "run_tests.sh e2e" in step["run"]
+
+
+def test_production_steps_run_with_debug_mode_false():
+    test_job = _load("ci.yml")["jobs"]["test"]
+    for name in (
+        "Run backend tests in production mode",
+        "Run e2e tests in production mode",
+    ):
+        step = next(s for s in test_job["steps"] if s.get("name") == name)
+        assert "if" not in step, name
+        assert "-e DEBUG_MODE=false" in step["run"], name
 
 
 def test_validation_images_stay_single_platform():

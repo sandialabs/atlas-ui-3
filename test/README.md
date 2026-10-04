@@ -48,8 +48,8 @@ The test scripts are designed to run inside Docker containers with the following
 ## CI/CD Integration
 
 The CI/CD pipeline (`.github/workflows/ci.yml`) builds and tests in parallel:
-1. The test job builds the test image, runs all suites with debug mode enabled,
-   then runs the backend suite in production mode.
+1. The `ci-test` job builds the test image, runs all suites with debug mode
+   enabled, then runs the backend and e2e suites in production mode.
 2. The production and runtime-only images are validated in separate jobs.
 3. On branch pushes a separate publish job pushes the multi-platform production
    image only after the test and runtime-only jobs pass.

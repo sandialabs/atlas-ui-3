@@ -10,6 +10,13 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+concurrency:
+  # Supersede older push runs so an older commit's publish-image job cannot
+  # overwrite `:latest`/`:<branch>` after a newer commit has published. Pull
+  # requests keep their own per-PR group and are left running.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   test:
     # Distinct display name: the release gate matches checks by bare name, so a
@@ -176,11 +183,6 @@ jobs:
     # `latest` tag on main -- to the registry.
     if: github.event_name != 'pull_request'
     needs: [test, runtime-only-image]
-    # One publisher per branch: a slower run for an older commit must not
-    # overwrite `:latest`/`:<branch>` after a newer one has published.
-    concurrency:
-      group: publish-${{ github.ref }}
-      cancel-in-progress: true
     runs-on: ubuntu-latest
     permissions:
       contents: read
