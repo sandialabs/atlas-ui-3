@@ -199,13 +199,13 @@ def test_main_entry_checks_bind_before_uvicorn(environment, host, override, succ
         "CAPABILITY_TOKEN_SECRET": "x" * 32,
         "SKIP_AUTHORIZATION_CHECKS": "false",
     }
+    script = (
+        "import runpy, uvicorn; "
+        "uvicorn.run = lambda *a, **k: print('UVICORN_REACHED'); "
+        "runpy.run_module('atlas.main', run_name='__main__')"
+    )
     result = subprocess.run(
-        [
-            sys.executable, "-c",
-            "import runpy, uvicorn; "
-            "uvicorn.run = lambda *a, **k: print('UVICORN_REACHED'); "
-            "runpy.run_module('atlas.main', run_name='__main__')",
-        ],
+        [sys.executable, "-c", script],
         env=env, capture_output=True, text=True, timeout=60,
     )
     assert (result.returncode == 0) is succeeds, result.stderr
