@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import { classificationsOf } from '../utils/complianceAccess'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
@@ -603,6 +604,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           help_email: toolServer.help_email,
           is_exclusive: toolServer.is_exclusive,
           compliance_level: toolServer.compliance_level,
+          allowed_data_classifications: toolServer.allowed_data_classifications,
           auth_type: toolServer.auth_type,
           tools: toolServer.tools || [],
           tools_detailed: toolServer.tools_detailed || [],
@@ -662,7 +664,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       if (!status.auth_required || status.authenticated) return
       if (
         complianceFilterActive &&
-        !isComplianceAccessible(complianceLevelFilter, status.compliance_level)
+        !isComplianceAccessible(complianceLevelFilter, classificationsOf(status))
       ) {
         return
       }
@@ -674,6 +676,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
         help_email: '',
         is_exclusive: false,
         compliance_level: status.compliance_level ?? null,
+        allowed_data_classifications: status.allowed_data_classifications ?? null,
         auth_type: status.auth_type,
         tools: [],
         tools_detailed: [],

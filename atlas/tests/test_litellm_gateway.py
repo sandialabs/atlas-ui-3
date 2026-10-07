@@ -570,6 +570,38 @@ class TestGatewayModelAllowlist:
         assert set(gateway.models) == {"gpt-4o-mini", "claude-sonnet"}
         assert gateway.models["gpt-4o-mini"].compliance_level is None
 
+    def test_model_classifications_most_specific_declaration_wins(self):
+        """Entry list > entry level > gateway list > gateway level (#1032)."""
+        llm_config = _llm_config(
+            compliance_level="Internal",
+            allowed_data_classifications=["Internal", "SOC2"],
+            models={
+                "listed": {"allowed_data_classifications": ["Public", "HIPAA"], "compliance_level": "Public"},
+                "leveled": {"compliance_level": "Public"},
+                "plain": None,
+            },
+        )
+        gateway = llm_config.litellm_gateways["enterprise"]
+        assert gateway.model_allowed_data_classifications("listed") == ["Public", "HIPAA"]
+        assert gateway.model_allowed_data_classifications("leveled") == ["Public"]
+        assert gateway.model_allowed_data_classifications("plain") == ["Internal", "SOC2"]
+        # The synthesized ModelConfig carries the same list.
+        assert llm_config.get_model(f"enterprise::{ALPHA}::listed").allowed_data_classifications == [
+            "Public",
+            "HIPAA",
+        ]
+        legacy_only = _llm_config(compliance_level="Internal").litellm_gateways["enterprise"]
+        assert legacy_only.model_allowed_data_classifications("anything") == ["Internal"]
+        assert _llm_config().litellm_gateways["enterprise"].model_allowed_data_classifications("x") is None
+
+    def test_invalid_entry_level_does_not_inherit_gateway_classifications(self):
+        llm_config = _llm_config(
+            allowed_data_classifications=["Internal"], models={"gpt-4o-mini": {"compliance_level": "Bogus"}}
+        )
+        gateway = llm_config.litellm_gateways["enterprise"]
+        gateway.models["gpt-4o-mini"]._invalid_compliance_level = True
+        assert gateway.model_allowed_data_classifications("gpt-4o-mini") is None
+
     def test_unknown_per_model_setting_is_rejected(self):
         with pytest.raises(ValueError):
             _llm_config(models={"gpt-4o-mini": {"complianc_level": "Public"}})
@@ -670,6 +702,7 @@ class TestGatewayModelAllowlist:
             "model_id": "gpt-4o-mini",
             "label": "gpt-4o-mini",
             "compliance_level": "Public",
+            "allowed_data_classifications": ["Public"],
         }]
 
     def test_per_model_level_is_canonicalized_at_load(self):

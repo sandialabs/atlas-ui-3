@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from atlas.core.auth import is_user_in_group
+from atlas.core.compliance import declared_classifications
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config import config_manager
@@ -886,7 +887,8 @@ async def get_available_mcp_servers(
                         "description": server_config.get("description", ""),
                         "short_description": server_config.get("short_description", ""),
                         "author": server_config.get("author", ""),
-                        "compliance_level": server_config.get("compliance_level", "")
+                        "compliance_level": server_config.get("compliance_level", ""),
+                        "allowed_data_classifications": declared_classifications(server_config),
                     }
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning(f"Failed to parse {config_file.name}: {e}")

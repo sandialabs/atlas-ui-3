@@ -22,6 +22,8 @@ class DataSource(BaseModel):
     id: str
     label: str
     compliance_level: str = "CUI"
+    # Optional explicit list (issue #1032); wins over compliance_level.
+    allowed_data_classifications: Optional[List[str]] = None
     description: str = ""
     # Advertised by v2 discovery so a backend can declare, per source, which
     # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).

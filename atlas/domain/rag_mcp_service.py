@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from atlas.core.compliance import get_compliance_manager
+from atlas.core.compliance import declared_classifications, get_compliance_manager
 from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -96,17 +96,14 @@ class RAGMCPService:
                 filtered_servers = []
                 for server in authorized_servers:
                     cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                    server_compliance_level = cfg.get("compliance_level")
-                    if compliance_mgr.is_accessible(
-                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    if compliance_mgr.classification_permits(
+                        user_compliance_level, declared_classifications(cfg)
                     ):
                         filtered_servers.append(server)
                     else:
                         logger.info(
-                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            "Skipping RAG server %s: not approved for the active classification",
                             sanitize_for_logging(server),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(server_compliance_level),
                         )
                 authorized_servers = filtered_servers
                 if not authorized_servers:
@@ -211,17 +208,14 @@ class RAGMCPService:
                 filtered_servers = []
                 for server in authorized_servers:
                     cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                    server_compliance_level = cfg.get("compliance_level")
-                    if compliance_mgr.is_accessible(
-                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    if compliance_mgr.classification_permits(
+                        user_compliance_level, declared_classifications(cfg)
                     ):
                         filtered_servers.append(server)
                     else:
                         logger.info(
-                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            "Skipping RAG server %s: not approved for the active classification",
                             sanitize_for_logging(server),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(server_compliance_level),
                         )
                 authorized_servers = filtered_servers
             # -------------------------------------
@@ -255,15 +249,20 @@ class RAGMCPService:
                     # --- Compliance Filtering (Step 3) ---
                     # Check for both camelCase (MCP standard) and snake_case (RAG mock standard)
                     resource_compliance_level = r.get("complianceLevel") or r.get("compliance_level")
-                    if compliance_mgr and not compliance_mgr.is_accessible(
-                        user_level=user_compliance_level, resource_level=resource_compliance_level
+                    # A resource that declares nothing of its own inherits its
+                    # server's classifications (the server already passed).
+                    resource_classifications = declared_classifications(r)
+                    if resource_classifications is None:
+                        resource_classifications = declared_classifications(
+                            (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+                        )
+                    if compliance_mgr and not compliance_mgr.classification_permits(
+                        user_compliance_level, resource_classifications
                     ):
                         logger.info(
-                            "Skipping RAG resource %s:%s due to compliance level mismatch (user: %s, resource: %s)",
+                            "Skipping RAG resource %s:%s: not approved for the active classification",
                             sanitize_for_logging(server),
                             sanitize_for_logging(rid),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(resource_compliance_level),
                         )
                         continue
                     # -------------------------------------
@@ -278,6 +277,7 @@ class RAGMCPService:
                         "selected": bool(r.get("defaultSelected", False)),
                         # Include compliance_level from resource or inherit from server
                         "complianceLevel": resource_compliance_level if resource_compliance_level else None,
+                        "allowedDataClassifications": resource_classifications,
                     })
 
                 # Optional config-driven icon/name and compliance level
@@ -291,6 +291,7 @@ class RAGMCPService:
                     "displayName": display_name,
                     "icon": icon,
                     "complianceLevel": compliance_level,
+                    "allowedDataClassifications": declared_classifications(cfg),
                     "sources": ui_sources,
                 })
         except Exception as e:

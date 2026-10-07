@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-09-24
+Last updated: 2026-10-07
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -301,7 +301,8 @@ the sampling context. Restrict access to such MCP servers with the server's own
 *   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.
 *   **`supports_tools`**: (boolean, default `true`) When `false`, tool/function definitions are stripped from requests to this model and the user is warned that tools are unavailable.
 *   **`reasoning_effort`**: (string, optional) The reasoning effort sent with every request to this model. One of `none`, `minimal`, `low`, `medium`, `high`, `xhigh` — an invalid value is rejected when the config file is loaded, not on the first chat. Omit the key (the default) for any model without a reasoning control; the request payload is then unchanged. **OpenAI's GPT-5.6 family requires `"none"` for tool calls** on `/v1/chat/completions`. See [Reasoning Effort](#reasoning-effort) below.
-*   **`compliance_level`**: (string) The security compliance level of this model (e.g., "Public", "Internal"). This is used to filter which models can be used in certain compliance contexts.
+*   **`allowed_data_classifications`**: (list of strings) Every data classification (compliance level) this model is explicitly approved to receive, e.g. `[UUR, ITAR]`. The model is usable only in a conversation whose selected level is in this list; a model that declares none is unavailable in every classified session. See [Compliance](compliance.md).
+*   **`compliance_level`**: (string, deprecated) A single level, read as a one-element `allowed_data_classifications` when that field is not set.
 *   **`groups`**: (list of strings, optional) Access-control groups for this model. When omitted or empty (the default), the model is available to everyone. When set, only users who belong to at least one listed group can see or use the model. Enforced at both the model-listing and chat-execution layers. See [Restricting Model Access by Group](#restricting-model-access-by-group-2026-07-10) above.
 
 ## LiteLLM Customer ID Header

@@ -8,6 +8,7 @@ import { BrowserRouter } from 'react-router-dom'
 import ToolsPanel from '../components/ToolsPanel'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import { isComplianceAccessible as isComplianceAccessibleFor } from '../utils/complianceAccess'
 
 // Mock the contexts and hooks
 vi.mock('../contexts/ChatContext')
@@ -1630,9 +1631,17 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
       getComplianceFilteredPrompts: vi.fn(() => []),
       getFilteredTools: vi.fn(() => tools),
       getFilteredPrompts: vi.fn(() => []),
-      // The real rule: strict, and a resource with no level never matches.
+      // The real rule: strict, and a resource with no classifications never
+      // matches. `secret` lists Public in allowed_with, which no longer widens.
       isComplianceAccessible: vi.fn(
-        (userLevel, resourceLevel) => !!resourceLevel && resourceLevel === userLevel
+        (userLevel, classifications) => isComplianceAccessibleFor(
+          [
+            { name: 'Public', aliases: [], allowed_with: ['Public'] },
+            { name: 'secret', aliases: [], allowed_with: ['secret', 'Public'] },
+          ],
+          userLevel,
+          classifications
+        )
       ),
       ...marketplaceOverrides
     })
@@ -1701,6 +1710,27 @@ describe('ToolsPanel - servers that require authorization but have no tools', ()
 
     expect(screen.getByText('remote-mcp')).toBeTruthy()
     expect(screen.getByRole('button', { name: /connect with oauth/i })).toBeTruthy()
+  })
+
+  it('synthesizes a row from allowed_data_classifications that include the level', () => {
+    renderWith(
+      { 'remote-mcp': { ...pendingStatus, allowed_data_classifications: ['Public', 'secret'] } },
+      [],
+      { complianceLevelFilter: 'secret', features: { compliance_levels: true } }
+    )
+
+    expect(screen.getByText('remote-mcp')).toBeTruthy()
+  })
+
+  it('does not synthesize a row only allowed_with would have admitted', () => {
+    // `secret` lists Public in allowed_with; a Public-only server stays hidden.
+    renderWith(
+      { 'remote-mcp': { ...pendingStatus, compliance_level: 'Public' } },
+      [],
+      { complianceLevelFilter: 'secret', features: { compliance_levels: true } }
+    )
+
+    expect(screen.queryByText('remote-mcp')).toBeNull()
   })
 
   it('offers a token control and the same hint for a non-oauth server', () => {

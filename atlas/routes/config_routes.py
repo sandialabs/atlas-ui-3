@@ -1,11 +1,12 @@
 """Configuration API routes."""
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
 
 from atlas.core.auth import is_user_in_group
+from atlas.core.compliance import declared_classifications
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
@@ -117,6 +118,19 @@ def _atlas_tools_info(
     }
 
 
+def _add_classification_fields(model_info: Dict[str, Any], model_config: Any) -> None:
+    """Expose a model's legacy level and its effective classifications.
+
+    ``allowed_data_classifications`` is what the client filters on (issue
+    #1032); ``compliance_level`` stays for older clients and the badge.
+    """
+    if model_config.compliance_level:
+        model_info["compliance_level"] = model_config.compliance_level
+    classifications = declared_classifications(model_config)
+    if classifications is not None:
+        model_info["allowed_data_classifications"] = classifications
+
+
 @router.get("/banners")
 async def get_banners(current_user: str = Depends(get_current_user)):
     """Get banners for the user."""
@@ -177,8 +191,8 @@ async def get_config_shell(
             "name": model_name,
             "description": model_config.description,
         }
-        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
-            model_info["compliance_level"] = model_config.compliance_level
+        if app_settings.feature_compliance_levels_enabled:
+            _add_classification_fields(model_info, model_config)
         api_key_source = getattr(model_config, "api_key_source", "system")
         if api_key_source == "user":
             model_info["api_key_source"] = "user"
@@ -386,6 +400,7 @@ async def get_config(
                         'short_description': server_config.get('short_description', server_config.get('description', f'{server_name} tools')),
                         'help_email': server_config.get('help_email', ''),
                         'compliance_level': server_config.get('compliance_level'),
+                        'allowed_data_classifications': declared_classifications(server_config),
                         'auth_type': auth_type,
                         'auth_required': auth_required
                     })
@@ -403,7 +418,8 @@ async def get_config(
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', f'{server_name} custom prompts'),
                         'help_email': server_config.get('help_email', ''),
-                        'compliance_level': server_config.get('compliance_level')
+                        'compliance_level': server_config.get('compliance_level'),
+                        'allowed_data_classifications': declared_classifications(server_config),
                     })
 
     # Read help page content from a markdown file (with legacy JSON fallback)
@@ -494,9 +510,9 @@ async def get_config(
             "name": model_name,
             "description": model_config.description,
         }
-        # Include compliance_level if feature is enabled
-        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
-            model_info["compliance_level"] = model_config.compliance_level
+        # Include compliance fields if feature is enabled
+        if app_settings.feature_compliance_levels_enabled:
+            _add_classification_fields(model_info, model_config)
         # Include api_key_source so frontend knows which models need user keys
         api_key_source = getattr(model_config, "api_key_source", "system")
         if api_key_source == "user":

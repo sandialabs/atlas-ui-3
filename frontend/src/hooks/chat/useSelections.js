@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { usePersistentState } from './usePersistentState'
 import { CANVAS_TOOL, migrateToolName, migrateToolNames } from '../../constants/atlasTools'
+import { classificationsOf } from '../../utils/complianceAccess'
 
 const toSet = arr => new Set(arr)
 const toArray = set => Array.from(set)
@@ -31,14 +32,15 @@ export const personaIdFromKey = key => (isPersonaKey(key) ? key.slice(PERSONA_PR
 // picker hides a persona whose level the filter does not allow and the server
 // refuses to resolve it, so keeping such a persona selected would silently
 // run the default prompt on the next turn. A missing persona is left alone
-// here -- the stale-key effect owns that case. `isAllowed(level)` is the
-// allowlist check the picker uses (HIPAA allows SOC2); without one only an
-// exact level match survives.
+// here -- the stale-key effect owns that case. `isAllowed(classifications)` is
+// the membership check the picker uses; without one only an exact level match
+// survives.
 export const personaSurvivesComplianceFilter = (persona, newLevel, isAllowed) => {
   if (!newLevel) return true
   if (!persona) return true
-  if (!persona.compliance_level) return false
-  return isAllowed ? !!isAllowed(persona.compliance_level) : persona.compliance_level === newLevel
+  const classifications = classificationsOf(persona)
+  if (!classifications || classifications.length === 0) return false
+  return isAllowed ? !!isAllowed(classifications) : classifications.includes(newLevel)
 }
 
 export function useSelections() {

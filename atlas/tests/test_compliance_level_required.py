@@ -143,6 +143,10 @@ async def test_any_level_is_refused_when_no_definitions_load(tmp_path):
 @pytest.mark.asyncio
 async def test_defined_level_proceeds_when_required():
     service = _make_service()
+    # The model must also be approved for the level (issue #1032).
+    service.config_manager.llm_config.models = {
+        "test-model": MagicMock(compliance_level=None, allowed_data_classifications=["Public"])
+    }
     orchestrator = await _send(service, compliance_level="Public")
     orchestrator.execute.assert_awaited_once()
 

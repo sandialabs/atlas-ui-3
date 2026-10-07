@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { useChat } from './ChatContext'
-import { isComplianceAccessible as isComplianceAccessibleFor } from '../utils/complianceAccess'
+import { isComplianceAccessible as isComplianceAccessibleFor, classificationsOf } from '../utils/complianceAccess'
 import { ATLAS_SERVER } from '../constants/atlasTools'
 
 const MarketplaceContext = createContext()
@@ -162,8 +162,10 @@ export const MarketplaceProvider = ({ children }) => {
     return prompts.filter(prompt => selectedServers.has(prompt.server))
   }
   
-  // Check if a resource is accessible given the user's compliance level using
-  // the allowlist (shared rule, see utils/complianceAccess).
+  // Check if a resource is accessible given the user's compliance level: the
+  // level must be one of the resource's allowed data classifications (shared
+  // rule, see utils/complianceAccess). `resourceLevel` is a list or a legacy
+  // single level.
   const isComplianceAccessible = (userLevel, resourceLevel) =>
     isComplianceAccessibleFor(complianceLevels, userLevel, resourceLevel)
 
@@ -172,7 +174,7 @@ export const MarketplaceProvider = ({ children }) => {
     return getFilteredTools().filter(tool => {
       // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels.
       // The built-in server is exempt (see COMPLIANCE_EXEMPT in utils/complianceAccess).
-      return tool.server === ATLAS_SERVER || isComplianceAccessible(complianceLevel, tool.compliance_level)
+      return tool.server === ATLAS_SERVER || isComplianceAccessible(complianceLevel, classificationsOf(tool))
     })
   }
   
@@ -180,7 +182,7 @@ export const MarketplaceProvider = ({ children }) => {
     if (!complianceLevel) return getFilteredPrompts()
     return getFilteredPrompts().filter(prompt => {
       // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels
-      return prompt.server === ATLAS_SERVER || isComplianceAccessible(complianceLevel, prompt.compliance_level)
+      return prompt.server === ATLAS_SERVER || isComplianceAccessible(complianceLevel, classificationsOf(prompt))
     })
   }
 

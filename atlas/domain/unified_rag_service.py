@@ -11,6 +11,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from atlas.core.compliance import (
+    declared_classifications,
     get_active_compliance_context,
     get_compliance_manager,
     reset_active_compliance_context,
@@ -333,26 +334,26 @@ class UnifiedRAGService:
             )
 
         active_compliance_level, enforce_compliance = get_active_compliance_context()
-        resource_compliance_level = source_config.compliance_level
-        if not enforce_compliance or not resource_compliance_level:
+        if not enforce_compliance:
             return
 
         if not active_compliance_level:
             logger.warning(
-                "Rejected RAG query for source %s: no trusted compliance level is active",
+                "Rejected RAG query for source %s: no compliance level is active",
                 sanitize_for_logging(source_name),
             )
             raise DataSourcePermissionError(
-                f"{subject} not accessible without a trusted compliance level. "
-                f"Deselect {pronoun}, or select a model that carries a "
-                "compliance level.",
+                f"{subject} not accessible without a compliance level. "
+                f"Deselect {pronoun}, or select a compliance level.",
                 code="DATA_SOURCE_COMPLIANCE_MISMATCH",
             )
 
+        # The source must explicitly list the active classification; one that
+        # declares nothing is approved for no classified session (#1032).
         compliance_mgr = get_compliance_manager()
-        if compliance_mgr.is_accessible(
-            user_level=active_compliance_level,
-            resource_level=resource_compliance_level,
+        if compliance_mgr.classification_permits(
+            active_compliance_level,
+            declared_classifications(source_config),
         ):
             return
 
@@ -364,9 +365,8 @@ class UnifiedRAGService:
             sanitize_for_logging(source_name),
         )
         raise DataSourcePermissionError(
-            f"{subject} not accessible at the compliance level of the selected "
-            f"model. Deselect {pronoun}, or switch to a model cleared for "
-            "that source.",
+            f"{subject} not approved for the selected compliance level. "
+            f"Deselect {pronoun}, or select a different compliance level.",
             code="DATA_SOURCE_COMPLIANCE_MISMATCH",
         )
 
@@ -409,17 +409,15 @@ class UnifiedRAGService:
                     continue
 
                 # Check compliance level filtering
-                if user_compliance_level and source_config.compliance_level:
+                if user_compliance_level:
                     compliance_mgr = get_compliance_manager()
-                    if not compliance_mgr.is_accessible(
-                        user_level=user_compliance_level,
-                        resource_level=source_config.compliance_level,
+                    if not compliance_mgr.classification_permits(
+                        user_compliance_level,
+                        declared_classifications(source_config),
                     ):
                         logger.info(
-                            "Skipping RAG source %s due to compliance level mismatch (user: %s, source: %s)",
+                            "Skipping RAG source %s: not approved for the active classification",
                             sanitize_for_logging(source_name),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(source_config.compliance_level),
                         )
                         continue
 
@@ -470,6 +468,7 @@ class UnifiedRAGService:
                     "authRequired": True,
                     "selected": False,
                     "complianceLevel": ds.compliance_level,
+                    "allowedDataClassifications": declared_classifications(ds),
                 }
                 for ds in data_sources
             ]
@@ -479,6 +478,7 @@ class UnifiedRAGService:
                 "displayName": config.display_name or source_name,
                 "icon": config.icon or "database",
                 "complianceLevel": config.compliance_level,
+                "allowedDataClassifications": declared_classifications(config),
                 "sources": ui_sources,
             }
 

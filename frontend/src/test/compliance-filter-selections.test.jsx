@@ -2,16 +2,18 @@
  * The header compliance filter against the real ChatProvider.
  *
  * Pins three behaviors found by driving the app in a browser:
- *   - nothing the filter hides is sent: untagged or out-of-allowlist tools,
- *     MCP prompts and data sources are dropped from the payload even when a
- *     persisted selection still holds them (the MCP tool path has no
- *     server-side compliance check);
- *   - persisted selections are pruned against the filter with the allowlist
- *     rule (HIPAA keeps SOC2), and nothing is pruned before the level
- *     definitions load;
- *   - an allowlisted persona survives, an excluded persona or MCP prompt is
- *     cleared, the model moves to an allowed one, and a turn is refused when
- *     no allowed model exists -- on a switch and on load alike.
+ *   - nothing the filter hides is sent: untagged tools, MCP prompts and data
+ *     sources, and those not approved for the level, are dropped from the
+ *     payload even when a persisted selection still holds them (the MCP tool
+ *     path has no server-side compliance check);
+ *   - persisted selections are pruned against the filter with the explicit
+ *     classification rule (the level must be one of the resource's
+ *     `allowed_data_classifications`; HIPAA no longer keeps SOC2-only
+ *     resources through `allowed_with`), and nothing is pruned before the
+ *     level definitions load;
+ *   - a persona approved for the level survives, an excluded persona or MCP
+ *     prompt is cleared, the model moves to an approved one, and a turn is
+ *     refused when no approved model exists -- on a switch and on load alike.
  *
  * Harness mirrors agent-mode-payload-gating.test.jsx: the real provider with
  * leaf hooks stubbed.
@@ -76,6 +78,7 @@ vi.mock('../hooks/usePersonas', () => ({
 
 const TOOLS = [
   { server: 'soc2srv', compliance_level: 'SOC2', tools: ['evaluate'] },
+  { server: 'dualsrv', allowed_data_classifications: ['SOC2', 'HIPAA'], tools: ['evaluate'] },
   { server: 'pubsrv', compliance_level: 'Public', tools: ['evaluate'] },
   { server: 'loose', tools: ['plan'] },
   // Built-in server: tagged Public by /api/config, exempt from the filter.
@@ -90,6 +93,7 @@ const RAG_SERVERS = [{
   complianceLevel: 'Internal',
   sources: [
     { id: 'audit', complianceLevel: 'SOC2' },
+    { id: 'claims', allowedDataClassifications: ['SOC2', 'HIPAA'] },
     { id: 'patients', complianceLevel: 'HIPAA' },
     { id: 'public', complianceLevel: 'Public' },
     { id: 'untagged' },
@@ -98,6 +102,7 @@ const RAG_SERVERS = [{
 const MODELS = [
   { name: 'public-model', compliance_level: 'Public' },
   { name: 'soc2-model', compliance_level: 'SOC2' },
+  { name: 'soc2-hipaa-model', allowed_data_classifications: ['SOC2', 'HIPAA'] },
   { name: 'hipaa-model', compliance_level: 'HIPAA' },
 ]
 
@@ -190,11 +195,11 @@ beforeEach(() => {
   h.levels = LEVELS
   h.filter = 'HIPAA'
   h.currentModel = 'hipaa-model'
-  h.selectedTools = new Set(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan', 'atlas_canvas'])
+  h.selectedTools = new Set(['soc2srv_evaluate', 'dualsrv_evaluate', 'pubsrv_evaluate', 'loose_plan', 'atlas_canvas'])
   h.selectedPrompts = new Set(['hipaasrv_intake', 'pubprompts_hello'])
   h.activePrompts = ['hipaasrv_intake', 'pubprompts_hello']
   h.activePromptKey = null
-  h.selectedDataSources = new Set(['rag:audit', 'rag:patients', 'rag:public', 'rag:untagged'])
+  h.selectedDataSources = new Set(['rag:audit', 'rag:claims', 'rag:patients', 'rag:public', 'rag:untagged'])
   h.ragEnabled = false
   h.personas = []
   h.features = { compliance_levels: true }
@@ -202,14 +207,14 @@ beforeEach(() => {
 })
 
 describe('compliance filter: outgoing payload', () => {
-  it('sends only what the filter allows, untagged resources excluded', () => {
+  it('sends only what is approved for the level, untagged and SOC2-only resources excluded', () => {
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('hi') })
 
     const payload = lastPayload()
-    expect(payload.selected_tools).toEqual(['soc2srv_evaluate', 'atlas_canvas'])
+    expect(payload.selected_tools).toEqual(['dualsrv_evaluate', 'atlas_canvas'])
     expect(payload.selected_prompts).toEqual(['hipaasrv_intake'])
-    expect(payload.selected_data_sources).toEqual(['rag:audit', 'rag:patients'])
+    expect(payload.selected_data_sources).toEqual(['rag:claims', 'rag:patients'])
     expect(payload.compliance_level_filter).toBe('HIPAA')
   })
 
@@ -219,7 +224,7 @@ describe('compliance filter: outgoing payload', () => {
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('hi') })
 
-    expect(lastPayload().selected_data_sources).toEqual(['rag:audit', 'rag:patients'])
+    expect(lastPayload().selected_data_sources).toEqual(['rag:claims', 'rag:patients'])
   })
 
   it('fails closed when a filter is set but the level definitions are missing', () => {
@@ -235,11 +240,11 @@ describe('compliance filter: outgoing payload', () => {
 
   it('holds back keys it cannot place yet instead of sending them unjudged', () => {
     // e.g. a persisted tool from a server /api/config has not reported yet
-    h.selectedTools = new Set(['soc2srv_evaluate', 'notloaded_tool'])
+    h.selectedTools = new Set(['dualsrv_evaluate', 'notloaded_tool'])
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('hi') })
 
-    expect(lastPayload().selected_tools).toEqual(['soc2srv_evaluate'])
+    expect(lastPayload().selected_tools).toEqual(['dualsrv_evaluate'])
   })
 
   it('sends everything when no filter is set', () => {
@@ -247,17 +252,17 @@ describe('compliance filter: outgoing payload', () => {
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('hi') })
 
-    expect(lastPayload().selected_tools).toEqual(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan', 'atlas_canvas'])
-    expect(lastPayload().selected_data_sources).toHaveLength(4)
+    expect(lastPayload().selected_tools).toEqual(['soc2srv_evaluate', 'dualsrv_evaluate', 'pubsrv_evaluate', 'loose_plan', 'atlas_canvas'])
+    expect(lastPayload().selected_data_sources).toHaveLength(5)
   })
 })
 
 describe('compliance filter: selection pruning', () => {
-  it('prunes persisted selections with the allowlist rule', () => {
+  it('prunes persisted selections not approved for the level, SOC2-only ones included', () => {
     renderChat()
-    expect(h.removeTools).toHaveBeenCalledWith(['pubsrv_evaluate', 'loose_plan'])
+    expect(h.removeTools).toHaveBeenCalledWith(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan'])
     expect(h.removePrompts).toHaveBeenCalledWith(['pubprompts_hello'])
-    expect(h.removeDataSources).toHaveBeenCalledWith(['rag:public', 'rag:untagged'])
+    expect(h.removeDataSources).toHaveBeenCalledWith(['rag:audit', 'rag:public', 'rag:untagged'])
   })
 
   it('prunes nothing before the level definitions load', () => {
@@ -278,19 +283,31 @@ describe('compliance filter: selection pruning', () => {
 describe('compliance filter: persona, active prompt and model', () => {
   // These run from the same effect on a level switch and on load, so a saved
   // filter with a saved persona/model is handled exactly like a fresh switch.
-  it('keeps an allowlisted persona and switches to an exact-level model', () => {
+  it('keeps a persona approved for the level and switches to the first approved model', () => {
+    // soc2-hipaa-model is listed before hipaa-model; there is no longer an
+    // exact-level preference, so the first approved model wins.
     h.currentModel = 'public-model'
+    h.activePromptKey = 'persona:auditor'
+    h.personas = [{ id: 'auditor', allowed_data_classifications: ['SOC2', 'HIPAA'] }]
+    renderChat()
+
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+    expect(h.setCurrentModel).toHaveBeenCalledWith('soc2-hipaa-model')
+    expect(h.toastInfo).toHaveBeenCalled()
+  })
+
+  it('clears a SOC2-only persona and moves off a SOC2-only model under HIPAA', () => {
+    h.currentModel = 'soc2-model'
     h.activePromptKey = 'persona:auditor'
     h.personas = [{ id: 'auditor', compliance_level: 'SOC2' }]
     renderChat()
 
-    expect(h.clearActivePrompt).not.toHaveBeenCalled()
-    expect(h.setCurrentModel).toHaveBeenCalledWith('hipaa-model')
-    expect(h.toastInfo).toHaveBeenCalled()
+    expect(h.clearActivePrompt).toHaveBeenCalled()
+    expect(h.setCurrentModel).toHaveBeenCalledWith('soc2-hipaa-model')
   })
 
-  it('clears a persona the level excludes and leaves a compliant model alone', () => {
-    h.currentModel = 'soc2-model'
+  it('clears a persona the level excludes and leaves an approved model alone', () => {
+    h.currentModel = 'soc2-hipaa-model'
     h.activePromptKey = 'persona:greeter'
     h.personas = [{ id: 'greeter', compliance_level: 'Public' }]
     renderChat()

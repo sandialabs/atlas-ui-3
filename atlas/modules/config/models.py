@@ -115,8 +115,13 @@ class ModelConfig(BaseModel):
     )
     # Optional extra HTTP headers (e.g. for providers like OpenRouter)
     extra_headers: Optional[Dict[str, str]] = None
-    # Compliance/security level (e.g., "External", "Internal", "Public")
+    # Compliance/security level (e.g., "External", "Internal", "Public").
+    # Deprecated in favour of allowed_data_classifications; when only this is
+    # set it is read as a one-element allowed_data_classifications list.
     compliance_level: Optional[str] = None
+    # Every data classification this model is explicitly approved to receive
+    # (issue #1032). Wins over compliance_level when both are set.
+    allowed_data_classifications: Optional[List[str]] = None
     # Access groups. Empty (the default) means every user may access this model,
     # preserving the historical behavior. When non-empty, only users who are a
     # member of at least one listed group may see or use this model. Matches the
@@ -237,6 +242,8 @@ class LiteLLMGatewayModel(BaseModel):
 
     # Overrides the gateway's compliance_level for this model.
     compliance_level: Optional[str] = None
+    # Overrides the gateway's classifications for this model (issue #1032).
+    allowed_data_classifications: Optional[List[str]] = None
     # Set at load when compliance_level names no known level: the model is
     # then unleveled, never silently given the gateway's level instead.
     _invalid_compliance_level: bool = PrivateAttr(default=False)
@@ -275,6 +282,7 @@ class LiteLLMGatewayConfig(BaseModel):
     # gateway, exactly as they do for a statically configured model.
     groups: List[str] = Field(default_factory=list)
     compliance_level: Optional[str] = None
+    allowed_data_classifications: Optional[List[str]] = None
     # Optional allowlist of LiteLLM model ids, keyed by id. When set, only these
     # models are offered or callable through the gateway (a team still has to
     # list a model for it to appear); each entry may set its own
@@ -290,7 +298,8 @@ class LiteLLMGatewayConfig(BaseModel):
     # itself, so a model_defaults entry for them would be silently misleading.
     RESERVED_MODEL_DEFAULT_KEYS: ClassVar[frozenset] = frozenset({
         "model_name", "model_url", "api_key", "api_key_source", "globus_scope",
-        "groups", "compliance_level", "extra_headers", "delegation",
+        "groups", "compliance_level", "allowed_data_classifications",
+        "extra_headers", "delegation",
     })
 
     @field_validator("models", mode="before")
@@ -353,6 +362,26 @@ class LiteLLMGatewayConfig(BaseModel):
             if entry.compliance_level:
                 return entry.compliance_level
         return self.compliance_level
+
+    def model_allowed_data_classifications(self, model_id: str) -> Optional[List[str]]:
+        """The data classifications one model is approved for.
+
+        The most specific declaration wins: the model entry's list, then its
+        legacy level, then the gateway's list, then the gateway's legacy level.
+        An entry whose compliance_level was invalid stays undeclared rather
+        than inheriting the gateway's classifications.
+        """
+        entry = self.models.get(model_id)
+        if entry is not None:
+            if entry.allowed_data_classifications is not None:
+                return list(entry.allowed_data_classifications)
+            if entry._invalid_compliance_level:
+                return None
+            if entry.compliance_level:
+                return [entry.compliance_level]
+        if self.allowed_data_classifications is not None:
+            return list(self.allowed_data_classifications)
+        return [self.compliance_level] if self.compliance_level else None
 
     def effective_user_id_source(self) -> str:
         if self.user_id_source:
@@ -429,6 +458,7 @@ class LLMConfig(BaseModel):
             api_key="",
             groups=list(gateway.groups),
             compliance_level=gateway.model_compliance_level(ref.model_id),
+            allowed_data_classifications=gateway.model_allowed_data_classifications(ref.model_id),
             extra_headers=dict(gateway.extra_headers) if gateway.extra_headers else None,
         )
         return ModelConfig(**fields)
@@ -498,7 +528,8 @@ class MCPServerConfig(BaseModel):
     oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 configuration (when auth_type="oauth")
     delegation: Optional[DelegationConfig] = None  # Downstream token parameters (when auth_type="delegated")
     wormhole: bool = False  # Forward the per-session Wormhole subtoken (via WORMHOLE_FORWARD_HEADER) when connecting
-    compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+    compliance_level: Optional[str] = None  # Deprecated single level; read as [compliance_level]
+    allowed_data_classifications: Optional[List[str]] = None  # Classifications this server may receive (issue #1032)
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing
 
@@ -531,7 +562,8 @@ class RAGSourceConfig(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None  # UI icon
     groups: List[str] = Field(default_factory=list)  # Access groups
-    compliance_level: Optional[str] = None
+    compliance_level: Optional[str] = None  # Deprecated single level; read as [compliance_level]
+    allowed_data_classifications: Optional[List[str]] = None  # Classifications this source may receive (issue #1032)
     enabled: bool = True
 
     # MCP-specific fields (type="mcp")

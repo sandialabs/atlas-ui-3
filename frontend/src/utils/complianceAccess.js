@@ -8,13 +8,19 @@
  * so a switch to HIPAA deselected SOC2 tools the panel still showed, and kept
  * untagged tools the panel hid. Keep the rule here so they cannot drift again.
  *
- * Rule (explicit allowlist, strict):
+ * Rule (explicit data classifications, issue #1032):
  *   - no level selected            -> everything is accessible
- *   - level selected, resource has none -> denied (an untagged resource has
- *     no declared boundary, so it cannot be trusted under a filter)
+ *   - level selected, resource declares nothing -> denied (an undeclared
+ *     resource is approved for no classified session)
  *   - unknown selected level       -> denied
- *   - otherwise the resource level (aliases resolved) must be in the selected
- *     level's `allowed_with` list.
+ *   - otherwise the selected level (aliases resolved) must be one of the
+ *     resource's `allowed_data_classifications`. A legacy single
+ *     `compliance_level` counts as a one-element list. `allowed_with` in the
+ *     level definitions no longer widens access: a level never makes another
+ *     level's resources valid by implication.
+ *
+ * The server applies the same rule to every chat turn, so this filtering is a
+ * convenience, not the boundary.
  */
 
 const canonicalName = (levels, name) => {
@@ -26,14 +32,34 @@ const canonicalName = (levels, name) => {
   return name
 }
 
-export const isComplianceAccessible = (levels, userLevel, resourceLevel) => {
+/**
+ * The classifications a resource (model, MCP server or prompt entry, RAG
+ * server or source) is approved for: its `allowed_data_classifications`
+ * (snake or camel case) when present, else its legacy level as a one-element
+ * list, else null (undeclared).
+ */
+export const classificationsOf = resource => {
+  if (!resource || typeof resource !== 'object') return null
+  const allowed = resource.allowed_data_classifications ?? resource.allowedDataClassifications
+  if (Array.isArray(allowed)) return allowed
+  const legacy = resource.compliance_level ?? resource.complianceLevel
+  return legacy ? [legacy] : null
+}
+
+/**
+ * `resourceClassifications` is a list of classifications, a single legacy
+ * level string, or null/undefined when the resource declares nothing.
+ */
+export const isComplianceAccessible = (levels, userLevel, resourceClassifications) => {
   if (!userLevel) return true
-  if (!resourceLevel) return false
+  const declared = typeof resourceClassifications === 'string'
+    ? [resourceClassifications]
+    : resourceClassifications
+  if (!Array.isArray(declared) || declared.length === 0) return false
   const list = Array.isArray(levels) ? levels : []
   const userName = canonicalName(list, userLevel)
-  const userLevelObj = list.find(l => l.name === userName)
-  if (!userLevelObj || !Array.isArray(userLevelObj.allowed_with)) return false
-  return userLevelObj.allowed_with.includes(canonicalName(list, resourceLevel))
+  if (!list.some(l => l.name === userName)) return false
+  return declared.some(name => canonicalName(list, name) === userName)
 }
 
 /**
@@ -57,7 +83,7 @@ export const COMPLIANCE_EXEMPT = 'compliance-exempt'
 /**
  * The subset of `keys` the active filter excludes.
  *
- * `levelOf(key)` returns the resource's level (null when untagged),
+ * `levelOf(key)` returns the resource's classifications (null when undeclared),
  * COMPLIANCE_EXEMPT, or `undefined` when it cannot place the key at all --
  * an unknown key (config not loaded yet, server gone) is left alone here
  * rather than guessed at; the send path drops such keys separately.
@@ -80,21 +106,19 @@ export const isModelComplianceAccessible = (models, levels, userLevel, modelName
   const entry = (models || []).map(modelEntry).find(m => m.name === modelName)
   // A model the list does not know (stale persisted choice) cannot be placed.
   if (!entry) return true
-  return isComplianceAccessible(levels, userLevel, entry.compliance_level)
+  return isComplianceAccessible(levels, userLevel, classificationsOf(entry))
 }
 
 /**
- * Model to switch to under `userLevel`, or null: the first model at exactly
- * that level, else the first one the level allows. Skips models that need a
- * per-user API key the user has not supplied, since they cannot be selected.
+ * Model to switch to under `userLevel`, or null: the first model approved for
+ * that classification. Skips models that need a per-user API key the user has
+ * not supplied, since they cannot be selected.
  */
 export const firstCompliantModel = (models, levels, userLevel) => {
-  const usable = (models || []).map(modelEntry).filter(m =>
+  const entry = (models || []).map(modelEntry).find(m =>
     m.name &&
-    isComplianceAccessible(levels, userLevel, m.compliance_level) &&
+    isComplianceAccessible(levels, userLevel, classificationsOf(m)) &&
     !(m.api_key_source === 'user' && m.user_has_key !== true)
   )
-  const exact = usable.find(m => canonicalName(levels, m.compliance_level) === canonicalName(levels, userLevel))
-  const entry = exact || usable[0]
   return entry ? entry.name : null
 }

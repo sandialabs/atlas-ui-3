@@ -5,7 +5,7 @@ import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
 import { useComplianceLevels } from '../hooks/chat/useComplianceLevels'
-import { isComplianceAccessible, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel, COMPLIANCE_EXEMPT } from '../utils/complianceAccess'
+import { isComplianceAccessible, classificationsOf, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel, COMPLIANCE_EXEMPT } from '../utils/complianceAccess'
 import { useUserPrompts } from '../hooks/useUserPrompts'
 import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
@@ -282,7 +282,7 @@ export const ChatProvider = ({ children }) => {
 			const server = findServerConfigForMcpKey(key, servers)
 			if (!server) return undefined
 			if (server.server === ATLAS_SERVER) return COMPLIANCE_EXEMPT
-			return server.compliance_level ?? null
+			return classificationsOf(server)
 		},
 		[]
 	)
@@ -291,7 +291,7 @@ export const ChatProvider = ({ children }) => {
 		if (sep < 0) return undefined
 		const server = config.ragServers.find(s => s.server === key.slice(0, sep))
 		const source = server?.sources?.find(src => src.id === key.slice(sep + 1))
-		return source ? (source.complianceLevel ?? null) : undefined
+		return source ? classificationsOf(source) : undefined
 	}, [config.ragServers])
 	// The filter level that actually applies: none when the feature is off.
 	const activeComplianceFilter = complianceEnabled ? selections.complianceLevelFilter : null
@@ -1884,8 +1884,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	const openChatAsText = useCallback(() => openTranscriptInTab(true), [openTranscriptInTab])
 
 	// Keep every selection inside the active compliance filter, with the same
-	// allowlist rule as the pickers (utils/complianceAccess): a level keeps
-	// everything its panels still show (HIPAA keeps SOC2 tools) and drops
+	// membership rule as the pickers (utils/complianceAccess): a level keeps
+	// everything its panels still show (resources listing it) and drops
 	// everything they hide, untagged resources included -- a hidden selection
 	// cannot be seen or deselected in its panel, yet would still be used.
 	// Runs on a level switch and also on load (a persisted filter meeting
@@ -1934,6 +1934,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			serverName: server.server,
 			serverDisplayName: server.displayName,
 			serverComplianceLevel: server.complianceLevel,
+			serverClassifications: classificationsOf(server),
 		}))
 	)
 
