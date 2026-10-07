@@ -368,8 +368,14 @@ class ChatService:
             compliance_level_raw, context="chat request"
         )
         if not active_level:
-            # An unknown level was already refused in required-level mode;
-            # otherwise it resolves to no classification, as before.
+            # A supplied level the deployment does not define must not quietly
+            # turn every check off. With no definitions loaded there is nothing
+            # to validate against (required-level mode refuses that case).
+            if compliance_mgr.levels:
+                raise ValidationError(
+                    "The selected compliance level is not defined on this deployment. "
+                    "Select a defined compliance level and send the message again."
+                )
             return
         try:
             violations = find_classification_violations(
@@ -431,7 +437,7 @@ class ChatService:
         if not active_level:
             return
         try:
-            unapproved = await find_unapproved_corpora(
+            unapproved, unverified = await find_unapproved_corpora(
                 active_level,
                 user_email,
                 selected_data_sources,
@@ -449,6 +455,20 @@ class ChatService:
                 "compliance level, so the message was not sent. Try again or contact "
                 "an administrator."
             ) from None
+        if unverified and not unapproved:
+            # The backend could not be asked (down, slow, or no discovery):
+            # an approved corpus is indistinguishable from an unapproved one,
+            # so refuse without claiming either.
+            logger.warning(
+                "Refused a chat turn: %d data source(s) could not be checked "
+                "against the active classification",
+                len(unverified),
+            )
+            raise ValidationError(
+                f"Could not confirm that data source {', '.join(unverified)} is approved "
+                f"for {active_level} data: its RAG backend did not answer. Deselect it "
+                "or try again later."
+            )
         if unapproved:
             logger.info(
                 "Refused a chat turn: %d data source(s) not approved for the active "
@@ -719,15 +739,23 @@ class ChatService:
 
         # Query-time RAG enforcement runs on the active classification. With
         # none selected (the "All Levels" choice, only offered when a level is
-        # not required) there is no classification to protect and enforce is
-        # False; FEATURE_COMPLIANCE_LEVEL_REQUIRED removes that choice.
+        # not required) enforce is False, and the model's classifications act
+        # as a floor instead: a source that declares classifications must
+        # share one with the model. FEATURE_COMPLIANCE_LEVEL_REQUIRED removes
+        # the no-level choice entirely.
         compliance_token = None
+        floor_token = None
         if compliance_enabled:
-            from atlas.core.compliance import set_active_compliance_context
+            from atlas.core.compliance import (
+                set_active_compliance_context,
+                set_model_classification_floor,
+            )
             compliance_token = set_active_compliance_context(
                 active_classification,
                 enforce=bool(active_classification),
             )
+            if not active_classification and model_classifications is not None:
+                floor_token = set_model_classification_floor(model_classifications)
 
         try:
             with start_span("chat.turn", turn_attrs):
@@ -814,6 +842,9 @@ class ChatService:
             if compliance_token is not None:
                 from atlas.core.compliance import reset_active_compliance_context
                 reset_active_compliance_context(compliance_token)
+            if floor_token is not None:
+                from atlas.core.compliance import reset_model_classification_floor
+                reset_model_classification_floor(floor_token)
 
     async def _commit_turn(
         self,

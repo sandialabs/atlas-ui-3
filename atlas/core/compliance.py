@@ -116,12 +116,12 @@ class ComplianceLevelManager:
             if widening:
                 # Kept loadable for compatibility, but it no longer grants
                 # access across levels (issue #1032).
-                logger.info(
-                    "compliance-levels.json: allowed_with on %d level(s) lists other "
+                logger.warning(
+                    "compliance-levels.json: allowed_with on level(s) %s lists other "
                     "levels; allowed_with is deprecated and no longer grants access "
                     "across levels. List every classification a component may "
                     "receive in its allowed_data_classifications instead.",
-                    len(widening),
+                    ", ".join(sanitize_for_logging(n) for n in widening),
                 )
 
             logger.info(f"Loaded {len(self.levels)} compliance levels from {config_path}")
@@ -356,6 +356,33 @@ _active_compliance_context: ContextVar[Tuple[Optional[str], bool]] = ContextVar(
     "active_compliance_context",
     default=(None, False),
 )
+
+
+# The selected model's classifications, set only for a turn with no active
+# classification. Query-time RAG enforcement then keeps the floor it had
+# before issue #1032: a source that declares classifications must share one
+# with the model that will read it.
+_model_classification_floor: ContextVar[Optional[Tuple[str, ...]]] = ContextVar(
+    "model_classification_floor",
+    default=None,
+)
+
+
+def set_model_classification_floor(
+    classifications: Optional[Sequence[str]],
+) -> Token[Optional[Tuple[str, ...]]]:
+    """Set the per-turn model floor used when no classification is active."""
+    return _model_classification_floor.set(
+        tuple(classifications) if classifications is not None else None
+    )
+
+
+def reset_model_classification_floor(token: Token[Optional[Tuple[str, ...]]]) -> None:
+    _model_classification_floor.reset(token)
+
+
+def get_model_classification_floor() -> Optional[Tuple[str, ...]]:
+    return _model_classification_floor.get()
 
 
 def get_compliance_manager() -> ComplianceLevelManager:

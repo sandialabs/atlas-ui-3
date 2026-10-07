@@ -50,7 +50,7 @@ async def turn(model, level, tools=None):
             except asyncio.TimeoutError:
                 return None, text
             blob = json.dumps(m)
-            if "Not approved for" in blob:
+            if "Not approved for" in blob or "is not defined on this deployment" in blob:
                 return blob, text
             if m.get("type") == "token_stream":
                 text += m.get("token") or ""
@@ -100,6 +100,9 @@ async def main():
     check(refusal is None, "a multi-classification MCP server is allowed in ITAR")
     refusal, _ = await turn("model-x", "UUR", ["google_search_search"])
     check(refusal is None, "the UUR-only MCP server is allowed in a UUR conversation")
+    refusal, _ = await turn("model-x", "ITRA")
+    check(refusal is not None and "not defined" in refusal,
+          "a misspelt level is refused rather than treated as no level")
     refusal, answer = await turn("undeclared", None)
     check(refusal is None and "ECHO" in answer, "no level selected: nothing is refused")
 

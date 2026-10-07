@@ -14,6 +14,7 @@ from atlas.core.compliance import (
     declared_classifications,
     get_active_compliance_context,
     get_compliance_manager,
+    get_model_classification_floor,
     reset_active_compliance_context,
     set_active_compliance_context,
 )
@@ -348,7 +349,30 @@ class UnifiedRAGService:
 
         active_compliance_level, enforce_compliance = get_active_compliance_context()
         if not enforce_compliance:
-            return
+            # No classification is active. Keep the model floor: a source that
+            # declares classifications must share one with the selected model,
+            # so an unclassified turn cannot pull a source into a model never
+            # approved for any of its classifications.
+            floor = get_model_classification_floor()
+            source_classifications = declared_classifications(source_config)
+            if floor is None or not source_classifications:
+                return
+            compliance_mgr = get_compliance_manager()
+            if any(
+                compliance_mgr.classification_permits(level, floor)
+                for level in source_classifications
+            ):
+                return
+            logger.warning(
+                "Rejected RAG query for source %s: no classification shared with the model",
+                sanitize_for_logging(source_name),
+            )
+            raise DataSourcePermissionError(
+                f"{subject} not approved for any classification the selected model "
+                f"may receive. Deselect {pronoun}, select a compliance level, or "
+                "switch to a model approved for that source.",
+                code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+            )
 
         if not active_compliance_level:
             logger.warning(
@@ -387,6 +411,7 @@ class UnifiedRAGService:
         self,
         username: str,
         user_compliance_level: Optional[str] = None,
+        only_servers: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Discover data sources across all configured RAG backends.
 
@@ -407,6 +432,8 @@ class UnifiedRAGService:
         rag_config = self.config_manager.rag_sources_config
 
         for source_name, source_config in rag_config.sources.items():
+            if only_servers is not None and source_name not in only_servers:
+                continue
             try:
                 if not source_config.enabled:
                     continue

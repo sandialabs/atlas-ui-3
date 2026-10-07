@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
-import { classificationsOf } from '../utils/complianceAccess'
+import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
@@ -1018,10 +1018,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                   Exclusive
                                 </span>
                               )}
-                              {complianceEnabled && server.compliance_level && (
+                              {complianceEnabled && classificationLabel(server) && (
                                 <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
                                   <Shield className="w-3 h-3" />
-                                  {server.compliance_level}
+                                  {classificationLabel(server)}
                                 </span>
                               )}
                               {/* Auth status indicator. An oauth server is connected by

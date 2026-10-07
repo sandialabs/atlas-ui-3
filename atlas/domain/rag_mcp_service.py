@@ -9,6 +9,7 @@ Future phases will add search/synthesis and richer shapes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +26,36 @@ class RAGMCPService:
         self.mcp_manager = mcp_manager
         self.config_manager = config_manager
         self.auth_check_func = auth_check_func
+        # Serializes the temporary servers_config swap in _ensure_rag_clients:
+        # two concurrent swaps could each restore a snapshot holding the
+        # other's RAG entries, leaving them in the tool inventory for good.
+        self._init_lock = asyncio.Lock()
+
+    async def _ensure_rag_clients(self) -> None:
+        """Initialize RAG MCP clients once, without polluting the tool inventory."""
+        try:
+            rag_servers = self.config_manager.rag_mcp_config.servers
+            if not [n for n in rag_servers if n not in getattr(self.mcp_manager, "clients", {})]:
+                return
+            # setdefault: instances built without __init__ (tests) still lock.
+            async with self.__dict__.setdefault("_init_lock", asyncio.Lock()):
+                # Re-check: another caller may have initialized them meanwhile.
+                missing = [n for n in rag_servers if n not in getattr(self.mcp_manager, "clients", {})]
+                if not missing:
+                    return
+                original = dict(getattr(self.mcp_manager, "servers_config", {}))
+                try:
+                    self.mcp_manager.servers_config.update(
+                        {name: cfg.model_dump() for name, cfg in rag_servers.items()}
+                    )
+                    await self.mcp_manager.initialize_clients()
+                    await self.mcp_manager.discover_tools()
+                finally:
+                    # Restore original list for general tools panel separation
+                    self.mcp_manager.servers_config = original
+        except Exception:
+            # If anything goes wrong, fall back silently to existing clients
+            pass
 
     async def _get_authorized_rag_servers(self, username: str, rag_servers: dict) -> List[str]:
         """Get list of RAG servers the user is authorized to access.
@@ -60,24 +91,7 @@ class RAGMCPService:
         Phase 1 returns a flat list of strings for backward compatibility.
         Uses server-qualified IDs: "{server}:{resource_id}" to avoid collisions.
         """
-        # Ensure RAG servers are initialized from rag_mcp_config, without polluting tool inventory
-        try:
-            rag_servers = self.config_manager.rag_mcp_config.servers
-            # If these servers aren't in mcp_manager.clients, initialize just these
-            missing = [name for name in rag_servers.keys() if name not in getattr(self.mcp_manager, "clients", {})]
-            if missing:
-                # Temporarily extend servers_config with rag servers and initialize them
-                original = dict(getattr(self.mcp_manager, "servers_config", {}))
-                try:
-                    self.mcp_manager.servers_config.update({name: cfg.model_dump() for name, cfg in rag_servers.items()})
-                    await self.mcp_manager.initialize_clients()
-                    await self.mcp_manager.discover_tools()
-                finally:
-                    # Restore original list for general tools panel separation
-                    self.mcp_manager.servers_config = original
-        except Exception:
-            # If anything goes wrong, fallback silently to existing clients
-            pass
+        await self._ensure_rag_clients()
         try:
             # Determine RAG servers current user can see
             # Use rag_mcp_config directly since servers_config was restored above
@@ -162,7 +176,12 @@ class RAGMCPService:
             logger.error("Error during RAG MCP discovery: %s", e, exc_info=True)
             return []
 
-    async def discover_servers(self, username: str, user_compliance_level: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def discover_servers(
+        self,
+        username: str,
+        user_compliance_level: Optional[str] = None,
+        only_servers: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Return richer per-server discovery structure for UI (rag_servers).
 
         Shape:
@@ -177,21 +196,7 @@ class RAGMCPService:
           }
         ]
         """
-        # Ensure RAG servers are initialized from rag_mcp_config, without polluting tool inventory
-        try:
-            rag_cfg_servers = self.config_manager.rag_mcp_config.servers
-            missing = [name for name in rag_cfg_servers.keys() if name not in getattr(self.mcp_manager, "clients", {})]
-            if missing:
-                original = dict(getattr(self.mcp_manager, "servers_config", {}))
-                try:
-                    self.mcp_manager.servers_config.update({name: cfg.model_dump() for name, cfg in rag_cfg_servers.items()})
-                    await self.mcp_manager.initialize_clients()
-                    await self.mcp_manager.discover_tools()
-                finally:
-                    self.mcp_manager.servers_config = original
-        except Exception:
-            # Fallback silently if RAG config init fails; we'll just return empty set
-            pass
+        await self._ensure_rag_clients()
 
         rag_servers: List[Dict[str, Any]] = []
         try:
@@ -202,6 +207,8 @@ class RAGMCPService:
             authorized_servers: List[str] = await self._get_authorized_rag_servers(
                 username, rag_cfg_servers
             )
+            if only_servers is not None:
+                authorized_servers = [s for s in authorized_servers if s in only_servers]
 
             # --- Compliance Filtering (Step 2) ---
             if compliance_mgr:
@@ -235,9 +242,11 @@ class RAGMCPService:
                     )
                     structured = self._extract_structured_result(raw)
                     resources = self._extract_resources(structured)
+                    discovery_failed = False
                 except Exception as e:
                     logger.warning("Discovery failed for server %s: %s", server, e)
                     resources = []
+                    discovery_failed = True
 
                 # Build UI sources array
                 ui_sources: List[Dict[str, Any]] = []
@@ -293,6 +302,8 @@ class RAGMCPService:
                     "complianceLevel": compliance_level,
                     "allowedDataClassifications": declared_classifications(cfg),
                     "sources": ui_sources,
+                    # Lets a caller tell "offered nothing" from "could not ask".
+                    "discoveryFailed": discovery_failed,
                 })
         except Exception as e:
             logger.error("discover_servers error: %s", e, exc_info=True)

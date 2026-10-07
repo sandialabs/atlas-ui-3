@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, Wrench, Shield, Key, Eye, Info } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
-import { classificationsOf } from '../utils/complianceAccess'
+import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
@@ -191,10 +191,10 @@ const ModelSelector = () => {
                             <Wrench className="w-3 h-3" />
                             Tools {model.supports_tools !== false ? '' : '(no)'}
                           </span>
-                          {complianceEnabled && model.compliance_level && (
+                          {complianceEnabled && classificationLabel(model) && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white">
                               <Shield className="w-3 h-3" />
-                              {model.compliance_level}
+                              {classificationLabel(model)}
                             </span>
                           )}
                         </div>

@@ -12,8 +12,9 @@ a hand-crafted client can still name them, so the turn is checked here before
 anything runs.
 """
 
+import asyncio
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from atlas.core.compliance import ComplianceLevelManager, declared_classifications
 from atlas.modules.config.models import lookup_model_config
@@ -29,6 +30,24 @@ def _server_for_tool(tool: str, server_names: Iterable[str]) -> Optional[str]:
         if tool.startswith(f"{name}_") and (best is None or len(name) > len(best)):
             best = name
     return best
+
+
+def _resolve_tool_server(tool: str, tool_manager: Any, server_names: Iterable[str]) -> Optional[str]:
+    """The server a tool belongs to, as the executor resolves it.
+
+    The tool manager's discovery index is authoritative (server names can
+    contain underscores, so a prefix can be ambiguous); the longest configured
+    prefix is the fallback for a server whose tools are not discovered yet.
+    """
+    lookup = getattr(tool_manager, "get_server_for_tool", None)
+    if callable(lookup):
+        try:
+            server = lookup(tool)
+        except Exception:
+            server = None
+        if isinstance(server, str) and server in server_names:
+            return server
+    return _server_for_tool(tool, server_names)
 
 
 def _mcp_servers(tool_manager: Any, config_manager: Any) -> Dict[str, Any]:
@@ -63,9 +82,9 @@ def find_classification_violations(
     Empty when every component the turn names is approved for the active
     classification, or when no classification is active.
 
-    Tool names that match no configured MCP server, and data sources whose
-    server is not configured, are not reported: they reach no component, and
-    the authorization and query paths already refuse them.
+    A non-built-in tool that cannot be tied to a configured MCP server is
+    reported (fail closed). Data sources whose server is not configured are
+    not reported: the query path refuses them on its own.
     """
     if not active_level:
         return []
@@ -80,6 +99,7 @@ def find_classification_violations(
     if selected_tools:
         servers = _mcp_servers(tool_manager, config_manager)
         denied_servers: List[str] = []
+        unknown_tools: List[str] = []
         for tool in selected_tools:
             if not isinstance(tool, str):
                 continue
@@ -87,14 +107,19 @@ def find_classification_violations(
             # sources that are checked on their own at query time.
             if is_atlas_tool(normalize_tool_name(tool)):
                 continue
-            server = _server_for_tool(tool, servers.keys())
-            if server is None or server in denied_servers:
+            server = _resolve_tool_server(tool, tool_manager, servers.keys())
+            if server is None:
+                if tool not in unknown_tools:
+                    unknown_tools.append(tool)
+                continue
+            if server in denied_servers:
                 continue
             if not compliance_mgr.classification_permits(
                 active_level, declared_classifications(servers[server])
             ):
                 denied_servers.append(server)
         violations.extend(f"tool server {name}" for name in denied_servers)
+        violations.extend(f"tool {name} (no known server)" for name in unknown_tools)
 
     if selected_data_sources:
         sources = _rag_sources(config_manager)
@@ -122,37 +147,64 @@ async def find_unapproved_corpora(
     unified_rag: Any = None,
     rag_mcp: Any = None,
     config_manager: Any = None,
-) -> List[str]:
+) -> Tuple[List[str], List[str]]:
     """Selected ``server:corpus`` keys discovery does not offer at ``active_level``.
 
     A corpus can declare narrower classifications than its server, and only
     the RAG backend knows them. Discovery run with the active level already
     drops unapproved servers and corpora (it is the same allow-list the
     ``atlas_search`` tool is bounded by), so a selected corpus missing from it
-    is refused rather than queried. Sources whose server is not configured are
-    not reported; the query path refuses those on its own.
+    is refused rather than queried.
+
+    Returns ``(unapproved, unverified)``: corpora discovery answered for and
+    did not offer, and corpora whose server's discovery failed or returned
+    nothing, which cannot be judged either way. Only the selected servers are
+    asked, concurrently. Sources whose server is not configured are not
+    reported; the query path refuses those on its own.
     """
     if not active_level or not selected_data_sources:
-        return []
-    configured = set(_rag_sources(config_manager))
+        return [], []
+    configured = _rag_sources(config_manager)
     wanted = [
         s for s in selected_data_sources
         if isinstance(s, str) and ":" in s and s.split(":", 1)[0] in configured
     ]
     if not wanted:
-        return []
+        return [], []
+    servers = sorted({s.split(":", 1)[0] for s in wanted})
+    http = [n for n in servers if getattr(configured[n], "type", None) == "http"]
+    mcp = [n for n in servers if n not in http]
+
+    lookups = []
+    if http and unified_rag is not None:
+        lookups.append(unified_rag.discover_data_sources(
+            user_email, user_compliance_level=active_level, only_servers=http
+        ))
+    if mcp and rag_mcp is not None:
+        lookups.append(rag_mcp.discover_servers(
+            user_email, user_compliance_level=active_level, only_servers=mcp
+        ))
     discovered: List[Dict[str, Any]] = []
-    if unified_rag is not None:
-        discovered += await unified_rag.discover_data_sources(
-            user_email, user_compliance_level=active_level
-        )
-    if rag_mcp is not None:
-        discovered += await rag_mcp.discover_servers(
-            user_email, user_compliance_level=active_level
-        )
+    for result in await asyncio.gather(*lookups):
+        discovered.extend(result or [])
+
+    answered = {
+        server.get("server")
+        for server in discovered
+        if not server.get("discoveryFailed")
+    }
     offered = {
         f"{server.get('server')}:{source.get('id')}"
         for server in discovered
         for source in server.get("sources", []) or []
     }
-    return [s for s in wanted if s not in offered]
+    unapproved: List[str] = []
+    unverified: List[str] = []
+    for key in wanted:
+        if key in offered:
+            continue
+        if key.split(":", 1)[0] in answered:
+            unapproved.append(key)
+        else:
+            unverified.append(key)
+    return unapproved, unverified

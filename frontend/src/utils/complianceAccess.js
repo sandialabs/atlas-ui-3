@@ -46,6 +46,12 @@ export const classificationsOf = resource => {
   return legacy ? [legacy] : null
 }
 
+/** Badge text for a resource's classifications ("UUR, ITAR"), or null. */
+export const classificationLabel = resource => {
+  const list = classificationsOf(resource)
+  return list && list.length ? list.join(', ') : null
+}
+
 /**
  * `resourceClassifications` is a list of classifications, a single legacy
  * level string, or null/undefined when the resource declares nothing.

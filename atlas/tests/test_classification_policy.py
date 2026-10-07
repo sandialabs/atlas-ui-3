@@ -144,14 +144,33 @@ def test_every_violation_is_reported_once(manager, config_manager):
     ]
 
 
-def test_builtin_and_unknown_tools_are_not_reported(manager, config_manager):
+def test_builtin_tools_and_unconfigured_sources_are_not_reported(manager, config_manager):
     # atlas_* run in-process; atlas_search reads sources checked on their own.
-    # A name matching no configured server reaches no component.
     assert _check(
         manager, config_manager, "ITAR",
-        tools=["atlas_canvas", "atlas_search", "canvas_canvas", "nonexistent_tool"],
+        tools=["atlas_canvas", "atlas_search", "canvas_canvas"],
         sources=["missing_server:x"],
     ) == []
+
+
+def test_tool_with_no_known_server_fails_closed(manager, config_manager):
+    assert _check(manager, config_manager, "ITAR", tools=["nonexistent_tool"]) == [
+        "tool nonexistent_tool (no known server)"
+    ]
+    assert _check(manager, config_manager, None, tools=["nonexistent_tool"]) == []
+
+
+def test_discovery_index_wins_over_prefix(manager, config_manager):
+    """An ambiguous prefix resolves the way the executor resolves it."""
+    config_manager.mcp_config.servers["internal"] = config_manager.mcp_config.servers["bare"]
+    tool_manager = SimpleNamespace(
+        servers_config={},
+        get_server_for_tool=lambda tool: "internal" if tool == "internal_search_query" else None,
+    )
+    assert find_classification_violations(
+        manager, "ITAR", model="model-x", config_manager=config_manager,
+        tool_manager=tool_manager, selected_tools=["internal_search_query"],
+    ) == ["tool server internal"]
 
 
 def test_longest_server_prefix_wins(manager, config_manager):
@@ -292,16 +311,18 @@ class TestPerCorpusClassifications:
         from atlas.application.chat.policies.classification_policy import find_unapproved_corpora
 
         class Discovery:
-            async def discover_data_sources(self, user, user_compliance_level=None):
+            async def discover_data_sources(self, user, user_compliance_level=None, only_servers=None):
                 assert user_compliance_level == "ITAR"
+                assert only_servers == ["export_docs"]
                 return [{"server": "export_docs", "sources": [{"id": "specs"}]}]
 
-        unapproved = await find_unapproved_corpora(
+        unapproved, unverified = await find_unapproved_corpora(
             "ITAR", "u@test.com",
             ["export_docs:specs", "export_docs:uur_only", "missing_server:x"],
             unified_rag=Discovery(), rag_mcp=None, config_manager=config_manager,
         )
         assert unapproved == ["export_docs:uur_only"]
+        assert unverified == []
 
     @pytest.mark.asyncio
     async def test_no_level_or_no_sources_skips_discovery(self, config_manager):
@@ -313,10 +334,10 @@ class TestPerCorpusClassifications:
 
         assert await find_unapproved_corpora(
             None, "u", ["export_docs:x"], unified_rag=Boom(), config_manager=config_manager
-        ) == []
+        ) == ([], [])
         assert await find_unapproved_corpora(
             "ITAR", "u", [], unified_rag=Boom(), config_manager=config_manager
-        ) == []
+        ) == ([], [])
 
     @pytest.mark.asyncio
     async def test_http_discovery_drops_unapproved_corpora(self, manager, monkeypatch):

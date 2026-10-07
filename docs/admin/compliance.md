@@ -43,7 +43,8 @@ The active conversation classification -- the level selected in the header -- is
 
 - **Deny by default.** A component that declares no classifications (neither `allowed_data_classifications` nor a legacy `compliance_level`), or an empty list, is approved for no classified session. This matters most for MCP servers, which can be data egress points.
 - **No implication between levels.** `allowed_with` in `compliance-levels.json` no longer grants access across levels: an ITAR session never reaches a UUR-only model or tool because ITAR "allows" UUR. List every classification a component may receive on the component itself.
-- With no level selected ("All Levels", only offered when a level is not required), there is no classification to protect and nothing is filtered. Use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` (below) to remove that choice.
+- With no level selected ("All Levels", only offered when a level is not required), nothing is filtered in the UI and no turn is refused for its components. RAG queries keep a floor: a source that declares classifications must share at least one with the selected model. Use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` (below) to remove the no-level choice.
+- A level the deployment does not define is refused, rather than treated as no level.
 
 ## Server-Side Enforcement
 
@@ -60,7 +61,7 @@ A RAG backend's discovery can also declare classifications per corpus (narrower 
 3. For a LiteLLM gateway, the most specific declaration wins: the allowlisted model's `allowed_data_classifications`, then its `compliance_level`, then the gateway's `allowed_data_classifications`, then the gateway's `compliance_level`.
 4. HTTP RAG discovery may return `allowed_data_classifications` per source alongside `compliance_level`; MCP RAG resources may return `allowedDataClassifications`. A resource that declares nothing inherits its server's classifications.
 
-> **Behavior change:** before this release, a level's `allowed_with` list let a session use components at other levels (the bundled HIPAA level allowed SOC2 components), and a component with no level was usable from any session on the server side. Both now fail closed. To keep a component usable at several levels, list them all in its `allowed_data_classifications`. `allowed_with` is still accepted in `compliance-levels.json` (and returned by `/api/compliance-levels`) for compatibility, but it no longer affects access.
+> **Behavior change:** before this release, a level's `allowed_with` list let a session use components at other levels (the bundled HIPAA level allowed SOC2 components), and a component with no level was usable from any session on the server side. Both now fail closed. To keep a component usable at several levels, list them all in its `allowed_data_classifications`. `allowed_with` is still accepted in `compliance-levels.json` (and returned by `/api/compliance-levels`) for compatibility, but it no longer affects access; a WARNING at startup names any level whose `allowed_with` lists other levels.
 
 ## Enabling the Compliance Selector
 

@@ -12,7 +12,7 @@
 #   4. Undeclared models and MCP servers fail closed in a classified session.
 #   5. A UUR-only MCP server is refused in ITAR; a multi-classification one
 #      is allowed.
-#   6. With no level selected nothing is refused.
+#   6. A misspelt level is refused; with no level selected nothing is refused.
 #   7. Backend unit suite.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
