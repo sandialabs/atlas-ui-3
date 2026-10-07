@@ -535,11 +535,23 @@ class ChatService:
             _config_manager.app_settings,
             "compliance_level_required_effective",
             False,
-        ) is True and not session.context["compliance_level"]:
-            raise ValidationError(
-                "A compliance level is required. Select a compliance level "
-                "and send the message again."
-            )
+        ) is True:
+            if not compliance_mgr.levels:
+                # With no definitions loaded, validation is permissive and
+                # would accept any invented name, so fail closed instead.
+                logger.warning(
+                    "A compliance level is required but no compliance level "
+                    "definitions are loaded; refusing the chat turn"
+                )
+                raise ValidationError(
+                    "A compliance level is required, but this deployment has "
+                    "no compliance levels configured. Contact an administrator."
+                )
+            if not session.context["compliance_level"]:
+                raise ValidationError(
+                    "A compliance level is required. Select a compliance level "
+                    "and send the message again."
+                )
 
         # Opt-in fine-tune capture: when both the system flag and this user's
         # consent are on, activate a capture context for the turn so the LLM

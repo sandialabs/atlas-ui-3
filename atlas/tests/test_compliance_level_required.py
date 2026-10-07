@@ -121,6 +121,16 @@ async def test_undefined_level_is_refused_when_required():
 
 
 @pytest.mark.asyncio
+async def test_any_level_is_refused_when_no_definitions_load(tmp_path):
+    """Permissive validation must not let an invented level through."""
+    service = _make_service()
+    empty = ComplianceLevelManager(config_path=tmp_path / "missing.json")
+    with patch("atlas.core.compliance.get_compliance_manager", return_value=empty):
+        with pytest.raises(ValidationError, match="no compliance levels configured"):
+            await _send(service, compliance_level="anything")
+
+
+@pytest.mark.asyncio
 async def test_defined_level_proceeds_when_required():
     service = _make_service()
     orchestrator = await _send(service, compliance_level="Public")
