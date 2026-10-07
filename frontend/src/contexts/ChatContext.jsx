@@ -903,7 +903,10 @@ export const ChatProvider = ({ children }) => {
 		// only before the level definitions load (or if they failed to load);
 		// the effect above picks a level as soon as they are known.
 		if (complianceRequired && !activeComplianceFilter) {
-			toast.error('A compliance level is required. Select a compliance level before sending.')
+			// With no definitions the header has no selector to point at.
+			toast.error(complianceLevels.length === 0
+				? 'A compliance level is required, but the compliance levels could not be loaded. Reload the page or contact an administrator.'
+				: 'A compliance level is required. Select a compliance level before sending.')
 			return false
 		}
 		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)

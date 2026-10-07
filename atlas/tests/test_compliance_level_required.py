@@ -113,6 +113,16 @@ async def test_refused_turn_never_reaches_the_orchestrator():
 
 
 @pytest.mark.asyncio
+async def test_refused_turn_leaves_the_session_untouched():
+    """The check runs before session lookup, hydration or rebinding."""
+    service = _make_service()
+    with pytest.raises(ValidationError):
+        await _send(service, conversation_id="conv-1")
+    service.session_repository.get.assert_not_called()
+    service.session_repository.create.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_undefined_level_is_refused_when_required():
     """A level the deployment does not define validates to None: refused."""
     service = _make_service()
@@ -220,3 +230,43 @@ def test_no_default_level_when_not_required(monkeypatch):
     assert resp.json()["default_level"] is None
     shell = _get("/api/config/shell").json()
     assert shell["features"]["compliance_level_required"] is False
+
+
+# --- non-browser clients pass the level through ------------------------------
+
+@pytest.mark.asyncio
+async def test_atlas_client_forwards_compliance_level():
+    from atlas.atlas_client import AtlasClient
+
+    chat_service = MagicMock()
+    chat_service.handle_chat_message = AsyncMock(return_value={})
+    client = AtlasClient()
+    client._initialized = True
+    client._factory = MagicMock()
+    client._factory.create_chat_service.return_value = chat_service
+
+    await client.chat("hi", model="m", user_email="u@test.com", compliance_level="Internal")
+
+    assert chat_service.handle_chat_message.await_args.kwargs["compliance_level"] == "Internal"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra,expected", [(["--compliance-level", "Internal"], "Internal"), ([], None)])
+async def test_cli_forwards_compliance_level(monkeypatch, extra, expected):
+    import atlas_chat_cli
+
+    seen = {}
+
+    class RecordingClient:
+        async def chat(self, *args, **kwargs):
+            seen.update(kwargs)
+            return MagicMock(message="ok", **{"to_dict.return_value": {}})
+
+        async def cleanup(self):
+            pass
+
+    monkeypatch.setattr(atlas_chat_cli, "AtlasClient", lambda: RecordingClient())
+    args = atlas_chat_cli.build_parser().parse_args(["hi", "--json", *extra])
+
+    assert await atlas_chat_cli.run(args) == 0
+    assert seen["compliance_level"] == expected

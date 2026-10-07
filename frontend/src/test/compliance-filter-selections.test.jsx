@@ -382,7 +382,7 @@ describe('required compliance level (FEATURE_COMPLIANCE_LEVEL_REQUIRED)', () => 
     expect(h.setComplianceLevelFilter).not.toHaveBeenCalled()
   })
 
-  it('refuses to send while no level is set', () => {
+  it('refuses to send while the level definitions are missing, saying why', () => {
     h.filter = null
     h.levels = []
     const { result } = renderChat()
@@ -390,7 +390,19 @@ describe('required compliance level (FEATURE_COMPLIANCE_LEVEL_REQUIRED)', () => 
     act(() => { sent = result.current.sendChatMessage('hi') })
     expect(sent).toBe(false)
     expect(h.sendMessage).not.toHaveBeenCalled()
-    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/compliance level is required/i))
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/could not be loaded/i))
+  })
+
+  it('asks the user to pick a level when definitions are loaded but none is set', () => {
+    // The prune effect would normally pick the default; with the setter mocked
+    // the filter stays unset, which is the window before that effect lands.
+    h.filter = null
+    const { result } = renderChat()
+    let sent
+    act(() => { sent = result.current.sendChatMessage('hi') })
+    expect(sent).toBe(false)
+    expect(h.sendMessage).not.toHaveBeenCalled()
+    expect(h.toastError).toHaveBeenCalledWith('A compliance level is required. Select a compliance level before sending.')
   })
 
   it('sends the selected level with the turn', () => {
