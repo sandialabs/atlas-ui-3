@@ -30,6 +30,22 @@ def test_skip_authorization_checks_is_disabled_for_tests():
     assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
 
 
+def test_compliance_required_mode_does_not_leak_into_the_suite():
+    """The compliance-required policy must not leak into unrelated tests.
+
+    ``conftest`` pins ``FEATURE_COMPLIANCE_LEVELS_ENABLED`` and
+    ``FEATURE_COMPLIANCE_LEVEL_REQUIRED`` off (and drops
+    ``COMPLIANCE_DEFAULT_LEVEL``) because a contributor with those exported
+    would otherwise make every chat-service test that omits
+    ``compliance_level`` fail with a ``ValidationError``. Compliance-specific
+    tests opt back in via ``monkeypatch``, which overrides the session pin.
+    """
+    assert os.environ.get("FEATURE_COMPLIANCE_LEVELS_ENABLED") == "false"
+    assert os.environ.get("FEATURE_COMPLIANCE_LEVEL_REQUIRED") == "false"
+    assert "COMPLIANCE_DEFAULT_LEVEL" not in os.environ
+    assert AppSettings().compliance_level_required_effective is False
+
+
 def test_dotenv_cannot_reenable_skip_authorization_checks(tmp_path):
     """A later dotenv load must not re-enable the developer-local bypass."""
     dotenv_path = tmp_path / ".env"
