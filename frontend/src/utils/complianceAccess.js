@@ -47,18 +47,28 @@ export const complianceLevelsReady = (levels, userLevel) =>
   !userLevel || (Array.isArray(levels) && levels.some(l => l.name === canonicalName(levels, userLevel)))
 
 /**
+ * Level marker for resources no compliance level filters out: the built-in
+ * `atlas` server runs in-process (canvas, sleep, search over sources that
+ * are compliance-checked on their own), so hiding it under a non-Public
+ * level would only take away `atlas_canvas`, which is always available.
+ */
+export const COMPLIANCE_EXEMPT = 'compliance-exempt'
+
+/**
  * The subset of `keys` the active filter excludes.
  *
- * `levelOf(key)` returns the resource's level (null when untagged) or
- * `undefined` when it cannot place the key at all -- an unknown key (config
- * not loaded yet, server gone) is left alone rather than guessed at.
+ * `levelOf(key)` returns the resource's level (null when untagged),
+ * COMPLIANCE_EXEMPT, or `undefined` when it cannot place the key at all --
+ * an unknown key (config not loaded yet, server gone) is left alone here
+ * rather than guessed at; the send path drops such keys separately.
  * Returns nothing until the level definitions are loaded.
  */
 export const keysExcludedByCompliance = (keys, levels, userLevel, levelOf) => {
   if (!userLevel || !complianceLevelsReady(levels, userLevel)) return []
   return [...keys].filter(key => {
     const level = levelOf(key)
-    return level !== undefined && !isComplianceAccessible(levels, userLevel, level)
+    return level !== undefined && level !== COMPLIANCE_EXEMPT &&
+      !isComplianceAccessible(levels, userLevel, level)
   })
 }
 

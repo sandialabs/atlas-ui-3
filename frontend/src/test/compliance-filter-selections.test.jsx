@@ -70,6 +70,8 @@ const TOOLS = [
   { server: 'soc2srv', compliance_level: 'SOC2', tools: ['evaluate'] },
   { server: 'pubsrv', compliance_level: 'Public', tools: ['evaluate'] },
   { server: 'loose', tools: ['plan'] },
+  // Built-in server: tagged Public by /api/config, exempt from the filter.
+  { server: 'atlas', compliance_level: 'Public', tools: ['canvas'] },
 ]
 const PROMPTS = [
   { server: 'hipaasrv', compliance_level: 'HIPAA', prompts: [{ name: 'intake' }] },
@@ -180,7 +182,7 @@ beforeEach(() => {
   h.levels = LEVELS
   h.filter = 'HIPAA'
   h.currentModel = 'public-model'
-  h.selectedTools = new Set(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan'])
+  h.selectedTools = new Set(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan', 'atlas_canvas'])
   h.selectedPrompts = new Set(['hipaasrv_intake', 'pubprompts_hello'])
   h.activePrompts = ['hipaasrv_intake', 'pubprompts_hello']
   h.activePromptKey = null
@@ -195,7 +197,7 @@ describe('compliance filter: outgoing payload', () => {
     act(() => { result.current.sendChatMessage('hi') })
 
     const payload = lastPayload()
-    expect(payload.selected_tools).toEqual(['soc2srv_evaluate'])
+    expect(payload.selected_tools).toEqual(['soc2srv_evaluate', 'atlas_canvas'])
     expect(payload.selected_prompts).toEqual(['hipaasrv_intake'])
     expect(payload.selected_data_sources).toEqual(['rag:audit', 'rag:patients'])
     expect(payload.compliance_level_filter).toBe('HIPAA')
@@ -217,8 +219,17 @@ describe('compliance filter: outgoing payload', () => {
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('hi') })
 
-    expect(lastPayload().selected_tools).toEqual([])
+    expect(lastPayload().selected_tools).toEqual(['atlas_canvas'])
     expect(lastPayload().selected_data_sources).toEqual([])
+  })
+
+  it('holds back keys it cannot place yet instead of sending them unjudged', () => {
+    // e.g. a persisted tool from a server /api/config has not reported yet
+    h.selectedTools = new Set(['soc2srv_evaluate', 'notloaded_tool'])
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('hi') })
+
+    expect(lastPayload().selected_tools).toEqual(['soc2srv_evaluate'])
   })
 
   it('sends everything when no filter is set', () => {
@@ -226,7 +237,7 @@ describe('compliance filter: outgoing payload', () => {
     const { result } = renderChat()
     act(() => { result.current.sendChatMessage('hi') })
 
-    expect(lastPayload().selected_tools).toEqual(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan'])
+    expect(lastPayload().selected_tools).toEqual(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan', 'atlas_canvas'])
     expect(lastPayload().selected_data_sources).toHaveLength(4)
   })
 })

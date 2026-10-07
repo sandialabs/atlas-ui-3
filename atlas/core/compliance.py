@@ -129,6 +129,17 @@ class ComplianceLevelManager:
             return None
         return self._name_to_canonical.get(name)
 
+    def is_valid_level(self, level_name: Optional[str]) -> bool:
+        """Whether ``level_name`` names a defined level or alias.
+
+        With no definitions loaded every name is accepted (permissive mode).
+        """
+        if not level_name:
+            return False
+        if not self.levels:
+            return True
+        return self.get_canonical_name(level_name) is not None
+
     def validate_compliance_level(self, level_name: Optional[str], context: str = "") -> Optional[str]:
         """Validate a compliance level name.
 

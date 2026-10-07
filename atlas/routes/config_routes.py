@@ -106,7 +106,9 @@ def _atlas_tools_info(
         "help_email": "",
         # The tools-panel compliance filter hides any server with a falsy
         # compliance_level once a compliance level is selected (strict mode).
-        # Mark the built-in server "Public" so it stays selectable; the RAG
+        # Mark the built-in server "Public" for clients that filter on it; the
+        # web UI exempts this server from the filter outright, since Public is
+        # not in the allowlist of the stricter levels. The RAG
         # *sources* search reads are still compliance-filtered independently in
         # the RAG panel and at query time, so this does not widen data access.
         "compliance_level": "Public",

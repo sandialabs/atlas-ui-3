@@ -8,7 +8,7 @@ The compliance system is designed to prevent the unintentional mixing of data fr
 
 You can assign a `compliance_level` to LLM endpoints, RAG data sources, and MCP servers. These levels are defined in `atlas/config/compliance-levels.json` (package default) and can be customized in `config/compliance-levels.json` (or `compliance-levels.json` in whatever directory `APP_CONFIG_DIR` names). A file in the user config directory replaces the package default entirely, so a custom file must list every level you use. A `compliance_level` value that names no defined level (or alias) is treated as unset and logged as a warning.
 
-> **Upgrade note (2026-10):** before this release the levels file was never found, so validation ran permissively and any level name was accepted. Level definitions now take effect: if you tag models, MCP servers or RAG sources with names that are not in the bundled defaults (for example `CUI`), add them to `config/compliance-levels.json`, or those resources lose their level (models) or have RAG queries rejected for lacking a trusted level.
+> **Upgrade note (2026-10):** before this release the levels file was never found, so validation ran permissively and any level name was accepted. Level definitions now take effect, so define every level name you use in `config/compliance-levels.json` (for example `CUI` is not in the bundled defaults). An undefined name on an LLM model is cleared at load, so that model has no level: the UI filter hides it, and server-side RAG enforcement is off for turns using it. An undefined name on a RAG source is logged as a warning at load but is **not** enforced -- the server treats a level it cannot resolve as accessible -- so an undefined level does not protect a corpus.
 
 **Example:** A tool that accesses internal-only data can be marked with `compliance_level: "Internal"`, while a tool that uses a public API can be marked as `compliance_level: "Public"`.
 
@@ -24,11 +24,11 @@ Set `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`. The header then shows a compliance
 
 ## What the Selector Does in the UI
 
-Choosing a level applies one rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when its `compliance_level` is in the selected level's `allowed_with` list. A resource with **no** `compliance_level` is hidden while a level is selected, because it has no declared boundary. With "All Levels", nothing is filtered.
+Choosing a level applies one rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when its `compliance_level` is in the selected level's `allowed_with` list. A resource with **no** `compliance_level` is hidden while a level is selected, because it has no declared boundary. With "All Levels", nothing is filtered. The built-in `atlas` tools (canvas, sleep, search, discover sources) are exempt: they run in-process, and search only reaches sources that pass their own compliance checks.
 
 Selections follow the same rule, so what is sent is always what the panels show:
 
-- Tool, prompt and data source selections the level excludes are deselected -- on a level switch, when the page loads with a saved level, and when a workspace is restored. Selections the level allows are kept (for example, switching to HIPAA keeps SOC2 tools).
+- Tool, prompt and data source selections the level excludes are deselected, and a selection the UI cannot place yet (while the configuration is still loading) is held back from the message rather than sent unchecked -- on a level switch, when the page loads with a saved level, and when a workspace is restored. Selections the level allows are kept (for example, switching to HIPAA keeps SOC2 tools).
 - An active persona the level excludes is cleared.
 - If the selected model is outside the level, the UI switches to a model at that level (or another model it allows) and says so. If no allowed model exists, the model button is highlighted with a warning and the model picker explains that no models match.
 - A saved level that the deployment no longer defines is dropped, rather than silently hiding everything.

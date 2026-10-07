@@ -286,3 +286,11 @@ class TestDefaultConfigLookup:
         monkeypatch.setattr(config_manager.app_settings, "app_config_dir", str(tmp_path))
 
         assert ComplianceLevelManager().get_all_levels() == ["OnlyThis"]
+
+    def test_is_valid_level(self, temp_compliance_config):
+        manager = ComplianceLevelManager(temp_compliance_config)
+        assert manager.is_valid_level("HIPAA") is True
+        assert manager.is_valid_level("public") is True  # alias
+        assert manager.is_valid_level("CUI") is False
+        assert manager.is_valid_level(None) is False
+        assert ComplianceLevelManager(Path("/nonexistent/x.json")).is_valid_level("CUI") is True

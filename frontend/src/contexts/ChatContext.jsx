@@ -5,7 +5,7 @@ import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
 import { useComplianceLevels } from '../hooks/chat/useComplianceLevels'
-import { isComplianceAccessible, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel } from '../utils/complianceAccess'
+import { isComplianceAccessible, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel, COMPLIANCE_EXEMPT } from '../utils/complianceAccess'
 import { useUserPrompts } from '../hooks/useUserPrompts'
 import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
@@ -22,7 +22,7 @@ import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
-import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
+import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -272,12 +272,14 @@ export const ChatProvider = ({ children }) => {
 	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled } = selections
 
 	// Compliance level of a selection key, for the compliance filter: null when
-	// the resource is untagged, undefined when the key cannot be placed (left
-	// alone -- see keysExcludedByCompliance).
+	// the resource is untagged, undefined when the key cannot be placed (see
+	// keysExcludedByCompliance). The built-in server is exempt.
 	const mcpKeyLevel = useCallback(
 		servers => key => {
 			const server = findServerConfigForMcpKey(key, servers)
-			return server ? (server.compliance_level ?? null) : undefined
+			if (!server) return undefined
+			if (server.server === ATLAS_SERVER) return COMPLIANCE_EXEMPT
+			return server.compliance_level ?? null
 		},
 		[]
 	)
@@ -879,14 +881,20 @@ export const ChatProvider = ({ children }) => {
 		// restored from a workspace, or one whose server changed level would
 		// otherwise ride along invisibly. The MCP tool path has no server-side
 		// compliance check, so this is the boundary for tools.
-		// If a filter is set but the level definitions are not available (fetch
-		// failed or still in flight), the pickers deny everything; fail closed
-		// here too rather than send what they hide.
-		const levelsMissing = !!activeComplianceFilter && !complianceLevelsReady(complianceLevels, activeComplianceFilter)
+		// Under a filter only what can be placed *and* is allowed goes out. A
+		// key whose server or source is not known yet (config still loading)
+		// is left to the stale-key and prune effects, but is not sent
+		// unjudged. If the level definitions are unavailable (fetch failed
+		// or in flight) the pickers deny everything, so only exempt keys go.
+		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
 		const dropExcluded = (keys, levelOf) => {
-			if (levelsMissing) return keys.filter(k => levelOf(k) === undefined)
-			const excluded = new Set(keysExcludedByCompliance(keys, complianceLevels, activeComplianceFilter, levelOf))
-			return excluded.size ? keys.filter(k => !excluded.has(k)) : keys
+			if (!activeComplianceFilter) return keys
+			return keys.filter(k => {
+				const level = levelOf(k)
+				if (level === COMPLIANCE_EXEMPT) return true
+				if (level === undefined || !levelsReady) return false
+				return isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
+			})
 		}
 		const toolsToSend = dropExcluded(
 			selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools],

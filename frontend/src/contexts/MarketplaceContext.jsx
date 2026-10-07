@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { useChat } from './ChatContext'
 import { isComplianceAccessible as isComplianceAccessibleFor } from '../utils/complianceAccess'
+import { ATLAS_SERVER } from '../constants/atlasTools'
 
 const MarketplaceContext = createContext()
 
@@ -169,8 +170,9 @@ export const MarketplaceProvider = ({ children }) => {
   const getComplianceFilteredTools = (complianceLevel) => {
     if (!complianceLevel) return getFilteredTools()
     return getFilteredTools().filter(tool => {
-      // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels
-      return isComplianceAccessible(complianceLevel, tool.compliance_level)
+      // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels.
+      // The built-in server is exempt (see COMPLIANCE_EXEMPT in utils/complianceAccess).
+      return tool.server === ATLAS_SERVER || isComplianceAccessible(complianceLevel, tool.compliance_level)
     })
   }
   
@@ -178,7 +180,7 @@ export const MarketplaceProvider = ({ children }) => {
     if (!complianceLevel) return getFilteredPrompts()
     return getFilteredPrompts().filter(prompt => {
       // STRICT MODE: When compliance filter is active, only show resources with matching compliance levels
-      return isComplianceAccessible(complianceLevel, prompt.compliance_level)
+      return prompt.server === ATLAS_SERVER || isComplianceAccessible(complianceLevel, prompt.compliance_level)
     })
   }
 
