@@ -35,6 +35,25 @@ class RAGMCPService:
         # other's RAG entries, leaving them in the tool inventory for good.
         self._init_lock = asyncio.Lock()
 
+    def _server_classifications(self, server: str):
+        """A RAG MCP server's declared classifications, from configuration.
+
+        Read from ``rag_mcp_config`` (built from rag-sources.json), not the
+        MCP manager's runtime ``available_tools`` entry, which a tool
+        rediscovery or admin reload clears -- that would fail approved
+        servers closed until restart. The runtime entry is the fallback for
+        a server the config does not list.
+        """
+        try:
+            cfg = self.config_manager.rag_mcp_config.servers.get(server)
+        except Exception:
+            cfg = None
+        if cfg is not None:
+            return declared_classifications(cfg)
+        return declared_classifications(
+            (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+        )
+
     async def _ensure_rag_clients(self) -> None:
         """Initialize RAG MCP clients once, without polluting the tool inventory."""
         try:
@@ -116,9 +135,8 @@ class RAGMCPService:
                 compliance_mgr = get_compliance_manager()
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
                     if compliance_mgr.classification_permits(
-                        user_compliance_level, declared_classifications(cfg)
+                        user_compliance_level, self._server_classifications(server)
                     ):
                         filtered_servers.append(server)
                     else:
@@ -228,9 +246,8 @@ class RAGMCPService:
             if compliance_mgr:
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
                     if compliance_mgr.classification_permits(
-                        user_compliance_level, declared_classifications(cfg)
+                        user_compliance_level, self._server_classifications(server)
                     ):
                         filtered_servers.append(server)
                     else:
@@ -279,9 +296,7 @@ class RAGMCPService:
                     own = r.get("allowedDataClassifications", r.get("allowed_data_classifications"))
                     resource_classifications = narrow_classifications(
                         own if isinstance(own, list) else None,
-                        declared_classifications(
-                            (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                        ),
+                        self._server_classifications(server),
                     )
                     if compliance_mgr and not compliance_mgr.classification_permits(
                         user_compliance_level, resource_classifications
@@ -318,7 +333,7 @@ class RAGMCPService:
                     "displayName": display_name,
                     "icon": icon,
                     "complianceLevel": compliance_level,
-                    "allowedDataClassifications": declared_classifications(cfg),
+                    "allowedDataClassifications": self._server_classifications(server),
                     "sources": ui_sources,
                     # Lets a caller tell "offered nothing" from "could not ask".
                     "discoveryFailed": discovery_failed,

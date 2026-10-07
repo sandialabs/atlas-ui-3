@@ -56,10 +56,9 @@ class _FakeMCP:
         self.failing = set(failing)
         self.resources = resources_by_server
         self.available_tools = {
-            name: {
-                "tools": [_Tool("rag_discover_resources")],
-                "config": {"allowed_data_classifications": ["UUR", "ITAR"]},
-            }
+            # The runtime entry carries no classifications (a reload clears
+            # it); the service must read them from rag_mcp_config.
+            name: {"tools": [_Tool("rag_discover_resources")], "config": {}}
             for name in resources_by_server
         }
 
@@ -75,7 +74,11 @@ def _rag_mcp(fake):
     from atlas.domain.rag_mcp_service import RAGMCPService
 
     cfg = SimpleNamespace(rag_mcp_config=SimpleNamespace(servers={
-        name: SimpleNamespace(enabled=True, groups=[]) for name in fake.resources
+        name: SimpleNamespace(
+            enabled=True, groups=[], allowed_data_classifications=["UUR", "ITAR"],
+            compliance_level=None,
+        )
+        for name in fake.resources
     }))
 
     async def auth(user, group):
