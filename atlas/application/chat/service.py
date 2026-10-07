@@ -416,8 +416,9 @@ class ChatService:
             )
             raise ValidationError(
                 f"Not approved for {active_level} data: {', '.join(violations)}. "
-                "Deselect them or pick ones approved for this compliance level, "
-                "then send the message again."
+                "Switch the model or deselect the tools and data sources named, "
+                "or choose a compliance level they are approved for, then send "
+                "the message again."
             )
 
     async def _enforce_corpus_classifications(

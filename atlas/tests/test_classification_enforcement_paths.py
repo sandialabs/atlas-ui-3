@@ -89,11 +89,13 @@ async def test_mcp_resources_filter_per_resource_and_inherit(use_manager):
     fake = _FakeMCP({"docs": [
         {"id": "narrow", "allowedDataClassifications": ["UUR"]},
         {"id": "inherits"},
-        {"id": "itar", "complianceLevel": "ITAR"},
+        {"id": "itar", "allowed_data_classifications": ["ITAR"]},
+        # Legacy per-resource level is display-only (as for HTTP corpora).
+        {"id": "cui_tagged", "complianceLevel": "CUI"},
     ]})
     servers = await _rag_mcp(fake).discover_servers("u@test.com", user_compliance_level="ITAR")
     (docs,) = servers
-    assert [s["id"] for s in docs["sources"]] == ["inherits", "itar"]
+    assert [s["id"] for s in docs["sources"]] == ["inherits", "itar", "cui_tagged"]
     inherited = next(s for s in docs["sources"] if s["id"] == "inherits")
     assert inherited["allowedDataClassifications"] == ["UUR", "ITAR"]
     assert docs["discoveryFailed"] is False

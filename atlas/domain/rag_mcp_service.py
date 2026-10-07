@@ -272,10 +272,13 @@ class RAGMCPService:
                     # --- Compliance Filtering (Step 3) ---
                     # Check for both camelCase (MCP standard) and snake_case (RAG mock standard)
                     resource_compliance_level = r.get("complianceLevel") or r.get("compliance_level")
-                    # A resource can only narrow its server's classifications;
-                    # one that declares nothing inherits them.
+                    # A resource can only narrow its server's classifications
+                    # with an explicit list; one that sends none inherits them.
+                    # A per-resource legacy complianceLevel is display-only, as
+                    # for HTTP corpora.
+                    own = r.get("allowedDataClassifications", r.get("allowed_data_classifications"))
                     resource_classifications = narrow_classifications(
-                        declared_classifications(r),
+                        own if isinstance(own, list) else None,
                         declared_classifications(
                             (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
                         ),
