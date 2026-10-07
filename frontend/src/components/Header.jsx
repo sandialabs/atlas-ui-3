@@ -65,6 +65,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
     features,
     complianceLevelFilter,
     setComplianceLevelFilter,
+    complianceRequired,
     selectedDataSources
   } = useChat()
   const { complianceLevels } = useMarketplace()
@@ -325,7 +326,9 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                 title="Select compliance level for this session"
                 aria-label="Compliance level"
               >
-                <option value="">All Levels</option>
+                {complianceRequired
+                  ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
+                  : <option value="">All Levels</option>}
                 {complianceOptions.map(level => (
                   <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                 ))}
@@ -506,7 +509,9 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                     className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     aria-label="Compliance level"
                   >
-                    <option value="">All Levels</option>
+                    {complianceRequired
+                      ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
+                      : <option value="">All Levels</option>}
                     {complianceOptions.map(level => (
                       <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                     ))}

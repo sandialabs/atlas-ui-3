@@ -239,6 +239,24 @@ class ComplianceLevelManager:
         # Return the allowed_with list for this level
         return set(user_level_obj.allowed_with)
 
+    def resolve_default_level(self, preferred: Optional[str]) -> Optional[str]:
+        """The level a session starts on when a level is required.
+
+        ``preferred`` (the operator's ``COMPLIANCE_DEFAULT_LEVEL``) wins when it
+        names a defined level or alias; otherwise the first defined level is
+        used. None when no levels are defined.
+        """
+        canonical = self.get_canonical_name(preferred) if preferred else None
+        if canonical:
+            return canonical
+        if preferred:
+            logger.warning(
+                "COMPLIANCE_DEFAULT_LEVEL names no defined compliance level; "
+                "using the first defined level instead"
+            )
+        levels = self.get_all_levels()
+        return levels[0] if levels else None
+
     def get_all_levels(self) -> List[str]:
         """Get all defined compliance level names (canonical).
 

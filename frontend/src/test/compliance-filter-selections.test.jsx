@@ -46,6 +46,8 @@ const h = vi.hoisted(() => ({
   clearActivePrompt: vi.fn(),
   setComplianceLevelFilter: vi.fn(),
   personas: [],
+  features: { compliance_levels: true },
+  defaultLevel: null,
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -61,7 +63,11 @@ vi.mock('../components/ui/toastContext', () => ({
 }))
 
 vi.mock('../hooks/chat/useComplianceLevels', () => ({
-  useComplianceLevels: () => ({ complianceLevels: h.levels, complianceMode: 'explicit_allowlist' }),
+  useComplianceLevels: () => ({
+    complianceLevels: h.levels,
+    complianceMode: 'explicit_allowlist',
+    defaultComplianceLevel: h.defaultLevel,
+  }),
 }))
 
 vi.mock('../hooks/usePersonas', () => ({
@@ -105,7 +111,7 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
     prompts: PROMPTS,
     ragServers: RAG_SERVERS,
     configReady: false,
-    features: { compliance_levels: true },
+    features: h.features,
     appName: 'Atlas',
     isInAdminGroup: false,
     fileExtraction: {},
@@ -191,6 +197,8 @@ beforeEach(() => {
   h.selectedDataSources = new Set(['rag:audit', 'rag:patients', 'rag:public', 'rag:untagged'])
   h.ragEnabled = false
   h.personas = []
+  h.features = { compliance_levels: true }
+  h.defaultLevel = null
 })
 
 describe('compliance filter: outgoing payload', () => {
@@ -325,5 +333,78 @@ describe('compliance filter: persona, active prompt and model', () => {
     renderChat()
     expect(h.clearActivePrompt).not.toHaveBeenCalled()
     expect(h.setCurrentModel).not.toHaveBeenCalled()
+  })
+})
+
+describe('required compliance level (FEATURE_COMPLIANCE_LEVEL_REQUIRED)', () => {
+  beforeEach(() => {
+    h.features = { compliance_levels: true, compliance_level_required: true }
+  })
+
+  it('exposes the requirement to the header', () => {
+    const { result } = renderChat()
+    expect(result.current.complianceRequired).toBe(true)
+  })
+
+  it('is off when compliance levels are disabled', () => {
+    h.features = { compliance_levels: false, compliance_level_required: true }
+    const { result } = renderChat()
+    expect(result.current.complianceRequired).toBe(false)
+  })
+
+  it('starts an unset filter on the configured default level', () => {
+    h.filter = null
+    h.defaultLevel = 'SOC2'
+    renderChat()
+    expect(h.setComplianceLevelFilter).toHaveBeenCalledWith('SOC2')
+    expect(h.setComplianceLevelFilter).not.toHaveBeenCalledWith(null)
+  })
+
+  it('falls back to the first defined level without a usable default', () => {
+    h.filter = null
+    h.defaultLevel = 'Retired'
+    renderChat()
+    expect(h.setComplianceLevelFilter).toHaveBeenCalledWith('Public')
+  })
+
+  it('replaces a saved level the deployment no longer defines instead of clearing it', () => {
+    h.filter = 'Retired'
+    h.defaultLevel = 'HIPAA'
+    renderChat()
+    expect(h.setComplianceLevelFilter).toHaveBeenCalledWith('HIPAA')
+    expect(h.setComplianceLevelFilter).not.toHaveBeenCalledWith(null)
+  })
+
+  it('keeps a saved level that is still defined', () => {
+    h.filter = 'SOC2'
+    h.defaultLevel = 'HIPAA'
+    renderChat()
+    expect(h.setComplianceLevelFilter).not.toHaveBeenCalled()
+  })
+
+  it('refuses to send while no level is set', () => {
+    h.filter = null
+    h.levels = []
+    const { result } = renderChat()
+    let sent
+    act(() => { sent = result.current.sendChatMessage('hi') })
+    expect(sent).toBe(false)
+    expect(h.sendMessage).not.toHaveBeenCalled()
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/compliance level is required/i))
+  })
+
+  it('sends the selected level with the turn', () => {
+    h.filter = 'HIPAA'
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('hi') })
+    expect(lastPayload().compliance_level_filter).toBe('HIPAA')
+  })
+
+  it('leaves an unset filter alone when a level is not required', () => {
+    h.features = { compliance_levels: true }
+    h.filter = null
+    h.defaultLevel = 'HIPAA'
+    renderChat()
+    expect(h.setComplianceLevelFilter).not.toHaveBeenCalled()
   })
 })

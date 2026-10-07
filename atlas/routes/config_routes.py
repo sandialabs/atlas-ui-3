@@ -214,6 +214,7 @@ async def get_config_shell(
             "chat_history_save_modes": ["none", "local", "server"] if app_settings.feature_chat_history_enabled else [],
             "custom_prompts": app_settings.custom_prompts_effective,
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "compliance_level_required": app_settings.compliance_level_required_effective,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
             "globus_auth": app_settings.feature_globus_auth_enabled,
@@ -572,6 +573,7 @@ async def get_config(
             "chat_history_save_modes": ["none", "local", "server"] if app_settings.feature_chat_history_enabled else [],
             "custom_prompts": app_settings.custom_prompts_effective,
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "compliance_level_required": app_settings.compliance_level_required_effective,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
             "globus_auth": app_settings.feature_globus_auth_enabled,
@@ -643,6 +645,8 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
     try:
         from atlas.core.compliance import get_compliance_manager
         compliance_mgr = get_compliance_manager()
+        app_settings = app_factory.get_config_manager().app_settings
+        required = app_settings.compliance_level_required_effective
 
         # Return level definitions for frontend use
         levels = []
@@ -657,14 +661,23 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
         return {
             "levels": levels,
             "mode": compliance_mgr.mode,
-            "all_level_names": compliance_mgr.get_all_levels()
+            "all_level_names": compliance_mgr.get_all_levels(),
+            # Required-level mode (features.compliance_level_required in
+            # /api/config): the UI offers no "All Levels" option and starts on
+            # default_level, a defined level, when nothing valid is saved.
+            "default_level": (
+                compliance_mgr.resolve_default_level(app_settings.compliance_default_level)
+                if required
+                else None
+            ),
         }
     except Exception as e:
         logger.error(f"Error getting compliance levels: {e}", exc_info=True)
         return {
             "levels": [],
             "mode": "explicit_allowlist",
-            "all_level_names": []
+            "all_level_names": [],
+            "default_level": None,
         }
 
 

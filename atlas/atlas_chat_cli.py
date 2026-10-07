@@ -170,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output", default=None, help="Write final response to file path.")
     parser.add_argument("--json", dest="json_output", action="store_true", help="Output structured JSON.")
     parser.add_argument("--user-email", default=None, help="Override user identity.")
+    parser.add_argument(
+        "--compliance-level",
+        default=None,
+        help="Compliance level for the turn. Required when the deployment sets "
+        "FEATURE_COMPLIANCE_LEVEL_REQUIRED.",
+    )
     parser.add_argument("--list-tools", action="store_true", help="Print available tools and exit.")
     parser.add_argument("--list-models", action="store_true", help="Print available models and exit.")
     parser.add_argument(
@@ -392,6 +398,7 @@ async def run(args: argparse.Namespace) -> int:
             session_id=None,
             streaming=streaming,
             raise_on_llm_error=True,
+            compliance_level=args.compliance_level,
         )
 
         if args.json_output:

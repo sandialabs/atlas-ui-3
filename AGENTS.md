@@ -210,6 +210,7 @@ frontend/src/
 - `FEATURE_TOOLS_ENABLED` - MCP tools
 - `FEATURE_RAG_MCP_ENABLED` - RAG over MCP
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Compliance level enforcement
+- `FEATURE_COMPLIANCE_LEVEL_REQUIRED` - Require a concrete compliance level per turn (no "All Levels"); `COMPLIANCE_DEFAULT_LEVEL` picks the starting level
 - `FEATURE_AGENT_MODE_AVAILABLE` - Agent mode UI toggle
 - `VITE_FEATURE_ANIMATED_LOGO` - Animated logo (build-time Vite flag; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 - `VITE_FEATURE_RAG_CITATIONS` - Perplexity-style inline citations & collapsible Sources section for RAG responses (build-time Vite flag; defaults to `false`; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
