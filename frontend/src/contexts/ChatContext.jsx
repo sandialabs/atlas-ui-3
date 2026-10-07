@@ -4,6 +4,8 @@ import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
+import { useComplianceLevels } from '../hooks/chat/useComplianceLevels'
+import { isComplianceAccessible, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel } from '../utils/complianceAccess'
 import { useUserPrompts } from '../hooks/useUserPrompts'
 import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
@@ -103,7 +105,7 @@ const MUTATING_SELECTION_ACTIONS = [
 	'toggleTool', 'addTools', 'removeTools',
 	'togglePrompt', 'addPrompts', 'removePrompts', 'setSinglePrompt',
 	'makePromptActive', 'clearActivePrompt', 'clearToolsAndPrompts',
-	'toggleDataSource', 'addDataSources', 'clearDataSources',
+	'toggleDataSource', 'addDataSources', 'removeDataSources', 'clearDataSources',
 	'setRagEnabled', 'toggleRagEnabled',
 ]
 
@@ -111,6 +113,8 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections()
+	const complianceEnabled = !!config.features?.compliance_levels
+	const { complianceLevels, complianceMode } = useComplianceLevels(complianceEnabled)
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
@@ -266,6 +270,38 @@ export const ChatProvider = ({ children }) => {
 	const toast = useToast()
 	const { currentModel } = config
 	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled } = selections
+
+	// Compliance level of a selection key, for the compliance filter: null when
+	// the resource is untagged, undefined when the key cannot be placed (left
+	// alone -- see keysExcludedByCompliance).
+	const mcpKeyLevel = useCallback(
+		servers => key => {
+			const server = findServerConfigForMcpKey(key, servers)
+			return server ? (server.compliance_level ?? null) : undefined
+		},
+		[]
+	)
+	const ragKeyLevel = useCallback(key => {
+		const sep = key.indexOf(':')
+		if (sep < 0) return undefined
+		const server = config.ragServers.find(s => s.server === key.slice(0, sep))
+		const source = server?.sources?.find(src => src.id === key.slice(sep + 1))
+		return source ? (source.complianceLevel ?? null) : undefined
+	}, [config.ragServers])
+	// The filter level that actually applies: none when the feature is off.
+	const activeComplianceFilter = complianceEnabled ? selections.complianceLevelFilter : null
+
+	// A persisted filter naming a level the deployment no longer defines would
+	// hide every resource (an unknown level allows nothing) while the header
+	// select, having no such option, displays "All Levels". Drop it once the
+	// definitions are known so what the selector shows is what applies.
+	const { complianceLevelFilter: storedComplianceFilter, setComplianceLevelFilter: storeComplianceFilter } = selections
+	useEffect(() => {
+		if (!storedComplianceFilter || complianceLevels.length === 0) return
+		if (!complianceLevels.some(l => l.name === storedComplianceFilter)) {
+			storeComplianceFilter(null)
+		}
+	}, [storedComplianceFilter, complianceLevels, storeComplianceFilter])
 
 	useEffect(() => {
 		if (!config.configReady || customPromptsEnabled) return
@@ -838,7 +874,24 @@ export const ChatProvider = ({ children }) => {
 		// A fine-tune correction (issue #622) narrows the turn to exactly one tool
 		// via selectedToolsOverride, so honor that list for the outgoing payload
 		// instead of the persisted selection.
-		const toolsToSend = selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools]
+		// The compliance filter hides what it excludes, so nothing it excludes
+		// may go out either: a selection persisted from before the filter, one
+		// restored from a workspace, or one whose server changed level would
+		// otherwise ride along invisibly. The MCP tool path has no server-side
+		// compliance check, so this is the boundary for tools.
+		// If a filter is set but the level definitions are not available (fetch
+		// failed or still in flight), the pickers deny everything; fail closed
+		// here too rather than send what they hide.
+		const levelsMissing = !!activeComplianceFilter && !complianceLevelsReady(complianceLevels, activeComplianceFilter)
+		const dropExcluded = (keys, levelOf) => {
+			if (levelsMissing) return keys.filter(k => levelOf(k) === undefined)
+			const excluded = new Set(keysExcludedByCompliance(keys, complianceLevels, activeComplianceFilter, levelOf))
+			return excluded.size ? keys.filter(k => !excluded.has(k)) : keys
+		}
+		const toolsToSend = dropExcluded(
+			selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools],
+			mcpKeyLevel(config.tools)
+		)
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
@@ -853,7 +906,7 @@ export const ChatProvider = ({ children }) => {
 		const searchToolSelected = toolsToSend.some(t => migrateToolName(t) === SEARCH_TOOL)
 		const ragActivated = ragEnabled || hasSelectedSources || searchToolSelected
 		const dataSourcesToSend = ragActivated
-			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
+			? dropExcluded(hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds(), ragKeyLevel)
 			: []
 		// When the RAG toggle alone expanded the list to "everything I can
 		// reach", the sources were not hand-picked -- the backend must not
@@ -893,7 +946,7 @@ export const ChatProvider = ({ children }) => {
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
-			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : activePrompts,
+			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : dropExcluded(activePrompts, mcpKeyLevel(config.prompts)),
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
@@ -1003,7 +1056,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, activeComplianceFilter, mcpKeyLevel, ragKeyLevel])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -1792,34 +1845,30 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	const openChat = useCallback(() => openTranscriptInTab(false), [openTranscriptInTab])
 	const openChatAsText = useCallback(() => openTranscriptInTab(true), [openTranscriptInTab])
 
-	// Wrapper for setComplianceLevelFilter that clears incompatible selections
+	// Keep tool, prompt and data-source selections inside the active compliance
+	// filter, with the same allowlist rule as the pickers (utils/complianceAccess):
+	// a level keeps everything its panels still show (HIPAA keeps SOC2 tools)
+	// and drops everything they hide, untagged resources included -- a hidden
+	// selection cannot be seen or deselected in its panel, yet would still be
+	// sent. Runs on a level switch and also on load, when a persisted filter
+	// meets persisted selections or a workspace restore, and whenever the
+	// config changes a resource's level. Keys that cannot be placed yet
+	// (config still loading) are left alone.
+	const { removeTools: pruneTools, removePrompts: prunePrompts, removeDataSources: pruneDataSources } = selections
+	useEffect(() => {
+		if (!activeComplianceFilter) return
+		const excluded = (keys, levelOf) =>
+			keysExcludedByCompliance(keys, complianceLevels, activeComplianceFilter, levelOf)
+		pruneTools(excluded(selectedTools, mcpKeyLevel(config.tools)))
+		prunePrompts(excluded(selectedPrompts, mcpKeyLevel(config.prompts)))
+		pruneDataSources(excluded(selectedDataSources, ragKeyLevel))
+	}, [activeComplianceFilter, complianceLevels, config.tools, config.prompts, selectedTools, selectedPrompts, selectedDataSources, mcpKeyLevel, ragKeyLevel, pruneTools, prunePrompts, pruneDataSources])
+
+	// Wrapper for setComplianceLevelFilter that also moves the active persona
+	// and the model off anything the new level excludes (tool, prompt and data
+	// source selections are pruned by the effect above).
 	const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
-		// If changing to a new compliance level (not clearing or setting to same)
-		if (newLevel && newLevel !== selections.complianceLevelFilter) {
-			// Clear tools that don't match the new compliance level
-			const toolsToRemove = []
-			selectedTools.forEach(toolKey => {
-				const server = findServerConfigForMcpKey(toolKey, config.tools)
-				if (server && server.compliance_level && server.compliance_level !== newLevel) {
-					toolsToRemove.push(toolKey)
-				}
-			})
-			if (toolsToRemove.length > 0) {
-				selections.removeTools(toolsToRemove)
-			}
-
-			// Clear prompts that don't match the new compliance level
-			const promptsToRemove = []
-			selectedPrompts.forEach(promptKey => {
-				const server = findServerConfigForMcpKey(promptKey, config.prompts)
-				if (server && server.compliance_level && server.compliance_level !== newLevel) {
-					promptsToRemove.push(promptKey)
-				}
-			})
-			if (promptsToRemove.length > 0) {
-				selections.removePrompts(promptsToRemove)
-			}
-
+		if (complianceEnabled && newLevel && newLevel !== selections.complianceLevelFilter) {
 			// Clear the active persona if the new context excludes it: the picker
 			// hides compliance-incompatible personas and the server refuses to
 			// resolve them, so keeping one selected would silently run the
@@ -1828,15 +1877,27 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				const persona = personas.personas.find(
 					p => p.id === personaIdFromKey(selections.activePromptKey)
 				)
-				if (!personaSurvivesComplianceFilter(persona, newLevel)) {
+				const allowed = level => isComplianceAccessible(complianceLevels, newLevel, level)
+				if (!personaSurvivesComplianceFilter(persona, newLevel, allowed)) {
 					clearActivePrompt()
+				}
+			}
+
+			// Move off a model the new level excludes. Leaving it selected would
+			// send the turn to a model outside the boundary the user just chose,
+			// with the picker no longer even listing it.
+			if (!isModelComplianceAccessible(config.models, complianceLevels, newLevel, currentModel)) {
+				const replacement = firstCompliantModel(config.models, complianceLevels, newLevel)
+				if (replacement) {
+					config.setCurrentModel(replacement)
+					toast.info(`Switched model to ${replacement} for the ${newLevel} compliance level`)
 				}
 			}
 		}
 
 		// Set the new compliance level
 		selections.setComplianceLevelFilter(newLevel)
-	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts, personas.personas, clearActivePrompt])
+	}, [complianceEnabled, complianceLevels, selections, config, currentModel, personas.personas, clearActivePrompt, toast])
 
 	// Flatten ragServers into a single list of data source objects for easier consumption
 	const ragSources = config.ragServers.flatMap(server =>
@@ -1999,6 +2060,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		clearToolsAndPrompts: guarded.clearToolsAndPrompts,
 		complianceLevelFilter: selections.complianceLevelFilter,
 		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,
+		complianceLevels,
+		complianceMode,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,
