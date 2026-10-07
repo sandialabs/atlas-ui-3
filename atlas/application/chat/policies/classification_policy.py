@@ -182,7 +182,8 @@ async def find_unapproved_corpora(
         ))
     if mcp and rag_mcp is not None:
         lookups.append(rag_mcp.discover_servers(
-            user_email, user_compliance_level=active_level, only_servers=mcp
+            user_email, user_compliance_level=active_level, only_servers=mcp,
+            initialize=False,
         ))
     discovered: List[Dict[str, Any]] = []
     for result in await asyncio.gather(*lookups):

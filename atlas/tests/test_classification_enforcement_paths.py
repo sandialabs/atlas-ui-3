@@ -276,3 +276,43 @@ async def test_model_floor_applies_without_an_active_classification(use_manager)
         reset_model_classification_floor(token)
     # No floor (the model declares nothing): permissive, as before.
     await check(source(["ITAR"]))
+
+
+@pytest.mark.asyncio
+async def test_corpus_gate_never_reinitializes_rag_mcp_clients(use_manager):
+    """A down MCP RAG server is reported unverified, not reconnected per turn."""
+    from atlas.application.chat.policies.classification_policy import find_unapproved_corpora
+
+    fake = _FakeMCP({"docs": [{"id": "a"}]})
+    fake.clients = {}  # never connected
+    fake.available_tools = {}
+
+    async def explode():
+        raise AssertionError("the per-turn gate must not initialize clients")
+
+    fake.initialize_clients = explode
+    cfg = SimpleNamespace(rag_sources_config=RAGSourcesConfig(sources={
+        "docs": {"type": "mcp", "url": "http://m", "allowed_data_classifications": ["ITAR"]},
+    }))
+    unapproved, unverified = await find_unapproved_corpora(
+        "ITAR", "u@test.com", ["docs:a"], rag_mcp=_rag_mcp(fake), config_manager=cfg,
+    )
+    assert (unapproved, unverified) == ([], ["docs:a"])
+
+
+@pytest.mark.asyncio
+async def test_mixed_unapproved_and_unverified_are_reported_together(use_manager, monkeypatch):
+    class Mixed:
+        async def discover_data_sources(self, user, user_compliance_level=None, only_servers=None):
+            return [{"server": "docs", "sources": [{"id": "open"}]}]
+
+    service, _ = _service(monkeypatch, unified_rag=Mixed())
+    service.config_manager.rag_sources_config = RAGSourcesConfig(sources={
+        "docs": {"type": "http", "url": "http://d", "allowed_data_classifications": ["UUR", "ITAR"]},
+        "other": {"type": "http", "url": "http://o", "allowed_data_classifications": ["UUR", "ITAR"]},
+    })
+    with pytest.raises(ValidationError) as exc:
+        await _send(service, ["docs:open", "docs:narrow", "other:x"])
+    message = str(exc.value)
+    assert "Not approved for ITAR data: data source docs:narrow" in message
+    assert "Could not confirm that data source other:x" in message

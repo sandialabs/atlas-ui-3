@@ -292,19 +292,36 @@ class TestChatServiceRefusesTheTurn:
 class TestPerCorpusClassifications:
     """A corpus can declare narrower classifications than its server."""
 
-    def test_corpus_declaration_wins_and_undeclared_inherits(self):
+    def test_corpus_list_narrows_and_undeclared_inherits(self):
         from atlas.domain.unified_rag_service import corpus_classifications
         from atlas.modules.rag.client import DataSource
 
         server = SimpleNamespace(allowed_data_classifications=["UUR", "ITAR"], compliance_level=None)
         narrow = DataSource(id="a", label="A", allowed_data_classifications=["UUR"])
-        leveled = DataSource(id="b", label="B", compliance_level="ITAR")
         silent = DataSource(id="c", label="C")
         assert corpus_classifications(narrow, server) == ["UUR"]
-        assert corpus_classifications(leveled, server) == ["ITAR"]
-        # The client model's implicit compliance_level default is not a
-        # declaration: the corpus inherits its server's list.
         assert corpus_classifications(silent, server) == ["UUR", "ITAR"]
+        # A corpus can narrow its server's list but never widen it.
+        wider = DataSource(id="w", label="W", allowed_data_classifications=["UUR", "ECI"])
+        assert corpus_classifications(wider, server) == ["UUR"]
+        # A server that declares nothing leaves its corpora undeclared.
+        bare = SimpleNamespace(allowed_data_classifications=None, compliance_level=None)
+        assert corpus_classifications(narrow, bare) is None
+
+    def test_legacy_per_corpus_level_is_display_only(self):
+        """Existing backends send compliance_level="CUI" for every corpus.
+
+        On a deployment without CUI that must not hide corpora the server
+        config approves, so the per-corpus legacy level is not a boundary.
+        """
+        from atlas.domain.unified_rag_service import corpus_classifications
+        from atlas.modules.rag.client import DataSource
+
+        server = SimpleNamespace(allowed_data_classifications=["UUR", "ITAR"], compliance_level=None)
+        cui = DataSource(id="d", label="D", compliance_level="CUI")
+        nulled = DataSource(id="n", label="N", compliance_level="CUI", allowed_data_classifications=None)
+        assert corpus_classifications(cui, server) == ["UUR", "ITAR"]
+        assert corpus_classifications(nulled, server) == ["UUR", "ITAR"]
 
     @pytest.mark.asyncio
     async def test_unapproved_corpus_is_reported(self, config_manager):
@@ -351,8 +368,8 @@ class TestPerCorpusClassifications:
         client = MagicMock()
         client.discover_data_sources = AsyncMock(return_value=[
             DataSource(id="open", label="Open", allowed_data_classifications=["UUR", "ITAR"]),
-            DataSource(id="uur_only", label="UUR only", compliance_level="UUR"),
-            DataSource(id="silent", label="Silent"),
+            DataSource(id="uur_only", label="UUR only", allowed_data_classifications=["UUR"]),
+            DataSource(id="silent", label="Silent", compliance_level="CUI"),
         ])
         service._get_http_client = lambda name, cfg: client
         config = SimpleNamespace(

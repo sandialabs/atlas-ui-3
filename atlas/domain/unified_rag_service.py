@@ -15,6 +15,7 @@ from atlas.core.compliance import (
     get_active_compliance_context,
     get_compliance_manager,
     get_model_classification_floor,
+    narrow_classifications,
     reset_active_compliance_context,
     set_active_compliance_context,
 )
@@ -121,16 +122,19 @@ def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
 
 
 def corpus_classifications(ds: Any, server_config: Any) -> Optional[List[str]]:
-    """A discovered corpus's classifications.
+    """A discovered HTTP corpus's classifications.
 
-    Its own ``allowed_data_classifications`` or ``compliance_level`` when the
-    backend sent one; otherwise its server's from rag-sources.json (the
-    client model's implicit ``compliance_level`` default is not a declaration).
+    The server's list from rag-sources.json, narrowed by the corpus's own
+    ``allowed_data_classifications`` when the backend sends a list. The
+    per-corpus ``compliance_level`` is display-only: existing backends send
+    one for every corpus (often ``CUI``), and it was never a server-side
+    boundary, so it must not hide corpora the server config approves.
     """
-    fields_set = getattr(ds, "model_fields_set", None)
-    if fields_set is None or fields_set & {"allowed_data_classifications", "compliance_level"}:
-        return declared_classifications(ds)
-    return declared_classifications(server_config)
+    own = getattr(ds, "allowed_data_classifications", None)
+    return narrow_classifications(
+        own if isinstance(own, list) else None,
+        declared_classifications(server_config),
+    )
 
 
 class UnifiedRAGService:

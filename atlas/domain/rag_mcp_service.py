@@ -13,7 +13,11 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from atlas.core.compliance import declared_classifications, get_compliance_manager
+from atlas.core.compliance import (
+    declared_classifications,
+    get_compliance_manager,
+    narrow_classifications,
+)
 from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -53,9 +57,12 @@ class RAGMCPService:
                 finally:
                     # Restore original list for general tools panel separation
                     self.mcp_manager.servers_config = original
-        except Exception:
-            # If anything goes wrong, fall back silently to existing clients
-            pass
+        except Exception as exc:
+            # Fall back to the clients that already exist.
+            logger.warning(
+                "RAG MCP client initialization failed (%s); using existing clients",
+                type(exc).__name__,
+            )
 
     async def _get_authorized_rag_servers(self, username: str, rag_servers: dict) -> List[str]:
         """Get list of RAG servers the user is authorized to access.
@@ -181,6 +188,7 @@ class RAGMCPService:
         username: str,
         user_compliance_level: Optional[str] = None,
         only_servers: Optional[List[str]] = None,
+        initialize: bool = True,
     ) -> List[Dict[str, Any]]:
         """Return richer per-server discovery structure for UI (rag_servers).
 
@@ -196,7 +204,13 @@ class RAGMCPService:
           }
         ]
         """
-        await self._ensure_rag_clients()
+        # ``initialize=False`` (the per-turn compliance gate) never reconnects:
+        # that would rerun tool discovery and swap the shared servers_config on
+        # every classified turn while a server is down. A server without a
+        # client is simply absent from the result, which the gate reports as
+        # unverified.
+        if initialize:
+            await self._ensure_rag_clients()
 
         rag_servers: List[Dict[str, Any]] = []
         try:
@@ -258,13 +272,14 @@ class RAGMCPService:
                     # --- Compliance Filtering (Step 3) ---
                     # Check for both camelCase (MCP standard) and snake_case (RAG mock standard)
                     resource_compliance_level = r.get("complianceLevel") or r.get("compliance_level")
-                    # A resource that declares nothing of its own inherits its
-                    # server's classifications (the server already passed).
-                    resource_classifications = declared_classifications(r)
-                    if resource_classifications is None:
-                        resource_classifications = declared_classifications(
+                    # A resource can only narrow its server's classifications;
+                    # one that declares nothing inherits them.
+                    resource_classifications = narrow_classifications(
+                        declared_classifications(r),
+                        declared_classifications(
                             (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                        )
+                        ),
+                    )
                     if compliance_mgr and not compliance_mgr.classification_permits(
                         user_compliance_level, resource_classifications
                     ):

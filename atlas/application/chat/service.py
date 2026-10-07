@@ -340,9 +340,34 @@ class ChatService:
         settings = getattr(getattr(self, "config_manager", None), "app_settings", None)
         return getattr(settings, "feature_compliance_levels_enabled", False) is True
 
+    def _resolve_active_classification(self, compliance_level_raw: Any) -> Optional[str]:
+        """The turn's active classification, resolved once for every gate.
+
+        None when the feature is off or no level was sent. A supplied level the
+        deployment does not define is refused rather than read as no level, so
+        a misspelling cannot quietly turn every check off. With no definitions
+        loaded, validation is permissive and returns the name as given
+        (required-level mode refuses that case earlier).
+        """
+        if not self._compliance_enabled():
+            return None
+        if not isinstance(compliance_level_raw, str) or not compliance_level_raw:
+            return None
+        from atlas.core.compliance import get_compliance_manager
+
+        level = get_compliance_manager().validate_compliance_level(
+            compliance_level_raw, context="chat request"
+        )
+        if not level:
+            raise ValidationError(
+                "The selected compliance level is not defined on this deployment. "
+                "Select a defined compliance level and send the message again."
+            )
+        return level
+
     def _enforce_data_classifications(
         self,
-        compliance_level_raw: Any,
+        active_level: Optional[str],
         model: str,
         selected_tools: Optional[List[str]],
         selected_data_sources: Optional[List[str]],
@@ -355,28 +380,13 @@ class ChatService:
         here, not only in the UI, so a stale or hand-crafted client cannot
         route classified data to an unapproved model, tool server or source.
         """
-        if not self._compliance_enabled():
-            return
-        if not isinstance(compliance_level_raw, str) or not compliance_level_raw:
+        if not active_level:
             return
         from atlas.core.compliance import get_compliance_manager
 
         from .policies.classification_policy import find_classification_violations
 
         compliance_mgr = get_compliance_manager()
-        active_level = compliance_mgr.validate_compliance_level(
-            compliance_level_raw, context="chat request"
-        )
-        if not active_level:
-            # A supplied level the deployment does not define must not quietly
-            # turn every check off. With no definitions loaded there is nothing
-            # to validate against (required-level mode refuses that case).
-            if compliance_mgr.levels:
-                raise ValidationError(
-                    "The selected compliance level is not defined on this deployment. "
-                    "Select a defined compliance level and send the message again."
-                )
-            return
         try:
             violations = find_classification_violations(
                 compliance_mgr,
@@ -412,7 +422,7 @@ class ChatService:
 
     async def _enforce_corpus_classifications(
         self,
-        compliance_level_raw: Any,
+        active_level: Optional[str],
         user_email: Optional[str],
         selected_data_sources: Optional[List[str]],
     ) -> None:
@@ -422,20 +432,12 @@ class ChatService:
         corpus that declares narrower classifications than its server; the
         RAG backend's discovery can, so the selection is checked against it.
         """
-        if not self._compliance_enabled() or not selected_data_sources:
+        if not active_level or not selected_data_sources:
             return
-        if not isinstance(compliance_level_raw, str) or not compliance_level_raw:
-            return
-        from atlas.core.compliance import get_compliance_manager
         from atlas.infrastructure.app_factory import app_factory
 
         from .policies.classification_policy import find_unapproved_corpora
 
-        active_level = get_compliance_manager().validate_compliance_level(
-            compliance_level_raw, context="chat request"
-        )
-        if not active_level:
-            return
         try:
             unapproved, unverified = await find_unapproved_corpora(
                 active_level,
@@ -455,31 +457,30 @@ class ChatService:
                 "compliance level, so the message was not sent. Try again or contact "
                 "an administrator."
             ) from None
-        if unverified and not unapproved:
-            # The backend could not be asked (down, slow, or no discovery):
-            # an approved corpus is indistinguishable from an unapproved one,
-            # so refuse without claiming either.
-            logger.warning(
-                "Refused a chat turn: %d data source(s) could not be checked "
-                "against the active classification",
-                len(unverified),
-            )
-            raise ValidationError(
-                f"Could not confirm that data source {', '.join(unverified)} is approved "
-                f"for {active_level} data: its RAG backend did not answer. Deselect it "
-                "or try again later."
-            )
+        if not unapproved and not unverified:
+            return
+        logger.info(
+            "Refused a chat turn: %d data source(s) not approved and %d unverifiable "
+            "for the active classification",
+            len(unapproved),
+            len(unverified),
+        )
+        parts = []
         if unapproved:
-            logger.info(
-                "Refused a chat turn: %d data source(s) not approved for the active "
-                "classification",
-                len(unapproved),
+            parts.append(f"Not approved for {active_level} data: data source {', '.join(unapproved)}.")
+        if unverified:
+            # The backend did not answer, or offers the user nothing on that
+            # server (for example a group restriction): approval cannot be
+            # confirmed either way, so neither is claimed.
+            parts.append(
+                f"Could not confirm that data source {', '.join(unverified)} is approved "
+                f"for {active_level} data (its RAG backend did not answer, or you do not "
+                "have access to it)."
             )
-            raise ValidationError(
-                f"Not approved for {active_level} data: data source "
-                f"{', '.join(unapproved)}. Deselect them or pick ones approved for "
-                "this compliance level, then send the message again."
-            )
+        raise ValidationError(
+            " ".join(parts) + " Deselect them or pick ones approved for this compliance "
+            "level, then send the message again."
+        )
 
     async def handle_chat_message(
         self,
@@ -524,11 +525,14 @@ class ChatService:
         # Checked before the session is touched, so a refused turn leaves no
         # trace (no conversation rebinding or history hydration).
         self._enforce_required_compliance_level(kwargs.get("compliance_level"))
+        active_classification = self._resolve_active_classification(
+            kwargs.get("compliance_level")
+        )
         self._enforce_data_classifications(
-            kwargs.get("compliance_level"), model, selected_tools, selected_data_sources
+            active_classification, model, selected_tools, selected_data_sources
         )
         await self._enforce_corpus_classifications(
-            kwargs.get("compliance_level"), user_email, selected_data_sources
+            active_classification, user_email, selected_data_sources
         )
 
         # Get or create session
@@ -655,14 +659,12 @@ class ChatService:
         #
         # Both are set every turn so a request that changes model or filter
         # clears any stale value.
-        compliance_level_raw = kwargs.pop("compliance_level", None)
+        kwargs.pop("compliance_level", None)  # resolved above as active_classification
         _config_manager = getattr(self, "config_manager", None)
         compliance_enabled = self._compliance_enabled()
-        active_classification = None
         model_classifications = None
         if compliance_enabled:
-            from atlas.core.compliance import declared_classifications, get_compliance_manager
-            compliance_mgr = get_compliance_manager()
+            from atlas.core.compliance import declared_classifications
             try:
                 model_classifications = declared_classifications(
                     lookup_model_config(_config_manager.llm_config, model)
@@ -675,13 +677,6 @@ class ChatService:
                     "Could not resolve the selected model's data classifications (%s).",
                     type(exc).__name__,
                 )
-            active_classification = (
-                compliance_mgr.validate_compliance_level(
-                    compliance_level_raw, context="chat request"
-                )
-                if compliance_level_raw
-                else None
-            )
         session.context["compliance_level"] = active_classification
         session.context["model_compliance_level"] = model_classifications
 

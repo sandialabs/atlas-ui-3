@@ -350,6 +350,31 @@ def declared_classifications(resource: Any) -> Optional[List[str]]:
     return None
 
 
+def narrow_classifications(
+    own: Optional[Sequence[str]],
+    server: Optional[Sequence[str]],
+    manager: Optional["ComplianceLevelManager"] = None,
+) -> Optional[List[str]]:
+    """A corpus's classifications, bounded by its server's.
+
+    A corpus can only narrow what its server is approved for, never widen it:
+    with no list of its own it inherits the server's, otherwise it keeps the
+    entries the server also lists (aliases resolved). ``None`` when the server
+    declares nothing, which denies the corpus in any classified session.
+    """
+    if server is None:
+        return None
+    if own is None:
+        return list(server)
+    mgr = manager or get_compliance_manager()
+
+    def canon(name: str) -> str:
+        return mgr.get_canonical_name(name) or name
+
+    allowed = {canon(n) for n in server if isinstance(n, str) and n}
+    return [n for n in own if isinstance(n, str) and n and canon(n) in allowed]
+
+
 # Global instance
 _compliance_manager: Optional[ComplianceLevelManager] = None
 _active_compliance_context: ContextVar[Tuple[Optional[str], bool]] = ContextVar(
