@@ -5,7 +5,7 @@ import re
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from atlas.core.http_client import create_rag_client
 
@@ -22,8 +22,12 @@ class DataSource(BaseModel):
     id: str
     label: str
     compliance_level: str = "CUI"
-    # Optional explicit list (issue #1032); wins over compliance_level.
-    allowed_data_classifications: Optional[List[str]] = None
+    # Optional explicit list (issue #1032); narrows the server's list. Backends
+    # may send it in camelCase, like the MCP discovery contract.
+    allowed_data_classifications: Optional[List[str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("allowed_data_classifications", "allowedDataClassifications"),
+    )
     description: str = ""
     # Advertised by v2 discovery so a backend can declare, per source, which
     # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).

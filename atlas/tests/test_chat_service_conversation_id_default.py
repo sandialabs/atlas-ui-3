@@ -255,7 +255,7 @@ async def test_active_classification_drives_session_and_rag_context():
 
     ``compliance_level`` carries it to tool discovery and execution, and the
     query-time RAG context enforces it. The model's declared classifications
-    are recorded under ``model_compliance_level``; its explicit list wins over
+    are recorded under ``model_data_classifications``; its explicit list wins over
     its legacy level.
     """
     service, sessions = _make_service()
@@ -274,7 +274,7 @@ async def test_active_classification_drives_session_and_rag_context():
         from atlas.core.compliance import get_active_compliance_context
         context = sessions[session_id].context
         captured["compliance_level"] = context.get("compliance_level")
-        captured["model_compliance_level"] = context.get("model_compliance_level")
+        captured["model_data_classifications"] = context.get("model_data_classifications")
         captured["active_context"] = get_active_compliance_context()
         return {"type": "done"}
 
@@ -291,7 +291,7 @@ async def test_active_classification_drives_session_and_rag_context():
         )
 
     assert captured["compliance_level"] == "Public"
-    assert captured["model_compliance_level"] == ["Public", "Internal"]
+    assert captured["model_data_classifications"] == ["Public", "Internal"]
     assert captured["active_context"] == ("Public", True)
 
 
@@ -377,8 +377,8 @@ async def test_model_lookup_failure_logs_without_naming_the_model(caplog):
     captured = {}
 
     async def fake_execute(**kwargs):
-        captured["model_compliance_level"] = sessions[session_id].context.get(
-            "model_compliance_level"
+        captured["model_data_classifications"] = sessions[session_id].context.get(
+            "model_data_classifications"
         )
         return {"type": "done"}
 
@@ -397,7 +397,7 @@ async def test_model_lookup_failure_logs_without_naming_the_model(caplog):
         )
 
     mock_orchestrator.execute.assert_called_once()
-    assert captured["model_compliance_level"] is None
+    assert captured["model_data_classifications"] is None
     warning_records = [
         r for r in caplog.records
         if r.levelno == logging.WARNING

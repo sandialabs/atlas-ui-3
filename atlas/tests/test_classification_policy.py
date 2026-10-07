@@ -380,3 +380,14 @@ class TestPerCorpusClassifications:
         assert [s["id"] for s in info["sources"]] == ["open", "silent"]
         info = await service._discover_http_source("docs", config, "u@test.com", None)
         assert [s["id"] for s in info["sources"]] == ["open", "uur_only", "silent"]
+
+
+def test_http_corpus_accepts_camel_case_list():
+    """A camelCase list must narrow, not be dropped (which would widen)."""
+    from atlas.domain.unified_rag_service import corpus_classifications
+    from atlas.modules.rag.client import DataSource
+
+    ds = DataSource(**{"id": "a", "label": "A", "allowedDataClassifications": ["UUR"]})
+    server = SimpleNamespace(allowed_data_classifications=["UUR", "ITAR"], compliance_level=None)
+    assert ds.allowed_data_classifications == ["UUR"]
+    assert corpus_classifications(ds, server) == ["UUR"]

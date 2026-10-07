@@ -653,7 +653,7 @@ class ChatService:
         #       was already checked against it in
         #       _enforce_data_classifications.
         #
-        #   session.context["model_compliance_level"]
+        #   session.context["model_data_classifications"]
         #       The selected model's declared classifications, kept for
         #       hooks and diagnostics. A model's metadata is a capability, not
         #       the source of the session classification.
@@ -679,7 +679,7 @@ class ChatService:
                     type(exc).__name__,
                 )
         session.context["compliance_level"] = active_classification
-        session.context["model_compliance_level"] = model_classifications
+        session.context["model_data_classifications"] = model_classifications
 
         # Opt-in fine-tune capture: when both the system flag and this user's
         # consent are on, activate a capture context for the turn so the LLM
