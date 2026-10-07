@@ -2678,6 +2678,9 @@ if __name__ == "__main__":
 
     from atlas.core.security_config import validate_debug_configuration
     validate_debug_configuration(config.app_settings, host)
+    # Keep the process environment consistent with the address we are about to
+    # bind so the lifespan guard resolves the same effective host.
+    os.environ["ATLAS_HOST"] = host
 
     uvicorn.run(
         app,

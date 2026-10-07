@@ -33,6 +33,30 @@ def _client():
     return client
 
 
+def _stdio_path_dirs(command: Optional[list]) -> list:
+    """Directories a stdio child needs on ``PATH`` without inheriting the backend's.
+
+    Add the backend virtualenv's ``bin`` and the directory of an
+    operator-specified command so console scripts (``fastmcp``,
+    ``mcp-server-*``, ``uvx``) and adjacent shebang interpreters still resolve
+    under the pinned baseline ``PATH``.
+    """
+    dirs = [os.path.dirname(os.path.abspath(sys.executable))]
+    if command:
+        executable = command[0]
+        if executable not in {"python", "python3"}:
+            if os.path.isabs(executable):
+                resolved = executable
+            else:
+                import shutil
+                resolved = shutil.which(executable)
+            if resolved:
+                resolved_dir = os.path.dirname(os.path.abspath(resolved))
+                if resolved_dir not in dirs:
+                    dirs.append(resolved_dir)
+    return dirs
+
+
 class ConnectionMixin:
     """Server connection, reconnection, and failure tracking."""
 
@@ -177,9 +201,10 @@ class ConnectionMixin:
 
             elif transport_type == "stdio":
                 # STDIO MCP server
+                command = config.get("command")
                 # Operator-declared MCP env is trusted, unlike Portal launch
                 # extras: merge it after the baseline so requested keys survive.
-                resolved_env = _build_child_env()
+                resolved_env = _build_child_env(extra_path_dirs=_stdio_path_dirs(command))
                 for key, value in (config.get("env") or {}).items():
                     try:
                         resolved_env[key] = resolve_env_var(value)
@@ -192,8 +217,12 @@ class ConnectionMixin:
                 resolved_env["PYTHONPATH"] = (
                     f"{project_root}{os.pathsep}{existing_pypath}" if existing_pypath else project_root
                 )
-                command = config.get("command")
-                logger.debug("STDIO transport command for %s: %s", safe_server_name, command)
+                logger.debug(
+                    "STDIO transport command for %s: %s (env keys: %s)",
+                    safe_server_name,
+                    command,
+                    ",".join(sorted(resolved_env)),
+                )
                 if command:
                     # Ensure MCP stdio servers run under the same interpreter as the backend.
                     # In dev containers, PATH `python` may not have required deps.

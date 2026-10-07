@@ -12,7 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_SECRETS = (
     "CAPABILITY_TOKEN_SECRET", "MCP_TOKEN_ENCRYPTION_KEY",
-    "MINIO_ROOT_PASSWORD", "POSTGRES_PASSWORD",
+    "MINIO_ROOT_PASSWORD", "POSTGRES_PASSWORD", "PROXY_SECRET",
 )
 
 
@@ -63,6 +63,9 @@ def test_compose_is_loopback_only_with_private_persistent_storage():
     assert "AGENT_LOOP_STRATEGY" not in env
     assert env["CHAT_HISTORY_DB_URL"] == "duckdb:////data/chat_history.db"
     assert env["CAPABILITY_TOKEN_SECRET"].startswith("${CAPABILITY_TOKEN_SECRET:?")
+    # DEBUG_MODE is gone, so proxy-secret enforcement is active; a missing
+    # secret would 503 every protected route while the heartbeat still passes.
+    assert env["PROXY_SECRET"].startswith("${PROXY_SECRET:?")
     assert env["S3_SECRET_KEY"].startswith("${MINIO_ROOT_PASSWORD:?")
     assert services["postgres"]["environment"]["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD:?")
     init = services["minio-init"]

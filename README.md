@@ -188,32 +188,44 @@ The full runbook — versioning (SemVer), the automation, failure recovery, the 
 
 ### Quick Start
 
+The canonical `Dockerfile` is a multi-stage build that runs as UID/GID `10001:10001` and drops `sudo`, Node.js/npm, pip, and the `test/`/`docs/`/`scripts/` trees. It requires three secrets at runtime:
+
 ```bash
-# 1. Set up local config (copies defaults from atlas/config/)
+# 1. Generate deployment secrets (reuse them across restarts and workers)
+export MCP_TOKEN_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+export CAPABILITY_TOKEN_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+export PROXY_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+
+# 2. Set up local config (copies defaults from atlas/config/)
 atlas-init
 # Edit .env to add your API keys
 
-# 2. Build the image
+# 3. Build the image
 podman build -t atlas-ui-3 .
 
-# 3. Run with your local config mounted
-podman run -p 8000:8000 \
+# 4. Run with your local config mounted
+podman run -p 127.0.0.1:8000:8000 \
   -v $(pwd)/config:/app/config:Z \
+  -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  -e CAPABILITY_TOKEN_SECRET="$CAPABILITY_TOKEN_SECRET" \
+  -e PROXY_SECRET="$PROXY_SECRET" \
   --env-file .env \
   atlas-ui-3
 ```
 
-The container seeds `/app/config` from package defaults at build time. Mounting your local `config/` folder overrides those defaults, so you can customize `llmconfig.yml`, `mcp.json`, etc. without rebuilding.
+Proxy-secret enforcement is on by default, so reach the UI through an authenticating reverse proxy that injects `X-Proxy-Secret` and a verified identity header. The `HEALTHCHECK` only probes `/api/heartbeat`; it does not test authentication. The container seeds `/app/config` from package defaults at build time; mount your local `config/` folder to override `llmconfig.yml`, `mcp.json`, etc. without rebuilding.
 
-### Runtime-only Image (smaller runtime footprint)
+### Runtime-only Image (compatibility entry point)
 
-Build the standard image (`Dockerfile`) when you need development-oriented files in the container.  
-Build the runtime-only recipe to keep Node.js, docs, and test trees out of the final image. Its final stage has Python, `bash`, and busybox (`sh`, `env`), but no package manager or compiler:
+`Dockerfile.runtimeonly` is a thin shim that reuses the canonical image rather than maintaining a second recipe. It defaults to the published tag, so pass `--build-arg ATLAS_RUNTIME_IMAGE` only to point at a locally built image:
 
 ```bash
 podman build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
-podman run -p 8000:8000 \
+podman run -p 127.0.0.1:8000:8000 \
   -v $(pwd)/config:/app/config:Z \
+  -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  -e CAPABILITY_TOKEN_SECRET="$CAPABILITY_TOKEN_SECRET" \
+  -e PROXY_SECRET="$PROXY_SECRET" \
   --env-file .env \
   atlas-ui-3-runtime
 ```

@@ -114,6 +114,10 @@ class TestLifespanRefusesToStart:
 
         from atlas import main as atlas_main
 
+        # The lifespan debug guard fails closed when no bind host is known;
+        # pin a loopback host so these tests exercise the key check itself.
+        monkeypatch.setenv("ATLAS_HOST", "127.0.0.1")
+
         config = types.SimpleNamespace(
             app_settings=settings_factory(key),
             llm_config=types.SimpleNamespace(models={}),

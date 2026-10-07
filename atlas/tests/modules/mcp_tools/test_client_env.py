@@ -236,7 +236,10 @@ async def test_stdio_environment_is_allowlisted(env_config, command_config, monk
     assert not set(private_names).intersection(env)
     assert env["HOME"] == "/home/stdio-test"
     assert env["LANG"] == env["LC_CTYPE"] == "C.UTF-8"
-    assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+    # The backend venv bin dir is prepended so console scripts still resolve;
+    # the rest of the baseline is fixed and does not inherit the backend PATH.
+    venv_bin = os.path.dirname(os.path.abspath(sys.executable))
+    assert env["PATH"] == os.pathsep.join([venv_bin, "/usr/local/bin", "/usr/bin", "/bin"])
     project_root = Path(__file__).resolve().parents[4]
     assert env["PYTHONPATH"] == str(project_root)
     assert kwargs["command"] == sys.executable

@@ -168,6 +168,11 @@ services:
       - APP_LOG_DIR=/app/logs
       
       - CAPABILITY_TOKEN_SECRET=${CAPABILITY_TOKEN_SECRET:?set CAPABILITY_TOKEN_SECRET (>=32 chars) in your environment or .env}
+
+      # Required: the authenticating reverse proxy must present this value as
+      # X-Proxy-Secret. Proxy-secret enforcement is on by default and fails
+      # closed, so a direct browser hit is rejected until a proxy is in front.
+      - PROXY_SECRET=${PROXY_SECRET:?set PROXY_SECRET (>=32 chars) in your environment or .env}
       
       # S3/MinIO Storage Configuration
       - S3_ENDPOINT=http://minio:9000

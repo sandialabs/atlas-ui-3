@@ -23,6 +23,7 @@ def _settings(**overrides):
         "debug_mode": True,
         "environment": "development",
         "allow_debug_non_loopback": False,
+        "allow_debug_production": False,
         "capability_token_secret": "a" * 32,
         "websocket_keepalive_interval_seconds": 20,
     }
@@ -52,9 +53,23 @@ def test_production_debug_rejected_even_on_loopback(environment):
 @pytest.mark.parametrize("environment", ["production", "development"])
 def test_explicit_override_allows_debug_with_warning(host, environment, caplog):
     validate_debug_configuration(
-        _settings(environment=environment, allow_debug_non_loopback=True), host
+        _settings(
+            environment=environment,
+            allow_debug_non_loopback=True,
+            allow_debug_production=True,
+        ),
+        host,
     )
     assert "bypasses authentication" in caplog.text
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])
+def test_production_refusal_is_independent_of_non_loopback_override(host):
+    # ALLOW_DEBUG_NON_LOOPBACK must not silently permit a production debug bind.
+    with pytest.raises(ValueError, match="ALLOW_DEBUG_PRODUCTION"):
+        validate_debug_configuration(
+            _settings(environment="production", allow_debug_non_loopback=True), host
+        )
 
 
 def test_debug_disabled_allows_public_production_without_debug_warning(caplog):
@@ -69,6 +84,13 @@ def test_override_is_off_by_default_and_loads_from_environment(monkeypatch):
     assert not AppSettings(_env_file=None).allow_debug_non_loopback
     monkeypatch.setenv("ALLOW_DEBUG_NON_LOOPBACK", "true")
     assert AppSettings(_env_file=None).allow_debug_non_loopback
+
+
+def test_production_override_is_off_by_default_and_loads_from_environment(monkeypatch):
+    monkeypatch.delenv("ALLOW_DEBUG_PRODUCTION", raising=False)
+    assert not AppSettings(_env_file=None).allow_debug_production
+    monkeypatch.setenv("ALLOW_DEBUG_PRODUCTION", "true")
+    assert AppSettings(_env_file=None).allow_debug_production
 
 
 @pytest.mark.parametrize(
@@ -189,7 +211,15 @@ def test_server_cli_local_host_overrides_nonloopback_environment(monkeypatch):
         ({"UVICORN_HOST": "::"}, ["uvicorn", "main:app"], "::"),
         ({}, ["uvicorn", "main:app", "--host", "0.0.0.0"], "0.0.0.0"),
         ({}, ["uvicorn", "main:app", "--host=0.0.0.0"], "0.0.0.0"),
-        ({}, ["uvicorn", "main:app"], "127.0.0.1"),
+        ({}, ["uvicorn", "main:app"], None),
+        # The last --host wins, and a CLI flag overrides a loopback env value.
+        ({}, ["uvicorn", "main:app", "--host", "127.0.0.1", "--host", "0.0.0.0"],
+         "0.0.0.0"),
+        ({"ATLAS_HOST": "127.0.0.1", "UVICORN_HOST": "127.0.0.1"},
+         ["uvicorn", "main:app", "--host", "0.0.0.0"], "0.0.0.0"),
+        # Gunicorn/Hypercorn bind flags are recognized too (:port is allowed).
+        ({"ATLAS_HOST": "127.0.0.1"},
+         ["gunicorn", "-b", "0.0.0.0:8000", "main:app"], "0.0.0.0:8000"),
     ],
 )
 def test_resolve_bind_host_sees_env_and_uvicorn_flags(monkeypatch, environ, argv, expected):
@@ -199,6 +229,24 @@ def test_resolve_bind_host_sees_env_and_uvicorn_flags(monkeypatch, environ, argv
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(sys, "argv", argv)
     assert resolve_bind_host() == expected
+
+
+def test_unknown_bind_host_fails_closed(monkeypatch):
+    for name in ("ATLAS_HOST", "UVICORN_HOST"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(sys, "argv", ["uvicorn", "atlas.main:app"])
+    assert resolve_bind_host() is None
+    with pytest.raises(ValueError, match="ALLOW_DEBUG_NON_LOOPBACK"):
+        validate_debug_configuration(_settings(), resolve_bind_host())
+
+
+def test_gunicorn_public_bind_cannot_bypass_debug_guard(monkeypatch):
+    # ATLAS_HOST=127.0.0.1 in .env must not mask an actual public bind.
+    monkeypatch.setenv("ATLAS_HOST", "127.0.0.1")
+    monkeypatch.delenv("UVICORN_HOST", raising=False)
+    monkeypatch.setattr(sys, "argv", ["gunicorn", "-b", "0.0.0.0:8000", "main:app"])
+    with pytest.raises(ValueError, match="ALLOW_DEBUG_NON_LOOPBACK"):
+        validate_debug_configuration(_settings(), resolve_bind_host())
 
 
 def test_direct_uvicorn_public_bind_cannot_bypass_debug_guard(monkeypatch):
@@ -212,20 +260,22 @@ def test_direct_uvicorn_public_bind_cannot_bypass_debug_guard(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "environment, host, override, succeeds",
+    "environment, host, override, prod_override, succeeds",
     [
-        ("production", "127.0.0.1", "false", False),
-        ("development", "0.0.0.0", "false", False),
-        ("development", "127.0.0.1", "false", True),
-        ("production", "0.0.0.0", "true", True),
+        ("production", "127.0.0.1", "false", "false", False),
+        ("development", "0.0.0.0", "false", "false", False),
+        ("development", "127.0.0.1", "false", "false", True),
+        ("production", "0.0.0.0", "true", "false", False),
+        ("production", "0.0.0.0", "true", "true", True),
     ],
 )
-def test_main_entry_checks_bind_before_uvicorn(environment, host, override, succeeds):
+def test_main_entry_checks_bind_before_uvicorn(environment, host, override, prod_override, succeeds):
     env = os.environ | {
         "DEBUG_MODE": "true",
         "ENVIRONMENT": environment,
         "ATLAS_HOST": host,
         "ALLOW_DEBUG_NON_LOOPBACK": override,
+        "ALLOW_DEBUG_PRODUCTION": prod_override,
         "CAPABILITY_TOKEN_SECRET": "x" * 32,
         "SKIP_AUTHORIZATION_CHECKS": "false",
     }
@@ -241,4 +291,4 @@ def test_main_entry_checks_bind_before_uvicorn(environment, host, override, succ
     assert (result.returncode == 0) is succeeds, result.stderr
     assert ("UVICORN_REACHED" in result.stdout) is succeeds
     if not succeeds:
-        assert "DEBUG_MODE=true requires" in result.stderr
+        assert "DEBUG_MODE=true" in result.stderr

@@ -100,8 +100,18 @@ when required credentials are missing:
 export MINIO_ROOT_USER=atlas-local
 export MINIO_ROOT_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
 export POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
+export PROXY_SECRET="$PROXY_SECRET"   # from the "Generate deployment secrets first" step
 docker compose up
 ```
+
+`DEBUG_MODE` is no longer set, so proxy-secret enforcement is active: the stack
+rejects any request that does not carry the `X-Proxy-Secret` header. Reaching
+the UI therefore requires an authenticating reverse proxy in front of Atlas
+that injects `X-Proxy-Secret` and a verified identity header, and strips
+client-supplied copies (an nginx example is in
+[authentication configuration](../admin/authentication.md#proxy-secret-authentication-enabled-by-default)).
+A bare `http://127.0.0.1:8000` hit only proves the container is up — the
+heartbeat healthcheck does not test authentication.
 
 All published ports bind to `127.0.0.1`: Atlas on 8000, MinIO on 9000/9001,
 and PostgreSQL on 5432. The MinIO initializer makes `atlas-files` private,

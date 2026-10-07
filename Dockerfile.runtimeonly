@@ -2,5 +2,5 @@
 #   docker build -t atlas-runtime:local .
 #   docker build --build-arg ATLAS_RUNTIME_IMAGE=atlas-runtime:local -f Dockerfile.runtimeonly .
 # Production publishing always builds Dockerfile directly.
-ARG ATLAS_RUNTIME_IMAGE
+ARG ATLAS_RUNTIME_IMAGE=quay.io/agarlan-snl/atlas-ui-3:latest
 FROM ${ATLAS_RUNTIME_IMAGE}

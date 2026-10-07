@@ -224,7 +224,10 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
         line.strip() for line in dockerfile_path.read_text().splitlines()
         if line.strip() and not line.startswith("#")
     ]
-    assert instructions == ["ARG ATLAS_RUNTIME_IMAGE", "FROM ${ATLAS_RUNTIME_IMAGE}"]
+    assert instructions == [
+        "ARG ATLAS_RUNTIME_IMAGE=quay.io/agarlan-snl/atlas-ui-3:latest",
+        "FROM ${ATLAS_RUNTIME_IMAGE}",
+    ]
 
 
 def test_use_new_frontend_flag_is_gone():

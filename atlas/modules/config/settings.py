@@ -145,7 +145,12 @@ class AppSettings(BaseSettings):
     debug_mode: bool = False
     allow_debug_non_loopback: bool = Field(
         default=False,
-        description="Explicitly permit debug authentication bypass in production or on non-loopback binds",
+        description="Explicitly permit debug authentication bypass on a non-loopback bind",
+    )
+    allow_debug_production: bool = Field(
+        default=False,
+        description="Explicitly permit debug authentication bypass when ENVIRONMENT=production",
+        validation_alias="ALLOW_DEBUG_PRODUCTION",
     )
     llm_request_timeout_seconds: float = Field(
         default=120.0,
