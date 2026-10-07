@@ -68,6 +68,12 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
     selectedDataSources
   } = useChat()
   const { complianceLevels } = useMarketplace()
+  // A saved level stays selectable even if the definitions failed to load or
+  // no longer list it, so the user can always clear a filter that is hiding
+  // everything; otherwise the selector would vanish with the filter active.
+  const complianceOptions = complianceLevelFilter && !complianceLevels.some(l => l.name === complianceLevelFilter)
+    ? [...complianceLevels, { name: complianceLevelFilter, description: 'Not defined by this deployment' }]
+    : complianceLevels
   const { connectionStatus, isConnected } = useWS()
   const toast = useToast()
   const [transcriptDropdownOpen, setTranscriptDropdownOpen] = useState(false)
@@ -309,7 +315,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
           </div>
 
           {/* Compliance Level Dropdown */}
-          {features?.compliance_levels && complianceLevels.length > 0 && (
+          {features?.compliance_levels && complianceOptions.length > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 border border-gray-600">
               <Shield className="w-4 h-4 text-blue-400" />
               <select
@@ -320,7 +326,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                 aria-label="Compliance level"
               >
                 <option value="">All Levels</option>
-                {complianceLevels.map(level => (
+                {complianceOptions.map(level => (
                   <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                 ))}
               </select>
@@ -488,7 +494,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
               </button>
 
               {/* Compliance Level */}
-              {features?.compliance_levels && complianceLevels.length > 0 && (
+              {features?.compliance_levels && complianceOptions.length > 0 && (
                 <div className="px-3 py-2 bg-gray-700 rounded-lg">
                   <div className="flex items-center gap-2 mb-2">
                     <Shield className="w-4 h-4 text-blue-400" />
@@ -501,7 +507,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                     aria-label="Compliance level"
                   >
                     <option value="">All Levels</option>
-                    {complianceLevels.map(level => (
+                    {complianceOptions.map(level => (
                       <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                     ))}
                   </select>

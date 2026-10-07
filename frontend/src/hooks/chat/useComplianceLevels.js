@@ -15,7 +15,10 @@ export function useComplianceLevels(enabled) {
     if (!enabled) return
     let cancelled = false
     fetch('/api/compliance-levels')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
       .then(data => {
         if (cancelled) return
         setComplianceLevels(Array.isArray(data?.levels) ? data.levels : [])

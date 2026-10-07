@@ -9,8 +9,9 @@
  *   - persisted selections are pruned against the filter with the allowlist
  *     rule (HIPAA keeps SOC2), and nothing is pruned before the level
  *     definitions load;
- *   - a level switch keeps an allowlisted persona and moves the model off a
- *     level the filter excludes.
+ *   - an allowlisted persona survives, an excluded persona or MCP prompt is
+ *     cleared, the model moves to an allowed one, and a turn is refused when
+ *     no allowed model exists -- on a switch and on load alike.
  *
  * Harness mirrors agent-mode-payload-gating.test.jsx: the real provider with
  * leaf hooks stubbed.
@@ -28,6 +29,7 @@ const LEVELS = [
 const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
   toastInfo: vi.fn(),
+  toastError: vi.fn(),
   setCurrentModel: vi.fn(),
   currentModel: 'public-model',
   levels: [],
@@ -55,7 +57,7 @@ vi.mock('../contexts/WSContext', () => ({
 }))
 
 vi.mock('../components/ui/toastContext', () => ({
-  useToast: () => ({ error: vi.fn(), success: vi.fn(), info: h.toastInfo }),
+  useToast: () => ({ error: h.toastError, success: vi.fn(), info: h.toastInfo }),
 }))
 
 vi.mock('../hooks/chat/useComplianceLevels', () => ({
@@ -181,7 +183,7 @@ beforeEach(() => {
   h.sendMessage.mockImplementation(() => true)
   h.levels = LEVELS
   h.filter = 'HIPAA'
-  h.currentModel = 'public-model'
+  h.currentModel = 'hipaa-model'
   h.selectedTools = new Set(['soc2srv_evaluate', 'pubsrv_evaluate', 'loose_plan', 'atlas_canvas'])
   h.selectedPrompts = new Set(['hipaasrv_intake', 'pubprompts_hello'])
   h.activePrompts = ['hipaasrv_intake', 'pubprompts_hello']
@@ -265,29 +267,63 @@ describe('compliance filter: selection pruning', () => {
   })
 })
 
-describe('compliance filter: level switch', () => {
+describe('compliance filter: persona, active prompt and model', () => {
+  // These run from the same effect on a level switch and on load, so a saved
+  // filter with a saved persona/model is handled exactly like a fresh switch.
   it('keeps an allowlisted persona and switches to an exact-level model', () => {
-    h.filter = null
+    h.currentModel = 'public-model'
     h.activePromptKey = 'persona:auditor'
     h.personas = [{ id: 'auditor', compliance_level: 'SOC2' }]
-    const { result } = renderChat()
-    act(() => { result.current.setComplianceLevelFilter('HIPAA') })
+    renderChat()
 
     expect(h.clearActivePrompt).not.toHaveBeenCalled()
     expect(h.setCurrentModel).toHaveBeenCalledWith('hipaa-model')
     expect(h.toastInfo).toHaveBeenCalled()
-    expect(h.setComplianceLevelFilter).toHaveBeenCalledWith('HIPAA')
   })
 
-  it('clears a persona the new level excludes and leaves a compliant model alone', () => {
-    h.filter = null
+  it('clears a persona the level excludes and leaves a compliant model alone', () => {
     h.currentModel = 'soc2-model'
     h.activePromptKey = 'persona:greeter'
     h.personas = [{ id: 'greeter', compliance_level: 'Public' }]
-    const { result } = renderChat()
-    act(() => { result.current.setComplianceLevelFilter('HIPAA') })
+    renderChat()
 
     expect(h.clearActivePrompt).toHaveBeenCalled()
+    expect(h.setCurrentModel).not.toHaveBeenCalled()
+  })
+
+  it('clears an active MCP prompt the level excludes', () => {
+    h.activePromptKey = 'pubprompts_hello'
+    renderChat()
+    expect(h.clearActivePrompt).toHaveBeenCalled()
+  })
+
+  it('keeps an active MCP prompt the level allows', () => {
+    h.activePromptKey = 'hipaasrv_intake'
+    renderChat()
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+  })
+
+  it('refuses to send to an excluded model when no allowed model exists', () => {
+    h.levels = [...LEVELS, { name: 'Internal', aliases: [], allowed_with: ['Internal'] }]
+    h.filter = 'Internal'
+    h.currentModel = 'public-model'
+    const { result } = renderChat()
+    let sent
+    act(() => { sent = result.current.sendChatMessage('hi') })
+
+    expect(h.setCurrentModel).not.toHaveBeenCalled()
+    expect(sent).toBe(false)
+    expect(h.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'chat' }))
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/outside the Internal compliance level/))
+  })
+
+  it('does nothing to the persona or model without a filter', () => {
+    h.filter = null
+    h.currentModel = 'public-model'
+    h.activePromptKey = 'persona:greeter'
+    h.personas = [{ id: 'greeter', compliance_level: 'Public' }]
+    renderChat()
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
     expect(h.setCurrentModel).not.toHaveBeenCalled()
   })
 })

@@ -29,9 +29,11 @@ Choosing a level applies one rule everywhere -- the tools and prompts panels, th
 Selections follow the same rule, so what is sent is always what the panels show:
 
 - Tool, prompt and data source selections the level excludes are deselected, and a selection the UI cannot place yet (while the configuration is still loading) is held back from the message rather than sent unchecked -- on a level switch, when the page loads with a saved level, and when a workspace is restored. Selections the level allows are kept (for example, switching to HIPAA keeps SOC2 tools).
-- An active persona the level excludes is cleared.
-- If the selected model is outside the level, the UI switches to a model at that level (or another model it allows) and says so. If no allowed model exists, the model button is highlighted with a warning and the model picker explains that no models match.
-- A saved level that the deployment no longer defines is dropped, rather than silently hiding everything.
+- An active persona or MCP prompt the level excludes is cleared.
+- If the selected model is outside the level, the UI switches to a model at that level (or another model it allows) and says so. If no allowed model exists, the model button is highlighted with a warning, the model picker explains that no models match, and sending is refused until you pick an allowed model or change the level.
+- A saved level that the deployment no longer defines is dropped, rather than silently hiding everything. If the level definitions cannot be loaded at all, the selector stays visible with the saved level so it can still be cleared.
+
+These rules apply both when you change the level and when the page loads with a saved level.
 
 MCP tool calls have no separate server-side compliance check, so this client-side filtering is what keeps an excluded tool out of a turn. RAG queries are additionally enforced on the server against the *selected model's* compliance level.
 
