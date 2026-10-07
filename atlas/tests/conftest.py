@@ -95,17 +95,16 @@ AppSettings.model_config["env_file"] = None
 # correctly omit the argument because compliance-required mode is not their
 # scenario.
 #
-# Pin all three to explicit values for the session, exactly like the other
-# isolation guards below -- including the default level, *pinned empty* rather
-# than popped. ``atlas.main`` calls ``load_dotenv("../.env")`` (override=False)
-# at import, which refills any environment key that is missing, so a popped
-# ``COMPLIANCE_DEFAULT_LEVEL`` would be restored by a developer's .env and the
-# guard would depend on import order. An explicit value is left alone by
-# ``load_dotenv`` with ``override=False``. Compliance-specific tests still opt in
-# with ``monkeypatch.setenv`` / direct settings overrides, which take precedence
-# over this session-level pin (see ``test_compliance_level_required.py``). This is
-# a test-isolation guard, not a product behavior change -- runtime policy is
-# untouched.
+# Pin all three to explicit values for the session -- including the default
+# level, *pinned empty* rather than popped. ``atlas.main`` calls
+# ``load_dotenv("../.env")`` (override=False) at import, which refills any
+# environment key that is missing, so a popped ``COMPLIANCE_DEFAULT_LEVEL`` would
+# be restored by a developer's .env and the guard would depend on import order.
+# An explicit value is left alone by ``load_dotenv`` with ``override=False``.
+# Compliance-specific tests still opt in with ``monkeypatch.setenv`` / direct
+# settings overrides, which take precedence over this session-level pin (see
+# ``test_compliance_level_required.py``). This is a test-isolation guard, not a
+# product behavior change -- runtime policy is untouched.
 os.environ["FEATURE_COMPLIANCE_LEVELS_ENABLED"] = "false"
 os.environ["FEATURE_COMPLIANCE_LEVEL_REQUIRED"] = "false"
 os.environ["COMPLIANCE_DEFAULT_LEVEL"] = ""

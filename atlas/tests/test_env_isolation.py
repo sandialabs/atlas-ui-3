@@ -86,9 +86,10 @@ def test_dotenv_cannot_reenable_skip_authorization_checks(tmp_path):
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("SKIP_AUTHORIZATION_CHECKS=true\n")
 
-    load_dotenv(dotenv_path=dotenv_path)
+    with mock.patch.dict(os.environ):
+        load_dotenv(dotenv_path=dotenv_path)
 
-    assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
+        assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
 
 
 def test_dotenv_on_disk_does_not_leak_into_settings(tmp_path, monkeypatch):
