@@ -83,7 +83,10 @@ describe('classificationsOf', () => {
 
   it('falls back to the legacy level, then to undeclared', () => {
     expect(classificationsOf({ compliance_level: 'SOC2' })).toEqual(['SOC2'])
-    expect(classificationsOf({ complianceLevel: 'Public', allowedDataClassifications: null })).toEqual(['Public'])
+    // An explicit null is the server's effective answer: undeclared. A RAG
+    // corpus's own complianceLevel (often CUI) must not stand in for it.
+    expect(classificationsOf({ complianceLevel: 'CUI', allowedDataClassifications: null })).toBeNull()
+    expect(classificationsOf({ compliance_level: 'Public', allowed_data_classifications: null })).toBeNull()
     expect(classificationsOf({})).toBeNull()
     expect(classificationsOf(null)).toBeNull()
   })

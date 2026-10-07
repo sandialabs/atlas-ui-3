@@ -14,6 +14,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from atlas.core.compliance import (
+    coerce_classifications,
     declared_classifications,
     get_compliance_manager,
     narrow_classifications,
@@ -304,10 +305,7 @@ class RAGMCPService:
                     own = r.get("allowedDataClassifications")
                     if own is None:
                         own = r.get("allowed_data_classifications")
-                    if isinstance(own, str):
-                        own = [own]
-                    elif own is not None and not isinstance(own, list):
-                        own = []  # unreadable declaration: approve for nothing
+                    own = coerce_classifications(own)
                     resource_classifications = narrow_classifications(
                         own,
                         self._server_classifications(server),

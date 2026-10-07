@@ -42,6 +42,12 @@ export const classificationsOf = resource => {
   if (!resource || typeof resource !== 'object') return null
   const allowed = resource.allowed_data_classifications ?? resource.allowedDataClassifications
   if (Array.isArray(allowed)) return allowed
+  // An explicit null from the server is its effective answer (the server
+  // already folded in any legacy level): the resource is undeclared. A RAG
+  // corpus's own complianceLevel is display-only and must not stand in for it.
+  if (resource.allowed_data_classifications === null || resource.allowedDataClassifications === null) {
+    return null
+  }
   const legacy = resource.compliance_level ?? resource.complianceLevel
   return legacy ? [legacy] : null
 }

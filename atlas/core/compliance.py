@@ -322,6 +322,23 @@ class ComplianceLevelManager:
         return list(self.levels.keys())
 
 
+def coerce_classifications(value: Any) -> Optional[List[str]]:
+    """Normalize a raw ``allowed_data_classifications`` value.
+
+    ``None`` stays ``None`` (not declared); a string is a one-element list; a
+    list keeps its non-empty string entries; any other shape is unreadable and
+    becomes ``[]``, which approves the component for nothing. One rule for
+    config, HTTP and MCP discovery payloads.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple)):
+        return [c for c in value if isinstance(c, str) and c]
+    return []
+
+
 def declared_classifications(resource: Any) -> Optional[List[str]]:
     """The data classifications a component is explicitly approved for.
 
@@ -341,10 +358,9 @@ def declared_classifications(resource: Any) -> Optional[List[str]]:
     else:
         allowed = getattr(resource, "allowed_data_classifications", None)
         legacy = getattr(resource, "compliance_level", None)
-    if isinstance(allowed, str):
-        allowed = [allowed]
-    if isinstance(allowed, (list, tuple)):
-        return [c for c in allowed if isinstance(c, str) and c]
+    allowed = coerce_classifications(allowed)
+    if allowed is not None:
+        return allowed
     if isinstance(legacy, str) and legacy:
         return [legacy]
     return None

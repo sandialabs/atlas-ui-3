@@ -32,14 +32,12 @@ class DataSource(BaseModel):
     @field_validator("allowed_data_classifications", mode="before")
     @classmethod
     def _coerce_classifications(cls, v):
-        # Match the MCP rule: a string is a one-element list, and any other
-        # non-list shape approves the corpus for nothing -- without failing
+        # The shared rule (atlas.core.compliance.coerce_classifications): a
+        # malformed value approves the corpus for nothing instead of failing
         # validation, which would hide every corpus on the server.
-        if v is None or isinstance(v, list):
-            return v
-        if isinstance(v, str):
-            return [v]
-        return []
+        from atlas.core.compliance import coerce_classifications
+
+        return coerce_classifications(v)
     description: str = ""
     # Advertised by v2 discovery so a backend can declare, per source, which
     # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).

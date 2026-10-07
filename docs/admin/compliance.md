@@ -31,6 +31,8 @@ models:
 
 Names are resolved through the level aliases at load. A name that matches no defined level is dropped with a warning, so a typo can only narrow what a component is approved for, never widen it.
 
+> **Upgrade note:** define every classification you use in `config/compliance-levels.json` (for example, `CUI` is not in the bundled defaults). A component whose only classification is undefined -- in `allowed_data_classifications` or a legacy `compliance_level` -- ends up declaring nothing, so it is unavailable in **every** classified session.
+
 ## The Rule
 
 The active conversation classification -- the level selected in the header -- is the authority. A component may be used only when that classification is a member of its `allowed_data_classifications`:
@@ -49,6 +51,8 @@ The active conversation classification -- the level selected in the header -- is
 ## Server-Side Enforcement
 
 The rule is enforced on the server, not only in the UI, so a stale bundle, the CLI, the Python client or a hand-crafted WebSocket client cannot bypass it. Before a chat turn runs, the server checks the selected model, the MCP server behind every selected tool, and every selected data source against the active classification. If any is not approved, the turn is refused with a message naming them, before the session is touched or anything is called. If the check itself cannot run (a broken configuration lookup), a classified turn is refused rather than run unchecked.
+
+Tool calls are checked again when they execute. A call the model makes to a tool on a server not approved for the active classification is refused, even if that tool was never selected (a hallucinated or prompt-injected call). The same applies to a server that declares nothing.
 
 A RAG backend's discovery can also return `allowed_data_classifications` per corpus. A corpus can only narrow its server's list (entries the server does not list are ignored); one that sends no list inherits its server's. A per-corpus `compliance_level` from discovery is shown as a badge but is not a boundary, because existing backends send one (often `CUI`) for every corpus. For a classified turn with selected data sources, the server runs discovery at the active level for just those servers and refuses any selected corpus it does not offer. A corpus whose backend does not answer, or that the user cannot see, is refused as unconfirmed rather than queried. RAG queries are checked again at query time against the active classification, which also covers `atlas_search` calls the model makes during a turn; discovery for the `atlas_search` tool only offers sources approved for it. The built-in `atlas` tools (canvas, sleep, search, discover sources) run in-process and are exempt from the tool check; search reaches only sources that pass their own checks.
 
