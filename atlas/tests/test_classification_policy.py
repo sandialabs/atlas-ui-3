@@ -414,3 +414,11 @@ def test_index_naming_an_unconfigured_server_is_unknown(manager, config_manager)
         manager, "ITAR", model="model-x", config_manager=config_manager,
         tool_manager=tool_manager, selected_tools=["internal_search_query"],
     ) == ["tool internal_search_query (no known server)"]
+
+
+def test_http_corpus_list_shapes_are_coerced():
+    from atlas.modules.rag.client import DataSource
+
+    assert DataSource(id="a", label="A", allowedDataClassifications="UUR").allowed_data_classifications == ["UUR"]
+    assert DataSource(id="b", label="B", allowedDataClassifications={"x": 1}).allowed_data_classifications == []
+    assert DataSource(id="c", label="C").allowed_data_classifications is None

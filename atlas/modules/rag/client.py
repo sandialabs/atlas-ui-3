@@ -28,6 +28,18 @@ class DataSource(BaseModel):
         default=None,
         validation_alias=AliasChoices("allowed_data_classifications", "allowedDataClassifications"),
     )
+
+    @field_validator("allowed_data_classifications", mode="before")
+    @classmethod
+    def _coerce_classifications(cls, v):
+        # Match the MCP rule: a string is a one-element list, and any other
+        # non-list shape approves the corpus for nothing -- without failing
+        # validation, which would hide every corpus on the server.
+        if v is None or isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            return [v]
+        return []
     description: str = ""
     # Advertised by v2 discovery so a backend can declare, per source, which
     # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).
