@@ -187,6 +187,42 @@ models:
 
 - `"system"` (default) - API key resolved from environment variables using `${VAR_NAME}` syntax
 - `"user"` - API key provided per-user via the UI, stored encrypted on disk
+- `"globus"` - the user's Globus token for `globus_scope`
+- `"delegated"` - a short-lived token obtained for the logged-in user on each call; see [Delegated API Keys](#delegated-api-keys)
+
+## Delegated API Keys
+
+A model can be called with a token issued for the logged-in user instead of a
+shared key, when its endpoint (for example a LiteLLM proxy behind an
+identity-aware gateway) accepts the identity provider's tokens. This is the
+same delegation [LiteLLM team gateways](litellm-team-gateways.md#authentication)
+use with `auth_type: delegated`, for a model listed under `models:`:
+
+```yaml
+models:
+  gateway-gpt:
+    model_name: openai/gpt-4.1
+    model_url: https://llm-gateway.example.gov/v1
+    api_key_source: "delegated"
+    delegation:
+      audience: llm-gateway        # or resource; for Entra On-Behalf-Of, scope alone
+      scope: llm-gateway
+```
+
+On each call Atlas exchanges the user's OIDC access token for a token for that
+audience and scope, through `OIDC_DELEGATION_PROVIDER` (RFC 8693 token exchange
+or Entra On-Behalf-Of; `FEATURE_OIDC_DELEGATION_ENABLED` must be on), and sends
+it as the API key. Tokens are cached per user, audience and scope until shortly
+before they expire. The identity-provider setup is the one described for
+gateways: [Entra](litellm-team-gateways.md#authentication) and
+[Keycloak](litellm-team-gateways.md#keycloak-rfc-8693-token-exchange).
+
+There is no fallback: with no signed-in user, no OIDC session, delegation turned
+off or a failed exchange, the call fails with "Please sign in again" or a
+configuration error, and the model is never called with another credential. A
+delegated model without `delegation.scope`, `audience` or `resource` is rejected
+when the config loads. Calls with no user (background work) can't use a
+delegated model.
 
 ## Restricting Model Access by Group (2026-07-10)
 
@@ -258,7 +294,8 @@ the sampling context. Restrict access to such MCP servers with the server's own
 *   **`max_tokens`**: (integer) The maximum number of tokens to generate in a response.
 *   **`temperature`**: (float) A value between 0.0 and 1.0 that controls the creativity of the model's responses. Higher values are more creative.
 *   **`extra_headers`**: (dictionary) A set of custom HTTP headers to include in the request, which is useful for some proxy services or custom providers. **Environment Variable Support**: Header values can also use the `${VAR_NAME}` syntax for environment variable expansion. This is particularly useful for services like OpenRouter that require headers like `HTTP-Referer` and `X-Title`. If an environment variable is missing, the application will raise a clear error message.
-*   **`api_key_source`**: (string) Controls where the API key comes from. `"system"` (default) resolves from environment variables. `"user"` requires each user to provide their own key via the UI. See [Per-User API Keys](#per-user-api-keys-2026-02-08) above.
+*   **`api_key_source`**: (string) Controls where the API key comes from. `"system"` (default) resolves from environment variables. `"user"` requires each user to provide their own key via the UI. See [Per-User API Keys](#per-user-api-keys-2026-02-08) above. `"delegated"` sends a token obtained for the logged-in user; see [Delegated API Keys](#delegated-api-keys).
+*   **`delegation`**: (object) For `api_key_source: "delegated"`, and only with it: the `audience`, `resource` and `scope` of the token Atlas obtains for the user. At least one is required.
 *   **`pass_user_as_customer_id`**: (boolean, default `false`) When `true`, the logged-in user's identifier is sent as the `x-litellm-customer-id` HTTP header on each request to the model. A [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/customers) uses this header to attribute spend/usage to the end user (customer). See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`customer_id_strip_suffix`**: (string, optional) An email-domain suffix (e.g. `"@mydomain.com"`) to strip from the reverse-proxy-provided username before it is sent as the `x-litellm-customer-id` header — turning `user@mydomain.com` into `user`. Only applies when `pass_user_as_customer_id` is `true` and the username actually ends with the suffix (matched case-insensitively); otherwise the value is sent unchanged. See [LiteLLM Customer ID Header](#litellm-customer-id-header) below.
 *   **`supports_vision`**: (boolean, default `false`) When `true`, the model accepts image inputs. Users can upload images in the chat UI, and those images are sent as inline base64 content blocks in the user message rather than being described in the text files manifest. Only raster image formats are supported (PNG, JPEG, GIF, WebP); SVG files are excluded. See [Vision Image Support](#vision-image-support-2026-03-23) below.

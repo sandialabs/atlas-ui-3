@@ -71,6 +71,55 @@ def _decode_jwt_claims(token: str) -> Dict[str, Any]:
     return claims if isinstance(claims, dict) else {}
 
 
+async def mint_delegated_llm_token(
+    user_email: Optional[str], delegation, *, endpoint: str, actor: str
+) -> str:
+    """Return a token for ``endpoint`` (e.g. "LiteLLM gateway 'teams'") obtained for
+    the user by the configured delegation provider: their OIDC access token, exchanged
+    (RFC 8693 or Entra On-Behalf-Of) for one with ``delegation``'s audience, resource
+    and scope. Used by gateways with ``auth_type: "delegated"`` and by models with
+    ``api_key_source: "delegated"``; neither falls back to another credential, so this
+    raises LLMAuthenticationError when no token can be obtained.
+    """
+    from atlas.core.oidc import mcp_delegation
+    from atlas.core.oidc.delegation import (
+        DelegationError,
+        DelegationRequest,
+        get_delegation_manager_async,
+    )
+
+    # Explicit CR/LF removal too: CodeQL's py/log-injection recognizes it where it
+    # doesn't recognize sanitize_for_logging() (a model's name comes from the request).
+    log_endpoint = sanitize_for_logging(endpoint).replace("\r", "").replace("\n", "")
+    if not user_email:
+        raise LLMAuthenticationError(f"{endpoint} needs a signed-in user.")
+    manager = await get_delegation_manager_async()
+    if manager is None:
+        logger.error("%s uses delegated auth but OIDC delegation is not configured", log_endpoint)
+        raise LLMAuthenticationError(f"{endpoint} requires delegated sign-in, which is not configured.")
+    subject_token = await mcp_delegation.resolve_subject_token(user_email)
+    if not subject_token:
+        raise LLMAuthenticationError(
+            f"Your sign-in session has no token to present to {endpoint}. Please sign in again."
+        )
+    request = DelegationRequest(
+        user_id=user_email,
+        subject_token=subject_token,
+        audience=delegation.audience if delegation else None,
+        resource=delegation.resource if delegation else None,
+        scope=delegation.scope if delegation else None,
+        actor=actor,
+    )
+    try:
+        token = await manager.get_token(request)
+    except DelegationError as exc:
+        logger.error(
+            "Delegated token exchange failed for %s: %s", log_endpoint, sanitize_for_logging(str(exc))
+        )
+        raise LLMAuthenticationError(f"Could not obtain a token for {endpoint}. Please sign in again.") from None
+    return token.access_token
+
+
 def parse_team_list(payload: Any) -> List[GatewayTeam]:
     """Normalize a ``/team/list`` response into teams.
 
@@ -157,48 +206,12 @@ class LiteLLMGatewayClient:
         return GatewayCredential(bearer_token=token, litellm_user_id=self._litellm_user_id(user_email, token))
 
     async def _mint_delegated_token(self, user_email: str) -> str:
-        from atlas.core.oidc import mcp_delegation
-        from atlas.core.oidc.delegation import (
-            DelegationError,
-            DelegationRequest,
-            get_delegation_manager_async,
-        )
-
-        manager = await get_delegation_manager_async()
-        if manager is None:
-            logger.error(
-                "LiteLLM gateway '%s' uses delegated auth but OIDC delegation is not configured",
-                self._log_name,
-            )
-            raise LLMAuthenticationError(
-                f"LiteLLM gateway '{self.name}' requires delegated sign-in, which is not configured."
-            )
-        subject_token = await mcp_delegation.resolve_subject_token(user_email)
-        if not subject_token:
-            raise LLMAuthenticationError(
-                "Your sign-in session has no token to present to the LiteLLM gateway. "
-                "Please sign in again."
-            )
-        delegation = self.config.delegation
-        request = DelegationRequest(
-            user_id=user_email,
-            subject_token=subject_token,
-            audience=delegation.audience if delegation else None,
-            resource=delegation.resource if delegation else None,
-            scope=delegation.scope if delegation else None,
+        return await mint_delegated_llm_token(
+            user_email,
+            self.config.delegation,
+            endpoint=f"LiteLLM gateway '{self.name}'",
             actor=f"litellm-gateway:{self.name}",
         )
-        try:
-            token = await manager.get_token(request)
-        except DelegationError as exc:
-            logger.error(
-                "Delegated token exchange failed for LiteLLM gateway '%s': %s",
-                self._log_name, sanitize_for_logging(str(exc)),
-            )
-            raise LLMAuthenticationError(
-                f"Could not obtain a token for LiteLLM gateway '{self.name}'. Please sign in again."
-            ) from None
-        return token.access_token
 
     def _litellm_user_id(self, user_email: str, token: str) -> str:
         if self.config.effective_user_id_source() == "token_claim":
