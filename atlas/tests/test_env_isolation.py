@@ -34,16 +34,43 @@ def test_compliance_required_mode_does_not_leak_into_the_suite():
     """The compliance-required policy must not leak into unrelated tests.
 
     ``conftest`` pins ``FEATURE_COMPLIANCE_LEVELS_ENABLED`` and
-    ``FEATURE_COMPLIANCE_LEVEL_REQUIRED`` off (and drops
-    ``COMPLIANCE_DEFAULT_LEVEL``) because a contributor with those exported
-    would otherwise make every chat-service test that omits
+    ``FEATURE_COMPLIANCE_LEVEL_REQUIRED`` to an explicit ``false`` and the
+    default level to an explicit empty string, because a contributor with those
+    exported would otherwise make every chat-service test that omits
     ``compliance_level`` fail with a ``ValidationError``. Compliance-specific
     tests opt back in via ``monkeypatch``, which overrides the session pin.
+
+    Assert the *effective* settings rather than the raw environment: ``main``
+    imports ``load_dotenv`` (``override=False``), so the environment can be
+    refilled from a developer's .env during collection -- pinning values, not
+    popping them, is what makes the effective policy deterministic.
     """
     assert os.environ.get("FEATURE_COMPLIANCE_LEVELS_ENABLED") == "false"
     assert os.environ.get("FEATURE_COMPLIANCE_LEVEL_REQUIRED") == "false"
-    assert "COMPLIANCE_DEFAULT_LEVEL" not in os.environ
-    assert AppSettings().compliance_level_required_effective is False
+    settings = AppSettings()
+    assert settings.compliance_level_required_effective is False
+    assert not settings.compliance_default_level
+
+
+def test_dotenv_cannot_reenable_compliance_required_mode(tmp_path):
+    """A later dotenv load must not re-enable compliance-required mode.
+
+    ``load_dotenv`` with its default ``override=False`` only fills keys that are
+    absent, so the conftest pins survive a .env that would otherwise restore the
+    policy. Mirrors ``test_dotenv_cannot_reenable_skip_authorization_checks``.
+    """
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "FEATURE_COMPLIANCE_LEVELS_ENABLED=true\n"
+        "FEATURE_COMPLIANCE_LEVEL_REQUIRED=true\n"
+        "COMPLIANCE_DEFAULT_LEVEL=Internal\n"
+    )
+
+    load_dotenv(dotenv_path=dotenv_path)
+
+    assert os.environ.get("FEATURE_COMPLIANCE_LEVELS_ENABLED") == "false"
+    assert os.environ.get("FEATURE_COMPLIANCE_LEVEL_REQUIRED") == "false"
+    assert os.environ.get("COMPLIANCE_DEFAULT_LEVEL") == ""
 
 
 def test_dotenv_cannot_reenable_skip_authorization_checks(tmp_path):
