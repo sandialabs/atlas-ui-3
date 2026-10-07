@@ -5,7 +5,7 @@ import re
 from typing import Dict, List, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from atlas.core.http_client import create_rag_client
 
@@ -22,6 +22,22 @@ class DataSource(BaseModel):
     id: str
     label: str
     compliance_level: str = "CUI"
+    # Optional explicit list (issue #1032); narrows the server's list. Backends
+    # may send it in camelCase, like the MCP discovery contract.
+    allowed_data_classifications: Optional[List[str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("allowed_data_classifications", "allowedDataClassifications"),
+    )
+
+    @field_validator("allowed_data_classifications", mode="before")
+    @classmethod
+    def _coerce_classifications(cls, v):
+        # The shared rule (atlas.core.compliance.coerce_classifications): a
+        # malformed value approves the corpus for nothing instead of failing
+        # validation, which would hide every corpus on the server.
+        from atlas.core.compliance import coerce_classifications
+
+        return coerce_classifications(v)
     description: str = ""
     # Advertised by v2 discovery so a backend can declare, per source, which
     # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).

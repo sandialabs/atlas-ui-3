@@ -1,0 +1,9 @@
+{
+  "version": "2.0",
+  "levels": [
+    {"name": "UUR", "description": "Unclassified unlimited release", "aliases": ["Unclassified"], "allowed_with": ["UUR"]},
+    {"name": "ITAR", "description": "Export controlled", "aliases": [], "allowed_with": ["ITAR", "UUR"]},
+    {"name": "ECI", "description": "Export controlled information", "aliases": [], "allowed_with": ["ECI", "UUR"]}
+  ],
+  "mode": "explicit_allowlist"
+}

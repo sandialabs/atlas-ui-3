@@ -1097,6 +1097,18 @@ async def lifespan(app: FastAPI):
         logger.error("STARTUP FAILED: %s", e)
         raise
 
+    # Compliance levels without a required level leave "All Levels" turns
+    # unchecked except for the RAG model floor (docs/admin/compliance.md).
+    if (
+        getattr(config.app_settings, "feature_compliance_levels_enabled", False) is True
+        and getattr(config.app_settings, "compliance_level_required_effective", False) is not True
+    ):
+        logger.warning(
+            "Compliance levels are enabled but not required: turns sent with no level "
+            "skip the per-component classification checks. Set "
+            "FEATURE_COMPLIANCE_LEVEL_REQUIRED=true to require a level on every turn."
+        )
+
     # SECURITY WARNING: Check for missing proxy secret in production
     if not config.app_settings.debug_mode:
         if not config.app_settings.feature_proxy_secret_enabled:

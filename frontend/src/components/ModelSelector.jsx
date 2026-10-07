@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, Wrench, Shield, Key, Eye, Info } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
+import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
@@ -63,21 +64,21 @@ const ModelSelector = () => {
   // A gateway stays listed while any of its models passes the filter; the
   // picker then hides the individual models that do not.
   const visibleGateways = complianceFiltering
-    ? llmGateways.filter(g => (g.compliance_levels || [g.compliance_level])
-      .some(level => isComplianceAccessible(complianceLevelFilter, level)))
+    ? llmGateways.filter(g => (g.model_classifications || g.compliance_levels || [g.compliance_level])
+      .some(classifications => isComplianceAccessible(complianceLevelFilter, classifications)))
     : llmGateways
   const isGatewayModelVisible = complianceFiltering
-    ? model => isComplianceAccessible(complianceLevelFilter, model.compliance_level)
+    ? model => isComplianceAccessible(complianceLevelFilter, classificationsOf(model))
     : null
   const visibleListedModels = complianceFiltering
     ? listedModels.filter(m => isComplianceAccessible(
-        complianceLevelFilter, typeof m === 'string' ? undefined : m.compliance_level))
+        complianceLevelFilter, typeof m === 'string' ? undefined : classificationsOf(m)))
     : listedModels
   // The selected model can sit outside the filter (a persisted choice, or no
   // compliant replacement existed when the level changed). The list no longer
   // shows it, so flag it on the button instead of leaving it looking normal.
   const currentOutsideFilter = complianceFiltering && !!currentObj &&
-    !isComplianceAccessible(complianceLevelFilter, currentObj.compliance_level)
+    !isComplianceAccessible(complianceLevelFilter, classificationsOf(currentObj))
   const buttonTitle = currentModel
     ? (currentOutsideFilter
       ? `Model: ${currentLabel} is outside the ${complianceLevelFilter} compliance level; choose a compliant model`
@@ -190,10 +191,10 @@ const ModelSelector = () => {
                             <Wrench className="w-3 h-3" />
                             Tools {model.supports_tools !== false ? '' : '(no)'}
                           </span>
-                          {complianceEnabled && model.compliance_level && (
+                          {complianceEnabled && classificationLabel(model) && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white">
                               <Shield className="w-3 h-3" />
-                              {model.compliance_level}
+                              {classificationLabel(model)}
                             </span>
                           )}
                         </div>

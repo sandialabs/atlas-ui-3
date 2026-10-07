@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Users, Wrench, Eye, Loader2, RefreshCw, Shield } from 'lucide-react'
+import { classificationLabel } from '../utils/complianceAccess'
 import {
   parseGatewayModelKey,
   rememberTeamLabel,
@@ -169,10 +170,10 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                   >
                     <span className="truncate">{model.label || model.model_id}</span>
                     <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                      {showCompliance && model.compliance_level && (
+                      {showCompliance && classificationLabel(model) && (
                         <span className="inline-flex items-center gap-0.5 px-1 rounded text-[10px] bg-blue-600 text-white">
                           <Shield className="w-2.5 h-2.5" />
-                          {model.compliance_level}
+                          {classificationLabel(model)}
                         </span>
                       )}
                       <Eye className={`w-3.5 h-3.5 ${gateway.supports_vision ? 'text-green-400' : 'text-gray-600'}`} />

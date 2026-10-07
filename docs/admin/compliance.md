@@ -4,19 +4,68 @@ Last updated: 2026-10-07
 
 The compliance system is designed to prevent the unintentional mixing of data from different security environments. This is essential for organizations that handle sensitive information.
 
-## Compliance Levels
+## Compliance Levels and Data Classifications
 
-You can assign a `compliance_level` to LLM endpoints, RAG data sources, and MCP servers. These levels are defined in `atlas/config/compliance-levels.json` (package default) and can be customized in `config/compliance-levels.json` (or `compliance-levels.json` in whatever directory `APP_CONFIG_DIR` names). A file in the user config directory replaces the package default entirely, so a custom file must list every level you use. A `compliance_level` value that names no defined level (or alias) is treated as unset and logged as a warning.
+The levels themselves -- the data classifications a conversation can run at, such as `UUR`, `ITAR` or `ECI` -- are defined in `atlas/config/compliance-levels.json` (package default) and can be customized in `config/compliance-levels.json` (or `compliance-levels.json` in whatever directory `APP_CONFIG_DIR` names). A file in the user config directory replaces the package default entirely, so a custom file must list every level you use.
 
-> **Upgrade note (2026-10):** before this release the levels file was never found, so validation ran permissively and any level name was accepted. Level definitions now take effect, so define every level name you use in `config/compliance-levels.json` (for example `CUI` is not in the bundled defaults). An undefined name on an LLM model is cleared at load, so that model has no level: the UI filter hides it, and server-side RAG enforcement is off for turns using it. An undefined name on a RAG source is logged as a warning at load but is **not** enforced -- the server treats a level it cannot resolve as accessible -- so an undefined level does not protect a corpus.
+Every component that can receive conversation data -- LLM models (including LiteLLM gateways and their allowlisted models), MCP servers and RAG sources -- declares which classifications it is **explicitly approved to receive** with `allowed_data_classifications`:
 
-**Example:** A tool that accesses internal-only data can be marked with `compliance_level: "Internal"`, while a tool that uses a public API can be marked as `compliance_level: "Public"`.
+```yaml
+# llmconfig.yml
+models:
+  model-x:
+    # ...
+    allowed_data_classifications: [UUR, ITAR, ECI]
+  model-y:
+    # ...
+    allowed_data_classifications: [UUR]
+```
 
-## The Allowlist Model
+```json
+// mcp.json (rag-sources.json takes the same field per source)
+{
+  "google-search":   { "url": "...", "allowed_data_classifications": ["UUR"] },
+  "internal-search": { "url": "...", "allowed_data_classifications": ["UUR", "ITAR", "ECI"] }
+}
+```
 
-The compliance system uses an explicit **allowlist**. Each compliance level defines which other levels it is allowed to interact with. This prevents data from a highly secure environment (e.g., "HIPAA") from being accidentally sent to a less secure one (e.g., "Public").
+Names are resolved through the level aliases at load. A name that matches no defined level is dropped with a warning, so a typo can only narrow what a component is approved for, never widen it.
 
-For example, a session running with a "HIPAA" compliance level will not be able to use tools or data sources marked as "Public", preventing sensitive data from being exposed.
+> **Upgrade note:** define every classification you use in `config/compliance-levels.json` (for example, `CUI` is not in the bundled defaults). A component whose only classification is undefined -- in `allowed_data_classifications` or a legacy `compliance_level` -- ends up declaring nothing, so it is unavailable in **every** classified session.
+
+## The Rule
+
+The active conversation classification -- the level selected in the header -- is the authority. A component may be used only when that classification is a member of its `allowed_data_classifications`:
+
+| Active classification | Model X (`UUR, ITAR, ECI`) | Model Y (`UUR`) | google-search (`UUR`) | internal-search (`UUR, ITAR, ECI`) |
+|---|---|---|---|---|
+| UUR  | yes | yes | yes | yes |
+| ITAR | yes | no  | no  | yes |
+| ECI  | yes | no  | no  | yes |
+
+- **Deny by default.** A component that declares no classifications (neither `allowed_data_classifications` nor a legacy `compliance_level`), or an empty list, is approved for no classified session. This matters most for MCP servers, which can be data egress points.
+- **No implication between levels.** `allowed_with` in `compliance-levels.json` no longer grants access across levels: an ITAR session never reaches a UUR-only model or tool because ITAR "allows" UUR. List every classification a component may receive on the component itself.
+- With no level selected ("All Levels", only offered when a level is not required), nothing is filtered in the UI and no turn is refused for its components. RAG queries keep a floor: a source that declares classifications must share at least one with the selected model. Nothing else is checked: in particular, RAG results in a no-level turn can reach any tool server the user selected. If that matters for your deployment, turn on `FEATURE_COMPLIANCE_LEVEL_REQUIRED`. Use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` (below) to remove the no-level choice.
+- A level the deployment does not define is refused, rather than treated as no level.
+
+## Server-Side Enforcement
+
+The rule is enforced on the server, not only in the UI, so a stale bundle, the CLI, the Python client or a hand-crafted WebSocket client cannot bypass it. Before a chat turn runs, the server checks the selected model, the MCP server behind every selected tool, and every selected data source against the active classification. If any is not approved, the turn is refused with a message naming them, before the session is touched or anything is called. If the check itself cannot run (a broken configuration lookup), a classified turn is refused rather than run unchecked.
+
+Tool calls are checked again when they execute. A call the model makes to a tool on a server not approved for the active classification is refused, even if that tool was never selected (a hallucinated or prompt-injected call). The same applies to a server that declares nothing.
+
+A RAG backend's discovery can also return `allowed_data_classifications` per corpus. A corpus can only narrow its server's list (entries the server does not list are ignored); one that sends no list inherits its server's. A per-corpus `compliance_level` from discovery is shown as a badge but is not a boundary, because existing backends send one (often `CUI`) for every corpus. For a classified turn with selected data sources, the server runs discovery at the active level for just those servers and refuses any selected corpus it does not offer. A corpus whose backend does not answer, or that the user cannot see, is refused as unconfirmed rather than queried. RAG queries are checked again at query time against the active classification, which also covers `atlas_search` calls the model makes during a turn; discovery for the `atlas_search` tool only offers sources approved for it. The built-in `atlas` tools (canvas, sleep, search, discover sources) run in-process and are exempt from the tool check; search reaches only sources that pass their own checks.
+
+## Migrating from `compliance_level`
+
+`compliance_level` is deprecated but still read:
+
+1. A component with only `compliance_level: X` is treated as `allowed_data_classifications: [X]`.
+2. When both are set, `allowed_data_classifications` wins and a deprecation warning is logged at load. Remove `compliance_level` once you have migrated.
+3. For a LiteLLM gateway, the most specific declaration wins: the allowlisted model's `allowed_data_classifications`, then its `compliance_level`, then the gateway's `allowed_data_classifications`, then the gateway's `compliance_level`.
+4. HTTP RAG discovery may return `allowed_data_classifications` per source alongside `compliance_level`; MCP RAG resources may return `allowedDataClassifications`. A resource that declares nothing inherits its server's classifications.
+
+> **Behavior change:** before this release, a level's `allowed_with` list let a session use components at other levels (the bundled HIPAA level allowed SOC2 components), and a component with no level was usable from any session on the server side. Both now fail closed. To keep a component usable at several levels, list them all in its `allowed_data_classifications`. `allowed_with` is still accepted in `compliance-levels.json` (and returned by `/api/compliance-levels`) for compatibility, but it no longer affects access; a WARNING at startup names any level whose `allowed_with` lists other levels.
 
 ## Enabling the Compliance Selector
 
@@ -44,16 +93,16 @@ If no `compliance-levels.json` can be loaded, the UI has no levels to offer and 
 
 ## What the Selector Does in the UI
 
-Choosing a level applies one rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when its `compliance_level` is in the selected level's `allowed_with` list. A resource with **no** `compliance_level` is hidden while a level is selected, because it has no declared boundary. With "All Levels", nothing is filtered. The built-in `atlas` tools (canvas, sleep, search, discover sources) are exempt: they run in-process, and search only reaches sources that pass their own compliance checks.
+Choosing a level applies the same rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when the selected level is one of its allowed data classifications. A resource with none is hidden while a level is selected. With "All Levels", nothing is filtered. Personas carry a single `compliance_level` and must match the selected level. The built-in `atlas` tools are exempt, as above. In the data sources panel, a source whose RAG server is not approved for the level is shown disabled, because the server will not query it.
 
 Selections follow the same rule, so what is sent is always what the panels show:
 
-- Tool, prompt and data source selections the level excludes are deselected, and a selection the UI cannot place yet (while the configuration is still loading) is held back from the message rather than sent unchecked -- on a level switch, when the page loads with a saved level, and when a workspace is restored. Selections the level allows are kept (for example, switching to HIPAA keeps SOC2 tools).
+- Tool, prompt and data source selections the level excludes are deselected, and a selection the UI cannot place yet (while the configuration is still loading) is held back from the message rather than sent unchecked -- on a level switch, when the page loads with a saved level, and when a workspace is restored. Selections the level allows are kept.
 - An active persona or MCP prompt the level excludes is cleared.
-- If the selected model is outside the level, the UI switches to a model at that level (or another model it allows) and says so. If no allowed model exists, the model button is highlighted with a warning, the model picker explains that no models match, and sending is refused until you pick an allowed model or change the level.
+- If the selected model is not approved for the level, the UI switches to the first approved model and says so. If no allowed model exists, the model button is highlighted with a warning, the model picker explains that no models match, and sending is refused until you pick an allowed model or change the level.
 - A saved level that the deployment no longer defines is dropped, rather than silently hiding everything. If the level definitions cannot be loaded at all, the selector stays visible with the saved level so it can still be cleared.
 
 These rules apply both when you change the level and when the page loads with a saved level.
 
-MCP tool calls have no separate server-side compliance check, so this client-side filtering is what keeps an excluded tool out of a turn. RAG queries are additionally enforced on the server against the *selected model's* compliance level.
+The server re-checks every turn (see Server-Side Enforcement), so this filtering is a convenience, not the boundary.
 

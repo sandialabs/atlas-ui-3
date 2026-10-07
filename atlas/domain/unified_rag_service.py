@@ -11,8 +11,11 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from atlas.core.compliance import (
+    declared_classifications,
     get_active_compliance_context,
     get_compliance_manager,
+    get_model_classification_floor,
+    narrow_classifications,
     reset_active_compliance_context,
     set_active_compliance_context,
 )
@@ -116,6 +119,22 @@ def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
     attrs["docs_used_in_context"] = doc_ids
     attrs["top_score"] = max(doc_scores) if doc_scores else None
     return attrs
+
+
+def corpus_classifications(ds: Any, server_config: Any) -> Optional[List[str]]:
+    """A discovered HTTP corpus's classifications.
+
+    The server's list from rag-sources.json, narrowed by the corpus's own
+    ``allowed_data_classifications`` when the backend sends a list. The
+    per-corpus ``compliance_level`` is display-only: existing backends send
+    one for every corpus (often ``CUI``), and it was never a server-side
+    boundary, so it must not hide corpora the server config approves.
+    """
+    own = getattr(ds, "allowed_data_classifications", None)
+    return narrow_classifications(
+        own if isinstance(own, list) else None,
+        declared_classifications(server_config),
+    )
 
 
 class UnifiedRAGService:
@@ -333,26 +352,49 @@ class UnifiedRAGService:
             )
 
         active_compliance_level, enforce_compliance = get_active_compliance_context()
-        resource_compliance_level = source_config.compliance_level
-        if not enforce_compliance or not resource_compliance_level:
-            return
-
-        if not active_compliance_level:
+        if not enforce_compliance:
+            # No classification is active. Keep the model floor: a source that
+            # declares classifications must share one with the selected model,
+            # so an unclassified turn cannot pull a source into a model never
+            # approved for any of its classifications.
+            floor = get_model_classification_floor()
+            source_classifications = declared_classifications(source_config)
+            if floor is None or not source_classifications:
+                return
+            compliance_mgr = get_compliance_manager()
+            if any(
+                compliance_mgr.classification_permits(level, floor)
+                for level in source_classifications
+            ):
+                return
             logger.warning(
-                "Rejected RAG query for source %s: no trusted compliance level is active",
+                "Rejected RAG query for source %s: no classification shared with the model",
                 sanitize_for_logging(source_name),
             )
             raise DataSourcePermissionError(
-                f"{subject} not accessible without a trusted compliance level. "
-                f"Deselect {pronoun}, or select a model that carries a "
-                "compliance level.",
+                f"{subject} not approved for any classification the selected model "
+                f"may receive. Deselect {pronoun}, select a compliance level, or "
+                "switch to a model approved for that source.",
                 code="DATA_SOURCE_COMPLIANCE_MISMATCH",
             )
 
+        if not active_compliance_level:
+            logger.warning(
+                "Rejected RAG query for source %s: no compliance level is active",
+                sanitize_for_logging(source_name),
+            )
+            raise DataSourcePermissionError(
+                f"{subject} not accessible without a compliance level. "
+                f"Deselect {pronoun}, or select a compliance level.",
+                code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+            )
+
+        # The source must explicitly list the active classification; one that
+        # declares nothing is approved for no classified session (#1032).
         compliance_mgr = get_compliance_manager()
-        if compliance_mgr.is_accessible(
-            user_level=active_compliance_level,
-            resource_level=resource_compliance_level,
+        if compliance_mgr.classification_permits(
+            active_compliance_level,
+            declared_classifications(source_config),
         ):
             return
 
@@ -364,9 +406,8 @@ class UnifiedRAGService:
             sanitize_for_logging(source_name),
         )
         raise DataSourcePermissionError(
-            f"{subject} not accessible at the compliance level of the selected "
-            f"model. Deselect {pronoun}, or switch to a model cleared for "
-            "that source.",
+            f"{subject} not approved for the selected compliance level. "
+            f"Deselect {pronoun}, or select a different compliance level.",
             code="DATA_SOURCE_COMPLIANCE_MISMATCH",
         )
 
@@ -374,6 +415,7 @@ class UnifiedRAGService:
         self,
         username: str,
         user_compliance_level: Optional[str] = None,
+        only_servers: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Discover data sources across all configured RAG backends.
 
@@ -394,6 +436,8 @@ class UnifiedRAGService:
         rag_config = self.config_manager.rag_sources_config
 
         for source_name, source_config in rag_config.sources.items():
+            if only_servers is not None and source_name not in only_servers:
+                continue
             try:
                 if not source_config.enabled:
                     continue
@@ -409,24 +453,22 @@ class UnifiedRAGService:
                     continue
 
                 # Check compliance level filtering
-                if user_compliance_level and source_config.compliance_level:
+                if user_compliance_level:
                     compliance_mgr = get_compliance_manager()
-                    if not compliance_mgr.is_accessible(
-                        user_level=user_compliance_level,
-                        resource_level=source_config.compliance_level,
+                    if not compliance_mgr.classification_permits(
+                        user_compliance_level,
+                        declared_classifications(source_config),
                     ):
                         logger.info(
-                            "Skipping RAG source %s due to compliance level mismatch (user: %s, source: %s)",
+                            "Skipping RAG source %s: not approved for the active classification",
                             sanitize_for_logging(source_name),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(source_config.compliance_level),
                         )
                         continue
 
                 if source_config.type == "http":
                     # Discover from HTTP RAG API
                     server_info = await self._discover_http_source(
-                        source_name, source_config, username
+                        source_name, source_config, username, user_compliance_level
                     )
                     if server_info:
                         rag_servers.append(server_info)
@@ -450,8 +492,14 @@ class UnifiedRAGService:
         source_name: str,
         config: RAGSourceConfig,
         username: str,
+        user_compliance_level: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Discover data sources from an HTTP RAG API."""
+        """Discover data sources from an HTTP RAG API.
+
+        With ``user_compliance_level`` set, corpora not approved for it are
+        left out (issue #1032), so this list is also the server-side gate for
+        per-corpus classifications.
+        """
         try:
             client = self._get_http_client(source_name, config)
             data_sources = await client.discover_data_sources(username)
@@ -460,9 +508,20 @@ class UnifiedRAGService:
                 logger.debug("No data sources found for HTTP source %s", source_name)
                 return None
 
-            # Build UI sources array
-            ui_sources = [
-                {
+            compliance_mgr = get_compliance_manager() if user_compliance_level else None
+            ui_sources = []
+            for ds in data_sources:
+                classifications = corpus_classifications(ds, config)
+                if compliance_mgr and not compliance_mgr.classification_permits(
+                    user_compliance_level, classifications
+                ):
+                    logger.info(
+                        "Skipping RAG corpus %s:%s: not approved for the active classification",
+                        sanitize_for_logging(source_name),
+                        sanitize_for_logging(ds.id),
+                    )
+                    continue
+                ui_sources.append({
                     "id": ds.id,
                     "name": ds.label,
                     "label": ds.label,
@@ -470,15 +529,15 @@ class UnifiedRAGService:
                     "authRequired": True,
                     "selected": False,
                     "complianceLevel": ds.compliance_level,
-                }
-                for ds in data_sources
-            ]
+                    "allowedDataClassifications": classifications,
+                })
 
             return {
                 "server": source_name,
                 "displayName": config.display_name or source_name,
                 "icon": config.icon or "database",
                 "complianceLevel": config.compliance_level,
+                "allowedDataClassifications": declared_classifications(config),
                 "sources": ui_sources,
             }
 

@@ -10,7 +10,7 @@ import logging
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 
@@ -109,6 +109,21 @@ class ComplianceLevelManager:
                 for alias in level.aliases:
                     self._name_to_canonical[alias] = level.name
 
+            widening = [
+                name for name, level in self.levels.items()
+                if any(other != name for other in level.allowed_with)
+            ]
+            if widening:
+                # Kept loadable for compatibility, but it no longer grants
+                # access across levels (issue #1032).
+                logger.warning(
+                    "compliance-levels.json: allowed_with on level(s) %s lists other "
+                    "levels; allowed_with is deprecated and no longer grants access "
+                    "across levels. List every classification a component may "
+                    "receive in its allowed_data_classifications instead.",
+                    ", ".join(sanitize_for_logging(n) for n in widening),
+                )
+
             logger.info(f"Loaded {len(self.levels)} compliance levels from {config_path}")
             logger.debug(f"Compliance levels: {list(self.levels.keys())}")
 
@@ -181,41 +196,83 @@ class ComplianceLevelManager:
 
         return canonical
 
-    def is_accessible(self, user_level: Optional[str], resource_level: Optional[str]) -> bool:
-        """Check if a resource at resource_level is accessible given user_level.
+    def validate_classifications(
+        self, classifications: Optional[Sequence[str]], context: str = ""
+    ) -> Optional[List[str]]:
+        """Canonicalize an ``allowed_data_classifications`` list.
 
-        In explicit allowlist mode:
-        - Each level defines which other levels can be used together
-        - For example, HIPAA might allow HIPAA and SOC2, but not Public
-        - None (unset) is accessible by all and can access all
-
-        Args:
-            user_level: User's selected compliance level
-            resource_level: Resource's compliance level
-
-        Returns:
-            True if resource is accessible, False otherwise
+        Unknown names are dropped (with the same warning as an unknown
+        ``compliance_level``) rather than kept, so a typo can only narrow what
+        a component is approved for, never widen it. ``None`` (not declared)
+        stays ``None``; a list whose every entry was unknown becomes ``[]``,
+        which approves the component for no classified session.
         """
-        # If either is None/unset, resource is accessible (backward compatibility)
-        if not user_level or not resource_level:
+        if classifications is None:
+            return None
+        out: List[str] = []
+        for name in classifications:
+            if not isinstance(name, str) or not name:
+                continue
+            canonical = self.validate_compliance_level(name, context=context)
+            if canonical and canonical not in out:
+                out.append(canonical)
+        return out
+
+    def classification_permits(
+        self,
+        active_level: Optional[str],
+        classifications: Union[None, str, Sequence[str]],
+    ) -> bool:
+        """Whether a component may receive data of the active classification.
+
+        The one access rule (issue #1032): the active conversation
+        classification must be a member of the component's explicitly
+        declared ``allowed_data_classifications``.
+
+        - No active classification: nothing to protect, so permitted.
+        - Nothing declared (``None`` or ``[]``): denied. A component without a
+          declaration is approved for no classified session -- fail closed.
+        - Otherwise membership after alias resolution. ``allowed_with`` in
+          compliance-levels.json plays no part: a level never makes another
+          level's components valid by implication.
+
+        ``classifications`` may be a bare string (a legacy ``compliance_level``),
+        which is read as a one-element list.
+        """
+        if not active_level:
             return True
+        if isinstance(classifications, str):
+            classifications = [classifications]
+        if not classifications:
+            return False
+        active = self.get_canonical_name(active_level) or (
+            None if self.levels else active_level
+        )
+        if not active:
+            # An undefined active level can match nothing.
+            return False
+        for name in classifications:
+            if not isinstance(name, str) or not name:
+                continue
+            canonical = self.get_canonical_name(name) or (None if self.levels else name)
+            if canonical == active:
+                return True
+        return False
 
-        # Get canonical names
-        user_canonical = self.get_canonical_name(user_level)
-        resource_canonical = self.get_canonical_name(resource_level)
+    def is_accessible(
+        self,
+        user_level: Optional[str],
+        resource_level: Union[None, str, Sequence[str]],
+    ) -> bool:
+        """Whether a resource is usable at ``user_level``.
 
-        # If we don't have level info, be permissive
-        if not user_canonical or not resource_canonical:
-            return True
-
-        # Get level object for user
-        user_level_obj = self.levels.get(user_canonical)
-
-        if not user_level_obj:
-            return True
-
-        # Check if resource_level is in the user's allowed_with list
-        return resource_canonical in user_level_obj.allowed_with
+        Kept as the historical entry point; it now applies the explicit
+        membership rule of :meth:`classification_permits` (issue #1032).
+        ``resource_level`` may be a legacy single level or a list of allowed
+        data classifications. An untagged resource is no longer accessible
+        under a selected level.
+        """
+        return self.classification_permits(user_level, resource_level)
 
     def get_accessible_levels(self, user_level: Optional[str]) -> Set[str]:
         """Get all compliance levels accessible to a user.
@@ -234,10 +291,9 @@ class ComplianceLevelManager:
         if not user_canonical or user_canonical not in self.levels:
             return set(self.levels.keys())
 
-        user_level_obj = self.levels[user_canonical]
-
-        # Return the allowed_with list for this level
-        return set(user_level_obj.allowed_with)
+        # Under the explicit membership rule a level reaches only components
+        # that list it; ``allowed_with`` no longer widens that.
+        return {user_canonical}
 
     def resolve_default_level(self, preferred: Optional[str]) -> Optional[str]:
         """The level a session starts on when a level is required.
@@ -266,12 +322,108 @@ class ComplianceLevelManager:
         return list(self.levels.keys())
 
 
+def coerce_classifications(value: Any) -> Optional[List[str]]:
+    """Normalize a raw ``allowed_data_classifications`` value.
+
+    ``None`` stays ``None`` (not declared); a string is a one-element list; a
+    list keeps its non-empty string entries; any other shape is unreadable and
+    becomes ``[]``, which approves the component for nothing. One rule for
+    config, HTTP and MCP discovery payloads.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple)):
+        return [c for c in value if isinstance(c, str) and c]
+    return []
+
+
+def declared_classifications(resource: Any) -> Optional[List[str]]:
+    """The data classifications a component is explicitly approved for.
+
+    ``resource`` is a config object (LLM model, MCP server, RAG source) or a
+    dict of the same shape, including discovery payloads that use camelCase.
+    ``allowed_data_classifications`` wins when present; otherwise a legacy
+    ``compliance_level`` is read as a one-element list (the migration path of
+    issue #1032). ``None`` when neither is declared.
+    """
+    if resource is None:
+        return None
+    if isinstance(resource, dict):
+        allowed = resource.get("allowed_data_classifications")
+        if allowed is None:
+            allowed = resource.get("allowedDataClassifications")
+        legacy = resource.get("compliance_level") or resource.get("complianceLevel")
+    else:
+        allowed = getattr(resource, "allowed_data_classifications", None)
+        legacy = getattr(resource, "compliance_level", None)
+    allowed = coerce_classifications(allowed)
+    if allowed is not None:
+        return allowed
+    if isinstance(legacy, str) and legacy:
+        return [legacy]
+    return None
+
+
+def narrow_classifications(
+    own: Optional[Sequence[str]],
+    server: Optional[Sequence[str]],
+    manager: Optional["ComplianceLevelManager"] = None,
+) -> Optional[List[str]]:
+    """A corpus's classifications, bounded by its server's.
+
+    A corpus can only narrow what its server is approved for, never widen it:
+    with no list of its own it inherits the server's, otherwise it keeps the
+    entries the server also lists (aliases resolved). ``None`` when the server
+    declares nothing, which denies the corpus in any classified session.
+    """
+    if server is None:
+        return None
+    if own is None:
+        return list(server)
+    mgr = manager or get_compliance_manager()
+
+    def canon(name: str) -> str:
+        return mgr.get_canonical_name(name) or name
+
+    allowed = {canon(n) for n in server if isinstance(n, str) and n}
+    return [n for n in own if isinstance(n, str) and n and canon(n) in allowed]
+
+
 # Global instance
 _compliance_manager: Optional[ComplianceLevelManager] = None
 _active_compliance_context: ContextVar[Tuple[Optional[str], bool]] = ContextVar(
     "active_compliance_context",
     default=(None, False),
 )
+
+
+# The selected model's classifications, set only for a turn with no active
+# classification. Query-time RAG enforcement then keeps the floor it had
+# before issue #1032: a source that declares classifications must share one
+# with the model that will read it.
+_model_classification_floor: ContextVar[Optional[Tuple[str, ...]]] = ContextVar(
+    "model_classification_floor",
+    default=None,
+)
+
+
+def set_model_classification_floor(
+    classifications: Optional[Sequence[str]],
+) -> Token[Optional[Tuple[str, ...]]]:
+    """Set the per-turn model floor used when no classification is active."""
+    return _model_classification_floor.set(
+        tuple(classifications) if classifications is not None else None
+    )
+
+
+def reset_model_classification_floor(token: Token[Optional[Tuple[str, ...]]]) -> None:
+    _model_classification_floor.reset(token)
+
+
+def get_model_classification_floor() -> Optional[Tuple[str, ...]]:
+    return _model_classification_floor.get()
 
 
 def get_compliance_manager() -> ComplianceLevelManager:

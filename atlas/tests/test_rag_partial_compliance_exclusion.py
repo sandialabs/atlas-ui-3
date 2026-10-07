@@ -29,9 +29,8 @@ def _denial(source: str) -> DataSourcePermissionError:
     """A denial shaped like the real one, which names the *corpus* the user
     selected rather than the ``rag-sources.json`` server key."""
     return DataSourcePermissionError(
-        f"The data source '{source}' is not accessible at the compliance level "
-        "of the selected model. Deselect it, or switch to a model cleared for "
-        "that source.",
+        f"The data source '{source}' is not approved for the selected compliance "
+        "level. Deselect it, or select a different compliance level.",
         code="DATA_SOURCE_COMPLIANCE_MISMATCH",
     )
 

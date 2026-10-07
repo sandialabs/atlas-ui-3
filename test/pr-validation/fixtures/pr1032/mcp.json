@@ -1,0 +1,22 @@
+{
+  "google_search": {
+    "url": "http://127.0.0.1:9/mcp",
+    "transport": "http",
+    "groups": [],
+    "description": "External search; UUR only",
+    "allowed_data_classifications": ["UUR"]
+  },
+  "internal_search": {
+    "url": "http://127.0.0.1:9/mcp",
+    "transport": "http",
+    "groups": [],
+    "description": "Internal search; every classification",
+    "allowed_data_classifications": ["UUR", "ITAR", "ECI"]
+  },
+  "bare_server": {
+    "url": "http://127.0.0.1:9/mcp",
+    "transport": "http",
+    "groups": [],
+    "description": "No declaration"
+  }
+}

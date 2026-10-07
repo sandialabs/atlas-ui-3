@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-08-21
+Last updated: 2026-10-07
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -227,7 +227,7 @@ Models can set `api_key_source: "globus"` with a `globus_scope` field. The Globu
 
 ### MCP Servers
 - Tool servers in `mcp.json`, RAG sources in `rag-sources.json`
-- Fields: `groups`, `transport|type`, `url|command/cwd`, `compliance_level`
+- Fields: `groups`, `transport|type`, `url|command/cwd`, `allowed_data_classifications` (legacy `compliance_level`)
 - Transport detection: explicit transport -> command (stdio) -> URL protocol (http/sse) -> type fallback
 - Tool names exposed to LLM: `server_toolName`. The built-in `atlas` server (`atlas_canvas`,
   `atlas_sleep`, `atlas_search`, `atlas_discover_sources`) has no MCP server behind it;
@@ -246,9 +246,9 @@ Example configs in `atlas/config/mcp-example-configs/`.
 
 ## Compliance Levels
 
-Definitions in `atlas/config/compliance-levels.json` with user overrides in `config/compliance-levels.json`. `core/compliance.py` loads, normalizes aliases, and enforces `allowed_with`.
+Definitions in `atlas/config/compliance-levels.json` with user overrides in `config/compliance-levels.json`. `core/compliance.py` loads and normalizes aliases. Models, MCP servers and RAG sources declare `allowed_data_classifications` (legacy `compliance_level` = one-element list); the active conversation level must be a member (`ComplianceLevelManager.classification_permits`), undeclared fails closed, and `allowed_with` no longer widens access (#1032). `application/chat/policies/classification_policy.py` checks the whole turn server-side before it runs; the frontend mirror is `utils/complianceAccess.js`.
 
-When enabled: `/api/config` includes model/server `compliance_level`, `domain/rag_mcp_service` filters using `ComplianceLevelManager.is_accessible(user, resource)`, validated on load for LLM models, MCP servers, and RAG servers.
+When enabled: `/api/config` includes model/server `compliance_level` and effective `allowed_data_classifications`, `domain/rag_mcp_service` and `domain/unified_rag_service` filter with `ComplianceLevelManager.classification_permits(level, declared_classifications(resource))`, validated on load for LLM models, gateways, MCP servers, and RAG sources.
 
 ## Key APIs
 

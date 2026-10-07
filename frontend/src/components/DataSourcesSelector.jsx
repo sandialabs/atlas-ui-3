@@ -2,6 +2,7 @@ import { useMemo, useState, useCallback } from 'react'
 import { X, Search, CheckSquare, Square } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
 
 /**
  * The data source (RAG corpus) picker.
@@ -18,26 +19,13 @@ const DataSourcesSelector = () => {
     addDataSources,
     clearDataSources,
     features,
-    complianceLevelFilter,
-    models,
-    currentModel
+    complianceLevelFilter
   } = useChat()
   const { isComplianceAccessible, complianceLevels } = useMarketplace()
 
   const [searchQuery, setSearchQuery] = useState('')
 
   const complianceLevelsEnabled = features.compliance_levels
-
-  // The boundary that is actually enforced server-side at query time is the
-  // *selected model's* compliance level, not the header filter. Derive it here
-  // so the picker cannot offer a source that would be excluded on send.
-  const modelComplianceLevel = useMemo(() => {
-    if (!complianceLevelsEnabled || !currentModel) return null
-    const match = (models || [])
-      .map(m => (typeof m === 'string' ? { name: m } : m))
-      .find(m => (m.name || '') === currentModel)
-    return match?.compliance_level || null
-  }, [complianceLevelsEnabled, models, currentModel])
 
   // Helper to get badge color
   const getComplianceBadgeColor = (level) => {
@@ -51,45 +39,39 @@ const DataSourcesSelector = () => {
 
   // Out-of-boundary sources are rendered disabled, not hidden: a hidden row
   // that stays selected can only be cleared via "Clear all", and the server's
-  // denial message ("Deselect it, or switch to a model cleared for that
-  // source") only makes sense when the checkbox stays reachable.
+  // denial message ("Deselect it") only makes sense when the checkbox stays
+  // reachable.
   //
   // Two compliance granularities exist side by side on each source:
-  //   source.complianceLevel        per-corpus label from the RAG backend's
-  //                                 own discovery response (shown on the badge)
-  //   source.serverComplianceLevel  per-server label from rag-sources.json
-  // The server-side gate compares the *per-server* value, so the model-level
-  // check below does too; the header filter and the badge stay on the
-  // per-corpus label the user is shown.
-  //
-  // This check deliberately mirrors the server's *permissive* treatment of
-  // untagged sources and missing config, so the picker never disables
-  // something the gate would allow:
-  //   - a source carrying no per-server level is never excluded (the gate
-  //     returns early on `not resource_compliance_level`);
-  //   - an empty/unloaded complianceLevels config disables the check
-  //     entirely (the server's ComplianceLevelManager is permissive with no
-  //     config loaded, and a failed fetch must not blank the panel).
-  const modelBoundaryActive =
+  //   classificationsOf(source)     per-corpus classifications from the RAG
+  //                                 backend's own discovery response (the
+  //                                 badge and the header filter use these)
+  //   source.serverClassifications  per-server classifications from
+  //                                 rag-sources.json
+  // The server checks the *per-server* classifications against the active
+  // compliance level on every turn and at query time (issue #1032), so a row
+  // whose server is not approved for the level is disabled here. An empty or
+  // unloaded level list disables the check, so a failed fetch does not blank
+  // the panel.
+  const boundaryActive =
     complianceLevelsEnabled &&
-    !!modelComplianceLevel &&
+    !!complianceLevelFilter &&
     (complianceLevels || []).length > 0
 
-  const isOutOfModelBoundary = useCallback((source) => {
-    if (!modelBoundaryActive) return false
-    if (!source.serverComplianceLevel) return false
-    return !isComplianceAccessible(modelComplianceLevel, source.serverComplianceLevel)
-  }, [modelBoundaryActive, modelComplianceLevel, isComplianceAccessible])
+  const isOutOfBoundary = useCallback((source) => {
+    if (!boundaryActive) return false
+    return !isComplianceAccessible(complianceLevelFilter, source.serverClassifications)
+  }, [boundaryActive, complianceLevelFilter, isComplianceAccessible])
 
   // Apply filtering logic based on compliance level and search query
   const filteredDataSources = useMemo(() => {
     let sources = ragSources
 
-    // Filter by compliance level with the same allowlist rule as tools,
-    // prompts and models (HIPAA also lists SOC2 sources), not name equality.
+    // Filter by compliance level with the same membership rule as tools,
+    // prompts and models: the level must be one of the source's classifications.
     if (complianceLevelsEnabled && complianceLevelFilter) {
       sources = sources.filter(source =>
-        isComplianceAccessible(complianceLevelFilter, source.complianceLevel)
+        isComplianceAccessible(complianceLevelFilter, classificationsOf(source))
       )
     }
 
@@ -107,14 +89,14 @@ const DataSourcesSelector = () => {
     return sources
   }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, isComplianceAccessible, searchQuery])
 
-  // Enable all filtered data sources, skipping rows the model boundary
+  // Enable all filtered data sources, skipping rows the compliance boundary
   // disables -- selecting those would only produce a query-time exclusion.
   const enableAll = useCallback(() => {
     const keys = filteredDataSources
-      .filter(ds => !isOutOfModelBoundary(ds))
+      .filter(ds => !isOutOfBoundary(ds))
       .map(ds => `${ds.serverName}:${ds.id}`)
     addDataSources(keys)
-  }, [filteredDataSources, isOutOfModelBoundary, addDataSources])
+  }, [filteredDataSources, isOutOfBoundary, addDataSources])
 
   // Clear all selected data sources (clears everything, not just filtered)
   const clearAll = useCallback(() => {
@@ -182,7 +164,7 @@ const DataSourcesSelector = () => {
             {filteredDataSources.map(dataSource => {
               const selectionKey = `${dataSource.serverName}:${dataSource.id}`
               const isSelected = selectedDataSources.has(selectionKey)
-              const outOfBoundary = isOutOfModelBoundary(dataSource)
+              const outOfBoundary = isOutOfBoundary(dataSource)
               const displayLabel = dataSource.label || dataSource.name || dataSource.id
               // An out-of-boundary row cannot be selected, but one that is
               // *already* selected must stay deselectable -- that is the whole
@@ -207,8 +189,8 @@ const DataSourcesSelector = () => {
                   onClick={clickable ? () => toggleDataSource(selectionKey) : undefined}
                   title={outOfBoundary
                     ? (isSelected
-                      ? 'Outside the selected model\'s compliance boundary; the server will not query it. Click to deselect.'
-                      : 'Outside the selected model\'s compliance boundary; the server will not query it')
+                      ? 'Not approved for the selected compliance level; the server will not query it. Click to deselect.'
+                      : 'Not approved for the selected compliance level; the server will not query it')
                     : undefined}
                   className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
                     outOfBoundary
@@ -226,9 +208,9 @@ const DataSourcesSelector = () => {
                     <span className="font-medium text-sm min-w-0 break-words">
                       {displayLabel}
                     </span>
-                    {complianceLevelsEnabled && dataSource.complianceLevel && (
-                      <span className={`px-1.5 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap flex-shrink-0 ${getComplianceBadgeColor(dataSource.complianceLevel)}`}>
-                        {dataSource.complianceLevel}
+                    {complianceLevelsEnabled && classificationLabel(dataSource) && (
+                      <span className={`px-1.5 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap flex-shrink-0 ${getComplianceBadgeColor(classificationsOf(dataSource)[0])}`}>
+                        {classificationLabel(dataSource)}
                       </span>
                     )}
                   </div>
@@ -242,7 +224,7 @@ const DataSourcesSelector = () => {
                   </div>
                   {outOfBoundary && (
                     <div className="text-xs mt-1 text-amber-400">
-                      Outside the selected model&apos;s compliance boundary
+                      Not approved for the selected compliance level
                       {isSelected && ' — selected but will not be searched; click to deselect'}
                     </div>
                   )}

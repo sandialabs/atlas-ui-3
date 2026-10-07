@@ -38,6 +38,7 @@ vi.mock('../hooks/useLLMAuthStatus', () => ({
 const MODELS = [
   { name: 'public-model', compliance_level: 'Public' },
   { name: 'soc2-model', compliance_level: 'SOC2' },
+  { name: 'soc2-hipaa-model', allowed_data_classifications: ['SOC2', 'HIPAA'] },
   { name: 'hipaa-model', compliance_level: 'HIPAA' },
 ]
 
@@ -64,17 +65,24 @@ describe('ModelSelector - compliance filter', () => {
     expect(button.title).toMatch(/outside the HIPAA compliance level/)
   })
 
-  it('does not flag a model the level allows', () => {
-    setup({ currentModel: 'soc2-model', complianceLevelFilter: 'HIPAA' })
+  it('does not flag a model whose classifications include the level', () => {
+    setup({ currentModel: 'soc2-hipaa-model', complianceLevelFilter: 'HIPAA' })
     const button = screen.getByRole('button', { name: /Select chat model/ })
     expect(button.getAttribute('aria-label')).not.toMatch(/outside/)
   })
 
-  it('lists the allowlisted models only', () => {
+  it('flags a SOC2-only model under HIPAA despite allowed_with', () => {
+    setup({ currentModel: 'soc2-model', complianceLevelFilter: 'HIPAA' })
+    const button = screen.getByRole('button', { name: /Select chat model/ })
+    expect(button).toHaveAttribute('aria-label', expect.stringContaining('outside the HIPAA compliance level'))
+  })
+
+  it('lists only the models approved for the level', () => {
     setup({ currentModel: 'hipaa-model', complianceLevelFilter: 'HIPAA' })
     fireEvent.click(screen.getByRole('button', { name: /Select chat model/ }))
-    expect(screen.getByTitle('soc2-model')).toBeInTheDocument()
     expect(screen.getByTitle('hipaa-model')).toBeInTheDocument()
+    expect(screen.getByTitle('soc2-hipaa-model')).toBeInTheDocument()
+    expect(screen.queryByTitle('soc2-model')).not.toBeInTheDocument()
     expect(screen.queryByTitle('public-model')).not.toBeInTheDocument()
   })
 

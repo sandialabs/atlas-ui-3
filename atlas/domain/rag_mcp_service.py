@@ -9,10 +9,16 @@ Future phases will add search/synthesis and richer shapes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from atlas.core.compliance import get_compliance_manager
+from atlas.core.compliance import (
+    coerce_classifications,
+    declared_classifications,
+    get_compliance_manager,
+    narrow_classifications,
+)
 from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -25,6 +31,66 @@ class RAGMCPService:
         self.mcp_manager = mcp_manager
         self.config_manager = config_manager
         self.auth_check_func = auth_check_func
+        # Serializes the temporary servers_config swap in _ensure_rag_clients:
+        # two concurrent swaps could each restore a snapshot holding the
+        # other's RAG entries, leaving them in the tool inventory for good.
+        self._init_lock = asyncio.Lock()
+
+    def _server_classifications(self, server: str):
+        """A RAG MCP server's declared classifications, from configuration.
+
+        Read from ``rag_mcp_config`` (built from rag-sources.json), not the
+        MCP manager's runtime ``available_tools`` entry, which a tool
+        rediscovery or admin reload clears -- that would fail approved
+        servers closed until restart. The runtime entry is the fallback for
+        a server the config does not list.
+        """
+        try:
+            cfg = self.config_manager.rag_mcp_config.servers.get(server)
+        except Exception:
+            cfg = None
+        if cfg is not None:
+            return declared_classifications(cfg)
+        return declared_classifications(
+            (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
+        )
+
+    async def _ensure_rag_clients(self) -> None:
+        """Initialize RAG MCP clients once, without polluting the tool inventory."""
+        try:
+            rag_servers = self.config_manager.rag_mcp_config.servers
+
+            def _missing():
+                # No client, or a client whose tools a rediscovery dropped from
+                # the shared inventory (which would hide the server until restart).
+                clients = getattr(self.mcp_manager, "clients", {})
+                tools = getattr(self.mcp_manager, "available_tools", {}) or {}
+                return [n for n in rag_servers if n not in clients or n not in tools]
+
+            if not _missing():
+                return
+            # setdefault: instances built without __init__ (tests) still lock.
+            async with self.__dict__.setdefault("_init_lock", asyncio.Lock()):
+                # Re-check: another caller may have initialized them meanwhile.
+                missing = _missing()
+                if not missing:
+                    return
+                original = dict(getattr(self.mcp_manager, "servers_config", {}))
+                try:
+                    self.mcp_manager.servers_config.update(
+                        {name: cfg.model_dump() for name, cfg in rag_servers.items()}
+                    )
+                    await self.mcp_manager.initialize_clients()
+                    await self.mcp_manager.discover_tools()
+                finally:
+                    # Restore original list for general tools panel separation
+                    self.mcp_manager.servers_config = original
+        except Exception as exc:
+            # Fall back to the clients that already exist.
+            logger.warning(
+                "RAG MCP client initialization failed (%s); using existing clients",
+                type(exc).__name__,
+            )
 
     async def _get_authorized_rag_servers(self, username: str, rag_servers: dict) -> List[str]:
         """Get list of RAG servers the user is authorized to access.
@@ -60,24 +126,7 @@ class RAGMCPService:
         Phase 1 returns a flat list of strings for backward compatibility.
         Uses server-qualified IDs: "{server}:{resource_id}" to avoid collisions.
         """
-        # Ensure RAG servers are initialized from rag_mcp_config, without polluting tool inventory
-        try:
-            rag_servers = self.config_manager.rag_mcp_config.servers
-            # If these servers aren't in mcp_manager.clients, initialize just these
-            missing = [name for name in rag_servers.keys() if name not in getattr(self.mcp_manager, "clients", {})]
-            if missing:
-                # Temporarily extend servers_config with rag servers and initialize them
-                original = dict(getattr(self.mcp_manager, "servers_config", {}))
-                try:
-                    self.mcp_manager.servers_config.update({name: cfg.model_dump() for name, cfg in rag_servers.items()})
-                    await self.mcp_manager.initialize_clients()
-                    await self.mcp_manager.discover_tools()
-                finally:
-                    # Restore original list for general tools panel separation
-                    self.mcp_manager.servers_config = original
-        except Exception:
-            # If anything goes wrong, fallback silently to existing clients
-            pass
+        await self._ensure_rag_clients()
         try:
             # Determine RAG servers current user can see
             # Use rag_mcp_config directly since servers_config was restored above
@@ -95,18 +144,14 @@ class RAGMCPService:
                 compliance_mgr = get_compliance_manager()
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                    server_compliance_level = cfg.get("compliance_level")
-                    if compliance_mgr.is_accessible(
-                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    if compliance_mgr.classification_permits(
+                        user_compliance_level, self._server_classifications(server)
                     ):
                         filtered_servers.append(server)
                     else:
                         logger.info(
-                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            "Skipping RAG server %s: not approved for the active classification",
                             sanitize_for_logging(server),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(server_compliance_level),
                         )
                 authorized_servers = filtered_servers
                 if not authorized_servers:
@@ -165,7 +210,13 @@ class RAGMCPService:
             logger.error("Error during RAG MCP discovery: %s", e, exc_info=True)
             return []
 
-    async def discover_servers(self, username: str, user_compliance_level: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def discover_servers(
+        self,
+        username: str,
+        user_compliance_level: Optional[str] = None,
+        only_servers: Optional[List[str]] = None,
+        initialize: bool = True,
+    ) -> List[Dict[str, Any]]:
         """Return richer per-server discovery structure for UI (rag_servers).
 
         Shape:
@@ -180,21 +231,13 @@ class RAGMCPService:
           }
         ]
         """
-        # Ensure RAG servers are initialized from rag_mcp_config, without polluting tool inventory
-        try:
-            rag_cfg_servers = self.config_manager.rag_mcp_config.servers
-            missing = [name for name in rag_cfg_servers.keys() if name not in getattr(self.mcp_manager, "clients", {})]
-            if missing:
-                original = dict(getattr(self.mcp_manager, "servers_config", {}))
-                try:
-                    self.mcp_manager.servers_config.update({name: cfg.model_dump() for name, cfg in rag_cfg_servers.items()})
-                    await self.mcp_manager.initialize_clients()
-                    await self.mcp_manager.discover_tools()
-                finally:
-                    self.mcp_manager.servers_config = original
-        except Exception:
-            # Fallback silently if RAG config init fails; we'll just return empty set
-            pass
+        # ``initialize=False`` (the per-turn compliance gate) never reconnects:
+        # that would rerun tool discovery and swap the shared servers_config on
+        # every classified turn while a server is down. A server without a
+        # client is simply absent from the result, which the gate reports as
+        # unverified.
+        if initialize:
+            await self._ensure_rag_clients()
 
         rag_servers: List[Dict[str, Any]] = []
         try:
@@ -205,23 +248,21 @@ class RAGMCPService:
             authorized_servers: List[str] = await self._get_authorized_rag_servers(
                 username, rag_cfg_servers
             )
+            if only_servers is not None:
+                authorized_servers = [s for s in authorized_servers if s in only_servers]
 
             # --- Compliance Filtering (Step 2) ---
             if compliance_mgr:
                 filtered_servers = []
                 for server in authorized_servers:
-                    cfg = (self.mcp_manager.available_tools.get(server) or {}).get("config", {})
-                    server_compliance_level = cfg.get("compliance_level")
-                    if compliance_mgr.is_accessible(
-                        user_level=user_compliance_level, resource_level=server_compliance_level
+                    if compliance_mgr.classification_permits(
+                        user_compliance_level, self._server_classifications(server)
                     ):
                         filtered_servers.append(server)
                     else:
                         logger.info(
-                            "Skipping RAG server %s due to compliance level mismatch (user: %s, server: %s)",
+                            "Skipping RAG server %s: not approved for the active classification",
                             sanitize_for_logging(server),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(server_compliance_level),
                         )
                 authorized_servers = filtered_servers
             # -------------------------------------
@@ -241,9 +282,11 @@ class RAGMCPService:
                     )
                     structured = self._extract_structured_result(raw)
                     resources = self._extract_resources(structured)
+                    discovery_failed = False
                 except Exception as e:
                     logger.warning("Discovery failed for server %s: %s", server, e)
                     resources = []
+                    discovery_failed = True
 
                 # Build UI sources array
                 ui_sources: List[Dict[str, Any]] = []
@@ -255,15 +298,25 @@ class RAGMCPService:
                     # --- Compliance Filtering (Step 3) ---
                     # Check for both camelCase (MCP standard) and snake_case (RAG mock standard)
                     resource_compliance_level = r.get("complianceLevel") or r.get("compliance_level")
-                    if compliance_mgr and not compliance_mgr.is_accessible(
-                        user_level=user_compliance_level, resource_level=resource_compliance_level
+                    # A resource can only narrow its server's classifications
+                    # with an explicit list; one that sends none inherits them.
+                    # A per-resource legacy complianceLevel is display-only, as
+                    # for HTTP corpora.
+                    own = r.get("allowedDataClassifications")
+                    if own is None:
+                        own = r.get("allowed_data_classifications")
+                    own = coerce_classifications(own)
+                    resource_classifications = narrow_classifications(
+                        own,
+                        self._server_classifications(server),
+                    )
+                    if compliance_mgr and not compliance_mgr.classification_permits(
+                        user_compliance_level, resource_classifications
                     ):
                         logger.info(
-                            "Skipping RAG resource %s:%s due to compliance level mismatch (user: %s, resource: %s)",
+                            "Skipping RAG resource %s:%s: not approved for the active classification",
                             sanitize_for_logging(server),
                             sanitize_for_logging(rid),
-                            sanitize_for_logging(user_compliance_level),
-                            sanitize_for_logging(resource_compliance_level),
                         )
                         continue
                     # -------------------------------------
@@ -278,6 +331,7 @@ class RAGMCPService:
                         "selected": bool(r.get("defaultSelected", False)),
                         # Include compliance_level from resource or inherit from server
                         "complianceLevel": resource_compliance_level if resource_compliance_level else None,
+                        "allowedDataClassifications": resource_classifications,
                     })
 
                 # Optional config-driven icon/name and compliance level
@@ -291,7 +345,10 @@ class RAGMCPService:
                     "displayName": display_name,
                     "icon": icon,
                     "complianceLevel": compliance_level,
+                    "allowedDataClassifications": self._server_classifications(server),
                     "sources": ui_sources,
+                    # Lets a caller tell "offered nothing" from "could not ask".
+                    "discoveryFailed": discovery_failed,
                 })
         except Exception as e:
             logger.error("discover_servers error: %s", e, exc_info=True)

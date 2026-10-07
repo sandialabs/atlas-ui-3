@@ -1,6 +1,6 @@
 # RAG Configuration
 
-Last updated: 2026-08-26
+Last updated: 2026-10-07
 
 This guide explains how to configure RAG (Retrieval-Augmented Generation) in Atlas UI.
 
@@ -110,7 +110,8 @@ For external HTTP REST API RAG backends:
 | `discovery_endpoint` | No | per `api_version` | Override the discovery path |
 | `query_endpoint` | No | per `api_version` | Override the query path |
 | `groups` | No | `[]` | Required groups for access |
-| `compliance_level` | No | `null` | Compliance level restriction |
+| `allowed_data_classifications` | No | `null` | Data classifications this source is approved to receive; the source is queried only when the conversation's level is listed. Undeclared means unavailable in classified sessions. See [Compliance](compliance.md) |
+| `compliance_level` | No | `null` | Deprecated single level, read as `[compliance_level]` when `allowed_data_classifications` is unset |
 | `enabled` | No | `true` | Whether this source is active |
 
 ### MCP RAG Source Configuration
@@ -144,7 +145,8 @@ For MCP-based RAG servers that expose `rag_discover_resources` tool:
 | `auth_token` | No | `null` | Auth token for MCP server |
 | `display_name` | No | source key | Name shown in UI |
 | `groups` | No | `[]` | Required groups for access |
-| `compliance_level` | No | `null` | Compliance level restriction |
+| `allowed_data_classifications` | No | `null` | Data classifications this source is approved to receive; the source is queried only when the conversation's level is listed. Undeclared means unavailable in classified sessions. See [Compliance](compliance.md) |
+| `compliance_level` | No | `null` | Deprecated single level, read as `[compliance_level]` when `allowed_data_classifications` is unset |
 
 \* Either `command` or `url` is required for MCP sources.
 
@@ -261,7 +263,7 @@ v1 always returns a completion (`is_completion=True`); Atlas renders the
 
 ## API v2: Query-Oriented Interface
 
-Last updated: 2026-08-26
+Last updated: 2026-10-07
 
 v2 exists because v1 ships the **entire conversation** to the RAG backend on
 every query, even though the backend only uses the last user message. v2 sends
@@ -447,7 +449,7 @@ and serves both contracts: `/api/v1/discover/datasources` +
 
 ## RAG Completions vs Raw Results
 
-Last updated: 2026-08-26
+Last updated: 2026-10-07
 
 Atlas UI supports two types of RAG responses, tracked by the `is_completion`
 flag on `RAGResponse`:

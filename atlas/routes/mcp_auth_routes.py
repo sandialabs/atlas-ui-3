@@ -20,6 +20,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from atlas.core.auth import is_user_in_group
+from atlas.core.compliance import declared_classifications
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.mcp_tools import mcp_oauth_service
@@ -190,6 +191,7 @@ async def get_auth_status(current_user: str = Depends(get_current_user)):
                 # no discovered tools, and a compliance filter has to be able to
                 # judge that row on the same footing as a real one.
                 "compliance_level": server_config.get("compliance_level"),
+                "allowed_data_classifications": declared_classifications(server_config),
             }
 
             # An oauth server is connected by visiting Atlas's own start

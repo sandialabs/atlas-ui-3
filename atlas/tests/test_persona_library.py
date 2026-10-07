@@ -417,14 +417,17 @@ async def test_compliance_filter_allows_matching_persona(compliance_setup):
 
 
 @pytest.mark.asyncio
-async def test_compliance_filter_uses_the_allowlist(compliance_setup):
+async def test_compliance_filter_requires_the_persona_level(compliance_setup):
     persona_library, group_check = compliance_setup
 
-    # HIPAA's allowed_with includes SOC2.
+    # The persona's level must be the active one; HIPAA's allowed_with listing
+    # SOC2 no longer widens it (issue #1032).
+    assert await persona_library.resolve_persona_prompt(
+        "soc2", "a@b.com", group_check, compliance_level_filter="SOC2"
+    ) == "SOC2 prompt"
     assert await persona_library.resolve_persona_prompt(
         "soc2", "a@b.com", group_check, compliance_level_filter="HIPAA"
-    ) == "SOC2 prompt"
-    # ...but Internal's does not include SOC2.
+    ) is None
     assert await persona_library.resolve_persona_prompt(
         "soc2", "a@b.com", group_check, compliance_level_filter="Internal"
     ) is None
