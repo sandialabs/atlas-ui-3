@@ -58,12 +58,20 @@ class RAGMCPService:
         """Initialize RAG MCP clients once, without polluting the tool inventory."""
         try:
             rag_servers = self.config_manager.rag_mcp_config.servers
-            if not [n for n in rag_servers if n not in getattr(self.mcp_manager, "clients", {})]:
+
+            def _missing():
+                # No client, or a client whose tools a rediscovery dropped from
+                # the shared inventory (which would hide the server until restart).
+                clients = getattr(self.mcp_manager, "clients", {})
+                tools = getattr(self.mcp_manager, "available_tools", {}) or {}
+                return [n for n in rag_servers if n not in clients or n not in tools]
+
+            if not _missing():
                 return
             # setdefault: instances built without __init__ (tests) still lock.
             async with self.__dict__.setdefault("_init_lock", asyncio.Lock()):
                 # Re-check: another caller may have initialized them meanwhile.
-                missing = [n for n in rag_servers if n not in getattr(self.mcp_manager, "clients", {})]
+                missing = _missing()
                 if not missing:
                     return
                 original = dict(getattr(self.mcp_manager, "servers_config", {}))
@@ -296,8 +304,12 @@ class RAGMCPService:
                     own = r.get("allowedDataClassifications")
                     if own is None:
                         own = r.get("allowed_data_classifications")
+                    if isinstance(own, str):
+                        own = [own]
+                    elif own is not None and not isinstance(own, list):
+                        own = []  # unreadable declaration: approve for nothing
                     resource_classifications = narrow_classifications(
-                        own if isinstance(own, list) else None,
+                        own,
                         self._server_classifications(server),
                     )
                     if compliance_mgr and not compliance_mgr.classification_permits(

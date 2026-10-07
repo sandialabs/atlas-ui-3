@@ -97,10 +97,12 @@ async def test_mcp_resources_filter_per_resource_and_inherit(use_manager):
         {"id": "cui_tagged", "complianceLevel": "CUI"},
         # A null camelCase key must not mask the snake_case list.
         {"id": "both_keys", "allowedDataClassifications": None, "allowed_data_classifications": ["UUR"]},
+        {"id": "string_itar", "allowedDataClassifications": "ITAR"},
+        {"id": "garbage", "allowedDataClassifications": {"bad": True}},
     ]})
     servers = await _rag_mcp(fake).discover_servers("u@test.com", user_compliance_level="ITAR")
     (docs,) = servers
-    assert [s["id"] for s in docs["sources"]] == ["inherits", "itar", "cui_tagged"]
+    assert [s["id"] for s in docs["sources"]] == ["inherits", "itar", "cui_tagged", "string_itar"]
     inherited = next(s for s in docs["sources"] if s["id"] == "inherits")
     assert inherited["allowedDataClassifications"] == ["UUR", "ITAR"]
     assert docs["discoveryFailed"] is False
@@ -134,6 +136,7 @@ async def test_concurrent_client_initialization_runs_once():
 
         async def discover_tools(self):
             await asyncio.sleep(0.01)
+            self.available_tools = {"rag": {"tools": [], "config": {}}}
 
     mcp = SlowMCP()
     cfg = SimpleNamespace(rag_mcp_config=SimpleNamespace(
@@ -323,3 +326,33 @@ async def test_mixed_unapproved_and_unverified_are_reported_together(use_manager
     message = str(exc.value)
     assert "Not approved for ITAR data: data source docs:narrow" in message
     assert "Could not confirm that data source other:x" in message
+
+
+@pytest.mark.asyncio
+async def test_rediscovered_away_rag_server_is_reinitialized():
+    """A RAG server dropped from available_tools by a rediscovery comes back."""
+    from atlas.domain.rag_mcp_service import RAGMCPService
+
+    calls = []
+
+    class MCP:
+        def __init__(self):
+            self.clients = {"rag": object()}  # client exists...
+            self.available_tools = {}           # ...but its tools were wiped
+            self.servers_config = {}
+
+        async def initialize_clients(self):
+            calls.append("init")
+
+        async def discover_tools(self):
+            self.available_tools["rag"] = {"tools": [], "config": {}}
+
+    mcp = MCP()
+    cfg = SimpleNamespace(rag_mcp_config=SimpleNamespace(
+        servers={"rag": SimpleNamespace(model_dump=lambda: {"url": "x"})}
+    ))
+    svc = RAGMCPService(mcp, cfg, None)
+    await svc._ensure_rag_clients()
+    assert calls == ["init"] and "rag" in mcp.available_tools
+    await svc._ensure_rag_clients()
+    assert calls == ["init"]  # restored: no further work
