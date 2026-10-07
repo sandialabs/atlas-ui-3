@@ -85,10 +85,11 @@ const DataSourcesSelector = () => {
   const filteredDataSources = useMemo(() => {
     let sources = ragSources
 
-    // Filter by compliance level
+    // Filter by compliance level with the same allowlist rule as tools,
+    // prompts and models (HIPAA also lists SOC2 sources), not name equality.
     if (complianceLevelsEnabled && complianceLevelFilter) {
       sources = sources.filter(source =>
-        source.complianceLevel && source.complianceLevel === complianceLevelFilter
+        isComplianceAccessible(complianceLevelFilter, source.complianceLevel)
       )
     }
 
@@ -104,7 +105,7 @@ const DataSourcesSelector = () => {
     }
 
     return sources
-  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, searchQuery])
+  }, [ragSources, complianceLevelFilter, complianceLevelsEnabled, isComplianceAccessible, searchQuery])
 
   // Enable all filtered data sources, skipping rows the model boundary
   // disables -- selecting those would only produce a query-time exclusion.

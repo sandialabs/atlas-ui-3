@@ -17,6 +17,41 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 logger = logging.getLogger(__name__)
 
 
+COMPLIANCE_LEVELS_FILE = "compliance-levels.json"
+
+
+def _default_search_paths() -> List[Path]:
+    """Where compliance-levels.json is looked up when no path is given.
+
+    Uses the same two-layer lookup as every other config file -- the user
+    config dir (APP_CONFIG_DIR, default ``config/``) then the package
+    defaults in ``atlas/config/`` -- so the documented locations actually
+    work. Before this, only pre-#275 paths (``config/overrides``,
+    ``atlas/configfiles``...) were searched, none of which exist after the
+    package rename, so the levels never loaded: the header compliance
+    selector never rendered and validation silently ran permissive.
+    The legacy override paths are still checked after the user config dir
+    so an older deployment that kept its file there keeps it.
+    """
+    atlas_root = Path(__file__).parent.parent
+    project_root = atlas_root.parent
+    legacy = [
+        project_root / "config" / "overrides" / COMPLIANCE_LEVELS_FILE,
+        project_root / "config" / "defaults" / COMPLIANCE_LEVELS_FILE,
+    ]
+    package_default = atlas_root / "config" / COMPLIANCE_LEVELS_FILE
+    try:
+        from atlas.modules.config.config_manager import config_manager
+
+        paths = config_manager._search_paths(COMPLIANCE_LEVELS_FILE)
+    except Exception as e:  # never let a lookup problem break startup
+        logger.warning("Could not resolve config search paths for compliance levels: %s", e)
+        paths = [package_default]
+    # Keep the package default last so a legacy override still wins over it.
+    user_paths = [p for p in paths if p != package_default]
+    return user_paths + legacy + [package_default]
+
+
 @dataclass
 class ComplianceLevel:
     """Represents a single compliance level definition."""
@@ -40,18 +75,7 @@ class ComplianceLevelManager:
         self._name_to_canonical: Dict[str, str] = {}  # Maps aliases to canonical names
 
         if config_path is None:
-            # Try to find config in standard locations
-            atlas_root = Path(__file__).parent.parent
-            project_root = atlas_root.parent
-
-            search_paths = [
-                project_root / "config" / "overrides" / "compliance-levels.json",
-                project_root / "config" / "defaults" / "compliance-levels.json",
-                atlas_root / "configfilesadmin" / "compliance-levels.json",
-                atlas_root / "configfiles" / "compliance-levels.json",
-            ]
-
-            for path in search_paths:
+            for path in _default_search_paths():
                 if path.exists():
                     config_path = path
                     break
@@ -104,6 +128,17 @@ class ComplianceLevelManager:
         if not name:
             return None
         return self._name_to_canonical.get(name)
+
+    def is_valid_level(self, level_name: Optional[str]) -> bool:
+        """Whether ``level_name`` names a defined level or alias.
+
+        With no definitions loaded every name is accepted (permissive mode).
+        """
+        if not level_name:
+            return False
+        if not self.levels:
+            return True
+        return self.get_canonical_name(level_name) is not None
 
     def validate_compliance_level(self, level_name: Optional[str], context: str = "") -> Optional[str]:
         """Validate a compliance level name.

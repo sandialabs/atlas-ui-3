@@ -251,3 +251,46 @@ class TestComplianceLevelManager:
 
         # Should allow all access
         assert manager.is_accessible("Level1", "Level2") is True
+
+
+class TestDefaultConfigLookup:
+    """With no explicit path the manager must find the documented locations.
+
+    It used to search only pre-package-rename paths (config/overrides,
+    atlas/configfiles, ...), none of which exist any more, so the levels never
+    loaded: the UI compliance selector never rendered and validation ran
+    permissive.
+    """
+
+    def test_loads_package_default_without_a_user_file(self, tmp_path, monkeypatch):
+        from atlas.modules.config.config_manager import config_manager
+
+        monkeypatch.setattr(config_manager.app_settings, "app_config_dir", str(tmp_path))
+        manager = ComplianceLevelManager()
+
+        # atlas/config/compliance-levels.json ships with the package.
+        assert "HIPAA" in manager.get_all_levels()
+        assert manager.is_accessible("HIPAA", "SOC2") is True
+        assert manager.is_accessible("HIPAA", "Public") is False
+
+    def test_user_config_dir_overrides_package_default(
+        self, tmp_path, monkeypatch, sample_compliance_config
+    ):
+        from atlas.modules.config.config_manager import config_manager
+
+        custom = dict(sample_compliance_config)
+        custom["levels"] = [
+            {"name": "OnlyThis", "description": "", "aliases": [], "allowed_with": ["OnlyThis"]}
+        ]
+        (tmp_path / "compliance-levels.json").write_text(json.dumps(custom))
+        monkeypatch.setattr(config_manager.app_settings, "app_config_dir", str(tmp_path))
+
+        assert ComplianceLevelManager().get_all_levels() == ["OnlyThis"]
+
+    def test_is_valid_level(self, temp_compliance_config):
+        manager = ComplianceLevelManager(temp_compliance_config)
+        assert manager.is_valid_level("HIPAA") is True
+        assert manager.is_valid_level("public") is True  # alias
+        assert manager.is_valid_level("CUI") is False
+        assert manager.is_valid_level(None) is False
+        assert ComplianceLevelManager(Path("/nonexistent/x.json")).is_valid_level("CUI") is True

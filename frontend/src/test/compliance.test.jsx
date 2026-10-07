@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { isComplianceAccessible } from '../utils/complianceAccess';
 
 describe('Compliance Level Filtering', () => {
   describe('Compliance Level Accessibility Logic', () => {
@@ -17,19 +18,9 @@ describe('Compliance Level Filtering', () => {
       ]
     };
 
-    // Helper function to simulate isComplianceAccessible with STRICT MODE
-    const isAccessible = (userLevel, resourceLevel, levels) => {
-      // If user level is not set, all resources are accessible
-      if (!userLevel) return true;
-      
-      // STRICT MODE: If user has selected a compliance level but resource has none, deny access
-      if (!resourceLevel) return false;
-
-      const userLevelObj = levels.levels.find(l => l.name === userLevel);
-      if (!userLevelObj) return false;
-
-      return userLevelObj.allowed_with.includes(resourceLevel);
-    };
+    // The real shared rule (utils/complianceAccess), not a local copy.
+    const isAccessible = (userLevel, resourceLevel, levels) =>
+      isComplianceAccessible(levels.levels, userLevel, resourceLevel);
 
     it('should allow Public to access only Public resources', () => {
       expect(isAccessible('Public', 'Public', complianceLevels)).toBe(true);

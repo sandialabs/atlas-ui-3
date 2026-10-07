@@ -222,4 +222,13 @@ describe('personaSurvivesComplianceFilter', () => {
   it('leaves a missing persona to the stale-key effect', () => {
     expect(personaSurvivesComplianceFilter(undefined, 'Internal')).toBe(true)
   })
+
+  it('keeps a persona the allowlist admits even when the names differ', () => {
+    // HIPAA allows SOC2: the picker still lists a SOC2 persona, so a switch
+    // to HIPAA must not clear it.
+    const hipaaAllows = level => ['HIPAA', 'SOC2'].includes(level)
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'SOC2' }, 'HIPAA', hipaaAllows)).toBe(true)
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Public' }, 'HIPAA', hipaaAllows)).toBe(false)
+    expect(personaSurvivesComplianceFilter({}, 'HIPAA', hipaaAllows)).toBe(false)
+  })
 })

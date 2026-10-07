@@ -120,14 +120,32 @@ describe('RagPanel - selected model compliance boundary', () => {
   })
 
   it('applies the header filter and the model level together', () => {
-    // Header filter narrows to Internal, hiding public-docs; internal-docs
-    // passes the header filter but sits outside the Public model's boundary,
-    // so it renders disabled.
+    // Header filter narrows to Public, hiding internal-docs (Public does not
+    // allow Internal); public-docs passes the filter and would only be disabled
+    // by the Internal model's boundary if that excluded Public -- it does not,
+    // so the row stays enabled.
+    setup({ currentModel: 'internal-model', complianceLevelFilter: 'Public' })
+
+    expect(screen.queryByText('internal-docs')).not.toBeInTheDocument()
+    expect(screen.getByText('public-docs')).toBeInTheDocument()
+    expect(screen.queryByTitle(BOUNDARY_HINT)).not.toBeInTheDocument()
+  })
+
+  it('filters by the header level allowlist, not name equality', () => {
+    // Internal allows Public, so an Internal filter lists both; the Public
+    // model's boundary then disables internal-docs.
     setup({ currentModel: 'public-model', complianceLevelFilter: 'Internal' })
 
-    expect(screen.queryByText('public-docs')).not.toBeInTheDocument()
+    expect(screen.getByText('public-docs')).toBeInTheDocument()
     expect(screen.getByText('internal-docs')).toBeInTheDocument()
     expect(screen.getByTitle(BOUNDARY_HINT)).toBeInTheDocument()
+  })
+
+  it('hides untagged sources while a header filter is active', () => {
+    const untagged = { id: 'untagged-docs', label: 'untagged-docs', serverName: 'atlas_rag' }
+    setup({ currentModel: 'internal-model', complianceLevelFilter: 'Internal', ragSources: [...RAG_SOURCES, untagged] })
+
+    expect(screen.queryByText('untagged-docs')).not.toBeInTheDocument()
   })
 
   it('does not disable a source that carries no compliance level', () => {
