@@ -293,7 +293,9 @@ class RAGMCPService:
                     # with an explicit list; one that sends none inherits them.
                     # A per-resource legacy complianceLevel is display-only, as
                     # for HTTP corpora.
-                    own = r.get("allowedDataClassifications", r.get("allowed_data_classifications"))
+                    own = r.get("allowedDataClassifications")
+                    if own is None:
+                        own = r.get("allowed_data_classifications")
                     resource_classifications = narrow_classifications(
                         own if isinstance(own, list) else None,
                         self._server_classifications(server),

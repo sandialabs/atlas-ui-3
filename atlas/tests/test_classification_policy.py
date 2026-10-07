@@ -261,6 +261,8 @@ class TestChatServiceRefusesTheTurn:
         cm.rag_sources_config = config_manager.rag_sources_config
         tool_manager = MagicMock()
         tool_manager.servers_config = tool_servers
+        # Nothing discovered yet: resolution falls back to configured prefixes.
+        tool_manager.get_server_for_tool = lambda tool: None
         return ChatService(
             llm=MagicMock(), tool_manager=tool_manager, connection=MagicMock(),
             config_manager=cm, session_repository=repo,
@@ -391,3 +393,24 @@ def test_http_corpus_accepts_camel_case_list():
     server = SimpleNamespace(allowed_data_classifications=["UUR", "ITAR"], compliance_level=None)
     assert ds.allowed_data_classifications == ["UUR"]
     assert corpus_classifications(ds, server) == ["UUR"]
+
+
+def test_index_naming_an_unconfigured_server_is_unknown(manager, config_manager):
+    """No prefix guess when the executor's index names a different server."""
+    tool_manager = SimpleNamespace(
+        servers_config={},
+        get_server_for_tool=lambda tool: "ghost_server",
+    )
+    assert find_classification_violations(
+        manager, "ITAR", model="model-x", config_manager=config_manager,
+        tool_manager=tool_manager, selected_tools=["internal_search_query"],
+    ) == ["tool internal_search_query (no known server)"]
+
+    def boom(tool):
+        raise RuntimeError("index broken")
+
+    tool_manager.get_server_for_tool = boom
+    assert find_classification_violations(
+        manager, "ITAR", model="model-x", config_manager=config_manager,
+        tool_manager=tool_manager, selected_tools=["internal_search_query"],
+    ) == ["tool internal_search_query (no known server)"]

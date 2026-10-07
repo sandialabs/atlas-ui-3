@@ -44,9 +44,12 @@ def _resolve_tool_server(tool: str, tool_manager: Any, server_names: Iterable[st
         try:
             server = lookup(tool)
         except Exception:
-            server = None
-        if isinstance(server, str) and server in server_names:
-            return server
+            # Cannot tell which server the executor would use: no known server.
+            return None
+        if server is not None:
+            # The index named a server; trust it, and treat one the config
+            # does not list as unknown rather than guessing by prefix.
+            return server if server in server_names else None
     return _server_for_tool(tool, server_names)
 
 
