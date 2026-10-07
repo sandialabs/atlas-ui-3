@@ -141,6 +141,9 @@ services:
       #   echo "MCP_TOKEN_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
       # Keep it stable - rotating it invalidates all stored tokens.
       - MCP_TOKEN_ENCRYPTION_KEY=${MCP_TOKEN_ENCRYPTION_KEY:?set MCP_TOKEN_ENCRYPTION_KEY (>=32 chars) in your environment or .env}
+      # Store tokens on the writable atlas-data volume; the UID 10001 runtime
+      # cannot write the host-owned ./config bind mount (config/secure).
+      - MCP_TOKEN_STORAGE_DIR=/data/tokens
       - FEATURE_FILE_CONTENT_EXTRACTION_ENABLED=false
       - FEATURE_GLOBUS_AUTH_ENABLED=false
 

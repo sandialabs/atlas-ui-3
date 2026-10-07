@@ -68,8 +68,12 @@ Node.js, npm, pip, or the repository's test/docs/scripts trees. Python and
 bundled MCP runtime dependencies remain available. A healthcheck probes
 `/api/heartbeat`; it is a liveness check, not an authentication test.
 
-`Dockerfile.runtimeonly` is a compatibility entry point that requires an
-explicit prebuilt image rather than maintaining a second application recipe:
+`Dockerfile.runtimeonly` is a compatibility entry point that reuses an
+already-built image rather than maintaining a second application recipe. It
+defaults to the published `quay.io/agarlan-snl/atlas-ui-3:latest` tag; pass
+`--build-arg ATLAS_RUNTIME_IMAGE=...` to point it at a locally built image (the
+shim copies nothing from your working tree, so build the canonical `Dockerfile`
+first if you want local source):
 
 ```bash
 docker build -t atlas-runtime:local .
@@ -120,12 +124,15 @@ Keep storage credentials stable for existing volumes. Changing environment
 variables alone does not rotate an existing PostgreSQL database password.
 
 The `atlas-data`, `atlas-logs`, and `minio-data` named volumes preserve DuckDB
-history, logs, and uploaded files across container recreation. The image runs
-as UID/GID `10001:10001`, so Docker-managed volumes are used instead of host
-bind mounts for writable state; mount `./config` for operator overrides. Use
-separately managed storage, backups, and least-privilege credentials in
-production. Do not enable debug mode to bypass proxy setup in this container:
-it listens on a non-loopback address inside its network.
+history, logs, uploaded files, and per-user MCP tokens (`/data/tokens`) across
+container recreation. The image runs as UID/GID `10001:10001`, so Docker-managed
+volumes are used instead of host bind mounts for writable state; mount `./config`
+for operator overrides. Because that bind mount is host-owned, the nonroot UID
+cannot write it: `chown -R 10001:10001 config` before `docker compose up` if you
+use the admin MCP editor, which writes `mcp.json` there. Use separately managed
+storage, backups, and least-privilege credentials in production. Do not enable
+debug mode to bypass proxy setup in this container: it listens on a non-loopback
+address inside its network.
 
 ## Local Development Setup
 
@@ -186,7 +193,7 @@ Now, open the `.env` file and add your API keys for the LLM providers you intend
 **Important Configuration Notes:**
 *   **`MCP_TOKEN_ENCRYPTION_KEY`**: You must replace the placeholder that ships in `.env.example`. It is a public value, so Atlas rejects it and refuses to start. Generate your own with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and keep it stable — rotating it invalidates all stored MCP tokens.
 *   **`CAPABILITY_TOKEN_SECRET`**: Generate an independent random secret with `openssl rand -hex 32`. Known placeholders and nonempty values shorter than 32 UTF-8 bytes are rejected. `atlas-init` generates both secrets automatically.
-*   **Local debug opt-in**: Set `DEBUG_MODE=true`, `ENVIRONMENT=development`, and `ATLAS_HOST=127.0.0.1` only for trusted local development. Debug is no longer enabled by copying the template. Production or non-loopback debug startup is rejected unless the dangerous `ALLOW_DEBUG_NON_LOOPBACK=true` override is explicitly set; see [development authentication](../admin/authentication.md#development-behavior).
+*   **Local debug opt-in**: Set `DEBUG_MODE=true`, `ENVIRONMENT=development`, and `ATLAS_HOST=127.0.0.1` only for trusted local development. Debug is no longer enabled by copying the template. Production or non-loopback debug startup is rejected unless the matching dangerous override is explicitly set — `ALLOW_DEBUG_PRODUCTION=true` for a production environment, `ALLOW_DEBUG_NON_LOOPBACK=true` for a non-loopback bind; the two are independent. See [development authentication](../admin/authentication.md#development-behavior).
 *   **`APP_LOG_DIR`**: It is essential to set `APP_LOG_DIR=/workspaces/atlas-ui-3/logs` (or another appropriate path) to ensure application logs are correctly stored. A path inside the checkout is fine for local development -- the test suite overrides this variable with a temp directory, so it cannot pollute test runs (see [test isolation](../developer/test-isolation.md)).
 *   **`USE_MOCK_S3`**: For local development and personal use, setting `USE_MOCK_S3=true` is acceptable. However, **this must never be used in a production environment** due to security and data durability concerns.
 *   **`SKIP_AUTHORIZATION_CHECKS`** (optional, local-only convenience): In debug mode the mock authorization table only grants admin access to two hardcoded identities (`ADMIN_TEST_USER`, default `admin@example.com`, and `test@test.com`), so a new contributor running locally with their real email would otherwise have to set `ADMIN_TEST_USER` to match it before reaching admin-gated routes. Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step -- every group check returns `True`, so any locally authenticated user has full access. **Blast radius is broader than admin pages:** because `is_user_in_group` is the single gate for every group-restricted surface, enabling it also unlocks group-restricted models (`atlas/core/model_access.py`), MCP servers gated by `required_groups` (`mcp_execution.py`), and feedback/capture routes. In debug mode a headerless request is assigned the `test_user` identity, so with this flag on any request reaching the port is effectively an administrator. It is strictly opt-in (commented out in `.env.example`), never affects authentication, and the app refuses to start if the flag is set without `DEBUG_MODE=true`, when `ENVIRONMENT=production`, or together with `AUTH_GROUP_CHECK_URL`. See [docs/admin/authentication.md](../admin/authentication.md) for full guardrail details.

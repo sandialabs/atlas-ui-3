@@ -66,6 +66,9 @@ def test_compose_is_loopback_only_with_private_persistent_storage():
     # DEBUG_MODE is gone, so proxy-secret enforcement is active; a missing
     # secret would 503 every protected route while the heartbeat still passes.
     assert env["PROXY_SECRET"].startswith("${PROXY_SECRET:?")
+    # Token storage must live on the writable named volume, not the host-owned
+    # ./config bind mount that the nonroot UID cannot write.
+    assert env["MCP_TOKEN_STORAGE_DIR"] == "/data/tokens"
     assert env["S3_SECRET_KEY"].startswith("${MINIO_ROOT_PASSWORD:?")
     assert services["postgres"]["environment"]["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD:?")
     init = services["minio-init"]

@@ -220,6 +220,14 @@ def test_server_cli_local_host_overrides_nonloopback_environment(monkeypatch):
         # Gunicorn/Hypercorn bind flags are recognized too (:port is allowed).
         ({"ATLAS_HOST": "127.0.0.1"},
          ["gunicorn", "-b", "0.0.0.0:8000", "main:app"], "0.0.0.0:8000"),
+        # Every bind hint is checked: a loopback value cannot mask a public one.
+        ({}, ["gunicorn", "-b", "0.0.0.0:8000", "-b", "127.0.0.1:8001", "main:app"],
+         "0.0.0.0:8000"),
+        # Attached -bHOST:PORT form.
+        ({}, ["gunicorn", "-b0.0.0.0:8000", "main:app"], "0.0.0.0:8000"),
+        # All loopback hints pass and the last is reported.
+        ({"ATLAS_HOST": "127.0.0.1"},
+         ["uvicorn", "main:app", "--host", "127.0.0.1"], "127.0.0.1"),
     ],
 )
 def test_resolve_bind_host_sees_env_and_uvicorn_flags(monkeypatch, environ, argv, expected):
@@ -245,6 +253,18 @@ def test_gunicorn_public_bind_cannot_bypass_debug_guard(monkeypatch):
     monkeypatch.setenv("ATLAS_HOST", "127.0.0.1")
     monkeypatch.delenv("UVICORN_HOST", raising=False)
     monkeypatch.setattr(sys, "argv", ["gunicorn", "-b", "0.0.0.0:8000", "main:app"])
+    with pytest.raises(ValueError, match="ALLOW_DEBUG_NON_LOOPBACK"):
+        validate_debug_configuration(_settings(), resolve_bind_host())
+
+
+def test_multiple_bind_flags_must_all_be_loopback(monkeypatch):
+    # A trailing loopback bind must not mask an earlier public one.
+    for name in ("ATLAS_HOST", "UVICORN_HOST"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["gunicorn", "-b", "0.0.0.0:8000", "-b", "127.0.0.1:8001", "main:app"],
+    )
     with pytest.raises(ValueError, match="ALLOW_DEBUG_NON_LOOPBACK"):
         validate_debug_configuration(_settings(), resolve_bind_host())
 

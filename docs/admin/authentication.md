@@ -50,9 +50,11 @@ for local development, set `DEBUG_MODE=true`, `ENVIRONMENT=development`, and
 when the environment is `production` or the effective bind address is not
 loopback, including an address supplied with `atlas-server --host`.
 
-`ALLOW_DEBUG_NON_LOOPBACK=true` explicitly overrides those debug checks. It
-does not restore authentication: anyone reaching that listener can impersonate
-users and gain debug administrator access. Never use this override on an
+Two independent overrides exist, both off by default. `ALLOW_DEBUG_NON_LOOPBACK=true`
+permits debug mode on a non-loopback bind, and `ALLOW_DEBUG_PRODUCTION=true`
+permits debug mode when `ENVIRONMENT=production`; one does not imply the other.
+Neither restores authentication: anyone reaching that listener can impersonate
+users and gain debug administrator access. Never use these overrides on an
 untrusted network. Debug mode always logs a security warning; the separate
 Agent Portal and authorization-bypass guards still apply.
 

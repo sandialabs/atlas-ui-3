@@ -18,6 +18,20 @@ _ENV_ALLOW_EXACT = (
     "TMPDIR",
 )
 
+# Non-secret operational configuration that bundled MCP children need to reach
+# the backend, share session state, and honor the host's proxy/CA settings.
+_ENV_ALLOW_CONFIG = (
+    "CHATUI_BACKEND_BASE_URL",
+    "BACKEND_URL",
+    "MCP_STATE_BACKEND",
+    "MCP_REDIS_URL",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+)
+
 # Do not inherit the backend's virtualenv or arbitrary tool directories.
 _ENV_FIXED_PATH = "/usr/local/bin:/usr/bin:/bin"
 _ENV_DENY_SUFFIXES = ("_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_PASSWD")
@@ -65,7 +79,7 @@ def _build_child_env(
     user-controlled Agent Portal extras must retain the deny-list.
     """
     env: Dict[str, str] = {}
-    for key in _ENV_ALLOW_EXACT:
+    for key in _ENV_ALLOW_EXACT + _ENV_ALLOW_CONFIG:
         value = os.environ.get(key)
         if value is not None:
             env[key] = value
@@ -87,10 +101,19 @@ def _build_child_env(
         if _is_denied_env_key(key):
             dropped.append(key)
             env.pop(key, None)
+    # Name the backend keys withheld by the denylist so a child failing to reach
+    # a resource can be diagnosed without guessing which variable went missing.
+    withheld = sorted({k for k in os.environ if _is_denied_env_key(k)} | set(dropped))
     if dropped:
         logger.info(
-            "agent_portal env isolation dropped %d key(s): %s",
+            "subprocess env isolation dropped %d key(s): %s",
             len(dropped),
             sanitize_for_logging(",".join(sorted(dropped))),
+        )
+    if withheld:
+        logger.info(
+            "subprocess env isolation withheld %d secret-shaped key(s): %s",
+            len(withheld),
+            sanitize_for_logging(",".join(withheld)),
         )
     return env

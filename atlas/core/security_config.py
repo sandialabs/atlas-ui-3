@@ -51,6 +51,9 @@ def _iter_argv_bind_hosts(argv):
         if arg in _BIND_HOST_FLAGS and index + 1 < len(argv):
             yield argv[index + 1]
             index += 1
+        elif arg.startswith("-b") and not arg.startswith("--") and len(arg) > 2:
+            # Attached Gunicorn/Hypercorn form: ``-b0.0.0.0:8000``.
+            yield arg[2:]
         index += 1
 
 
@@ -84,19 +87,24 @@ def _is_loopback_host(host: Optional[str]) -> bool:
 def resolve_bind_host(default: Optional[str] = None) -> Optional[str]:
     """Best-effort effective bind host for pre-serve safety checks.
 
-    Precedence follows what a launcher actually binds: the last ``--host`` /
-    ``--bind`` / ``-b`` argument wins over ``UVICORN_HOST`` and ``ATLAS_HOST``,
-    because a CLI flag overrides both. When no source names a host, return
-    ``default`` (``None``) so callers fail closed instead of assuming loopback.
+    Gather every bind hint: the ``--host`` / ``--bind`` / ``-b`` CLI flags
+    (including the attached ``-bHOST:PORT`` form), then ``UVICORN_HOST`` and
+    ``ATLAS_HOST``. Any non-loopback hint makes the guard unsafe, so a
+    non-loopback value is returned whenever one exists; otherwise the last
+    loopback value is returned. When no source names a host, return ``default``
+    (``None``) so callers fail closed instead of assuming loopback.
     """
     hosts = list(_iter_argv_bind_hosts(sys.argv[1:]))
-    if hosts:
-        return hosts[-1]
     for name in ("UVICORN_HOST", "ATLAS_HOST"):
         value = os.environ.get(name)
         if value:
-            return value
-    return default
+            hosts.append(value)
+    if not hosts:
+        return default
+    for host in hosts:
+        if not _is_loopback_host(host):
+            return host
+    return hosts[-1]
 
 
 def validate_debug_configuration(settings, host: Optional[str]) -> None:
@@ -117,7 +125,8 @@ def validate_debug_configuration(settings, host: Optional[str]) -> None:
         )
     if not _is_loopback_host(host) and not settings.allow_debug_non_loopback:
         raise ValueError(
-            "DEBUG_MODE=true requires a loopback bind host. Set DEBUG_MODE=false, "
-            "or explicitly set ALLOW_DEBUG_NON_LOOPBACK=true to accept "
-            "unauthenticated access on every interface."
+            f"DEBUG_MODE=true refuses the non-loopback bind host {host!r}. Bind to "
+            "127.0.0.1 (for example `--host 127.0.0.1`), set DEBUG_MODE=false, or "
+            "explicitly set ALLOW_DEBUG_NON_LOOPBACK=true to accept unauthenticated "
+            "access on every interface."
         )
