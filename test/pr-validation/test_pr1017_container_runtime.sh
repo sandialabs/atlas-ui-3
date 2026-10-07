@@ -53,23 +53,60 @@ cleanup() { "$engine" rm -f "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 capability_secret="$(openssl rand -hex 32)"
 mcp_key="$(openssl rand -hex 32)"
+proxy_secret="$(openssl rand -hex 32)"
 "$engine" run -d --name "$name" \
     -e "CAPABILITY_TOKEN_SECRET=$capability_secret" \
     -e "MCP_TOKEN_ENCRYPTION_KEY=$mcp_key" \
+    -e "PROXY_SECRET=$proxy_secret" \
     -e USE_MOCK_S3=true \
-    -e FEATURE_PROXY_SECRET_ENABLED=false \
     "$image" >/dev/null
+healthy=false
 for attempt in $(seq 1 60); do
     status="$("$engine" inspect --format '{{.State.Health.Status}}' "$name")"
     if [ "$status" = healthy ]; then
         echo "Heartbeat HEALTHCHECK passed"
-        exit 0
+        healthy=true
+        break
     fi
     if [ "$("$engine" inspect --format '{{.State.Running}}' "$name")" != true ]; then
         break
     fi
     sleep 2
 done
-"$engine" logs "$name"
-echo "Runtime did not become healthy" >&2
-exit 1
+if [ "$healthy" != true ]; then
+    "$engine" logs "$name"
+    echo "Runtime did not become healthy" >&2
+    exit 1
+fi
+
+# Proxy-secret enforcement is on by default. A protected route must reject a
+# request without the proxy header and accept one the proxy has authenticated,
+# even though the unauthenticated /api/heartbeat healthcheck reports healthy.
+"$engine" exec -e "PROXY_SECRET=$proxy_secret" "$name" python -c '
+import os
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8000"
+
+
+def get(path, headers=None):
+    request = urllib.request.Request(BASE + path, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+
+assert get("/api/heartbeat") == 200, "heartbeat must stay unauthenticated"
+assert get("/api/config/shell") == 401, "missing proxy secret must be rejected"
+assert get(
+    "/api/config/shell",
+    {
+        "X-Proxy-Secret": os.environ["PROXY_SECRET"],
+        "X-User-Email": "test@test.com",
+    },
+) == 200, "proxy-authenticated request should succeed"
+print("Proxy-secret enforcement checked: 401 without header, 200 with header")
+'
