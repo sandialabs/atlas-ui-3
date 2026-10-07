@@ -114,7 +114,10 @@ export const ChatProvider = ({ children }) => {
 	const config = useChatConfig()
 	const selections = useSelections()
 	const complianceEnabled = !!config.features?.compliance_levels
-	const { complianceLevels, complianceMode } = useComplianceLevels(complianceEnabled)
+	const { complianceLevels, complianceMode, defaultComplianceLevel } = useComplianceLevels(complianceEnabled)
+	// Required-level mode: there is no "All Levels" state; a session always
+	// carries a defined level and the server refuses a turn without one.
+	const complianceRequired = complianceEnabled && !!config.features?.compliance_level_required
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
@@ -297,13 +300,22 @@ export const ChatProvider = ({ children }) => {
 	// hide every resource (an unknown level allows nothing) while the header
 	// select, having no such option, displays "All Levels". Drop it once the
 	// definitions are known so what the selector shows is what applies.
+	// When a level is required there is no "no filter" state to drop to: an
+	// unset or undefined level is replaced with the deployment's default (a
+	// defined level), or the first defined level if the default is not one.
 	const { complianceLevelFilter: storedComplianceFilter, setComplianceLevelFilter: storeComplianceFilter } = selections
 	useEffect(() => {
-		if (!storedComplianceFilter || complianceLevels.length === 0) return
-		if (!complianceLevels.some(l => l.name === storedComplianceFilter)) {
+		if (complianceLevels.length === 0) return
+		if (storedComplianceFilter && complianceLevels.some(l => l.name === storedComplianceFilter)) return
+		if (complianceRequired) {
+			const fallback = complianceLevels.some(l => l.name === defaultComplianceLevel)
+				? defaultComplianceLevel
+				: complianceLevels[0].name
+			storeComplianceFilter(fallback)
+		} else if (storedComplianceFilter) {
 			storeComplianceFilter(null)
 		}
-	}, [storedComplianceFilter, complianceLevels, storeComplianceFilter])
+	}, [storedComplianceFilter, complianceLevels, complianceRequired, defaultComplianceLevel, storeComplianceFilter])
 
 	useEffect(() => {
 		if (!config.configReady || customPromptsEnabled) return
@@ -886,6 +898,17 @@ export const ChatProvider = ({ children }) => {
 		// is left to the stale-key and prune effects, but is not sent
 		// unjudged. If the level definitions are unavailable (fetch failed
 		// or in flight) the pickers deny everything, so only exempt keys go.
+		// Required-level mode: a turn without a level would be refused by the
+		// server, so refuse it here with a reason the user can act on. Reached
+		// only before the level definitions load (or if they failed to load);
+		// the effect above picks a level as soon as they are known.
+		if (complianceRequired && !activeComplianceFilter) {
+			// With no definitions the header has no selector to point at.
+			toast.error(complianceLevels.length === 0
+				? 'A compliance level is required, but the compliance levels could not be loaded. Reload the page or contact an administrator.'
+				: 'A compliance level is required. Select a compliance level before sending.')
+			return false
+		}
 		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
 		const dropExcluded = (keys, levelOf) => {
 			if (!activeComplianceFilter) return keys
@@ -1071,7 +1094,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, activeComplianceFilter, mcpKeyLevel, ragKeyLevel])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, mcpKeyLevel, ragKeyLevel])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -2067,6 +2090,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setComplianceLevelFilter: selections.setComplianceLevelFilter,
 		complianceLevels,
 		complianceMode,
+		complianceRequired,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,

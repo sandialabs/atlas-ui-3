@@ -22,6 +22,26 @@ For example, a session running with a "HIPAA" compliance level will not be able 
 
 Set `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`. The header then shows a compliance level selector (in the overflow menu on narrow screens) listing every defined level, plus "All Levels" for no filter.
 
+## Requiring a Compliance Level
+
+By default a user can pick "All Levels", which applies no filter. To require every chat turn to run under a concrete level, also set:
+
+```bash
+FEATURE_COMPLIANCE_LEVELS_ENABLED=true
+FEATURE_COMPLIANCE_LEVEL_REQUIRED=true
+# Optional: the level a session starts on. Must name a level (or alias) in
+# compliance-levels.json; when unset or undefined, the first defined level is used.
+COMPLIANCE_DEFAULT_LEVEL=Internal
+```
+
+`FEATURE_COMPLIANCE_LEVEL_REQUIRED` has no effect unless `FEATURE_COMPLIANCE_LEVELS_ENABLED` is also on. With both set:
+
+- **UI:** the selector has no "All Levels" option. A user with no saved level, or with a saved level the deployment no longer defines, starts on `COMPLIANCE_DEFAULT_LEVEL` (or the first defined level). Sending is refused, with a message, while no level is set -- for example if the level definitions failed to load.
+- **Server:** every chat turn must carry a level that names a defined level or alias. A turn with no level, or with an undefined one, is rejected with a validation error before any model, tool or data source is called. This covers the browser, stale or hand-crafted WebSocket clients, background runs, the Python `AtlasClient` (`compliance_level=`) and the `atlas-chat` CLI (`--compliance-level`).
+- `/api/config` reports `features.compliance_level_required`, and `/api/compliance-levels` reports the resolved `default_level`.
+
+If no `compliance-levels.json` can be loaded, the UI has no levels to offer and every turn is refused, so make sure the file is in place before enabling the requirement.
+
 ## What the Selector Does in the UI
 
 Choosing a level applies one rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when its `compliance_level` is in the selected level's `allowed_with` list. A resource with **no** `compliance_level` is hidden while a level is selected, because it has no declared boundary. With "All Levels", nothing is filtered. The built-in `atlas` tools (canvas, sleep, search, discover sources) are exempt: they run in-process, and search only reaches sources that pass their own compliance checks.

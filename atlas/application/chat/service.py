@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
-from atlas.domain.errors import AuthorizationError, DomainError
+from atlas.domain.errors import AuthorizationError, DomainError, ValidationError
 from atlas.domain.messages.models import MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.hooks import HookEvent, get_hook_manager
@@ -301,6 +301,41 @@ class ChatService:
         logger.info(f"Created session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
         return session
 
+    def _enforce_required_compliance_level(self, compliance_level_raw: Any) -> None:
+        """Refuse a turn with no defined compliance level in required-level mode.
+
+        The UI has no "All Levels" option in this mode, but a stale bundle, the
+        CLI or a hand-crafted client can still omit the level or send one the
+        deployment does not define. With no definitions loaded, validation is
+        permissive and would accept any invented name, so that fails closed.
+        """
+        settings = getattr(getattr(self, "config_manager", None), "app_settings", None)
+        if getattr(settings, "compliance_level_required_effective", False) is not True:
+            return
+        from atlas.core.compliance import get_compliance_manager
+        compliance_mgr = get_compliance_manager()
+        if not compliance_mgr.levels:
+            logger.warning(
+                "A compliance level is required but no compliance level "
+                "definitions are loaded; refusing the chat turn"
+            )
+            raise ValidationError(
+                "A compliance level is required, but this deployment has "
+                "no compliance levels configured. Contact an administrator."
+            )
+        level = (
+            compliance_mgr.validate_compliance_level(
+                compliance_level_raw, context="chat request"
+            )
+            if isinstance(compliance_level_raw, str) and compliance_level_raw
+            else None
+        )
+        if not level:
+            raise ValidationError(
+                "A compliance level is required. Select a compliance level "
+                "and send the message again."
+            )
+
     async def handle_chat_message(
         self,
         session_id: UUID,
@@ -340,6 +375,10 @@ class ChatService:
                 f"handle_chat_message content preview: '{sanitize_for_logging(content_preview)}', "
                 f"kwargs: {sanitized_kwargs}"
             )
+
+        # Checked before the session is touched, so a refused turn leaves no
+        # trace (no conversation rebinding or history hydration).
+        self._enforce_required_compliance_level(kwargs.get("compliance_level"))
 
         # Get or create session
         session = await self.session_repository.get(session_id)
