@@ -20,17 +20,27 @@ _ENV_ALLOW_EXACT = (
 
 # Non-secret operational configuration that bundled MCP children need to reach
 # the backend, share session state, and honor the host's proxy/CA settings.
-_ENV_ALLOW_CONFIG = (
+# Opt in with ``forward_mcp_config=True``: the Agent Portal must not inherit
+# these (some proxy and Redis URLs embed credentials).
+_ENV_ALLOW_CONFIG_EXACT = (
     "CHATUI_BACKEND_BASE_URL",
     "BACKEND_URL",
     "MCP_STATE_BACKEND",
     "MCP_REDIS_URL",
+    "MCP_SESSION_STATE_PORT",
+    "MCP_CODE_EXECUTOR_V2_HOST",
+    "PPTX_TEMPLATE_PATH",
+    "CHATUI_RUNTIME_UPLOADS",
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
     "SSL_CERT_FILE",
     "REQUESTS_CA_BUNDLE",
 )
+_ENV_ALLOW_CONFIG_PREFIXES = ("CODE_EXECUTOR_V2_", "MCP_TRANSFER_")
 
 # Do not inherit the backend's virtualenv or arbitrary tool directories.
 _ENV_FIXED_PATH = "/usr/local/bin:/usr/bin:/bin"
@@ -66,23 +76,36 @@ def _is_denied_env_key(key: str) -> bool:
     return False
 
 
+def _is_mcp_config_env_key(key: str) -> bool:
+    """Bundled MCP servers read these non-secret keys from their environment."""
+    return key in _ENV_ALLOW_CONFIG_EXACT or key.startswith(_ENV_ALLOW_CONFIG_PREFIXES)
+
+
 def _build_child_env(
     extra: Optional[Dict[str, str]] = None,
     *,
     extra_path_dirs: Optional[List[str]] = None,
+    forward_mcp_config: bool = False,
 ) -> Dict[str, str]:
     """Build an allowlisted environment, stripping secret-shaped extras.
 
     ``extra_path_dirs`` lets an absolute command find an adjacent shebang
-    interpreter without inheriting the backend's full PATH. Callers accepting
-    trusted operator-declared secrets must merge them *after* this baseline;
-    user-controlled Agent Portal extras must retain the deny-list.
+    interpreter without inheriting the backend's full PATH. ``forward_mcp_config``
+    is opt-in because the bundled MCP servers need backend URLs, shared-state
+    settings, and proxy/CA variables that the Agent Portal must not inherit
+    (some of those values embed credentials and match no denylist suffix).
+    Callers accepting trusted operator-declared secrets must merge them *after*
+    this baseline; user-controlled Agent Portal extras must retain the deny-list.
     """
     env: Dict[str, str] = {}
-    for key in _ENV_ALLOW_EXACT + _ENV_ALLOW_CONFIG:
+    for key in _ENV_ALLOW_EXACT:
         value = os.environ.get(key)
         if value is not None:
             env[key] = value
+    if forward_mcp_config:
+        for key, value in os.environ.items():
+            if _is_mcp_config_env_key(key):
+                env[key] = value
     for key, value in os.environ.items():
         if key.startswith("LC_"):
             env[key] = value
@@ -101,9 +124,10 @@ def _build_child_env(
         if _is_denied_env_key(key):
             dropped.append(key)
             env.pop(key, None)
-    # Name the backend keys withheld by the denylist so a child failing to reach
-    # a resource can be diagnosed without guessing which variable went missing.
-    withheld = sorted({k for k in os.environ if _is_denied_env_key(k)} | set(dropped))
+    # Name the backend keys the allowlist did not forward so a child failing to
+    # reach a resource can be diagnosed without guessing which variable is
+    # missing. Values are never logged; sanitize_for_logging hardens the names.
+    withheld = sorted(k for k in os.environ if k not in env)
     if dropped:
         logger.info(
             "subprocess env isolation dropped %d key(s): %s",
@@ -112,7 +136,7 @@ def _build_child_env(
         )
     if withheld:
         logger.info(
-            "subprocess env isolation withheld %d secret-shaped key(s): %s",
+            "subprocess env isolation withheld %d backend key(s): %s",
             len(withheld),
             sanitize_for_logging(",".join(withheld)),
         )

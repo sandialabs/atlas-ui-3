@@ -29,13 +29,37 @@ def test_bundled_mcp_config_keys_are_forwarded(monkeypatch):
         "BACKEND_URL": "http://backend:8000",
         "MCP_STATE_BACKEND": "redis",
         "MCP_REDIS_URL": "redis://redis:6379/0",
+        "MCP_SESSION_STATE_PORT": "9003",
+        "MCP_CODE_EXECUTOR_V2_HOST": "backend",
+        "PPTX_TEMPLATE_PATH": "/app/templates/deck.pptx",
+        "CHATUI_RUNTIME_UPLOADS": "/app/runtime/uploads",
+        "CODE_EXECUTOR_V2_WORKSPACES_DIR": "/data/code-executor",
+        "CODE_EXECUTOR_V2_MEM_MB": "2048",
+        "MCP_TRANSFER_BASE_DIR": "/data/transfers",
+        "MCP_TRANSFER_ALLOWED_DIRS": "/data,/tmp",
         "HTTP_PROXY": "http://proxy:3128",
         "HTTPS_PROXY": "http://proxy:3128",
+        "http_proxy": "http://proxy:3128",
+        "https_proxy": "http://proxy:3128",
         "NO_PROXY": "localhost",
+        "no_proxy": "localhost",
         "SSL_CERT_FILE": "/etc/ssl/certs/ca.pem",
         "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca.pem",
     }
     for key, value in keys.items():
         monkeypatch.setenv(key, value)
-    env = _build_child_env()
+    env = _build_child_env(forward_mcp_config=True)
     assert {key: env.get(key) for key in keys} == keys
+
+
+def test_mcp_config_keys_are_not_forwarded_to_portal(monkeypatch):
+    """The Agent Portal must not inherit credential-bearing proxy/Redis URLs."""
+    monkeypatch.setenv("MCP_REDIS_URL", "redis://user:password@redis:6379/0")
+    monkeypatch.setenv("HTTP_PROXY", "http://user:password@proxy:3128")
+    monkeypatch.setenv("HTTPS_PROXY", "http://user:password@proxy:3128")
+    monkeypatch.setenv("CODE_EXECUTOR_V2_WORKSPACES_DIR", "/data/code-executor")
+    env = _build_child_env()
+    assert "MCP_REDIS_URL" not in env
+    assert "HTTP_PROXY" not in env
+    assert "HTTPS_PROXY" not in env
+    assert "CODE_EXECUTOR_V2_WORKSPACES_DIR" not in env

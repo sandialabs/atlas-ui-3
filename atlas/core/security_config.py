@@ -124,9 +124,18 @@ def validate_debug_configuration(settings, host: Optional[str]) -> None:
             "to accept unauthenticated access in production."
         )
     if not _is_loopback_host(host) and not settings.allow_debug_non_loopback:
-        raise ValueError(
-            f"DEBUG_MODE=true refuses the non-loopback bind host {host!r}. Bind to "
-            "127.0.0.1 (for example `--host 127.0.0.1`), set DEBUG_MODE=false, or "
-            "explicitly set ALLOW_DEBUG_NON_LOOPBACK=true to accept unauthenticated "
-            "access on every interface."
-        )
+        if host:
+            detail = (
+                f"DEBUG_MODE=true refuses the non-loopback bind host {host!r}. Bind to "
+                "127.0.0.1 (for example `--host 127.0.0.1`), set DEBUG_MODE=false, or "
+                "explicitly set ALLOW_DEBUG_NON_LOOPBACK=true to accept unauthenticated "
+                "access on every interface."
+            )
+        else:
+            detail = (
+                "DEBUG_MODE=true cannot determine the bind host and will not assume "
+                "loopback. Set ATLAS_HOST=127.0.0.1 (or pass `--host 127.0.0.1`), set "
+                "DEBUG_MODE=false, or explicitly set ALLOW_DEBUG_NON_LOOPBACK=true to "
+                "accept unauthenticated access on every interface."
+            )
+        raise ValueError(detail)

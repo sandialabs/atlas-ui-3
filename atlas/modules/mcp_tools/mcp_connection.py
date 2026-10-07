@@ -204,7 +204,10 @@ class ConnectionMixin:
                 command = config.get("command")
                 # Operator-declared MCP env is trusted, unlike Portal launch
                 # extras: merge it after the baseline so requested keys survive.
-                resolved_env = _build_child_env(extra_path_dirs=_stdio_path_dirs(command))
+                resolved_env = _build_child_env(
+                    extra_path_dirs=_stdio_path_dirs(command),
+                    forward_mcp_config=True,
+                )
                 for key, value in (config.get("env") or {}).items():
                     try:
                         resolved_env[key] = resolve_env_var(value)
