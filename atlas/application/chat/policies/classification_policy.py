@@ -112,3 +112,47 @@ def find_classification_violations(
         violations.extend(f"data source {name}" for name in denied_sources)
 
     return violations
+
+
+async def find_unapproved_corpora(
+    active_level: Optional[str],
+    user_email: Optional[str],
+    selected_data_sources: Optional[List[str]],
+    *,
+    unified_rag: Any = None,
+    rag_mcp: Any = None,
+    config_manager: Any = None,
+) -> List[str]:
+    """Selected ``server:corpus`` keys discovery does not offer at ``active_level``.
+
+    A corpus can declare narrower classifications than its server, and only
+    the RAG backend knows them. Discovery run with the active level already
+    drops unapproved servers and corpora (it is the same allow-list the
+    ``atlas_search`` tool is bounded by), so a selected corpus missing from it
+    is refused rather than queried. Sources whose server is not configured are
+    not reported; the query path refuses those on its own.
+    """
+    if not active_level or not selected_data_sources:
+        return []
+    configured = set(_rag_sources(config_manager))
+    wanted = [
+        s for s in selected_data_sources
+        if isinstance(s, str) and ":" in s and s.split(":", 1)[0] in configured
+    ]
+    if not wanted:
+        return []
+    discovered: List[Dict[str, Any]] = []
+    if unified_rag is not None:
+        discovered += await unified_rag.discover_data_sources(
+            user_email, user_compliance_level=active_level
+        )
+    if rag_mcp is not None:
+        discovered += await rag_mcp.discover_servers(
+            user_email, user_compliance_level=active_level
+        )
+    offered = {
+        f"{server.get('server')}:{source.get('id')}"
+        for server in discovered
+        for source in server.get("sources", []) or []
+    }
+    return [s for s in wanted if s not in offered]

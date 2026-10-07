@@ -119,6 +119,19 @@ def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
     return attrs
 
 
+def corpus_classifications(ds: Any, server_config: Any) -> Optional[List[str]]:
+    """A discovered corpus's classifications.
+
+    Its own ``allowed_data_classifications`` or ``compliance_level`` when the
+    backend sent one; otherwise its server's from rag-sources.json (the
+    client model's implicit ``compliance_level`` default is not a declaration).
+    """
+    fields_set = getattr(ds, "model_fields_set", None)
+    if fields_set is None or fields_set & {"allowed_data_classifications", "compliance_level"}:
+        return declared_classifications(ds)
+    return declared_classifications(server_config)
+
+
 class UnifiedRAGService:
     """Aggregates RAG discovery and querying across HTTP and MCP sources."""
 
@@ -424,7 +437,7 @@ class UnifiedRAGService:
                 if source_config.type == "http":
                     # Discover from HTTP RAG API
                     server_info = await self._discover_http_source(
-                        source_name, source_config, username
+                        source_name, source_config, username, user_compliance_level
                     )
                     if server_info:
                         rag_servers.append(server_info)
@@ -448,8 +461,14 @@ class UnifiedRAGService:
         source_name: str,
         config: RAGSourceConfig,
         username: str,
+        user_compliance_level: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Discover data sources from an HTTP RAG API."""
+        """Discover data sources from an HTTP RAG API.
+
+        With ``user_compliance_level`` set, corpora not approved for it are
+        left out (issue #1032), so this list is also the server-side gate for
+        per-corpus classifications.
+        """
         try:
             client = self._get_http_client(source_name, config)
             data_sources = await client.discover_data_sources(username)
@@ -458,9 +477,20 @@ class UnifiedRAGService:
                 logger.debug("No data sources found for HTTP source %s", source_name)
                 return None
 
-            # Build UI sources array
-            ui_sources = [
-                {
+            compliance_mgr = get_compliance_manager() if user_compliance_level else None
+            ui_sources = []
+            for ds in data_sources:
+                classifications = corpus_classifications(ds, config)
+                if compliance_mgr and not compliance_mgr.classification_permits(
+                    user_compliance_level, classifications
+                ):
+                    logger.info(
+                        "Skipping RAG corpus %s:%s: not approved for the active classification",
+                        sanitize_for_logging(source_name),
+                        sanitize_for_logging(ds.id),
+                    )
+                    continue
+                ui_sources.append({
                     "id": ds.id,
                     "name": ds.label,
                     "label": ds.label,
@@ -468,10 +498,8 @@ class UnifiedRAGService:
                     "authRequired": True,
                     "selected": False,
                     "complianceLevel": ds.compliance_level,
-                    "allowedDataClassifications": declared_classifications(ds),
-                }
-                for ds in data_sources
-            ]
+                    "allowedDataClassifications": classifications,
+                })
 
             return {
                 "server": source_name,

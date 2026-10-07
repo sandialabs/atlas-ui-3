@@ -404,6 +404,63 @@ class ChatService:
                 "then send the message again."
             )
 
+    async def _enforce_corpus_classifications(
+        self,
+        compliance_level_raw: Any,
+        user_email: Optional[str],
+        selected_data_sources: Optional[List[str]],
+    ) -> None:
+        """Refuse selected corpora not approved for the active classification.
+
+        The per-server check in _enforce_data_classifications cannot see a
+        corpus that declares narrower classifications than its server; the
+        RAG backend's discovery can, so the selection is checked against it.
+        """
+        if not self._compliance_enabled() or not selected_data_sources:
+            return
+        if not isinstance(compliance_level_raw, str) or not compliance_level_raw:
+            return
+        from atlas.core.compliance import get_compliance_manager
+        from atlas.infrastructure.app_factory import app_factory
+
+        from .policies.classification_policy import find_unapproved_corpora
+
+        active_level = get_compliance_manager().validate_compliance_level(
+            compliance_level_raw, context="chat request"
+        )
+        if not active_level:
+            return
+        try:
+            unapproved = await find_unapproved_corpora(
+                active_level,
+                user_email,
+                selected_data_sources,
+                unified_rag=app_factory.get_unified_rag_service(),
+                rag_mcp=app_factory.get_rag_mcp_service(),
+                config_manager=self.config_manager,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not check data source classifications for the turn (%s); refusing it",
+                type(exc).__name__,
+            )
+            raise ValidationError(
+                "The selected data sources could not be checked against the selected "
+                "compliance level, so the message was not sent. Try again or contact "
+                "an administrator."
+            ) from None
+        if unapproved:
+            logger.info(
+                "Refused a chat turn: %d data source(s) not approved for the active "
+                "classification",
+                len(unapproved),
+            )
+            raise ValidationError(
+                f"Not approved for {active_level} data: data source "
+                f"{', '.join(unapproved)}. Deselect them or pick ones approved for "
+                "this compliance level, then send the message again."
+            )
+
     async def handle_chat_message(
         self,
         session_id: UUID,
@@ -449,6 +506,9 @@ class ChatService:
         self._enforce_required_compliance_level(kwargs.get("compliance_level"))
         self._enforce_data_classifications(
             kwargs.get("compliance_level"), model, selected_tools, selected_data_sources
+        )
+        await self._enforce_corpus_classifications(
+            kwargs.get("compliance_level"), user_email, selected_data_sources
         )
 
         # Get or create session

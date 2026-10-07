@@ -268,3 +268,77 @@ class TestChatServiceRefusesTheTurn:
         assert "data source uur_docs" in str(exc.value)
         assert "internal_search" not in str(exc.value)
         repo.get.assert_not_called()
+
+
+class TestPerCorpusClassifications:
+    """A corpus can declare narrower classifications than its server."""
+
+    def test_corpus_declaration_wins_and_undeclared_inherits(self):
+        from atlas.domain.unified_rag_service import corpus_classifications
+        from atlas.modules.rag.client import DataSource
+
+        server = SimpleNamespace(allowed_data_classifications=["UUR", "ITAR"], compliance_level=None)
+        narrow = DataSource(id="a", label="A", allowed_data_classifications=["UUR"])
+        leveled = DataSource(id="b", label="B", compliance_level="ITAR")
+        silent = DataSource(id="c", label="C")
+        assert corpus_classifications(narrow, server) == ["UUR"]
+        assert corpus_classifications(leveled, server) == ["ITAR"]
+        # The client model's implicit compliance_level default is not a
+        # declaration: the corpus inherits its server's list.
+        assert corpus_classifications(silent, server) == ["UUR", "ITAR"]
+
+    @pytest.mark.asyncio
+    async def test_unapproved_corpus_is_reported(self, config_manager):
+        from atlas.application.chat.policies.classification_policy import find_unapproved_corpora
+
+        class Discovery:
+            async def discover_data_sources(self, user, user_compliance_level=None):
+                assert user_compliance_level == "ITAR"
+                return [{"server": "export_docs", "sources": [{"id": "specs"}]}]
+
+        unapproved = await find_unapproved_corpora(
+            "ITAR", "u@test.com",
+            ["export_docs:specs", "export_docs:uur_only", "missing_server:x"],
+            unified_rag=Discovery(), rag_mcp=None, config_manager=config_manager,
+        )
+        assert unapproved == ["export_docs:uur_only"]
+
+    @pytest.mark.asyncio
+    async def test_no_level_or_no_sources_skips_discovery(self, config_manager):
+        from atlas.application.chat.policies.classification_policy import find_unapproved_corpora
+
+        class Boom:
+            async def discover_data_sources(self, *a, **k):
+                raise AssertionError("discovery must not run")
+
+        assert await find_unapproved_corpora(
+            None, "u", ["export_docs:x"], unified_rag=Boom(), config_manager=config_manager
+        ) == []
+        assert await find_unapproved_corpora(
+            "ITAR", "u", [], unified_rag=Boom(), config_manager=config_manager
+        ) == []
+
+    @pytest.mark.asyncio
+    async def test_http_discovery_drops_unapproved_corpora(self, manager, monkeypatch):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from atlas.domain.unified_rag_service import UnifiedRAGService
+        from atlas.modules.rag.client import DataSource
+
+        monkeypatch.setattr("atlas.domain.unified_rag_service.get_compliance_manager", lambda: manager)
+        service = object.__new__(UnifiedRAGService)
+        client = MagicMock()
+        client.discover_data_sources = AsyncMock(return_value=[
+            DataSource(id="open", label="Open", allowed_data_classifications=["UUR", "ITAR"]),
+            DataSource(id="uur_only", label="UUR only", compliance_level="UUR"),
+            DataSource(id="silent", label="Silent"),
+        ])
+        service._get_http_client = lambda name, cfg: client
+        config = SimpleNamespace(
+            allowed_data_classifications=["UUR", "ITAR"], compliance_level=None,
+            display_name=None, icon=None,
+        )
+        info = await service._discover_http_source("docs", config, "u@test.com", "ITAR")
+        assert [s["id"] for s in info["sources"]] == ["open", "silent"]
+        info = await service._discover_http_source("docs", config, "u@test.com", None)
+        assert [s["id"] for s in info["sources"]] == ["open", "uur_only", "silent"]
