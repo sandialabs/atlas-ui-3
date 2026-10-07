@@ -14,6 +14,7 @@ guard in place so it cannot be silently removed.
 
 import os
 from pathlib import Path
+from unittest import mock
 
 from dotenv import load_dotenv
 
@@ -57,7 +58,10 @@ def test_dotenv_cannot_reenable_compliance_required_mode(tmp_path):
 
     ``load_dotenv`` with its default ``override=False`` only fills keys that are
     absent, so the conftest pins survive a .env that would otherwise restore the
-    policy. Mirrors ``test_dotenv_cannot_reenable_skip_authorization_checks``.
+    policy. Mirrors ``test_dotenv_cannot_reenable_skip_authorization_checks``,
+    with ``mock.patch.dict`` wrapping the load so that if the pins ever regress
+    the leaked values are restored and do not bury every later test under a
+    spurious required-compliance failure.
     """
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text(
@@ -66,11 +70,15 @@ def test_dotenv_cannot_reenable_compliance_required_mode(tmp_path):
         "COMPLIANCE_DEFAULT_LEVEL=Internal\n"
     )
 
-    load_dotenv(dotenv_path=dotenv_path)
+    with mock.patch.dict(os.environ):
+        load_dotenv(dotenv_path=dotenv_path)
 
-    assert os.environ.get("FEATURE_COMPLIANCE_LEVELS_ENABLED") == "false"
-    assert os.environ.get("FEATURE_COMPLIANCE_LEVEL_REQUIRED") == "false"
-    assert os.environ.get("COMPLIANCE_DEFAULT_LEVEL") == ""
+        assert os.environ.get("FEATURE_COMPLIANCE_LEVELS_ENABLED") == "false"
+        assert os.environ.get("FEATURE_COMPLIANCE_LEVEL_REQUIRED") == "false"
+        assert os.environ.get("COMPLIANCE_DEFAULT_LEVEL") == ""
+        settings = AppSettings()
+        assert settings.compliance_level_required_effective is False
+        assert not settings.compliance_default_level
 
 
 def test_dotenv_cannot_reenable_skip_authorization_checks(tmp_path):
