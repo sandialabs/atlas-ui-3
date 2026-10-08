@@ -427,7 +427,8 @@ async def test_concurrent_misses_share_one_discovery(manager):
         assert backend.discover_data_sources.await_count == 1
         assert len(service._corpus_refreshes) == 1
         release.set()
-        await queries
+        responses = await queries
+    assert [r.content for r in responses] == ["v1", "v1", "v1"]
     assert backend.discover_data_sources.await_count == 1
     assert backend.queried == 3
 
@@ -533,7 +534,8 @@ async def test_invalidate_discards_an_in_flight_refresh(manager):
         service.invalidate_cache("legacy")
         assert service._corpus_refreshes == {}
         release.set()
-        await pending  # this caller still gets the answer it waited for...
+        # This caller still gets the answer it waited for...
+        assert (await pending).content == "v1"
     # ...but the result from before the invalidation was not cached.
     assert service._corpus_metadata.lookup("legacy", USER) is None
 
@@ -558,7 +560,7 @@ async def test_cancelled_caller_does_not_cancel_the_shared_refresh(manager):
             await asyncio.sleep(0)
         first.cancel()
         release.set()
-        await second
+        assert (await second).content == "v1"
     assert first.cancelled()
     assert backend.discover_data_sources.await_count == 1
     assert backend.queried == 1
