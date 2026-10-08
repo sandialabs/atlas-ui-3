@@ -7,6 +7,7 @@ This service provides a single interface for:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -29,6 +30,7 @@ from atlas.core.telemetry import (
 )
 from atlas.domain.errors import DataSourcePermissionError
 from atlas.domain.rag_corpus_classifications import (
+    CORPUS_DISCOVERY_TIMEOUT_SECONDS,
     CORPUS_METADATA_MIN_REFRESH_SECONDS,
     CorpusMetadataCache,
     corpus_classifications,
@@ -153,6 +155,8 @@ class UnifiedRAGService:
         self._http_clients: Dict[str, AtlasRAGClient] = {}
         # Recent HTTP discovery answers, read by query-time per-corpus checks.
         self._corpus_metadata = CorpusMetadataCache()
+        # In-flight query-time discoveries, so concurrent misses share one call.
+        self._corpus_refreshes: Dict[Tuple[str, str], "asyncio.Future[bool]"] = {}
 
     # ----------------------------------------------------- RAG hooks (GH #713)
 
@@ -441,9 +445,32 @@ class UnifiedRAGService:
             return cached, False
         if cache.recently_failed(source_name, username):
             return cached, True
+        key = (source_name, username or "")
+        refresh = self._corpus_refreshes.get(key)
+        if refresh is None:
+            refresh = asyncio.ensure_future(
+                self._refresh_corpus_metadata(username, source_name, source_config)
+            )
+            self._corpus_refreshes[key] = refresh
+            refresh.add_done_callback(lambda _done: self._corpus_refreshes.pop(key, None))
+        # Shielded: one caller giving up must not cancel the shared refresh.
+        answered = await asyncio.shield(refresh)
+        return cache.lookup(source_name, username), not answered
+
+    async def _refresh_corpus_metadata(
+        self,
+        username: str,
+        source_name: str,
+        source_config: RAGSourceConfig,
+    ) -> bool:
+        """Ask the backend for its corpora once; True when it answered."""
+        cache = self._corpus_metadata
         try:
             client = self._get_http_client(source_name, source_config)
-            data_sources = await client.discover_data_sources(username)
+            data_sources = await asyncio.wait_for(
+                client.discover_data_sources(username),
+                timeout=min(source_config.timeout, CORPUS_DISCOVERY_TIMEOUT_SECONDS),
+            )
         except Exception as exc:
             logger.warning(
                 "Could not load corpus metadata for RAG source %s (%s)",
@@ -453,9 +480,9 @@ class UnifiedRAGService:
             data_sources = None
         if not data_sources:
             cache.mark_failed(source_name, username)
-            return cache.lookup(source_name, username), True
+            return False
         cache.store(source_name, username, data_sources)
-        return cache.lookup(source_name, username), False
+        return True
 
     async def _ensure_corpora_allowed(
         self,
@@ -481,10 +508,12 @@ class UnifiedRAGService:
 
         In a classified session a corpus the backend's discovery does not list,
         or any corpus when discovery does not answer, cannot be confirmed and
-        is refused. Under the floor alone such a corpus is let through: the
-        server already shares a classification with the model, and refusing
-        would turn a discovery outage into an outage for unclassified chat;
-        each such pass is logged at WARNING.
+        is refused. Under the floor alone the same holds for a server with
+        ``legacy_corpus_classifications``, whose operator has said per-corpus
+        levels matter. Otherwise such a corpus is let through under the floor:
+        the server already shares a classification with the model, and
+        refusing would turn a discovery outage into an outage for unclassified
+        chat; each such pass is logged at WARNING.
         """
         if not source_ids or source_config.type != "http":
             return
@@ -501,7 +530,7 @@ class UnifiedRAGService:
         for corpus_id in source_ids:
             ds = corpora.get(corpus_id)
             if ds is None:
-                if active_level is not None:
+                if active_level is not None or source_config.legacy_corpus_classifications:
                     unconfirmed.append(corpus_id)
                 else:
                     unchecked_under_floor.append(corpus_id)
@@ -558,8 +587,8 @@ class UnifiedRAGService:
             if unanswered:
                 raise DataSourcePermissionError(
                     f"{subject} not verifiable right now: its RAG backend did not "
-                    "answer, so it cannot be checked against the selected compliance "
-                    f"level. Try again later, or deselect {pronoun}.",
+                    "answer, so its data classification cannot be checked. Try again "
+                    f"later, or deselect {pronoun}.",
                     code="DATA_SOURCE_UNVERIFIED",
                 )
             raise DataSourcePermissionError(

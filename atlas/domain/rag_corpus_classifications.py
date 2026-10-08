@@ -36,6 +36,13 @@ CORPUS_METADATA_TTL_SECONDS = 60.0
 # does not know (a model's invented corpus, say) cannot force a discovery
 # round trip per query.
 CORPUS_METADATA_MIN_REFRESH_SECONDS = 5.0
+# How long a failed discovery stops query-time checks from asking again. Longer
+# than the query-time discovery timeout, so a hung backend costs one timeout
+# per window rather than one per query.
+CORPUS_DISCOVERY_FAILURE_SECONDS = 30.0
+# Upper bound on a query-time discovery call; the configured client timeout
+# applies when it is shorter.
+CORPUS_DISCOVERY_TIMEOUT_SECONDS = 10.0
 # Upper bound on cached (server, user) entries; the oldest are dropped first.
 CORPUS_METADATA_MAX_ENTRIES = 2048
 
@@ -94,7 +101,7 @@ class CorpusMetadataCache:
     leaves an existing entry alone, so a refresh that fails does not discard
     one that is still within its TTL.
 
-    A failed refresh is remembered for ``min_refresh_seconds`` so that during a
+    A failed refresh is remembered for ``failure_seconds`` so that during a
     backend outage queries are refused (or, under the model floor alone, let
     through) at once instead of each waiting out the discovery timeout.
     """
@@ -103,11 +110,11 @@ class CorpusMetadataCache:
         self,
         ttl_seconds: float = CORPUS_METADATA_TTL_SECONDS,
         max_entries: int = CORPUS_METADATA_MAX_ENTRIES,
-        min_refresh_seconds: float = CORPUS_METADATA_MIN_REFRESH_SECONDS,
+        failure_seconds: float = CORPUS_DISCOVERY_FAILURE_SECONDS,
     ) -> None:
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries
-        self.min_refresh_seconds = min_refresh_seconds
+        self.failure_seconds = failure_seconds
         self._entries: OrderedDict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = OrderedDict()
         self._failures: OrderedDict[Tuple[str, str], float] = OrderedDict()
 
@@ -137,7 +144,7 @@ class CorpusMetadataCache:
     def recently_failed(self, server: str, user: str) -> bool:
         """Whether discovery for ``(server, user)`` failed too recently to retry."""
         failed_at = self._failures.get((server, user or ""))
-        return failed_at is not None and self._now() - failed_at < self.min_refresh_seconds
+        return failed_at is not None and self._now() - failed_at < self.failure_seconds
 
     def lookup(self, server: str, user: str) -> Optional[Dict[str, Any]]:
         """The fresh discovery answer for ``(server, user)``, or ``None``."""
@@ -170,6 +177,8 @@ class CorpusMetadataCache:
 
 
 __all__ = [
+    "CORPUS_DISCOVERY_FAILURE_SECONDS",
+    "CORPUS_DISCOVERY_TIMEOUT_SECONDS",
     "CORPUS_METADATA_MIN_REFRESH_SECONDS",
     "CORPUS_METADATA_TTL_SECONDS",
     "CorpusMetadataCache",

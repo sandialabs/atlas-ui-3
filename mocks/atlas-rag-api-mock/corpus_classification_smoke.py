@@ -2,7 +2,8 @@
 
 Drives the real ``UnifiedRAGService`` over HTTP against a running mock, with
 and without ``legacy_corpus_classifications``, on both API versions, in a
-``Public`` session. The mock sends ``compliance_level`` per corpus
+``Public`` session; then with no level under a Public-only model floor, and
+against a backend that is down. The mock sends ``compliance_level`` per corpus
 (``product-knowledge`` is Public, the others Internal), so with the flag on
 only ``product-knowledge`` may be queried.
 
@@ -68,7 +69,7 @@ async def _outcome(coro) -> str:
         return exc.code
 
 
-async def run(url: str, key: str) -> int:
+async def run(url: str, key: str, down_url: str) -> int:
     _use_levels()
     failures = 0
     for api_version in ("v1", "v2"):
@@ -101,11 +102,51 @@ async def run(url: str, key: str) -> int:
                 }
             finally:
                 compliance.reset_active_compliance_context(token)
-            for name, outcome in actual.items():
-                ok = outcome == expected[name]
-                failures += not ok
-                print(f"  {name}: {outcome}{'' if ok else f'  (expected {expected[name]})'}")
+            failures += _report({name: (actual[name], expected[name]) for name in actual})
             print(f"  discovery round trips: {len(calls)}")
+
+    # No level selected: the model floor (here, a Public-only model) applies to
+    # corpora with their own level.
+    service, _ = _service(url, key, "v1", True)
+    print("== no level, model floor [Public], legacy_corpus_classifications=True")
+    token = compliance.set_model_classification_floor(["Public"])
+    try:
+        failures += _report({
+            "single product-knowledge": (await _outcome(
+                service.query_rag(USER, "mock:product-knowledge", MESSAGES)), "ALLOWED"),
+            "single technical-docs": (await _outcome(
+                service.query_rag(USER, "mock:technical-docs", MESSAGES)),
+                "DATA_SOURCE_COMPLIANCE_MISMATCH"),
+        })
+    finally:
+        compliance.reset_model_classification_floor(token)
+
+    # Backend down: nothing listens on --down-url.
+    service, _ = _service(down_url, key, "v1", True)
+    print(f"== backend down ({down_url}), legacy_corpus_classifications=True")
+    token = compliance.set_active_compliance_context("Public", enforce=True)
+    try:
+        classified = await _outcome(service.query_rag(USER, "mock:product-knowledge", MESSAGES))
+    finally:
+        compliance.reset_active_compliance_context(token)
+    token = compliance.set_model_classification_floor(["Public"])
+    try:
+        floor_only = await _outcome(service.query_rag(USER, "mock:product-knowledge", MESSAGES))
+    finally:
+        compliance.reset_model_classification_floor(token)
+    failures += _report({
+        "classified session": (classified, "DATA_SOURCE_UNVERIFIED"),
+        "no level, model floor": (floor_only, "DATA_SOURCE_UNVERIFIED"),
+    })
+    return failures
+
+
+def _report(results) -> int:
+    failures = 0
+    for name, (outcome, expected) in results.items():
+        ok = outcome == expected
+        failures += not ok
+        print(f"  {name}: {outcome}{'' if ok else f'  (expected {expected})'}")
     return failures
 
 
@@ -113,8 +154,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", default="http://127.0.0.1:8002")
     parser.add_argument("--key", default="test-atlas-rag-token")
+    parser.add_argument(
+        "--down-url", default="http://127.0.0.1:9",
+        help="a URL nothing listens on, for the backend-down cases",
+    )
     args = parser.parse_args()
-    failures = asyncio.run(run(args.url, args.key))
+    failures = asyncio.run(run(args.url, args.key, args.down_url))
     print("OK" if not failures else f"{failures} unexpected outcome(s)")
     sys.exit(1 if failures else 0)
 

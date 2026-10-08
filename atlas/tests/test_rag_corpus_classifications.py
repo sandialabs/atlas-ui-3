@@ -5,6 +5,7 @@ calculation, and query-time enforcement of each requested corpus across the
 single, batch, v1/v2 and agent-tool paths.
 """
 
+import asyncio
 import importlib
 import json
 import logging
@@ -22,6 +23,7 @@ from atlas.core.compliance import (
 )
 from atlas.domain.errors import DataSourcePermissionError
 from atlas.domain.rag_corpus_classifications import (
+    CORPUS_DISCOVERY_FAILURE_SECONDS,
     CORPUS_METADATA_MIN_REFRESH_SECONDS,
     CorpusMetadataCache,
     corpus_classifications,
@@ -254,13 +256,19 @@ async def test_unanswered_discovery_fails_closed(manager):
 
 @pytest.mark.asyncio
 async def test_floor_only_turn_survives_a_discovery_outage(manager):
-    """No level selected: the server floor passed, so an outage is not a denial."""
+    """No level selected: the server floor passed, so an outage is not a denial
+    -- unless the server opted in to per-corpus levels, which then must be read."""
     backend = _Backend([])
     backend.discover_data_sources.side_effect = RuntimeError("down")
-    service = _service(backend)
     token = set_model_classification_floor(["UUR"])
     try:
-        await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+        await _service(backend, legacy=False).query_rag(
+            USER, "legacy:silent", [{"role": "user", "content": "q"}])
+        assert backend.queried == 1
+        with pytest.raises(DataSourcePermissionError) as exc:
+            await _service(backend, legacy=True).query_rag(
+                USER, "legacy:silent", [{"role": "user", "content": "q"}])
+        assert exc.value.code == "DATA_SOURCE_UNVERIFIED"
     finally:
         reset_model_classification_floor(token)
     assert backend.queried == 1
@@ -369,9 +377,9 @@ async def test_outage_is_not_retried_on_every_query(manager, monkeypatch):
             with pytest.raises(DataSourcePermissionError, match="did not answer"):
                 await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
         assert backend.discover_data_sources.await_count == 1
-        # Recovered backend: asked again once the short failure window passes.
+        # Recovered backend: asked again once the failure window passes.
         backend.discover_data_sources.side_effect = lambda user: list(MIXED)
-        _advance(monkeypatch, CORPUS_METADATA_MIN_REFRESH_SECONDS + 1)
+        _advance(monkeypatch, CORPUS_DISCOVERY_FAILURE_SECONDS + 1)
         await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
     assert backend.discover_data_sources.await_count == 2
 
@@ -379,9 +387,10 @@ async def test_outage_is_not_retried_on_every_query(manager, monkeypatch):
 @pytest.mark.asyncio
 async def test_floor_only_pass_without_metadata_is_logged(manager, caplog):
     """Under the floor, a corpus discovery does not list is let through on the
-    server's floor check, with a WARNING naming it."""
+    server's floor check, with a WARNING naming it (server without the legacy
+    opt-in; with it, the corpus is refused -- see the outage test above)."""
     backend = _Backend(MIXED)
-    service = _service(backend)
+    service = _service(backend, legacy=False)
     token = set_model_classification_floor(["UUR"])
     try:
         with caplog.at_level(logging.WARNING):
@@ -394,6 +403,49 @@ async def test_floor_only_pass_without_metadata_is_logged(manager, caplog):
         and "unlisted" in r.getMessage()
         for r in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_misses_share_one_discovery(manager):
+    backend = _Backend(MIXED)
+    release = asyncio.Event()
+
+    async def slow(user):
+        await release.wait()
+        return list(MIXED)
+
+    backend.discover_data_sources.side_effect = slow
+    service = _service(backend)
+    with _Turn("ITAR"):
+        queries = asyncio.gather(*[
+            service.query_rag(USER, "legacy:itar_legacy", [{"role": "user", "content": "q"}])
+            for _ in range(3)
+        ])
+        await asyncio.sleep(0)
+        release.set()
+        await queries
+    assert backend.discover_data_sources.await_count == 1
+    assert backend.queried == 3
+
+
+@pytest.mark.asyncio
+async def test_hung_discovery_is_bounded(manager, monkeypatch):
+    monkeypatch.setattr(
+        "atlas.domain.unified_rag_service.CORPUS_DISCOVERY_TIMEOUT_SECONDS", 0.05
+    )
+    backend = _Backend(MIXED)
+
+    async def hang(user):
+        await asyncio.sleep(30)
+
+    backend.discover_data_sources.side_effect = hang
+    service = _service(backend)
+    with _Turn("ITAR"), pytest.raises(DataSourcePermissionError) as exc:
+        await asyncio.wait_for(
+            service.query_rag(USER, "legacy:itar_legacy", [{"role": "user", "content": "q"}]),
+            timeout=5,
+        )
+    assert exc.value.code == "DATA_SOURCE_UNVERIFIED"
 
 
 @pytest.mark.asyncio

@@ -171,15 +171,19 @@ versions:
   is sent to the backend.
 - In a classified session, a corpus discovery does not list for the user is
   refused (`DATA_SOURCE_NOT_LISTED`), and while the backend's discovery does
-  not answer every corpus is refused (`DATA_SOURCE_UNVERIFIED`). A failed
-  discovery is remembered for 5 seconds, so during an outage queries are
-  refused at once instead of each waiting out the discovery timeout.
+  not answer every corpus is refused (`DATA_SOURCE_UNVERIFIED`). A query-time
+  discovery is capped at 10 seconds (or the source's `timeout`, if shorter),
+  concurrent queries share one call, and a failure is remembered for 30
+  seconds, so during an outage queries are refused at once instead of each
+  waiting on the backend.
 - With no level selected ("All Levels"), the model floor still applies: a
   corpus that declares its own classifications must share one with the
-  selected model. A corpus without discovery metadata (an outage, or one
-  discovery does not list) is let through on the server's floor check and
-  logged at WARNING, so a discovery outage does not block unclassified chat.
-  Use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` if that is not acceptable.
+  selected model. On a server with `legacy_corpus_classifications`, a corpus
+  without discovery metadata (an outage, or one discovery does not list) is
+  refused here too. On other servers it is let through on the server's floor
+  check and logged at WARNING, so a discovery outage does not block
+  unclassified chat; use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` if that is not
+  acceptable.
 - Corpus metadata comes from the backend, never from the client. Atlas reuses
   a discovery answer for up to 60 seconds per user and server, so a
   reclassified corpus is re-checked within about a minute. When a requested
