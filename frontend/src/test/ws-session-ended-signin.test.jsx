@@ -168,25 +168,25 @@ describe('session_ended sign-in flow', () => {
       vi.unstubAllGlobals()
     })
 
-    it('marks the session ended on the session_ended frame and the 1008 close', async () => {
+    it('marks the session ended on the session_ended frame and the 4401 close', async () => {
       renderProvider()
 
       const socket = FakeWebSocket.instances[0]
       act(() => {
         socket.onmessage({ data: JSON.stringify({ type: 'session_ended', reason: SESSION_ENDED_REASON }) })
-        socket.onclose({ code: 1008, reason: SESSION_ENDED_REASON })
+        socket.onclose({ code: 4401, reason: SESSION_ENDED_REASON })
       })
 
       await waitFor(() => expect(probe.sessionEnded).toBe(true))
       expect(probe.connectionStatus).toBe(`Unauthenticated: ${SESSION_ENDED_REASON}`)
     })
 
-    it('marks the session ended from a bare 1008 close with a sign-in reason', async () => {
+    it('marks the session ended from a bare 4401 close', async () => {
       renderProvider()
 
       const socket = FakeWebSocket.instances[0]
       act(() => {
-        socket.onclose({ code: 1008, reason: SESSION_ENDED_REASON })
+        socket.onclose({ code: 4401, reason: SESSION_ENDED_REASON })
       })
 
       await waitFor(() => expect(probe.sessionEnded).toBe(true))

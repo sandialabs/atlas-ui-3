@@ -27,7 +27,7 @@ export const WSProvider = ({ children }) => {
   const sessionEndedRef = useRef(false)
 
   const connectWebSocket = () => {
-    // The server sends a `session_ended` frame and closes with 1008 when the
+    // The server sends a `session_ended` frame and closes with 4401 when the
     // OIDC login behind the socket was refused by the IdP. Backing off as if
     // the backend were down would hide the actual problem: the user needs to
     // sign in again, so surface a sign-in prompt instead.
@@ -69,13 +69,12 @@ export const WSProvider = ({ children }) => {
 
       wsRef.current.onclose = (event) => {
         setIsConnected(false)
-        // Check if closed due to authentication failure (1008 = Policy Violation)
-        if (event.code === 1008) {
-          if (/sign in/i.test(event.reason || '')) {
-            markSessionEnded(event.reason)
-          } else {
-            setConnectionStatus(`Unauthenticated: ${event.reason || 'Authentication required'}`)
-          }
+        // 4401 (application range) means the OIDC login behind the socket was
+        // ended; other 1008 closes are proxy-secret or origin problems.
+        if (event.code === 4401) {
+          markSessionEnded(event.reason)
+        } else if (event.code === 1008) {
+          setConnectionStatus(`Unauthenticated: ${event.reason || 'Authentication required'}`)
         } else {
           setConnectionStatus('Disconnected')
         }

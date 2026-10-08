@@ -120,7 +120,7 @@ def exercise():
         try:
             socket.receive_json()
         except WebSocketDisconnect as exc:
-            assert exc.code == 1008
+            assert exc.code == 4401
         else:
             raise AssertionError("An invalidated OIDC socket accepted another operation")
     print("PASSED: an already-open OIDC WebSocket refuses further use")

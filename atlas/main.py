@@ -1477,18 +1477,21 @@ async def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]
 
 async def _enforce_oidc_frame_session(
     websocket, app_settings, established_user: Optional[str]
-) -> bool:
+) -> None:
     """Re-check the OIDC login behind an established socket on every frame.
 
-    Returns True while the socket stays authenticated. When the login session
-    was ended (logout, IdP refusal), tells the client why the socket is going
-    away -- the frame that triggered the check must not be silently lost --
-    and closes with 1008 before returning False.
+    Returns normally while the socket stays authenticated. When the login
+    session was ended (logout, IdP refusal), tells the client why the socket
+    is going away -- the frame that triggered the check must not be silently
+    lost -- and raises ``WebSocketDisconnect`` so the normal disconnect
+    teardown runs: an in-flight agent or tool turn is stopped and the
+    chat-service and MCP resources are released exactly as on any other
+    disconnect.
     """
     if not established_user:
-        return True
+        return
     if await _resolve_oidc_websocket_user(websocket, app_settings) == established_user:
-        return True
+        return
     try:
         await websocket.send_json({
             "type": "session_ended",
@@ -1496,8 +1499,14 @@ async def _enforce_oidc_frame_session(
         })
     except Exception:  # pragma: no cover - client already gone
         logger.debug("Could not deliver session_ended frame", exc_info=True)
-    await websocket.close(code=1008, reason="OIDC session ended. Please sign in again.")
-    return False
+    # 4401 (application range) says "your login session ended"; the plain
+    # 1008s elsewhere mean proxy-secret or origin problems.
+    await websocket.close(code=4401, reason="OIDC session ended. Please sign in again.")
+    # Raising (rather than returning) hands the connection to the endpoint's
+    # disconnect teardown: an in-flight agent or tool turn is stopped and the
+    # chat-service and MCP resources are released exactly as on any other
+    # disconnect.
+    raise WebSocketDisconnect(code=4401, reason="OIDC session ended. Please sign in again.")
 
 
 # WebSocket endpoint for chat
@@ -1703,8 +1712,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            if not await _enforce_oidc_frame_session(websocket, app_settings, oidc_ws_user):
-                break
+            await _enforce_oidc_frame_session(websocket, app_settings, oidc_ws_user)
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages

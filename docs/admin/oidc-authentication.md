@@ -123,17 +123,19 @@ An `invalid_grant` client-error response ends that Atlas session and discards th
 user's cached delegated credentials using the same cleanup as logout. The current
 request is no longer authenticated by that session: browsers return to sign-in,
 APIs receive 401, and an open chat socket receives a `session_ended` message
-before closing with code 1008, and the chat UI offers a link to sign in again.
+before closing with code 4401, and the chat UI offers a link to sign in again.
 The existing trusted-header authentication fallback is unchanged. Reloading the
 browser can start a new login without manually visiting the logout URL.
 
 The cleanup ends with the login session: delegated credentials are revoked
-user-wide only when the refused session was the user's **last live one**. A
-stale tab whose grant is refused therefore cannot tear down the delegated
-credentials a newer, healthy session is using; if the IdP refused the user's
-whole grant, each remaining session discovers that at its own next refresh, and
-the last one out revokes. Sessions that outlive a refused one keep working for
-everything that does not need a delegated credential.
+user-wide only when the refused session was the user's **last live one that can
+still discover a refusal** -- a session with a refresh token and a known
+access-token expiry. A stale tab whose grant is refused therefore cannot tear
+down the delegated credentials a newer, healthy session is using, and a session
+that cannot refresh never keeps the cleanup waiting. If the IdP refused the
+user's whole grant, each refresh-capable session discovers that at its own next
+refresh, and the last one out revokes. Sessions that outlive a refused one keep
+working for everything that does not need a delegated credential.
 
 Network failures, IdP 5xx responses, and other refresh errors retain the Atlas
 session and retry on later use; delegated calls cannot use an expired token.

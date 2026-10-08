@@ -107,7 +107,10 @@ async def test_missing_refresh_token_keeps_login_but_not_expired_credential(sess
 @pytest.mark.asyncio
 async def test_refused_grant_removes_session_but_spares_other_sessions(session, refresh, revoke):
     """A stale tab's refusal must not wipe a newer session's delegated credentials."""
-    other = get_session_store().create(user_id=session.user_id)
+    other = get_session_store().create(
+        user_id=session.user_id, access_token="other-access", refresh_token="other-refresh",
+        access_token_expires_at=time.time() + 600,
+    )
     refresh.side_effect = refused_grant()
     assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is None
     assert get_session_store().get(session.session_id) is None
@@ -115,6 +118,16 @@ async def test_refused_grant_removes_session_but_spares_other_sessions(session, 
     revoke.assert_not_awaited()
     assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
     refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_refusal_does_not_wait_for_a_peer_that_cannot_discover_it(session, refresh, revoke):
+    """A session that can never be refused must not keep the cleanup waiting."""
+    helpless = get_session_store().create(user_id=session.user_id)
+    refresh.side_effect = refused_grant()
+    assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is None
+    assert get_session_store().get(helpless.session_id) is helpless
+    revoke.assert_awaited_once_with(session.user_id)
 
 
 @pytest.mark.asyncio
@@ -389,7 +402,8 @@ async def test_websocket_resolver_refreshes_and_rejects_refusal(session, refresh
 
 
 @pytest.mark.asyncio
-async def test_frame_guard_sends_session_ended_before_the_1008_close(session, refresh, revoke):
+async def test_frame_guard_sends_session_ended_then_raises_disconnect(session, refresh, revoke):
+    from fastapi import WebSocketDisconnect
     from main import _enforce_oidc_frame_session
 
     sent, closed = [], []
@@ -405,14 +419,18 @@ async def test_frame_guard_sends_session_ended_before_the_1008_close(session, re
         send_json=send_json,
         close=close,
     )
-    assert await _enforce_oidc_frame_session(socket, SETTINGS, session.user_id) is True
+    await _enforce_oidc_frame_session(socket, SETTINGS, session.user_id)
     assert sent == [] and closed == []
 
     session.access_token_expires_at = time.time() - 1
     refresh.side_effect = refused_grant()
-    assert await _enforce_oidc_frame_session(socket, SETTINGS, session.user_id) is False
+    with pytest.raises(WebSocketDisconnect) as disconnect:
+        await _enforce_oidc_frame_session(socket, SETTINGS, session.user_id)
+    assert disconnect.value.code == 4401
     assert sent == [{
         "type": "session_ended",
         "reason": "OIDC session ended. Please sign in again.",
     }]
-    assert closed == [{"code": 1008, "reason": "OIDC session ended. Please sign in again."}]
+    # The socket itself is closed here, and the raised WebSocketDisconnect
+    # hands the endpoint over to its disconnect cleanup.
+    assert closed == [{"code": 4401, "reason": "OIDC session ended. Please sign in again."}]

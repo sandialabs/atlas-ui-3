@@ -746,7 +746,7 @@ export function createWebSocketHandler(deps) {
           break
         case 'session_ended':
           // The server ended the OIDC login behind this socket and is about
-          // to close it with 1008. Stop the turn cleanly instead of leaving
+          // to close it with 4401. Stop the turn cleanly instead of leaving
           // the thinking spinner running into a misleading timeout error.
           setIsThinking(false)
           clearAgentRunning()

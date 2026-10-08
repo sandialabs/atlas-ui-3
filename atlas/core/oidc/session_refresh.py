@@ -102,6 +102,12 @@ async def ensure_fresh_access_token(
         settings = app_factory.get_config_manager().app_settings
 
     lock = await _lock_for(session.session_id)
+    # A refresh already in flight serves the still-valid token right away
+    # instead of making every caller queue behind the IdP round trip.
+    if lock.locked():
+        expires_at = session.access_token_expires_at
+        if expires_at is not None and time.time() < expires_at:
+            return session.access_token
     async with lock:
         # Logout or a refused refresh may have removed it while we waited.
         if get_session_store().get(session.session_id) is not session:
@@ -144,16 +150,19 @@ async def ensure_fresh_access_token(
                 store.remove(session.session_id)
                 forget_refresh_state(session.session_id)
                 # The refusal says the IdP no longer accepts this grant. Only
-                # tear down the user's delegated credentials when this was
-                # their last live session: an older tab whose grant is refused
-                # must not revoke the credentials a newer, healthy session is
-                # using. If the IdP refused the user's whole grant, each other
-                # session discovers it at its own next refresh, and the last
-                # one out revokes.
+                # tear down the user's delegated credentials when no other
+                # session can still discover that refusal: one with a refresh
+                # token and a known access-token expiry refreshes on use and
+                # would be refused the same way. A session that cannot refresh
+                # can never observe the refusal, so it must not keep the
+                # cleanup waiting -- otherwise a disabled user's delegated
+                # credentials would stay alive indefinitely.
                 others = [
                     other
                     for other in store.iter_sessions()
                     if other.user_id.strip().lower() == session.user_id.strip().lower()
+                    and other.refresh_token
+                    and other.access_token_expires_at is not None
                 ]
                 if not others:
                     try:
