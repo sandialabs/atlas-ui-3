@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from atlas.application.chat.runs.registry import RunRegistry
+from atlas.domain import conversation_classification as conv_class
 
 TITLE_MAX_CHARS = 200
 
@@ -39,6 +40,25 @@ def _run_message_dicts(session) -> list:
         data["sequence_number"] = index
         messages.append(data)
     return messages
+
+
+def _live_metadata(session) -> Dict[str, Any]:
+    """The stored shape's metadata, including the run's classification record.
+
+    The record comes from the binding the run's turn gate checked (issue
+    #1042); a run whose turn has not reached the gate yet has none, and reads
+    as legacy -- refused while compliance levels are enforced -- until it does.
+    """
+    metadata: Dict[str, Any] = {
+        "agent_mode": bool(session.context.get("agent_mode")),
+        "workspace_id": session.context.get("workspace_id"),
+    }
+    classification = conv_class.metadata_value(
+        session.context.get(conv_class.SESSION_BINDING_KEY)
+    )
+    if classification is not ...:
+        metadata[conv_class.CLASSIFICATION_METADATA_KEY] = classification
+    return metadata
 
 
 async def in_flight_conversation(
@@ -81,6 +101,7 @@ async def in_flight_conversation(
     # appends onto the same text.
     stream_text = record.stream.text()
 
+    metadata = _live_metadata(session)
     return {
         "id": conversation_id,
         "user_email": user_email,
@@ -93,12 +114,10 @@ async def in_flight_conversation(
         "created_at": _iso(record.created_at),
         "updated_at": _iso(record.updated_at),
         "message_count": len(messages),
-        "metadata": {
-            "agent_mode": bool(session.context.get("agent_mode")),
-            "workspace_id": session.context.get("workspace_id"),
-        },
+        "metadata": metadata,
         "messages": messages,
         "tags": [],
+        **conv_class.public_fields(metadata),
         # Tells a client this is the run's live view, not a stored record.
         "in_flight": True,
         "run_id": record.run_id,

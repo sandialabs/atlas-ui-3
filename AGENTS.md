@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -246,7 +246,7 @@ Example configs in `atlas/config/mcp-example-configs/`.
 
 ## Compliance Levels
 
-Definitions in `atlas/config/compliance-levels.json` with user overrides in `config/compliance-levels.json`. `core/compliance.py` loads and normalizes aliases. Models, MCP servers and RAG sources declare `allowed_data_classifications` (legacy `compliance_level` = one-element list); the active conversation level must be a member (`ComplianceLevelManager.classification_permits`), undeclared fails closed, and `allowed_with` no longer widens access (#1032). `application/chat/policies/classification_policy.py` checks the whole turn server-side before it runs; the frontend mirror is `utils/complianceAccess.js`.
+Definitions in `atlas/config/compliance-levels.json` with user overrides in `config/compliance-levels.json`. `core/compliance.py` loads and normalizes aliases. Models, MCP servers and RAG sources declare `allowed_data_classifications` (legacy `compliance_level` = one-element list); the active conversation level must be a member (`ComplianceLevelManager.classification_permits`), undeclared fails closed, and `allowed_with` no longer widens access (#1032). `application/chat/policies/classification_policy.py` checks the whole turn server-side before it runs; the frontend mirror is `utils/complianceAccess.js`. A saved conversation records the level it was created under (`metadata.data_classification`, server-managed, immutable) and can only be restored or continued at that same level; `domain/conversation_classification.py` holds the rule, enforced on every turn, restore, REST fetch and steer, and legacy conversations without a record fail closed while levels are enforced (#1042).
 
 When enabled: `/api/config` includes model/server `compliance_level` and effective `allowed_data_classifications`, `domain/rag_mcp_service` and `domain/unified_rag_service` filter with `ComplianceLevelManager.classification_permits(level, declared_classifications(resource))`, validated on load for LLM models, gateways, MCP servers, and RAG sources.
 

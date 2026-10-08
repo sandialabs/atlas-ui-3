@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from atlas.core.log_sanitizer import get_current_user
+from atlas.domain import conversation_classification as conv_class
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +108,18 @@ async def export_all_conversations(
 @router.get("/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
+    compliance_level: Optional[str] = Query(default=None),
     current_user: str = Depends(get_current_user),
 ):
-    """Get a full conversation with all messages."""
+    """Get a full conversation with all messages.
+
+    ``compliance_level`` is the caller's active level. When it is supplied, a
+    conversation recorded under another classification is refused with 409
+    and only its classification is returned, never its content (issue #1042).
+    The conversation belongs to the caller either way; the binding check that
+    keeps its history away from models and tools runs on restore and on every
+    chat turn, server-side.
+    """
     repo = _get_repo()
     if repo is None:
         return {"error": "Chat history is not enabled"}
@@ -128,7 +138,43 @@ async def get_conversation(
         conversation = repo.get_conversation(conversation_id, current_user) or live
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if compliance_level is not None:
+        refusal = _classification_refusal(conversation, compliance_level, current_user)
+        if refusal:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": refusal,
+                    "error_type": conv_class.ERROR_CODE,
+                    "id": conversation.get("id"),
+                    **conv_class.public_fields(conversation.get("metadata")),
+                },
+            )
     return conversation
+
+
+def _classification_refusal(conversation, compliance_level: str, user_email: str):
+    """Why the conversation may not be opened at ``compliance_level``, or None."""
+    from atlas.core.compliance import get_compliance_manager
+    from atlas.infrastructure.app_factory import app_factory
+
+    settings = app_factory.get_config_manager().app_settings
+    enabled = getattr(settings, "feature_compliance_levels_enabled", False) is True
+    mgr = get_compliance_manager()
+    active = None
+    if enabled and compliance_level:
+        active = mgr.validate_compliance_level(compliance_level, context="conversation fetch")
+        if not active:
+            return "The selected compliance level is not defined on this deployment."
+    binding = conv_class.binding_from_metadata(conversation.get("metadata"))
+    refusal = conv_class.resume_refusal(
+        binding, active, compliance_enabled=enabled, compliance_mgr=mgr
+    )
+    if refusal:
+        conv_class.audit_refusal(
+            "fetch", conversation.get("id"), user_email, binding, active
+        )
+    return refusal
 
 
 async def _in_flight_conversation(conversation_id: str, user_email: str):

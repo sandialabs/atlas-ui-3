@@ -24,6 +24,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
+from atlas.domain.conversation_classification import (
+    CLASSIFICATION_METADATA_KEY,
+    public_fields,
+)
 
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
 
@@ -96,6 +100,21 @@ class ConversationRepository:
                         sanitize_for_logging(conversation_id),
                         len(messages),
                         stored_count,
+                    )
+                    return None
+
+                # The conversation's data classification (issue #1042) is set
+                # once, when the conversation is created, and never changes:
+                # history written under one level must not be relabelled as
+                # another, and a legacy record must not be stamped by an
+                # ordinary save. An explicit operator stamp goes through
+                # ``stamp_legacy_classification``.
+                if not _classification_unchanged(existing.metadata_json, metadata):
+                    logger.error(
+                        "Refusing to save conversation %s: the write would change "
+                        "its recorded data classification. This turn was not "
+                        "persisted.",
+                        sanitize_for_logging(conversation_id),
                     )
                     return None
 
@@ -222,6 +241,7 @@ class ConversationRepository:
                     "message_count": conv.message_count,
                     "preview": preview,
                     "tags": tag_names,
+                    **public_fields(_load_metadata(conv.metadata_json)),
                 })
 
             return results
@@ -284,6 +304,7 @@ class ConversationRepository:
                 "metadata": conv_metadata,
                 "messages": messages,
                 "tags": self._get_tag_names(session, conv.id),
+                **public_fields(_load_metadata(conv.metadata_json)),
             }
 
     def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
@@ -442,6 +463,7 @@ class ConversationRepository:
                     "message_count": conv.message_count,
                     "preview": preview,
                     "tags": self._get_tag_names(session, conv.id),
+                    **public_fields(_load_metadata(conv.metadata_json)),
                 })
 
             return results
@@ -549,6 +571,50 @@ class ConversationRepository:
             session.commit()
             return True
 
+    def stamp_legacy_classification(
+        self,
+        level: Optional[str],
+        user_email: Optional[str] = None,
+        conversation_ids: Optional[List[str]] = None,
+    ) -> int:
+        """Record a data classification on legacy conversations (issue #1042).
+
+        The explicit migration step for conversations saved before the record
+        existed: an operator who knows what they hold assigns ``level``
+        (``None`` records them as unclassified). Only conversations with no
+        record are touched -- a recorded classification is never rewritten.
+        Scoped to one user and/or a list of ids when given. Returns the number
+        of conversations stamped.
+        """
+        with self._get_session() as session:
+            query = session.query(ConversationRecord)
+            if user_email:
+                query = query.filter(
+                    ConversationRecord.user_email == normalize_user_email(user_email)
+                )
+            if conversation_ids is not None:
+                query = query.filter(ConversationRecord.id.in_(conversation_ids))
+            stamped = 0
+            for conv in query.all():
+                if conv.metadata_json:
+                    try:
+                        current = json.loads(conv.metadata_json)
+                    except json.JSONDecodeError:
+                        # Unreadable metadata is left alone: it may hold a
+                        # record this method cannot see.
+                        continue
+                    if not isinstance(current, dict):
+                        continue
+                else:
+                    current = {}
+                if CLASSIFICATION_METADATA_KEY in current:
+                    continue
+                current[CLASSIFICATION_METADATA_KEY] = level
+                conv.metadata_json = json.dumps(current)
+                stamped += 1
+            session.commit()
+            return stamped
+
     def _get_tag_names(self, session: Session, conversation_id: str) -> List[str]:
         """Get tag names for a conversation."""
         links = session.query(ConversationTagLink).filter(
@@ -580,6 +646,40 @@ class ConversationRepository:
                 ConversationRecord.id == conversation_id
             )
         )
+
+
+_MISSING = object()
+
+
+def _load_metadata(metadata_json: Optional[str]) -> Any:
+    """Decoded conversation metadata; an unreadable blob decodes to ``_MISSING``."""
+    if not metadata_json:
+        return {}
+    try:
+        return json.loads(metadata_json)
+    except json.JSONDecodeError:
+        return _MISSING
+
+
+def _classification_unchanged(
+    stored_metadata_json: Optional[str], incoming: Optional[Dict[str, Any]]
+) -> bool:
+    """Whether a save keeps the stored data classification record as it is.
+
+    Both sides must agree on whether a record exists and, if so, on its value.
+    Unreadable stored metadata fails closed: it may hold a record.
+    """
+    stored = _load_metadata(stored_metadata_json)
+    if not isinstance(stored, dict):
+        return False
+    incoming = incoming if isinstance(incoming, dict) else {}
+    stored_has = CLASSIFICATION_METADATA_KEY in stored
+    incoming_has = CLASSIFICATION_METADATA_KEY in incoming
+    if stored_has != incoming_has:
+        return False
+    return not stored_has or (
+        stored[CLASSIFICATION_METADATA_KEY] == incoming[CLASSIFICATION_METADATA_KEY]
+    )
 
 
 def _parse_timestamp(value) -> datetime:

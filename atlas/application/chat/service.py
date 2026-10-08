@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
+from atlas.domain import conversation_classification as conv_class
 from atlas.domain.errors import AuthorizationError, DomainError, ValidationError
 from atlas.domain.messages.models import MessageType, ToolResult
 from atlas.domain.sessions.models import Session
@@ -642,6 +643,14 @@ class ChatService:
                     sanitize_for_logging(str(session_id)),
                 )
 
+        # The history this session carries -- hydrated from the store, restored
+        # from the sidebar, or accumulated by earlier turns -- belongs to a
+        # conversation with a recorded classification (issue #1042). Refuse the
+        # turn before anything is sent if the active level does not match it.
+        self._enforce_conversation_classification(
+            session, active_classification, user_email
+        )
+
         # Compliance for this turn. The active conversation classification --
         # the client-selected level, validated against the definitions -- is
         # the authority (issue #1032):
@@ -985,9 +994,16 @@ class ChatService:
         session_id: UUID,
         conversation_id: str,
         messages: List[Dict[str, Any]],
-        user_email: Optional[str] = None
+        user_email: Optional[str] = None,
+        compliance_level: Any = UNSET,
     ) -> Dict[str, Any]:
         """Restore a saved conversation into the current session.
+
+        ``compliance_level`` is the client's active level. When supplied, a
+        conversation recorded under another classification is refused here,
+        before the session is touched (issue #1042); either way the session
+        is bound to the conversation's recorded classification, so the next
+        turn is checked against it no matter what the client sends.
 
         Resets the session, loads previous messages into history,
         and maps the session to the original conversation_id so
@@ -1027,6 +1043,7 @@ class ChatService:
         # display-only fallback and is NOT persisted back.
         canonical_messages = messages
         stored_workspace_id = None
+        binding = None
         if getattr(self, "conversation_repository", None) is not None:
             # A conversation with a run in flight is ahead of its stored
             # record, and may not have one at all yet: a tracked run's
@@ -1055,6 +1072,33 @@ class ChatService:
             conv_metadata = conv.get("metadata")
             if isinstance(conv_metadata, dict):
                 stored_workspace_id = conv_metadata.get("workspace_id")
+            binding = conv_class.binding_from_metadata(conv_metadata)
+
+        if compliance_level is not UNSET:
+            try:
+                active_level = self._resolve_active_classification(compliance_level)
+            except ValidationError as e:
+                return self._classification_error_frame(conversation_id, e.message)
+            if binding is None:
+                # No server store: the client holds this history and is its
+                # only source, so it is bound to the level it is reopened at.
+                binding = conv_class.binding_for_new_conversation(active_level)
+            refusal = conv_class.resume_refusal(
+                binding,
+                active_level,
+                compliance_enabled=self._compliance_enabled(),
+                compliance_mgr=self._compliance_manager(),
+            )
+            if refusal:
+                conv_class.audit_refusal(
+                    "restore", conversation_id, user_email, binding, active_level
+                )
+                return self._classification_error_frame(conversation_id, refusal)
+        elif binding is None:
+            # Client-held history restored without a level: its provenance is
+            # unknown, so it is treated like a legacy record (fails closed
+            # while compliance levels are enforced).
+            binding = conv_class.make_binding(conv_class.STATE_LEGACY)
 
         # Reset the session
         await self.end_session(session_id)
@@ -1070,6 +1114,7 @@ class ChatService:
         # rehydrate path: an unbound conversation must read as unbound, never
         # inherit whatever the session was carrying.
         session.context["workspace_id"] = stored_workspace_id
+        session.context[conv_class.SESSION_BINDING_KEY] = binding
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical
@@ -1090,7 +1135,90 @@ class ChatService:
             "type": "conversation_restored",
             "conversation_id": conversation_id,
             "message_count": loaded,
+            "data_classification": conv_class.normalize_binding(binding)["level"],
+            "data_classification_state": conv_class.normalize_binding(binding)["state"],
         }
+
+    @staticmethod
+    def _classification_error_frame(conversation_id: str, message: str) -> Dict[str, Any]:
+        return {
+            "type": "error",
+            "message": message,
+            "error_type": conv_class.ERROR_CODE,
+            "conversation_id": conversation_id,
+        }
+
+    @staticmethod
+    def _compliance_manager():
+        from atlas.core.compliance import get_compliance_manager
+
+        return get_compliance_manager()
+
+    def _enforce_conversation_classification(
+        self,
+        session: Session,
+        active_level: Optional[str],
+        user_email: Optional[str],
+    ) -> None:
+        """Refuse a turn whose session history is bound to another classification.
+
+        A session with no binding and no history is a new conversation: it is
+        bound to this turn's level. History without a binding has unknown
+        provenance and is treated as legacy (fail closed).
+        """
+        binding = session.context.get(conv_class.SESSION_BINDING_KEY)
+        if binding is None:
+            binding = (
+                conv_class.make_binding(conv_class.STATE_LEGACY)
+                if session.history.messages
+                else conv_class.binding_for_new_conversation(active_level)
+            )
+        refusal = conv_class.resume_refusal(
+            binding,
+            active_level,
+            compliance_enabled=self._compliance_enabled(),
+            compliance_mgr=self._compliance_manager(),
+        )
+        if refusal:
+            conv_class.audit_refusal(
+                "turn",
+                session.context.get("conversation_id"),
+                user_email,
+                binding,
+                active_level,
+            )
+            raise ValidationError(refusal, code=conv_class.ERROR_CODE)
+        session.context[conv_class.SESSION_BINDING_KEY] = conv_class.normalize_binding(binding)
+
+    async def steering_classification_refusal(
+        self, session_id: UUID, compliance_level: Any
+    ) -> Optional[str]:
+        """Why a steering message may not join the running turn, or None.
+
+        A steer skips handle_chat_message: it is injected into a loop already
+        running at its own level. A client that has switched levels since must
+        not have its new message processed under the old one (issue #1042).
+        """
+        if not self._compliance_enabled():
+            return None
+        try:
+            active_level = self._resolve_active_classification(compliance_level)
+        except ValidationError as e:
+            return e.message
+        session = await self.session_repository.get(session_id)
+        running_level = session.context.get("compliance_level") if session else None
+        mgr = self._compliance_manager()
+
+        def canon(level):
+            return (mgr.get_canonical_name(level) or level) if level else None
+
+        if canon(active_level) == canon(running_level):
+            return None
+        return (
+            f"The running turn is working under {running_level or 'no compliance level'}, "
+            f"and the selected compliance level is {active_level or 'no compliance level'}. "
+            "Wait for it to finish or stop it, then send the message again."
+        )
 
     async def _in_flight_conversation(
         self, conversation_id: str, user_email: Optional[str]
@@ -1472,7 +1600,11 @@ class ChatService:
 
         if not conv:
             # A conversation_id the store has never seen: the client is naming a
-            # new conversation, which is the normal first-turn case.
+            # new conversation, which is the normal first-turn case. An empty
+            # session takes its classification from this turn; a non-empty one
+            # keeps the binding of the history it still holds.
+            if not session.history.messages:
+                session.context.pop(conv_class.SESSION_BINDING_KEY, None)
             return 0
 
         # Read the binding as soon as the record is in hand, before the message
@@ -1484,6 +1616,11 @@ class ChatService:
             conv_metadata.get("workspace_id")
             if isinstance(conv_metadata, dict)
             else None
+        )
+        # The stored classification replaces whatever the session carried, and
+        # binds even an empty record: it is the conversation's, not the turn's.
+        session.context[conv_class.SESSION_BINDING_KEY] = (
+            conv_class.binding_from_metadata(conv_metadata)
         )
 
         messages = conv.get("messages")
@@ -1596,16 +1733,26 @@ class ChatService:
                     title = msg.content[:200]
                     break
 
+        metadata = {
+            "agent_mode": bool(session.context.get("agent_mode")),
+            "workspace_id": session.context.get("workspace_id"),
+        }
+        # Server-managed classification record (issue #1042), from the binding
+        # the turn gate checked -- never from a client field. Legacy history
+        # is written without one; the repository refuses any change.
+        classification = conv_class.metadata_value(
+            session.context.get(conv_class.SESSION_BINDING_KEY)
+        )
+        if classification is not ...:
+            metadata[conv_class.CLASSIFICATION_METADATA_KEY] = classification
+
         record = self.conversation_repository.save_conversation(
             conversation_id=conv_id,
             user_email=normalize_user_email(user_email),
             title=title,
             model=model,
             messages=messages,
-            metadata={
-                "agent_mode": bool(session.context.get("agent_mode")),
-                "workspace_id": session.context.get("workspace_id"),
-            },
+            metadata=metadata,
             allow_shrink=allow_shrink,
         )
         if record is None:
