@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Check, Ban } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
+import { useFocusTrap } from '../utils/focusTrap'
 
 /**
  * ElicitationDialog Component
@@ -15,6 +16,11 @@ const ElicitationDialog = ({ elicitation }) => {
   const { sendMessage, setPendingElicitation } = useChat()
   const [formData, setFormData] = useState({})
   const [isValid, setIsValid] = useState(false)
+  const dialogRef = useRef(null)
+  // The prompt claims to be modal (aria-modal), so it must own focus: it
+  // pulls focus in on mount, traps Tab while up, and stands down as the
+  // topmost dialog (an open drawer beneath it must not take the keys back).
+  useFocusTrap({ containerRef: dialogRef, active: true })
 
   const { elicitation_id, tool_name, message, response_schema } = elicitation
 
@@ -107,6 +113,7 @@ const ElicitationDialog = ({ elicitation }) => {
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="elicitation-dialog-title"

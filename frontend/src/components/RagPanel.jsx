@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { X } from 'lucide-react'
 import DataSourcesSelector from './DataSourcesSelector'
 import { useEscapeKey } from '../hooks/useEscapeKey'
-import { FOCUSABLE_SELECTOR } from '../utils/focusTrap'
+import { isTopmostModalDialog, useFocusTrap } from '../utils/focusTrap'
 
 /**
  * Left-hand Data Sources drawer.
@@ -20,90 +20,18 @@ import { FOCUSABLE_SELECTOR } from '../utils/focusTrap'
  * mobile widths.
  */
 const RagPanel = ({ isOpen, onClose }) => {
-  const closeButtonRef = useRef(null)
   const drawerRef = useRef(null)
-  // Focus held when the drawer opened (the header toggle on a keyboard
-  // open): restored on close so keyboard users keep their place.
-  const previousFocusRef = useRef(null)
 
   // The Tools and Settings modal can be layered on top of an open drawer.
-  // Ownership goes to the TOPMOST modal dialog in document order (later
-  // siblings stack above earlier ones at equal z-index). This relies on App
-  // rendering SettingsPanel after RagPanel -- true today and the reason
-  // document order equals stacking order here; the useFocusTrap refactor
-  // tracked in #1039 should make the ownership explicit instead. Decided by
-  // the aria-modal attribute rather than focus position: clicking
-  // non-focusable text in the modal drops focus to <body>, and a focus-based
-  // check would hand Escape and Tab straight back to the drawer beneath it.
-  // The drawer stands down when it is not the topmost modal; useEscapeKey
-  // consults the predicate BEFORE stopping propagation, so the modal's own
-  // (bubble-phase) Escape handler still receives the key.
-  const isTopmostModalDialog = () => {
-    if (!drawerRef.current) return false
-    const modals = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
-    return modals.length > 0 && modals[modals.length - 1] === drawerRef.current
-  }
+  // Ownership goes to the topmost modal dialog -- the drawer stands down
+  // when it is not it. useEscapeKey consults the predicate BEFORE stopping
+  // propagation, so the modal's own (bubble-phase) Escape handler still
+  // receives the key.
+  useEscapeKey(isOpen, onClose, {
+    shouldHandle: () => isTopmostModalDialog(drawerRef.current)
+  })
 
-  useEscapeKey(isOpen, onClose, { shouldHandle: isTopmostModalDialog })
-
-  useEffect(() => {
-    if (isOpen) {
-      previousFocusRef.current = document.activeElement
-      closeButtonRef.current?.focus()
-      return
-    }
-    // Focus that moved into another dialog while the drawer was up (the
-    // Tools and Settings modal) belongs to that dialog; restoring here
-    // would yank focus behind its backdrop. Either way the saved element
-    // is stale once the drawer is gone.
-    const previous = previousFocusRef.current
-    previousFocusRef.current = null
-    if (!isTopmostModalDialog()) return
-    if (previous instanceof HTMLElement) previous.focus()
-  }, [isOpen])
-
-  // Tab is trapped inside the drawer rather than switched off: without this,
-  // focus could walk the covered header controls behind the backdrop, and a
-  // press on one of them could close a second overlay together with this
-  // one. The listener lives on `document` (not on the <aside>) because focus
-  // can legitimately sit outside the drawer while it is up -- e.g. on <body>
-  // after "Clear All" disabled the control that held it -- and a keydown on
-  // the <aside> itself would never see it. Stands down when the drawer is
-  // not the topmost modal dialog (same predicate as Escape: the Tools and
-  // Settings modal layered on top owns the trap). No visibility filter on
-  // the focusables (the SettingsPanel one works around nested fixed-position
-  // modals this drawer does not have; when the drawer is closed it is inert,
-  // so Tab never reaches it anyway). Not a shared hook yet: SettingsPanel's
-  // trap is innermost-dialog aware in ways this drawer does not need;
-  // tracked in issue #1039.
-  useEffect(() => {
-    if (!isOpen) return undefined
-
-    const trapTab = (event) => {
-      if (event.key !== 'Tab' || !drawerRef.current) return
-      // Same ownership rule as Escape: the topmost modal dialog owns Tab.
-      if (!isTopmostModalDialog()) return
-
-      const focusable = drawerRef.current.querySelectorAll(FOCUSABLE_SELECTOR)
-      if (focusable.length === 0) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      const active = document.activeElement
-      if (!drawerRef.current.contains(active)) {
-        event.preventDefault()
-        ;(event.shiftKey ? last : first).focus()
-      } else if (event.shiftKey && active === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', trapTab)
-    return () => document.removeEventListener('keydown', trapTab)
-  }, [isOpen])
+  useFocusTrap({ containerRef: drawerRef, active: isOpen })
 
   return (
     <>
@@ -122,7 +50,7 @@ const RagPanel = ({ isOpen, onClose }) => {
         id="rag-drawer"
         data-testid="rag-drawer"
         role="dialog"
-        aria-modal="true"
+        aria-modal={isOpen ? 'true' : undefined}
         aria-labelledby="rag-drawer-title"
         aria-hidden={!isOpen}
         inert={!isOpen}
@@ -135,7 +63,6 @@ const RagPanel = ({ isOpen, onClose }) => {
         <div className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
           <h2 id="rag-drawer-title" className="text-lg font-semibold text-gray-100">Data Sources</h2>
           <button
-            ref={closeButtonRef}
             onClick={onClose}
             aria-label="Close data sources drawer"
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"

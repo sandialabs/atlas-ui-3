@@ -19,6 +19,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import RagPanel from '../components/RagPanel'
+import ElicitationDialog from '../components/ElicitationDialog'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import { FOCUSABLE_SELECTOR } from '../utils/focusTrap'
@@ -302,8 +303,11 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
 
     const insideOther = addOtherDialog({ prepend: true })
 
-    fireEvent.keyDown(document, { key: 'Tab' })
-    // The drawer is still the topmost modal: the trap pulls focus back in.
+    // Stray focus on <body>: if the earlier modal wrongly owned the trap it
+    // would pull focus in; the drawer being the true topmost modal means
+    // the trap hands focus back to the drawer instead.
+    screen.getByRole('button', { name: 'Close data sources drawer' }).blur()
+    fireEvent.keyDown(document.body, { key: 'Tab' })
     expect(document.activeElement).not.toBe(insideOther)
     expect(screen.getByRole('dialog', { name: 'Data Sources' }).contains(document.activeElement)).toBe(true)
   })
@@ -364,5 +368,66 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
 
     rerender(<RagPanel isOpen={false} onClose={vi.fn()} />)
     expect(document.activeElement).toBe(insideOther)
+  })
+})
+
+describe('RagPanel - stacked with the real ElicitationDialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const elicitation = {
+    elicitation_id: 'elicit-1',
+    tool_name: 'demo_tool',
+    message: 'Provide a value',
+    response_schema: {
+      type: 'object',
+      properties: { answer: { type: 'string' } },
+      required: ['answer']
+    }
+  }
+
+  it('hands ownership to the elicitation prompt and takes it back on unmount', () => {
+    useChat.mockReturnValue({
+      ragSources: [],
+      selectedDataSources: new Set(),
+      toggleDataSource: vi.fn(),
+      addDataSources: vi.fn(),
+      clearDataSources: vi.fn(),
+      features: {},
+      complianceLevelFilter: null,
+      models: [],
+      currentModel: null,
+      sendMessage: vi.fn(),
+      setPendingElicitation: vi.fn()
+    })
+    useMarketplace.mockReturnValue({
+      complianceLevels: [],
+      isComplianceAccessible: vi.fn(() => true)
+    })
+
+    const onClose = vi.fn()
+    render(<RagPanel isOpen={true} onClose={onClose} />)
+    const drawerClose = screen.getByRole('button', { name: 'Close data sources drawer' })
+    expect(document.activeElement).toBe(drawerClose)
+
+    // An MCP tool requests elicitation: the prompt renders on top.
+    const { unmount } = render(<ElicitationDialog elicitation={elicitation} />)
+    const prompt = screen.getByRole('dialog', { name: 'User Input Required' })
+    expect(prompt.getAttribute('aria-modal')).toBe('true')
+    // Focus followed the prompt, and Tab is trapped inside it.
+    expect(prompt.contains(document.activeElement)).toBe(true)
+    const promptFocusables = prompt.querySelectorAll(FOCUSABLE_SELECTOR)
+    promptFocusables[promptFocusables.length - 1].focus()
+    fireEvent.keyDown(prompt, { key: 'Tab' })
+    expect(prompt.contains(document.activeElement)).toBe(true)
+
+    // Escape while in the prompt must not close the drawer beneath it.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Once the prompt is answered and unmounts, the drawer regains focus.
+    unmount()
+    expect(document.activeElement).toBe(drawerClose)
   })
 })
