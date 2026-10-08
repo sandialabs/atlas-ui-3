@@ -122,9 +122,7 @@ async def mint_delegated_llm_token(
         logger.error(
             "Delegated token exchange failed for %s: %s", log_endpoint, sanitize_for_logging(str(exc))
         )
-        raise LLMAuthenticationError(
-            f"Could not obtain a token for {endpoint}. Please sign in again.", code=SIGN_IN_REQUIRED
-        ) from None
+        raise LLMAuthenticationError(f"Could not obtain a token for {endpoint}. Please sign in again.") from None
     return token.access_token
 
 

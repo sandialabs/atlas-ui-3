@@ -591,6 +591,27 @@ class TestGatewaySignInRecovery:
         assert error.value.code == SIGN_IN_REQUIRED
 
 
+    @pytest.mark.asyncio
+    async def test_failed_exchange_is_not_marked_sign_in_required(self):
+        """A refused exchange is usually configuration or an outage; a fresh
+        login cannot be promised to fix it, so no sign-in link is offered."""
+        from atlas.core.oidc.delegation import DelegationError
+
+        llm_config = _llm_config(auth_type="delegated", delegation={"scope": "s"})
+        manager = AsyncMock()
+        manager.get_token.side_effect = DelegationError("invalid_client")
+        with patch(
+            "atlas.core.oidc.delegation.get_delegation_manager_async",
+            AsyncMock(return_value=manager),
+        ), patch(
+            "atlas.core.oidc.mcp_delegation.resolve_subject_token",
+            AsyncMock(return_value="user-login-token"),
+        ):
+            with pytest.raises(LLMAuthenticationError) as error:
+                await _client(llm_config).list_teams("bob@example.com")
+        assert error.value.code is None
+
+
 class TestGatewayComplianceNormalization:
     def test_gateway_level_is_canonicalized_at_load(self):
         from atlas.modules.config import config_loader

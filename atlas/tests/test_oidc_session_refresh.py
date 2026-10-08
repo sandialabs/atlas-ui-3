@@ -123,6 +123,7 @@ async def test_token_error_surfaces_entra_support_identifiers():
     {"error": "invalid_request", "error_codes": ["9002313"], "trace_id": "x\nforged log line"},
     {"error": "invalid_request", "error_codes": [True, -1, 10**12], "correlation_id": 42},
     {"error": "invalid_request", "trace_id": "a" * 200},
+    {"error": "invalid_request", "trace_id": "deadbeef\n", "correlation_id": "aaaa0000-bb11\n"},
 ])
 async def test_token_error_drops_unexpected_diagnostic_values(body):
     error = await _token_error(400, body)
@@ -131,7 +132,7 @@ async def test_token_error_drops_unexpected_diagnostic_values(body):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("raw", ["bad\r\ncode", 'q"uote', "x" * 65, 7, ""])
+@pytest.mark.parametrize("raw", ["bad\r\ncode", "invalid_request\n", 'q"uote', "x" * 65, 7, ""])
 async def test_token_error_code_must_be_an_rfc6749_error_value(raw):
     error = await _token_error(400, {"error": raw})
     assert error.error_code == "unknown_error"

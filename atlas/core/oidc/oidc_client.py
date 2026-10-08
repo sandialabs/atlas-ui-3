@@ -51,11 +51,12 @@ class OIDCFlowError(RuntimeError):
 # `error_codes`, `trace_id`, and `correlation_id`). They name the exact
 # rejection reason (e.g. AADSTS9002313) and let an IdP admin find the request
 # in sign-in logs, yet carry nothing secret. Only values of these exact shapes
-# are kept: the free-text `error_description` is never surfaced.
-_DIAGNOSTIC_ID_PATTERN = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
+# are kept (whole-string matches, so a trailing newline cannot slip into a
+# log line): the free-text `error_description` is never surfaced.
+_DIAGNOSTIC_ID_PATTERN = re.compile(r"[0-9A-Fa-f-]{8,64}")
 # RFC 6749 section 5.2 limits `error` to printable ASCII without quote or
 # backslash; anything else is not a real error code and is not logged.
-_ERROR_CODE_PATTERN = re.compile(r"^[\x20\x21\x23-\x5B\x5D-\x7E]{1,64}$")
+_ERROR_CODE_PATTERN = re.compile(r"[\x20\x21\x23-\x5B\x5D-\x7E]{1,64}")
 _MAX_ERROR_CODES = 5
 
 
@@ -70,7 +71,7 @@ def _token_error_diagnostics(body: Dict[str, Any]) -> Dict[str, Any]:
             diagnostics["error_codes"] = safe_codes
     for key in ("trace_id", "correlation_id"):
         value = body.get(key)
-        if isinstance(value, str) and _DIAGNOSTIC_ID_PATTERN.match(value):
+        if isinstance(value, str) and _DIAGNOSTIC_ID_PATTERN.fullmatch(value):
             diagnostics[key] = value
     return diagnostics
 
@@ -174,7 +175,7 @@ async def _post_token_request(
             body = response.json()
             if isinstance(body, dict):
                 raw_error = body.get("error")
-                if isinstance(raw_error, str) and _ERROR_CODE_PATTERN.match(raw_error):
+                if isinstance(raw_error, str) and _ERROR_CODE_PATTERN.fullmatch(raw_error):
                     error_code = raw_error
                 diagnostics = _token_error_diagnostics(body)
         except ValueError:
