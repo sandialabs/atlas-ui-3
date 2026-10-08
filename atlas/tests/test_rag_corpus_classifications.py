@@ -232,7 +232,7 @@ async def test_allowed_batch_runs(manager):
 async def test_corpus_unknown_to_discovery_is_denied(manager):
     backend = _Backend(MIXED)
     service = _service(backend)
-    with _Turn("ITAR"), pytest.raises(DataSourcePermissionError, match="did not list it"):
+    with _Turn("ITAR"), pytest.raises(DataSourcePermissionError, match="not offered to you"):
         await service.query_rag(USER, "legacy:invented", [{"role": "user", "content": "q"}])
     assert backend.queried == 0
 
@@ -350,12 +350,59 @@ async def test_corpus_missing_from_cache_triggers_one_refresh(manager, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_unlisted_corpus_has_its_own_code(manager):
+    service = _service(_Backend(MIXED))
+    with _Turn("ITAR"), pytest.raises(DataSourcePermissionError) as exc:
+        await service.query_rag(USER, "legacy:invented", [{"role": "user", "content": "q"}])
+    assert exc.value.code == "DATA_SOURCE_NOT_LISTED"
+    assert "try again later" not in str(exc.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_outage_is_not_retried_on_every_query(manager, monkeypatch):
+    """A failed discovery is remembered briefly, so queries do not each wait on it."""
+    backend = _Backend([])
+    backend.discover_data_sources.side_effect = RuntimeError("down")
+    service = _service(backend)
+    with _Turn("UUR"):
+        for _ in range(3):
+            with pytest.raises(DataSourcePermissionError, match="did not answer"):
+                await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+        assert backend.discover_data_sources.await_count == 1
+        # Recovered backend: asked again once the short failure window passes.
+        backend.discover_data_sources.side_effect = lambda user: list(MIXED)
+        _advance(monkeypatch, CORPUS_METADATA_MIN_REFRESH_SECONDS + 1)
+        await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+    assert backend.discover_data_sources.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_floor_only_pass_without_metadata_is_logged(manager, caplog):
+    """Under the floor, a corpus discovery does not list is let through on the
+    server's floor check, with a WARNING naming it."""
+    backend = _Backend(MIXED)
+    service = _service(backend)
+    token = set_model_classification_floor(["UUR"])
+    try:
+        with caplog.at_level(logging.WARNING):
+            await service.query_rag(USER, "legacy:unlisted", [{"role": "user", "content": "q"}])
+    finally:
+        reset_model_classification_floor(token)
+    assert backend.queried == 1
+    assert any(
+        "under the model floor without per-corpus metadata" in r.getMessage()
+        and "unlisted" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
 async def test_unknown_corpus_cannot_force_a_refresh_per_query(manager):
     backend = _Backend(MIXED)
     service = _service(backend)
     with _Turn("ITAR"):
         for _ in range(3):
-            with pytest.raises(DataSourcePermissionError, match="did not list it"):
+            with pytest.raises(DataSourcePermissionError, match="not offered to you"):
                 await service.query_rag(USER, "legacy:invented", [{"role": "user", "content": "q"}])
     assert backend.discover_data_sources.await_count == 1
 
@@ -368,8 +415,9 @@ async def test_failed_refresh_keeps_a_fresh_answer(manager, monkeypatch):
         await service.query_rag(USER, "legacy:doc", [{"role": "user", "content": "q"}])
         backend.sources = []  # discovery now fails (reported as an empty list)
         _advance(monkeypatch, CORPUS_METADATA_MIN_REFRESH_SECONDS + 1)
-        with pytest.raises(DataSourcePermissionError, match="did not list it"):
+        with pytest.raises(DataSourcePermissionError, match="did not answer") as exc:
             await service.query_rag(USER, "legacy:other", [{"role": "user", "content": "q"}])
+        assert exc.value.code == "DATA_SOURCE_UNVERIFIED"
         # The still-fresh answer was not discarded by the failed refresh.
         await service.query_rag(USER, "legacy:doc", [{"role": "user", "content": "q"}])
     assert backend.queried == 2

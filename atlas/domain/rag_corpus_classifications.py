@@ -93,16 +93,23 @@ class CorpusMetadataCache:
     not answer" must not read as "the backend offers nothing". An empty answer
     leaves an existing entry alone, so a refresh that fails does not discard
     one that is still within its TTL.
+
+    A failed refresh is remembered for ``min_refresh_seconds`` so that during a
+    backend outage queries are refused (or, under the model floor alone, let
+    through) at once instead of each waiting out the discovery timeout.
     """
 
     def __init__(
         self,
         ttl_seconds: float = CORPUS_METADATA_TTL_SECONDS,
         max_entries: int = CORPUS_METADATA_MAX_ENTRIES,
+        min_refresh_seconds: float = CORPUS_METADATA_MIN_REFRESH_SECONDS,
     ) -> None:
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries
+        self.min_refresh_seconds = min_refresh_seconds
         self._entries: OrderedDict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = OrderedDict()
+        self._failures: OrderedDict[Tuple[str, str], float] = OrderedDict()
 
     @staticmethod
     def _now() -> float:
@@ -113,10 +120,24 @@ class CorpusMetadataCache:
         key = (server, user or "")
         if not corpora:
             return
+        self._failures.pop(key, None)
         self._entries[key] = (self._now(), corpora)
         self._entries.move_to_end(key)
         while len(self._entries) > self.max_entries:
             self._entries.popitem(last=False)
+
+    def mark_failed(self, server: str, user: str) -> None:
+        """Record that discovery for ``(server, user)`` just failed."""
+        key = (server, user or "")
+        self._failures[key] = self._now()
+        self._failures.move_to_end(key)
+        while len(self._failures) > self.max_entries:
+            self._failures.popitem(last=False)
+
+    def recently_failed(self, server: str, user: str) -> bool:
+        """Whether discovery for ``(server, user)`` failed too recently to retry."""
+        failed_at = self._failures.get((server, user or ""))
+        return failed_at is not None and self._now() - failed_at < self.min_refresh_seconds
 
     def lookup(self, server: str, user: str) -> Optional[Dict[str, Any]]:
         """The fresh discovery answer for ``(server, user)``, or ``None``."""
@@ -141,9 +162,11 @@ class CorpusMetadataCache:
     def invalidate(self, server: Optional[str] = None) -> None:
         if server is None:
             self._entries.clear()
+            self._failures.clear()
             return
-        for key in [k for k in self._entries if k[0] == server]:
-            del self._entries[key]
+        for store in (self._entries, self._failures):
+            for key in [k for k in store if k[0] == server]:
+                del store[key]
 
 
 __all__ = [

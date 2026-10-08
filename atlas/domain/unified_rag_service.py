@@ -8,7 +8,7 @@ This service provides a single interface for:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from atlas.core.compliance import (
     declared_classifications,
@@ -416,7 +416,7 @@ class UnifiedRAGService:
         source_name: str,
         source_config: RAGSourceConfig,
         source_ids: List[str],
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Tuple[Optional[Dict[str, Any]], bool]:
         """Server-owned discovery metadata for ``source_ids``, by corpus id.
 
         A fresh cached answer that lists every requested corpus is used as is;
@@ -426,8 +426,11 @@ class UnifiedRAGService:
         ``CORPUS_METADATA_TTL_SECONDS``, which bounds how long a reclassified
         corpus keeps its old classifications. Corpus ids come from the request
         and are only ever looked up here -- never taken as evidence of
-        anything. ``None`` when there is no fresh answer: the backend's
-        discovery failed or listed nothing.
+        anything.
+
+        Returns ``(corpora, refresh_failed)``: the fresh answer (``None`` when
+        there is none), and whether the backend failed to answer when it was
+        needed -- just now, or recently enough not to be asked again yet.
         """
         cache = self._corpus_metadata
         cached = cache.lookup(source_name, username)
@@ -435,11 +438,24 @@ class UnifiedRAGService:
             all(cid in cached for cid in source_ids)
             or (cache.age(source_name, username) or 0.0) < CORPUS_METADATA_MIN_REFRESH_SECONDS
         ):
-            return cached
-        client = self._get_http_client(source_name, source_config)
-        data_sources = await client.discover_data_sources(username)
-        cache.store(source_name, username, data_sources or [])
-        return cache.lookup(source_name, username)
+            return cached, False
+        if cache.recently_failed(source_name, username):
+            return cached, True
+        try:
+            client = self._get_http_client(source_name, source_config)
+            data_sources = await client.discover_data_sources(username)
+        except Exception as exc:
+            logger.warning(
+                "Could not load corpus metadata for RAG source %s (%s)",
+                sanitize_for_logging(source_name),
+                type(exc).__name__,
+            )
+            data_sources = None
+        if not data_sources:
+            cache.mark_failed(source_name, username)
+            return cache.lookup(source_name, username), True
+        cache.store(source_name, username, data_sources)
+        return cache.lookup(source_name, username), False
 
     async def _ensure_corpora_allowed(
         self,
@@ -467,32 +483,28 @@ class UnifiedRAGService:
         or any corpus when discovery does not answer, cannot be confirmed and
         is refused. Under the floor alone such a corpus is let through: the
         server already shares a classification with the model, and refusing
-        would turn a discovery outage into an outage for unclassified chat.
+        would turn a discovery outage into an outage for unclassified chat;
+        each such pass is logged at WARNING.
         """
         if not source_ids or source_config.type != "http":
             return
-        try:
-            corpora = await self._corpus_metadata_for(
-                username, source_name, source_config, source_ids
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not load corpus metadata for RAG source %s (%s)",
-                sanitize_for_logging(source_name),
-                type(exc).__name__,
-            )
-            corpora = None
-        answered = corpora is not None
+        corpora, refresh_failed = await self._corpus_metadata_for(
+            username, source_name, source_config, source_ids
+        )
+        unanswered = refresh_failed or corpora is None
         corpora = corpora or {}
 
         compliance_mgr = get_compliance_manager()
         denied: List[str] = []
         unconfirmed: List[str] = []
+        unchecked_under_floor: List[str] = []
         for corpus_id in source_ids:
             ds = corpora.get(corpus_id)
             if ds is None:
                 if active_level is not None:
                     unconfirmed.append(corpus_id)
+                else:
+                    unchecked_under_floor.append(corpus_id)
                 continue
             classifications = corpus_classifications(ds, source_config)
             if active_level is not None:
@@ -508,6 +520,14 @@ class UnifiedRAGService:
                 denied.append(corpus_id)
 
         # Corpus ids are logged, never the labels they were checked against.
+        if unchecked_under_floor and not denied:
+            logger.warning(
+                "Allowed RAG query for source %s under the model floor without "
+                "per-corpus metadata for %d corpus(es): %s",
+                sanitize_for_logging(source_name),
+                len(unchecked_under_floor),
+                sanitize_for_logging(",".join(unchecked_under_floor)),
+            )
         if denied:
             logger.warning(
                 "Rejected RAG query for source %s: %d corpus(es) outside the "
@@ -535,7 +555,7 @@ class UnifiedRAGService:
                 sanitize_for_logging(",".join(unconfirmed)),
             )
             subject, pronoun = _describe_sources(source_name, unconfirmed)
-            if not answered:
+            if unanswered:
                 raise DataSourcePermissionError(
                     f"{subject} not verifiable right now: its RAG backend did not "
                     "answer, so it cannot be checked against the selected compliance "
@@ -543,9 +563,10 @@ class UnifiedRAGService:
                     code="DATA_SOURCE_UNVERIFIED",
                 )
             raise DataSourcePermissionError(
-                f"{subject} not confirmed as approved for this conversation: its RAG "
-                f"backend did not list {pronoun}. Deselect {pronoun}, or try again later.",
-                code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+                f"{subject} not offered to you by its RAG backend, so it cannot be "
+                f"confirmed as approved for this conversation. Deselect {pronoun}, "
+                "or ask an administrator for access.",
+                code="DATA_SOURCE_NOT_LISTED",
             )
 
     async def discover_data_sources(

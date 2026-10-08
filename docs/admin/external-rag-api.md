@@ -169,13 +169,17 @@ versions:
   backend's discovery for that user and approved for the session's
   classification. If any is not, the whole request is refused before anything
   is sent to the backend.
-- In a classified session, a corpus discovery does not list is refused, and
-  while the backend's discovery does not answer every corpus is refused with
-  the `DATA_SOURCE_UNVERIFIED` code.
+- In a classified session, a corpus discovery does not list for the user is
+  refused (`DATA_SOURCE_NOT_LISTED`), and while the backend's discovery does
+  not answer every corpus is refused (`DATA_SOURCE_UNVERIFIED`). A failed
+  discovery is remembered for 5 seconds, so during an outage queries are
+  refused at once instead of each waiting out the discovery timeout.
 - With no level selected ("All Levels"), the model floor still applies: a
   corpus that declares its own classifications must share one with the
-  selected model. A discovery outage does not block these turns, since the
-  server itself already passed the floor.
+  selected model. A corpus without discovery metadata (an outage, or one
+  discovery does not list) is let through on the server's floor check and
+  logged at WARNING, so a discovery outage does not block unclassified chat.
+  Use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` if that is not acceptable.
 - Corpus metadata comes from the backend, never from the client. Atlas reuses
   a discovery answer for up to 60 seconds per user and server, so a
   reclassified corpus is re-checked within about a minute. When a requested
@@ -183,7 +187,9 @@ versions:
   seconds; a refresh that fails keeps the previous answer until it expires.
 
 Denials are logged with the server and corpus ids, never the classification
-labels.
+labels. To check a deployment end to end, run
+`mocks/atlas-rag-api-mock/corpus_classification_smoke.py` against the bundled
+mock (usage in its docstring).
 
 ### MCP RAG Source Configuration
 
