@@ -158,9 +158,9 @@ function ChatInterface() {
     }
   }, [canvasFiles])
 
-  // Stable identities: RagPanel registers its Escape listener against
-  // onClose, so a fresh inline arrow per render would resubscribe it every
-  // time App re-renders.
+  // Stable identities: RagPanel's listeners key on isOpen and read handlers
+  // through latest-refs, so keeping these callbacks stable means no overlay
+  // effect ever churns on an App re-render.
   const closeRagPanel = useCallback(() => setRagPanelOpen(false), [])
   const toggleRagPanel = useCallback(() => setRagPanelOpen(open => !open), [])
 
@@ -194,6 +194,7 @@ function ChatInterface() {
         <div className="flex flex-col flex-1 min-w-0 relative">
           {/* Header */}
           <Header
+            ragPanelOpen={ragPanelOpen}
             onToggleSidebar={() => setSidebarMobileOpen(!sidebarMobileOpen)}
             onToggleRag={toggleRagPanel}
             onToggleFiles={() => {

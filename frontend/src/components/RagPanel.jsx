@@ -27,9 +27,11 @@ const RagPanel = ({ isOpen, onClose }) => {
   const previousFocusRef = useRef(null)
 
   // The Tools and Settings modal can be layered on top of an open drawer.
-  // While focus is in *that* dialog, it owns Escape and the Tab trap; this
-  // drawer standing down keeps Escape from closing the drawer out from under
-  // the modal and focus restore from yanking focus behind its backdrop.
+  // While focus is in *that* dialog, it owns Escape and the Tab trap: this
+  // drawer stands down via shouldHandle -- which useEscapeKey consults
+  // BEFORE stopping propagation, so the modal's own (bubble-phase) Escape
+  // handler still receives the key -- and focus restore is skipped if the
+  // drawer is dismissed while the modal is up.
   const focusInOtherDialog = () => {
     const active = document.activeElement
     if (!(active instanceof HTMLElement)) return false
@@ -37,9 +39,7 @@ const RagPanel = ({ isOpen, onClose }) => {
     return dialog !== null && dialog !== drawerRef.current
   }
 
-  useEscapeKey(isOpen, () => {
-    if (!focusInOtherDialog()) onClose()
-  })
+  useEscapeKey(isOpen, onClose, { shouldHandle: () => !focusInOtherDialog() })
 
   useEffect(() => {
     if (isOpen) {
@@ -116,6 +116,7 @@ const RagPanel = ({ isOpen, onClose }) => {
       {/* Panel */}
       <aside
         ref={drawerRef}
+        id="rag-drawer"
         data-testid="rag-drawer"
         role="dialog"
         aria-modal="true"

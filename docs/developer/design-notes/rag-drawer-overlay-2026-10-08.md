@@ -57,9 +57,14 @@ so it gained the treatment the other overlays already had (issue #1037 review):
   than on the drawer itself, so it also catches focus that strays outside
   (e.g. to `<body>` after a control disabled itself), and it stands down
   while focus is inside a different dialog layered on top of the drawer.
-- Escape closes it, via the shared `useEscapeKey` hook; the header toggle's
-  `onClose`/`onToggleRag` callbacks are stable (`useCallback`) so the Escape
-  listener is not resubscribed on every app render.
+- Escape closes it, via the shared `useEscapeKey` hook -- which now holds its
+  handler in a latest-ref and keys its listener on `isOpen` alone, so
+  per-render callback identities cannot resubscribe it. When the Tools and
+  Settings modal is layered on top, the drawer passes a `shouldHandle`
+  predicate that stands down while focus is in that modal: the predicate is
+  consulted *before* the hook stops propagation, so the modal's own
+  bubble-phase Escape handler still receives the key and Escape closes only
+  the topmost overlay.
 
 One deliberate non-change: `useEscapeKey` still uses `stopPropagation()`, not
 `stopImmediatePropagation()`. Changing the shared hook would alter how every

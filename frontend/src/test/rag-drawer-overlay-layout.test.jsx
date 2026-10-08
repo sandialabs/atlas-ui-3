@@ -294,6 +294,36 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     other.remove()
   })
 
+  it('lets the Escape key through to bubble-phase listeners when standing down', () => {
+    // The drawer's own Escape listener sits in the capture phase and stops
+    // propagation -- but ONLY once its stand-down predicate has passed. This
+    // is the regression: stopping propagation first swallowed the key before
+    // the Settings modal's bubble-phase handler could see it, so Escape
+    // closed neither overlay.
+    const { onClose } = setup({ isOpen: true })
+
+    const other = document.createElement('div')
+    other.setAttribute('role', 'dialog')
+    const insideOther = document.createElement('button')
+    other.appendChild(insideOther)
+    document.body.appendChild(other)
+    insideOther.focus()
+
+    let bubbleListenerSawEscape = false
+    const bubbleListener = (event) => {
+      if (event.key === 'Escape') bubbleListenerSawEscape = true
+    }
+    document.addEventListener('keydown', bubbleListener)
+    try {
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(bubbleListenerSawEscape).toBe(true)
+      expect(onClose).not.toHaveBeenCalled()
+    } finally {
+      document.removeEventListener('keydown', bubbleListener)
+      other.remove()
+    }
+  })
+
   it('skips focus restore when the drawer closed under a different dialog', () => {
     // If the drawer is dismissed while the user is in a modal layered on top
     // of it, restoring saved focus would yank focus behind that modal's
