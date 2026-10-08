@@ -719,10 +719,12 @@ class UnifiedRAGService:
         left out (issue #1032), so this list is also the server-side gate for
         per-corpus classifications.
         """
+        generation = self._corpus_metadata.generation
+        answered = False
         try:
             client = self._get_http_client(source_name, config)
-            generation = self._corpus_metadata.generation
             data_sources = await client.discover_data_sources(username)
+            answered = True
             # Unfiltered, so query-time checks at any level can reuse it. A
             # failed answer opens the same short window query-time discovery
             # uses, so the queries that follow do not each wait on the backend.
@@ -772,6 +774,8 @@ class UnifiedRAGService:
 
         except Exception as e:
             logger.error("Failed to discover HTTP source %s: %s", source_name, e)
+            if not answered:
+                self._corpus_metadata.mark_failed(source_name, username, generation)
             return None
 
     def _resolve_query(self, messages: List[Dict], query: Optional[str]) -> str:

@@ -607,6 +607,18 @@ async def test_picker_discovery_started_before_invalidation_is_not_cached(manage
 
 
 @pytest.mark.asyncio
+async def test_picker_discovery_error_opens_the_failure_window(manager):
+    backend = _Backend(MIXED)
+    backend.discover_data_sources.side_effect = RuntimeError("down")
+    service = _service(backend)
+    cfg = service.config_manager.rag_sources_config.sources["legacy"]
+    assert await service._discover_http_source("legacy", cfg, USER, "UUR") is None
+    with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="did not answer"):
+        await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+    assert backend.discover_data_sources.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_unknown_corpus_cannot_force_a_refresh_per_query(manager):
     backend = _Backend(MIXED)
     service = _service(backend)
