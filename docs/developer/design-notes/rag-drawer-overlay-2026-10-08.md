@@ -56,15 +56,19 @@ so it gained the treatment the other overlays already had (issue #1037 review):
   header controls behind the backdrop. The trap listens on `document` rather
   than on the drawer itself, so it also catches focus that strays outside
   (e.g. to `<body>` after a control disabled itself), and it stands down
-  while focus is inside a different dialog layered on top of the drawer.
+  whenever the drawer is not the topmost modal dialog.
 - Escape closes it, via the shared `useEscapeKey` hook -- which now holds its
   handler in a latest-ref and keys its listener on `isOpen` alone, so
-  per-render callback identities cannot resubscribe it. When the Tools and
-  Settings modal is layered on top, the drawer passes a `shouldHandle`
-  predicate that stands down while focus is in that modal: the predicate is
-  consulted *before* the hook stops propagation, so the modal's own
-  bubble-phase Escape handler still receives the key and Escape closes only
-  the topmost overlay.
+  per-render callback identities cannot resubscribe it. Overlay ownership is
+  decided by the topmost `[role="dialog"][aria-modal="true"]` in document
+  order (App renders SettingsPanel after RagPanel, so document order equals
+  stacking order), never by focus position -- clicking non-focusable text in
+  the modal drops focus to `<body>`, and a focus-based check handed Escape to
+  the drawer beneath it. The predicate is consulted *before* the hook stops
+  propagation, so the modal's own bubble-phase Escape handler still receives
+  the key and Escape closes only the topmost overlay.
+
+![Tools and Settings modal layered over the open drawer; Escape closes only the modal](../images/issue1037-stacked-escape-order.png)
 
 One deliberate non-change: `useEscapeKey` still uses `stopPropagation()`, not
 `stopImmediatePropagation()`. Changing the shared hook would alter how every

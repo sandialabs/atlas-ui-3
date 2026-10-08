@@ -28,13 +28,16 @@ const RagPanel = ({ isOpen, onClose }) => {
 
   // The Tools and Settings modal can be layered on top of an open drawer.
   // Ownership goes to the TOPMOST modal dialog in document order (later
-  // siblings stack above earlier ones at equal z-index), decided by the
-  // aria-modal attribute rather than focus position: clicking non-focusable
-  // text in the modal drops focus to <body>, and a focus-based check would
-  // hand Escape and Tab straight back to the drawer beneath it. The drawer
-  // stands down when it is not the topmost modal; useEscapeKey consults the
-  // predicate BEFORE stopping propagation, so the modal's own (bubble-phase)
-  // Escape handler still receives the key.
+  // siblings stack above earlier ones at equal z-index). This relies on App
+  // rendering SettingsPanel after RagPanel -- true today and the reason
+  // document order equals stacking order here; the useFocusTrap refactor
+  // tracked in #1039 should make the ownership explicit instead. Decided by
+  // the aria-modal attribute rather than focus position: clicking
+  // non-focusable text in the modal drops focus to <body>, and a focus-based
+  // check would hand Escape and Tab straight back to the drawer beneath it.
+  // The drawer stands down when it is not the topmost modal; useEscapeKey
+  // consults the predicate BEFORE stopping propagation, so the modal's own
+  // (bubble-phase) Escape handler still receives the key.
   const isTopmostModalDialog = () => {
     if (!drawerRef.current) return false
     const modals = document.querySelectorAll('[role="dialog"][aria-modal="true"]')

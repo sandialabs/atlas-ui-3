@@ -18,7 +18,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render } from '@testing-library/react'
-import { useState } from 'react'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 
 const captureListenersInFlight = () => {
@@ -39,15 +38,15 @@ function Probe({ onEscape, shouldHandle }) {
   return null
 }
 
-/** Rerenders Probe with a fresh handler each time (the inline-arrow case). */
-function RerenderingProbe({ calls }) {
-  const [, setTick] = useState(0)
-  return (
-    <>
-      <button onClick={() => setTick(t => t + 1)}>rerender</button>
-      <Probe onEscape={() => calls.push(`call-${calls.length + 1}`)} />
-    </>
-  )
+/**
+ * Each render's handler pushes the label of ITS render, so a stale handler
+ * (a resubscription bug) produces ['render-1', 'render-1'] and fails; a
+ * call-time label like `calls.length` would make stale and fresh handlers
+ * indistinguishable.
+ */
+function LatestProbe({ label, calls }) {
+  useEscapeKey(true, () => calls.push(label))
+  return null
 }
 
 let ordered
@@ -74,19 +73,19 @@ const pressEscape = () => {
 describe('useEscapeKey', () => {
   it('calls the latest handler after a rerender changes its identity', () => {
     const calls = []
-    const { getByText } = render(<RerenderingProbe calls={calls} />)
+    const { rerender } = render(<LatestProbe label="render-1" calls={calls} />)
 
     pressEscape()
-    getByText('rerender').click()
+    rerender(<LatestProbe label="render-2" calls={calls} />)
     pressEscape()
 
-    expect(calls).toEqual(['call-1', 'call-2'])
+    expect(calls).toEqual(['render-1', 'render-2'])
   })
 
   it('keeps a single subscription across rerenders', () => {
     const addSpy = vi.spyOn(document, 'addEventListener')
     const removeSpy = vi.spyOn(document, 'removeEventListener')
-    const { getByText } = render(<RerenderingProbe calls={[]} />)
+    const { rerender } = render(<LatestProbe label="render-1" calls={[]} />)
 
     const keydownAdds = () =>
       addSpy.mock.calls.filter(([type]) => type === 'keydown').length
@@ -95,8 +94,8 @@ describe('useEscapeKey', () => {
 
     const addsAfterMount = keydownAdds()
     const removesAfterMount = keydownRemoves()
-    getByText('rerender').click()
-    getByText('rerender').click()
+    rerender(<LatestProbe label="render-2" calls={[]} />)
+    rerender(<LatestProbe label="render-3" calls={[]} />)
 
     expect(keydownAdds()).toBe(addsAfterMount)
     expect(keydownRemoves()).toBe(removesAfterMount)
