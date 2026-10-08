@@ -26,11 +26,6 @@ from types import SimpleNamespace
 
 import atlas.core.compliance as compliance
 import atlas.domain.unified_rag_service as unified
-from atlas.core.compliance import (
-    ComplianceLevelManager,
-    reset_active_compliance_context,
-    set_active_compliance_context,
-)
 from atlas.domain.errors import DataSourcePermissionError
 from atlas.modules.config.models import RAGSourcesConfig
 
@@ -41,7 +36,7 @@ MESSAGES = [{"role": "user", "content": "How do I get started?"}]
 def _use_levels() -> None:
     path = Path(tempfile.mkdtemp()) / "compliance-levels.json"
     path.write_text(json.dumps({"levels": [{"name": "Public"}, {"name": "Internal"}]}))
-    manager = ComplianceLevelManager(path)
+    manager = compliance.ComplianceLevelManager(path)
     compliance.get_compliance_manager = lambda: manager
     unified.get_compliance_manager = lambda: manager
 
@@ -91,7 +86,7 @@ async def run(url: str, key: str) -> int:
                 "batch product-knowledge + technical-docs": internal,
                 "single invented corpus": "DATA_SOURCE_NOT_LISTED",
             }
-            token = set_active_compliance_context("Public", enforce=True)
+            token = compliance.set_active_compliance_context("Public", enforce=True)
             try:
                 actual = {
                     "single product-knowledge": await _outcome(
@@ -105,7 +100,7 @@ async def run(url: str, key: str) -> int:
                         service.query_rag(USER, "mock:invented", MESSAGES)),
                 }
             finally:
-                reset_active_compliance_context(token)
+                compliance.reset_active_compliance_context(token)
             for name, outcome in actual.items():
                 ok = outcome == expected[name]
                 failures += not ok
