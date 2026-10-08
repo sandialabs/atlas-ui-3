@@ -1072,7 +1072,7 @@ class ChatService:
             conv_metadata = conv.get("metadata")
             if isinstance(conv_metadata, dict):
                 stored_workspace_id = conv_metadata.get("workspace_id")
-            binding = conv_class.binding_from_metadata(conv_metadata)
+            binding = conv_class.binding_from_record(conv)
 
         if compliance_level is not UNSET:
             try:
@@ -1620,7 +1620,7 @@ class ChatService:
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
         session.context[conv_class.SESSION_BINDING_KEY] = (
-            conv_class.binding_from_metadata(conv_metadata)
+            conv_class.binding_from_record(conv)
         )
 
         messages = conv.get("messages")

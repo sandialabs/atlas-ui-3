@@ -514,3 +514,39 @@ async def test_rest_fetch_at_another_level_returns_no_content(use_manager, repo,
         CONV, compliance_level="CUI", current_user=USER
     )
     assert len(allowed["messages"]) == 2
+
+
+# --- unreadable records -------------------------------------------------------
+
+
+def test_non_object_metadata_is_invalid_not_legacy():
+    assert conv_class.binding_from_metadata([])["state"] == "invalid"
+    assert conv_class.binding_from_metadata("CUI")["state"] == "invalid"
+
+
+def _corrupt_metadata(repo, value):
+    from atlas.modules.chat_history.models import ConversationRecord
+
+    with repo._get_session() as session:
+        session.get(ConversationRecord, CONV).metadata_json = value
+        session.commit()
+
+
+@pytest.mark.parametrize("raw", ["{not json", "[]", '"CUI"'])
+@pytest.mark.asyncio
+async def test_unreadable_stored_metadata_fails_closed_even_when_levels_are_disabled(
+    use_manager, repo, raw
+):
+    await _seed_cui(repo)
+    _corrupt_metadata(repo, raw)
+    assert repo.get_conversation(CONV, USER)["data_classification_state"] == "invalid"
+    assert repo.list_conversations(USER)[0]["data_classification_state"] == "invalid"
+
+    service, sessions = _make_service(repo, compliance_enabled=False)
+    with pytest.raises(ValidationError):
+        await _turn(service, _new_session(sessions), None)
+    frame = await service.handle_restore_conversation(
+        session_id=_new_session(sessions), conversation_id=CONV, messages=[],
+        user_email=USER, compliance_level=None,
+    )
+    assert frame["type"] == "error"

@@ -69,8 +69,18 @@ def binding_for_new_conversation(active_level: Optional[str]) -> Dict[str, Any]:
 
 
 def binding_from_metadata(metadata: Any) -> Dict[str, Any]:
-    """The binding recorded on a stored (or in-flight) conversation."""
-    if not isinstance(metadata, dict) or CLASSIFICATION_METADATA_KEY not in metadata:
+    """The binding recorded on a stored (or in-flight) conversation.
+
+    Only a readable metadata object without the key is legacy. No metadata at
+    all (``None``) is legacy too; anything else that is not an object --
+    corrupt or malformed metadata -- may have held a record, so it is invalid
+    and matches nothing.
+    """
+    if metadata is None:
+        return make_binding(STATE_LEGACY)
+    if not isinstance(metadata, dict):
+        return make_binding(STATE_INVALID)
+    if CLASSIFICATION_METADATA_KEY not in metadata:
         return make_binding(STATE_LEGACY)
     value = metadata[CLASSIFICATION_METADATA_KEY]
     if value is None:
@@ -78,6 +88,21 @@ def binding_from_metadata(metadata: Any) -> Dict[str, Any]:
     if isinstance(value, str) and value.strip():
         return make_binding(STATE_CLASSIFIED, value.strip())
     return make_binding(STATE_INVALID)
+
+
+def binding_from_record(record: Any) -> Dict[str, Any]:
+    """The binding of a conversation record as the repository returns it.
+
+    The record's top-level ``data_classification_state`` is preferred: the
+    repository computes it from the raw stored metadata, so it still reports
+    corrupt metadata as invalid where the decoded ``metadata`` dict cannot.
+    """
+    if isinstance(record, dict) and isinstance(record.get("data_classification_state"), str):
+        return normalize_binding({
+            "state": record["data_classification_state"],
+            "level": record.get("data_classification"),
+        })
+    return binding_from_metadata(record.get("metadata") if isinstance(record, dict) else None)
 
 
 def normalize_binding(binding: Any) -> Dict[str, Any]:

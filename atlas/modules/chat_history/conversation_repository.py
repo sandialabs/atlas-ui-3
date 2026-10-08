@@ -654,7 +654,7 @@ _MISSING = object()
 def _load_metadata(metadata_json: Optional[str]) -> Any:
     """Decoded conversation metadata; an unreadable blob decodes to ``_MISSING``."""
     if not metadata_json:
-        return {}
+        return None
     try:
         return json.loads(metadata_json)
     except json.JSONDecodeError:
@@ -670,6 +670,8 @@ def _classification_unchanged(
     Unreadable stored metadata fails closed: it may hold a record.
     """
     stored = _load_metadata(stored_metadata_json)
+    if stored is None:
+        stored = {}
     if not isinstance(stored, dict):
         return False
     incoming = incoming if isinstance(incoming, dict) else {}

@@ -147,7 +147,8 @@ async def get_conversation(
                     "detail": refusal,
                     "error_type": conv_class.ERROR_CODE,
                     "id": conversation.get("id"),
-                    **conv_class.public_fields(conversation.get("metadata")),
+                    "data_classification": conversation.get("data_classification"),
+                    "data_classification_state": conv_class.binding_from_record(conversation)["state"],
                 },
             )
     return conversation
@@ -166,7 +167,7 @@ def _classification_refusal(conversation, compliance_level: str, user_email: str
         active = mgr.validate_compliance_level(compliance_level, context="conversation fetch")
         if not active:
             return "The selected compliance level is not defined on this deployment."
-    binding = conv_class.binding_from_metadata(conversation.get("metadata"))
+    binding = conv_class.binding_from_record(conversation)
     refusal = conv_class.resume_refusal(
         binding, active, compliance_enabled=enabled, compliance_mgr=mgr
     )

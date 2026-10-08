@@ -22,7 +22,7 @@ import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
-import { classificationOf } from '../utils/conversationClassification'
+import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
@@ -917,6 +917,23 @@ export const ChatProvider = ({ children }) => {
 				: 'A compliance level is required. Select a compliance level before sending.')
 			return false
 		}
+		// The open conversation keeps the level it was recorded at (issue
+		// #1042). The server refuses a mismatched turn on its own; refusing it
+		// here too keeps the prompt out of the transcript, where the local
+		// autosave would otherwise persist it under the recorded level.
+		const bound = conversationClassificationRef.current
+		if (bound) {
+			const refusal = classificationRefusal(
+				bound.recorded
+					? { data_classification_state: bound.level === null ? 'unclassified' : 'classified', data_classification: bound.level }
+					: { data_classification_state: 'legacy', data_classification: null },
+				{ complianceEnabled, activeLevel: activeComplianceFilter },
+			)
+			if (refusal) {
+				toast.error(refusal)
+				return false
+			}
+		}
 		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
 		const dropExcluded = (keys, levelOf) => {
 			if (!activeComplianceFilter) return keys
@@ -1105,7 +1122,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, mcpKeyLevel, ragKeyLevel])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
