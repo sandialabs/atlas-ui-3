@@ -169,3 +169,19 @@ describe('model helpers', () => {
     expect(firstCompliantModel(MODELS, [...LEVELS, { name: 'Internal', allowed_with: ['Internal'] }], 'Internal')).toBeNull()
   })
 })
+
+describe('HTTP RAG corpus payload (issue #1035)', () => {
+  // Discovery now sends complianceLevel: null when the backend omits it, and
+  // the effective list (legacy level folded in by the server) separately.
+  it('reads the effective list, never the badge', () => {
+    const legacy = { id: 'a', complianceLevel: 'HIPAA', allowedDataClassifications: ['HIPAA'] }
+    const missing = { id: 'b', complianceLevel: null, allowedDataClassifications: ['SOC2', 'HIPAA'] }
+    const narrowedAway = { id: 'c', complianceLevel: 'SECRET', allowedDataClassifications: [] }
+    expect(classificationsOf(legacy)).toEqual(['HIPAA'])
+    expect(classificationsOf(missing)).toEqual(['SOC2', 'HIPAA'])
+    expect(classificationsOf(narrowedAway)).toEqual([])
+    expect(isComplianceAccessible(LEVELS, 'SOC2', classificationsOf(legacy))).toBe(false)
+    expect(isComplianceAccessible(LEVELS, 'SOC2', classificationsOf(missing))).toBe(true)
+    expect(isComplianceAccessible(LEVELS, 'SOC2', classificationsOf(narrowedAway))).toBe(false)
+  })
+})

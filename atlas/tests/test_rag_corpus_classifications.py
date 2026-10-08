@@ -449,6 +449,36 @@ async def test_hung_discovery_is_bounded(manager, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_refusals_name_every_corpus_in_plural(manager):
+    backend = _Backend([])
+    service = _service(backend)
+    with _Turn("UUR"), pytest.raises(DataSourcePermissionError) as exc:
+        await service.query_rag_batch(
+            USER, ["legacy:a", "legacy:b"], [{"role": "user", "content": "q"}])
+    assert str(exc.value).startswith(
+        "The data sources 'a' and 'b' are not verifiable right now: the RAG backend "
+        "did not answer, so their data classifications cannot be checked."
+    )
+    service = _service(_Backend(MIXED))
+    with _Turn("ITAR"), pytest.raises(DataSourcePermissionError) as exc:
+        await service.query_rag_batch(
+            USER, ["legacy:x", "legacy:y"], [{"role": "user", "content": "q"}])
+    assert "'x' and 'y' are not offered to you by the RAG backend, so they cannot" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_failed_picker_discovery_opens_the_failure_window(manager):
+    backend = _Backend([])
+    service = _service(backend)
+    cfg = service.config_manager.rag_sources_config.sources["legacy"]
+    assert await service._discover_http_source("legacy", cfg, USER, "UUR") is None
+    with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="did not answer"):
+        await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+    # The query did not ask the backend again within the window.
+    assert backend.discover_data_sources.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_unknown_corpus_cannot_force_a_refresh_per_query(manager):
     backend = _Backend(MIXED)
     service = _service(backend)

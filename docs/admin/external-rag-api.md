@@ -183,7 +183,8 @@ versions:
   refused here too. On other servers it is let through on the server's floor
   check and logged at WARNING, so a discovery outage does not block
   unclassified chat; use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` if that is not
-  acceptable.
+  acceptable. Removing `legacy_corpus_classifications` after a migration
+  therefore also returns such no-level turns to this permissive behavior.
 - Corpus metadata comes from the backend, never from the client. Atlas reuses
   a discovery answer for up to 60 seconds per user and server, so a
   reclassified corpus is re-checked within about a minute. When a requested

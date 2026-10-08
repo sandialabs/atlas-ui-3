@@ -584,17 +584,18 @@ class UnifiedRAGService:
                 sanitize_for_logging(",".join(unconfirmed)),
             )
             subject, pronoun = _describe_sources(source_name, unconfirmed)
+            plural = pronoun == "them"
             if unanswered:
                 raise DataSourcePermissionError(
-                    f"{subject} not verifiable right now: its RAG backend did not "
-                    "answer, so its data classification cannot be checked. Try again "
-                    f"later, or deselect {pronoun}.",
+                    f"{subject} not verifiable right now: the RAG backend did not "
+                    f"answer, so {'their data classifications' if plural else 'its data classification'} "
+                    f"cannot be checked. Try again later, or deselect {pronoun}.",
                     code="DATA_SOURCE_UNVERIFIED",
                 )
             raise DataSourcePermissionError(
-                f"{subject} not offered to you by its RAG backend, so it cannot be "
-                f"confirmed as approved for this conversation. Deselect {pronoun}, "
-                "or ask an administrator for access.",
+                f"{subject} not offered to you by the RAG backend, so "
+                f"{'they' if plural else 'it'} cannot be confirmed as approved for this "
+                f"conversation. Deselect {pronoun}, or ask an administrator for access.",
                 code="DATA_SOURCE_NOT_LISTED",
             )
 
@@ -690,8 +691,13 @@ class UnifiedRAGService:
         try:
             client = self._get_http_client(source_name, config)
             data_sources = await client.discover_data_sources(username)
-            # Unfiltered, so query-time checks at any level can reuse it.
-            self._corpus_metadata.store(source_name, username, data_sources or [])
+            # Unfiltered, so query-time checks at any level can reuse it. A
+            # failed answer opens the same short window query-time discovery
+            # uses, so the queries that follow do not each wait on the backend.
+            if data_sources:
+                self._corpus_metadata.store(source_name, username, data_sources)
+            else:
+                self._corpus_metadata.mark_failed(source_name, username)
 
             if not data_sources:
                 logger.debug("No data sources found for HTTP source %s", source_name)
