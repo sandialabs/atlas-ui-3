@@ -12,11 +12,11 @@ vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
 vi.mock('../contexts/WSContext', () => ({ useWS: vi.fn() }))
 vi.mock('../contexts/MarketplaceContext', () => ({ useMarketplace: vi.fn() }))
 vi.mock('react-router-dom', () => ({ useNavigate: vi.fn() }))
-vi.mock('./WorkspaceSelector', () => ({ default: () => null }))
+vi.mock('../components/WorkspaceSelector', () => ({ default: () => null }))
 vi.mock('../hooks/useElementWidth', () => ({
   useElementWidth: vi.fn(() => [vi.fn(), mockedWidth])
 }))
-vi.mock('./ui/toastContext', () => ({
+vi.mock('../components/ui/toastContext', () => ({
   useToast: () => ({ showToast: vi.fn(), success: vi.fn(), error: vi.fn() })
 }))
 
@@ -104,6 +104,15 @@ describe('header Sources toggle as a dialog trigger', () => {
     renderHeader({ ragPanelOpen: false })
 
     expect(screen.getByRole('button', { name: 'Toggle Data Sources drawer' })).toBeTruthy()
+  })
+
+  it('carries the selected count in the icon-only accessible name', () => {
+    setContext({ width: 720, chatOver: { selectedDataSources: new Set(['a:1', 'b:2']) } })
+    renderHeader({ ragPanelOpen: false })
+
+    expect(
+      screen.getByRole('button', { name: 'Toggle Data Sources drawer, 2 selected' })
+    ).toBeTruthy()
   })
 
   it('toggles via onToggleRag when clicked', () => {

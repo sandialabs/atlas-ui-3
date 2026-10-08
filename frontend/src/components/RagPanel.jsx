@@ -27,19 +27,21 @@ const RagPanel = ({ isOpen, onClose }) => {
   const previousFocusRef = useRef(null)
 
   // The Tools and Settings modal can be layered on top of an open drawer.
-  // While focus is in *that* dialog, it owns Escape and the Tab trap: this
-  // drawer stands down via shouldHandle -- which useEscapeKey consults
-  // BEFORE stopping propagation, so the modal's own (bubble-phase) Escape
-  // handler still receives the key -- and focus restore is skipped if the
-  // drawer is dismissed while the modal is up.
-  const focusInOtherDialog = () => {
-    const active = document.activeElement
-    if (!(active instanceof HTMLElement)) return false
-    const dialog = active.closest('[role="dialog"]')
-    return dialog !== null && dialog !== drawerRef.current
+  // Ownership goes to the TOPMOST modal dialog in document order (later
+  // siblings stack above earlier ones at equal z-index), decided by the
+  // aria-modal attribute rather than focus position: clicking non-focusable
+  // text in the modal drops focus to <body>, and a focus-based check would
+  // hand Escape and Tab straight back to the drawer beneath it. The drawer
+  // stands down when it is not the topmost modal; useEscapeKey consults the
+  // predicate BEFORE stopping propagation, so the modal's own (bubble-phase)
+  // Escape handler still receives the key.
+  const isTopmostModalDialog = () => {
+    if (!drawerRef.current) return false
+    const modals = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+    return modals.length > 0 && modals[modals.length - 1] === drawerRef.current
   }
 
-  useEscapeKey(isOpen, onClose, { shouldHandle: () => !focusInOtherDialog() })
+  useEscapeKey(isOpen, onClose, { shouldHandle: isTopmostModalDialog })
 
   useEffect(() => {
     if (isOpen) {
@@ -53,7 +55,7 @@ const RagPanel = ({ isOpen, onClose }) => {
     // is stale once the drawer is gone.
     const previous = previousFocusRef.current
     previousFocusRef.current = null
-    if (focusInOtherDialog()) return
+    if (!isTopmostModalDialog()) return
     if (previous instanceof HTMLElement) previous.focus()
   }, [isOpen])
 
@@ -63,29 +65,27 @@ const RagPanel = ({ isOpen, onClose }) => {
   // one. The listener lives on `document` (not on the <aside>) because focus
   // can legitimately sit outside the drawer while it is up -- e.g. on <body>
   // after "Clear All" disabled the control that held it -- and a keydown on
-  // the <aside> itself would never see it. Stands down while focus is inside
-  // a different dialog (the Tools and Settings modal layered on top of an
-  // open drawer owns its own trap). No visibility filter on the focusables
-  // (the SettingsPanel one works around nested fixed-position modals this
-  // drawer does not have; when the drawer is closed it is inert, so Tab
-  // never reaches it anyway). Not a shared hook yet: SettingsPanel's trap is
-  // innermost-dialog aware in ways this drawer does not need; tracked in
-  // issue #1039.
+  // the <aside> itself would never see it. Stands down when the drawer is
+  // not the topmost modal dialog (same predicate as Escape: the Tools and
+  // Settings modal layered on top owns the trap). No visibility filter on
+  // the focusables (the SettingsPanel one works around nested fixed-position
+  // modals this drawer does not have; when the drawer is closed it is inert,
+  // so Tab never reaches it anyway). Not a shared hook yet: SettingsPanel's
+  // trap is innermost-dialog aware in ways this drawer does not need;
+  // tracked in issue #1039.
   useEffect(() => {
     if (!isOpen) return undefined
 
     const trapTab = (event) => {
       if (event.key !== 'Tab' || !drawerRef.current) return
-      const active = document.activeElement
-      const activeDialog = active instanceof HTMLElement
-        ? active.closest('[role="dialog"]')
-        : null
-      if (activeDialog && activeDialog !== drawerRef.current) return
+      // Same ownership rule as Escape: the topmost modal dialog owns Tab.
+      if (!isTopmostModalDialog()) return
 
       const focusable = drawerRef.current.querySelectorAll(FOCUSABLE_SELECTOR)
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
+      const active = document.activeElement
       if (!drawerRef.current.contains(active)) {
         event.preventDefault()
         ;(event.shiftKey ? last : first).focus()
@@ -124,7 +124,7 @@ const RagPanel = ({ isOpen, onClose }) => {
         aria-hidden={!isOpen}
         inert={!isOpen}
         className={`
-          fixed left-0 top-0 h-full w-80 lg:w-96 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out flex flex-col
+          fixed left-0 top-0 h-full w-80 lg:w-96 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out motion-reduce:transition-none flex flex-col
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
       >

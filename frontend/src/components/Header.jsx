@@ -177,7 +177,9 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
             aria-expanded={ragPanelOpen}
             aria-haspopup="dialog"
             aria-controls="rag-drawer"
-            aria-label={showActionLabels ? undefined : 'Toggle Data Sources drawer'}
+            aria-label={showActionLabels
+              ? undefined
+              : `Toggle Data Sources drawer${selectedDataSources?.size ? `, ${selectedDataSources.size} selected` : ''}`}
             className={`flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg transition-colors ${
               selectedDataSources?.size > 0
                 ? 'bg-blue-600 hover:bg-blue-700 text-white'

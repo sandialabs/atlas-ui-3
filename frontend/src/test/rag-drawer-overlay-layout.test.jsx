@@ -263,8 +263,11 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     // its own trap owns Tab while focus is in there.
     setup({ isOpen: true })
 
+    // Mirrors the real Tools and Settings modal, which carries
+    // aria-modal="true" -- the topmost-dialog check keys on it.
     const other = document.createElement('div')
     other.setAttribute('role', 'dialog')
+    other.setAttribute('aria-modal', 'true')
     const insideOther = document.createElement('button')
     other.appendChild(insideOther)
     document.body.appendChild(other)
@@ -281,14 +284,24 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     // swallow the modal's Escape: whichever dialog has focus owns Escape.
     const { onClose } = setup({ isOpen: true })
 
+    // Mirrors the real Tools and Settings modal, which carries
+    // aria-modal="true" -- the topmost-dialog check keys on it.
     const other = document.createElement('div')
     other.setAttribute('role', 'dialog')
+    other.setAttribute('aria-modal', 'true')
     const insideOther = document.createElement('button')
     other.appendChild(insideOther)
     document.body.appendChild(other)
     insideOther.focus()
 
     fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Clicking non-focusable text in the modal drops focus to <body>: with
+    // no focus to inspect, ownership must still follow the topmost modal
+    // dialog, not fall back to the drawer.
+    insideOther.blur()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
 
     other.remove()
@@ -302,8 +315,11 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     // closed neither overlay.
     const { onClose } = setup({ isOpen: true })
 
+    // Mirrors the real Tools and Settings modal, which carries
+    // aria-modal="true" -- the topmost-dialog check keys on it.
     const other = document.createElement('div')
     other.setAttribute('role', 'dialog')
+    other.setAttribute('aria-modal', 'true')
     const insideOther = document.createElement('button')
     other.appendChild(insideOther)
     document.body.appendChild(other)
@@ -331,8 +347,11 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     opener.focus()
     const { rerender } = setup({ isOpen: true })
 
+    // Mirrors the real Tools and Settings modal, which carries
+    // aria-modal="true" -- the topmost-dialog check keys on it.
     const other = document.createElement('div')
     other.setAttribute('role', 'dialog')
+    other.setAttribute('aria-modal', 'true')
     const insideOther = document.createElement('button')
     other.appendChild(insideOther)
     document.body.appendChild(other)
