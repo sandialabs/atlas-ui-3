@@ -106,6 +106,20 @@ describe('RagPanel - drawer overlays instead of reflowing the chat (issue #1037)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('closes the drawer via the X button in its header', () => {
+    const { onClose } = setup({ isOpen: true })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close data sources drawer' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not close anything on Escape while the drawer is closed', () => {
+    const { onClose } = setup({ isOpen: false })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('removes the closed drawer from the accessibility tree and tab order', () => {
     // Off-screen but still mounted means the close button would otherwise
     // stay reachable by keyboard and screen reader while invisible.
@@ -161,6 +175,21 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     expect(document.activeElement).toBe(opener)
   })
 
+  it('walks the real closed -> open -> closed path with focus intact', () => {
+    // The app always mounts the drawer closed and opens it from the header
+    // toggle; the whole cycle must hand focus back where it started.
+    opener.focus()
+    const { rerender } = setup({ isOpen: false })
+    expect(document.activeElement).toBe(opener)
+
+    rerender(<RagPanel isOpen={true} onClose={vi.fn()} />)
+    const closeButton = screen.getByRole('button', { name: 'Close data sources drawer' })
+    expect(document.activeElement).toBe(closeButton)
+
+    rerender(<RagPanel isOpen={false} onClose={vi.fn()} />)
+    expect(document.activeElement).toBe(opener)
+  })
+
   it('leaves focus alone when mounted closed', () => {
     // The restore branch must key on a drawer that actually opened, not fire
     // for one that never did.
@@ -208,5 +237,39 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     fireEvent.keyDown(drawer, { key: 'Tab', shiftKey: true })
 
     expect(document.activeElement).toBe(last)
+  })
+
+  it('pulls stray focus back into the drawer: the trap listens on document', () => {
+    // Focus can legitimately leave the drawer while it is up (e.g. "Clear
+    // All" disabled itself and dropped focus to <body>); from there a Tab
+    // must return into the drawer, not walk the covered header controls.
+    setup({ isOpen: true })
+
+    const drawer = screen.getByRole('dialog', { name: 'Data Sources' })
+    const focusables = drawer.querySelectorAll(
+      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+    )
+    document.body.focus()
+    fireEvent.keyDown(document.body, { key: 'Tab' })
+
+    expect(document.activeElement).toBe(focusables[0])
+  })
+
+  it('stands down while focus is inside a different dialog', () => {
+    // The Tools and Settings modal can be layered on top of an open drawer;
+    // its own trap owns Tab while focus is in there.
+    setup({ isOpen: true })
+
+    const other = document.createElement('div')
+    other.setAttribute('role', 'dialog')
+    const insideOther = document.createElement('button')
+    other.appendChild(insideOther)
+    document.body.appendChild(other)
+    insideOther.focus()
+
+    fireEvent.keyDown(document, { key: 'Tab' })
+    expect(document.activeElement).toBe(insideOther)
+
+    other.remove()
   })
 })

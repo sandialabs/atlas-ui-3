@@ -42,28 +42,49 @@ const RagPanel = ({ isOpen, onClose }) => {
   // Tab is trapped inside the drawer rather than switched off: without this,
   // focus could walk the covered header controls behind the backdrop, and a
   // press on one of them could close a second overlay together with this
-  // one. No visibility filter on the focusables (the SettingsPanel one works
-  // around nested fixed-position modals this drawer does not have; when the
-  // drawer is closed it is inert, so Tab never reaches it anyway).
-  const trapTab = (event) => {
-    if (event.key !== 'Tab' || !drawerRef.current) return
-    const focusable = drawerRef.current.querySelectorAll(
-      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
-    )
-    if (focusable.length === 0) return
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    if (!drawerRef.current.contains(document.activeElement)) {
-      event.preventDefault()
-      ;(event.shiftKey ? last : first).focus()
-    } else if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
+  // one. The listener lives on `document` (not on the <aside>) because focus
+  // can legitimately sit outside the drawer while it is up -- e.g. on <body>
+  // after "Clear All" disabled the control that held it -- and a keydown on
+  // the <aside> itself would never see it. Stands down while focus is inside
+  // a different dialog (the Tools and Settings modal layered on top of an
+  // open drawer owns its own trap). No visibility filter on the focusables
+  // (the SettingsPanel one works around nested fixed-position modals this
+  // drawer does not have; when the drawer is closed it is inert, so Tab
+  // never reaches it anyway). Not a shared hook yet: SettingsPanel's trap is
+  // innermost-dialog aware in ways this drawer does not need; unifying them
+  // is a follow-up.
+  useEffect(() => {
+    if (!isOpen) return undefined
+
+    const trapTab = (event) => {
+      if (event.key !== 'Tab' || !drawerRef.current) return
+      const active = document.activeElement
+      const activeDialog = active instanceof HTMLElement
+        ? active.closest('[role="dialog"]')
+        : null
+      if (activeDialog && activeDialog !== drawerRef.current) return
+
+      const focusable = drawerRef.current.querySelectorAll(
+        'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+      )
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (!drawerRef.current.contains(active)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
-  }
+
+    document.addEventListener('keydown', trapTab)
+    return () => document.removeEventListener('keydown', trapTab)
+  }, [isOpen])
 
   return (
     <>
@@ -85,7 +106,6 @@ const RagPanel = ({ isOpen, onClose }) => {
         aria-labelledby="rag-drawer-title"
         aria-hidden={!isOpen}
         inert={!isOpen}
-        onKeyDown={trapTab}
         className={`
           fixed left-0 top-0 h-full w-80 lg:w-96 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out flex flex-col
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}

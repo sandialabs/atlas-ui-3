@@ -34,13 +34,13 @@ drawer stays mounted off-screen, marked `aria-hidden` and `inert`.
 
 ![After: drawer open on desktop as an overlay, chat content unmoved](../images/issue1037-after-drawer-open-overlay.png)
 
-Measured geometry (Playwright, header bounding box):
+Measured geometry (Playwright, header bounding box, 1440x900 unless noted):
 
-| Scenario                          | Closed          | Open            | Shift |
-| --------------------------------- | --------------- | --------------- | ----- |
-| 1440x900, sidebar open            | left 200px, w 1240px | left 584px, w 856px | 384px |
-| 1440x900, sidebar collapsed       | left 40px, w 1400px | left 40px, w 1400px | 0px (fixed) |
-| 390x800 mobile                    | left 0, w 390px | left 0, w 390px | 0px (unchanged) |
+| Scenario                      | Before: closed -> open      | After: closed -> open  | Shift |
+| ----------------------------- | --------------------------- | ---------------------- | ----- |
+| Sidebar open (200px)          | left 200 -> 584             | left 200 -> 200        | +384 -> 0 |
+| Sidebar collapsed (40px rail) | left 40 -> 424              | left 40 -> 40          | +384 -> 0 |
+| 390x800 mobile                | left 0 -> 0 (already overlay) | left 0 -> 0          | unchanged |
 
 ## Modal behavior
 
@@ -51,8 +51,13 @@ so it gained the treatment the other overlays already had (issue #1037 review):
 - Focus enters the drawer (its close button) when it opens and returns to the
   previously focused element when it closes.
 - Tab is trapped inside while it is open, so focus cannot walk the covered
-  header controls behind the backdrop.
-- Escape closes it, via the shared `useEscapeKey` hook.
+  header controls behind the backdrop. The trap listens on `document` rather
+  than on the drawer itself, so it also catches focus that strays outside
+  (e.g. to `<body>` after a control disabled itself), and it stands down
+  while focus is inside a different dialog layered on top of the drawer.
+- Escape closes it, via the shared `useEscapeKey` hook; the header toggle's
+  `onClose`/`onToggleRag` callbacks are stable (`useCallback`) so the Escape
+  listener is not resubscribed on every app render.
 
 One deliberate non-change: `useEscapeKey` still uses `stopPropagation()`, not
 `stopImmediatePropagation()`. Changing the shared hook would alter how every
