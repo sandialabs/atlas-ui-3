@@ -109,8 +109,11 @@ Data sources are only ever consumed by search, so the picker is the second tab,
 Integrations** tab.
 
 The left-hand **Sources** drawer is unchanged and still available; both render
-the same `DataSourcesSelector` component. Dataset names wrap instead of being
-clipped, so a long name (or one with a suffix appended) stays readable.
+the same `DataSourcesSelector` component. It slides over the chat as an
+overlay at every screen width -- opening it no longer pushes the chat to the
+right -- and clicking the shaded area outside it (or the X in its header)
+closes it. Dataset names wrap instead of being clipped, so a long name (or one
+with a suffix appended) stays readable.
 
 Data source changes apply as soon as you make them, unlike tool and prompt
 checkboxes, which are staged until you press **Save and Close**.
