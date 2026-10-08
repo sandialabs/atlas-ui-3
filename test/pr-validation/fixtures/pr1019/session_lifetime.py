@@ -62,10 +62,14 @@ def login(client):
 
 def exercise():
     import atlas.main as atlas_main
+    from atlas.core.oidc import session_refresh
     from atlas.core.oidc.delegation import get_delegation_manager
     from atlas.core.oidc.mcp_delegation import mint_delegated_token_for_server
     from atlas.core.oidc.session import get_session_store
     from atlas.modules.mcp_tools.token_storage import get_token_storage
+
+    # Keep the fixture fast while still exercising the cooldown end to end.
+    session_refresh.REFRESH_FAILURE_COOLDOWN_SECONDS = 0.5
 
     client = TestClient(atlas_main.app)
     login(client)
@@ -76,10 +80,14 @@ def exercise():
 
     RefreshingIdP.mode = "unavailable"
     assert client.get("/api/auth/oidc/status").status_code == 200
+    assert RefreshingIdP.refresh_calls == 2
     RefreshingIdP.mode = "success"
     assert client.get("/api/auth/oidc/status").status_code == 200
+    assert RefreshingIdP.refresh_calls == 2, "inside the cooldown the IdP is not retried"
+    time.sleep(0.6)
+    assert client.get("/api/auth/oidc/status").status_code == 200
     assert RefreshingIdP.refresh_calls == 3
-    print("PASSED: an IdP outage retains the session and later use retries")
+    print("PASSED: an IdP outage retains the session, defers the retry, and later use retries")
 
     token = asyncio.run(mint_delegated_token_for_server(provider.USER_EMAIL, "tools", {
         "auth_type": "delegated", "url": "https://tools.example.gov/mcp",
