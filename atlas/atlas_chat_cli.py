@@ -237,6 +237,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override file extractors config file (sets FILE_EXTRACTORS_CONFIG_FILE). Accepts a filename or path.",
     )
+    # Deprecated no-op (kept so scripts that still pass it do not break).
+    parser.add_argument(
+        "--tool-approvals-config",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--version",
         action="store_true",
@@ -350,7 +356,21 @@ async def list_data_sources(user_email: str = None, *, json_output: bool = False
         await client.cleanup()
 
 
+def _warn_deprecated_flags(args: argparse.Namespace) -> None:
+    if args.tool_approvals_config is not None:
+        # Kept as a no-op for one release: scripts that still pass the
+        # removed approvals-file flag keep running (it is inert -- tool
+        # approvals come from mcp.json now).
+        print(
+            "Warning: --tool-approvals-config is deprecated and ignored; "
+            "tool approvals are configured in mcp.json.",
+            file=sys.stderr,
+        )
+
+
 async def run(args: argparse.Namespace) -> int:
+    _warn_deprecated_flags(args)
+
     if args.list_models:
         return await list_models(json_output=args.json_output)
 

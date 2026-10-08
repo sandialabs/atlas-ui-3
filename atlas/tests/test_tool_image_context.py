@@ -542,21 +542,51 @@ class TestSynthesisUserQuestionLookup:
                 )
                 yield "answer"
 
-        caller = _LlmCaller()
-        messages = [
-            {"role": "user", "content": "check the rocket"},
-            {"role": "tool", "content": "{}", "tool_call_id": "c1"},
-            {"role": "user", "content": [
-                {"type": "text", "text": "[Automated system note]"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,x"}},
-            ]},
-        ]
-        runner = ToolsModeRunner(
-            caller, MagicMock(), AsyncMock(), prompt_provider=_PromptProvider(),
+        # Driven through run_streaming (as TestToolsStreamingInjectsToolImages
+        # does) so the list-content user turn is produced by the real pipeline
+        # instead of calling the private _stream_synthesis directly.
+        llm_response = LLMResponse(
+            content="",
+            tool_calls=[SimpleNamespace(
+                id="call_1", type="function",
+                function=SimpleNamespace(name="screenshot", arguments="{}"),
+            )],
         )
-        await runner._stream_synthesis(
-            model="m", messages=messages, session_context={}, update_callback=None,
-            llm_response=LLMResponse(content=""), user_email=None,
+        tool_mgr = MagicMock()
+
+        async def fake_execute(tool_call_obj, context=None):
+            return _image_result(tool_call_id=tool_call_obj.id)
+
+        tool_mgr.execute_tool = AsyncMock(side_effect=fake_execute)
+
+        class _LlmCaller:
+            def __init__(self):
+                self.prompts_seen = []
+
+            async def stream_with_tools(self, *args, **kwargs):
+                yield llm_response
+
+            async def stream_plain(self, model, messages, user_email=None):
+                self.prompts_seen.extend(
+                    m["content"] for m in messages
+                    if m.get("role") == "system" and str(m.get("content", "")).startswith("PROMPT")
+                )
+                yield "answer"
+
+        caller = _LlmCaller()
+        messages = [{"role": "user", "content": "check the rocket"}]
+        config = _vision_config()
+        config.app_settings.tools_mode_max_extra_rounds = 0
+        runner = ToolsModeRunner(
+            caller, tool_mgr, AsyncMock(),
+            prompt_provider=_PromptProvider(), config_manager=config,
+        )
+        runner.skip_approval = True
+        await runner.run_streaming(
+            messages=messages,
+            model="vision-model",
+            session=Session(),
+            selected_tools=["screenshot"],
         )
         assert caller.prompts_seen == ["PROMPT[check the rocket]"]
 

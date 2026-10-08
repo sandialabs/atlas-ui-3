@@ -98,6 +98,15 @@ if atlas-chat "Hello" --model cleanup-mock > "$WORKDIR/error.txt" 2>&1; then
     echo "FAILED: provider authentication failure must return a nonzero exit status"
     exit 1
 fi
+# A nonzero exit alone would also pass on an ImportError or uncaught crash.
+# (litellm logs handled exceptions with a traceback, so "no Traceback" is not
+# a usable signal.) The CLI's own handler prints the classified message as a
+# final "Error: ..." line; an uncaught crash never would.
+grep -q "^Error: There was an authentication issue with the LLM service" "$WORKDIR/error.txt" || {
+    echo "FAILED: provider error was not classified as an authentication failure"
+    cat "$WORKDIR/error.txt"
+    exit 1
+}
 echo "PASSED: streaming provider errors still fail the CLI"
 
 # Do not let the smoke test's empty MCP config and disabled features alter the

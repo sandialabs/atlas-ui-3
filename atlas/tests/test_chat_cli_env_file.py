@@ -8,8 +8,6 @@ same way across every entry point.
 
 from pathlib import Path
 
-import pytest
-
 
 def _load_resolver(tmp_path, monkeypatch):
     """Import atlas_chat_cli with a valid env file so module init succeeds.
@@ -65,14 +63,30 @@ class TestChatCliEnvFile:
         assert path == Path("~/.atlasrc").expanduser()
 
 
-def test_legacy_approval_file_option_is_rejected(tmp_path, monkeypatch, capsys):
+def test_legacy_approval_file_option_is_a_deprecated_no_op(tmp_path, monkeypatch, capsys):
     _load_resolver(tmp_path, monkeypatch)
-    from atlas.atlas_chat_cli import build_parser
+    from atlas.atlas_chat_cli import _warn_deprecated_flags, build_parser
 
-    with pytest.raises(SystemExit) as raised:
-        build_parser().parse_args(["--tool-approvals-config", "unused.json"])
-    assert raised.value.code == 2
-    assert "unrecognized arguments: --tool-approvals-config" in capsys.readouterr().err
+    # The retired approvals-file flag still parses so existing scripts keep
+    # working, but it is ignored (tool approvals come from mcp.json now).
+    args = build_parser().parse_args(["--tool-approvals-config", "unused.json"])
+    assert args.tool_approvals_config == "unused.json"
+
+    monkeypatch.delenv("TOOL_APPROVALS_CONFIG_FILE", raising=False)
+    from os import environ
+
+    assert "TOOL_APPROVALS_CONFIG_FILE" not in environ
+
+    _warn_deprecated_flags(args)
+    assert "--tool-approvals-config is deprecated and ignored" in capsys.readouterr().err
+
+
+def test_no_deprecation_warning_without_the_legacy_flag(tmp_path, monkeypatch, capsys):
+    _load_resolver(tmp_path, monkeypatch)
+    from atlas.atlas_chat_cli import _warn_deprecated_flags, build_parser
+
+    _warn_deprecated_flags(build_parser().parse_args(["hi"]))
+    assert capsys.readouterr().err == ""
 
 
 def test_mcp_config_override_remains_supported(tmp_path, monkeypatch):
