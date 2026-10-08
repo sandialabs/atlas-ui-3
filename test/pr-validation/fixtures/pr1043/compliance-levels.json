@@ -1,0 +1,7 @@
+{
+  "version": "2.0",
+  "levels": [
+    {"name": "UUR", "description": "Test level one", "aliases": [], "allowed_with": ["UUR"]},
+    {"name": "CUI", "description": "Test level two", "aliases": [], "allowed_with": ["CUI"]}
+  ]
+}
