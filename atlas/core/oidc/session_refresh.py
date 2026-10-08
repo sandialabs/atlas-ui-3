@@ -42,6 +42,8 @@ _refresh_failure_cooldowns: dict = {}
 _CLIENT_CONFIGURATION_ERRORS = frozenset(
     {"invalid_client", "unauthorized_client", "unsupported_grant_type"}
 )
+# Client errors that only mean "try later"; a new sign-in would not help.
+_RETRY_LATER_ERRORS = frozenset({"temporarily_unavailable", "slow_down"})
 
 
 def _refresh_in_cooldown(session_id: str) -> bool:
@@ -204,6 +206,8 @@ async def ensure_fresh_access_token(
                 isinstance(exc, OIDCFlowError)
                 and exc.status_code is not None
                 and 400 <= exc.status_code < 500
+                and exc.status_code != 429
+                and exc.error_code not in _RETRY_LATER_ERRORS
             ):
                 # Not a definitive refusal of the grant, so the session is kept
                 # and retried, but the same request will usually be rejected
@@ -217,7 +221,7 @@ async def ensure_fresh_access_token(
             else:
                 logger.warning("Could not refresh the OIDC access token: %s", exc)
             return None
-        except Exception as exc:  # pragma: no cover - network surprises
+        except Exception as exc:  # network surprises
             _set_refresh_cooldown(session.session_id)
             logger.warning(
                 "Unexpected error refreshing the OIDC access token: %s", exc, exc_info=True

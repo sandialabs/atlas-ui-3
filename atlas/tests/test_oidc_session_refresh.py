@@ -175,6 +175,10 @@ async def test_client_configuration_rejection_does_not_suggest_sign_in(
 @pytest.mark.parametrize("failure", [
     OIDCFlowError("Token endpoint returned 503 (temporarily_unavailable)",
                   error_code="temporarily_unavailable", status_code=503),
+    OIDCFlowError("Token endpoint returned 429 (unknown_error)",
+                  error_code="unknown_error", status_code=429),
+    OIDCFlowError("Token endpoint returned 400 (slow_down)",
+                  error_code="slow_down", status_code=400),
     httpx.ConnectError("Unavailable"),
 ])
 async def test_transient_refresh_failure_does_not_suggest_sign_in(
@@ -186,6 +190,25 @@ async def test_transient_refresh_failure_does_not_suggest_sign_in(
         assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
     assert "the OIDC access token" in caplog.text
     assert "signing in again" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_entra_rejection_identifiers_reach_the_refresh_log(session, revoke, caplog):
+    """End to end from the HTTP response: parsing feeds the logged identifiers."""
+    response = httpx.Response(400, json=ENTRA_ERROR)
+    with patch.object(session_refresh, "get_provider_metadata", AsyncMock()), \
+            patch.object(session_refresh, "build_client_credentials_from_settings",
+                         return_value=ClientCredentials()), \
+            patch("atlas.core.oidc.oidc_client.httpx.AsyncClient") as client, \
+            caplog.at_level("WARNING", logger="atlas.core.oidc.session_refresh"):
+        client.return_value.__aenter__.return_value.post = AsyncMock(return_value=response)
+        assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
+    assert get_session_store().get(session.session_id) is session
+    assert "(invalid_request) [error_codes=9002313; " in caplog.text
+    assert ENTRA_ERROR["trace_id"] in caplog.text
+    assert ENTRA_ERROR["correlation_id"] in caplog.text
+    assert "secret-echo" not in caplog.text
+    assert "signing in again starts a fresh session" in caplog.text
 
 
 @pytest.mark.asyncio
