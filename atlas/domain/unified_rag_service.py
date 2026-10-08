@@ -15,7 +15,6 @@ from atlas.core.compliance import (
     get_active_compliance_context,
     get_compliance_manager,
     get_model_classification_floor,
-    narrow_classifications,
     reset_active_compliance_context,
     set_active_compliance_context,
 )
@@ -29,6 +28,11 @@ from atlas.core.telemetry import (
     start_span,
 )
 from atlas.domain.errors import DataSourcePermissionError
+from atlas.domain.rag_corpus_classifications import (
+    CorpusMetadataCache,
+    corpus_classifications,
+    corpus_declares_own,
+)
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
@@ -121,22 +125,6 @@ def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
     return attrs
 
 
-def corpus_classifications(ds: Any, server_config: Any) -> Optional[List[str]]:
-    """A discovered HTTP corpus's classifications.
-
-    The server's list from rag-sources.json, narrowed by the corpus's own
-    ``allowed_data_classifications`` when the backend sends a list. The
-    per-corpus ``compliance_level`` is display-only: existing backends send
-    one for every corpus (often ``CUI``), and it was never a server-side
-    boundary, so it must not hide corpora the server config approves.
-    """
-    own = getattr(ds, "allowed_data_classifications", None)
-    return narrow_classifications(
-        own if isinstance(own, list) else None,
-        declared_classifications(server_config),
-    )
-
-
 class UnifiedRAGService:
     """Aggregates RAG discovery and querying across HTTP and MCP sources."""
 
@@ -162,6 +150,8 @@ class UnifiedRAGService:
 
         # Cache of HTTP RAG clients by source name
         self._http_clients: Dict[str, AtlasRAGClient] = {}
+        # Recent HTTP discovery answers, read by query-time per-corpus checks.
+        self._corpus_metadata = CorpusMetadataCache()
 
     # ----------------------------------------------------- RAG hooks (GH #713)
 
@@ -296,10 +286,11 @@ class UnifiedRAGService:
             source_name: The server key from ``rag-sources.json``. Used for the
                 log lines and as a fallback in messages; it is a config key the
                 UI never displays, so it is not what the user is told about.
-            source_config: The server's configuration. Authorization is decided
-                per *server*: ``enabled``, ``groups`` and ``compliance_level``
-                all live on this entry, so a denial covers every corpus selected
-                from that server.
+            source_config: The server's configuration. ``enabled``, ``groups``
+                and the server's classifications live on this entry, so a denial
+                on those grounds covers every corpus selected from that server.
+                For HTTP sources each corpus is then checked against its own
+                classifications as well (``_ensure_corpora_allowed``, #1035).
             source_ids: The corpora the user actually selected from this server,
                 as displayed in the picker. All of them are named in the denial
                 message -- the check is per-server, so every one of them is
@@ -366,6 +357,9 @@ class UnifiedRAGService:
                 compliance_mgr.classification_permits(level, floor)
                 for level in source_classifications
             ):
+                await self._ensure_corpora_allowed(
+                    username, source_name, source_config, source_ids, None, floor
+                )
                 return
             logger.warning(
                 "Rejected RAG query for source %s: no classification shared with the model",
@@ -396,6 +390,10 @@ class UnifiedRAGService:
             active_compliance_level,
             declared_classifications(source_config),
         ):
+            await self._ensure_corpora_allowed(
+                username, source_name, source_config, source_ids,
+                active_compliance_level, None,
+            )
             return
 
         # Deliberately logs neither compliance label: the point of query-time
@@ -410,6 +408,125 @@ class UnifiedRAGService:
             f"Deselect {pronoun}, or select a different compliance level.",
             code="DATA_SOURCE_COMPLIANCE_MISMATCH",
         )
+
+    async def _corpus_metadata_for(
+        self,
+        username: str,
+        source_name: str,
+        source_config: RAGSourceConfig,
+        source_ids: List[str],
+    ) -> Dict[str, Any]:
+        """Server-owned discovery metadata for ``source_ids``, by corpus id.
+
+        A fresh cached answer that lists every requested corpus is used as is;
+        otherwise the backend is asked again, so a corpus added since the last
+        discovery is found. An answer is trusted for at most
+        ``CORPUS_METADATA_TTL_SECONDS``, which bounds how long a reclassified
+        corpus keeps its old classifications. Corpus ids come from the request
+        and are only ever looked up here -- never taken as evidence of
+        anything. Empty when the backend does not answer.
+        """
+        cached = self._corpus_metadata.lookup(source_name, username)
+        if cached is not None and all(cid in cached for cid in source_ids):
+            return cached
+        client = self._get_http_client(source_name, source_config)
+        data_sources = await client.discover_data_sources(username)
+        self._corpus_metadata.store(source_name, username, data_sources or [])
+        return self._corpus_metadata.lookup(source_name, username) or {}
+
+    async def _ensure_corpora_allowed(
+        self,
+        username: str,
+        source_name: str,
+        source_config: RAGSourceConfig,
+        source_ids: Optional[List[str]],
+        active_level: Optional[str],
+        floor: Optional[Any],
+    ) -> None:
+        """Check every requested HTTP corpus against its own classifications.
+
+        Runs after the server passed, with the same per-corpus calculation
+        discovery uses (``corpus_classifications``), so a corpus the picker
+        hides cannot be reached by a stale selection, a hand-built request or
+        a model's tool call. Every corpus is checked before any is queried; one
+        failure refuses the whole request.
+
+        ``active_level`` is the trusted per-turn classification. Without one,
+        ``floor`` (the selected model's classifications) applies instead, and
+        only to corpora that declare their own list -- one that inherits its
+        server's was covered by the server's floor check.
+
+        A corpus the backend's discovery does not list, or a backend whose
+        discovery does not answer, cannot be confirmed and is refused.
+        """
+        if not source_ids or source_config.type != "http":
+            return
+        try:
+            corpora = await self._corpus_metadata_for(
+                username, source_name, source_config, source_ids
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not load corpus metadata for RAG source %s (%s)",
+                sanitize_for_logging(source_name),
+                type(exc).__name__,
+            )
+            corpora = {}
+
+        compliance_mgr = get_compliance_manager()
+        denied: List[str] = []
+        unconfirmed: List[str] = []
+        for corpus_id in source_ids:
+            ds = corpora.get(corpus_id)
+            if ds is None:
+                unconfirmed.append(corpus_id)
+                continue
+            classifications = corpus_classifications(ds, source_config)
+            if active_level is not None:
+                allowed = compliance_mgr.classification_permits(active_level, classifications)
+            elif not corpus_declares_own(ds, source_config):
+                continue
+            else:
+                allowed = any(
+                    compliance_mgr.classification_permits(level, floor)
+                    for level in classifications or []
+                )
+            if not allowed:
+                denied.append(corpus_id)
+
+        # Corpus ids are logged, never the labels they were checked against.
+        if denied:
+            logger.warning(
+                "Rejected RAG query for source %s: %d corpus(es) outside the "
+                "active compliance boundary: %s",
+                sanitize_for_logging(source_name),
+                len(denied),
+                sanitize_for_logging(",".join(denied)),
+            )
+            subject, pronoun = _describe_sources(source_name, denied)
+            if active_level is not None:
+                reason = "not approved for the selected compliance level"
+                remedy = "or select a different compliance level"
+            else:
+                reason = "not approved for any classification the selected model may receive"
+                remedy = "select a compliance level, or switch to a model approved for that source"
+            raise DataSourcePermissionError(
+                f"{subject} {reason}. Deselect {pronoun}, {remedy}.",
+                code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+            )
+        if unconfirmed:
+            logger.warning(
+                "Rejected RAG query for source %s: %d corpus(es) not confirmed by discovery: %s",
+                sanitize_for_logging(source_name),
+                len(unconfirmed),
+                sanitize_for_logging(",".join(unconfirmed)),
+            )
+            subject, pronoun = _describe_sources(source_name, unconfirmed)
+            raise DataSourcePermissionError(
+                f"{subject} not confirmed as approved for this conversation: its RAG "
+                f"backend did not list {pronoun}. Deselect {pronoun}, or try again later.",
+                code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+            )
 
     async def discover_data_sources(
         self,
@@ -503,6 +620,8 @@ class UnifiedRAGService:
         try:
             client = self._get_http_client(source_name, config)
             data_sources = await client.discover_data_sources(username)
+            # Unfiltered, so query-time checks at any level can reuse it.
+            self._corpus_metadata.store(source_name, username, data_sources or [])
 
             if not data_sources:
                 logger.debug("No data sources found for HTTP source %s", source_name)
@@ -528,7 +647,8 @@ class UnifiedRAGService:
                     "description": ds.description,
                     "authRequired": True,
                     "selected": False,
-                    "complianceLevel": ds.compliance_level,
+                    # Display badge; the boundary is allowedDataClassifications.
+                    "complianceLevel": ds.compliance_level or None,
                     "allowedDataClassifications": classifications,
                 })
 
@@ -1099,6 +1219,7 @@ class UnifiedRAGService:
         Args:
             source_name: Specific source to invalidate, or None to invalidate all.
         """
+        self._corpus_metadata.invalidate(source_name)
         if source_name:
             if source_name in self._http_clients:
                 del self._http_clients[source_name]
@@ -1108,4 +1229,4 @@ class UnifiedRAGService:
             logger.info("Invalidated all HTTP client caches")
 
 
-__all__ = ["UnifiedRAGService"]
+__all__ = ["UnifiedRAGService", "corpus_classifications"]

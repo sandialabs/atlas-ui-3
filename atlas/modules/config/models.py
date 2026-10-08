@@ -580,6 +580,10 @@ class RAGSourceConfig(BaseModel):
     top_k: int = 4  # Number of documents to retrieve
     timeout: float = 60.0  # Request timeout in seconds
     strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
+    # Migration aid (issue #1035): read a corpus's discovered compliance_level
+    # as its one-element classification list when it sends no
+    # allowed_data_classifications. Always narrowed by this server's list.
+    legacy_corpus_classifications: bool = False
 
     # Which ATLAS RAG contract this backend speaks (HTTP type).
     # "v1" posts the conversation to /rag/completions and gets a completion

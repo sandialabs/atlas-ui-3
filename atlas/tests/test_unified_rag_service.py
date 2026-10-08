@@ -12,6 +12,13 @@ from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig, config_manager
 from atlas.modules.rag.client import DataSource, RAGResponse
 
+# What the mocked HTTP backend's discovery lists. Query-time checks in a
+# classified turn resolve each requested corpus against it (issue #1035).
+_DISCOVERED = [
+    DataSource(id="corpus1", label="Corpus One"),
+    DataSource(id="corpus2", label="Corpus Two"),
+]
+
 
 @pytest.fixture
 def mock_config_manager(distinct_admin_group):
@@ -390,6 +397,7 @@ class TestQueryRAGCompliance:
         """A matching server-side compliance level should allow the query."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -521,6 +529,7 @@ class TestQueryRAGProductionEnforcementPath:
         """The allowed case must still reach the backend with no kwarg."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -563,6 +572,7 @@ class TestQueryRAGProductionEnforcementPath:
         """enforce=False (no trusted level resolved) keeps prior behaviour."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -659,6 +669,7 @@ class TestQueryRAGProductionEnforcementPath:
 
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -709,6 +720,7 @@ class TestGateAgainstTheRealComplianceManager:
 
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         async def _query(level):
             token = set_active_compliance_context(level, enforce=True)
@@ -924,6 +936,7 @@ class TestQueryRAGBatch:
         """Test that batch passes first source_id (not empty string) to query_rag."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             await unified_rag_service.query_rag_batch(
