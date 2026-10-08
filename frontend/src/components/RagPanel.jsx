@@ -7,6 +7,10 @@ import DataSourcesSelector from './DataSourcesSelector'
  * The picker itself lives in DataSourcesSelector so it can be reused by the
  * Data Sources tab in the Tools and Settings panel (issue #839 review); this
  * component is only the drawer chrome.
+ *
+ * The drawer is an overlay at every breakpoint: it stays `fixed` and out of
+ * document flow so opening it never reflows the chat layout (issue #1037).
+ * A full-screen backdrop (also at desktop widths) closes it on outside click.
  */
 const RagPanel = ({ isOpen, onClose }) => {
   return (
@@ -14,17 +18,16 @@ const RagPanel = ({ isOpen, onClose }) => {
       {/* Overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          data-testid="rag-drawer-backdrop"
+          className="fixed inset-0 bg-black bg-opacity-50 z-40"
           onClick={onClose}
         />
       )}
 
       {/* Panel */}
-      <aside className={`
-        fixed left-0 top-0 h-full w-80 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out flex flex-col
+      <aside data-testid="rag-drawer" aria-hidden={!isOpen} inert={!isOpen} className={`
+        fixed left-0 top-0 h-full w-80 lg:w-96 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out flex flex-col
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-        lg:relative lg:translate-x-0 lg:w-96
-        ${!isOpen ? 'lg:hidden' : ''}
       `}>
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
