@@ -113,7 +113,9 @@ the same `DataSourcesSelector` component. It slides over the chat as an
 overlay at every screen width -- opening it no longer pushes the chat to the
 right, and it covers the banner strip while open, the same way it always has
 at mobile widths. Clicking the shaded area outside it, the X in its header,
-or Escape closes it, and focus returns to the **Sources** button. Dataset
+or Escape closes it; if you opened it from the keyboard, focus returns to the
+**Sources** button when it closes (after a mouse open, click back into the
+page as usual). Dataset
 names wrap instead of being clipped, so a long name (or one with a suffix
 appended) stays readable.
 

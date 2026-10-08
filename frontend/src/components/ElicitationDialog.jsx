@@ -106,12 +106,17 @@ const ElicitationDialog = ({ elicitation }) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="elicitation-dialog-title"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+    >
       <div className="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
           <div>
-            <h2 className="text-xl font-semibold text-gray-50">User Input Required</h2>
+            <h2 id="elicitation-dialog-title" className="text-xl font-semibold text-gray-50">User Input Required</h2>
             <p className="text-sm text-gray-400 mt-1">Tool: {tool_name}</p>
           </div>
           <button

@@ -139,6 +139,7 @@ describe('RagPanel - drawer overlays instead of reflowing the chat (issue #1037)
 
 describe('RagPanel - modal semantics of the overlay drawer', () => {
   let opener
+  let otherDialog
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -149,7 +150,30 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
 
   afterEach(() => {
     opener.remove()
+    // Cleanup here rather than at the end of each test, so one failing
+    // assertion does not leave a fake dialog behind and break the tests
+    // after it.
+    if (otherDialog) {
+      otherDialog.remove()
+      otherDialog = null
+    }
   })
+
+  // Mirrors the real Tools and Settings modal, which carries
+  // role="dialog" aria-modal="true" -- the topmost-dialog check keys on both.
+  const addOtherDialog = ({ prepend = false } = {}) => {
+    otherDialog = document.createElement('div')
+    otherDialog.setAttribute('role', 'dialog')
+    otherDialog.setAttribute('aria-modal', 'true')
+    const insideOther = document.createElement('button')
+    otherDialog.appendChild(insideOther)
+    if (prepend) {
+      document.body.insertBefore(otherDialog, document.body.firstChild)
+    } else {
+      document.body.appendChild(otherDialog)
+    }
+    return insideOther
+  }
 
   it('announces itself as a modal dialog named by its heading', () => {
     setup({ isOpen: true })
@@ -263,20 +287,25 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     // its own trap owns Tab while focus is in there.
     setup({ isOpen: true })
 
-    // Mirrors the real Tools and Settings modal, which carries
-    // aria-modal="true" -- the topmost-dialog check keys on it.
-    const other = document.createElement('div')
-    other.setAttribute('role', 'dialog')
-    other.setAttribute('aria-modal', 'true')
-    const insideOther = document.createElement('button')
-    other.appendChild(insideOther)
-    document.body.appendChild(other)
+    const insideOther = addOtherDialog()
     insideOther.focus()
 
     fireEvent.keyDown(document, { key: 'Tab' })
     expect(document.activeElement).toBe(insideOther)
+  })
 
-    other.remove()
+  it('stands down for an earlier-in-document modal too: ownership is not focus, not first-match', () => {
+    // The ownership rule is "last aria-modal dialog in the document wins"
+    // (App renders SettingsPanel after RagPanel). A modal that happens to
+    // sit BEFORE the drawer in document order does not take ownership.
+    setup({ isOpen: true })
+
+    const insideOther = addOtherDialog({ prepend: true })
+
+    fireEvent.keyDown(document, { key: 'Tab' })
+    // The drawer is still the topmost modal: the trap pulls focus back in.
+    expect(document.activeElement).not.toBe(insideOther)
+    expect(screen.getByRole('dialog', { name: 'Data Sources' }).contains(document.activeElement)).toBe(true)
   })
 
   it('does not close on Escape while focus is inside a different dialog', () => {
@@ -284,14 +313,7 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     // swallow the modal's Escape: whichever dialog has focus owns Escape.
     const { onClose } = setup({ isOpen: true })
 
-    // Mirrors the real Tools and Settings modal, which carries
-    // aria-modal="true" -- the topmost-dialog check keys on it.
-    const other = document.createElement('div')
-    other.setAttribute('role', 'dialog')
-    other.setAttribute('aria-modal', 'true')
-    const insideOther = document.createElement('button')
-    other.appendChild(insideOther)
-    document.body.appendChild(other)
+    const insideOther = addOtherDialog()
     insideOther.focus()
 
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -303,8 +325,6 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     insideOther.blur()
     fireEvent.keyDown(document.body, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
-
-    other.remove()
   })
 
   it('lets the Escape key through to bubble-phase listeners when standing down', () => {
@@ -315,14 +335,7 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     // closed neither overlay.
     const { onClose } = setup({ isOpen: true })
 
-    // Mirrors the real Tools and Settings modal, which carries
-    // aria-modal="true" -- the topmost-dialog check keys on it.
-    const other = document.createElement('div')
-    other.setAttribute('role', 'dialog')
-    other.setAttribute('aria-modal', 'true')
-    const insideOther = document.createElement('button')
-    other.appendChild(insideOther)
-    document.body.appendChild(other)
+    const insideOther = addOtherDialog()
     insideOther.focus()
 
     let bubbleListenerSawEscape = false
@@ -336,7 +349,6 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
       expect(onClose).not.toHaveBeenCalled()
     } finally {
       document.removeEventListener('keydown', bubbleListener)
-      other.remove()
     }
   })
 
@@ -347,19 +359,10 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     opener.focus()
     const { rerender } = setup({ isOpen: true })
 
-    // Mirrors the real Tools and Settings modal, which carries
-    // aria-modal="true" -- the topmost-dialog check keys on it.
-    const other = document.createElement('div')
-    other.setAttribute('role', 'dialog')
-    other.setAttribute('aria-modal', 'true')
-    const insideOther = document.createElement('button')
-    other.appendChild(insideOther)
-    document.body.appendChild(other)
+    const insideOther = addOtherDialog()
     insideOther.focus()
 
     rerender(<RagPanel isOpen={false} onClose={vi.fn()} />)
     expect(document.activeElement).toBe(insideOther)
-
-    other.remove()
   })
 })
