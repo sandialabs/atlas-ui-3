@@ -470,12 +470,15 @@ class UnifiedRAGService:
                 lambda done: self._corpus_refreshes.pop(key, None)
                 if self._corpus_refreshes.get(key) is done else None
             )
+        generation = cache.generation
         # Shielded: one caller giving up must not cancel the shared refresh.
         answer = await asyncio.shield(refresh)
+        if cache.generation != generation:
+            # invalidate_cache ran meanwhile (for example a config change);
+            # an answer from before it cannot be trusted for this check.
+            return None, True
         if answer is None:
             return cache.lookup(source_name, username), True
-        # The fresh answer itself, which invalidate_cache may have kept out of
-        # the cache; it is still the backend's current word for this check.
         return answer, False
 
     async def _refresh_corpus_metadata(
@@ -500,11 +503,18 @@ class UnifiedRAGService:
                 type(exc).__name__,
             )
             data_sources = None
-        if not data_sources:
+        corpora = {ds.id: ds for ds in data_sources or [] if getattr(ds, "id", None)}
+        if not corpora:
+            if data_sources is not None:
+                # The HTTP client reports its own errors as an empty list.
+                logger.warning(
+                    "RAG source %s returned no corpora to corpus metadata discovery",
+                    sanitize_for_logging(source_name),
+                )
             cache.mark_failed(source_name, username, generation)
             return None
         cache.store(source_name, username, data_sources, generation)
-        return {ds.id: ds for ds in data_sources if getattr(ds, "id", None)} or None
+        return corpora
 
     async def _ensure_corpora_allowed(
         self,
@@ -729,9 +739,7 @@ class UnifiedRAGService:
             # failed answer opens the same short window query-time discovery
             # uses, so the queries that follow do not each wait on the backend.
             # Neither is written if invalidate_cache ran meanwhile.
-            if data_sources:
-                self._corpus_metadata.store(source_name, username, data_sources, generation)
-            else:
+            if not self._corpus_metadata.store(source_name, username, data_sources or [], generation):
                 self._corpus_metadata.mark_failed(source_name, username, generation)
 
             if not data_sources:

@@ -130,18 +130,20 @@ class CorpusMetadataCache:
         user: str,
         data_sources: Iterable[Any],
         generation: Optional[int] = None,
-    ) -> None:
+    ) -> bool:
+        """Cache a discovery answer; False when nothing usable was stored."""
         if generation is not None and generation != self.generation:
-            return
+            return False
         corpora = {ds.id: ds for ds in data_sources if getattr(ds, "id", None)}
         key = (server, user or "")
         if not corpora:
-            return
+            return False
         self._failures.pop(key, None)
         self._entries[key] = (self._now(), corpora)
         self._entries.move_to_end(key)
         while len(self._entries) > self.max_entries:
             self._entries.popitem(last=False)
+        return True
 
     def mark_failed(self, server: str, user: str, generation: Optional[int] = None) -> None:
         """Record that discovery for ``(server, user)`` just failed."""

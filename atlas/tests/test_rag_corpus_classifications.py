@@ -534,9 +534,11 @@ async def test_invalidate_discards_an_in_flight_refresh(manager):
         service.invalidate_cache("legacy")
         assert service._corpus_refreshes == {}
         release.set()
-        # This caller still gets the answer it waited for...
-        assert (await pending).content == "v1"
-    # ...but the result from before the invalidation was not cached.
+        # The answer from before the invalidation is neither used nor cached.
+        with pytest.raises(DataSourcePermissionError) as exc:
+            await pending
+    assert exc.value.code == "DATA_SOURCE_UNVERIFIED"
+    assert backend.queried == 0
     assert service._corpus_metadata.lookup("legacy", USER) is None
 
 
@@ -616,6 +618,23 @@ async def test_picker_discovery_error_opens_the_failure_window(manager):
     with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="did not answer"):
         await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
     assert backend.discover_data_sources.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("via_picker", [False, True])
+async def test_answer_without_usable_ids_counts_as_a_failure(manager, caplog, via_picker):
+    backend = _Backend([DataSource(id="", label="blank")])
+    service = _service(backend)
+    if via_picker:
+        cfg = service.config_manager.rag_sources_config.sources["legacy"]
+        await service._discover_http_source("legacy", cfg, USER, "UUR")
+    with caplog.at_level(logging.WARNING), _Turn("UUR"):
+        for _ in range(2):
+            with pytest.raises(DataSourcePermissionError, match="did not answer"):
+                await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+    assert backend.discover_data_sources.await_count == 1
+    if not via_picker:
+        assert any("returned no corpora" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.asyncio
