@@ -20,7 +20,15 @@ const ElicitationDialog = ({ elicitation }) => {
   // The prompt claims to be modal (aria-modal), so it must own focus: it
   // pulls focus in on mount, traps Tab while up, and stands down as the
   // topmost dialog (an open drawer beneath it must not take the keys back).
-  useFocusTrap({ containerRef: dialogRef, active: true })
+  // The entry target is the first form field -- or Accept when there are no
+  // fields -- never the Cancel button: the prompt often mounts while the
+  // user is typing, and focus on Cancel would make the next Space or Enter
+  // cancel the tool's request.
+  useFocusTrap({
+    containerRef: dialogRef,
+    active: true,
+    initialFocusSelector: 'input, select, textarea, #elicitation-accept'
+  })
 
   const { elicitation_id, tool_name, message, response_schema } = elicitation
 
@@ -159,6 +167,7 @@ const ElicitationDialog = ({ elicitation }) => {
         {/* Actions */}
         <div className="flex flex-row-reverse items-center justify-start gap-3 p-6 border-t border-gray-700 bg-gray-750">
           <button
+            id="elicitation-accept"
             onClick={handleAccept}
             disabled={!isValid && fields.length > 0}
             className={`px-4 py-2 rounded-md transition-colors flex items-center gap-2 ${

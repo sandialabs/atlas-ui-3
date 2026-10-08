@@ -6,10 +6,23 @@ import { useEffect, useRef } from 'react'
  * Shared by every overlay trap (SettingsPanel's dialog stack, the RAG
  * drawer, the elicitation prompt) so the copies cannot drift: a selector
  * that forgets, say, `[href]` links would silently drop them from the
- * trap's rotation in one overlay only.
+ * trap's rotation in one overlay only. Disabled form fields are excluded
+ * alongside disabled buttons, or a trap could swallow a Tab and then focus
+ * nothing at all.
  */
 export const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Focusable elements inside `container` that are actually rendered.
+ *
+ * getClientRects() rather than offsetParent for the visibility filter:
+ * offsetParent is null inside a `position: fixed` ancestor, which is
+ * exactly how the nested modals in the Tools and Settings panel render.
+ */
+export const getFocusableElements = (container) =>
+  Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR))
+    .filter(el => el.getClientRects().length > 0)
 
 /**
  * Whether `container` is the topmost open modal dialog.
@@ -34,6 +47,13 @@ export const isTopmostModalDialog = (container) => {
  * is trapped inside while it is up, and focus returns to where it was when
  * it deactivates.
  *
+ * - `initialFocusSelector` picks the entry focus target within the overlay
+ *   (the first matching, rendered element), falling back to the first
+ *   focusable. The elicitation prompt uses it to land on the first form
+ *   field -- or Accept, when there are no fields -- instead of its Cancel
+ *   button: the prompt often mounts while the user is typing, and focus
+ *   landing on Cancel would make the next Space or Enter cancel the tool's
+ *   request.
  * - The listener lives on `document`, not the container: focus can
  *   legitimately sit outside while the overlay is up (e.g. <body> after a
  *   control disabled itself), and a keydown on the container never sees it.
@@ -44,7 +64,7 @@ export const isTopmostModalDialog = (container) => {
  * - The previous-focus element is cleared on deactivation either way; it is
  *   stale once the overlay is gone.
  */
-export function useFocusTrap({ containerRef, active }) {
+export function useFocusTrap({ containerRef, active, initialFocusSelector }) {
   const previousFocusRef = useRef(null)
 
   useEffect(() => {
@@ -54,13 +74,17 @@ export function useFocusTrap({ containerRef, active }) {
 
     previousFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const focusable = container.querySelectorAll(FOCUSABLE_SELECTOR)
-    focusable[0]?.focus()
+
+    const initialBySelector = initialFocusSelector
+      ? Array.from(container.querySelectorAll(initialFocusSelector))
+        .find(el => el.getClientRects().length > 0)
+      : null
+    ;(initialBySelector || getFocusableElements(container)[0])?.focus()
 
     const trapTab = (event) => {
       if (event.key !== 'Tab') return
       if (!isTopmostModalDialog(container)) return
-      const focusable = container.querySelectorAll(FOCUSABLE_SELECTOR)
+      const focusable = getFocusableElements(container)
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]

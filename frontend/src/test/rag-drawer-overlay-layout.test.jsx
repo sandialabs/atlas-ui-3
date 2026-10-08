@@ -141,15 +141,21 @@ describe('RagPanel - drawer overlays instead of reflowing the chat (issue #1037)
 describe('RagPanel - modal semantics of the overlay drawer', () => {
   let opener
   let otherDialog
+  let rectsSpy
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // The shared getFocusableElements filters on getClientRects() for
+    // visibility; jsdom has no layout and returns none, so pretend every
+    // element renders.
+    rectsSpy = vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}])
     // Whatever the user was interacting with before the drawer opened.
     opener = document.createElement('button')
     document.body.appendChild(opener)
   })
 
   afterEach(() => {
+    rectsSpy.mockRestore()
     opener.remove()
     // Cleanup here rather than at the end of each test, so one failing
     // assertion does not leave a fake dialog behind and break the tests
@@ -372,8 +378,16 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
 })
 
 describe('RagPanel - stacked with the real ElicitationDialog', () => {
+  let rectsSpy
+
   beforeEach(() => {
     vi.clearAllMocks()
+    // Same visibility stub as the modal-semantics suite above.
+    rectsSpy = vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}])
+  })
+
+  afterEach(() => {
+    rectsSpy.mockRestore()
   })
 
   const elicitation = {
@@ -415,12 +429,18 @@ describe('RagPanel - stacked with the real ElicitationDialog', () => {
     const { unmount } = render(<ElicitationDialog elicitation={elicitation} />)
     const prompt = screen.getByRole('dialog', { name: 'User Input Required' })
     expect(prompt.getAttribute('aria-modal')).toBe('true')
-    // Focus followed the prompt, and Tab is trapped inside it.
+    // Focus followed the prompt -- onto the first form field, NOT the Cancel
+    // control: the prompt often mounts while the user is typing, and focus
+    // on Cancel would make the next Space or Enter cancel the request.
     expect(prompt.contains(document.activeElement)).toBe(true)
+    expect(document.activeElement.tagName).toBe('INPUT')
+    expect(document.activeElement).not.toBe(screen.getByTitle('Cancel'))
+    // Tab is trapped inside it: from the last control it wraps to the first
+    // (jsdom has no native tabbing, so the wrap proves the trap ran).
     const promptFocusables = prompt.querySelectorAll(FOCUSABLE_SELECTOR)
     promptFocusables[promptFocusables.length - 1].focus()
     fireEvent.keyDown(prompt, { key: 'Tab' })
-    expect(prompt.contains(document.activeElement)).toBe(true)
+    expect(document.activeElement).toBe(promptFocusables[0])
 
     // Escape while in the prompt must not close the drawer beneath it.
     fireEvent.keyDown(document, { key: 'Escape' })

@@ -10,7 +10,7 @@ import DataSourcesSelector from './DataSourcesSelector'
 import AdminQuickPanel from './admin/AdminQuickPanel'
 import CaptureConsentSection from './CaptureConsentSection'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
-import { FOCUSABLE_SELECTOR } from '../utils/focusTrap'
+import { getFocusableElements, isTopmostModalDialog } from '../utils/focusTrap'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -378,6 +378,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     const onKeyDown = (event) => {
       const node = dialogRef.current
       if (!node) return
+      // A modal layered on top of this panel -- the elicitation prompt --
+      // owns Escape and Tab while it is up. Without this, Escape with focus
+      // on <body> (clicking non-focusable text drops it there) closed this
+      // panel underneath the prompt.
+      if (!isTopmostModalDialog(node)) return
       const scope = innermostDialog()
       // Clicking non-focusable text drops focus to document.body, so the
       // listener has to live on the document; scope by target instead, and
@@ -399,11 +404,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       // Tab is trapped inside the innermost open dialog rather than switched
       // off: standing down would let focus walk out of the overlay entirely.
       if (event.key !== 'Tab') return
-      const focusable = Array.from(
-        scope.querySelectorAll(FOCUSABLE_SELECTOR)
-      // getClientRects() rather than offsetParent: offsetParent is null inside a
-      // `position: fixed` ancestor, which is exactly how the nested modals render.
-      ).filter(el => el.getClientRects().length > 0)
+      const focusable = getFocusableElements(scope)
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
