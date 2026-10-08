@@ -49,7 +49,7 @@ export const DESKTOP_ACTIONS_MIN_WIDTH = 1080
 // problem in particular").
 export const ACTION_LABELS_MIN_WIDTH = 760
 
-const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
+const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
   const {
     user,
@@ -174,6 +174,12 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
         {features?.rag && (
           <button
             onClick={onToggleRag}
+            aria-expanded={ragPanelOpen}
+            aria-haspopup="dialog"
+            aria-controls="rag-drawer"
+            aria-label={showActionLabels
+              ? undefined
+              : `Toggle Data Sources drawer${selectedDataSources?.size ? `, ${selectedDataSources.size} selected` : ''}`}
             className={`flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg transition-colors ${
               selectedDataSources?.size > 0
                 ? 'bg-blue-600 hover:bg-blue-700 text-white'

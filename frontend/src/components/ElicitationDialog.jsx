@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Check, Ban } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
+import { useFocusTrap } from '../utils/focusTrap'
 
 /**
  * ElicitationDialog Component
@@ -15,6 +16,19 @@ const ElicitationDialog = ({ elicitation }) => {
   const { sendMessage, setPendingElicitation } = useChat()
   const [formData, setFormData] = useState({})
   const [isValid, setIsValid] = useState(false)
+  const dialogRef = useRef(null)
+  // The prompt claims to be modal (aria-modal), so it must own focus: it
+  // pulls focus in on mount, traps Tab while up, and stands down as the
+  // topmost dialog (an open drawer beneath it must not take the keys back).
+  // The entry target is the first form field -- or Accept when there are no
+  // fields -- never the Cancel button: the prompt often mounts while the
+  // user is typing, and focus on Cancel would make the next Space or Enter
+  // cancel the tool's request.
+  useFocusTrap({
+    containerRef: dialogRef,
+    active: true,
+    initialFocusSelector: 'input, select, textarea, #elicitation-accept'
+  })
 
   const { elicitation_id, tool_name, message, response_schema } = elicitation
 
@@ -106,12 +120,18 @@ const ElicitationDialog = ({ elicitation }) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="elicitation-dialog-title"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+    >
       <div className="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
           <div>
-            <h2 className="text-xl font-semibold text-gray-50">User Input Required</h2>
+            <h2 id="elicitation-dialog-title" className="text-xl font-semibold text-gray-50">User Input Required</h2>
             <p className="text-sm text-gray-400 mt-1">Tool: {tool_name}</p>
           </div>
           <button
@@ -147,6 +167,7 @@ const ElicitationDialog = ({ elicitation }) => {
         {/* Actions */}
         <div className="flex flex-row-reverse items-center justify-start gap-3 p-6 border-t border-gray-700 bg-gray-750">
           <button
+            id="elicitation-accept"
             onClick={handleAccept}
             disabled={!isValid && fields.length > 0}
             className={`px-4 py-2 rounded-md transition-colors flex items-center gap-2 ${

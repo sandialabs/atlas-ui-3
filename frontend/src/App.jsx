@@ -158,6 +158,12 @@ function ChatInterface() {
     }
   }, [canvasFiles])
 
+  // Stable identities: RagPanel's listeners key on isOpen and read handlers
+  // through latest-refs, so keeping these callbacks stable means no overlay
+  // effect ever churns on an App re-render.
+  const closeRagPanel = useCallback(() => setRagPanelOpen(false), [])
+  const toggleRagPanel = useCallback(() => setRagPanelOpen(open => !open), [])
+
   return (
     <div
       className="relative flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
@@ -180,7 +186,7 @@ function ChatInterface() {
         {features?.rag && (
           <RagPanel
             isOpen={ragPanelOpen}
-            onClose={() => setRagPanelOpen(false)}
+            onClose={closeRagPanel}
           />
         )}
 
@@ -188,8 +194,9 @@ function ChatInterface() {
         <div className="flex flex-col flex-1 min-w-0 relative">
           {/* Header */}
           <Header
+            ragPanelOpen={ragPanelOpen}
             onToggleSidebar={() => setSidebarMobileOpen(!sidebarMobileOpen)}
-            onToggleRag={() => setRagPanelOpen(!ragPanelOpen)}
+            onToggleRag={toggleRagPanel}
             onToggleFiles={() => {
               if (!filesPanelOpen) {
                 setCanvasPanelOpen(false)
