@@ -191,6 +191,18 @@ def test_default_level_falls_back_to_first_defined(tmp_path):
     assert mgr.resolve_default_level("Bogus") == "Public"
 
 
+def test_default_level_empty_string_matches_none(tmp_path):
+    """The test-session pin uses "" for the default level; it must behave as None.
+
+    ``conftest`` pins ``COMPLIANCE_DEFAULT_LEVEL`` to an empty string (rather
+    than clearing it) so ``load_dotenv(override=False)`` cannot restore a
+    developer value. Production defaults the setting to ``None``; both must
+    resolve the same way so the test pin does not create a distinct path.
+    """
+    mgr = _manager(tmp_path, ["Public", "Internal"])
+    assert mgr.resolve_default_level("") == mgr.resolve_default_level(None)
+
+
 def test_default_level_none_without_definitions(tmp_path):
     mgr = ComplianceLevelManager(config_path=tmp_path / "missing.json")
     assert mgr.resolve_default_level("Public") is None
