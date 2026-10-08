@@ -612,6 +612,11 @@ describe('mid-run live refresh of a joined conversation', () => {
 
   it('wires the fetch timeout, the backoff base and the backoff cap', async () => {
     vi.useFakeTimers()
+    // Pin the jitter draw so the 503 retry lands exactly on backoffBase:
+    // calculateBackoffDelay jitters 0.8-1.2x, so an unpinned draw can push
+    // the retry past the 3.5s this test advances and flake the assertion
+    // (seen once in CI). Same trick as the backoff-cap test below.
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
     try {
       // Fail from the first poll: then the retry delay is the backoff, not the
       // normal interval, so this actually pins backoffBase.
@@ -644,6 +649,7 @@ describe('mid-run live refresh of a joined conversation', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
       expect(h.fetchMock.mock.calls.length).toBeGreaterThan(callsAtStart)
     } finally {
+      randomSpy.mockRestore()
       vi.useRealTimers()
     }
   })
