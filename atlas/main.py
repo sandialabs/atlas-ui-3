@@ -1464,8 +1464,8 @@ def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
     )
 
 
-def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
-    """Resolve the OIDC login session behind a WebSocket handshake.
+async def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
+    """Refresh and resolve the OIDC login behind a handshake or incoming frame.
 
     Starlette's SessionMiddleware populates ``scope["session"]`` for websocket
     scopes as well as HTTP ones, so the browser's existing login cookie
@@ -1476,14 +1476,49 @@ def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
     """
     if not getattr(app_settings, "feature_oidc_auth_enabled", False):
         return None
-    from atlas.core.oidc.session import SESSION_COOKIE_KEY, get_session_store
+    from atlas.core.oidc.session import SESSION_COOKIE_KEY
+    from atlas.core.oidc.session_refresh import get_refreshed_session
 
     try:
         session_id = websocket.session.get(SESSION_COOKIE_KEY)
     except (AssertionError, KeyError):
         return None
-    oidc_session = get_session_store().get(session_id)
+    oidc_session = await get_refreshed_session(session_id, app_settings)
     return oidc_session.user_id if oidc_session else None
+
+
+async def _enforce_oidc_frame_session(
+    websocket, app_settings, established_user: Optional[str]
+) -> None:
+    """Re-check the OIDC login behind an established socket on every frame.
+
+    Returns normally while the socket stays authenticated. When the login
+    session was ended (logout, IdP refusal), tells the client why the socket
+    is going away -- the frame that triggered the check must not be silently
+    lost -- and raises ``WebSocketDisconnect`` so the normal disconnect
+    teardown runs: an in-flight agent or tool turn is stopped and the
+    chat-service and MCP resources are released exactly as on any other
+    disconnect.
+    """
+    if not established_user:
+        return
+    if await _resolve_oidc_websocket_user(websocket, app_settings) == established_user:
+        return
+    try:
+        await websocket.send_json({
+            "type": "session_ended",
+            "reason": "OIDC session ended. Please sign in again.",
+        })
+    except Exception:  # pragma: no cover - client already gone
+        logger.debug("Could not deliver session_ended frame", exc_info=True)
+    # 4401 (application range) says "your login session ended"; the plain
+    # 1008s elsewhere mean proxy-secret or origin problems.
+    await websocket.close(code=4401, reason="OIDC session ended. Please sign in again.")
+    # Raising (rather than returning) hands the connection to the endpoint's
+    # disconnect teardown: an in-flight agent or tool turn is stopped and the
+    # chat-service and MCP resources are released exactly as on any other
+    # disconnect.
+    raise WebSocketDisconnect(code=4401, reason="OIDC session ended. Please sign in again.")
 
 
 # WebSocket endpoint for chat
@@ -1545,7 +1580,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # An established OIDC login session authenticates the socket on its own,
     # exactly as it does for HTTP in AuthMiddleware. Checked before the proxy
     # secret because an OIDC deployment may have no reverse proxy at all.
-    oidc_ws_user = _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
+    oidc_ws_user = await _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
@@ -1689,6 +1724,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+            await _enforce_oidc_frame_session(websocket, app_settings, oidc_ws_user)
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages

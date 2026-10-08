@@ -39,6 +39,11 @@ _jwks_clients: Dict[str, "jwt.PyJWKClient"] = {}
 class OIDCFlowError(RuntimeError):
     """Raised when a step of the authorization code flow fails."""
 
+    def __init__(self, message: str, *, error_code=None, status_code=None):
+        super().__init__(message)
+        self.error_code = error_code
+        self.status_code = status_code
+
 
 def generate_pkce_pair() -> Tuple[str, str]:
     """Return a ``(code_verifier, code_challenge)`` pair using S256."""
@@ -127,14 +132,18 @@ async def _post_token_request(
         # verbatim, which can echo back credentials on some providers.
         error_code = "unknown_error"
         try:
-            error_code = str(response.json().get("error", error_code))
+            body = response.json()
+            if isinstance(body, dict):
+                error_code = str(body.get("error", error_code))
         except ValueError:
             # A non-JSON error body carries nothing we can safely surface, so
             # the generic code above stands. Deliberately not logged: some
             # providers echo the submitted credential back in an HTML error.
             error_code = "unknown_error"
         raise OIDCFlowError(
-            f"Token endpoint returned {response.status_code} ({error_code})"
+            f"Token endpoint returned {response.status_code} ({error_code})",
+            error_code=error_code,
+            status_code=response.status_code,
         )
     try:
         return response.json()

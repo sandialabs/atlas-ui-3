@@ -65,7 +65,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             target = f"{target}?{request.url.query}"
         return f"{self.oidc_login_url}?{urlencode({'next': target})}"
 
-    def _resolve_oidc_user(self, request: Request) -> Optional[str]:
+    async def _resolve_oidc_user(self, request: Request) -> Optional[str]:
         """Resolve identity from an established OIDC login session.
 
         Returns None whenever OIDC login is disabled, the session middleware is
@@ -75,14 +75,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         if not self.oidc_enabled:
             return None
-        from atlas.core.oidc.session import SESSION_COOKIE_KEY, get_session_store
+        from atlas.core.oidc.session import SESSION_COOKIE_KEY
+        from atlas.core.oidc.session_refresh import get_refreshed_session
 
         try:
             session_id = request.session.get(SESSION_COOKIE_KEY)
         except (AssertionError, KeyError):
             # SessionMiddleware is not installed (or not outside this one).
             return None
-        oidc_session = get_session_store().get(session_id)
+        oidc_session = await get_refreshed_session(session_id)
+        if session_id and oidc_session is None:
+            request.session.pop(SESSION_COOKIE_KEY, None)
         return oidc_session.user_id if oidc_session else None
 
     async def _resolve_user(self, header_value: Optional[str]) -> Optional[str]:
@@ -146,7 +149,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # forge one. That is strictly stronger than the header-spoofing
         # protection the proxy secret exists to provide, which is what makes
         # it safe to run OIDC mode with no reverse proxy in front.
-        oidc_user = self._resolve_oidc_user(request)
+        oidc_user = await self._resolve_oidc_user(request)
         if oidc_user:
             request.state.user_email = oidc_user
             request.state.auth_source = "oidc"

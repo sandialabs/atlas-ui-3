@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-10-02
+Last updated: 2026-10-07
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -108,6 +108,53 @@ and the reason.
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to
 header-based auth rather than starting a half-configured login flow.
+
+### Session lifetime and refresh-on-use
+
+With OIDC login enabled, authenticated HTTP requests, WebSocket handshakes, and
+incoming messages on OIDC-authenticated sockets refresh the access token when
+it is expired or within the existing 60-second refresh margin. Concurrent uses
+share a per-session refresh lock, including delegated calls. This is the default
+behavior, with no separate setting or background refresh task: a request needing
+refresh waits for the IdP. Static files and unauthenticated health checks do not
+refresh sessions.
+
+An `invalid_grant` client-error response ends that Atlas session and discards the
+user's cached delegated credentials using the same cleanup as logout. The current
+request is no longer authenticated by that session: browsers return to sign-in,
+APIs receive 401, and an open chat socket receives a `session_ended` message
+before closing with code 4401, and the chat UI offers a link to sign in again.
+The existing trusted-header authentication fallback is unchanged. Reloading the
+browser can start a new login without manually visiting the logout URL.
+
+The cleanup ends with the login session: delegated credentials are revoked
+user-wide only when the refused session was the user's **last live one that can
+still discover a refusal** -- a session with a refresh token and a known
+access-token expiry. A stale tab whose grant is refused therefore cannot tear
+down the delegated credentials a newer, healthy session is using, and a session
+that cannot refresh never keeps the cleanup waiting. If the IdP refused the
+user's whole grant, each refresh-capable session discovers that at its own next
+refresh, and the last one out revokes. Sessions that outlive a refused one keep
+working for everything that does not need a delegated credential.
+
+Network failures, IdP 5xx responses, and other refresh errors retain the Atlas
+session and retry on later use; delegated calls cannot use an expired token.
+After a transient refresh failure the session pauses IdP attempts for a short
+cooldown (10 seconds), so an outage does not make every queued request wait
+behind its own serialized refresh timeout; an access token that has not
+actually expired yet keeps working during the cooldown. Refresh bookkeeping
+(cooldowns and per-session locks) is dropped whenever the session leaves the
+store. Configure the IdP to issue refresh tokens and report access-token expiry.
+Without a refresh token or known expiry, Atlas cannot track the IdP session this
+way; the Atlas maximum age remains the limit. Refresh does not extend
+`OIDC_SESSION_MAX_AGE_SECONDS`.
+
+An active session normally detects IdP revocation by the next refresh, provided
+the IdP refuses the grant. This is not immediate logout propagation: idle
+browsers are checked only when used again, already-running work is not cancelled,
+and back-channel/front-channel logout endpoints are not implemented. Choose an
+access-token lifetime shorter than the IdP idle timeout if active Atlas use
+should keep the IdP session alive.
 
 ## Confidential-client authentication
 
@@ -245,7 +292,9 @@ A tool call never fails with a delegation stack trace.
   `DELETE /api/auth/oidc/delegated-tokens` clear all three places a delegated
   credential is held: the delegation cache, the encrypted token store, and any
   MCP client already built around it. Tokens the user uploaded themselves are
-  left alone.
+  left alone. Session termination on `invalid_grant` uses the same cleanup.
+  Pending delegated-token exchanges are invalidated too, so a late IdP response
+  cannot restore a credential after revocation.
 - **Sessions are per-process.** The session store is in memory, so a restart or
   a second uvicorn worker forces a fresh (silent) IdP round trip rather than
   putting long-lived credentials into shared storage. Run a single worker, or

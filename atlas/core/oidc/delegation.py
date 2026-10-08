@@ -245,6 +245,7 @@ class DelegationManager:
         self.min_ttl_seconds = min_ttl_seconds
         self._cache: Dict[Tuple[str, str, str, str], DelegatedToken] = {}
         self._lock = asyncio.Lock()
+        self._pending: Dict[str, set[asyncio.Event]] = {}
 
     async def get_token(self, request: DelegationRequest) -> DelegatedToken:
         """Return a live delegated token, minting one if needed."""
@@ -253,32 +254,51 @@ class DelegationManager:
         if cached and not cached.is_expired(self.min_ttl_seconds):
             return cached
 
-        async with self._lock:
-            cached = self._cache.get(key)
-            if cached and not cached.is_expired(self.min_ttl_seconds):
-                return cached
-            token = await self.provider.exchange(request)
-            # A token with no advertised expiry is never cached: we cannot tell
-            # when it stops being valid, and a stale one fails closed as a 401
-            # on the downstream call rather than being re-minted.
-            if token.expires_at is not None:
-                self._cache[key] = token
-            logger.info(
-                "Minted delegated token via '%s' for a downstream audience (actor=%s)",
-                self.provider.name,
-                request.actor or "user",
-            )
-            return token
+        # Revocation must also fence off exchanges waiting for the lock or IdP,
+        # otherwise their results can restore credentials after logout.
+        revoked = asyncio.Event()
+        pending = self._pending.setdefault(key[0], set())
+        pending.add(revoked)
+        try:
+            async with self._lock:
+                if revoked.is_set():
+                    raise DelegationError("Delegated credentials were revoked during exchange")
+                cached = self._cache.get(key)
+                if cached and not cached.is_expired(self.min_ttl_seconds):
+                    return cached
+                token = await self.provider.exchange(request)
+                if revoked.is_set():
+                    raise DelegationError("Delegated credentials were revoked during exchange")
+                # A token with no advertised expiry is never cached: we cannot tell
+                # when it stops being valid, and a stale one fails closed as a 401
+                # on the downstream call rather than being re-minted.
+                if token.expires_at is not None:
+                    self._cache[key] = token
+                logger.info(
+                    "Minted delegated token via '%s' for a downstream audience (actor=%s)",
+                    self.provider.name,
+                    request.actor or "user",
+                )
+                return token
+        finally:
+            pending.discard(revoked)
+            if not pending:
+                self._pending.pop(key[0], None)
 
     def invalidate_user(self, user_id: str) -> int:
         """Drop every cached delegated token for one user (e.g. at logout)."""
         prefix = user_id.lower()
+        for revoked in self._pending.get(prefix, ()):
+            revoked.set()
         keys = [key for key in self._cache if key[0] == prefix]
         for key in keys:
             del self._cache[key]
         return len(keys)
 
     def clear(self) -> None:
+        for pending in self._pending.values():
+            for revoked in pending:
+                revoked.set()
         self._cache.clear()
 
 
