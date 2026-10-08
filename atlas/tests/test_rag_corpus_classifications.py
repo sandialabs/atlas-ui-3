@@ -244,6 +244,7 @@ async def test_unanswered_discovery_fails_closed(manager):
     with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="did not answer") as exc:
         await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
     assert exc.value.code == "DATA_SOURCE_UNVERIFIED"
+    assert str(exc.value).startswith("The data source 'silent' is not verifiable right now:")
 
     backend.discover_data_sources.side_effect = RuntimeError("down")
     with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="did not answer"):

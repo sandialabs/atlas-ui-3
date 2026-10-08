@@ -537,9 +537,9 @@ class UnifiedRAGService:
             subject, pronoun = _describe_sources(source_name, unconfirmed)
             if not answered:
                 raise DataSourcePermissionError(
-                    f"{subject} could not be checked against the selected compliance "
-                    "level because its RAG backend did not answer. Try again later, "
-                    f"or deselect {pronoun}.",
+                    f"{subject} not verifiable right now: its RAG backend did not "
+                    "answer, so it cannot be checked against the selected compliance "
+                    f"level. Try again later, or deselect {pronoun}.",
                     code="DATA_SOURCE_UNVERIFIED",
                 )
             raise DataSourcePermissionError(
