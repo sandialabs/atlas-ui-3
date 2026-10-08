@@ -420,7 +420,12 @@ async def test_concurrent_misses_share_one_discovery(manager):
             service.query_rag(USER, "legacy:itar_legacy", [{"role": "user", "content": "q"}])
             for _ in range(3)
         ])
-        await asyncio.sleep(0)
+        # Let every caller reach discovery before it can answer; without
+        # coalescing each would have started its own call by now.
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert backend.discover_data_sources.await_count == 1
+        assert len(service._corpus_refreshes) == 1
         release.set()
         await queries
     assert backend.discover_data_sources.await_count == 1
@@ -557,6 +562,46 @@ async def test_cancelled_caller_does_not_cancel_the_shared_refresh(manager):
     assert first.cancelled()
     assert backend.discover_data_sources.await_count == 1
     assert backend.queried == 1
+
+
+@pytest.mark.asyncio
+async def test_floor_refuses_unlisted_corpus_even_after_a_failed_refresh(manager, monkeypatch):
+    """A fresh listing still counts when the refresh it prompted fails."""
+    backend = _Backend(MIXED)
+    service = _service(backend, legacy=False)
+    cfg = service.config_manager.rag_sources_config.sources["legacy"]
+    await service._discover_http_source("legacy", cfg, USER, None)
+    backend.sources = []  # the refresh for the missing corpus fails
+    _advance(monkeypatch, CORPUS_METADATA_MIN_REFRESH_SECONDS + 1)
+    token = set_model_classification_floor(["UUR"])
+    try:
+        with pytest.raises(DataSourcePermissionError) as exc:
+            await service.query_rag(USER, "legacy:unlisted", [{"role": "user", "content": "q"}])
+    finally:
+        reset_model_classification_floor(token)
+    assert exc.value.code == "DATA_SOURCE_UNVERIFIED"
+    assert backend.queried == 0
+
+
+@pytest.mark.asyncio
+async def test_picker_discovery_started_before_invalidation_is_not_cached(manager):
+    backend = _Backend(MIXED)
+    release = asyncio.Event()
+
+    async def slow(user):
+        await release.wait()
+        return list(MIXED)
+
+    backend.discover_data_sources.side_effect = slow
+    service = _service(backend)
+    cfg = service.config_manager.rag_sources_config.sources["legacy"]
+    pending = asyncio.ensure_future(service._discover_http_source("legacy", cfg, USER, None))
+    while not backend.discover_data_sources.await_count:
+        await asyncio.sleep(0)
+    service.invalidate_cache("legacy")
+    release.set()
+    assert (await pending)["sources"]
+    assert service._corpus_metadata.lookup("legacy", USER) is None
 
 
 @pytest.mark.asyncio

@@ -542,7 +542,9 @@ class UnifiedRAGService:
         corpora, refresh_failed = await self._corpus_metadata_for(
             username, source_name, source_config, source_ids
         )
-        unanswered = refresh_failed or corpora is None
+        # A fresh listing can exist even when the latest refresh failed; a corpus
+        # missing from it was still not listed by the backend.
+        has_listing = corpora is not None
         corpora = corpora or {}
 
         compliance_mgr = get_compliance_manager()
@@ -554,7 +556,7 @@ class UnifiedRAGService:
             if ds is None:
                 if (
                     active_level is not None
-                    or not unanswered
+                    or has_listing
                     or source_config.legacy_corpus_classifications
                 ):
                     unconfirmed.append(corpus_id)
@@ -612,7 +614,7 @@ class UnifiedRAGService:
             )
             subject, pronoun = _describe_sources(source_name, unconfirmed)
             plural = pronoun == "them"
-            if unanswered:
+            if refresh_failed or not has_listing:
                 raise DataSourcePermissionError(
                     f"{subject} not verifiable right now: the RAG backend did not "
                     f"answer, so {'their data classifications' if plural else 'its data classification'} "
@@ -719,14 +721,16 @@ class UnifiedRAGService:
         """
         try:
             client = self._get_http_client(source_name, config)
+            generation = self._corpus_metadata.generation
             data_sources = await client.discover_data_sources(username)
             # Unfiltered, so query-time checks at any level can reuse it. A
             # failed answer opens the same short window query-time discovery
             # uses, so the queries that follow do not each wait on the backend.
+            # Neither is written if invalidate_cache ran meanwhile.
             if data_sources:
-                self._corpus_metadata.store(source_name, username, data_sources)
+                self._corpus_metadata.store(source_name, username, data_sources, generation)
             else:
-                self._corpus_metadata.mark_failed(source_name, username)
+                self._corpus_metadata.mark_failed(source_name, username, generation)
 
             if not data_sources:
                 logger.debug("No data sources found for HTTP source %s", source_name)
