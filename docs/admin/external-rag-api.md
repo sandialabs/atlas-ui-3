@@ -178,13 +178,16 @@ versions:
   waiting on the backend.
 - With no level selected ("All Levels"), the model floor still applies: a
   corpus that declares its own classifications must share one with the
-  selected model. On a server with `legacy_corpus_classifications`, a corpus
-  without discovery metadata (an outage, or one discovery does not list) is
-  refused here too. On other servers it is let through on the server's floor
-  check and logged at WARNING, so a discovery outage does not block
-  unclassified chat; use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` if that is not
-  acceptable. Removing `legacy_corpus_classifications` after a migration
-  therefore also returns such no-level turns to this permissive behavior.
+  selected model, and a corpus discovery answers for but does not list is
+  refused. During a discovery outage, a server with
+  `legacy_corpus_classifications` refuses too; other servers let the corpus
+  through on the server's floor check and log it at WARNING, so an outage
+  does not block unclassified chat (use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` if
+  that is not acceptable). Removing `legacy_corpus_classifications` after a
+  migration therefore also returns no-level turns to this permissive outage
+  behavior.
+- A refused batch names the corpora that failed and the others from the same
+  backend that were skipped with them.
 - Corpus metadata comes from the backend, never from the client. Atlas reuses
   a discovery answer for up to 60 seconds per user and server, so a
   reclassified corpus is re-checked within about a minute. When a requested

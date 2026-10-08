@@ -117,12 +117,22 @@ class CorpusMetadataCache:
         self.failure_seconds = failure_seconds
         self._entries: OrderedDict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = OrderedDict()
         self._failures: OrderedDict[Tuple[str, str], float] = OrderedDict()
+        # Bumped by invalidate(); a refresh started before it must not write.
+        self.generation = 0
 
     @staticmethod
     def _now() -> float:
         return time.monotonic()
 
-    def store(self, server: str, user: str, data_sources: Iterable[Any]) -> None:
+    def store(
+        self,
+        server: str,
+        user: str,
+        data_sources: Iterable[Any],
+        generation: Optional[int] = None,
+    ) -> None:
+        if generation is not None and generation != self.generation:
+            return
         corpora = {ds.id: ds for ds in data_sources if getattr(ds, "id", None)}
         key = (server, user or "")
         if not corpora:
@@ -133,8 +143,10 @@ class CorpusMetadataCache:
         while len(self._entries) > self.max_entries:
             self._entries.popitem(last=False)
 
-    def mark_failed(self, server: str, user: str) -> None:
+    def mark_failed(self, server: str, user: str, generation: Optional[int] = None) -> None:
         """Record that discovery for ``(server, user)`` just failed."""
+        if generation is not None and generation != self.generation:
+            return
         key = (server, user or "")
         self._failures[key] = self._now()
         self._failures.move_to_end(key)
@@ -167,6 +179,7 @@ class CorpusMetadataCache:
         return entry
 
     def invalidate(self, server: Optional[str] = None) -> None:
+        self.generation += 1
         if server is None:
             self._entries.clear()
             self._failures.clear()

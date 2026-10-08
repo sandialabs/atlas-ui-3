@@ -213,9 +213,8 @@ async def test_batch_with_one_disallowed_corpus_runs_nothing(manager, api_versio
             USER, ["legacy:itar_legacy", "legacy:uur_legacy", "legacy:silent"],
             [{"role": "user", "content": "q"}],
         )
-    # Only the offending corpus is named; nothing reached the backend.
-    assert "'uur_legacy'" in str(exc.value)
-    assert "'itar_legacy'" not in str(exc.value)
+    # Only the offending corpus is refused by name; nothing reached the backend.
+    assert str(exc.value).startswith("The data source 'uur_legacy' is not approved")
     assert backend.queried == 0
 
 
@@ -386,10 +385,10 @@ async def test_outage_is_not_retried_on_every_query(manager, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_floor_only_pass_without_metadata_is_logged(manager, caplog):
-    """Under the floor, a corpus discovery does not list is let through on the
+    """Under the floor during an outage, a corpus is let through on the
     server's floor check, with a WARNING naming it (server without the legacy
     opt-in; with it, the corpus is refused -- see the outage test above)."""
-    backend = _Backend(MIXED)
+    backend = _Backend([])
     service = _service(backend, legacy=False)
     token = set_model_classification_floor(["UUR"])
     try:
@@ -476,6 +475,88 @@ async def test_failed_picker_discovery_opens_the_failure_window(manager):
         await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
     # The query did not ask the backend again within the window.
     assert backend.discover_data_sources.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_floor_only_refuses_a_corpus_discovery_does_not_list(manager):
+    backend = _Backend(MIXED)
+    service = _service(backend, legacy=False)
+    token = set_model_classification_floor(["UUR"])
+    try:
+        with pytest.raises(DataSourcePermissionError) as exc:
+            await service.query_rag(USER, "legacy:unlisted", [{"role": "user", "content": "q"}])
+    finally:
+        reset_model_classification_floor(token)
+    assert exc.value.code == "DATA_SOURCE_NOT_LISTED"
+    assert backend.queried == 0
+
+
+@pytest.mark.asyncio
+async def test_batch_refusal_names_the_corpora_it_skips(manager):
+    service = _service(_Backend(MIXED))
+    with _Turn("ITAR"), pytest.raises(DataSourcePermissionError) as exc:
+        await service.query_rag_batch(
+            USER, ["legacy:itar_legacy", "legacy:uur_legacy", "legacy:silent"],
+            [{"role": "user", "content": "q"}],
+        )
+    assert str(exc.value).endswith(
+        "'itar_legacy' and 'silent' from the same backend were not searched either."
+    )
+    with _Turn("ITAR"), pytest.raises(DataSourcePermissionError) as exc:
+        await service.query_rag_batch(
+            USER, ["legacy:itar_legacy", "legacy:invented"], [{"role": "user", "content": "q"}],
+        )
+    assert str(exc.value).endswith("'itar_legacy' from the same backend was not searched either.")
+
+
+@pytest.mark.asyncio
+async def test_invalidate_discards_an_in_flight_refresh(manager):
+    backend = _Backend(MIXED)
+    release = asyncio.Event()
+
+    async def slow(user):
+        await release.wait()
+        return list(MIXED)
+
+    backend.discover_data_sources.side_effect = slow
+    service = _service(backend)
+    with _Turn("ITAR"):
+        pending = asyncio.ensure_future(
+            service.query_rag(USER, "legacy:itar_legacy", [{"role": "user", "content": "q"}]))
+        while not backend.discover_data_sources.await_count:
+            await asyncio.sleep(0)
+        service.invalidate_cache("legacy")
+        assert service._corpus_refreshes == {}
+        release.set()
+        await pending  # this caller still gets the answer it waited for...
+    # ...but the result from before the invalidation was not cached.
+    assert service._corpus_metadata.lookup("legacy", USER) is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_caller_does_not_cancel_the_shared_refresh(manager):
+    backend = _Backend(MIXED)
+    release = asyncio.Event()
+
+    async def slow(user):
+        await release.wait()
+        return list(MIXED)
+
+    backend.discover_data_sources.side_effect = slow
+    service = _service(backend)
+    with _Turn("ITAR"):
+        first = asyncio.ensure_future(
+            service.query_rag(USER, "legacy:itar_legacy", [{"role": "user", "content": "q"}]))
+        second = asyncio.ensure_future(
+            service.query_rag(USER, "legacy:modern_itar", [{"role": "user", "content": "q"}]))
+        while not backend.discover_data_sources.await_count:
+            await asyncio.sleep(0)
+        first.cancel()
+        release.set()
+        await second
+    assert first.cancelled()
+    assert backend.discover_data_sources.await_count == 1
+    assert backend.queried == 1
 
 
 @pytest.mark.asyncio
