@@ -105,15 +105,37 @@ async def test_missing_refresh_token_keeps_login_but_not_expired_credential(sess
 
 
 @pytest.mark.asyncio
-async def test_refused_grant_removes_only_affected_session_and_revokes(session, refresh, revoke):
+async def test_refused_grant_removes_session_but_spares_other_sessions(session, refresh, revoke):
+    """A stale tab's refusal must not wipe a newer session's delegated credentials."""
     other = get_session_store().create(user_id=session.user_id)
     refresh.side_effect = refused_grant()
     assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is None
     assert get_session_store().get(session.session_id) is None
     assert get_session_store().get(other.session_id) is other
-    revoke.assert_awaited_once_with(session.user_id)
+    revoke.assert_not_awaited()
     assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
     refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_refused_grant_on_the_last_session_revokes_user_wide(session, refresh, revoke):
+    refresh.side_effect = refused_grant()
+    assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is None
+    assert get_session_store().get(session.session_id) is None
+    revoke.assert_awaited_once_with(session.user_id)
+
+
+@pytest.mark.asyncio
+async def test_last_refused_session_revokes_after_its_peers_ended(session, refresh, revoke):
+    other = get_session_store().create(
+        user_id=session.user_id, access_token="other-access", refresh_token="other-refresh",
+        access_token_expires_at=time.time() - 1,
+    )
+    refresh.side_effect = refused_grant()
+    assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is None
+    revoke.assert_not_awaited()
+    assert await session_refresh.get_refreshed_session(other.session_id, SETTINGS) is None
+    revoke.assert_awaited_once_with(session.user_id)
 
 
 @pytest.mark.asyncio
@@ -162,6 +184,38 @@ async def test_transient_failure_sets_a_short_cooldown(session, refresh, monkeyp
     assert session.access_token == "new-access"
     assert refresh.await_count == 2
     assert session.session_id not in session_refresh._refresh_failure_cooldowns
+
+
+@pytest.mark.asyncio
+async def test_cooldown_keeps_serving_a_token_that_has_not_expired(session, refresh, monkeypatch):
+    monkeypatch.setattr(session_refresh, "REFRESH_FAILURE_COOLDOWN_SECONDS", 30)
+    session.access_token_expires_at = time.time() + 30  # inside the 60 s margin
+    refresh.side_effect = httpx.ConnectError("Unavailable")
+    assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is session
+    assert refresh.await_count == 1
+    # Inside the cooldown the still-valid token is served instead of failing closed.
+    assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) == "old-access"
+    assert refresh.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_cooldown_entries_are_pruned_on_lookup(session, refresh, monkeypatch):
+    monkeypatch.setattr(session_refresh, "REFRESH_FAILURE_COOLDOWN_SECONDS", 0.05)
+    refresh.side_effect = httpx.ConnectError("Unavailable")
+    await session_refresh.ensure_fresh_access_token(session, SETTINGS)
+    assert session.session_id in session_refresh._refresh_failure_cooldowns
+    await asyncio.sleep(0.06)
+    assert not session_refresh._refresh_in_cooldown(session.session_id)
+    assert session.session_id not in session_refresh._refresh_failure_cooldowns
+
+
+def test_forget_refresh_state_drops_the_lock_and_cooldown(session, monkeypatch):
+    monkeypatch.setattr(session_refresh, "REFRESH_FAILURE_COOLDOWN_SECONDS", 30)
+    session_refresh._set_refresh_cooldown(session.session_id)
+    session_refresh.forget_refresh_state(session.session_id)
+    assert session.session_id not in session_refresh._refresh_failure_cooldowns
+    assert session_refresh._refresh_locks.get(session.session_id) is None
+    session_refresh.forget_refresh_state(None)  # must tolerate no session id
 
 
 @pytest.mark.asyncio
@@ -332,3 +386,33 @@ async def test_websocket_resolver_refreshes_and_rejects_refusal(session, refresh
     refresh.side_effect = refused_grant()
     assert await _resolve_oidc_websocket_user(socket, SETTINGS) is None
     revoke.assert_awaited_once_with(session.user_id)
+
+
+@pytest.mark.asyncio
+async def test_frame_guard_sends_session_ended_before_the_1008_close(session, refresh, revoke):
+    from main import _enforce_oidc_frame_session
+
+    sent, closed = [], []
+
+    async def send_json(payload):
+        sent.append(payload)
+
+    async def close(**kwargs):
+        closed.append(kwargs)
+
+    socket = SimpleNamespace(
+        session={SESSION_COOKIE_KEY: session.session_id},
+        send_json=send_json,
+        close=close,
+    )
+    assert await _enforce_oidc_frame_session(socket, SETTINGS, session.user_id) is True
+    assert sent == [] and closed == []
+
+    session.access_token_expires_at = time.time() - 1
+    refresh.side_effect = refused_grant()
+    assert await _enforce_oidc_frame_session(socket, SETTINGS, session.user_id) is False
+    assert sent == [{
+        "type": "session_ended",
+        "reason": "OIDC session ended. Please sign in again.",
+    }]
+    assert closed == [{"code": 1008, "reason": "OIDC session ended. Please sign in again."}]

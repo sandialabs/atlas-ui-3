@@ -127,19 +127,22 @@ before closing with code 1008, and the chat UI offers a link to sign in again.
 The existing trusted-header authentication fallback is unchanged. Reloading the
 browser can start a new login without manually visiting the logout URL.
 
-The delegated-credential cleanup is user-wide: the user's delegated tokens are
-revoked for **all** of their sessions, including sessions still open in other
-tabs, so a refused grant on one stale tab tears down credentials for the newer
-ones too. Those other sessions stay signed in and keep working for everything
-that does not need a delegated credential, and their next refresh re-establishes
-delegation if the IdP still accepts the grant.
+The cleanup ends with the login session: delegated credentials are revoked
+user-wide only when the refused session was the user's **last live one**. A
+stale tab whose grant is refused therefore cannot tear down the delegated
+credentials a newer, healthy session is using; if the IdP refused the user's
+whole grant, each remaining session discovers that at its own next refresh, and
+the last one out revokes. Sessions that outlive a refused one keep working for
+everything that does not need a delegated credential.
 
 Network failures, IdP 5xx responses, and other refresh errors retain the Atlas
 session and retry on later use; delegated calls cannot use an expired token.
 After a transient refresh failure the session pauses IdP attempts for a short
 cooldown (10 seconds), so an outage does not make every queued request wait
-behind its own serialized refresh timeout. Configure the IdP to issue refresh
-tokens and report access-token expiry.
+behind its own serialized refresh timeout; an access token that has not
+actually expired yet keeps working during the cooldown. Refresh bookkeeping
+(cooldowns and per-session locks) is dropped whenever the session leaves the
+store. Configure the IdP to issue refresh tokens and report access-token expiry.
 Without a refresh token or known expiry, Atlas cannot track the IdP session this
 way; the Atlas maximum age remains the limit. Refresh does not extend
 `OIDC_SESSION_MAX_AGE_SECONDS`.

@@ -12,6 +12,7 @@ import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
 import { WSProvider, useWS } from '../contexts/WSContext'
 import { useChat } from '../contexts/ChatContext'
+import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext', () => ({
@@ -112,6 +113,33 @@ describe('session_ended sign-in flow', () => {
       expect(screen.getByTestId('ws-disconnected-banner')).toBeInTheDocument()
       expect(screen.getByText(/Disconnected from server/)).toBeInTheDocument()
       expect(screen.queryByTestId('session-signin-link')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('chat message handler', () => {
+    it('stops the turn and tells the user to sign in again', () => {
+      const deps = {
+        addMessage: vi.fn(),
+        mapMessages: vi.fn(),
+        setIsThinking: vi.fn(),
+        setIsAgentRunning: vi.fn(),
+        setIsSynthesizing: vi.fn(),
+        setCurrentAgentStep: vi.fn(),
+        setAgentPendingQuestion: vi.fn(),
+        streamToken: vi.fn(),
+        streamEnd: vi.fn(),
+      }
+      const handler = createWebSocketHandler(deps)
+      handler({ type: 'session_ended', reason: 'OIDC session ended. Please sign in again.' })
+
+      expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+      expect(deps.setIsSynthesizing).toHaveBeenCalledWith(false)
+      expect(deps.setIsAgentRunning).toHaveBeenCalledWith(false)
+      expect(deps.streamEnd).toHaveBeenCalled()
+      expect(deps.addMessage).toHaveBeenCalledTimes(1)
+      const [[message]] = deps.addMessage.mock.calls
+      expect(message.role).toBe('system')
+      expect(message.content).toContain('Sign in again')
     })
   })
 

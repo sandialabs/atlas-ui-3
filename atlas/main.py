@@ -1475,6 +1475,31 @@ async def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]
     return oidc_session.user_id if oidc_session else None
 
 
+async def _enforce_oidc_frame_session(
+    websocket, app_settings, established_user: Optional[str]
+) -> bool:
+    """Re-check the OIDC login behind an established socket on every frame.
+
+    Returns True while the socket stays authenticated. When the login session
+    was ended (logout, IdP refusal), tells the client why the socket is going
+    away -- the frame that triggered the check must not be silently lost --
+    and closes with 1008 before returning False.
+    """
+    if not established_user:
+        return True
+    if await _resolve_oidc_websocket_user(websocket, app_settings) == established_user:
+        return True
+    try:
+        await websocket.send_json({
+            "type": "session_ended",
+            "reason": "OIDC session ended. Please sign in again.",
+        })
+    except Exception:  # pragma: no cover - client already gone
+        logger.debug("Could not deliver session_ended frame", exc_info=True)
+    await websocket.close(code=1008, reason="OIDC session ended. Please sign in again.")
+    return False
+
+
 # WebSocket endpoint for chat
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -1678,20 +1703,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            if oidc_ws_user and (
-                await _resolve_oidc_websocket_user(websocket, app_settings)
-            ) != oidc_ws_user:
-                # Tell the client why the socket is going away before the
-                # 1008 close, so the frame that triggered the check is not
-                # silently lost and the UI can offer a way back to sign-in.
-                try:
-                    await websocket.send_json({
-                        "type": "session_ended",
-                        "reason": "OIDC session ended. Please sign in again.",
-                    })
-                except Exception:  # pragma: no cover - client already gone
-                    logger.debug("Could not deliver session_ended frame", exc_info=True)
-                await websocket.close(code=1008, reason="OIDC session ended. Please sign in again.")
+            if not await _enforce_oidc_frame_session(websocket, app_settings, oidc_ws_user):
                 break
             message_type = data.get("type")
 

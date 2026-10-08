@@ -41,7 +41,14 @@ _refresh_failure_cooldowns: dict = {}
 
 def _refresh_in_cooldown(session_id: str) -> bool:
     until = _refresh_failure_cooldowns.get(session_id)
-    return until is not None and time.monotonic() < until
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        # Entries for sessions that never refresh again would otherwise
+        # accumulate one dictionary entry per abandoned session.
+        _refresh_failure_cooldowns.pop(session_id, None)
+        return False
+    return True
 
 
 def _set_refresh_cooldown(session_id: str) -> None:
@@ -59,8 +66,16 @@ async def _lock_for(session_id: str) -> asyncio.Lock:
         return lock
 
 
-def _forget_lock(session_id: str) -> None:
+def forget_refresh_state(session_id: Optional[str]) -> None:
+    """Drop per-session refresh bookkeeping (lock and failure cooldown).
+
+    Called whenever a session leaves the store -- logout, expiry, or a refused
+    refresh -- so no entry outlives the session it belongs to.
+    """
+    if session_id is None:
+        return
     _refresh_locks.pop(session_id, None)
+    _refresh_failure_cooldowns.pop(session_id, None)
 
 
 async def ensure_fresh_access_token(
@@ -90,14 +105,18 @@ async def ensure_fresh_access_token(
     async with lock:
         # Logout or a refused refresh may have removed it while we waited.
         if get_session_store().get(session.session_id) is not session:
-            _forget_lock(session.session_id)
+            forget_refresh_state(session.session_id)
             return None
         # Another coroutine may have refreshed while we waited.
         if not session.access_token_needs_refresh():
             return session.access_token
         # A recent transient failure already burned a refresh timeout for this
-        # session; fail fast instead of queueing behind the IdP again.
+        # session; fail fast instead of queueing behind the IdP again. A token
+        # that is still valid keeps working during the cooldown.
         if _refresh_in_cooldown(session.session_id):
+            expires_at = session.access_token_expires_at
+            if expires_at is not None and time.time() < expires_at:
+                return session.access_token
             return None
 
         try:
@@ -119,16 +138,40 @@ async def ensure_fresh_access_token(
             ):
                 from atlas.core.oidc.mcp_delegation import revoke_delegated_credentials
 
+                store = get_session_store()
                 # Remove first: cleanup must never leave an authenticatable
                 # session behind, even if a credential store is unavailable.
-                get_session_store().remove(session.session_id)
-                _forget_lock(session.session_id)
-                _refresh_failure_cooldowns.pop(session.session_id, None)
-                try:
-                    await revoke_delegated_credentials(session.user_id)
-                except Exception:
-                    logger.exception("Could not revoke delegated credentials after OIDC session ended")
-                logger.info("OIDC session ended because the IdP refused its refresh grant")
+                store.remove(session.session_id)
+                forget_refresh_state(session.session_id)
+                # The refusal says the IdP no longer accepts this grant. Only
+                # tear down the user's delegated credentials when this was
+                # their last live session: an older tab whose grant is refused
+                # must not revoke the credentials a newer, healthy session is
+                # using. If the IdP refused the user's whole grant, each other
+                # session discovers it at its own next refresh, and the last
+                # one out revokes.
+                others = [
+                    other
+                    for other in store.iter_sessions()
+                    if other.user_id.strip().lower() == session.user_id.strip().lower()
+                ]
+                if not others:
+                    try:
+                        await revoke_delegated_credentials(session.user_id)
+                    except Exception:
+                        logger.exception(
+                            "Could not revoke delegated credentials after OIDC session ended"
+                        )
+                    logger.info(
+                        "OIDC session ended because the IdP refused its refresh grant;"
+                        " delegated credentials revoked"
+                    )
+                else:
+                    logger.info(
+                        "OIDC session ended because the IdP refused its refresh grant;"
+                        " %d other live session(s) keep the user's delegated credentials",
+                        len(others),
+                    )
                 return None
             _set_refresh_cooldown(session.session_id)
             logger.warning("Could not refresh the OIDC access token: %s", exc)
@@ -147,7 +190,7 @@ async def ensure_fresh_access_token(
             else None
         )
         if get_session_store().get(session.session_id) is not session:
-            _forget_lock(session.session_id)
+            forget_refresh_state(session.session_id)
             return None
         updated = get_session_store().update_tokens(
             session.session_id,
@@ -158,7 +201,7 @@ async def ensure_fresh_access_token(
         )
         if updated is None:
             # The session was dropped (logout, expiry) while we refreshed.
-            _forget_lock(session.session_id)
+            forget_refresh_state(session.session_id)
             return None
         _refresh_failure_cooldowns.pop(session.session_id, None)
         logger.info("Refreshed the OIDC access token for a live session")

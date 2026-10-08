@@ -744,6 +744,23 @@ export function createWebSocketHandler(deps) {
         case 'agent_control':
           // Client→server message type (e.g. stop). Silently ignore if echoed back (#54).
           break
+        case 'session_ended':
+          // The server ended the OIDC login behind this socket and is about
+          // to close it with 1008. Stop the turn cleanly instead of leaving
+          // the thinking spinner running into a misleading timeout error.
+          setIsThinking(false)
+          clearAgentRunning()
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          setCurrentAgentStep(0)
+          if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
+          endTokenStream()
+          addMessage({
+            role: 'system',
+            content: 'Your session ended. Sign in again, then resend your message.',
+            type: 'warning',
+            timestamp: new Date().toISOString(),
+          })
+          break
         default:
           // New backend sends { type: 'agent_update', update_type: '...' }
           if (data.type === 'agent_update' && data.update_type) {
