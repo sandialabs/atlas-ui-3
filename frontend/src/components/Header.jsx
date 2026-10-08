@@ -173,7 +173,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
 
         {features?.rag && (
           <button
-            id="rag-drawer-toggle" /* RagPanel returns focus here on close */
             onClick={onToggleRag}
             className={`flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg transition-colors ${
               selectedDataSources?.size > 0

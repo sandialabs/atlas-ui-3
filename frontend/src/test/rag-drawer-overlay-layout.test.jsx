@@ -7,9 +7,13 @@
  * The drawer now stays `fixed` and out of document flow at every width: it
  * slides over the chat, and a backdrop (also at desktop widths) closes it.
  *
+ * As an overlay it is modal: focus enters on open, Tab is trapped inside,
+ * and focus returns to the element that had it when the drawer opened.
+ *
  * jsdom has no CSS engine, so these tests pin the class strings Tailwind
  * resolves at each breakpoint; the visual geometry itself was verified in a
- * browser during #1037 (header bounding box identical open vs closed).
+ * browser during #1037 (header bounding box identical open vs closed, see
+ * docs/developer/design-notes/rag-drawer-overlay-2026-10-08.md).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -21,10 +25,10 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext')
 
-function setup({ isOpen = true } = {}) {
+function setup({ isOpen = true, ragSources = [], selectedDataSources = new Set() } = {}) {
   useChat.mockReturnValue({
-    ragSources: [],
-    selectedDataSources: new Set(),
+    ragSources,
+    selectedDataSources,
     toggleDataSource: vi.fn(),
     addDataSources: vi.fn(),
     clearDataSources: vi.fn(),
@@ -47,18 +51,8 @@ function setup({ isOpen = true } = {}) {
 }
 
 describe('RagPanel - drawer overlays instead of reflowing the chat (issue #1037)', () => {
-  let toggle
-
   beforeEach(() => {
     vi.clearAllMocks()
-    // The header toggle the drawer returns focus to on close.
-    toggle = document.createElement('button')
-    toggle.id = 'rag-drawer-toggle'
-    document.body.appendChild(toggle)
-  })
-
-  afterEach(() => {
-    toggle.remove()
   })
 
   it('keeps the drawer fixed and out of document flow on desktop', () => {
@@ -126,8 +120,31 @@ describe('RagPanel - drawer overlays instead of reflowing the chat (issue #1037)
     expect(openDrawer.getAttribute('aria-hidden')).toBe('false')
     expect(openDrawer.hasAttribute('inert')).toBe(false)
   })
+})
+
+describe('RagPanel - modal semantics of the overlay drawer', () => {
+  let opener
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Whatever the user was interacting with before the drawer opened.
+    opener = document.createElement('button')
+    document.body.appendChild(opener)
+  })
+
+  afterEach(() => {
+    opener.remove()
+  })
+
+  it('announces itself as a modal dialog named by its heading', () => {
+    setup({ isOpen: true })
+
+    const drawer = screen.getByRole('dialog', { name: 'Data Sources' })
+    expect(drawer.getAttribute('aria-modal')).toBe('true')
+  })
 
   it('moves focus into the drawer when it opens', () => {
+    opener.focus()
     setup({ isOpen: true })
 
     expect(document.activeElement).toBe(
@@ -135,18 +152,61 @@ describe('RagPanel - drawer overlays instead of reflowing the chat (issue #1037)
     )
   })
 
-  it('returns focus to the header toggle when it closes', () => {
+  it('returns focus to the element that had it when the drawer opened', () => {
+    opener.focus()
     const { rerender } = setup({ isOpen: true })
+    expect(document.activeElement).not.toBe(opener)
 
     rerender(<RagPanel isOpen={false} onClose={vi.fn()} />)
-    expect(document.activeElement).toBe(toggle)
+    expect(document.activeElement).toBe(opener)
   })
 
   it('leaves focus alone when mounted closed', () => {
-    // The toggle-focus effect must key on a real open -> closed transition,
-    // not fire for a drawer that never opened.
+    // The restore branch must key on a drawer that actually opened, not fire
+    // for one that never did.
+    opener.focus()
     setup({ isOpen: false })
 
-    expect(document.activeElement).toBe(document.body)
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('traps Tab: forward from the last control wraps to the first', () => {
+    setup({
+      isOpen: true,
+      // A source and a selection keep Enable All / Clear All enabled, so the
+      // trap has the drawer's full control set to walk.
+      ragSources: [{ id: 'docs', label: 'docs', serverName: 'atlas_rag' }],
+      selectedDataSources: new Set(['atlas_rag:docs'])
+    })
+
+    const drawer = screen.getByRole('dialog', { name: 'Data Sources' })
+    const focusables = drawer.querySelectorAll(
+      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+    )
+    focusables[focusables.length - 1].focus()
+    fireEvent.keyDown(drawer, { key: 'Tab' })
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Close data sources drawer' })
+    )
+  })
+
+  it('traps Tab: backward from the first control wraps to the last', () => {
+    setup({
+      isOpen: true,
+      ragSources: [{ id: 'docs', label: 'docs', serverName: 'atlas_rag' }],
+      selectedDataSources: new Set(['atlas_rag:docs'])
+    })
+
+    const drawer = screen.getByRole('dialog', { name: 'Data Sources' })
+    const focusables = drawer.querySelectorAll(
+      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+    )
+    const first = focusables[0]
+    const last = focusables[focusables.length - 1]
+    first.focus()
+    fireEvent.keyDown(drawer, { key: 'Tab', shiftKey: true })
+
+    expect(document.activeElement).toBe(last)
   })
 })

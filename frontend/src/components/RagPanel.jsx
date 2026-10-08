@@ -13,31 +13,57 @@ import { useEscapeKey } from '../hooks/useEscapeKey'
  * The drawer is an overlay at every breakpoint: it stays `fixed` and out of
  * document flow so opening it never reflows the chat layout (issue #1037).
  * A full-screen backdrop (also at desktop widths) closes it on outside click
- * or Escape. The drawer covers the banner strip while open, the same way it
- * always has at mobile widths.
+ * or Escape, and it behaves as a modal: focus enters on open, Tab stays
+ * inside while it is up, and focus returns to where it was on close. The
+ * drawer covers the banner strip while open, the same way it always has at
+ * mobile widths.
  */
 const RagPanel = ({ isOpen, onClose }) => {
-  // The header toggle (Header.jsx renders the button with this id) regains
-  // focus when the drawer closes so keyboard users keep their place.
-  const TOGGLE_ID = 'rag-drawer-toggle'
   const closeButtonRef = useRef(null)
+  const drawerRef = useRef(null)
+  // Focus held when the drawer opened (the header toggle on a keyboard
+  // open): restored on close so keyboard users keep their place.
+  const previousFocusRef = useRef(null)
 
   useEscapeKey(isOpen, onClose)
 
-  // Focus lands in the drawer when it opens, and returns to the header toggle
-  // when it closes -- otherwise closing via Escape or the backdrop leaves the
-  // focus on <body> and keyboard users lose their place.
   useEffect(() => {
-    if (isOpen) closeButtonRef.current?.focus()
+    if (isOpen) {
+      previousFocusRef.current = document.activeElement
+      closeButtonRef.current?.focus()
+      return
+    }
+    if (previousFocusRef.current instanceof HTMLElement) {
+      previousFocusRef.current.focus()
+      previousFocusRef.current = null
+    }
   }, [isOpen])
 
-  const wasOpenRef = useRef(isOpen)
-  useEffect(() => {
-    if (wasOpenRef.current && !isOpen) {
-      document.getElementById(TOGGLE_ID)?.focus()
+  // Tab is trapped inside the drawer rather than switched off: without this,
+  // focus could walk the covered header controls behind the backdrop, and a
+  // press on one of them could close a second overlay together with this
+  // one. No visibility filter on the focusables (the SettingsPanel one works
+  // around nested fixed-position modals this drawer does not have; when the
+  // drawer is closed it is inert, so Tab never reaches it anyway).
+  const trapTab = (event) => {
+    if (event.key !== 'Tab' || !drawerRef.current) return
+    const focusable = drawerRef.current.querySelectorAll(
+      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+    )
+    if (focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (!drawerRef.current.contains(document.activeElement)) {
+      event.preventDefault()
+      ;(event.shiftKey ? last : first).focus()
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
     }
-    wasOpenRef.current = isOpen
-  }, [isOpen])
+  }
 
   return (
     <>
@@ -51,13 +77,23 @@ const RagPanel = ({ isOpen, onClose }) => {
       )}
 
       {/* Panel */}
-      <aside data-testid="rag-drawer" aria-hidden={!isOpen} inert={!isOpen} className={`
-        fixed left-0 top-0 h-full w-80 lg:w-96 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out flex flex-col
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
+      <aside
+        ref={drawerRef}
+        data-testid="rag-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rag-drawer-title"
+        aria-hidden={!isOpen}
+        inert={!isOpen}
+        onKeyDown={trapTab}
+        className={`
+          fixed left-0 top-0 h-full w-80 lg:w-96 bg-gray-800 border-r border-gray-700 z-50 transform transition-transform duration-300 ease-in-out flex flex-col
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-gray-100">Data Sources</h2>
+          <h2 id="rag-drawer-title" className="text-lg font-semibold text-gray-100">Data Sources</h2>
           <button
             ref={closeButtonRef}
             onClick={onClose}
