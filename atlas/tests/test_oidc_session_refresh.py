@@ -110,7 +110,7 @@ async def test_token_error_surfaces_entra_support_identifiers():
         "correlation_id": ENTRA_ERROR["correlation_id"],
     }
     message = str(error)
-    assert "AADSTS9002313" in message
+    assert "error_codes=9002313" in message
     assert ENTRA_ERROR["trace_id"] in message
     assert ENTRA_ERROR["correlation_id"] in message
     # The free-text description can echo request data and is never surfaced.
@@ -145,14 +145,14 @@ async def test_rejected_refresh_request_logs_identifiers_and_keeps_session(
     """Entra's invalid_request is not a refused grant: keep the session, but
     log what an IdP admin needs and how the user recovers."""
     refresh.side_effect = OIDCFlowError(
-        "Token endpoint returned 400 (invalid_request) [AADSTS9002313; trace_id=abc12345]",
+        "Token endpoint returned 400 (invalid_request) [error_codes=9002313; trace_id=abc12345]",
         error_code="invalid_request", status_code=400,
     )
     with caplog.at_level("WARNING", logger="atlas.core.oidc.session_refresh"):
         assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
     assert get_session_store().get(session.session_id) is session
     revoke.assert_not_awaited()
-    assert "AADSTS9002313" in caplog.text
+    assert "error_codes=9002313" in caplog.text
     assert "signing in again starts a fresh session" in caplog.text
 
 
@@ -168,6 +168,23 @@ async def test_client_configuration_rejection_does_not_suggest_sign_in(
         assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
     assert get_session_store().get(session.session_id) is session
     assert "client configuration" in caplog.text
+    assert "signing in again" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [
+    OIDCFlowError("Token endpoint returned 503 (temporarily_unavailable)",
+                  error_code="temporarily_unavailable", status_code=503),
+    httpx.ConnectError("Unavailable"),
+])
+async def test_transient_refresh_failure_does_not_suggest_sign_in(
+    session, refresh, caplog, failure,
+):
+    """An outage is not something a new sign-in fixes; no hint is logged."""
+    refresh.side_effect = failure
+    with caplog.at_level("WARNING", logger="atlas.core.oidc.session_refresh"):
+        assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
+    assert "the OIDC access token" in caplog.text
     assert "signing in again" not in caplog.text
 
 

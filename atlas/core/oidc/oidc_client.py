@@ -77,7 +77,10 @@ def _token_error_diagnostics(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _describe_diagnostics(diagnostics: Dict[str, Any]) -> str:
-    parts = [f"AADSTS{code}" for code in diagnostics.get("error_codes", [])]
+    # Rendered neutrally: only Entra is known to send these, as its AADSTS numbers.
+    parts = []
+    if diagnostics.get("error_codes"):
+        parts.append("error_codes=" + ",".join(str(code) for code in diagnostics["error_codes"]))
     for key in ("trace_id", "correlation_id"):
         if key in diagnostics:
             parts.append(f"{key}={diagnostics[key]}")

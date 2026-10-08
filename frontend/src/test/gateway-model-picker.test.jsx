@@ -172,7 +172,27 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     setup()
     fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
     const link = await screen.findByTestId('gateway-signin-link')
-    expect(link.getAttribute('href')).toMatch(/^\/auth\/oidc\/login\?next=/)
+    const next = window.location.pathname + window.location.search
+    expect(link.getAttribute('href')).toBe(`/auth/oidc/login?next=${encodeURIComponent(next)}`)
+  })
+
+  it('offers the sign-in link when listing a team\'s models fails the same way', async () => {
+    global.fetch = vi.fn(async (url) => {
+      if (url.startsWith('/api/llm/gateways/enterprise/teams')) {
+        return { ok: true, status: 200, json: async () => TEAMS }
+      }
+      return {
+        ok: false,
+        status: 401,
+        headers: new Headers({ 'X-Atlas-Sign-In': '/auth/oidc/login' }),
+        json: async () => ({ detail: 'Please sign in again.' }),
+      }
+    })
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    fireEvent.change(await screen.findByLabelText('1. Team'), { target: { value: 'team-alpha' } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load models: Please sign in again.')
+    expect(screen.getByTestId('gateway-signin-link').getAttribute('href')).toMatch(/^\/auth\/oidc\/login\?next=/)
   })
 
   it.each([
