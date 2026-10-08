@@ -47,9 +47,11 @@ Measured geometry (Playwright, header bounding box, 1440x900 unless noted):
 Making the drawer an overlay at all widths turned it into a modal on desktop,
 so it gained the treatment the other overlays already had (issue #1037 review):
 
-- `role="dialog"`, `aria-modal="true"`, labelled by its heading.
-- Focus enters the drawer (its close button) when it opens and returns to the
-  previously focused element when it closes.
+- `role="dialog"`, `aria-modal="true"`, labelled by its heading. Focus enters
+  the drawer (its close button) when it opens:
+![Focus lands on the drawer's close button the moment it opens](../images/issue1037-focus-in-drawer-on-open.png)
+
+- Focus returns to the previously focused element when the drawer closes.
 - Tab is trapped inside while it is open, so focus cannot walk the covered
   header controls behind the backdrop. The trap listens on `document` rather
   than on the drawer itself, so it also catches focus that strays outside

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import DataSourcesSelector from './DataSourcesSelector'
 import { useEscapeKey } from '../hooks/useEscapeKey'
+import { FOCUSABLE_SELECTOR } from '../utils/focusTrap'
 
 /**
  * Left-hand Data Sources drawer.
@@ -25,7 +26,20 @@ const RagPanel = ({ isOpen, onClose }) => {
   // open): restored on close so keyboard users keep their place.
   const previousFocusRef = useRef(null)
 
-  useEscapeKey(isOpen, onClose)
+  // The Tools and Settings modal can be layered on top of an open drawer.
+  // While focus is in *that* dialog, it owns Escape and the Tab trap; this
+  // drawer standing down keeps Escape from closing the drawer out from under
+  // the modal and focus restore from yanking focus behind its backdrop.
+  const focusInOtherDialog = () => {
+    const active = document.activeElement
+    if (!(active instanceof HTMLElement)) return false
+    const dialog = active.closest('[role="dialog"]')
+    return dialog !== null && dialog !== drawerRef.current
+  }
+
+  useEscapeKey(isOpen, () => {
+    if (!focusInOtherDialog()) onClose()
+  })
 
   useEffect(() => {
     if (isOpen) {
@@ -33,10 +47,14 @@ const RagPanel = ({ isOpen, onClose }) => {
       closeButtonRef.current?.focus()
       return
     }
-    if (previousFocusRef.current instanceof HTMLElement) {
-      previousFocusRef.current.focus()
-      previousFocusRef.current = null
-    }
+    // Focus that moved into another dialog while the drawer was up (the
+    // Tools and Settings modal) belongs to that dialog; restoring here
+    // would yank focus behind its backdrop. Either way the saved element
+    // is stale once the drawer is gone.
+    const previous = previousFocusRef.current
+    previousFocusRef.current = null
+    if (focusInOtherDialog()) return
+    if (previous instanceof HTMLElement) previous.focus()
   }, [isOpen])
 
   // Tab is trapped inside the drawer rather than switched off: without this,
@@ -51,8 +69,8 @@ const RagPanel = ({ isOpen, onClose }) => {
   // (the SettingsPanel one works around nested fixed-position modals this
   // drawer does not have; when the drawer is closed it is inert, so Tab
   // never reaches it anyway). Not a shared hook yet: SettingsPanel's trap is
-  // innermost-dialog aware in ways this drawer does not need; unifying them
-  // is a follow-up.
+  // innermost-dialog aware in ways this drawer does not need; tracked in
+  // issue #1039.
   useEffect(() => {
     if (!isOpen) return undefined
 
@@ -64,9 +82,7 @@ const RagPanel = ({ isOpen, onClose }) => {
         : null
       if (activeDialog && activeDialog !== drawerRef.current) return
 
-      const focusable = drawerRef.current.querySelectorAll(
-        'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
-      )
+      const focusable = drawerRef.current.querySelectorAll(FOCUSABLE_SELECTOR)
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]

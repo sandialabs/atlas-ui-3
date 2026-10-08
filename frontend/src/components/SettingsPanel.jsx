@@ -10,6 +10,7 @@ import DataSourcesSelector from './DataSourcesSelector'
 import AdminQuickPanel from './admin/AdminQuickPanel'
 import CaptureConsentSection from './CaptureConsentSection'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
+import { FOCUSABLE_SELECTOR } from '../utils/focusTrap'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -399,7 +400,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       // off: standing down would let focus walk out of the overlay entirely.
       if (event.key !== 'Tab') return
       const focusable = Array.from(
-        scope.querySelectorAll('a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])')
+        scope.querySelectorAll(FOCUSABLE_SELECTOR)
       // getClientRects() rather than offsetParent: offsetParent is null inside a
       // `position: fixed` ancestor, which is exactly how the nested modals render.
       ).filter(el => el.getClientRects().length > 0)

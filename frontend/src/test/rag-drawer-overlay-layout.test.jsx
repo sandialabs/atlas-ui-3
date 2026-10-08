@@ -21,6 +21,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import RagPanel from '../components/RagPanel'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import { FOCUSABLE_SELECTOR } from '../utils/focusTrap'
 
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext')
@@ -209,9 +210,7 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     })
 
     const drawer = screen.getByRole('dialog', { name: 'Data Sources' })
-    const focusables = drawer.querySelectorAll(
-      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
-    )
+    const focusables = drawer.querySelectorAll(FOCUSABLE_SELECTOR)
     focusables[focusables.length - 1].focus()
     fireEvent.keyDown(drawer, { key: 'Tab' })
 
@@ -228,9 +227,7 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     })
 
     const drawer = screen.getByRole('dialog', { name: 'Data Sources' })
-    const focusables = drawer.querySelectorAll(
-      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
-    )
+    const focusables = drawer.querySelectorAll(FOCUSABLE_SELECTOR)
     const first = focusables[0]
     const last = focusables[focusables.length - 1]
     first.focus()
@@ -246,13 +243,19 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     setup({ isOpen: true })
 
     const drawer = screen.getByRole('dialog', { name: 'Data Sources' })
-    const focusables = drawer.querySelectorAll(
-      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
-    )
-    document.body.focus()
-    fireEvent.keyDown(document.body, { key: 'Tab' })
+    const focusables = drawer.querySelectorAll(FOCUSABLE_SELECTOR)
+    // document.body.focus() is a no-op in jsdom; blur() is what actually
+    // moves activeElement to <body>.
+    screen.getByRole('button', { name: 'Close data sources drawer' }).blur()
+    expect(drawer.contains(document.activeElement)).toBe(false)
 
+    fireEvent.keyDown(document.body, { key: 'Tab' })
     expect(document.activeElement).toBe(focusables[0])
+
+    // And the same from <body> with Shift+Tab lands on the last control.
+    screen.getByRole('button', { name: 'Close data sources drawer' }).blur()
+    fireEvent.keyDown(document.body, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(focusables[focusables.length - 1])
   })
 
   it('stands down while focus is inside a different dialog', () => {
@@ -268,6 +271,44 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     insideOther.focus()
 
     fireEvent.keyDown(document, { key: 'Tab' })
+    expect(document.activeElement).toBe(insideOther)
+
+    other.remove()
+  })
+
+  it('does not close on Escape while focus is inside a different dialog', () => {
+    // A drawer left open beneath the Tools and Settings modal must not
+    // swallow the modal's Escape: whichever dialog has focus owns Escape.
+    const { onClose } = setup({ isOpen: true })
+
+    const other = document.createElement('div')
+    other.setAttribute('role', 'dialog')
+    const insideOther = document.createElement('button')
+    other.appendChild(insideOther)
+    document.body.appendChild(other)
+    insideOther.focus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+
+    other.remove()
+  })
+
+  it('skips focus restore when the drawer closed under a different dialog', () => {
+    // If the drawer is dismissed while the user is in a modal layered on top
+    // of it, restoring saved focus would yank focus behind that modal's
+    // backdrop.
+    opener.focus()
+    const { rerender } = setup({ isOpen: true })
+
+    const other = document.createElement('div')
+    other.setAttribute('role', 'dialog')
+    const insideOther = document.createElement('button')
+    other.appendChild(insideOther)
+    document.body.appendChild(other)
+    insideOther.focus()
+
+    rerender(<RagPanel isOpen={false} onClose={vi.fn()} />)
     expect(document.activeElement).toBe(insideOther)
 
     other.remove()
