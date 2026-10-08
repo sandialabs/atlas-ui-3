@@ -159,6 +159,33 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     setup()
     fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Please sign in again.')
+    expect(screen.queryByTestId('gateway-signin-link')).toBeNull()
+  })
+
+  it('offers a sign-in link when the backend says a fresh sign-in can fix it', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'X-Atlas-Sign-In': '/auth/oidc/login' }),
+      json: async () => ({ detail: 'Your sign-in session has no token. Please sign in again.' }),
+    }))
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    const link = await screen.findByTestId('gateway-signin-link')
+    expect(link.getAttribute('href')).toMatch(/^\/auth\/oidc\/login\?next=/)
+  })
+
+  it('ignores a sign-in header that is not a same-origin path', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'X-Atlas-Sign-In': '//evil.example/login' }),
+      json: async () => ({ detail: 'Please sign in again.' }),
+    }))
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please sign in again.')
+    expect(screen.queryByTestId('gateway-signin-link')).toBeNull()
   })
 })
 

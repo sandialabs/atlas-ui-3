@@ -13,6 +13,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import re
 import secrets
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode
@@ -39,10 +40,47 @@ _jwks_clients: Dict[str, "jwt.PyJWKClient"] = {}
 class OIDCFlowError(RuntimeError):
     """Raised when a step of the authorization code flow fails."""
 
-    def __init__(self, message: str, *, error_code=None, status_code=None):
+    def __init__(self, message: str, *, error_code=None, status_code=None, diagnostics=None):
         super().__init__(message)
         self.error_code = error_code
         self.status_code = status_code
+        self.diagnostics = diagnostics or {}
+
+
+# Support identifiers some IdPs add to a token error (Microsoft Entra returns
+# `error_codes`, `trace_id`, and `correlation_id`). They name the exact
+# rejection reason (e.g. AADSTS9002313) and let an IdP admin find the request
+# in sign-in logs, yet carry nothing secret. Only values of these exact shapes
+# are kept: the free-text `error_description` is never surfaced.
+_DIAGNOSTIC_ID_PATTERN = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
+# RFC 6749 section 5.2 limits `error` to printable ASCII without quote or
+# backslash; anything else is not a real error code and is not logged.
+_ERROR_CODE_PATTERN = re.compile(r"^[\x20\x21\x23-\x5B\x5D-\x7E]{1,64}$")
+_MAX_ERROR_CODES = 5
+
+
+def _token_error_diagnostics(body: Dict[str, Any]) -> Dict[str, Any]:
+    diagnostics: Dict[str, Any] = {}
+    codes = body.get("error_codes")
+    if isinstance(codes, list):
+        safe_codes = [
+            code for code in codes if isinstance(code, int) and not isinstance(code, bool) and 0 <= code < 10**9
+        ][:_MAX_ERROR_CODES]
+        if safe_codes:
+            diagnostics["error_codes"] = safe_codes
+    for key in ("trace_id", "correlation_id"):
+        value = body.get(key)
+        if isinstance(value, str) and _DIAGNOSTIC_ID_PATTERN.match(value):
+            diagnostics[key] = value
+    return diagnostics
+
+
+def _describe_diagnostics(diagnostics: Dict[str, Any]) -> str:
+    parts = [f"AADSTS{code}" for code in diagnostics.get("error_codes", [])]
+    for key in ("trace_id", "correlation_id"):
+        if key in diagnostics:
+            parts.append(f"{key}={diagnostics[key]}")
+    return "; ".join(parts)
 
 
 def generate_pkce_pair() -> Tuple[str, str]:
@@ -131,19 +169,26 @@ async def _post_token_request(
         # OAuth error bodies carry an `error` code; log that but never the body
         # verbatim, which can echo back credentials on some providers.
         error_code = "unknown_error"
+        diagnostics: Dict[str, Any] = {}
         try:
             body = response.json()
             if isinstance(body, dict):
-                error_code = str(body.get("error", error_code))
+                raw_error = body.get("error")
+                if isinstance(raw_error, str) and _ERROR_CODE_PATTERN.match(raw_error):
+                    error_code = raw_error
+                diagnostics = _token_error_diagnostics(body)
         except ValueError:
             # A non-JSON error body carries nothing we can safely surface, so
             # the generic code above stands. Deliberately not logged: some
             # providers echo the submitted credential back in an HTML error.
             error_code = "unknown_error"
+        detail = _describe_diagnostics(diagnostics)
         raise OIDCFlowError(
-            f"Token endpoint returned {response.status_code} ({error_code})",
+            f"Token endpoint returned {response.status_code} ({error_code})"
+            + (f" [{detail}]" if detail else ""),
             error_code=error_code,
             status_code=response.status_code,
+            diagnostics=diagnostics,
         )
     try:
         return response.json()

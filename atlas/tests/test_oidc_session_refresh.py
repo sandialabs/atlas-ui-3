@@ -1,6 +1,7 @@
 """Refresh-on-use, refused grants, and concurrent OIDC session invalidation."""
 
 import asyncio
+import importlib
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -74,6 +75,108 @@ async def test_token_endpoint_preserves_structured_error(status, body, code):
             )
     assert error.value.error_code == code
     assert error.value.status_code == status
+
+
+ENTRA_ERROR = {
+    "error": "invalid_request",
+    "error_description": "AADSTS9002313: Invalid request. refresh_token=secret-echo",
+    "error_codes": [9002313],
+    "timestamp": "2026-10-08 20:59:38Z",
+    "trace_id": "0000aaaa-11bb-cccc-dd22-eeeeee333333",
+    "correlation_id": "aaaa0000-bb11-2222-33cc-444444dddddd",
+}
+
+
+async def _token_error(status, body):
+    response = httpx.Response(status, json=body)
+    with patch("atlas.core.oidc.oidc_client.httpx.AsyncClient") as client:
+        client.return_value.__aenter__.return_value.post = AsyncMock(return_value=response)
+        with pytest.raises(OIDCFlowError) as error:
+            await refresh_access_token(
+                token_endpoint="https://idp.example.gov/token", refresh_token="test-refresh",
+                credentials=ClientCredentials(),
+            )
+    return error.value
+
+
+@pytest.mark.asyncio
+async def test_token_error_surfaces_entra_support_identifiers():
+    """The AADSTS code and trace/correlation IDs name why Entra refused."""
+    error = await _token_error(400, ENTRA_ERROR)
+    assert error.error_code == "invalid_request"
+    assert error.diagnostics == {
+        "error_codes": [9002313],
+        "trace_id": ENTRA_ERROR["trace_id"],
+        "correlation_id": ENTRA_ERROR["correlation_id"],
+    }
+    message = str(error)
+    assert "AADSTS9002313" in message
+    assert ENTRA_ERROR["trace_id"] in message
+    assert ENTRA_ERROR["correlation_id"] in message
+    # The free-text description can echo request data and is never surfaced.
+    assert "secret-echo" not in message
+    assert "Invalid request" not in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    {"error": "invalid_request", "error_codes": ["9002313"], "trace_id": "x\nforged log line"},
+    {"error": "invalid_request", "error_codes": [True, -1, 10**12], "correlation_id": 42},
+    {"error": "invalid_request", "trace_id": "a" * 200},
+])
+async def test_token_error_drops_unexpected_diagnostic_values(body):
+    error = await _token_error(400, body)
+    assert error.diagnostics == {}
+    assert str(error) == "Token endpoint returned 400 (invalid_request)"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ["bad\r\ncode", 'q"uote', "x" * 65, 7, ""])
+async def test_token_error_code_must_be_an_rfc6749_error_value(raw):
+    error = await _token_error(400, {"error": raw})
+    assert error.error_code == "unknown_error"
+
+
+@pytest.mark.asyncio
+async def test_rejected_refresh_request_logs_identifiers_and_keeps_session(
+    session, refresh, revoke, caplog,
+):
+    """Entra's invalid_request is not a refused grant: keep the session, but
+    log what an IdP admin needs and how the user recovers."""
+    refresh.side_effect = OIDCFlowError(
+        "Token endpoint returned 400 (invalid_request) [AADSTS9002313; trace_id=abc12345]",
+        error_code="invalid_request", status_code=400,
+    )
+    with caplog.at_level("WARNING", logger="atlas.core.oidc.session_refresh"):
+        assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
+    assert get_session_store().get(session.session_id) is session
+    revoke.assert_not_awaited()
+    assert "AADSTS9002313" in caplog.text
+    assert "signing in again starts a fresh session" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_new_sign_in_recovers_delegation_while_old_session_is_rejected(
+    session, refresh, monkeypatch,
+):
+    """A fresh login works without a restart even while the idle session's
+    refresh keeps being rejected (the reported workaround)."""
+    from atlas.core.oidc import mcp_delegation
+
+    monkeypatch.setattr(session_refresh, "REFRESH_FAILURE_COOLDOWN_SECONDS", 0)
+    refresh.side_effect = OIDCFlowError(
+        "Token endpoint returned 400 (invalid_request)", error_code="invalid_request", status_code=400,
+    )
+    # The package re-exports the instance under the submodule's name, so a
+    # dotted-string patch would resolve to the module, not the instance.
+    factory = importlib.import_module("atlas.infrastructure.app_factory").app_factory
+    monkeypatch.setattr(factory, "get_config_manager", lambda: SimpleNamespace(app_settings=SETTINGS))
+    assert await mcp_delegation.resolve_subject_token(session.user_id) is None
+    get_session_store().create(
+        user_id=session.user_id, access_token="fresh-login", refresh_token="fresh-refresh",
+        access_token_expires_at=time.time() + 3600, max_age_seconds=3600,
+    )
+    assert await mcp_delegation.resolve_subject_token(session.user_id) == "fresh-login"
 
 
 @pytest.mark.asyncio

@@ -71,6 +71,11 @@ def _decode_jwt_claims(token: str) -> Dict[str, Any]:
     return claims if isinstance(claims, dict) else {}
 
 
+# Error code for failures a fresh sign-in can fix: the user's session has no
+# usable token to delegate (e.g. the IdP rejected its refresh after hours idle).
+SIGN_IN_REQUIRED = "sign_in_required"
+
+
 async def mint_delegated_llm_token(
     user_email: Optional[str], delegation, *, endpoint: str, actor: str
 ) -> str:
@@ -100,7 +105,8 @@ async def mint_delegated_llm_token(
     subject_token = await mcp_delegation.resolve_subject_token(user_email)
     if not subject_token:
         raise LLMAuthenticationError(
-            f"Your sign-in session has no token to present to {endpoint}. Please sign in again."
+            f"Your sign-in session has no token to present to {endpoint}. Please sign in again.",
+            code=SIGN_IN_REQUIRED,
         )
     request = DelegationRequest(
         user_id=user_email,
@@ -116,7 +122,9 @@ async def mint_delegated_llm_token(
         logger.error(
             "Delegated token exchange failed for %s: %s", log_endpoint, sanitize_for_logging(str(exc))
         )
-        raise LLMAuthenticationError(f"Could not obtain a token for {endpoint}. Please sign in again.") from None
+        raise LLMAuthenticationError(
+            f"Could not obtain a token for {endpoint}. Please sign in again.", code=SIGN_IN_REQUIRED
+        ) from None
     return token.access_token
 
 

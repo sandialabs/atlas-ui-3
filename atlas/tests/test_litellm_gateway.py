@@ -31,7 +31,7 @@ from atlas.modules.config.litellm_gateway_models import (
 from atlas.modules.config.models import LLMConfig
 from atlas.modules.llm import litellm_gateway_client
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
-from atlas.modules.llm.litellm_gateway_client import LiteLLMGatewayClient, reset_gateway_clients
+from atlas.modules.llm.litellm_gateway_client import SIGN_IN_REQUIRED, LiteLLMGatewayClient, reset_gateway_clients
 
 _MOCK_MAIN = Path(__file__).resolve().parents[2] / "mocks" / "litellm-mock" / "main.py"
 _spec = importlib.util.spec_from_file_location("litellm_mock_main_for_tests", _MOCK_MAIN)
@@ -535,6 +535,60 @@ class TestGatewayRoutes:
         assert client.get("/api/llm/gateways/nope/teams").status_code == 404
         state["user"] = "outsider@example.com"
         assert client.get("/api/llm/gateways/enterprise/teams").status_code == 404
+
+
+class TestGatewaySignInRecovery:
+    """A delegated-token failure a fresh sign-in can fix points the picker at login."""
+
+    @staticmethod
+    def _fail_with(exc):
+        client = litellm_gateway_client._clients["enterprise"][1]
+        return patch.object(client, "list_teams", AsyncMock(side_effect=exc))
+
+    def test_sign_in_required_names_the_login_path_when_oidc_is_on(self, routes_client):
+        from atlas.routes import litellm_gateway_routes
+
+        client, _ = routes_client
+        config_manager = litellm_gateway_routes.app_factory.get_config_manager()
+        config_manager.app_settings = type("S", (), {"feature_oidc_auth_enabled": True})()
+        error = LLMAuthenticationError("Please sign in again.", code=SIGN_IN_REQUIRED)
+        with self._fail_with(error):
+            response = client.get("/api/llm/gateways/enterprise/teams")
+        assert response.status_code == 401
+        assert response.headers["X-Atlas-Sign-In"] == "/auth/oidc/login"
+
+    def test_no_login_path_without_oidc(self, routes_client):
+        client, _ = routes_client
+        error = LLMAuthenticationError("Please sign in again.", code=SIGN_IN_REQUIRED)
+        with self._fail_with(error):
+            response = client.get("/api/llm/gateways/enterprise/teams")
+        assert response.status_code == 401
+        assert "X-Atlas-Sign-In" not in response.headers
+
+    def test_other_authentication_errors_get_no_login_path(self, routes_client):
+        from atlas.routes import litellm_gateway_routes
+
+        client, _ = routes_client
+        config_manager = litellm_gateway_routes.app_factory.get_config_manager()
+        config_manager.app_settings = type("S", (), {"feature_oidc_auth_enabled": True})()
+        with self._fail_with(LLMAuthenticationError("The gateway rejected its service key.")):
+            response = client.get("/api/llm/gateways/enterprise/teams")
+        assert response.status_code == 401
+        assert "X-Atlas-Sign-In" not in response.headers
+
+    @pytest.mark.asyncio
+    async def test_missing_subject_token_is_marked_sign_in_required(self):
+        llm_config = _llm_config(auth_type="delegated", delegation={"scope": "s"})
+        with patch(
+            "atlas.core.oidc.delegation.get_delegation_manager_async",
+            AsyncMock(return_value=AsyncMock()),
+        ), patch(
+            "atlas.core.oidc.mcp_delegation.resolve_subject_token",
+            AsyncMock(return_value=None),
+        ):
+            with pytest.raises(LLMAuthenticationError) as error:
+                await _client(llm_config).list_teams("bob@example.com")
+        assert error.value.code == SIGN_IN_REQUIRED
 
 
 class TestGatewayComplianceNormalization:

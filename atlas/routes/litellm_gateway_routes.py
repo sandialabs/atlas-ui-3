@@ -17,11 +17,16 @@ from atlas.domain.errors import AuthorizationError, LLMAuthenticationError, LLMS
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config.litellm_gateway_models import build_gateway_model_key, is_key_safe_part
 from atlas.modules.config.models import LiteLLMGatewayConfig
-from atlas.modules.llm.litellm_gateway_client import get_gateway_client
+from atlas.modules.llm.litellm_gateway_client import SIGN_IN_REQUIRED, get_gateway_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/llm/gateways", tags=["llm-gateways"])
+
+# Tells the model picker where a fresh sign-in starts, so a delegated-token
+# failure offers a recovery link instead of a dead-end error.
+SIGN_IN_HEADER = "X-Atlas-Sign-In"
+OIDC_SIGN_IN_PATH = "/auth/oidc/login"
 
 async def build_gateway_summaries(llm_config: Any, current_user: str, app_settings: Any) -> List[Dict[str, Any]]:
     """Gateways the user may use, in the shape ``/api/config`` returns them."""
@@ -90,7 +95,11 @@ def _raise_http(exc: Exception) -> None:
     if isinstance(exc, AuthorizationError):
         raise HTTPException(status_code=403, detail=exc.message) from None
     if isinstance(exc, LLMAuthenticationError):
-        raise HTTPException(status_code=401, detail=exc.message) from None
+        headers = None
+        app_settings = getattr(app_factory.get_config_manager(), "app_settings", None)
+        if exc.code == SIGN_IN_REQUIRED and getattr(app_settings, "feature_oidc_auth_enabled", False):
+            headers = {SIGN_IN_HEADER: OIDC_SIGN_IN_PATH}
+        raise HTTPException(status_code=401, detail=exc.message, headers=headers) from None
     if isinstance(exc, LLMServiceError):
         raise HTTPException(status_code=502, detail=exc.message) from None
     raise exc

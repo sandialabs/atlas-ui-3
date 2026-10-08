@@ -183,7 +183,22 @@ async def ensure_fresh_access_token(
                     )
                 return None
             _set_refresh_cooldown(session.session_id)
-            logger.warning("Could not refresh the OIDC access token: %s", exc)
+            if (
+                isinstance(exc, OIDCFlowError)
+                and exc.status_code is not None
+                and 400 <= exc.status_code < 500
+            ):
+                # Not a definitive refusal of the grant, so the session is kept
+                # and retried, but the same request will usually be rejected
+                # again: name the recovery and the IdP's support identifiers.
+                logger.warning(
+                    "Could not refresh the OIDC access token: %s. The IdP rejected"
+                    " the refresh request; the session is kept and retried, and"
+                    " signing in again starts a fresh session.",
+                    exc,
+                )
+            else:
+                logger.warning("Could not refresh the OIDC access token: %s", exc)
             return None
         except Exception as exc:  # pragma: no cover - network surprises
             _set_refresh_cooldown(session.session_id)
