@@ -175,11 +175,16 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     expect(link.getAttribute('href')).toMatch(/^\/auth\/oidc\/login\?next=/)
   })
 
-  it('ignores a sign-in header that is not a same-origin path', async () => {
+  it.each([
+    '//evil.example/login',
+    '/\\evil.example/login',
+    'https://evil.example/login',
+    'javascript:alert(1)',
+  ])('ignores a sign-in header that is not a same-origin path: %s', async (value) => {
     global.fetch = vi.fn(async () => ({
       ok: false,
       status: 401,
-      headers: new Headers({ 'X-Atlas-Sign-In': '//evil.example/login' }),
+      headers: new Headers({ 'X-Atlas-Sign-In': value }),
       json: async () => ({ detail: 'Please sign in again.' }),
     }))
     setup()

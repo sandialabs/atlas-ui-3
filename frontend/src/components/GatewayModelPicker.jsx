@@ -22,10 +22,22 @@ async function fetchJson(url) {
     // Set by the backend when a fresh sign-in can fix the failure (the
     // session has no usable token to delegate to the gateway).
     const signIn = res.status === 401 ? res.headers?.get('X-Atlas-Sign-In') : null
-    error.signInUrl = signIn && signIn.startsWith('/') && !signIn.startsWith('//') ? signIn : null
+    error.signInUrl = sameOriginPath(signIn)
     throw error
   }
   return body
+}
+
+// Only a path on this origin may become a link: browsers resolve values such
+// as `//host` or `/\host` to another site, so parse rather than prefix-check.
+function sameOriginPath(value) {
+  if (!value || !value.startsWith('/')) return null
+  try {
+    const url = new URL(value, window.location.origin)
+    return url.origin === window.location.origin ? url.pathname : null
+  } catch {
+    return null
+  }
 }
 
 function signInHref(signInUrl) {

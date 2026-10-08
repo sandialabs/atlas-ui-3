@@ -157,6 +157,21 @@ async def test_rejected_refresh_request_logs_identifiers_and_keeps_session(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["invalid_client", "unauthorized_client", "unsupported_grant_type"])
+async def test_client_configuration_rejection_does_not_suggest_sign_in(
+    session, refresh, revoke, caplog, code,
+):
+    refresh.side_effect = OIDCFlowError(
+        f"Token endpoint returned 401 ({code})", error_code=code, status_code=401,
+    )
+    with caplog.at_level("WARNING", logger="atlas.core.oidc.session_refresh"):
+        assert await session_refresh.ensure_fresh_access_token(session, SETTINGS) is None
+    assert get_session_store().get(session.session_id) is session
+    assert "client configuration" in caplog.text
+    assert "signing in again" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_new_sign_in_recovers_delegation_while_old_session_is_rejected(
     session, refresh, monkeypatch,
 ):

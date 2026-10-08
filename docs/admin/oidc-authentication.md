@@ -157,8 +157,12 @@ and correlation IDs are kept -- the free-text `error_description` is never
 logged, since it can echo request data. Give the AADSTS code and IDs to the
 Entra administrator to find the request in the sign-in logs. Such a session is
 kept and retried, but delegated calls fail until the user signs in again; the
-LiteLLM team picker shows a **Sign in again** link for this case. Signing in
-again creates a fresh session that delegation prefers, with no server restart.
+LiteLLM team picker shows a **Sign in again** link for this case (chat errors
+from the same cause show the "Please sign in again" text only). Signing in again
+creates a fresh session that delegation prefers, with no server restart.
+`invalid_client`, `unauthorized_client`, and `unsupported_grant_type` describe
+Atlas's client registration instead; the log says so, and a new sign-in will
+not help.
 
 An active session normally detects IdP revocation by the next refresh, provided
 the IdP refuses the grant. This is not immediate logout propagation: idle

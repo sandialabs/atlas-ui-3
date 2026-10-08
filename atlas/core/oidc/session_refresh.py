@@ -38,6 +38,11 @@ _refresh_locks_guard = asyncio.Lock()
 REFRESH_FAILURE_COOLDOWN_SECONDS = 10.0
 _refresh_failure_cooldowns: dict = {}
 
+# Token-endpoint errors that describe Atlas's client, not the user's grant.
+_CLIENT_CONFIGURATION_ERRORS = frozenset(
+    {"invalid_client", "unauthorized_client", "unsupported_grant_type"}
+)
+
 
 def _refresh_in_cooldown(session_id: str) -> bool:
     until = _refresh_failure_cooldowns.get(session_id)
@@ -184,6 +189,18 @@ async def ensure_fresh_access_token(
                 return None
             _set_refresh_cooldown(session.session_id)
             if (
+                isinstance(exc, OIDCFlowError)
+                and exc.error_code in _CLIENT_CONFIGURATION_ERRORS
+            ):
+                # Atlas's own registration or credentials are at fault; no user
+                # sign-in can fix that, so don't suggest one.
+                logger.warning(
+                    "Could not refresh the OIDC access token: %s. The IdP rejected"
+                    " Atlas's client registration or credentials; check the OIDC"
+                    " client configuration.",
+                    exc,
+                )
+            elif (
                 isinstance(exc, OIDCFlowError)
                 and exc.status_code is not None
                 and 400 <= exc.status_code < 500
