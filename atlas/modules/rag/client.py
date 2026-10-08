@@ -25,7 +25,10 @@ class DataSource(BaseModel):
     # missing field must not read as a classification (issue #1035). It is a
     # display badge unless the server opts in with
     # ``legacy_corpus_classifications`` (see atlas.domain.rag_corpus_classifications).
-    compliance_level: Optional[str] = None
+    compliance_level: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("compliance_level", "complianceLevel"),
+    )
 
     @field_validator("compliance_level", mode="before")
     @classmethod

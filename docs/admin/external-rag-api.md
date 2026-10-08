@@ -169,15 +169,18 @@ versions:
   backend's discovery for that user and approved for the session's
   classification. If any is not, the whole request is refused before anything
   is sent to the backend.
-- A corpus discovery does not list, or a backend whose discovery does not
-  answer, cannot be confirmed and is refused.
+- In a classified session, a corpus discovery does not list is refused, and
+  while the backend's discovery does not answer every corpus is refused with
+  the `DATA_SOURCE_UNVERIFIED` code.
 - With no level selected ("All Levels"), the model floor still applies: a
   corpus that declares its own classifications must share one with the
-  selected model.
+  selected model. A discovery outage does not block these turns, since the
+  server itself already passed the floor.
 - Corpus metadata comes from the backend, never from the client. Atlas reuses
-  a discovery answer for up to 60 seconds per user and server, and asks again
-  sooner when a requested corpus is missing from it, so a reclassified corpus
-  is re-checked within about a minute.
+  a discovery answer for up to 60 seconds per user and server, so a
+  reclassified corpus is re-checked within about a minute. When a requested
+  corpus is missing from the answer Atlas asks again, at most once every 5
+  seconds; a refresh that fails keeps the previous answer until it expires.
 
 Denials are logged with the server and corpus ids, never the classification
 labels.

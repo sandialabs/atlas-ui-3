@@ -29,6 +29,7 @@ from atlas.core.telemetry import (
 )
 from atlas.domain.errors import DataSourcePermissionError
 from atlas.domain.rag_corpus_classifications import (
+    CORPUS_METADATA_MIN_REFRESH_SECONDS,
     CorpusMetadataCache,
     corpus_classifications,
     corpus_declares_own,
@@ -415,24 +416,30 @@ class UnifiedRAGService:
         source_name: str,
         source_config: RAGSourceConfig,
         source_ids: List[str],
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """Server-owned discovery metadata for ``source_ids``, by corpus id.
 
         A fresh cached answer that lists every requested corpus is used as is;
-        otherwise the backend is asked again, so a corpus added since the last
-        discovery is found. An answer is trusted for at most
+        otherwise the backend is asked again (at most once every
+        ``CORPUS_METADATA_MIN_REFRESH_SECONDS``), so a corpus added since the
+        last discovery is found. An answer is trusted for at most
         ``CORPUS_METADATA_TTL_SECONDS``, which bounds how long a reclassified
         corpus keeps its old classifications. Corpus ids come from the request
         and are only ever looked up here -- never taken as evidence of
-        anything. Empty when the backend does not answer.
+        anything. ``None`` when there is no fresh answer: the backend's
+        discovery failed or listed nothing.
         """
-        cached = self._corpus_metadata.lookup(source_name, username)
-        if cached is not None and all(cid in cached for cid in source_ids):
+        cache = self._corpus_metadata
+        cached = cache.lookup(source_name, username)
+        if cached is not None and (
+            all(cid in cached for cid in source_ids)
+            or (cache.age(source_name, username) or 0.0) < CORPUS_METADATA_MIN_REFRESH_SECONDS
+        ):
             return cached
         client = self._get_http_client(source_name, source_config)
         data_sources = await client.discover_data_sources(username)
-        self._corpus_metadata.store(source_name, username, data_sources or [])
-        return self._corpus_metadata.lookup(source_name, username) or {}
+        cache.store(source_name, username, data_sources or [])
+        return cache.lookup(source_name, username)
 
     async def _ensure_corpora_allowed(
         self,
@@ -456,8 +463,11 @@ class UnifiedRAGService:
         only to corpora that declare their own list -- one that inherits its
         server's was covered by the server's floor check.
 
-        A corpus the backend's discovery does not list, or a backend whose
-        discovery does not answer, cannot be confirmed and is refused.
+        In a classified session a corpus the backend's discovery does not list,
+        or any corpus when discovery does not answer, cannot be confirmed and
+        is refused. Under the floor alone such a corpus is let through: the
+        server already shares a classification with the model, and refusing
+        would turn a discovery outage into an outage for unclassified chat.
         """
         if not source_ids or source_config.type != "http":
             return
@@ -471,7 +481,9 @@ class UnifiedRAGService:
                 sanitize_for_logging(source_name),
                 type(exc).__name__,
             )
-            corpora = {}
+            corpora = None
+        answered = corpora is not None
+        corpora = corpora or {}
 
         compliance_mgr = get_compliance_manager()
         denied: List[str] = []
@@ -479,7 +491,8 @@ class UnifiedRAGService:
         for corpus_id in source_ids:
             ds = corpora.get(corpus_id)
             if ds is None:
-                unconfirmed.append(corpus_id)
+                if active_level is not None:
+                    unconfirmed.append(corpus_id)
                 continue
             classifications = corpus_classifications(ds, source_config)
             if active_level is not None:
@@ -522,6 +535,13 @@ class UnifiedRAGService:
                 sanitize_for_logging(",".join(unconfirmed)),
             )
             subject, pronoun = _describe_sources(source_name, unconfirmed)
+            if not answered:
+                raise DataSourcePermissionError(
+                    f"{subject} could not be checked against the selected compliance "
+                    "level because its RAG backend did not answer. Try again later, "
+                    f"or deselect {pronoun}.",
+                    code="DATA_SOURCE_UNVERIFIED",
+                )
             raise DataSourcePermissionError(
                 f"{subject} not confirmed as approved for this conversation: its RAG "
                 f"backend did not list {pronoun}. Deselect {pronoun}, or try again later.",

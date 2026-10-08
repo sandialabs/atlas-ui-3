@@ -22,6 +22,7 @@ from atlas.core.compliance import (
 )
 from atlas.domain.errors import DataSourcePermissionError
 from atlas.domain.rag_corpus_classifications import (
+    CORPUS_METADATA_MIN_REFRESH_SECONDS,
     CorpusMetadataCache,
     corpus_classifications,
     legacy_corpus_classifications,
@@ -69,6 +70,11 @@ def test_missing_compliance_level_is_not_classified_cui():
     ds = DataSource(id="a", label="A")
     assert ds.compliance_level is None
     assert legacy_corpus_classifications(ds) is None
+
+
+def test_camel_case_legacy_level_is_read(manager):
+    ds = DataSource(**{"id": "a", "label": "A", "complianceLevel": "UUR"})
+    assert corpus_classifications(ds, _server()) == ["UUR"]
 
 
 def test_legacy_mapping_is_opt_in(manager):
@@ -235,13 +241,28 @@ async def test_corpus_unknown_to_discovery_is_denied(manager):
 async def test_unanswered_discovery_fails_closed(manager):
     backend = _Backend([])
     service = _service(backend)
-    with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="not confirmed"):
+    with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="did not answer") as exc:
         await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+    assert exc.value.code == "DATA_SOURCE_UNVERIFIED"
 
     backend.discover_data_sources.side_effect = RuntimeError("down")
-    with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="not confirmed"):
+    with _Turn("UUR"), pytest.raises(DataSourcePermissionError, match="did not answer"):
         await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
     assert backend.queried == 0
+
+
+@pytest.mark.asyncio
+async def test_floor_only_turn_survives_a_discovery_outage(manager):
+    """No level selected: the server floor passed, so an outage is not a denial."""
+    backend = _Backend([])
+    backend.discover_data_sources.side_effect = RuntimeError("down")
+    service = _service(backend)
+    token = set_model_classification_floor(["UUR"])
+    try:
+        await service.query_rag(USER, "legacy:silent", [{"role": "user", "content": "q"}])
+    finally:
+        reset_model_classification_floor(token)
+    assert backend.queried == 1
 
 
 @pytest.mark.asyncio
@@ -310,15 +331,47 @@ async def test_stale_cache_is_refreshed(manager, monkeypatch):
     assert backend.discover_data_sources.await_count == 2
 
 
+def _advance(monkeypatch, seconds):
+    clock = [CorpusMetadataCache._now() + seconds]
+    monkeypatch.setattr(CorpusMetadataCache, "_now", staticmethod(lambda: clock[0]))
+
+
 @pytest.mark.asyncio
-async def test_corpus_missing_from_cache_triggers_one_refresh(manager):
+async def test_corpus_missing_from_cache_triggers_one_refresh(manager, monkeypatch):
     backend = _Backend([_ds("old", compliance_level="ITAR")])
     service = _service(backend)
     with _Turn("ITAR"):
         await service.query_rag(USER, "legacy:old", [{"role": "user", "content": "q"}])
         backend.sources = [_ds("old", compliance_level="ITAR"), _ds("new", compliance_level="ITAR")]
+        _advance(monkeypatch, CORPUS_METADATA_MIN_REFRESH_SECONDS + 1)
         await service.query_rag(USER, "legacy:new", [{"role": "user", "content": "q"}])
     assert backend.discover_data_sources.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_unknown_corpus_cannot_force_a_refresh_per_query(manager):
+    backend = _Backend(MIXED)
+    service = _service(backend)
+    with _Turn("ITAR"):
+        for _ in range(3):
+            with pytest.raises(DataSourcePermissionError, match="did not list it"):
+                await service.query_rag(USER, "legacy:invented", [{"role": "user", "content": "q"}])
+    assert backend.discover_data_sources.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_refresh_keeps_a_fresh_answer(manager, monkeypatch):
+    backend = _Backend([_ds("doc", compliance_level="ITAR")])
+    service = _service(backend)
+    with _Turn("ITAR"):
+        await service.query_rag(USER, "legacy:doc", [{"role": "user", "content": "q"}])
+        backend.sources = []  # discovery now fails (reported as an empty list)
+        _advance(monkeypatch, CORPUS_METADATA_MIN_REFRESH_SECONDS + 1)
+        with pytest.raises(DataSourcePermissionError, match="did not list it"):
+            await service.query_rag(USER, "legacy:other", [{"role": "user", "content": "q"}])
+        # The still-fresh answer was not discarded by the failed refresh.
+        await service.query_rag(USER, "legacy:doc", [{"role": "user", "content": "q"}])
+    assert backend.queried == 2
 
 
 def test_cache_is_per_user_and_invalidates():
@@ -327,8 +380,9 @@ def test_cache_is_per_user_and_invalidates():
     assert cache.lookup("s", "b@x") is None
     assert "c" in cache.lookup("s", "a@x")
     cache.store("s", "a@x", [])  # an empty answer is not an answer
-    assert cache.lookup("s", "a@x") is None
-    cache.store("s", "a@x", [_ds("c")])
+    assert "c" in cache.lookup("s", "a@x")
+    cache.store("s", "b@x", [])
+    assert cache.lookup("s", "b@x") is None
     cache.invalidate("s")
     assert cache.lookup("s", "a@x") is None
 

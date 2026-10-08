@@ -31,6 +31,11 @@ from atlas.core.compliance import declared_classifications, narrow_classificatio
 # How long a discovery answer may stand in for a fresh one at query time. Short,
 # so a corpus reclassified by its backend is re-checked within about a minute.
 CORPUS_METADATA_TTL_SECONDS = 60.0
+# A requested corpus missing from an answer younger than this is refused
+# without asking the backend again, so repeated requests for an id the backend
+# does not know (a model's invented corpus, say) cannot force a discovery
+# round trip per query.
+CORPUS_METADATA_MIN_REFRESH_SECONDS = 5.0
 # Upper bound on cached (server, user) entries; the oldest are dropped first.
 CORPUS_METADATA_MAX_ENTRIES = 2048
 
@@ -85,7 +90,9 @@ class CorpusMetadataCache:
     Discovery is per user (the backend filters by ``as_user``), so entries are
     never shared between users. Only a non-empty answer is stored: the HTTP
     client reports a failed discovery as an empty list, and "the backend did
-    not answer" must not read as "the backend offers nothing".
+    not answer" must not read as "the backend offers nothing". An empty answer
+    leaves an existing entry alone, so a refresh that fails does not discard
+    one that is still within its TTL.
     """
 
     def __init__(
@@ -95,7 +102,7 @@ class CorpusMetadataCache:
     ) -> None:
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries
-        self._entries: "OrderedDict[Tuple[str, str], Tuple[float, Dict[str, Any]]]" = OrderedDict()
+        self._entries: OrderedDict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = OrderedDict()
 
     @staticmethod
     def _now() -> float:
@@ -105,7 +112,6 @@ class CorpusMetadataCache:
         corpora = {ds.id: ds for ds in data_sources if getattr(ds, "id", None)}
         key = (server, user or "")
         if not corpora:
-            self._entries.pop(key, None)
             return
         self._entries[key] = (self._now(), corpora)
         self._entries.move_to_end(key)
@@ -114,15 +120,23 @@ class CorpusMetadataCache:
 
     def lookup(self, server: str, user: str) -> Optional[Dict[str, Any]]:
         """The fresh discovery answer for ``(server, user)``, or ``None``."""
+        entry = self._fresh(server, user)
+        return entry[1] if entry else None
+
+    def age(self, server: str, user: str) -> Optional[float]:
+        """Seconds since the fresh answer for ``(server, user)`` was stored."""
+        entry = self._fresh(server, user)
+        return self._now() - entry[0] if entry else None
+
+    def _fresh(self, server: str, user: str) -> Optional[Tuple[float, Dict[str, Any]]]:
         key = (server, user or "")
         entry = self._entries.get(key)
         if entry is None:
             return None
-        stored_at, corpora = entry
-        if self._now() - stored_at > self.ttl_seconds:
+        if self._now() - entry[0] > self.ttl_seconds:
             del self._entries[key]
             return None
-        return corpora
+        return entry
 
     def invalidate(self, server: Optional[str] = None) -> None:
         if server is None:
@@ -133,6 +147,7 @@ class CorpusMetadataCache:
 
 
 __all__ = [
+    "CORPUS_METADATA_MIN_REFRESH_SECONDS",
     "CORPUS_METADATA_TTL_SECONDS",
     "CorpusMetadataCache",
     "corpus_classifications",
