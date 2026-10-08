@@ -49,7 +49,7 @@ export const DESKTOP_ACTIONS_MIN_WIDTH = 1080
 // problem in particular").
 export const ACTION_LABELS_MIN_WIDTH = 760
 
-const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
+const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
   const {
     user,
@@ -65,9 +65,16 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
     features,
     complianceLevelFilter,
     setComplianceLevelFilter,
+    complianceRequired,
     selectedDataSources
   } = useChat()
   const { complianceLevels } = useMarketplace()
+  // A saved level stays selectable even if the definitions failed to load or
+  // no longer list it, so the user can always clear a filter that is hiding
+  // everything; otherwise the selector would vanish with the filter active.
+  const complianceOptions = complianceLevelFilter && !complianceLevels.some(l => l.name === complianceLevelFilter)
+    ? [...complianceLevels, { name: complianceLevelFilter, description: 'Not defined by this deployment' }]
+    : complianceLevels
   const { connectionStatus, isConnected } = useWS()
   const toast = useToast()
   const [transcriptDropdownOpen, setTranscriptDropdownOpen] = useState(false)
@@ -79,8 +86,6 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
   const showDesktopActions = headerWidth >= DESKTOP_ACTIONS_MIN_WIDTH
   const showActionLabels = headerWidth >= ACTION_LABELS_MIN_WIDTH
   
-  // Extract unique compliance levels from all available tools and prompts
-  const availableComplianceLevels = complianceLevels.map(l => l.name)
 
   // Reset the compact menu once the header is wide enough for the desktop
   // cluster, so it does not spring back open if the header narrows again. The
@@ -169,6 +174,12 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
         {features?.rag && (
           <button
             onClick={onToggleRag}
+            aria-expanded={ragPanelOpen}
+            aria-haspopup="dialog"
+            aria-controls="rag-drawer"
+            aria-label={showActionLabels
+              ? undefined
+              : `Toggle Data Sources drawer${selectedDataSources?.size ? `, ${selectedDataSources.size} selected` : ''}`}
             className={`flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg transition-colors ${
               selectedDataSources?.size > 0
                 ? 'bg-blue-600 hover:bg-blue-700 text-white'
@@ -311,7 +322,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
           </div>
 
           {/* Compliance Level Dropdown */}
-          {features?.compliance_levels && availableComplianceLevels.length > 0 && (
+          {features?.compliance_levels && complianceOptions.length > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 border border-gray-600">
               <Shield className="w-4 h-4 text-blue-400" />
               <select
@@ -319,10 +330,13 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                 onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
                 className="bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 title="Select compliance level for this session"
+                aria-label="Compliance level"
               >
-                <option value="">All Levels</option>
-                {availableComplianceLevels.map(level => (
-                  <option key={level} value={level}>{level}</option>
+                {complianceRequired
+                  ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
+                  : <option value="">All Levels</option>}
+                {complianceOptions.map(level => (
+                  <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                 ))}
               </select>
             </div>
@@ -489,7 +503,7 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
               </button>
 
               {/* Compliance Level */}
-              {features?.compliance_levels && availableComplianceLevels.length > 0 && (
+              {features?.compliance_levels && complianceOptions.length > 0 && (
                 <div className="px-3 py-2 bg-gray-700 rounded-lg">
                   <div className="flex items-center gap-2 mb-2">
                     <Shield className="w-4 h-4 text-blue-400" />
@@ -499,10 +513,13 @@ const Header = ({ onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, o
                     value={complianceLevelFilter || ''}
                     onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
                     className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    aria-label="Compliance level"
                   >
-                    <option value="">All Levels</option>
-                    {availableComplianceLevels.map(level => (
-                      <option key={level} value={level}>{level}</option>
+                    {complianceRequired
+                      ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
+                      : <option value="">All Levels</option>}
+                    {complianceOptions.map(level => (
+                      <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                     ))}
                   </select>
                 </div>

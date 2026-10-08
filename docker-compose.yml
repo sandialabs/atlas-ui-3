@@ -118,6 +118,7 @@ services:
       # PostgreSQL (production / multi-user):
       # - CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@postgres:5432/atlas_chat_history
       - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
+      - FEATURE_COMPLIANCE_LEVEL_REQUIRED=false
       - FEATURE_METRICS_LOGGING_ENABLED=false
       - FEATURE_SPLASH_SCREEN_ENABLED=false
       - FEATURE_DOMAIN_WHITELIST_ENABLED=false

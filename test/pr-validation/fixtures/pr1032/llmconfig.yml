@@ -1,0 +1,24 @@
+models:
+  model-x:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/scripted-mock"
+    api_key: "mock"
+    description: "Approved for UUR, ITAR and ECI"
+    allowed_data_classifications: [UUR, ITAR, ECI]
+  model-y:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/scripted-mock"
+    api_key: "mock"
+    description: "Approved for UUR only"
+    allowed_data_classifications: [UUR]
+  legacy-itar:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/scripted-mock"
+    api_key: "mock"
+    description: "Legacy single compliance_level"
+    compliance_level: ITAR
+  undeclared:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/scripted-mock"
+    api_key: "mock"
+    description: "Declares nothing"

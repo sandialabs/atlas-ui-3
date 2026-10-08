@@ -13,6 +13,7 @@ import {
   withGatewayModel,
   rememberTeamLabel,
 } from '../utils/gatewayModels'
+import { isComplianceAccessible } from '../utils/complianceAccess'
 
 const mocks = vi.hoisted(() => ({ marketplace: null }))
 
@@ -161,19 +162,32 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
   })
 })
 
-describe('admin-allowlisted gateway models with their own compliance level', () => {
+describe('admin-allowlisted gateway models with their own classifications', () => {
   // A gateway whose llmconfig `models` allowlist gives gpt-4o-mini its own
-  // level; the others inherit the gateway's.
+  // level and llama explicit classifications; claude-sonnet inherits the
+  // gateway's level.
   const LEVELED_GATEWAY = {
     ...GATEWAY,
     compliance_level: 'Internal',
-    model_compliance_levels: { 'gpt-4o-mini': 'Public', 'claude-sonnet': 'Internal' },
-    compliance_levels: ['Internal', 'Public'],
+    model_compliance_levels: { 'gpt-4o-mini': 'Public', 'claude-sonnet': 'Internal', llama: null },
+    compliance_levels: ['Internal', 'Public', null],
+    model_allowed_data_classifications: {
+      'gpt-4o-mini': ['Public'],
+      'claude-sonnet': ['Internal'],
+      llama: ['Public', 'Internal'],
+    },
+    model_classifications: [['Public'], ['Internal'], ['Public', 'Internal']],
   }
   const LEVELED_MODELS = { models: [
-    { name: 'enterprise::team-alpha::gpt-4o-mini', model_id: 'gpt-4o-mini', label: 'gpt-4o-mini', compliance_level: 'Public' },
-    { name: 'enterprise::team-alpha::claude-sonnet', model_id: 'claude-sonnet', label: 'claude-sonnet', compliance_level: 'Internal' },
+    { name: 'enterprise::team-alpha::gpt-4o-mini', model_id: 'gpt-4o-mini', label: 'gpt-4o-mini', compliance_level: 'Public', allowed_data_classifications: ['Public'] },
+    { name: 'enterprise::team-alpha::claude-sonnet', model_id: 'claude-sonnet', label: 'claude-sonnet', compliance_level: 'Internal', allowed_data_classifications: ['Internal'] },
+    { name: 'enterprise::team-alpha::llama', model_id: 'llama', label: 'llama', allowed_data_classifications: ['Public', 'Internal'] },
   ] }
+  // Internal's allowed_with lists Public, which no longer widens access.
+  const LEVELS = [
+    { name: 'Public', aliases: [], allowed_with: ['Public'] },
+    { name: 'Internal', aliases: [], allowed_with: ['Internal', 'Public'] },
+  ]
 
   beforeEach(() => {
     localStorage.clear()
@@ -182,8 +196,11 @@ describe('admin-allowlisted gateway models with their own compliance level', () 
       if (parsed.pathname.endsWith('/teams')) return { ok: true, status: 200, json: async () => TEAMS }
       return { ok: true, status: 200, json: async () => LEVELED_MODELS }
     })
-    // Only an exact match is accessible, which is enough to tell levels apart.
-    mocks.marketplace = { isComplianceAccessible: (filter, level) => level === filter }
+    // The real shared rule, as MarketplaceContext binds it.
+    mocks.marketplace = {
+      isComplianceAccessible: (filter, classifications) =>
+        isComplianceAccessible(LEVELS, filter, classifications),
+    }
   })
   afterEach(() => {
     mocks.marketplace = null
@@ -201,6 +218,13 @@ describe('admin-allowlisted gateway models with their own compliance level', () 
       .toBeNull()
   })
 
+  it('carries the per-model classifications onto a saved selection', () => {
+    expect(gatewayModelEntry('enterprise::t1::llama', [LEVELED_GATEWAY], 'a@x.com').allowed_data_classifications)
+      .toEqual(['Public', 'Internal'])
+    expect(gatewayModelEntry('enterprise::t1::gpt-4o-mini', [LEVELED_GATEWAY], 'a@x.com').allowed_data_classifications)
+      .toEqual(['Public'])
+  })
+
   it('keeps the gateway listed when one model passes and hides the others', async () => {
     lastTeam('team-alpha')
     setup({
@@ -210,7 +234,23 @@ describe('admin-allowlisted gateway models with their own compliance level', () 
     })
     fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
     expect(await screen.findByRole('button', { name: /gpt-4o-mini/ })).toHaveTextContent('Public')
+    expect(screen.getByRole('button', { name: /llama/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /claude-sonnet/ })).toBeNull()
+  })
+
+  it('does not widen Internal to Public-only models through allowed_with', async () => {
+    lastTeam('team-alpha')
+    setup({
+      gateways: [LEVELED_GATEWAY],
+      features: { compliance_levels: true },
+      complianceLevelFilter: 'Internal',
+    })
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    expect(await screen.findByRole('button', { name: /claude-sonnet/ })).toBeInTheDocument()
+    // Classified for both Public and Internal: listed.
+    expect(screen.getByRole('button', { name: /llama/ })).toBeInTheDocument()
+    // Public-only: hidden even though Internal's allowed_with lists Public.
+    expect(screen.queryByRole('button', { name: /gpt-4o-mini/ })).toBeNull()
   })
 
   it('hides the gateway when none of its models pass the filter', () => {

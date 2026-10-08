@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-05
+
+### Features
+- **#985:** Publish linux/arm64 container images alongside linux/amd64 on GHCR and Quay, enabling native execution on Apple Silicon and arm64 Kubernetes nodes. PR image builds remain amd64-only.
+- **#1002:** Replace per-PR edits to `CHANGELOG.md` with small `changes/<id>.<type>.md`
+  fragments so independent PRs stop conflicting in the same region at the top of
+  the changelog. The weekly and stabilization release workflows compose the
+  fragments into `## [Unreleased]` grouped by type before reshaping that heading
+  into a release, CI validates fragment names and types and rejects direct
+  `CHANGELOG.md` edits on normal PRs, and a fragment is added to the PR itself so
+  release notes stay reviewed.
+
+### Fixes
+- **#1005:** Fixed stale parallel-run conversations after a WebSocket reconnect. A reconnect now reloads missed activity for the open server-saved conversation only when something may have changed, then continues refreshing until the run finishes -- without navigating away and back, and without clearing the canvas, session files, or the user's current workspace.
+- **#1008:** Delegated credentials (MCP servers with `auth_type: delegated`, LiteLLM team gateways) now use the user's newest login session with a usable token; an older session whose IdP session had ended made delegation fail with "Please sign in again" even right after a fresh sign-in.
+
+### Internal
+- **#1020:** Parallelized CI image builds and test jobs, removed the redundant production-mode frontend run, kept the production-mode e2e run (debug mode changes auth behaviour), and moved the non-blocking reverse-order test off the pull-request path. Operations note: branch protection for `main` must replace the retired `build-and-test` check with `ci-test`, `production-image`, and `runtime-only-image`; otherwise PRs wait on a check that never reports.
+
+### PR #1003 - 2026-10-02
+- Replace expected delegated MCP startup discovery HTTP 401 errors with warnings explaining the lack of a user session and the authenticated tool-discovery retry; preserve other failure diagnostics (closes #996).
+
 ### PR #1001 - 2026-10-02
 - Follow-up to #1000: MCP OAuth checks the host httpx actually connects to, so Unicode-dot spellings (`169。254。169。254`, `a．localhost`) can no longer slip past the internal-address refusal; `testserver` no longer gets loopback trust in production; adds a refresh test and corrects #1000's breaking-change note (Atlas sessions last to `OIDC_SESSION_MAX_AGE_SECONDS`; access-token refresh and discovered-endpoint delegation are what stop).
 

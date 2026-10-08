@@ -267,6 +267,26 @@ class ConfigManager:
 
         return self._llm_config
 
+    @staticmethod
+    def _validate_data_classifications(compliance_mgr, resource, context: str) -> None:
+        """Canonicalize ``allowed_data_classifications`` on one config object.
+
+        Also notes the deprecated ``compliance_level`` when both are set: the
+        list wins, so the legacy field is ignored for access decisions.
+        """
+        allowed = getattr(resource, "allowed_data_classifications", None)
+        if allowed is None:
+            return
+        resource.allowed_data_classifications = compliance_mgr.validate_classifications(
+            allowed, context=context
+        )
+        if getattr(resource, "compliance_level", None):
+            logger.warning(
+                "Both allowed_data_classifications and the deprecated compliance_level "
+                "are set %s; allowed_data_classifications is used. Remove compliance_level.",
+                context,
+            )
+
     def _validate_llm_compliance_levels(self):
         """Validate compliance levels for all LLM models."""
         try:
@@ -283,6 +303,9 @@ class ConfigManager:
                     )
                     # Update to canonical name or None if invalid
                     model_config.compliance_level = validated
+                self._validate_data_classifications(
+                    compliance_mgr, model_config, f"for LLM model '{model_name}'"
+                )
             # A gateway's level applies to every model reached through it,
             # unless an allowlisted model sets its own.
             for gateway_name, gateway_config in self._llm_config.litellm_gateways.items():
@@ -291,6 +314,9 @@ class ConfigManager:
                         gateway_config.compliance_level,
                         context=f"for LiteLLM gateway '{gateway_name}'"
                     )
+                self._validate_data_classifications(
+                    compliance_mgr, gateway_config, f"for LiteLLM gateway '{gateway_name}'"
+                )
                 for model_id, model_entry in gateway_config.models.items():
                     if model_entry.compliance_level:
                         validated = compliance_mgr.validate_compliance_level(
@@ -301,6 +327,11 @@ class ConfigManager:
                         # a static model; it must not inherit the gateway's.
                         model_entry._invalid_compliance_level = validated is None
                         model_entry.compliance_level = validated
+                    self._validate_data_classifications(
+                        compliance_mgr,
+                        model_entry,
+                        f"for model '{model_id}' of LiteLLM gateway '{gateway_name}'",
+                    )
         except Exception as e:
             logger.warning(f"Could not validate LLM compliance levels: {e}")
 
@@ -373,6 +404,7 @@ class ConfigManager:
                         transport=source.transport,
                         auth_token=source.auth_token,
                         compliance_level=source.compliance_level,
+                        allowed_data_classifications=source.allowed_data_classifications,
                     )
 
                 self._rag_mcp_config = MCPConfig(servers=mcp_servers)
@@ -446,6 +478,9 @@ class ConfigManager:
                         source_name,
                         level
                     )
+                self._validate_data_classifications(
+                    compliance_mgr, source_config, f"for RAG source '{source_name}'"
+                )
         except Exception as e:
             logger.debug("Compliance validation skipped for RAG sources: %s", e)
 
@@ -633,6 +668,9 @@ class ConfigManager:
                     )
                     # Update to canonical name or None if invalid
                     server_config.compliance_level = validated
+                self._validate_data_classifications(
+                    compliance_mgr, server_config, f"for {config_type} server '{server_name}'"
+                )
         except Exception as e:
             logger.warning(f"Could not validate {config_type} compliance levels: {e}")
 

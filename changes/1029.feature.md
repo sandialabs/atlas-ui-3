@@ -1,0 +1,1 @@
+Operators can require a concrete compliance level with `FEATURE_COMPLIANCE_LEVEL_REQUIRED=true` (alongside `FEATURE_COMPLIANCE_LEVELS_ENABLED`): the header selector drops "All Levels" and starts on `COMPLIANCE_DEFAULT_LEVEL` (or the first defined level), and the server rejects chat turns that carry no valid compliance level.

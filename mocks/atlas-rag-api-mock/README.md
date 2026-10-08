@@ -254,6 +254,18 @@ Users can also be registered or updated at runtime via `POST /admin/users` (e.g.
    In the expanded **References** section, each entry shows the underlying
    `Section.text` snippet that produced the citation.
 
+## Per-Corpus Classification Smoke Test
+
+`corpus_classification_smoke.py` drives Atlas's real `UnifiedRAGService`
+against a running mock, with and without `legacy_corpus_classifications`, on
+both API versions, and exits non-zero on any unexpected allow or deny:
+
+```bash
+ATLAS_RAG_MOCK_PORT=8002 ATLAS_RAG_SHARED_KEY=mock-key python mocks/atlas-rag-api-mock/main.py &
+PYTHONPATH=. python mocks/atlas-rag-api-mock/corpus_classification_smoke.py \
+    --url http://127.0.0.1:8002 --key mock-key
+```
+
 ## API Docs
 
 When the service is running, visit:

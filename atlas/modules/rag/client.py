@@ -3,7 +3,7 @@
 import re
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 # Response shapes a v2 RAG backend can return. ``raw`` hands back retrieved
 # evidence for the caller's LLM to reason over; ``synthesized`` hands back an
@@ -17,7 +17,40 @@ class DataSource(BaseModel):
     """Represents a RAG data source with compliance information."""
     id: str
     label: str
-    compliance_level: str = "CUI"
+    # The backend's legacy per-corpus level. ``None`` when it was not sent: a
+    # missing field must not read as a classification (issue #1035). It is a
+    # display badge unless the server opts in with
+    # ``legacy_corpus_classifications`` (see atlas.domain.rag_corpus_classifications).
+    compliance_level: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("compliance_level", "complianceLevel"),
+    )
+
+    @field_validator("compliance_level", mode="before")
+    @classmethod
+    def _coerce_compliance_level(cls, v):
+        # A non-string level is unreadable; keep the field present but empty
+        # so the legacy mapping approves the corpus for nothing.
+        if v is None or isinstance(v, str):
+            return v
+        return ""
+
+    # Optional explicit list (issue #1032); narrows the server's list. Backends
+    # may send it in camelCase, like the MCP discovery contract.
+    allowed_data_classifications: Optional[List[str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("allowed_data_classifications", "allowedDataClassifications"),
+    )
+
+    @field_validator("allowed_data_classifications", mode="before")
+    @classmethod
+    def _coerce_classifications(cls, v):
+        # The shared rule (atlas.core.compliance.coerce_classifications): a
+        # malformed value approves the corpus for nothing instead of failing
+        # validation, which would hide every corpus on the server.
+        from atlas.core.compliance import coerce_classifications
+
+        return coerce_classifications(v)
     description: str = ""
     # Advertised by v2 discovery so a backend can declare, per source, which
     # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).

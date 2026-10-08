@@ -84,6 +84,7 @@ class AtlasClient:
         streaming: bool = False,
         quiet: bool = False,
         raise_on_llm_error: bool = False,
+        compliance_level: Optional[str] = None,
     ) -> ChatResult:
         """
         Send a chat message and return the result.
@@ -106,6 +107,10 @@ class AtlasClient:
                 error text. Opt-in for the CLI (``atlas-chat`` exits non-zero);
                 library callers keep the graceful ChatResult behavior by
                 default.
+            compliance_level: Compliance level for the turn (same meaning as
+                the UI's compliance selector). Required when the deployment
+                sets FEATURE_COMPLIANCE_LEVEL_REQUIRED; ignored when compliance
+                levels are disabled.
 
         Returns:
             ChatResult with assistant message, tool calls, files, etc.
@@ -157,6 +162,7 @@ class AtlasClient:
             agent_max_steps=max_steps,
             user_email=user_email,
             temperature=temperature,
+            compliance_level=compliance_level,
             # CLI/dev-machine: the operator who set FEATURE_FINETUNE_CAPTURE_ENABLED
             # is the consenting party, so the system flag alone enables capture
             # (no per-user consent record, which the CLI has no way to set).

@@ -57,7 +57,7 @@ from atlas.modules.config.config_manager import resolve_env_var
 from atlas.modules.config.litellm_gateway_models import parse_gateway_model_key, resolve_gateway_ref
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 
-from .litellm_gateway_client import get_gateway_client
+from .litellm_gateway_client import get_gateway_client, mint_delegated_llm_token
 from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse, split_provider
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
@@ -799,12 +799,26 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         """Return the LiteLLM model id and call kwargs for one LLM call.
 
         For a team-scoped LiteLLM gateway model this also confirms the user
-        belongs to the team and adds the team header and bearer token, which
-        needs network I/O the synchronous kwargs builder cannot do.
+        belongs to the team and adds the team header and bearer token, and for
+        a model with ``api_key_source: "delegated"`` it obtains the user's
+        delegated token: network I/O the synchronous kwargs builder cannot do.
         """
         litellm_model = self._get_litellm_model_name(model_name)
-        model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
         ref = resolve_gateway_ref(self.llm_config, model_name)
+        model_config = lookup_model_config(self.llm_config, model_name) if ref is None else None
+        if model_config is not None and getattr(model_config, "api_key_source", "system") == "delegated":
+            token = await mint_delegated_llm_token(
+                user_email, model_config.delegation, endpoint=f"Model '{model_name}'", actor=f"llm:{model_name}"
+            )
+            model_kwargs = self._get_model_kwargs(
+                model_name, temperature, user_email=user_email, delegated_api_key=token
+            )
+            # Always the configured endpoint, as for gateways: the provider-URL
+            # heuristic in _get_model_kwargs skips api_base for URLs that merely
+            # mention a provider, which would send the user's token elsewhere.
+            model_kwargs["api_base"] = model_config.model_url
+        else:
+            model_kwargs = self._get_model_kwargs(model_name, temperature, user_email=user_email)
         if ref is not None:
             # Always the gateway: the provider-URL heuristic in
             # _get_model_kwargs skips api_base for URLs that merely mention a
@@ -915,7 +929,11 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         return value
 
     def _get_model_kwargs(
-        self, model_name: str, temperature: Optional[float] = None, user_email: Optional[str] = None
+        self,
+        model_name: str,
+        temperature: Optional[float] = None,
+        user_email: Optional[str] = None,
+        delegated_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get LiteLLM kwargs for a specific model."""
         model_config = self._require_model_config(model_name)
@@ -959,6 +977,15 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         elif api_key_source == "globus":
             globus_scope = getattr(model_config, "globus_scope", None)
             api_key = self._resolve_globus_api_key(model_name, globus_scope, user_email)
+        elif api_key_source == "delegated":
+            # Obtained per call by _resolve_call_target. Never send a delegated
+            # model without it: LiteLLM's SDK would fall back to the server's
+            # own provider key.
+            if not delegated_api_key:
+                raise ValueError(
+                    f"Model '{model_name}' uses delegated authorization, but no delegated token was obtained."
+                )
+            api_key = delegated_api_key
         else:
             # Set API key - resolve environment variables
             try:

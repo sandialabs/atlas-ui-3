@@ -1,11 +1,12 @@
 """Configuration API routes."""
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
 
 from atlas.core.auth import is_user_in_group
+from atlas.core.compliance import declared_classifications
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
@@ -106,13 +107,28 @@ def _atlas_tools_info(
         "help_email": "",
         # The tools-panel compliance filter hides any server with a falsy
         # compliance_level once a compliance level is selected (strict mode).
-        # Mark the built-in server "Public" so it stays selectable; the RAG
+        # Mark the built-in server "Public" for clients that filter on it; the
+        # web UI exempts this server from the filter outright, since Public is
+        # not in the allowlist of the stricter levels. The RAG
         # *sources* search reads are still compliance-filtered independently in
         # the RAG panel and at query time, so this does not widen data access.
         "compliance_level": "Public",
         "auth_type": "none",
         "auth_required": False,
     }
+
+
+def _add_classification_fields(model_info: Dict[str, Any], model_config: Any) -> None:
+    """Expose a model's legacy level and its effective classifications.
+
+    ``allowed_data_classifications`` is what the client filters on (issue
+    #1032); ``compliance_level`` stays for older clients and the badge.
+    """
+    if model_config.compliance_level:
+        model_info["compliance_level"] = model_config.compliance_level
+    classifications = declared_classifications(model_config)
+    if classifications is not None:
+        model_info["allowed_data_classifications"] = classifications
 
 
 @router.get("/banners")
@@ -175,8 +191,8 @@ async def get_config_shell(
             "name": model_name,
             "description": model_config.description,
         }
-        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
-            model_info["compliance_level"] = model_config.compliance_level
+        if app_settings.feature_compliance_levels_enabled:
+            _add_classification_fields(model_info, model_config)
         api_key_source = getattr(model_config, "api_key_source", "system")
         if api_key_source == "user":
             model_info["api_key_source"] = "user"
@@ -212,6 +228,7 @@ async def get_config_shell(
             "chat_history_save_modes": ["none", "local", "server"] if app_settings.feature_chat_history_enabled else [],
             "custom_prompts": app_settings.custom_prompts_effective,
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "compliance_level_required": app_settings.compliance_level_required_effective,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
             "globus_auth": app_settings.feature_globus_auth_enabled,
@@ -383,6 +400,7 @@ async def get_config(
                         'short_description': server_config.get('short_description', server_config.get('description', f'{server_name} tools')),
                         'help_email': server_config.get('help_email', ''),
                         'compliance_level': server_config.get('compliance_level'),
+                        'allowed_data_classifications': declared_classifications(server_config),
                         'auth_type': auth_type,
                         'auth_required': auth_required
                     })
@@ -400,7 +418,8 @@ async def get_config(
                         'author': server_config.get('author', 'Unknown'),
                         'short_description': server_config.get('short_description', f'{server_name} custom prompts'),
                         'help_email': server_config.get('help_email', ''),
-                        'compliance_level': server_config.get('compliance_level')
+                        'compliance_level': server_config.get('compliance_level'),
+                        'allowed_data_classifications': declared_classifications(server_config),
                     })
 
     # Read help page content from a markdown file (with legacy JSON fallback)
@@ -491,9 +510,9 @@ async def get_config(
             "name": model_name,
             "description": model_config.description,
         }
-        # Include compliance_level if feature is enabled
-        if app_settings.feature_compliance_levels_enabled and model_config.compliance_level:
-            model_info["compliance_level"] = model_config.compliance_level
+        # Include compliance fields if feature is enabled
+        if app_settings.feature_compliance_levels_enabled:
+            _add_classification_fields(model_info, model_config)
         # Include api_key_source so frontend knows which models need user keys
         api_key_source = getattr(model_config, "api_key_source", "system")
         if api_key_source == "user":
@@ -570,6 +589,7 @@ async def get_config(
             "chat_history_save_modes": ["none", "local", "server"] if app_settings.feature_chat_history_enabled else [],
             "custom_prompts": app_settings.custom_prompts_effective,
             "compliance_levels": app_settings.feature_compliance_levels_enabled,
+            "compliance_level_required": app_settings.compliance_level_required_effective,
             "splash_screen": app_settings.feature_splash_screen_enabled,
             "file_content_extraction": app_settings.feature_file_content_extraction_enabled,
             "globus_auth": app_settings.feature_globus_auth_enabled,
@@ -641,6 +661,8 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
     try:
         from atlas.core.compliance import get_compliance_manager
         compliance_mgr = get_compliance_manager()
+        app_settings = app_factory.get_config_manager().app_settings
+        required = app_settings.compliance_level_required_effective
 
         # Return level definitions for frontend use
         levels = []
@@ -655,14 +677,23 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
         return {
             "levels": levels,
             "mode": compliance_mgr.mode,
-            "all_level_names": compliance_mgr.get_all_levels()
+            "all_level_names": compliance_mgr.get_all_levels(),
+            # Required-level mode (features.compliance_level_required in
+            # /api/config): the UI offers no "All Levels" option and starts on
+            # default_level, a defined level, when nothing valid is saved.
+            "default_level": (
+                compliance_mgr.resolve_default_level(app_settings.compliance_default_level)
+                if required
+                else None
+            ),
         }
     except Exception as e:
         logger.error(f"Error getting compliance levels: {e}", exc_info=True)
         return {
             "levels": [],
             "mode": "explicit_allowlist",
-            "all_level_names": []
+            "all_level_names": [],
+            "default_level": None,
         }
 
 

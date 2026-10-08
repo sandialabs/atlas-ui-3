@@ -4,6 +4,8 @@ import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
+import { useComplianceLevels } from '../hooks/chat/useComplianceLevels'
+import { isComplianceAccessible, classificationsOf, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel, COMPLIANCE_EXEMPT } from '../utils/complianceAccess'
 import { useUserPrompts } from '../hooks/useUserPrompts'
 import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
@@ -20,7 +22,7 @@ import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
-import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
+import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -44,6 +46,26 @@ const LIVE_REFRESH_FETCH_TIMEOUT_MS = 15000
 // temporary server outage should recover within a conversation, not after it.
 const LIVE_REFRESH_MAX_BACKOFF_MS = 30000
 const THINKING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+// Read one conversation record. The reconnect resync and the joined-run live
+// poll hit the same endpoint under the same hang guard, so the timeout -- and
+// any caller-supplied abort signal -- live in one place. `AbortSignal.any`
+// combines them when available; otherwise the caller's signal wins, since a
+// stale response from a view that moved on is the more important one to cut.
+const fetchConversationRecord = async (id, { signal } = {}) => {
+	const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+		? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
+		: undefined
+	const signals = [signal, timeoutSignal].filter(Boolean)
+	const combined = signals.length === 0
+		? undefined
+		: signals.length === 1
+			? signals[0]
+			: (typeof AbortSignal.any === 'function' ? AbortSignal.any(signals) : signals[0])
+	const res = await fetch(`/api/conversations/${id}`, combined ? { signal: combined } : undefined)
+	if (!res.ok) throw new Error(`conversation refresh failed: ${res.status}`)
+	return res.json()
+}
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
 // model's tool output. The renderer's own flags all start with an underscore
@@ -83,7 +105,7 @@ const MUTATING_SELECTION_ACTIONS = [
 	'toggleTool', 'addTools', 'removeTools',
 	'togglePrompt', 'addPrompts', 'removePrompts', 'setSinglePrompt',
 	'makePromptActive', 'clearActivePrompt', 'clearToolsAndPrompts',
-	'toggleDataSource', 'addDataSources', 'clearDataSources',
+	'toggleDataSource', 'addDataSources', 'removeDataSources', 'clearDataSources',
 	'setRagEnabled', 'toggleRagEnabled',
 ]
 
@@ -91,6 +113,11 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections()
+	const complianceEnabled = !!config.features?.compliance_levels
+	const { complianceLevels, complianceMode, defaultComplianceLevel } = useComplianceLevels(complianceEnabled)
+	// Required-level mode: there is no "All Levels" state; a session always
+	// carries a defined level and the server refuses a turn without one.
+	const complianceRequired = complianceEnabled && !!config.features?.compliance_level_required
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
@@ -210,6 +237,7 @@ export const ChatProvider = ({ children }) => {
 	// it was built.
 	const activeConversationIdRef = useRef(null)
 	activeConversationIdRef.current = activeConversationId
+	const reconnectResyncGenerationRef = useRef(0)
 	const localSaveTimerRef = useRef(null)
 
 	// Method to add a file to attachments
@@ -245,6 +273,49 @@ export const ChatProvider = ({ children }) => {
 	const toast = useToast()
 	const { currentModel } = config
 	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled } = selections
+
+	// Compliance level of a selection key, for the compliance filter: null when
+	// the resource is untagged, undefined when the key cannot be placed (see
+	// keysExcludedByCompliance). The built-in server is exempt.
+	const mcpKeyLevel = useCallback(
+		servers => key => {
+			const server = findServerConfigForMcpKey(key, servers)
+			if (!server) return undefined
+			if (server.server === ATLAS_SERVER) return COMPLIANCE_EXEMPT
+			return classificationsOf(server)
+		},
+		[]
+	)
+	const ragKeyLevel = useCallback(key => {
+		const sep = key.indexOf(':')
+		if (sep < 0) return undefined
+		const server = config.ragServers.find(s => s.server === key.slice(0, sep))
+		const source = server?.sources?.find(src => src.id === key.slice(sep + 1))
+		return source ? classificationsOf(source) : undefined
+	}, [config.ragServers])
+	// The filter level that actually applies: none when the feature is off.
+	const activeComplianceFilter = complianceEnabled ? selections.complianceLevelFilter : null
+
+	// A persisted filter naming a level the deployment no longer defines would
+	// hide every resource (an unknown level allows nothing) while the header
+	// select, having no such option, displays "All Levels". Drop it once the
+	// definitions are known so what the selector shows is what applies.
+	// When a level is required there is no "no filter" state to drop to: an
+	// unset or undefined level is replaced with the deployment's default (a
+	// defined level), or the first defined level if the default is not one.
+	const { complianceLevelFilter: storedComplianceFilter, setComplianceLevelFilter: storeComplianceFilter } = selections
+	useEffect(() => {
+		if (complianceLevels.length === 0) return
+		if (storedComplianceFilter && complianceLevels.some(l => l.name === storedComplianceFilter)) return
+		if (complianceRequired) {
+			const fallback = complianceLevels.some(l => l.name === defaultComplianceLevel)
+				? defaultComplianceLevel
+				: complianceLevels[0].name
+			storeComplianceFilter(fallback)
+		} else if (storedComplianceFilter) {
+			storeComplianceFilter(null)
+		}
+	}, [storedComplianceFilter, complianceLevels, complianceRequired, defaultComplianceLevel, storeComplianceFilter])
 
 	useEffect(() => {
 		if (!config.configReady || customPromptsEnabled) return
@@ -817,7 +888,48 @@ export const ChatProvider = ({ children }) => {
 		// A fine-tune correction (issue #622) narrows the turn to exactly one tool
 		// via selectedToolsOverride, so honor that list for the outgoing payload
 		// instead of the persisted selection.
-		const toolsToSend = selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools]
+		// The compliance filter hides what it excludes, so nothing it excludes
+		// may go out either: a selection persisted from before the filter, one
+		// restored from a workspace, or one whose server changed level would
+		// otherwise ride along invisibly. The MCP tool path has no server-side
+		// compliance check, so this is the boundary for tools.
+		// Under a filter only what can be placed *and* is allowed goes out. A
+		// key whose server or source is not known yet (config still loading)
+		// is left to the stale-key and prune effects, but is not sent
+		// unjudged. If the level definitions are unavailable (fetch failed
+		// or in flight) the pickers deny everything, so only exempt keys go.
+		// Required-level mode: a turn without a level would be refused by the
+		// server, so refuse it here with a reason the user can act on. Reached
+		// only before the level definitions load (or if they failed to load);
+		// the effect above picks a level as soon as they are known.
+		if (complianceRequired && !activeComplianceFilter) {
+			// With no definitions the header has no selector to point at.
+			toast.error(complianceLevels.length === 0
+				? 'A compliance level is required, but the compliance levels could not be loaded. Reload the page or contact an administrator.'
+				: 'A compliance level is required. Select a compliance level before sending.')
+			return false
+		}
+		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
+		const dropExcluded = (keys, levelOf) => {
+			if (!activeComplianceFilter) return keys
+			return keys.filter(k => {
+				const level = levelOf(k)
+				if (level === COMPLIANCE_EXEMPT) return true
+				if (level === undefined || !levelsReady) return false
+				return isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
+			})
+		}
+		// Never send a turn to a model the active level excludes. The picker
+		// flags it; this is reached only when no allowed model exists to
+		// switch to (the prune effect moves off it otherwise).
+		if (levelsReady && !isModelComplianceAccessible(config.models, complianceLevels, activeComplianceFilter, currentModel)) {
+			toast.error(`${currentModel} is outside the ${activeComplianceFilter} compliance level. Choose an allowed model or change the compliance level.`)
+			return false
+		}
+		const toolsToSend = dropExcluded(
+			selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools],
+			mcpKeyLevel(config.tools)
+		)
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
@@ -832,7 +944,7 @@ export const ChatProvider = ({ children }) => {
 		const searchToolSelected = toolsToSend.some(t => migrateToolName(t) === SEARCH_TOOL)
 		const ragActivated = ragEnabled || hasSelectedSources || searchToolSelected
 		const dataSourcesToSend = ragActivated
-			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
+			? dropExcluded(hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds(), ragKeyLevel)
 			: []
 		// When the RAG toggle alone expanded the list to "everything I can
 		// reach", the sources were not hand-picked -- the backend must not
@@ -872,7 +984,7 @@ export const ChatProvider = ({ children }) => {
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
-			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : activePrompts,
+			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : dropExcluded(activePrompts, mcpKeyLevel(config.prompts)),
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
@@ -924,6 +1036,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			toast.error('Not connected. Waiting to reconnect before sending.')
 			return false
 		}
+		// A reconnect snapshot fetched before this turn must not erase it.
+		reconnectResyncGenerationRef.current += 1
 		// Sending a turn is the only user action that re-binds a conversation to
 		// the active workspace; opening one must not. Only once the frame is
 		// actually on the wire -- a send that failed must not leave a durable
@@ -980,7 +1094,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, mcpKeyLevel, ragKeyLevel])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -1134,11 +1248,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer])
 
 	// Load a saved conversation from history into the chat view
-	const loadSavedConversation = useCallback(async (conversationData) => {
+	const loadSavedConversation = useCallback(async (conversationData, { origin = 'open' } = {}) => {
 		if (!conversationData || !conversationData.messages) return
+		// A reconnect resync is not navigation: the same conversation stays on
+		// screen, so it must not dismiss a pending undo offer, wipe canvas /
+		// custom-UI / session files, drop an agent's pending question, re-bind
+		// the workspace, or ask for a run snapshot the socket's own
+		// `runs_snapshot` already carries. It only replaces the transcript and
+		// re-arms the joined view.
+		const reconnecting = origin === 'reconnect'
 
 		// Whatever was on offer refers to a chat that is no longer on screen.
-		invalidateUndoOffer()
+		if (!reconnecting) invalidateUndoOffer()
 
 		// Clear current state. The per-turn flags and the token buffer belong
 		// to the conversation being left: a run there continues (issue #884),
@@ -1152,7 +1273,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setIsSynthesizing(false)
 		setIsAgentRunning(false)
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
-		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
+		if (agent?.setAgentPendingQuestion && !reconnecting) agent.setAgentPendingQuestion(null)
 		// Opened while its run is executing: the live stream is not replayed,
 		// so remember to reload from the store once the run ends. The record's
 		// own `in_flight` flag decides this, not the run tracker: the snapshot
@@ -1173,8 +1294,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (runInFlight) {
 			// Ask for a fresh run snapshot: this tab may not have received
 			// `run_started`/`run_status` for a run its tracker has never seen,
-			// and the reload-on-run-end below keys off that tracker.
-			sendMessage?.({ type: 'list_runs', conversation_id: conversationData.id })
+			// and the reload-on-run-end below keys off that tracker. A reconnect
+			// is the exception: the socket answers the new connection with its
+			// own `runs_snapshot`, so asking again would be a duplicate.
+			if (!reconnecting) sendMessage?.({ type: 'list_runs', conversation_id: conversationData.id })
 			// The run already ended while the view was being loaded: schedule the
 			// same delayed refresh the run-end path runs, so the store's final
 			// rows are appended once the save has settled.
@@ -1214,9 +1337,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				joinedRunTimerRef.current = setTimeout(tick, RUN_END_RELOAD_GRACE_MS)
 			}
 		}
-		files.setCanvasContent('')
-		files.setCustomUIContent(null)
-		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
+		if (!reconnecting) {
+			files.setCanvasContent('')
+			files.setCustomUIContent(null)
+			files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
+		}
 
 		// Track the loaded conversation. The ref is set synchronously too: the
 		// replay frame answering the restore below is tagged with the run's ids
@@ -1286,18 +1411,77 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Best effort: a workspace that has since been deleted is silently
 		// skipped, and if the list has not loaded yet the switch is deferred
 		// until it does. A conversation with no recorded workspace leaves the
-		// currently active workspace untouched.
+		// currently active workspace untouched. A reconnect skips this whole
+		// block: the conversation did not change, and a transient socket blip
+		// must not yank the user back to the stored workspace after they
+		// deliberately switched or cleared it.
 		const meta = conversationData.metadata || {}
-		// Remember the binding as loaded so the local autosave re-persists *this*
-		// conversation's workspace rather than whatever is active at save time.
-		conversationWorkspaceIdRef.current = meta.workspace_id || null
-		restoreWorkspace(meta.workspace_id)
+		if (!reconnecting) {
+			// Remember the binding as loaded so the local autosave re-persists *this*
+			// conversation's workspace rather than whatever is active at save time.
+			conversationWorkspaceIdRef.current = meta.workspace_id || null
+			restoreWorkspace(meta.workspace_id)
+		}
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
 		// new token frame rebuilds, so the objects themselves would tear this
 		// callback down -- and re-subscribe everything that depends on it -- on
 		// every streaming frame.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
+
+	// A new socket cannot receive the old run's stream. Reuse the reopen path
+	// to replace missed rows and arm the joined view's polling/final refresh --
+	// but only when the store may actually differ from what is on screen, and
+	// without the navigation-only resets (canvas, session files, workspace,
+	// pending undo and agent prompts) that a socket blip must not trigger.
+	const loadSavedConversationRef = useRef(loadSavedConversation)
+	loadSavedConversationRef.current = loadSavedConversation
+	// `hasConnectedRef` separates the first connection from a reconnect:
+	// `wasConnectedRef` alone starts `false`, so a conversation opened before
+	// the first connect would be treated as a reconnect and reloaded at once.
+	const hasConnectedRef = useRef(false)
+	const wasConnectedRef = useRef(isConnected)
+	// Does the fetched record hold anything the view does not already show? An
+	// idle conversation that matches what is on screen should not pay for a
+	// full transcript replacement and a `restore_conversation` re-upload on
+	// every reconnect. A tracked or reported in-flight run always qualifies,
+	// because its streaming bubble and rows move without a message-count
+	// change. Otherwise compare the stored transcript to the on-screen one
+	// (live-only and streaming rows have no stored counterpart).
+	const reconnectSnapshotChanged = useCallback((data, id) => {
+		if (isRunActive(runsByConversationRef.current[id])) return true
+		if (data.in_flight === true) return true
+		const stored = Array.isArray(data.messages) ? data.messages : []
+		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
+		if (stored.length !== current.length) return true
+		const lastStored = stored[stored.length - 1]
+		if (!lastStored) return false
+		const lastCurrent = current[current.length - 1]
+		return (lastStored.timestamp ?? null) !== (lastCurrent?.timestamp ?? null)
+	}, [])
+	useEffect(() => {
+		const reconnected = hasConnectedRef.current && !wasConnectedRef.current && isConnected
+		wasConnectedRef.current = isConnected
+		if (isConnected) hasConnectedRef.current = true
+		if (!reconnected || !config.features?.chat_history || saveMode !== 'server' || !activeConversationId) return
+		let cancelled = false
+		const id = activeConversationId
+		const generation = reconnectResyncGenerationRef.current
+		const controller = new AbortController()
+		const resync = async () => {
+			try {
+				const data = await fetchConversationRecord(id, { signal: controller.signal })
+				if (cancelled || reconnectResyncGenerationRef.current !== generation ||
+					activeConversationIdRef.current !== id || data?.id !== id || data.error) return
+				if (!reconnectSnapshotChanged(data, id)) return
+				await loadSavedConversationRef.current(data, { origin: 'reconnect' })
+			} catch (error) {
+				if (!cancelled) console.error('Could not resync conversation after reconnect:', error)
+			}
+		}
+		resync()
+		return () => { cancelled = true; controller.abort() }
+	}, [isConnected, config.features?.chat_history, saveMode, activeConversationId, reconnectSnapshotChanged])
 
 	const refreshJoinedConversation = useCallback((conversationData, { live = false } = {}) => {
 		if (!conversationData || !conversationData.messages) return false
@@ -1372,6 +1556,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// case table instead of each restating it.
 		const storedIdx = alignTranscript(current, stored)
 		if (storedIdx === null) return false
+
+		// This reconcile is the transcript-replacement path: any reconnect
+		// snapshot still in the air was fetched before these rows and must not
+		// overwrite them (nor the live bubble updated below). Bumping here, not
+		// only on a send, covers the rows the run-end refresh and the live poll
+		// commit while a reconnect fetch is outstanding.
+		reconnectResyncGenerationRef.current += 1
 
 		// A live pass keeps the open bubble showing the segment the run is
 		// streaming now, or the marker-only seed while it is between segments.
@@ -1453,19 +1644,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 	const fetchLiveJoinedConversation = useCallback(async () => {
 		if (!liveJoinedConversationId) return
-		// Abort a hung request so the poll's cadence resumes (and reports a
-		// failure) instead of waiting on it indefinitely.
-		const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-			? AbortSignal.timeout(LIVE_REFRESH_FETCH_TIMEOUT_MS)
-			: undefined
-		const res = await fetch(
-			`/api/conversations/${liveJoinedConversationId}`,
-			timeoutSignal ? { signal: timeoutSignal } : undefined,
-		)
-		// Throw so usePollingWithBackoff backs off on a flaky server rather
+		// The shared helper carries the hang guard and throws on a non-OK
+		// response, so usePollingWithBackoff backs off on a flaky server rather
 		// than hammering it every interval.
-		if (!res.ok) throw new Error(`live conversation refresh failed: ${res.status}`)
-		const data = await res.json()
+		const data = await fetchConversationRecord(liveJoinedConversationId)
 		// The run settled between polls: the run-end path owns the final
 		// transcript, and applying a stored record here could discharge the
 		// obligation early.
@@ -1701,51 +1883,49 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	const openChat = useCallback(() => openTranscriptInTab(false), [openTranscriptInTab])
 	const openChatAsText = useCallback(() => openTranscriptInTab(true), [openTranscriptInTab])
 
-	// Wrapper for setComplianceLevelFilter that clears incompatible selections
-	const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
-		// If changing to a new compliance level (not clearing or setting to same)
-		if (newLevel && newLevel !== selections.complianceLevelFilter) {
-			// Clear tools that don't match the new compliance level
-			const toolsToRemove = []
-			selectedTools.forEach(toolKey => {
-				const server = findServerConfigForMcpKey(toolKey, config.tools)
-				if (server && server.compliance_level && server.compliance_level !== newLevel) {
-					toolsToRemove.push(toolKey)
-				}
-			})
-			if (toolsToRemove.length > 0) {
-				selections.removeTools(toolsToRemove)
-			}
+	// Keep every selection inside the active compliance filter, with the same
+	// membership rule as the pickers (utils/complianceAccess): a level keeps
+	// everything its panels still show (resources listing it) and drops
+	// everything they hide, untagged resources included -- a hidden selection
+	// cannot be seen or deselected in its panel, yet would still be used.
+	// Runs on a level switch and also on load (a persisted filter meeting
+	// persisted selections), after a workspace restore, and whenever the
+	// config changes a resource's level. Keys that cannot be placed yet
+	// (config still loading) are left alone; the send path holds them back.
+	const { removeTools: pruneTools, removePrompts: prunePrompts, removeDataSources: pruneDataSources } = selections
+	const { models: configModels, setCurrentModel: configSetCurrentModel } = config
+	useEffect(() => {
+		if (!activeComplianceFilter || !complianceLevelsReady(complianceLevels, activeComplianceFilter)) return
+		const excluded = (keys, levelOf) =>
+			keysExcludedByCompliance(keys, complianceLevels, activeComplianceFilter, levelOf)
+		pruneTools(excluded(selectedTools, mcpKeyLevel(config.tools)))
+		prunePrompts(excluded(selectedPrompts, mcpKeyLevel(config.prompts)))
+		pruneDataSources(excluded(selectedDataSources, ragKeyLevel))
 
-			// Clear prompts that don't match the new compliance level
-			const promptsToRemove = []
-			selectedPrompts.forEach(promptKey => {
-				const server = findServerConfigForMcpKey(promptKey, config.prompts)
-				if (server && server.compliance_level && server.compliance_level !== newLevel) {
-					promptsToRemove.push(promptKey)
-				}
-			})
-			if (promptsToRemove.length > 0) {
-				selections.removePrompts(promptsToRemove)
-			}
-
-			// Clear the active persona if the new context excludes it: the picker
-			// hides compliance-incompatible personas and the server refuses to
-			// resolve them, so keeping one selected would silently run the
-			// default prompt on the next turn.
-			if (isPersonaKey(selections.activePromptKey)) {
-				const persona = personas.personas.find(
-					p => p.id === personaIdFromKey(selections.activePromptKey)
-				)
-				if (!personaSurvivesComplianceFilter(persona, newLevel)) {
-					clearActivePrompt()
-				}
+		// The active prompt: an MCP prompt the level hides, or a persona it
+		// hides (the server refuses to resolve one, so keeping it selected
+		// would silently run the default prompt).
+		if (activePromptKey && !isUserPromptKey(activePromptKey)) {
+			if (isPersonaKey(activePromptKey)) {
+				const persona = personas.personas.find(p => p.id === personaIdFromKey(activePromptKey))
+				const allowed = level => isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
+				if (!personaSurvivesComplianceFilter(persona, activeComplianceFilter, allowed)) clearActivePrompt()
+			} else if (excluded([activePromptKey], mcpKeyLevel(config.prompts)).length > 0) {
+				clearActivePrompt()
 			}
 		}
 
-		// Set the new compliance level
-		selections.setComplianceLevelFilter(newLevel)
-	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts, personas.personas, clearActivePrompt])
+		// The model: move to one the level allows. With none available it stays
+		// selected, flagged in the picker, and the send path refuses the turn.
+		if (!isModelComplianceAccessible(configModels, complianceLevels, activeComplianceFilter, currentModel)) {
+			const replacement = firstCompliantModel(configModels, complianceLevels, activeComplianceFilter)
+			if (replacement) {
+				configSetCurrentModel(replacement)
+				toast.info(`Switched model to ${replacement} for the ${activeComplianceFilter} compliance level`)
+			}
+		}
+	}, [activeComplianceFilter, complianceLevels, config.tools, config.prompts, selectedTools, selectedPrompts, selectedDataSources, mcpKeyLevel, ragKeyLevel, pruneTools, prunePrompts, pruneDataSources, activePromptKey, personas.personas, clearActivePrompt, configModels, configSetCurrentModel, currentModel, toast])
+
 
 	// Flatten ragServers into a single list of data source objects for easier consumption
 	const ragSources = config.ragServers.flatMap(server =>
@@ -1754,6 +1934,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			serverName: server.server,
 			serverDisplayName: server.displayName,
 			serverComplianceLevel: server.complianceLevel,
+			serverClassifications: classificationsOf(server),
 		}))
 	)
 
@@ -1907,7 +2088,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		toggleRagEnabled: guarded.toggleRagEnabled,
 		clearToolsAndPrompts: guarded.clearToolsAndPrompts,
 		complianceLevelFilter: selections.complianceLevelFilter,
-		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,
+		setComplianceLevelFilter: selections.setComplianceLevelFilter,
+		complianceLevels,
+		complianceMode,
+		complianceRequired,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,

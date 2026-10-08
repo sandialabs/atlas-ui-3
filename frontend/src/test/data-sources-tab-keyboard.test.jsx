@@ -15,6 +15,7 @@ import SettingsPanel from '../components/SettingsPanel'
 import { ThemeProvider } from '../contexts/ThemeContext'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import { isComplianceAccessible } from '../utils/complianceAccess'
 
 vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
 vi.mock('../contexts/MarketplaceContext', () => ({ useMarketplace: vi.fn() }))
@@ -30,8 +31,10 @@ vi.mock('../components/admin/AdminQuickPanel', () => ({ default: () => <div>admi
 vi.mock('../components/PromptManager', () => ({ default: () => <div>prompt manager</div> }))
 
 const SOURCES = [
-  { id: 'public-docs', label: 'public-docs', serverName: 'atlas_rag', serverComplianceLevel: 'Public', complianceLevel: 'Public' },
-  { id: 'internal-docs', label: 'internal-docs', serverName: 'atlas_rag', serverComplianceLevel: 'Internal', complianceLevel: 'Internal' },
+  { id: 'public-docs', label: 'public-docs', serverName: 'atlas_rag', serverClassifications: ['Public'], complianceLevel: 'Public' },
+  // The corpus is Internal but its server is approved for Public only, so an
+  // Internal header filter lists it yet renders it out of boundary.
+  { id: 'internal-docs', label: 'internal-docs', serverName: 'atlas_rag', serverClassifications: ['Public'], complianceLevel: 'Internal' },
 ]
 
 const COMPLIANCE_LEVELS = [
@@ -61,12 +64,8 @@ function mockChat(overrides = {}) {
   })
   useMarketplace.mockReturnValue({
     complianceLevels: COMPLIANCE_LEVELS,
-    isComplianceAccessible: (userLevel, resourceLevel) => {
-      if (!userLevel) return true
-      if (!resourceLevel) return false
-      const level = COMPLIANCE_LEVELS.find(l => l.name === userLevel)
-      return !!level && level.allowed_with.includes(resourceLevel)
-    },
+    isComplianceAccessible: (userLevel, classifications) =>
+      isComplianceAccessible(COMPLIANCE_LEVELS, userLevel, classifications),
   })
 }
 
@@ -107,7 +106,7 @@ describe('DataSourcesSelector - keyboard operability', () => {
     const toggleDataSource = vi.fn()
     mockChat({
       toggleDataSource,
-      currentModel: 'public-model',
+      complianceLevelFilter: 'Internal',
       features: { compliance_levels: true, rag: true, tools: true },
     })
     render(<DataSourcesSelector />)
@@ -123,7 +122,7 @@ describe('DataSourcesSelector - keyboard operability', () => {
     const toggleDataSource = vi.fn()
     mockChat({
       toggleDataSource,
-      currentModel: 'public-model',
+      complianceLevelFilter: 'Internal',
       selectedDataSources: new Set(['atlas_rag:internal-docs']),
       features: { compliance_levels: true, rag: true, tools: true },
     })

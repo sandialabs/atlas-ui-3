@@ -1,5 +1,6 @@
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
+import { classificationsOf } from '../utils/complianceAccess'
 import { ChevronDown, Sparkles, User, Users, Pencil, Plus } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey, personaKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
@@ -36,7 +37,7 @@ const PromptSelector = () => {
   // re-checks the same rule when resolving the turn's persona_id.
   const complianceEnabled = !!features.compliance_levels
   const visiblePersonas = (complianceEnabled && complianceLevelFilter)
-    ? personas.filter(p => isComplianceAccessible(complianceLevelFilter, p.compliance_level))
+    ? personas.filter(p => isComplianceAccessible(complianceLevelFilter, classificationsOf(p)))
     : personas
 
   // Get all selected prompt keys as an array (these are the "loaded" prompts)
@@ -57,7 +58,8 @@ const PromptSelector = () => {
             server: server.server,
             name: prompt.name,
             description: prompt.description || '',
-            compliance_level: server.compliance_level
+            compliance_level: server.compliance_level,
+            allowed_data_classifications: server.allowed_data_classifications
           })
         }
       })

@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-09-30
+Last updated: 2026-10-02
 
 Issue #884.
 
@@ -191,6 +191,28 @@ Either way the partial bubble is marked "answer in progress -- it will refresh
 when the response finishes": once the run ends, the client reloads the
 conversation from the store and the marker goes with the placeholder.
 
+### Reconnecting resynchronizes the open conversation
+
+When the WebSocket reconnects, the client revisits the currently visible
+server-saved conversation. This applies only to server-saved conversations (the
+`server` save mode); browser-only and incognito conversations are left exactly
+as they are. It also only reloads when something may have changed -- a tracked
+or reported in-flight run, a different message count, or a newer last message --
+so an idle conversation that already matches the screen is not re-fetched and
+re-seeded on every blip.
+
+When a reload does run, missed messages and tool rows replace the stale
+transcript without duplicating overlapping local rows. If the run is still
+active, its `streaming_text` seeds a replay placeholder and the joined-view
+polling and final refresh described below take over. If it finished while
+disconnected, the completed transcript appears immediately. Unlike opening a
+conversation from history, a reconnect does not clear the canvas, custom UI or
+session files, does not dismiss a pending undo offer or agent question, and does
+not re-bind the workspace: the user stays where they were. No navigation away
+and back is required. If the reconnect fetch fails, the view keeps whatever it
+had -- the same stale transcript as before this behavior existed -- until the
+next reconnect or a manual reload.
+
 ### A joined view refreshes while the run is still going
 
 A run's frames stay bound to the socket that started it, so a joined view --
@@ -297,8 +319,9 @@ These are known and deliberate, not oversights:
   them durable requires a persisted run store and persisted pending-request
   records.
 - **A reconnected browser does not resume a live event stream.** It sees the run
-  in `runs_snapshot` and, on reopening the conversation, the run's transcript so
-  far (prompt and tool rows) plus the open segment streamed so far
+  in `runs_snapshot` and automatically resynchronizes the open conversation
+  with the run's transcript so far (prompt and tool rows) plus the open segment
+  streamed so far
   (`streaming_text` / the restore replay frame) — but the tokens that stream
   *after* it reopens reach only the socket that started the run. The view polls
   the run's live record every few seconds while the run is active and appends

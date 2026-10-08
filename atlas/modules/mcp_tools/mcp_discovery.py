@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.core.oidc.mcp_delegation import is_delegated_server
 
 from .atlas_server import (
     ATLAS_SERVER_NAME,
@@ -22,6 +23,7 @@ from .atlas_server import (
     launch_tool_enabled,
     normalize_tool_name,
 )
+from .mcp_errors import _is_unauthorized_error
 from .sleep_tool import sleep_tool_enabled
 
 logger = logging.getLogger(__name__)
@@ -159,6 +161,23 @@ def _build_tool_index(available_tools) -> Dict[str, Dict[str, Any]]:
     return index
 
 
+def _log_deferred_delegated_discovery(server_name, server_config, kind, error) -> bool:
+    """Explain an expected authorization failure on the process-level client."""
+    if not is_delegated_server(server_config) or not _is_unauthorized_error(error):
+        return False
+    logger.warning(
+        "%s discovery deferred for delegated MCP server '%s': HTTP 401 Unauthorized. "
+        "The process-level discovery client has no user session for delegated "
+        "authentication (OBO). Atlas will retry tool discovery with delegated "
+        "credentials on the user's next request after login; startup discovery "
+        "does not need to succeed. If tools remain unavailable, check the "
+        "OBO/delegation configuration.",
+        kind.capitalize(),
+        sanitize_for_logging(server_name),
+    )
+    return True
+
+
 class DiscoveryMixin:
     """Tool/prompt discovery and inventory query helpers."""
 
@@ -214,6 +233,9 @@ class DiscoveryMixin:
         except Exception as e:
             error_type = type(e).__name__
             error_msg = sanitize_for_logging(str(e))
+            if _log_deferred_delegated_discovery(server_name, server_config, "tools", e):
+                self._record_server_failure(server_name, f"{error_type}: {error_msg}")
+                return {'tools': [], 'config': server_config}
             logger.error(f"TOOL DISCOVERY FAILED for '{safe_server_name}': {error_type}: {error_msg}")
 
             # Targeted debugging for tool discovery errors
@@ -345,6 +367,8 @@ class DiscoveryMixin:
                     logger.debug(f"Successfully stored prompts for {safe_server_name}")
                     return server_data
                 except Exception as e:
+                    if _log_deferred_delegated_discovery(server_name, server_config, "prompts", e):
+                        return {'prompts': [], 'config': server_config}
                     # Server might not support prompts or list_prompts() failed  store empty list
                     logger.debug(
                         f"Server {safe_server_name} does not support prompts or list_prompts() failed: {e}"
@@ -356,6 +380,9 @@ class DiscoveryMixin:
         except Exception as e:
             error_type = type(e).__name__
             error_msg = sanitize_for_logging(str(e))
+            if _log_deferred_delegated_discovery(server_name, server_config, "prompts", e):
+                self._record_server_failure(server_name, f"{error_type}: {error_msg}")
+                return {'prompts': [], 'config': server_config}
             logger.error(f"PROMPT DISCOVERY FAILED for '{safe_server_name}': {error_type}: {error_msg}")
 
             # Targeted debugging for prompt discovery errors

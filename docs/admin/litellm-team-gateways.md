@@ -1,6 +1,6 @@
 # Enterprise LiteLLM Team Gateways
 
-Last updated: 2026-09-30
+Last updated: 2026-10-07
 
 Some deployments reach their models through an enterprise
 [LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) where access and
@@ -66,10 +66,11 @@ litellm_gateways:
 | `discovery_timeout_seconds` | `30` | Timeout for team and model listing. |
 | `discovery_cache_seconds` | `300` | How long a user's team and model lists are cached. A forced refresh (`?refresh=true`, or a cache miss on a team) is only honored once the cached list is 10 seconds old. |
 | `groups` | `[]` | Atlas groups allowed to use the gateway, as for a model's `groups`. |
-| `compliance_level` | - | Compliance level of every model reached through the gateway, unless a `models` entry sets its own. |
-| `models` | `{}` (all) | Admin allowlist of LiteLLM model ids. When set, only these models are offered and callable through the gateway (see [Limiting the models](#limiting-the-models)). Each entry may set `compliance_level`. A plain list (`models: [gpt-4.1, claude-sonnet]`) allows models without per-model settings. |
+| `allowed_data_classifications` | - | Data classifications every model reached through the gateway is approved for, unless a `models` entry sets its own. See [Compliance](compliance.md). |
+| `compliance_level` | - | Deprecated single level; read as `[compliance_level]` when `allowed_data_classifications` is unset. |
+| `models` | `{}` (all) | Admin allowlist of LiteLLM model ids. When set, only these models are offered and callable through the gateway (see [Limiting the models](#limiting-the-models)). Each entry may set `allowed_data_classifications` or `compliance_level`. A plain list (`models: [gpt-4.1, claude-sonnet]`) allows models without per-model settings. |
 | `extra_headers` | - | Static headers sent on every chat request. |
-| `model_defaults` | `{}` | Any [model field](llm-config.md#configuration-fields-explained) except the identity and access fields (`model_name`, `model_url`, `api_key`, `api_key_source`, `globus_scope`, `groups`, `compliance_level`, `extra_headers`). Validated when the file loads. |
+| `model_defaults` | `{}` | Any [model field](llm-config.md#configuration-fields-explained) except the identity and access fields (`model_name`, `model_url`, `api_key`, `api_key_source`, `globus_scope`, `groups`, `compliance_level`, `allowed_data_classifications`, `extra_headers`). Validated when the file loads. |
 
 A gateway name must not contain `::`, and no model in the top-level `models`
 may start with `<gateway>::`.
@@ -100,13 +101,15 @@ litellm_gateways:
   call with such a key, such as a saved selection whose model has since been
   removed from the list, fails with "The selected model is no longer available
   on this LiteLLM gateway".
-- **Compliance.** Each model's level is its entry's `compliance_level`, or the
-  gateway's when the entry sets none. Levels are validated like any other
+- **Compliance.** Each model's classifications are, most specific first, its
+  entry's `allowed_data_classifications`, its entry's `compliance_level`, the
+  gateway's `allowed_data_classifications`, then the gateway's
+  `compliance_level`. Levels are validated like any other
   model's. An unknown level (a typo such as `SOC-2`) leaves that model
   unleveled, as it would for a static model. It does not inherit the gateway's level. The level drives the server-side compliance checks. It also drives
   the compliance filter in the model picker: the gateway stays listed while any
   of its models passes the filter, and models that don't pass are hidden.
-- Each entry accepts only `compliance_level`; other model settings still come
+- Each entry accepts only `allowed_data_classifications` and `compliance_level`; other model settings still come
   from `model_defaults`. Removing a model from the list takes effect when the
   new configuration is loaded.
 
@@ -229,9 +232,9 @@ completion. Validate that path in staging before relying on it.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/config`, `GET /api/config/shell` | `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, compliance_level?, compliance_levels?, model_compliance_levels?}]`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps each allowlisted model id to its level (`null` when the model is unleveled). |
+| `GET /api/config`, `GET /api/config/shell` | `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, compliance_level?, compliance_levels?, model_compliance_levels?}]`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps each allowlisted model id to its level (`null` when the model is unleveled). `model_allowed_data_classifications` maps each allowlisted model id to its classifications and `model_classifications` lists them, which is what the picker filters on. |
 | `GET /api/llm/gateways/{gateway}/teams[?refresh=true]` | `{gateway, teams: [{team_id, label}]}` |
-| `GET /api/llm/gateways/{gateway}/models?team_id=...[&refresh=true]` | `{gateway, team_id, team_label, models: [{name, model_id, label, compliance_level?}]}`, limited to the allowlist when one is set |
+| `GET /api/llm/gateways/{gateway}/models?team_id=...[&refresh=true]` | `{gateway, team_id, team_label, models: [{name, model_id, label, compliance_level?, allowed_data_classifications?}]}`, limited to the allowlist when one is set |
 
 Errors: `401` the gateway could not authenticate the user, `403` not a member
 of the team, `404` unknown or restricted gateway, `502` LiteLLM unreachable.

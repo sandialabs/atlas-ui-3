@@ -373,9 +373,13 @@ jobs:
         name: security-summary
         path: security-summary.md
 
-    # Comment on PR with security summary
+    # Comment on PR with security summary. Fork PRs get a read-only
+    # GITHUB_TOKEN, so the API call returns 403 "Resource not accessible by
+    # integration"; the summary is still uploaded as an artifact. Guard against
+    # forks and keep a future permission surprise from failing the workflow.
     - name: Comment PR with Security Summary
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
+      continue-on-error: true
       uses: actions/github-script@v9
       with:
         script: |

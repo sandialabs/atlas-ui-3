@@ -748,6 +748,20 @@ class AppSettings(BaseSettings):
         )
 
     @property
+    def compliance_level_required_effective(self) -> bool:
+        """Whether chat turns must carry a concrete compliance level.
+
+        The requirement rides on the compliance feature: with compliance levels
+        disabled there is no selector to satisfy it, so it is off. This derived
+        flag is the single gate shared by the config payload and the chat
+        service so the UI and the server enforcement cannot drift apart.
+        """
+        return bool(
+            self.feature_compliance_levels_enabled
+            and self.feature_compliance_level_required
+        )
+
+    @property
     def workspaces_effective(self) -> bool:
         """Whether the workspace switcher is actually usable.
 
@@ -783,6 +797,23 @@ class AppSettings(BaseSettings):
         False,
         description="Enable compliance level filtering for MCP servers and data sources",
         validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVELS_ENABLED"),
+    )
+    # Require every chat turn to carry a concrete compliance level. Only takes
+    # effect with FEATURE_COMPLIANCE_LEVELS_ENABLED; see
+    # compliance_level_required_effective.
+    feature_compliance_level_required: bool = Field(
+        False,
+        description="Require a concrete compliance level on every chat turn; "
+                    "the UI drops its 'All Levels' option and the server rejects "
+                    "turns with no valid level",
+        validation_alias=AliasChoices("FEATURE_COMPLIANCE_LEVEL_REQUIRED"),
+    )
+    compliance_default_level: Optional[str] = Field(
+        None,
+        description="Compliance level the UI starts on when a level is required "
+                    "and the user has not picked one. Must name a defined level; "
+                    "otherwise the first defined level is used",
+        validation_alias=AliasChoices("COMPLIANCE_DEFAULT_LEVEL"),
     )
     # Email domain whitelist feature gate
     feature_domain_whitelist_enabled: bool = Field(

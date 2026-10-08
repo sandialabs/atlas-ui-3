@@ -83,6 +83,32 @@ from atlas.modules.config.settings import AppSettings  # noqa: E402
 
 AppSettings.model_config["env_file"] = None
 
+# --- Compliance-feature isolation ----------------------------------------
+# ``FEATURE_COMPLIANCE_LEVEL_REQUIRED`` (with ``FEATURE_COMPLIANCE_LEVELS_ENABLED``)
+# makes ``ChatService.handle_chat_message()`` reject any turn that does not carry a
+# concrete ``compliance_level``. That is a deployment policy, not a property of the
+# code under test, yet ``AppSettings`` reads those flags straight from the process
+# environment -- so a contributor (or CI runner) with them exported silently turns
+# ``ValidationError: A compliance level is required...`` into the result of every
+# chat-service test that omits ``compliance_level``: the agent-mode integration,
+# MCP-prompt-override, and system-prompt-loading tests among them. Those tests
+# correctly omit the argument because compliance-required mode is not their
+# scenario.
+#
+# Pin all three to explicit values for the session -- including the default
+# level, *pinned empty* rather than popped. ``atlas.main`` calls
+# ``load_dotenv("../.env")`` (override=False) at import, which refills any
+# environment key that is missing, so a popped ``COMPLIANCE_DEFAULT_LEVEL`` would
+# be restored by a developer's .env and the guard would depend on import order.
+# An explicit value is left alone by ``load_dotenv`` with ``override=False``.
+# Compliance-specific tests still opt in with ``monkeypatch.setenv`` / direct
+# settings overrides, which take precedence over this session-level pin (see
+# ``test_compliance_level_required.py``). This is a test-isolation guard, not a
+# product behavior change -- runtime policy is untouched.
+os.environ["FEATURE_COMPLIANCE_LEVELS_ENABLED"] = "false"
+os.environ["FEATURE_COMPLIANCE_LEVEL_REQUIRED"] = "false"
+os.environ["COMPLIANCE_DEFAULT_LEVEL"] = ""
+
 # --- External authorizer isolation ---------------------------------------
 # ``core.auth.is_user_in_group`` prefers a configured external authorization
 # service over its local group logic: when AUTH_GROUP_CHECK_URL and

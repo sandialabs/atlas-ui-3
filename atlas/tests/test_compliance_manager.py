@@ -158,40 +158,59 @@ class TestComplianceLevelManager:
         # Internal cannot access External
         assert manager.is_accessible("Internal", "External") is False
 
-    def test_is_accessible_allowlist_grants_access(self, temp_compliance_config):
-        """Test access control when allowlist grants access."""
+    def test_allowed_with_no_longer_grants_access(self, temp_compliance_config):
+        """allowed_with does not make another level's resources valid (#1032).
+
+        HIPAA lists SOC2 in allowed_with, but a SOC2-only resource is not
+        approved for HIPAA data, and the relationship is not bidirectional
+        either.
+        """
         manager = ComplianceLevelManager(temp_compliance_config)
 
-        # HIPAA can access SOC2 (in allowlist)
-        assert manager.is_accessible("HIPAA", "SOC2") is True
-
-        # FedRAMP can access SOC2 (in allowlist)
-        assert manager.is_accessible("FedRAMP", "SOC2") is True
-
-    def test_is_accessible_one_sided_allowlist(self, temp_compliance_config):
-        """Test that allowlist is not bidirectional."""
-        manager = ComplianceLevelManager(temp_compliance_config)
-
-        # HIPAA can access SOC2
-        assert manager.is_accessible("HIPAA", "SOC2") is True
-
-        # But SOC2 cannot access HIPAA (not in SOC2's allowlist)
+        assert manager.is_accessible("HIPAA", "SOC2") is False
+        assert manager.is_accessible("FedRAMP", "SOC2") is False
         assert manager.is_accessible("SOC2", "HIPAA") is False
 
-    def test_is_accessible_none_is_permissive(self, temp_compliance_config):
-        """Test that None (unset) compliance level is always accessible."""
+    def test_explicit_classifications_admit_each_listed_level(self, temp_compliance_config):
+        """A multi-classification component is usable at every listed level."""
+        manager = ComplianceLevelManager(temp_compliance_config)
+        internal_search = ["Public", "HIPAA", "FedRAMP"]
+
+        for level in internal_search:
+            assert manager.classification_permits(level, internal_search) is True
+        assert manager.classification_permits("SOC2", internal_search) is False
+        # A Public-only component (an external search MCP) never sees HIPAA data.
+        assert manager.classification_permits("HIPAA", ["Public"]) is False
+
+    def test_classifications_resolve_aliases_on_both_sides(self, temp_compliance_config):
         manager = ComplianceLevelManager(temp_compliance_config)
 
-        # None user can access any resource
+        assert manager.classification_permits("SOC 2", ["SOC2"]) is True
+        assert manager.classification_permits("HIPAA", ["HIPAA-Compliant"]) is True
+        assert manager.classification_permits("Bogus", ["Bogus"]) is False
+
+    def test_undeclared_resource_fails_closed_under_a_level(self, temp_compliance_config):
+        """No active level: everything goes. Active level: undeclared is denied."""
+        manager = ComplianceLevelManager(temp_compliance_config)
+
         assert manager.is_accessible(None, "HIPAA") is True
-        assert manager.is_accessible(None, "Public") is True
-
-        # Any user can access None resource
-        assert manager.is_accessible("HIPAA", None) is True
-        assert manager.is_accessible("Public", None) is True
-
-        # None to None
         assert manager.is_accessible(None, None) is True
+        assert manager.classification_permits(None, []) is True
+
+        assert manager.is_accessible("HIPAA", None) is False
+        assert manager.is_accessible("Public", None) is False
+        assert manager.classification_permits("Public", []) is False
+
+    def test_validate_classifications_drops_unknown_names(self, temp_compliance_config):
+        manager = ComplianceLevelManager(temp_compliance_config)
+
+        assert manager.validate_classifications(None) is None
+        assert manager.validate_classifications(["SOC 2", "HIPAA", "Bogus", "SOC2"]) == [
+            "SOC2",
+            "HIPAA",
+        ]
+        # A list of only unknown names approves the component for nothing.
+        assert manager.validate_classifications(["Bogus"]) == []
 
     def test_get_accessible_levels_public(self, temp_compliance_config):
         """Test getting accessible levels for Public."""
@@ -207,7 +226,8 @@ class TestComplianceLevelManager:
 
         accessible = manager.get_accessible_levels("HIPAA")
 
-        assert accessible == {"HIPAA", "SOC2"}
+        # allowed_with no longer widens a level (#1032).
+        assert accessible == {"HIPAA"}
 
     def test_get_accessible_levels_fedramp(self, temp_compliance_config):
         """Test getting accessible levels for FedRAMP."""
@@ -215,7 +235,7 @@ class TestComplianceLevelManager:
 
         accessible = manager.get_accessible_levels("FedRAMP")
 
-        assert accessible == {"FedRAMP", "SOC2"}
+        assert accessible == {"FedRAMP"}
 
     def test_get_accessible_levels_none(self, temp_compliance_config):
         """Test getting accessible levels when user level is None."""
@@ -249,5 +269,51 @@ class TestComplianceLevelManager:
         # Should validate anything in permissive mode
         assert manager.validate_compliance_level("AnyLevel") == "AnyLevel"
 
-        # Should allow all access
-        assert manager.is_accessible("Level1", "Level2") is True
+        # With no definitions, names are compared as given: membership still
+        # applies, so a different or undeclared level is not admitted.
+        assert manager.is_accessible("Level1", ["Level1", "Level3"]) is True
+        assert manager.is_accessible("Level1", "Level2") is False
+
+
+class TestDefaultConfigLookup:
+    """With no explicit path the manager must find the documented locations.
+
+    It used to search only pre-package-rename paths (config/overrides,
+    atlas/configfiles, ...), none of which exist any more, so the levels never
+    loaded: the UI compliance selector never rendered and validation ran
+    permissive.
+    """
+
+    def test_loads_package_default_without_a_user_file(self, tmp_path, monkeypatch):
+        from atlas.modules.config.config_manager import config_manager
+
+        monkeypatch.setattr(config_manager.app_settings, "app_config_dir", str(tmp_path))
+        manager = ComplianceLevelManager()
+
+        # atlas/config/compliance-levels.json ships with the package.
+        assert "HIPAA" in manager.get_all_levels()
+        assert manager.is_accessible("HIPAA", "HIPAA") is True
+        assert manager.is_accessible("HIPAA", "SOC2") is False
+        assert manager.is_accessible("HIPAA", "Public") is False
+
+    def test_user_config_dir_overrides_package_default(
+        self, tmp_path, monkeypatch, sample_compliance_config
+    ):
+        from atlas.modules.config.config_manager import config_manager
+
+        custom = dict(sample_compliance_config)
+        custom["levels"] = [
+            {"name": "OnlyThis", "description": "", "aliases": [], "allowed_with": ["OnlyThis"]}
+        ]
+        (tmp_path / "compliance-levels.json").write_text(json.dumps(custom))
+        monkeypatch.setattr(config_manager.app_settings, "app_config_dir", str(tmp_path))
+
+        assert ComplianceLevelManager().get_all_levels() == ["OnlyThis"]
+
+    def test_is_valid_level(self, temp_compliance_config):
+        manager = ComplianceLevelManager(temp_compliance_config)
+        assert manager.is_valid_level("HIPAA") is True
+        assert manager.is_valid_level("public") is True  # alias
+        assert manager.is_valid_level("CUI") is False
+        assert manager.is_valid_level(None) is False
+        assert ComplianceLevelManager(Path("/nonexistent/x.json")).is_valid_level("CUI") is True

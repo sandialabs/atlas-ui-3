@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, Wrench, Shield, Key, Eye, Info } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
+import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
@@ -63,12 +64,26 @@ const ModelSelector = () => {
   // A gateway stays listed while any of its models passes the filter; the
   // picker then hides the individual models that do not.
   const visibleGateways = complianceFiltering
-    ? llmGateways.filter(g => (g.compliance_levels || [g.compliance_level])
-      .some(level => isComplianceAccessible(complianceLevelFilter, level)))
+    ? llmGateways.filter(g => (g.model_classifications || g.compliance_levels || [g.compliance_level])
+      .some(classifications => isComplianceAccessible(complianceLevelFilter, classifications)))
     : llmGateways
   const isGatewayModelVisible = complianceFiltering
-    ? model => isComplianceAccessible(complianceLevelFilter, model.compliance_level)
+    ? model => isComplianceAccessible(complianceLevelFilter, classificationsOf(model))
     : null
+  const visibleListedModels = complianceFiltering
+    ? listedModels.filter(m => isComplianceAccessible(
+        complianceLevelFilter, typeof m === 'string' ? undefined : classificationsOf(m)))
+    : listedModels
+  // The selected model can sit outside the filter (a persisted choice, or no
+  // compliant replacement existed when the level changed). The list no longer
+  // shows it, so flag it on the button instead of leaving it looking normal.
+  const currentOutsideFilter = complianceFiltering && !!currentObj &&
+    !isComplianceAccessible(complianceLevelFilter, classificationsOf(currentObj))
+  const buttonTitle = currentModel
+    ? (currentOutsideFilter
+      ? `Model: ${currentLabel} is outside the ${complianceLevelFilter} compliance level; choose a compliant model`
+      : `Model: ${currentLabel}`)
+    : 'Select a model'
 
   return (
     <div className="relative">
@@ -76,12 +91,19 @@ const ModelSelector = () => {
         type="button"
         ref={triggerRef}
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className="flex items-center gap-1 px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors max-w-[16rem]"
-        title={currentModel ? `Model: ${currentLabel}` : 'Select a model'}
-        aria-label={currentModel ? `Select chat model, currently ${currentLabel}` : 'Select chat model'}
+        className={`flex items-center gap-1 px-2 py-1 rounded transition-colors max-w-[16rem] ${
+          currentOutsideFilter
+            ? 'bg-amber-900/60 hover:bg-amber-900 text-amber-200 border border-amber-600'
+            : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+        }`}
+        title={buttonTitle}
+        aria-label={currentModel
+          ? `Select chat model, currently ${currentLabel}${currentOutsideFilter ? `, outside the ${complianceLevelFilter} compliance level` : ''}`
+          : 'Select chat model'}
         aria-expanded={dropdownOpen}
         aria-haspopup="true"
       >
+        {currentOutsideFilter && <Shield className="w-3 h-3 flex-shrink-0 text-amber-400" aria-hidden="true" />}
         <span className="text-xs truncate min-w-0">{currentLabel || 'Model...'}</span>
         {currentObj?.api_key_source === 'user' && (
           <Key className={`w-3 h-3 flex-shrink-0 ${
@@ -97,16 +119,14 @@ const ModelSelector = () => {
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }} />
           <div className="absolute bottom-full left-0 mb-1 w-72 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
-            {listedModels.length === 0 && visibleGateways.length === 0 ? (
+            {listedModels.length === 0 && llmGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
+            ) : visibleListedModels.length === 0 && visibleGateways.length === 0 ? (
+              <div className="px-4 py-2 text-gray-400 text-sm">
+                No models match the {complianceLevelFilter} compliance level
+              </div>
             ) : (
-              (complianceEnabled && complianceLevelFilter
-                ? listedModels.filter(m => {
-                    const model = typeof m === 'string' ? { name: m } : m
-                    return isComplianceAccessible(complianceLevelFilter, model.compliance_level)
-                  })
-                : listedModels
-              ).map(m => {
+              visibleListedModels.map(m => {
                 const model = typeof m === 'string' ? { name: m } : m
                 const modelName = model.name || m
                 const needsUserKey = model.api_key_source === 'user'
@@ -171,10 +191,10 @@ const ModelSelector = () => {
                             <Wrench className="w-3 h-3" />
                             Tools {model.supports_tools !== false ? '' : '(no)'}
                           </span>
-                          {complianceEnabled && model.compliance_level && (
+                          {complianceEnabled && classificationLabel(model) && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white">
                               <Shield className="w-3 h-3" />
-                              {model.compliance_level}
+                              {classificationLabel(model)}
                             </span>
                           )}
                         </div>
