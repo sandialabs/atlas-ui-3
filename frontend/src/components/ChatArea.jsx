@@ -91,7 +91,7 @@ const ChatArea = () => {
     followUpSuggestions,
     setFollowUpSuggestions,
   } = useChat()
-  const { isConnected, connectionStatus } = useWS()
+  const { isConnected, connectionStatus, sessionEnded } = useWS()
   const toast = useToast()
   const maxFileSizeBytes = fileUpload?.max_file_size_bytes || DEFAULT_MAX_FILE_SIZE_BYTES
 
@@ -981,9 +981,23 @@ const ChatArea = () => {
               data-testid="ws-disconnected-banner"
             >
               <WifiOff className="w-4 h-4 flex-shrink-0" />
-              <span>
-                Disconnected from server{connectionStatus ? ` (${connectionStatus})` : ''}. Messages can't be sent until the connection is restored.
-              </span>
+              {sessionEnded ? (
+                <span data-testid="session-ended-banner">
+                  Your session ended.{' '}
+                  <a
+                    href={`/auth/oidc/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`}
+                    className="underline font-medium hover:text-red-200"
+                    data-testid="session-signin-link"
+                  >
+                    Sign in again
+                  </a>{' '}
+                  to continue chatting.
+                </span>
+              ) : (
+                <span>
+                  Disconnected from server{connectionStatus ? ` (${connectionStatus})` : ''}. Messages can't be sent until the connection is restored.
+                </span>
+              )}
             </div>
           )}
 

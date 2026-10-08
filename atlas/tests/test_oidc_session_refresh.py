@@ -29,6 +29,7 @@ def session():
     store = get_session_store()
     store.clear()
     session_refresh._refresh_locks.clear()
+    session_refresh._refresh_failure_cooldowns.clear()
     value = store.create(
         user_id="user@example.gov", access_token="old-access", refresh_token="old-refresh",
         access_token_expires_at=time.time() - 1, max_age_seconds=3600,
@@ -36,6 +37,7 @@ def session():
     yield value
     store.clear()
     session_refresh._refresh_locks.clear()
+    session_refresh._refresh_failure_cooldowns.clear()
 
 
 @pytest.fixture
@@ -130,7 +132,11 @@ async def test_session_stays_removed_if_credential_cleanup_fails(session, refres
     OIDCFlowError("Token endpoint response is not valid JSON"),
     OIDCFlowError("invalid_grant"),  # Text alone is not a structured refusal.
 ])
-async def test_transient_or_other_error_keeps_session_and_retries(session, refresh, revoke, failure):
+async def test_transient_or_other_error_keeps_session_and_retries(
+    session, refresh, revoke, failure, monkeypatch,
+):
+    # The cooldown would otherwise defer the immediate retry in this test.
+    monkeypatch.setattr(session_refresh, "REFRESH_FAILURE_COOLDOWN_SECONDS", 0)
     refresh.side_effect = failure
     assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is session
     revoke.assert_not_awaited()
@@ -138,6 +144,24 @@ async def test_transient_or_other_error_keeps_session_and_retries(session, refre
     assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is session
     assert session.access_token == "new-access"
     assert refresh.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_sets_a_short_cooldown(session, refresh, monkeypatch):
+    """An outage must not make every queued request retry the IdP in turn."""
+    monkeypatch.setattr(session_refresh, "REFRESH_FAILURE_COOLDOWN_SECONDS", 0.05)
+    refresh.side_effect = httpx.ConnectError("Unavailable")
+    assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is session
+    # Inside the cooldown the IdP is not contacted again and the session stays.
+    assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is session
+    assert refresh.await_count == 1
+    # Once the cooldown expires the IdP is retried and success clears it.
+    await asyncio.sleep(0.06)
+    refresh.side_effect = None
+    assert await session_refresh.get_refreshed_session(session.session_id, SETTINGS) is session
+    assert session.access_token == "new-access"
+    assert refresh.await_count == 2
+    assert session.session_id not in session_refresh._refresh_failure_cooldowns
 
 
 @pytest.mark.asyncio
@@ -287,7 +311,9 @@ def test_http_refusal_rejects_current_and_next_request(session, refresh, revoke,
     refresh.assert_awaited_once()
 
 
-def test_http_transient_failure_authenticates_and_retries(session, refresh, revoke, client):
+def test_http_transient_failure_authenticates_and_retries(session, refresh, revoke, client, monkeypatch):
+    # The cooldown would otherwise defer the immediate retry in this test.
+    monkeypatch.setattr(session_refresh, "REFRESH_FAILURE_COOLDOWN_SECONDS", 0)
     refresh.side_effect = httpx.ConnectError("Unavailable")
     assert client.get("/api/whoami").status_code == 200
     refresh.side_effect = None

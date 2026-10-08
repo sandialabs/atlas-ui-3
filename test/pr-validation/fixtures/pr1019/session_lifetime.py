@@ -107,6 +107,8 @@ def exercise():
     with client.websocket_connect("/ws") as socket:
         RefreshingIdP.mode = "refused"
         socket.send_json({"type": "attach_file", "s3_key": "unused"})
+        ended = socket.receive_json()
+        assert ended.get("type") == "session_ended" and "sign in" in ended.get("reason", ""), ended
         try:
             socket.receive_json()
         except WebSocketDisconnect as exc:

@@ -32,6 +32,23 @@ logger = logging.getLogger(__name__)
 _refresh_locks: WeakValueDictionary = WeakValueDictionary()
 _refresh_locks_guard = asyncio.Lock()
 
+# A transient refresh failure briefly blocks further IdP attempts for the same
+# session. Without this cooldown, an IdP outage makes every queued request wait
+# behind its own serialized refresh timeout before failing.
+REFRESH_FAILURE_COOLDOWN_SECONDS = 10.0
+_refresh_failure_cooldowns: dict = {}
+
+
+def _refresh_in_cooldown(session_id: str) -> bool:
+    until = _refresh_failure_cooldowns.get(session_id)
+    return until is not None and time.monotonic() < until
+
+
+def _set_refresh_cooldown(session_id: str) -> None:
+    _refresh_failure_cooldowns[session_id] = (
+        time.monotonic() + REFRESH_FAILURE_COOLDOWN_SECONDS
+    )
+
 
 async def _lock_for(session_id: str) -> asyncio.Lock:
     async with _refresh_locks_guard:
@@ -78,6 +95,10 @@ async def ensure_fresh_access_token(
         # Another coroutine may have refreshed while we waited.
         if not session.access_token_needs_refresh():
             return session.access_token
+        # A recent transient failure already burned a refresh timeout for this
+        # session; fail fast instead of queueing behind the IdP again.
+        if _refresh_in_cooldown(session.session_id):
+            return None
 
         try:
             metadata = await get_provider_metadata(settings.oidc_issuer or "")
@@ -102,15 +123,18 @@ async def ensure_fresh_access_token(
                 # session behind, even if a credential store is unavailable.
                 get_session_store().remove(session.session_id)
                 _forget_lock(session.session_id)
+                _refresh_failure_cooldowns.pop(session.session_id, None)
                 try:
                     await revoke_delegated_credentials(session.user_id)
                 except Exception:
                     logger.exception("Could not revoke delegated credentials after OIDC session ended")
                 logger.info("OIDC session ended because the IdP refused its refresh grant")
                 return None
+            _set_refresh_cooldown(session.session_id)
             logger.warning("Could not refresh the OIDC access token: %s", exc)
             return None
         except Exception as exc:  # pragma: no cover - network surprises
+            _set_refresh_cooldown(session.session_id)
             logger.warning(
                 "Unexpected error refreshing the OIDC access token: %s", exc, exc_info=True
             )
@@ -136,6 +160,7 @@ async def ensure_fresh_access_token(
             # The session was dropped (logout, expiry) while we refreshed.
             _forget_lock(session.session_id)
             return None
+        _refresh_failure_cooldowns.pop(session.session_id, None)
         logger.info("Refreshed the OIDC access token for a live session")
         return updated.access_token
 

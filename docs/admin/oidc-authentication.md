@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-10-04
+Last updated: 2026-10-07
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -122,13 +122,24 @@ refresh sessions.
 An `invalid_grant` client-error response ends that Atlas session and discards the
 user's cached delegated credentials using the same cleanup as logout. The current
 request is no longer authenticated by that session: browsers return to sign-in,
-APIs receive 401, and an open chat socket closes on its next incoming message.
+APIs receive 401, and an open chat socket receives a `session_ended` message
+before closing with code 1008, and the chat UI offers a link to sign in again.
 The existing trusted-header authentication fallback is unchanged. Reloading the
 browser can start a new login without manually visiting the logout URL.
 
+The delegated-credential cleanup is user-wide: the user's delegated tokens are
+revoked for **all** of their sessions, including sessions still open in other
+tabs, so a refused grant on one stale tab tears down credentials for the newer
+ones too. Those other sessions stay signed in and keep working for everything
+that does not need a delegated credential, and their next refresh re-establishes
+delegation if the IdP still accepts the grant.
+
 Network failures, IdP 5xx responses, and other refresh errors retain the Atlas
 session and retry on later use; delegated calls cannot use an expired token.
-Configure the IdP to issue refresh tokens and report access-token expiry.
+After a transient refresh failure the session pauses IdP attempts for a short
+cooldown (10 seconds), so an outage does not make every queued request wait
+behind its own serialized refresh timeout. Configure the IdP to issue refresh
+tokens and report access-token expiry.
 Without a refresh token or known expiry, Atlas cannot track the IdP session this
 way; the Atlas maximum age remains the limit. Refresh does not extend
 `OIDC_SESSION_MAX_AGE_SECONDS`.

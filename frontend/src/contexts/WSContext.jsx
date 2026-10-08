@@ -19,12 +19,25 @@ export const useWS = () => {
 export const WSProvider = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState('Disconnected')
+  const [sessionEnded, setSessionEnded] = useState(false)
   const wsRef = useRef(null)
   const messageHandlersRef = useRef([])
   const healthCheckFailuresRef = useRef(0)
   const healthCheckTimeoutRef = useRef(null)
+  const sessionEndedRef = useRef(false)
 
   const connectWebSocket = () => {
+    // The server sends a `session_ended` frame and closes with 1008 when the
+    // OIDC login behind the socket was refused by the IdP. Backing off as if
+    // the backend were down would hide the actual problem: the user needs to
+    // sign in again, so surface a sign-in prompt instead.
+    const markSessionEnded = (reason) => {
+      if (sessionEndedRef.current) return
+      sessionEndedRef.current = true
+      setSessionEnded(true)
+      setConnectionStatus(`Unauthenticated: ${reason || 'Your session ended. Sign in again to continue.'}`)
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws`
     
@@ -39,6 +52,9 @@ export const WSProvider = ({ children }) => {
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
+          if (data && data.type === 'session_ended') {
+            markSessionEnded(data.reason)
+          }
           messageHandlersRef.current.forEach(handler => {
             try {
               handler(data)
@@ -55,7 +71,11 @@ export const WSProvider = ({ children }) => {
         setIsConnected(false)
         // Check if closed due to authentication failure (1008 = Policy Violation)
         if (event.code === 1008) {
-          setConnectionStatus(`Unauthenticated: ${event.reason || 'Authentication required'}`)
+          if (/sign in/i.test(event.reason || '')) {
+            markSessionEnded(event.reason)
+          } else {
+            setConnectionStatus(`Unauthenticated: ${event.reason || 'Authentication required'}`)
+          }
         } else {
           setConnectionStatus('Disconnected')
         }
@@ -108,6 +128,22 @@ export const WSProvider = ({ children }) => {
     }
 
     const checkBackendAndReconnect = async () => {
+      // The OIDC session was ended: poll steadily for a fresh sign-in instead
+      // of growing the backoff as if the backend were unavailable.
+      if (sessionEndedRef.current) {
+        try {
+          const response = await fetch('/api/config', { signal: AbortSignal.timeout(5000) })
+          if (response.ok) {
+            sessionEndedRef.current = false
+            setSessionEnded(false)
+            reconnectWebSocket()
+          }
+        } catch {
+          // Backend unreachable; keep waiting and polling.
+        }
+        scheduleHealthCheck(INITIAL_HEALTH_CHECK_INTERVAL)
+        return
+      }
       // Only check if WebSocket is disconnected and not already attempting to connect
       if (wsRef.current && wsRef.current.readyState !== WebSocket.OPEN && wsRef.current.readyState !== WebSocket.CONNECTING) {
         try {
@@ -159,6 +195,7 @@ export const WSProvider = ({ children }) => {
   const value = {
     isConnected,
     connectionStatus,
+    sessionEnded,
     sendMessage,
     addMessageHandler,
     reconnectWebSocket
