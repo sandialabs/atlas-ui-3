@@ -7,15 +7,15 @@ This service provides a single interface for:
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from atlas.core.compliance import (
     declared_classifications,
     get_active_compliance_context,
     get_compliance_manager,
     get_model_classification_floor,
-    narrow_classifications,
     reset_active_compliance_context,
     set_active_compliance_context,
 )
@@ -29,6 +29,13 @@ from atlas.core.telemetry import (
     start_span,
 )
 from atlas.domain.errors import DataSourcePermissionError
+from atlas.domain.rag_corpus_classifications import (
+    CORPUS_DISCOVERY_TIMEOUT_SECONDS,
+    CORPUS_METADATA_MIN_REFRESH_SECONDS,
+    CorpusMetadataCache,
+    corpus_classifications,
+    corpus_declares_own,
+)
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.config.config_manager import ConfigManager, RAGSourceConfig, resolve_env_var
 from atlas.modules.rag.atlas_rag_client import AtlasRAGClient
@@ -71,6 +78,19 @@ def _describe_sources(
         return f"The data source {quoted[0]} is", "it"
     listed = ", ".join(quoted[:-1]) + f" and {quoted[-1]}"
     return f"The data sources {listed} are", "them"
+
+
+def _batch_skipped_note(source_ids: List[str], named: List[str]) -> str:
+    """A sentence naming the other corpora a refused per-server batch skips.
+
+    One refused corpus refuses the whole request to its backend, so without
+    this the user would assume the corpora not named were searched.
+    """
+    others = [f"'{s}'" for s in source_ids if s not in named]
+    if not others:
+        return ""
+    listed = others[0] if len(others) == 1 else ", ".join(others[:-1]) + f" and {others[-1]}"
+    return f" {listed} from the same backend {'was' if len(others) == 1 else 'were'} not searched either."
 
 
 def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
@@ -121,22 +141,6 @@ def _rag_response_attrs(response: RAGResponse) -> Dict[str, Any]:
     return attrs
 
 
-def corpus_classifications(ds: Any, server_config: Any) -> Optional[List[str]]:
-    """A discovered HTTP corpus's classifications.
-
-    The server's list from rag-sources.json, narrowed by the corpus's own
-    ``allowed_data_classifications`` when the backend sends a list. The
-    per-corpus ``compliance_level`` is display-only: existing backends send
-    one for every corpus (often ``CUI``), and it was never a server-side
-    boundary, so it must not hide corpora the server config approves.
-    """
-    own = getattr(ds, "allowed_data_classifications", None)
-    return narrow_classifications(
-        own if isinstance(own, list) else None,
-        declared_classifications(server_config),
-    )
-
-
 class UnifiedRAGService:
     """Aggregates RAG discovery and querying across HTTP and MCP sources."""
 
@@ -162,6 +166,10 @@ class UnifiedRAGService:
 
         # Cache of HTTP RAG clients by source name
         self._http_clients: Dict[str, AtlasRAGClient] = {}
+        # Recent HTTP discovery answers, read by query-time per-corpus checks.
+        self._corpus_metadata = CorpusMetadataCache()
+        # In-flight query-time discoveries, so concurrent misses share one call.
+        self._corpus_refreshes: Dict[Tuple[str, str], "asyncio.Future[Optional[Dict[str, Any]]]"] = {}
 
     # ----------------------------------------------------- RAG hooks (GH #713)
 
@@ -296,10 +304,11 @@ class UnifiedRAGService:
             source_name: The server key from ``rag-sources.json``. Used for the
                 log lines and as a fallback in messages; it is a config key the
                 UI never displays, so it is not what the user is told about.
-            source_config: The server's configuration. Authorization is decided
-                per *server*: ``enabled``, ``groups`` and ``compliance_level``
-                all live on this entry, so a denial covers every corpus selected
-                from that server.
+            source_config: The server's configuration. ``enabled``, ``groups``
+                and the server's classifications live on this entry, so a denial
+                on those grounds covers every corpus selected from that server.
+                For HTTP sources each corpus is then checked against its own
+                classifications as well (``_ensure_corpora_allowed``, #1035).
             source_ids: The corpora the user actually selected from this server,
                 as displayed in the picker. All of them are named in the denial
                 message -- the check is per-server, so every one of them is
@@ -366,6 +375,9 @@ class UnifiedRAGService:
                 compliance_mgr.classification_permits(level, floor)
                 for level in source_classifications
             ):
+                await self._ensure_corpora_allowed(
+                    username, source_name, source_config, source_ids, None, floor
+                )
                 return
             logger.warning(
                 "Rejected RAG query for source %s: no classification shared with the model",
@@ -396,6 +408,10 @@ class UnifiedRAGService:
             active_compliance_level,
             declared_classifications(source_config),
         ):
+            await self._ensure_corpora_allowed(
+                username, source_name, source_config, source_ids,
+                active_compliance_level, None,
+            )
             return
 
         # Deliberately logs neither compliance label: the point of query-time
@@ -410,6 +426,219 @@ class UnifiedRAGService:
             f"Deselect {pronoun}, or select a different compliance level.",
             code="DATA_SOURCE_COMPLIANCE_MISMATCH",
         )
+
+    async def _corpus_metadata_for(
+        self,
+        username: str,
+        source_name: str,
+        source_config: RAGSourceConfig,
+        source_ids: List[str],
+    ) -> Tuple[Optional[Dict[str, Any]], bool]:
+        """Server-owned discovery metadata for ``source_ids``, by corpus id.
+
+        A fresh cached answer that lists every requested corpus is used as is;
+        otherwise the backend is asked again (at most once every
+        ``CORPUS_METADATA_MIN_REFRESH_SECONDS``), so a corpus added since the
+        last discovery is found. An answer is trusted for at most
+        ``CORPUS_METADATA_TTL_SECONDS``, which bounds how long a reclassified
+        corpus keeps its old classifications. Corpus ids come from the request
+        and are only ever looked up here -- never taken as evidence of
+        anything.
+
+        Returns ``(corpora, refresh_failed)``: the fresh answer (``None`` when
+        there is none), and whether the backend failed to answer when it was
+        needed -- just now, or recently enough not to be asked again yet.
+        """
+        cache = self._corpus_metadata
+        cached = cache.lookup(source_name, username)
+        if cached is not None and (
+            all(cid in cached for cid in source_ids)
+            or (cache.age(source_name, username) or 0.0) < CORPUS_METADATA_MIN_REFRESH_SECONDS
+        ):
+            return cached, False
+        if cache.recently_failed(source_name, username):
+            return cached, True
+        key = (source_name, username or "")
+        refresh = self._corpus_refreshes.get(key)
+        if refresh is None:
+            refresh = asyncio.ensure_future(
+                self._refresh_corpus_metadata(username, source_name, source_config)
+            )
+            self._corpus_refreshes[key] = refresh
+            refresh.add_done_callback(
+                # Only its own entry: invalidate_cache may have replaced it.
+                lambda done: self._corpus_refreshes.pop(key, None)
+                if self._corpus_refreshes.get(key) is done else None
+            )
+        generation = cache.generation
+        # Shielded: one caller giving up must not cancel the shared refresh.
+        answer = await asyncio.shield(refresh)
+        if cache.generation != generation:
+            # invalidate_cache ran meanwhile (for example a config change);
+            # an answer from before it cannot be trusted for this check.
+            return None, True
+        if answer is None:
+            return cache.lookup(source_name, username), True
+        return answer, False
+
+    async def _refresh_corpus_metadata(
+        self,
+        username: str,
+        source_name: str,
+        source_config: RAGSourceConfig,
+    ) -> Optional[Dict[str, Any]]:
+        """Ask the backend for its corpora once; ``None`` when it did not answer."""
+        cache = self._corpus_metadata
+        generation = cache.generation
+        try:
+            client = self._get_http_client(source_name, source_config)
+            data_sources = await asyncio.wait_for(
+                client.discover_data_sources(username),
+                timeout=min(source_config.timeout, CORPUS_DISCOVERY_TIMEOUT_SECONDS),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not load corpus metadata for RAG source %s (%s)",
+                sanitize_for_logging(source_name),
+                type(exc).__name__,
+            )
+            data_sources = None
+        corpora = {ds.id: ds for ds in data_sources or [] if getattr(ds, "id", None)}
+        if not corpora:
+            if data_sources is not None:
+                # The HTTP client reports its own errors as an empty list.
+                logger.warning(
+                    "RAG source %s returned no corpora to corpus metadata discovery",
+                    sanitize_for_logging(source_name),
+                )
+            cache.mark_failed(source_name, username, generation)
+            return None
+        cache.store(source_name, username, data_sources, generation)
+        return corpora
+
+    async def _ensure_corpora_allowed(
+        self,
+        username: str,
+        source_name: str,
+        source_config: RAGSourceConfig,
+        source_ids: Optional[List[str]],
+        active_level: Optional[str],
+        floor: Optional[Any],
+    ) -> None:
+        """Check every requested HTTP corpus against its own classifications.
+
+        Runs after the server passed, with the same per-corpus calculation
+        discovery uses (``corpus_classifications``), so a corpus the picker
+        hides cannot be reached by a stale selection, a hand-built request or
+        a model's tool call. Every corpus is checked before any is queried; one
+        failure refuses the whole request.
+
+        ``active_level`` is the trusted per-turn classification. Without one,
+        ``floor`` (the selected model's classifications) applies instead, and
+        only to corpora that declare their own list -- one that inherits its
+        server's was covered by the server's floor check.
+
+        A corpus the backend's discovery answered for but does not list is
+        refused. When discovery does not answer, every corpus is refused in a
+        classified session, and under the floor alone on a server with
+        ``legacy_corpus_classifications`` (whose operator has said per-corpus
+        levels matter). Otherwise an outage lets corpora through under the
+        floor: the server already shares a classification with the model, and
+        refusing would turn a discovery outage into an outage for unclassified
+        chat; each such pass is logged at WARNING.
+        """
+        if not source_ids or source_config.type != "http":
+            return
+        corpora, refresh_failed = await self._corpus_metadata_for(
+            username, source_name, source_config, source_ids
+        )
+        # A fresh listing can exist even when the latest refresh failed; a corpus
+        # missing from it was still not listed by the backend.
+        has_listing = corpora is not None
+        corpora = corpora or {}
+
+        compliance_mgr = get_compliance_manager()
+        denied: List[str] = []
+        unconfirmed: List[str] = []
+        unchecked_under_floor: List[str] = []
+        for corpus_id in source_ids:
+            ds = corpora.get(corpus_id)
+            if ds is None:
+                if (
+                    active_level is not None
+                    or has_listing
+                    or source_config.legacy_corpus_classifications
+                ):
+                    unconfirmed.append(corpus_id)
+                else:
+                    unchecked_under_floor.append(corpus_id)
+                continue
+            classifications = corpus_classifications(ds, source_config)
+            if active_level is not None:
+                allowed = compliance_mgr.classification_permits(active_level, classifications)
+            elif not corpus_declares_own(ds, source_config):
+                continue
+            else:
+                allowed = any(
+                    compliance_mgr.classification_permits(level, floor)
+                    for level in classifications or []
+                )
+            if not allowed:
+                denied.append(corpus_id)
+
+        # Corpus ids are logged, never the labels they were checked against.
+        if unchecked_under_floor and not denied:
+            logger.warning(
+                "Allowed RAG query for source %s under the model floor without "
+                "per-corpus metadata for %d corpus(es): %s",
+                sanitize_for_logging(source_name),
+                len(unchecked_under_floor),
+                sanitize_for_logging(",".join(unchecked_under_floor)),
+            )
+        if denied:
+            logger.warning(
+                "Rejected RAG query for source %s: %d corpus(es) outside the "
+                "active compliance boundary: %s",
+                sanitize_for_logging(source_name),
+                len(denied),
+                sanitize_for_logging(",".join(denied)),
+            )
+            subject, pronoun = _describe_sources(source_name, denied)
+            if active_level is not None:
+                reason = "not approved for the selected compliance level"
+                remedy = "or select a different compliance level"
+            else:
+                reason = "not approved for any classification the selected model may receive"
+                remedy = "select a compliance level, or switch to a model approved for that source"
+            raise DataSourcePermissionError(
+                f"{subject} {reason}. Deselect {pronoun}, {remedy}."
+                + _batch_skipped_note(source_ids, denied),
+                code="DATA_SOURCE_COMPLIANCE_MISMATCH",
+            )
+        if unconfirmed:
+            logger.warning(
+                "Rejected RAG query for source %s: %d corpus(es) not confirmed by discovery: %s",
+                sanitize_for_logging(source_name),
+                len(unconfirmed),
+                sanitize_for_logging(",".join(unconfirmed)),
+            )
+            subject, pronoun = _describe_sources(source_name, unconfirmed)
+            plural = pronoun == "them"
+            if refresh_failed or not has_listing:
+                raise DataSourcePermissionError(
+                    f"{subject} not verifiable right now: the RAG backend did not "
+                    f"answer, so {'their data classifications' if plural else 'its data classification'} "
+                    f"cannot be checked. Try again later, or deselect {pronoun}."
+                    + _batch_skipped_note(source_ids, unconfirmed),
+                    code="DATA_SOURCE_UNVERIFIED",
+                )
+            raise DataSourcePermissionError(
+                f"{subject} not offered to you by the RAG backend, so "
+                f"{'they' if plural else 'it'} cannot be confirmed as approved for this "
+                f"conversation. Deselect {pronoun}, or ask an administrator for access."
+                + _batch_skipped_note(source_ids, unconfirmed),
+                code="DATA_SOURCE_NOT_LISTED",
+            )
 
     async def discover_data_sources(
         self,
@@ -500,9 +729,18 @@ class UnifiedRAGService:
         left out (issue #1032), so this list is also the server-side gate for
         per-corpus classifications.
         """
+        generation = self._corpus_metadata.generation
+        answered = False
         try:
             client = self._get_http_client(source_name, config)
             data_sources = await client.discover_data_sources(username)
+            answered = True
+            # Unfiltered, so query-time checks at any level can reuse it. A
+            # failed answer opens the same short window query-time discovery
+            # uses, so the queries that follow do not each wait on the backend.
+            # Neither is written if invalidate_cache ran meanwhile.
+            if not self._corpus_metadata.store(source_name, username, data_sources or [], generation):
+                self._corpus_metadata.mark_failed(source_name, username, generation)
 
             if not data_sources:
                 logger.debug("No data sources found for HTTP source %s", source_name)
@@ -528,7 +766,8 @@ class UnifiedRAGService:
                     "description": ds.description,
                     "authRequired": True,
                     "selected": False,
-                    "complianceLevel": ds.compliance_level,
+                    # Display badge; the boundary is allowedDataClassifications.
+                    "complianceLevel": ds.compliance_level or None,
                     "allowedDataClassifications": classifications,
                 })
 
@@ -543,6 +782,8 @@ class UnifiedRAGService:
 
         except Exception as e:
             logger.error("Failed to discover HTTP source %s: %s", source_name, e)
+            if not answered:
+                self._corpus_metadata.mark_failed(source_name, username, generation)
             return None
 
     def _resolve_query(self, messages: List[Dict], query: Optional[str]) -> str:
@@ -1099,6 +1340,10 @@ class UnifiedRAGService:
         Args:
             source_name: Specific source to invalidate, or None to invalidate all.
         """
+        self._corpus_metadata.invalidate(source_name)
+        for key in [k for k in self._corpus_refreshes if source_name in (None, k[0])]:
+            # Still running, but its result is now discarded (see generation).
+            self._corpus_refreshes.pop(key, None)
         if source_name:
             if source_name in self._http_clients:
                 del self._http_clients[source_name]
@@ -1108,4 +1353,4 @@ class UnifiedRAGService:
             logger.info("Invalidated all HTTP client caches")
 
 
-__all__ = ["UnifiedRAGService"]
+__all__ = ["UnifiedRAGService", "corpus_classifications"]

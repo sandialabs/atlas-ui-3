@@ -21,7 +21,24 @@ class DataSource(BaseModel):
     """Represents a RAG data source with compliance information."""
     id: str
     label: str
-    compliance_level: str = "CUI"
+    # The backend's legacy per-corpus level. ``None`` when it was not sent: a
+    # missing field must not read as a classification (issue #1035). It is a
+    # display badge unless the server opts in with
+    # ``legacy_corpus_classifications`` (see atlas.domain.rag_corpus_classifications).
+    compliance_level: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("compliance_level", "complianceLevel"),
+    )
+
+    @field_validator("compliance_level", mode="before")
+    @classmethod
+    def _coerce_compliance_level(cls, v):
+        # A non-string level is unreadable; keep the field present but empty
+        # so the legacy mapping approves the corpus for nothing.
+        if v is None or isinstance(v, str):
+            return v
+        return ""
+
     # Optional explicit list (issue #1032); narrows the server's list. Backends
     # may send it in camelCase, like the MCP discovery contract.
     allowed_data_classifications: Optional[List[str]] = Field(

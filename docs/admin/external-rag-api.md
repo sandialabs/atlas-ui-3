@@ -112,7 +112,92 @@ For external HTTP REST API RAG backends:
 | `groups` | No | `[]` | Required groups for access |
 | `allowed_data_classifications` | No | `null` | Data classifications this source is approved to receive; the source is queried only when the conversation's level is listed. Undeclared means unavailable in classified sessions. See [Compliance](compliance.md) |
 | `compliance_level` | No | `null` | Deprecated single level, read as `[compliance_level]` when `allowed_data_classifications` is unset |
+| `legacy_corpus_classifications` | No | `false` | Temporary migration aid: read each corpus's discovered `compliance_level` as its one-element classification list when the corpus sends no `allowed_data_classifications`. See [Legacy Per-Corpus Classifications](#legacy-per-corpus-classifications) |
 | `enabled` | No | `true` | Whether this source is active |
+
+### Legacy Per-Corpus Classifications
+
+Older HTTP RAG backends send a single `compliance_level` for each corpus in
+discovery instead of an `allowed_data_classifications` list. By default that
+value is only a display badge: every such corpus inherits its server's
+`allowed_data_classifications`, because many backends send the same value
+(often `CUI`) for every corpus. A server whose per-corpus levels are
+meaningful can opt in to using them:
+
+```json
+{
+  "legacy-rag": {
+    "type": "http",
+    "url": "${RAG_URL}",
+    "allowed_data_classifications": ["UUR", "ITAR", "ECI"],
+    "legacy_corpus_classifications": true
+  }
+}
+```
+
+Each discovered corpus then gets its effective classifications in this order:
+
+1. The corpus's own `allowed_data_classifications`, when the backend sends it
+   (including an empty list, which approves the corpus for nothing).
+2. With `legacy_corpus_classifications: true`, the corpus's `compliance_level`,
+   when the backend actually sends one, as a one-element list. A missing or
+   `null` field is not a level (it is never read as `CUI`); a blank or
+   non-string value approves the corpus for nothing.
+3. Otherwise the server's `allowed_data_classifications`.
+
+The result is always narrowed by the server's list: a corpus can never be
+approved for a classification its server is not. An unknown level, or one the
+server does not list, leaves the corpus approved for nothing in classified
+sessions. Aliases from `compliance-levels.json` resolve as usual. Discovery
+returns the effective list to the UI as `allowedDataClassifications`; the
+corpus's `complianceLevel` stays as a display badge.
+
+The option is a temporary bridge. Migrate backends to return
+`allowed_data_classifications` per corpus, then remove the flag; once every
+corpus sends a list the flag has no effect.
+
+#### Query-time corpus checks
+
+Discovery hides corpora not approved for the active classification, and every
+HTTP RAG query checks each requested corpus again with the same calculation,
+so a stale selection, a hand-built request or a model's `atlas_search` call
+cannot reach a hidden corpus. This applies to every HTTP source (with or
+without the legacy flag), to single and batched queries, and to both API
+versions:
+
+- In a classified session, every requested corpus must be listed by the
+  backend's discovery for that user and approved for the session's
+  classification. If any is not, the whole request is refused before anything
+  is sent to the backend.
+- In a classified session, a corpus discovery does not list for the user is
+  refused (`DATA_SOURCE_NOT_LISTED`), and while the backend's discovery does
+  not answer every corpus is refused (`DATA_SOURCE_UNVERIFIED`). A query-time
+  discovery is capped at 10 seconds (or the source's `timeout`, if shorter),
+  concurrent queries share one call, and a failure is remembered for 30
+  seconds, so during an outage queries are refused at once instead of each
+  waiting on the backend.
+- With no level selected ("All Levels"), the model floor still applies: a
+  corpus that declares its own classifications must share one with the
+  selected model, and a corpus discovery answers for but does not list is
+  refused. During a discovery outage, a server with
+  `legacy_corpus_classifications` refuses too; other servers let the corpus
+  through on the server's floor check and log it at WARNING, so an outage
+  does not block unclassified chat (use `FEATURE_COMPLIANCE_LEVEL_REQUIRED` if
+  that is not acceptable). Removing `legacy_corpus_classifications` after a
+  migration therefore also returns no-level turns to this permissive outage
+  behavior.
+- A refused batch names the corpora that failed and the others from the same
+  backend that were skipped with them.
+- Corpus metadata comes from the backend, never from the client. Atlas reuses
+  a discovery answer for up to 60 seconds per user and server, so a
+  reclassified corpus is re-checked within about a minute. When a requested
+  corpus is missing from the answer Atlas asks again, at most once every 5
+  seconds; a refresh that fails keeps the previous answer until it expires.
+
+Denials are logged with the server and corpus ids, never the classification
+labels. To check a deployment end to end, run
+`mocks/atlas-rag-api-mock/corpus_classification_smoke.py` against the bundled
+mock (usage in its docstring).
 
 ### MCP RAG Source Configuration
 

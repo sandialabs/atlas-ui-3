@@ -362,11 +362,13 @@ class TestPerCorpusClassifications:
     async def test_http_discovery_drops_unapproved_corpora(self, manager, monkeypatch):
         from unittest.mock import AsyncMock, MagicMock
 
+        from atlas.domain.rag_corpus_classifications import CorpusMetadataCache
         from atlas.domain.unified_rag_service import UnifiedRAGService
         from atlas.modules.rag.client import DataSource
 
         monkeypatch.setattr("atlas.domain.unified_rag_service.get_compliance_manager", lambda: manager)
         service = object.__new__(UnifiedRAGService)
+        service._corpus_metadata = CorpusMetadataCache()
         client = MagicMock()
         client.discover_data_sources = AsyncMock(return_value=[
             DataSource(id="open", label="Open", allowed_data_classifications=["UUR", "ITAR"]),
