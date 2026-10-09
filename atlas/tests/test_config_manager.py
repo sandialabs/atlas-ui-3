@@ -4,11 +4,11 @@ Tests the centralized configuration management system without
 modifying the actual environment or configuration files.
 """
 
+import logging
 from pathlib import Path
 
 import pytest
 
-from atlas.modules.config import settings as settings_module
 from atlas.modules.config.config_manager import (
     AppSettings,
     ConfigManager,
@@ -244,29 +244,33 @@ class TestAppSettings:
         assert hasattr(settings, "agent_mode_available")
         assert settings.agent_mode_available == settings.feature_agent_mode_available
 
-    def test_agent_portal_disabled_on_windows(self, monkeypatch):
-        """On Windows, the validator forces feature_agent_portal_enabled False.
+    def test_removed_agent_portal_settings_warn_and_are_ignored(self, monkeypatch, caplog):
+        """Leftover Agent Portal env vars are ignored, with a single warning."""
+        from atlas.modules.config.settings import warn_removed_agent_portal_settings
 
-        This runs before the dev-only guard, so enabling it on Windows must not
-        raise even when debug mode is off — it is silently treated as disabled.
-        """
-        monkeypatch.setattr(settings_module.sys, "platform", "win32")
         monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "true")
-        monkeypatch.setenv("DEBUG_MODE", "false")
+        monkeypatch.setenv("AGENT_PORTAL_ALLOWED_ORIGINS", "atlas.example.com")
 
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
+            warn_removed_agent_portal_settings()
+
+        assert "FEATURE_AGENT_PORTAL_ENABLED" in caplog.text
+        assert "AGENT_PORTAL_ALLOWED_ORIGINS" in caplog.text
+        # The removed fields are gone from the settings model entirely.
         settings = AppSettings(_env_file=None)
+        assert not hasattr(settings, "feature_agent_portal_enabled")
+        assert not hasattr(settings, "agent_portal_allowed_origins")
 
-        assert settings.feature_agent_portal_enabled is False
+    def test_removed_agent_portal_warning_silent_when_unset(self, monkeypatch, caplog):
+        from atlas.modules.config.settings import warn_removed_agent_portal_settings
 
-    def test_agent_portal_honored_on_non_windows(self, monkeypatch):
-        """Off Windows, the flag is left intact (debug mode required to enable)."""
-        monkeypatch.setattr(settings_module.sys, "platform", "linux")
-        monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "true")
-        monkeypatch.setenv("DEBUG_MODE", "true")
+        monkeypatch.delenv("FEATURE_AGENT_PORTAL_ENABLED", raising=False)
+        monkeypatch.delenv("AGENT_PORTAL_ALLOWED_ORIGINS", raising=False)
 
-        settings = AppSettings(_env_file=None)
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
+            warn_removed_agent_portal_settings()
 
-        assert settings.feature_agent_portal_enabled is True
+        assert caplog.text == ""
 
 
 class TestConfigManagerCustomRoot:

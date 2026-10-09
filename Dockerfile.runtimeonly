@@ -83,9 +83,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 
 # Final stage: Python, bash, and busybox (sh, env, and basic commands), so
-# hooks and agent-portal commands that are shell scripts or use an
-# `#!/usr/bin/env` line keep working. apk is removed afterwards: no package
-# manager or compiler ends up in the image.
+# hooks that are shell scripts or use an `#!/usr/bin/env` line keep working.
+# apk is removed afterwards: no package manager or compiler ends up in the image.
 FROM cgr.dev/chainguard/wolfi-base
 
 ARG PYTHON_VERSION

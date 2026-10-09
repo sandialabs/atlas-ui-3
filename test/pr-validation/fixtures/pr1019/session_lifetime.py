@@ -144,12 +144,10 @@ def main():
                 "OIDC_REDIRECT_URI": "http://testserver/auth/oidc/callback",
                 "DEBUG_MODE": "false",
                 "FEATURE_PROXY_SECRET_ENABLED": "false",
-                "FEATURE_AGENT_PORTAL_ENABLED": "false",
                 "FEATURE_WEBSOCKET_ORIGIN_CHECK_ENABLED": "false",
                 "APP_LOG_DIR": state,
                 "MCP_TOKEN_STORAGE_DIR": f"{state}/tokens",
                 "CHAT_HISTORY_DB_URL": f"duckdb:///{state}/history.db",
-                "AGENT_PORTAL_DB_URL": f"duckdb:///{state}/portal.db",
             })
             exercise()
     finally:

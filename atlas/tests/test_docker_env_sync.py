@@ -275,8 +275,8 @@ def test_runtime_only_dockerfile_keeps_runtime_surface_small():
 
     final_packages = apk_packages(final_stage)
 
-    # The final stage is not a -dev image, keeps a shell (hooks and agent-portal
-    # commands can be shell scripts), and has no package manager or build tools.
+    # The final stage is not a -dev image, keeps a shell (hooks can be shell
+    # scripts), and has no package manager or build tools.
     assert '-dev' not in final_image, f"Final stage must not use a -dev image: {final_from}"
     assert {'bash', 'busybox'} <= set(final_packages), (
         f"Final stage must install bash and busybox; it installs {final_packages}"

@@ -163,8 +163,8 @@ your administrator sets.
 ## Top bar sizing
 
 The admin shield is gone -- admin controls are the Admin tab, and the full
-dashboard is one click on from there -- and Help and Portal are icons rather
-than icon-plus-word.
+dashboard is one click on from there -- and Help is an icon rather than
+icon-plus-word.
 
 The left-hand button labels are now driven by the header's own measured width
 rather than a viewport media query. The header sits beside the sidebar and the

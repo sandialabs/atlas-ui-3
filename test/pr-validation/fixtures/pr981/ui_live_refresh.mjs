@@ -105,7 +105,6 @@ try {
       FEATURE_TOOLS_ENABLED: 'true',
       FEATURE_RAG_ENABLED: 'false',
       FEATURE_WORKSPACES_ENABLED: 'false',
-      FEATURE_AGENT_PORTAL_ENABLED: 'false',
       USE_MOCK_S3: 'true',
       REQUIRE_TOOL_APPROVAL_BY_DEFAULT: 'true',
       FORCE_TOOL_APPROVAL_GLOBALLY: 'false',

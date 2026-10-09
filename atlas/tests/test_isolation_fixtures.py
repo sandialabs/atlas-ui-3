@@ -5,10 +5,9 @@ and off the developer's real state, so they need coverage of their own -- a
 silently broken guard looks exactly like a suite that never needed one. Two of
 the behaviors here are regressions that already happened once:
 
-* ``_release`` dispatched by method name, so ``ProcessManager.cancel`` (which
-  is ``async def cancel(self, process_id, *, sigkill_after=3.0)``) raised
-  TypeError into a bare ``except`` and the singleton owning live subprocesses
-  was never released.
+* ``_release`` dispatched by method name, so an ``async def cancel(self, ...)``
+  resource like the old process manager raised TypeError into a bare
+  ``except`` and the singleton owning live subprocesses was never released.
 * the snapshot skipped modules that were not imported yet, so a singleton
   created by an import *inside* a test escaped isolation entirely.
 """
@@ -259,19 +258,19 @@ class TestSingletonSnapshot:
 
     def _fake_module(self, name):
         module = types.ModuleType(name)
-        module._singleton = None
+        module._hook_manager = None
         return module
 
-    def test_restores_a_value_the_test_replaced(self, monkeypatch):
-        from atlas.modules.agent_portal import presets_store as ps_mod
+    def test_restores_a_value_the_test_replaced(self):
+        import atlas.hooks.manager as manager_mod
 
-        original = ps_mod._singleton
+        original = manager_mod._hook_manager
         saved = snapshot_singletons()
-        ps_mod._singleton = "replaced-by-test"
+        manager_mod._hook_manager = "replaced-by-test"
 
         restore_singletons(saved)
 
-        assert ps_mod._singleton is original
+        assert manager_mod._hook_manager is original
 
     def test_clears_a_singleton_created_by_an_import_inside_the_test(self):
         """A module absent at snapshot time must come back as ``None``.
@@ -280,19 +279,21 @@ class TestSingletonSnapshot:
         snapshotting, then putting a populated stand-in back -- the shape of a
         subset run where the first import happens inside the test.
         """
-        name = "atlas.modules.agent_portal.presets_store"
+        import atlas.hooks.manager  # noqa: F401
+
+        name = "atlas.hooks.manager"
         real = sys.modules[name]
         del sys.modules[name]
         try:
             saved = snapshot_singletons()
 
             stand_in = self._fake_module(name)
-            stand_in._singleton = "created-during-test"
+            stand_in._hook_manager = "created-during-test"
             sys.modules[name] = stand_in
 
             restore_singletons(saved)
 
-            assert stand_in._singleton is None, (
+            assert stand_in._hook_manager is None, (
                 "a singleton created by an import inside the test must not "
                 "survive into the next test"
             )
@@ -306,7 +307,9 @@ class TestSingletonSnapshot:
         ``test_env_isolation.test_isolated_singletons_name_real_module_globals``;
         this covers the restore side not creating the attribute either.
         """
-        name = "atlas.modules.agent_portal.presets_store"
+        import atlas.hooks.manager  # noqa: F401
+
+        name = "atlas.hooks.manager"
         module = sys.modules[name]
         assert not hasattr(module, "_no_such_global")
 

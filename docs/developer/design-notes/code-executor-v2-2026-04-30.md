@@ -92,7 +92,7 @@ In order of which catches what:
 
 ### Startup precondition
 
-`atlas/modules/process_manager/landlock.is_supported()` must return `True`. If not, the server **refuses to boot** with a clear error:
+`atlas/mcp/code-executor-v2/sandbox/kernel_probe.is_landlock_supported()` must return `True`. If not, the server **refuses to boot** with a clear error:
 
 ```
 FATAL: Landlock unavailable on this kernel. Code Executor v2 requires
@@ -244,7 +244,7 @@ atlas/mcp/code-executor-v2/
 Reuses (no duplication):
 - `atlas/mcp_shared/server_factory.py` pattern (but creates an HTTP-flavor factory variant).
 - `atlas/mcp/common/state.get_state_store()`.
-- `atlas/modules/process_manager/landlock.is_supported()` for the boot probe.
+- `atlas/mcp/code-executor-v2/sandbox/kernel_probe.is_landlock_supported()` for the boot probe.
 
 The new `_sandbox_launch_v2.py` is its own file (does not import the existing one) for the same reason the existing one is standalone: the child runs with the user's cwd, not the project root, so it must be self-contained stdlib.
 

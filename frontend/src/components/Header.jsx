@@ -4,7 +4,7 @@ import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import WorkspaceSelector from './WorkspaceSelector'
-import { Database, Wrench, Bot, ExternalLink, FileText, Plus, CircleHelp, Shield, FolderOpen, Monitor, Menu, X, PanelLeft, HardDrive, Cloud, Printer, Terminal } from 'lucide-react'
+import { Database, Wrench, Bot, ExternalLink, FileText, Plus, CircleHelp, Shield, FolderOpen, Monitor, Menu, X, PanelLeft, HardDrive, Cloud, Printer } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
 import { useElementWidth } from '../hooks/useElementWidth'
 import { useToast } from './ui/toastContext'
@@ -37,7 +37,7 @@ const SAVE_MODE_CONFIG = {
 // Header width (not viewport width) at which the full desktop button cluster
 // fits. Below it the cluster collapses into the hamburger menu. The cluster is
 // smaller since issue #839 -- the model picker moved to the chat bar and the
-// admin shield, Help label, and Portal label are gone -- so the threshold came
+// admin shield and Help label are gone -- so the threshold came
 // down with it, and still carries headroom for locale-dependent label widths.
 export const DESKTOP_ACTIONS_MIN_WIDTH = 1080
 
@@ -385,18 +385,6 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
             <CircleHelp className="w-5 h-5" />
           </button>
 
-          {/* Agent Portal Button */}
-          {features?.agent_portal && (
-            <button
-              onClick={() => navigate('/agent-portal')}
-              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-              title="Agent Portal -- launch host processes"
-              aria-label="Agent Portal"
-            >
-              <Terminal className="w-5 h-5" />
-            </button>
-          )}
-
           {/* File Manager Panel Toggle */}
           {features?.files_panel && (
             <button
@@ -592,20 +580,6 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                 <CircleHelp className="w-5 h-5" />
                 <span>Help</span>
               </button>
-
-              {/* Agent Portal */}
-              {features?.agent_portal && (
-                <button
-                  onClick={() => {
-                    navigate('/agent-portal')
-                    setMobileMenuOpen(false)
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
-                >
-                  <Terminal className="w-5 h-5" />
-                  <span>Agent Portal</span>
-                </button>
-              )}
 
               {/* File Manager Panel Toggle */}
               {features?.files_panel && (
