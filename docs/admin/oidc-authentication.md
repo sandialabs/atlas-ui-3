@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -148,6 +148,24 @@ store. Configure the IdP to issue refresh tokens and report access-token expiry.
 Without a refresh token or known expiry, Atlas cannot track the IdP session this
 way; the Atlas maximum age remains the limit. Refresh does not extend
 `OIDC_SESSION_MAX_AGE_SECONDS`.
+
+A refresh the IdP rejects with any other client error (for example Entra's
+`invalid_request`) is logged as `Could not refresh the OIDC access token: Token
+endpoint returned 400 (invalid_request) [error_codes=<n>; trace_id=...;
+correlation_id=...]`. Only the provider's numeric `error_codes` and its trace
+and correlation IDs are kept -- the free-text `error_description` is never
+logged, since it can echo request data. For Entra, `error_codes` are AADSTS
+numbers (`error_codes=9002313` is `AADSTS9002313`). Give the code and IDs to the
+Entra administrator to find the request in the sign-in logs. Such a session is
+kept and retried, but delegated calls fail until the user signs in again; the
+LiteLLM team picker shows a **Sign in again** link for this case (chat errors
+from the same cause show the "Please sign in again" text only). The link is
+also shown when the refresh failed because the IdP is unreachable; signing in
+cannot succeed until the IdP is back, so retry later in that case. Signing in again
+creates a fresh session that delegation prefers, with no server restart.
+`invalid_client`, `unauthorized_client`, and `unsupported_grant_type` describe
+Atlas's client registration instead; the log says so, and a new sign-in will
+not help.
 
 An active session normally detects IdP revocation by the next refresh, provided
 the IdP refuses the grant. This is not immediate logout propagation: idle
@@ -316,4 +334,5 @@ A tool call never fails with a delegation stack trace.
 | Redirect to `/?oidc_error=invalid_state` | The session cookie was lost between login and callback (secret changed, or the process restarted). |
 | Redirect to `/?oidc_error=token_exchange_failed` | Client authentication was rejected, or the ID token failed validation. Check the redirect URI is registered exactly. |
 | Redirect to `/?oidc_error=misconfigured` | Client credentials could not be built -- e.g. `private_key_jwt` with an unreadable key file. |
+| LiteLLM picker: `Your sign-in session has no token to present to LiteLLM gateway ...` after hours idle | The session's refresh failed. Use the **Sign in again** link, then search the log for `Could not refresh the OIDC access token`; an `invalid_grant` ended the session, anything else carries the IdP's `error_codes` (AADSTS numbers on Entra) and trace/correlation IDs to look up in the Entra sign-in logs. |
 | MCP server shows as unauthenticated | Delegation disabled, no OIDC session for that user, or the exchange was refused by the IdP. |

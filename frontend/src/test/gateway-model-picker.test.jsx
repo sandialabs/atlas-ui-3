@@ -159,6 +159,58 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     setup()
     fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Please sign in again.')
+    expect(screen.queryByTestId('gateway-signin-link')).toBeNull()
+  })
+
+  it('offers a sign-in link when the backend says a fresh sign-in can fix it', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'X-Atlas-Sign-In': '/auth/oidc/login' }),
+      json: async () => ({ detail: 'Your sign-in session has no token. Please sign in again.' }),
+    }))
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    const link = await screen.findByTestId('gateway-signin-link')
+    const next = window.location.pathname + window.location.search
+    expect(link.getAttribute('href')).toBe(`/auth/oidc/login?next=${encodeURIComponent(next)}`)
+  })
+
+  it('offers the sign-in link when listing a team\'s models fails the same way', async () => {
+    global.fetch = vi.fn(async (url) => {
+      if (url.startsWith('/api/llm/gateways/enterprise/teams')) {
+        return { ok: true, status: 200, json: async () => TEAMS }
+      }
+      return {
+        ok: false,
+        status: 401,
+        headers: new Headers({ 'X-Atlas-Sign-In': '/auth/oidc/login' }),
+        json: async () => ({ detail: 'Please sign in again.' }),
+      }
+    })
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    fireEvent.change(await screen.findByLabelText('1. Team'), { target: { value: 'team-alpha' } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load models: Please sign in again.')
+    expect(screen.getByTestId('gateway-signin-link').getAttribute('href')).toMatch(/^\/auth\/oidc\/login\?next=/)
+  })
+
+  it.each([
+    '//evil.example/login',
+    '/\\evil.example/login',
+    'https://evil.example/login',
+    'javascript:alert(1)',
+  ])('ignores a sign-in header that is not a same-origin path: %s', async (value) => {
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'X-Atlas-Sign-In': value }),
+      json: async () => ({ detail: 'Please sign in again.' }),
+    }))
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please sign in again.')
+    expect(screen.queryByTestId('gateway-signin-link')).toBeNull()
   })
 })
 

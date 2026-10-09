@@ -38,6 +38,13 @@ _refresh_locks_guard = asyncio.Lock()
 REFRESH_FAILURE_COOLDOWN_SECONDS = 10.0
 _refresh_failure_cooldowns: dict = {}
 
+# Token-endpoint errors that describe Atlas's client, not the user's grant.
+_CLIENT_CONFIGURATION_ERRORS = frozenset(
+    {"invalid_client", "unauthorized_client", "unsupported_grant_type"}
+)
+# Client errors that only mean "try later"; a new sign-in would not help.
+_RETRY_LATER_ERRORS = frozenset({"temporarily_unavailable", "slow_down"})
+
 
 def _refresh_in_cooldown(session_id: str) -> bool:
     until = _refresh_failure_cooldowns.get(session_id)
@@ -183,9 +190,38 @@ async def ensure_fresh_access_token(
                     )
                 return None
             _set_refresh_cooldown(session.session_id)
-            logger.warning("Could not refresh the OIDC access token: %s", exc)
+            if (
+                isinstance(exc, OIDCFlowError)
+                and exc.error_code in _CLIENT_CONFIGURATION_ERRORS
+            ):
+                # Atlas's own registration or credentials are at fault; no user
+                # sign-in can fix that, so don't suggest one.
+                logger.warning(
+                    "Could not refresh the OIDC access token: %s. The IdP rejected"
+                    " Atlas's client registration or credentials; check the OIDC"
+                    " client configuration.",
+                    exc,
+                )
+            elif (
+                isinstance(exc, OIDCFlowError)
+                and exc.status_code is not None
+                and 400 <= exc.status_code < 500
+                and exc.status_code != 429
+                and exc.error_code not in _RETRY_LATER_ERRORS
+            ):
+                # Not a definitive refusal of the grant, so the session is kept
+                # and retried, but the same request will usually be rejected
+                # again: name the recovery and the IdP's support identifiers.
+                logger.warning(
+                    "Could not refresh the OIDC access token: %s. The IdP rejected"
+                    " the refresh request; the session is kept and retried, and"
+                    " signing in again starts a fresh session.",
+                    exc,
+                )
+            else:
+                logger.warning("Could not refresh the OIDC access token: %s", exc)
             return None
-        except Exception as exc:  # pragma: no cover - network surprises
+        except Exception as exc:  # network surprises
             _set_refresh_cooldown(session.session_id)
             logger.warning(
                 "Unexpected error refreshing the OIDC access token: %s", exc, exc_info=True

@@ -18,10 +18,49 @@ async function fetchJson(url) {
   }
   if (!res.ok) {
     const detail = body && typeof body.detail === 'string' ? body.detail : `HTTP ${res.status}`
-    throw new Error(detail)
+    const error = new Error(detail)
+    // Set by the backend when a fresh sign-in can fix the failure (the
+    // session has no usable token to delegate to the gateway).
+    const signIn = res.status === 401 ? res.headers?.get('X-Atlas-Sign-In') : null
+    error.signInUrl = sameOriginPath(signIn)
+    throw error
   }
   return body
 }
+
+// Only a path on this origin may become a link: browsers resolve values such
+// as `//host` or `/\host` to another site, so parse rather than prefix-check.
+function sameOriginPath(value) {
+  if (!value || !value.startsWith('/')) return null
+  try {
+    const url = new URL(value, window.location.origin)
+    return url.origin === window.location.origin ? url.pathname : null
+  } catch {
+    return null
+  }
+}
+
+function signInHref(signInUrl) {
+  return `${signInUrl}?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
+}
+
+const LoadError = ({ prefix, error }) => (
+  <p className="text-xs text-red-400" role="alert">
+    {prefix}: {error.message}
+    {error.signInUrl && (
+      <>
+        {' '}
+        <a
+          href={signInHref(error.signInUrl)}
+          className="underline font-medium hover:text-red-300"
+          data-testid="gateway-signin-link"
+        >
+          Sign in again
+        </a>
+      </>
+    )}
+  </p>
+)
 
 /**
  * Team-then-model selection for one enterprise LiteLLM gateway.
@@ -54,7 +93,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
         // Drop a remembered team the user no longer belongs to.
         setTeamId(prev => (list.some(t => t.team_id === prev) ? prev : ''))
       })
-      .catch(err => { if (!cancelled) setTeamsError(err.message) })
+      .catch(err => { if (!cancelled) setTeamsError(err) })
     return () => { cancelled = true }
   }, [base, refreshCount])
 
@@ -68,7 +107,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
     setModelsError(null)
     fetchJson(`${base}/models?team_id=${encodeURIComponent(teamId)}${refreshCount ? '&refresh=true' : ''}`)
       .then(body => { if (!cancelled) setModels(body?.models || []) })
-      .catch(err => { if (!cancelled) setModelsError(err.message) })
+      .catch(err => { if (!cancelled) setModelsError(err) })
     return () => { cancelled = true }
   }, [base, teamId, teams, refreshCount])
 
@@ -116,7 +155,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
       )}
 
       {teamsError ? (
-        <p className="text-xs text-red-400" role="alert">Could not load teams: {teamsError}</p>
+        <LoadError prefix="Could not load teams" error={teamsError} />
       ) : teams === null ? (
         <p className="text-xs text-gray-400 flex items-center gap-1">
           <Loader2 className="w-3 h-3 animate-spin" /> Loading teams...
@@ -144,7 +183,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
         <div>
           <div className="text-[11px] text-gray-400 mb-1">2. Model</div>
           {modelsError ? (
-            <p className="text-xs text-red-400" role="alert">Could not load models: {modelsError}</p>
+            <LoadError prefix="Could not load models" error={modelsError} />
           ) : models === null ? (
             <p className="text-xs text-gray-400 flex items-center gap-1">
               <Loader2 className="w-3 h-3 animate-spin" /> Loading models...
