@@ -9,7 +9,28 @@ from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
 
-_warned_removed_agent_portal_settings = False
+
+def warn_removed_agent_portal_settings() -> None:
+    """Log if a removed Agent Portal setting is still present in the environment.
+
+    ``FEATURE_AGENT_PORTAL_ENABLED`` and ``AGENT_PORTAL_ALLOWED_ORIGINS`` were
+    removed along with the Agent Portal. A leftover value in an operator's
+    ``.env`` is harmless but easy to miss, so surface it rather than ignoring it
+    silently. Call this *after* the env file has been loaded (e.g. from
+    ``main.py``), otherwise values that live only in ``.env`` are invisible.
+    """
+    leftover = [
+        name
+        for name in ("FEATURE_AGENT_PORTAL_ENABLED", "AGENT_PORTAL_ALLOWED_ORIGINS")
+        if os.environ.get(name)
+    ]
+    if leftover:
+        logger.warning(
+            "Ignoring removed Agent Portal setting(s): %s. The Agent Portal "
+            "has been removed from Atlas; these variables have no effect and "
+            "can be deleted from your .env.",
+            ", ".join(leftover),
+        )
 
 
 def parse_identity_list(raw: str) -> FrozenSet[str]:
@@ -1029,33 +1050,6 @@ class AppSettings(BaseSettings):
                     "auth_aws_expected_alb_arn must be set to a valid AWS ALB ARN when auth_user_header_type is 'aws-alb-jwt'. "
                     "Current value is empty or a placeholder. Set AUTH_AWS_EXPECTED_ALB_ARN environment variable."
                 )
-        return self
-
-    @model_validator(mode='after')
-    def warn_removed_agent_portal_settings(self):
-        """Log a one-time warning if a removed Agent Portal setting is still set.
-
-        The Agent Portal (and its ``FEATURE_AGENT_PORTAL_ENABLED`` /
-        ``AGENT_PORTAL_ALLOWED_ORIGINS`` settings) was removed. A leftover value
-        in an operator's ``.env`` is harmless but easy to miss, so surface it
-        once rather than failing to boot.
-        """
-        global _warned_removed_agent_portal_settings
-        if _warned_removed_agent_portal_settings:
-            return self
-        leftover = [
-            name
-            for name in ("FEATURE_AGENT_PORTAL_ENABLED", "AGENT_PORTAL_ALLOWED_ORIGINS")
-            if os.environ.get(name)
-        ]
-        if leftover:
-            logger.warning(
-                "Ignoring removed Agent Portal setting(s): %s. The Agent Portal "
-                "has been removed from Atlas; these variables have no effect and "
-                "can be deleted from your .env.",
-                ", ".join(leftover),
-            )
-        _warned_removed_agent_portal_settings = True
         return self
 
     @model_validator(mode='after')

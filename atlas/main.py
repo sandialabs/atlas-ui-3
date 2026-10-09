@@ -81,7 +81,7 @@ from atlas.domain.errors import (
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
-from atlas.modules.config.settings import agent_mode_available
+from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
 from atlas.routes.admin_routes import admin_router
 
@@ -115,6 +115,9 @@ from atlas.version import VERSION
 
 # Load environment variables from the parent directory
 load_dotenv(dotenv_path="../.env")
+
+# Surface (and ignore) any removed Agent Portal settings left in .env / the env
+warn_removed_agent_portal_settings()
 
 # Setup OpenTelemetry logging
 otel_config = setup_opentelemetry("atlas-ui-3-backend", "1.0.0")
