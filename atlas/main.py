@@ -82,10 +82,9 @@ from atlas.domain.errors import (
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
-from atlas.modules.config.settings import agent_mode_available
+from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
 from atlas.routes.admin_routes import admin_router
-from atlas.routes.agent_portal_availability import load_agent_portal_router
 
 # Import essential routes
 from atlas.routes.capture_routes import capture_router
@@ -117,6 +116,9 @@ from atlas.version import VERSION
 
 # Load environment variables from the parent directory
 load_dotenv(dotenv_path="../.env")
+
+# Surface (and ignore) any removed Agent Portal settings left in .env / the env
+warn_removed_agent_portal_settings()
 
 # Setup OpenTelemetry logging
 otel_config = setup_opentelemetry("atlas-ui-3-backend", "1.0.0")
@@ -1083,6 +1085,14 @@ async def lifespan(app: FastAPI):
     # Initialize configuration
     config = app_factory.get_config_manager()
 
+    from atlas.core.security_config import (
+        resolve_bind_host,
+        validate_capability_secret,
+        validate_debug_configuration,
+    )
+    validate_debug_configuration(config.app_settings, resolve_bind_host())
+    validate_capability_secret(config.app_settings.capability_token_secret)
+
     # CONFIG: Validate the MCP token encryption key at startup.
     #
     # The key is only resolved lazily, inside request handlers such as
@@ -1341,9 +1351,6 @@ app.include_router(user_prompt_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
-agent_portal_router = load_agent_portal_router()
-if agent_portal_router is not None:
-    app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -2731,7 +2738,6 @@ if static_dir.exists():
         "help",
         "admin",
         "files",
-        "agent-portal",
     )
 
     @app.get("/{full_path:path}")
@@ -2753,6 +2759,12 @@ if __name__ == "__main__":
     # Set ATLAS_HOST=0.0.0.0 in production environments where needed
     host = os.getenv("ATLAS_HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
+
+    from atlas.core.security_config import validate_debug_configuration
+    validate_debug_configuration(config.app_settings, host)
+    # Keep the process environment consistent with the address we are about to
+    # bind so the lifespan guard resolves the same effective host.
+    os.environ["ATLAS_HOST"] = host
 
     uvicorn.run(
         app,

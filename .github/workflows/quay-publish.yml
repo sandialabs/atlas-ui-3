@@ -54,11 +54,33 @@ jobs:
         echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
         echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
 
+    - name: Build runtime validation image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile
+        target: runtime
+        load: true
+        tags: runtime-only-image:latest
+        build-args: |
+          VITE_APP_NAME=ATLAS
+          VITE_FEATURE_ANIMATED_LOGO=true
+          VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=true
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
+        cache-from: type=gha,scope=atlas-quay
+        cache-to: type=gha,scope=atlas-quay,mode=max
+
+    - name: Validate runtime image
+      run: ATLAS_TEST_IMAGE=runtime-only-image:latest bash test/pr-validation/test_pr1017_container_runtime.sh
+
     - name: Build and push to Quay.io
       uses: docker/build-push-action@v7
       with:
         context: .
         file: ./Dockerfile
+        target: runtime
         platforms: linux/amd64,linux/arm64
         push: true
         build-args: |
@@ -70,5 +92,5 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=atlas-quay
+        cache-to: type=gha,scope=atlas-quay,mode=max

@@ -15,6 +15,7 @@ import time
 from hashlib import sha256
 from typing import Any, Dict, Optional
 
+from atlas.core.security_config import validate_capability_secret
 from atlas.modules.config import config_manager
 
 logger = logging.getLogger(__name__)
@@ -79,13 +80,10 @@ def _get_secret() -> bytes:
     - Cryptographically random per-process ephemeral secret (fail-closed:
       never falls back to a hardcoded value that an attacker could predict)
     """
-    try:
-        settings = config_manager.app_settings
-        configured = getattr(settings, "capability_token_secret", None)
-        if configured:
-            return configured.encode("utf-8")
-    except Exception:
-        logger.debug("Capability token secret config not ready; using ephemeral secret.")
+    settings = config_manager.app_settings
+    configured = validate_capability_secret(settings.capability_token_secret)
+    if configured:
+        return configured.encode("utf-8")
 
     return _get_ephemeral_secret()
 
@@ -124,9 +122,11 @@ def generate_file_token(user_email: str, file_key: str, ttl_seconds: Optional[in
 
 def verify_file_token(token: str) -> Optional[Dict[str, Any]]:
     """Verify a file token and return claims if valid, else None."""
+    # Configuration errors must not be mistaken for malformed client tokens.
+    secret = _get_secret()
     try:
         body, sig_b64 = token.split(".", 1)
-        expected_sig = hmac.new(_get_secret(), body.encode("ascii"), sha256).digest()
+        expected_sig = hmac.new(secret, body.encode("ascii"), sha256).digest()
         given_sig = _b64url_decode(sig_b64)
         if not hmac.compare_digest(expected_sig, given_sig):
             return None

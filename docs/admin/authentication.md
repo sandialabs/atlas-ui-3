@@ -1,6 +1,6 @@
 # Authentication & Authorization
 
-Last updated: 2026-09-15
+Last updated: 2026-10-04
 
 This page describes Atlas's **default** authentication mode: the application
 operates behind a reverse proxy and trusts an identity header injected by an
@@ -43,6 +43,20 @@ This configuration will decode the base64-encoded JWT passed in the x-amzn-oidc-
 ## Development Behavior
 
 In a local development environment (when `DEBUG_MODE=true` in the `.env` file), the system falls back to using a default `test@test.com` user if the configured authentication header is not present.
+
+Debug is off in shipped templates and newly initialized installations. To opt in
+for local development, set `DEBUG_MODE=true`, `ENVIRONMENT=development`, and
+`ATLAS_HOST=127.0.0.1` (or another loopback address). Startup rejects debug mode
+when the environment is `production` or the effective bind address is not
+loopback, including an address supplied with `atlas-server --host`.
+
+Two independent overrides exist, both off by default. `ALLOW_DEBUG_NON_LOOPBACK=true`
+permits debug mode on a non-loopback bind, and `ALLOW_DEBUG_PRODUCTION=true`
+permits debug mode when `ENVIRONMENT=production`; one does not imply the other.
+Neither restores authentication: anyone reaching that listener can impersonate
+users and gain debug administrator access. Never use these overrides on an
+untrusted network. Debug mode always logs a security warning; the separate
+authorization-bypass guards still apply.
 
 **Production Mode (`DEBUG_MODE=false`):** HTTP routes raise HTTP 401 ("Not authenticated: missing user identity") if `user_email` is not set on the request state. There is no fallback to a default user — requests that bypass auth middleware are rejected.
 
@@ -135,10 +149,6 @@ covers the case where the browser and the backend agree on the hostname. Set
 name (for example `proxy_set_header Host backend.internal`), so that the
 browser's origin no longer matches what the backend sees. Disabling the check
 entirely re-opens the hijacking path and should be a last resort.
-
-The Agent Portal stream socket has its own, stricter allowlist
-(`AGENT_PORTAL_ALLOWED_ORIGINS`) — it does not consult `Host` and does not
-admit a missing `Origin`. See [the Agent Portal threat model](../agentportal/threat-model.md).
 
 ## Configuring the Authentication Header
 

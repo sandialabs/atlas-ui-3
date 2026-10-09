@@ -40,46 +40,6 @@ class PlainModeRunner:
         # an error message, so `atlas-chat` exits non-zero on LLM failures.
         self.raise_on_stream_error = False
 
-    async def run(
-        self,
-        session: Session,
-        model: str,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.7,
-        user_email: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Execute plain LLM mode.
-
-        Args:
-            session: Current chat session
-            model: LLM model to use
-            messages: Message history
-            temperature: LLM temperature parameter
-            user_email: Optional user email for per-user API key resolution
-
-        Returns:
-            Response dictionary
-        """
-        # Call LLM
-        response_content = await self.llm.call_plain(model, messages, temperature=temperature, user_email=user_email)
-
-        # Add assistant message to history
-        assistant_message = Message(
-            role=MessageRole.ASSISTANT,
-            content=response_content
-        )
-        session.history.add_message(assistant_message)
-
-        # Publish events
-        await self.event_publisher.publish_chat_response(
-            message=response_content,
-            has_pending_tools=False,
-        )
-        await self.event_publisher.publish_response_complete()
-
-        return event_notifier.create_chat_response(response_content)
-
     async def run_streaming(
         self,
         session: Session,

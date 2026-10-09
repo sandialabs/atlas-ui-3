@@ -11,7 +11,6 @@ These tests pin the shared resolver and both WebSocket call sites.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -228,45 +227,3 @@ def test_chat_socket_accepts_a_verified_token_in_jwt_mode(jwt_mode_factory):
             websocket.send_json({"type": "ping"})
             adapter = jwt_mode_factory.create_chat_service.call_args[0][0]
             assert adapter.user_email == "alice@example.com"
-
-
-# --- the agent portal socket ---------------------------------------------
-
-@pytest.mark.asyncio
-async def test_agent_portal_ws_rejects_unsigned_header_in_jwt_mode():
-    from atlas.routes import agent_portal_routes as ap
-
-    with patch.object(ap.app_factory, "get_config_manager", return_value=_jwt_config()):
-        socket = SimpleNamespace(
-            headers={"X-User-Email": "attacker@example.com"},
-            query_params={},
-        )
-        assert await ap._authenticate_ws(socket) is None
-
-
-@pytest.mark.asyncio
-async def test_agent_portal_ws_accepts_a_verified_token_in_jwt_mode():
-    from atlas.routes import agent_portal_routes as ap
-
-    with patch.object(ap.app_factory, "get_config_manager", return_value=_jwt_config()), \
-         patch("atlas.core.auth.get_user_from_aws_alb_jwt", return_value="alice@example.com"):
-        socket = SimpleNamespace(
-            headers={"X-User-Email": "a.valid.jwt"},
-            query_params={},
-        )
-        assert await ap._authenticate_ws(socket) == "alice@example.com"
-
-
-@pytest.mark.asyncio
-async def test_plain_mode_still_works_on_both_sockets():
-    """The default email-string deployment is unaffected by the change."""
-    from atlas.routes import agent_portal_routes as ap
-
-    config = _jwt_config()
-    config.app_settings.auth_user_header_type = "email-string"
-    with patch.object(ap.app_factory, "get_config_manager", return_value=config):
-        socket = SimpleNamespace(
-            headers={"X-User-Email": "alice@example.com"},
-            query_params={},
-        )
-        assert await ap._authenticate_ws(socket) == "alice@example.com"

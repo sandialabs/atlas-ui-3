@@ -390,8 +390,7 @@ goes away, `mode` is added as a span attribute).
    behavior) or feed `raw` evidence to its LLM? The former is lower latency;
    the latter keeps one answer path. Recommend: default `synthesized` for
    non-agent, `raw` for agent — but confirm with the product direction
-   (both in-chat and the Agent Portal are now first-class agent surfaces,
-   per `AGENTS.md`).
+   (the in-chat agent loop is a first-class agent surface, per `AGENTS.md`).
 
 2. **Streaming.** v1 has a `stream` field (unused by the current client, which
    always sends `false`). Should v2 `synthesized` mode support SSE streaming

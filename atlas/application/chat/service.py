@@ -10,8 +10,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
-    runtime_checkable,
 )
 from uuid import UUID, uuid4
 
@@ -37,11 +35,8 @@ from .modes.agent import AgentModeRunner
 from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
 from .modes.tools import ToolsModeRunner
-
-# Import new refactored modules
 from .policies.tool_authorization import ToolAuthorizationService
-from .preprocessors.message_builder import MessageBuilder, build_session_context
-from .preprocessors.prompt_override_service import PromptOverrideService
+from .preprocessors.message_builder import build_session_context
 
 # Import utilities
 from .utilities import error_handler, file_processor
@@ -79,15 +74,6 @@ _MAX_WORKSPACE_ID_LEN = 128
 
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
-
-
-@runtime_checkable
-class ConversationOwnerRepository(Protocol):
-    """Repository capability required for conversation ownership checks."""
-
-    def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
-        """Return the owner email for a conversation, if it exists."""
-        ...
 
 
 class ChatService:
@@ -171,12 +157,14 @@ class ChatService:
         self._incognito_save_floor: dict = {}
         self._save_floor_locked: set = set()
 
-        # Initialize refactored services
+        # Tool authorization is read off the service by the launch tool's
+        # ``resolve_child_tools`` (see runs/launcher.py) to re-check a
+        # workspace's saved tools against the caller's current access before
+        # starting a sub-conversation, so it is not unused even though no
+        # method here references it directly.
         self.tool_authorization = ToolAuthorizationService(
             tool_manager=self.tool_manager, config_manager=self.config_manager
         )
-        self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
-        self.message_builder = MessageBuilder()
 
         # Initialize mode runners
         self.plain_mode = PlainModeRunner(

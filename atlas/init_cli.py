@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 _ENCRYPTION_KEY_VAR = "MCP_TOKEN_ENCRYPTION_KEY"
+_CAPABILITY_SECRET_VAR = "CAPABILITY_TOKEN_SECRET"
 
 
 def generate_encryption_key() -> str:
@@ -122,6 +123,23 @@ def _read_encryption_key(env_path: Path) -> Optional[str]:
     return None
 
 
+def _read_capability_secret(env_path: Path) -> Optional[str]:
+    """Preserve a valid existing signing key, including quoted dotenv values."""
+    from dotenv import dotenv_values
+
+    from atlas.core.security_config import validate_capability_secret
+
+    if not env_path.exists():
+        return None
+    value = dotenv_values(env_path).get(_CAPABILITY_SECRET_VAR)
+    if not value:
+        return None
+    try:
+        return validate_capability_secret(value)
+    except ValueError:
+        return None
+
+
 def _write_env_securely(env_path: Path, content: str) -> None:
     """Write ``content`` to ``env_path`` readable only by the owner.
 
@@ -147,27 +165,19 @@ def _write_env_securely(env_path: Path, content: str) -> None:
         pass
 
 
-def _ensure_encryption_key(env_path: Path, key: str) -> None:
-    """Rewrite ``env_path`` so ``MCP_TOKEN_ENCRYPTION_KEY`` is set to ``key``.
+def _ensure_env_value(env_path: Path, name: str, value: str) -> None:
+    """Rewrite an assignment after copying the template.
 
-    Used by the non-minimal path, which copies ``.env.example`` verbatim —
-    including the placeholder the server rejects, so the documented
-    ``atlas-init && atlas-server`` flow would otherwise produce an install that
-    refuses to boot. Shared with the minimal path via ``key`` so the two
-    branches cannot drift on what counts as an acceptable value.
+    Remove duplicate assignments so dotenv's last-assignment precedence cannot
+    silently restore a template value.
     """
-    try:
-        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
-    except OSError:
-        return
-
-    assignment = f"{_ENCRYPTION_KEY_VAR}={key}\n"
+    lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    assignment = f"{name}={value}\n"
     replaced = False
     for index, line in enumerate(lines):
-        if line.strip().startswith(f"{_ENCRYPTION_KEY_VAR}="):
-            lines[index] = assignment
+        if line.strip().startswith(f"{name}="):
+            lines[index] = "" if replaced else assignment
             replaced = True
-            break
     if not replaced:
         if lines and not lines[-1].endswith("\n"):
             lines.append("\n")
@@ -175,13 +185,14 @@ def _ensure_encryption_key(env_path: Path, key: str) -> None:
         lines.append(assignment)
 
     _write_env_securely(env_path, "".join(lines))
-    print(f"  Set {_ENCRYPTION_KEY_VAR} in {env_path}")
+    print(f"  Updated {env_path}")
 
 
 def create_minimal_env(
     env_path: Path,
     force: bool = False,
     encryption_key: Optional[str] = None,
+    capability_secret: Optional[str] = None,
 ) -> bool:
     """Create a minimal .env file with just API key placeholders.
 
@@ -197,7 +208,12 @@ def create_minimal_env(
     # (rotating it invalidates every stored MCP token) but must never be a
     # shared or repo-public constant, so generate it here rather than
     # shipping a placeholder the user has to notice and replace.
-    mcp_token_encryption_key = encryption_key or generate_encryption_key()
+    mcp_token_encryption_key = (
+        encryption_key or _read_encryption_key(env_path) or generate_encryption_key()
+    )
+    capability_token_secret = (
+        capability_secret or _read_capability_secret(env_path) or secrets.token_urlsafe(32)
+    )
     minimal_env = f"""\
 # Atlas Configuration
 # See https://github.com/sandialabs/atlas-ui-3 for full documentation
@@ -213,7 +229,9 @@ ANTHROPIC_API_KEY=your-anthropic-api-key-here
 # Server Settings
 # =============================================================================
 PORT=8000
-DEBUG_MODE=true
+DEBUG_MODE=false
+# To develop locally, set DEBUG_MODE=true and ENVIRONMENT=development.
+# Debug requires a loopback bind unless ALLOW_DEBUG_NON_LOOPBACK=true.
 # Dev-only convenience: skip admin/group authorization checks so you don't
 # need to set ADMIN_TEST_USER to reach admin routes. Only works with
 # DEBUG_MODE=true; never enable in production.
@@ -230,6 +248,10 @@ APP_CONFIG_DIR=./config
 # Encrypts user API keys/tokens for MCP servers. Generated uniquely for this
 # install. Keep it stable - rotating it invalidates all stored tokens.
 MCP_TOKEN_ENCRYPTION_KEY={mcp_token_encryption_key}
+
+# Signs file download URLs. Independent from the token-encryption key.
+# Keep stable across restarts; generated uniquely for this install.
+CAPABILITY_TOKEN_SECRET={capability_token_secret}
 
 # =============================================================================
 # Optional: RAG Configuration
@@ -286,6 +308,7 @@ def run_init(args: argparse.Namespace) -> int:
     # branches below use this same value.
     existing_key = _read_encryption_key(env_path)
     encryption_key = existing_key or generate_encryption_key()
+    capability_secret = _read_capability_secret(env_path) or secrets.token_urlsafe(32)
     if existing_key:
         print(f"  Keeping the existing {_ENCRYPTION_KEY_VAR} (rotating it would "
               "invalidate all stored MCP tokens)")
@@ -293,7 +316,10 @@ def run_init(args: argparse.Namespace) -> int:
     if args.minimal:
         # Minimal mode: just create a simple .env
         print("Creating minimal configuration...")
-        create_minimal_env(env_path, force=args.force, encryption_key=encryption_key)
+        create_minimal_env(
+            env_path, force=args.force, encryption_key=encryption_key,
+            capability_secret=capability_secret,
+        )
     else:
         # Full mode: copy config and .env
         print("Copying configuration files...")
@@ -314,12 +340,17 @@ def run_init(args: argparse.Namespace) -> int:
             if copy_with_prompt(env_example, env_path, force=args.force):
                 # .env.example ships the placeholder the server rejects, so the
                 # verbatim copy would refuse to boot. Replace it in place.
-                _ensure_encryption_key(env_path, encryption_key)
+                _ensure_env_value(env_path, _ENCRYPTION_KEY_VAR, encryption_key)
+                _ensure_env_value(env_path, _CAPABILITY_SECRET_VAR, capability_secret)
+                _ensure_env_value(env_path, "DEBUG_MODE", "false")
                 print(f"\n  Remember to edit {env_path} and add your API keys!")
         else:
             # Fall back to creating minimal env
             print("  .env.example not found, creating minimal .env...")
-            create_minimal_env(env_path, force=args.force, encryption_key=encryption_key)
+            create_minimal_env(
+                env_path, force=args.force, encryption_key=encryption_key,
+                capability_secret=capability_secret,
+            )
 
     print("\n" + "=" * 60)
     print("Setup complete!")

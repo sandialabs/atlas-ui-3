@@ -173,7 +173,6 @@ def main():
         "DEBUG_MODE": "false",
         "FEATURE_PROXY_SECRET_ENABLED": "true",
         "PROXY_SECRET": "validation-proxy-secret",
-        "FEATURE_AGENT_PORTAL_ENABLED": "false",
         "SKIP_AUTHORIZATION_CHECKS": "false",
     })
 

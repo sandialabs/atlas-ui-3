@@ -1,6 +1,6 @@
 # Installation
 
-Last updated: 2026-08-09
+Last updated: 2026-10-04
 
 This guide provides everything you need to get Atlas UI 3 running, whether you prefer using Docker for a quick setup or setting up a local development environment.
 
@@ -8,7 +8,7 @@ This guide provides everything you need to get Atlas UI 3 running, whether you p
 
 Using Docker is the fastest way to get the application running.
 
-#### Generate the required encryption key first
+#### Generate deployment secrets first
 
 The container has no default for `MCP_TOKEN_ENCRYPTION_KEY`, and Atlas refuses to
 start without it, so generate one before your first `docker run` and reuse the
@@ -16,14 +16,26 @@ same value on every subsequent run — rotating it invalidates all stored MCP to
 
 ```bash
 export MCP_TOKEN_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+export CAPABILITY_TOKEN_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+export PROXY_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
 ```
+
+Store these independent secrets securely and reuse them across restarts and
+workers. Configure your authenticating reverse proxy to inject `PROXY_SECRET`
+as `X-Proxy-Secret` and a verified user identity; strip client-supplied
+copies of both headers. Debug authentication bypasses are off by default.
+Without authenticated proxy requests, protected endpoints reject access; an
+unauthenticated `/api/heartbeat` response only proves the server is running.
+See [authentication configuration](../admin/authentication.md).
 
 ### Option 1: Use Pre-built Image from Quay.io
 
 ```bash
 docker pull quay.io/agarlan-snl/atlas-ui-3:latest
-docker run -p 8000:8000 \
+docker run -p 127.0.0.1:8000:8000 \
   -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  -e CAPABILITY_TOKEN_SECRET="$CAPABILITY_TOKEN_SECRET" \
+  -e PROXY_SECRET="$PROXY_SECRET" \
   quay.io/agarlan-snl/atlas-ui-3:latest
 ```
 
@@ -38,35 +50,89 @@ docker run -p 8000:8000 \
 2.  **Run the Container:**
     Once the image is built, start the container:
     ```bash
-    docker run -p 8000:8000 \
+    docker run -p 127.0.0.1:8000:8000 \
       -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+      -e CAPABILITY_TOKEN_SECRET="$CAPABILITY_TOKEN_SECRET" \
+      -e PROXY_SECRET="$PROXY_SECRET" \
       atlas-ui-3
     ```
 
 3.  **Access the Application:**
-    Open your web browser and navigate to [http://localhost:8000](http://localhost:8000).
+    Access the application through your configured authenticating proxy.
 
-### Option 3: Build a Runtime-only Image
+### Option 3: Legacy Runtime-only Build Entry Point
 
-Use the runtime-only Dockerfile when you want a slimmer deployed image with only runtime dependencies. Its final stage is built from Chainguard's `wolfi-base` with Python, `bash`, and busybox (`sh`, `env`, and basic commands), but no package manager or compiler. `ARG PYTHON_VERSION` (default `3.14`) sets the Wolfi Python package that both Python stages install.
+The canonical `Dockerfile` is now the multi-stage runtime image published to
+both registries. It runs as UID/GID `10001:10001` and does not ship `sudo`,
+Node.js, npm, pip, or the repository's test/docs/scripts trees. Python and
+bundled MCP runtime dependencies remain available. A healthcheck probes
+`/api/heartbeat`; it is a liveness check, not an authentication test.
+
+`Dockerfile.runtimeonly` is a compatibility entry point that reuses an
+already-built image rather than maintaining a second application recipe. It
+defaults to the published `quay.io/agarlan-snl/atlas-ui-3:latest` tag; pass
+`--build-arg ATLAS_RUNTIME_IMAGE=...` to point it at a locally built image (the
+shim copies nothing from your working tree, so build the canonical `Dockerfile`
+first if you want local source):
 
 ```bash
-docker build -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
-docker run -p 8000:8000 \
+docker build -t atlas-runtime:local .
+docker build --build-arg ATLAS_RUNTIME_IMAGE=atlas-runtime:local \
+  -f Dockerfile.runtimeonly -t atlas-ui-3-runtime .
+docker run -p 127.0.0.1:8000:8000 \
   -e MCP_TOKEN_ENCRYPTION_KEY="$MCP_TOKEN_ENCRYPTION_KEY" \
+  -e CAPABILITY_TOKEN_SECRET="$CAPABILITY_TOKEN_SECRET" \
+  -e PROXY_SECRET="$PROXY_SECRET" \
   atlas-ui-3-runtime
 ```
 
+Build stages use digest-pinned images; update the pins deliberately when
+applying base-image security updates. `.dockerignore` excludes local secrets,
+configuration, databases, frontend dependencies, and generated assets. Mount
+operator configuration at runtime rather than expecting it to be copied from
+your working tree. Tools needing Node.js or additional system packages require
+a separately maintained derivative image or an external MCP service.
+
 ### Option 4: Docker Compose
 
-`docker-compose.yml` requires `MCP_TOKEN_ENCRYPTION_KEY` to be set in the
-environment or in a `.env` file next to it, and fails with a clear message if it
-is missing:
+`docker-compose.yml` is a **development-only** stack, not a production
+deployment template. Supply the secrets above and storage credentials in your
+environment or a protected `.env` file next to it. Compose refuses to start
+when required credentials are missing:
 
 ```bash
-echo "MCP_TOKEN_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+export MINIO_ROOT_USER=atlas-local
+export MINIO_ROOT_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
+export POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
+export PROXY_SECRET="$PROXY_SECRET"   # from the "Generate deployment secrets first" step
 docker compose up
 ```
+
+`DEBUG_MODE` is no longer set, so proxy-secret enforcement is active: the stack
+rejects any request that does not carry the `X-Proxy-Secret` header. Reaching
+the UI therefore requires an authenticating reverse proxy in front of Atlas
+that injects `X-Proxy-Secret` and a verified identity header, and strips
+client-supplied copies (an nginx example is in
+[authentication configuration](../admin/authentication.md#proxy-secret-authentication-enabled-by-default)).
+A bare `http://127.0.0.1:8000` hit only proves the container is up — the
+heartbeat healthcheck does not test authentication.
+
+All published ports bind to `127.0.0.1`: Atlas on 8000, MinIO on 9000/9001,
+and PostgreSQL on 5432. The MinIO initializer makes `atlas-files` private,
+including revoking the old anonymous-download policy on an existing bucket.
+Keep storage credentials stable for existing volumes. Changing environment
+variables alone does not rotate an existing PostgreSQL database password.
+
+The `atlas-data`, `atlas-logs`, and `minio-data` named volumes preserve DuckDB
+history, logs, uploaded files, and per-user MCP tokens (`/data/tokens`) across
+container recreation. The image runs as UID/GID `10001:10001`, so Docker-managed
+volumes are used instead of host bind mounts for writable state; mount `./config`
+for operator overrides. Because that bind mount is host-owned, the nonroot UID
+cannot write it: `chown -R 10001:10001 config` before `docker compose up` if you
+use the admin MCP editor, which writes `mcp.json` there. Use separately managed
+storage, backups, and least-privilege credentials in production. Do not enable
+debug mode to bypass proxy setup in this container: it listens on a non-loopback
+address inside its network.
 
 ## Local Development Setup
 
@@ -126,6 +192,8 @@ Now, open the `.env` file and add your API keys for the LLM providers you intend
 
 **Important Configuration Notes:**
 *   **`MCP_TOKEN_ENCRYPTION_KEY`**: You must replace the placeholder that ships in `.env.example`. It is a public value, so Atlas rejects it and refuses to start. Generate your own with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and keep it stable — rotating it invalidates all stored MCP tokens.
+*   **`CAPABILITY_TOKEN_SECRET`**: Generate an independent random secret with `openssl rand -hex 32`. Known placeholders and nonempty values shorter than 32 UTF-8 bytes are rejected. `atlas-init` generates both secrets automatically.
+*   **Local debug opt-in**: Set `DEBUG_MODE=true`, `ENVIRONMENT=development`, and `ATLAS_HOST=127.0.0.1` only for trusted local development. Debug is no longer enabled by copying the template. Production or non-loopback debug startup is rejected unless the matching dangerous override is explicitly set — `ALLOW_DEBUG_PRODUCTION=true` for a production environment, `ALLOW_DEBUG_NON_LOOPBACK=true` for a non-loopback bind; the two are independent. See [development authentication](../admin/authentication.md#development-behavior).
 *   **`APP_LOG_DIR`**: It is essential to set `APP_LOG_DIR=/workspaces/atlas-ui-3/logs` (or another appropriate path) to ensure application logs are correctly stored. A path inside the checkout is fine for local development -- the test suite overrides this variable with a temp directory, so it cannot pollute test runs (see [test isolation](../developer/test-isolation.md)).
 *   **`USE_MOCK_S3`**: For local development and personal use, setting `USE_MOCK_S3=true` is acceptable. However, **this must never be used in a production environment** due to security and data durability concerns.
 *   **`SKIP_AUTHORIZATION_CHECKS`** (optional, local-only convenience): In debug mode the mock authorization table only grants admin access to two hardcoded identities (`ADMIN_TEST_USER`, default `admin@example.com`, and `test@test.com`), so a new contributor running locally with their real email would otherwise have to set `ADMIN_TEST_USER` to match it before reaching admin-gated routes. Setting `SKIP_AUTHORIZATION_CHECKS=true` skips that step -- every group check returns `True`, so any locally authenticated user has full access. **Blast radius is broader than admin pages:** because `is_user_in_group` is the single gate for every group-restricted surface, enabling it also unlocks group-restricted models (`atlas/core/model_access.py`), MCP servers gated by `required_groups` (`mcp_execution.py`), and feedback/capture routes. In debug mode a headerless request is assigned the `test_user` identity, so with this flag on any request reaching the port is effectively an administrator. It is strictly opt-in (commented out in `.env.example`), never affects authentication, and the app refuses to start if the flag is set without `DEBUG_MODE=true`, when `ENVIRONMENT=production`, or together with `AUTH_GROUP_CHECK_URL`. See [docs/admin/authentication.md](../admin/authentication.md) for full guardrail details.

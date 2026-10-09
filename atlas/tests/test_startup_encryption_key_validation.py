@@ -24,7 +24,11 @@ VALID_KEY = "a" * MIN_ENCRYPTION_KEY_LENGTH
 
 def _settings(key):
     """Minimal stub for the key check alone (see _full_settings for lifespan)."""
-    return types.SimpleNamespace(mcp_token_encryption_key=key)
+    return types.SimpleNamespace(
+        mcp_token_encryption_key=key,
+        debug_mode=False,
+        capability_token_secret="",
+    )
 
 
 def _full_settings(key):
@@ -32,6 +36,9 @@ def _full_settings(key):
     return types.SimpleNamespace(
         mcp_token_encryption_key=key,
         debug_mode=True,
+        environment="development",
+        allow_debug_non_loopback=False,
+        capability_token_secret="",
         feature_proxy_secret_enabled=False,
         proxy_secret=None,
         feature_globus_auth_enabled=False,
@@ -106,6 +113,10 @@ class TestLifespanRefusesToStart:
         import asyncio
 
         from atlas import main as atlas_main
+
+        # The lifespan debug guard fails closed when no bind host is known;
+        # pin a loopback host so these tests exercise the key check itself.
+        monkeypatch.setenv("ATLAS_HOST", "127.0.0.1")
 
         config = types.SimpleNamespace(
             app_settings=settings_factory(key),

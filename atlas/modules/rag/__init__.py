@@ -10,7 +10,6 @@ from .atlas_rag_client import AtlasRAGClient, create_atlas_rag_client_from_confi
 from .client import (
     DataSource,
     DocumentMetadata,
-    RAGClient,
     RAGMetadata,
     RAGResponse,
     Section,
@@ -18,7 +17,6 @@ from .client import (
 )
 
 __all__ = [
-    "RAGClient",
     "AtlasRAGClient",
     "create_atlas_rag_client_from_config",
     "DataSource",

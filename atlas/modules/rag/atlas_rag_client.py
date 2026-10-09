@@ -69,7 +69,6 @@ logger = logging.getLogger(__name__)
 class AtlasRAGClient:
     """Client for the external ATLAS RAG API.
 
-    Implements the same interface as ``RAGClient`` for seamless substitution.
     Uses Bearer token authentication with user impersonation via the ``as_user``
     query parameter.
     """
