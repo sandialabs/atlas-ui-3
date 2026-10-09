@@ -1,0 +1,45 @@
+{
+  "version": "2.0",
+  "description": "Banner fixture for PR #1045 (issue #1045).",
+  "levels": [
+    {
+      "name": "UUR",
+      "description": "Unclassified Unlimited Release",
+      "aliases": [],
+      "allowed_with": ["UUR"],
+      "banner": {
+        "label": "UUR",
+        "background_color": "#007A33",
+        "text_color": "#FFFFFF"
+      }
+    },
+    {
+      "name": "CUI",
+      "description": "Controlled Unclassified Information",
+      "aliases": ["CUI-Basic"],
+      "allowed_with": ["CUI"],
+      "banner": {
+        "label": "CONTROLLED UNCLASSIFIED INFORMATION",
+        "background_color": "#502B85",
+        "text_color": "#FFFFFF",
+        "pattern": {
+          "type": "edge_stripes",
+          "color": "#9871B9",
+          "width": 8,
+          "angle": 45
+        }
+      }
+    },
+    {
+      "name": "Broken",
+      "description": "A level whose banner is malformed; presentation is dropped.",
+      "aliases": [],
+      "allowed_with": ["Broken"],
+      "banner": {
+        "background_color": "not-a-hex-color",
+        "pattern": { "type": "zigzag" }
+      }
+    }
+  ],
+  "mode": "explicit_allowlist"
+}

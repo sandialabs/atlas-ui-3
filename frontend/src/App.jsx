@@ -13,6 +13,7 @@ import RagPanel from './components/RagPanel'
 import CanvasPanel from './components/CanvasPanel'
 import MarketplacePanel from './components/MarketplacePanel'
 import BannerPanel from './components/BannerPanel'
+import ComplianceBanner from './components/ComplianceBanner'
 import HelpPage from './components/HelpPage'
 import AdminDashboard from './components/AdminDashboard'
 import LogViewer from './components/LogViewer' // Import LogViewer
@@ -169,6 +170,9 @@ function ChatInterface() {
       className="relative flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
       style={{ height: 'var(--app-viewport-height, 100vh)' }}
     >
+      {/* Compliance classification banner - full width, at the very top */}
+      <ComplianceBanner />
+
       {/* Banner Panel - full width across the top */}
       <BannerPanel />
 

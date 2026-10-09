@@ -671,7 +671,10 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
                 "name": name,
                 "description": level_obj.description,
                 "aliases": level_obj.aliases,
-                "allowed_with": level_obj.allowed_with
+                "allowed_with": level_obj.allowed_with,
+                # Optional presentation-only classification banner (issue #1045).
+                # Null unless the level defines a valid one; never affects access.
+                "banner": level_obj.banner,
             })
 
         return {
