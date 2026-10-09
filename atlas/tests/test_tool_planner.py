@@ -2,6 +2,7 @@
 
 import base64
 import importlib.util
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,7 @@ _spec.loader.exec_module(_mod)
 format_tools_for_llm = _mod.format_tools_for_llm
 build_planning_prompt = _mod.build_planning_prompt
 _build_artifact_response = _mod._build_artifact_response
+MAX_GENERATED_SCRIPT_BYTES = _mod.MAX_GENERATED_SCRIPT_BYTES
 # plan_with_tools may be wrapped by @mcp.tool into a FunctionTool (.fn attr)
 # or left as a plain function depending on the fastmcp version
 _plan_with_tools_fn = getattr(_mod.plan_with_tools, 'fn', _mod.plan_with_tools)
@@ -237,23 +239,22 @@ class TestPlanWithTools:
         )
         assert result["results"]["operation"] == "plan_with_tools"
         script = _decode_artifact(result)
-        assert "Sampling unavailable" in script
-        assert "test task" in script
+        assert "# Task: test task" in script
+        assert "atlas_chat_cli.py" in script
+        assert 'python atlas_chat_cli.py "REPLACE_ME" --tools atlas_discover_sources' in script
 
     @pytest.mark.asyncio
     async def test_without_mcp_data_still_works(self):
         result = await _call_plan_with_tools(task="do something")
         script = _decode_artifact(result)
-        assert "Sampling unavailable" in script
+        assert "Replace the placeholder command below" in script
         assert "No tools available" in script
 
     @pytest.mark.asyncio
-    async def test_with_mocked_ctx_sample(self):
+    async def test_with_client_generated_script(self):
         mock_ctx = MagicMock()
-        mock_result = MagicMock()
-        mock_result.text = "#!/bin/bash\nset -e\npython atlas_chat_cli.py 'hello' --tools calc_add"
-        mock_ctx.sample = AsyncMock(return_value=mock_result)
         mock_ctx.report_progress = AsyncMock()
+        generated_script = "#!/bin/bash\nset -e\npython atlas_chat_cli.py 'hello' --tools calc_add"
 
         mcp_data = {
             "available_servers": [
@@ -275,27 +276,85 @@ class TestPlanWithTools:
         }
 
         result = await _call_plan_with_tools(
-            task="add two numbers", _mcp_data=mcp_data, ctx=mock_ctx
+            task="add two numbers",
+            generated_script=generated_script,
+            _mcp_data=mcp_data,
+            ctx=mock_ctx,
         )
 
         script = _decode_artifact(result)
         assert "atlas_chat_cli.py" in script
+        assert "calc_add" in script
         assert result["artifacts"][0]["name"].endswith(".sh")
-        mock_ctx.sample.assert_awaited_once()
-
-        call_kwargs = mock_ctx.sample.call_args
-        assert call_kwargs.kwargs["temperature"] == 0.3
-        assert call_kwargs.kwargs["max_tokens"] == 10000
-        assert "task planner" in call_kwargs.kwargs["system_prompt"].lower()
+        mock_ctx.report_progress.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_sample_returns_none_text(self):
+    async def test_empty_generated_script_falls_back(self):
         mock_ctx = MagicMock()
-        mock_result = MagicMock()
-        mock_result.text = None
-        mock_ctx.sample = AsyncMock(return_value=mock_result)
         mock_ctx.report_progress = AsyncMock()
 
-        result = await _call_plan_with_tools(task="test", _mcp_data={}, ctx=mock_ctx)
+        result = await _call_plan_with_tools(
+            task="test",
+            generated_script="   ",
+            _mcp_data={},
+            ctx=mock_ctx,
+        )
         script = _decode_artifact(result)
-        assert "Unable to generate plan" in script
+        assert "Replace the placeholder command below" in script
+
+    @pytest.mark.asyncio
+    async def test_default_artifact_is_valid_bash_with_multiline_inputs(self, tmp_path):
+        mcp_data = {
+            "available_servers": [
+                {
+                    "server_name": "slides",
+                    "description": "Line one\nLine two",
+                    "tools": [
+                        {
+                            "name": "slides_create",
+                            "description": 'Create "quoted" slides\nwith details',
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "topic": {
+                                        "type": "string",
+                                        "description": "First line\nSecond line",
+                                    }
+                                },
+                                "required": ["topic"],
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+        result = await _call_plan_with_tools(
+            task='line one\nline two with "quotes"',
+            _mcp_data=mcp_data,
+        )
+        script = _decode_artifact(result)
+        script_path = tmp_path / "plan.sh"
+        script_path.write_text(script, encoding="utf-8")
+        subprocess.run(["bash", "-n", str(script_path)], check=True)
+        assert '\n# line two with "quotes"' in script
+        assert '\n# Line two' in script
+        assert '"REPLACE_ME"' in script
+
+    @pytest.mark.asyncio
+    async def test_generated_script_requires_bash_shebang(self):
+        with pytest.raises(ValueError, match="must start with #!/bin/bash"):
+            await _call_plan_with_tools(
+                task="test",
+                generated_script="echo hello",
+                _mcp_data={},
+            )
+
+    @pytest.mark.asyncio
+    async def test_generated_script_enforces_size_cap(self):
+        oversized_script = "#!/bin/bash\n" + ("x" * MAX_GENERATED_SCRIPT_BYTES)
+        with pytest.raises(ValueError, match="exceeds"):
+            await _call_plan_with_tools(
+                task="test",
+                generated_script=oversized_script,
+                _mcp_data={},
+            )

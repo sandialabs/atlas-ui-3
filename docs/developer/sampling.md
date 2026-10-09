@@ -17,6 +17,8 @@ LLM sampling allows MCP tools to pause their execution and request text generati
 
 When a tool calls `ctx.sample()`, Atlas UI 3's backend routes the sampling request directly to the configured LLM (via LiteLLM). The tool waits for the LLM response before continuing execution.
 
+Note: the bundled `atlas/mcp/sampling_demo/` server no longer calls `ctx.sample()`. It now demonstrates the client-driven pattern where the caller supplies optional generated fields and the server provides deterministic fallbacks.
+
 ### Key Features
 
 - **System Prompts**: Establish LLM role and behavior guidelines
@@ -108,33 +110,21 @@ async def research_topic(topic: str, ctx: Context) -> str:
 To experience sampling features:
 
 1. **Access Admin Panel**: Log into Atlas UI 3 and go to the admin panel
-2. **Enable Demo Server**: Enable the `sampling_demo` MCP server
+2. **Use a sampling-enabled server or test harness**: build a tool like the examples below, or run the manual harness in `atlas/tests/manual_test_sampling.py`
 3. **Try These Prompts**:
-   - "Summarize this text using the sampling demo: [your text]"
+   - "Summarize this text: [your text]"
    - "Analyze the sentiment of this review: [review text]"
    - "Generate Python code that calculates fibonacci numbers"
    - "Write a creative story about artificial intelligence"
    - "Research this question: What are renewable energy benefits?"
 
-### Example: Summarization in Action
+### Example in Action
 
-Here's what the sampling demo looks like when summarizing text:
+When a sampling-enabled tool calls `ctx.sample()`, the backend forwards that request through LiteLLM and returns the generated text to the tool before execution resumes.
 
-![Sampling Demo Summarization](../readme_img/sampling-demo-suuarmization.png)
+### Client-Driven Demo Note
 
-The tool uses LLM sampling to generate a concise summary, demonstrating how MCP tools can leverage AI capabilities during execution.
-
-### Available Demo Tools
-
-The sampling demo MCP server includes these example tools:
-
-- **`summarize_text`**: Basic text summarization
-- **`analyze_sentiment`**: Sentiment analysis with system prompt
-- **`generate_code`**: Code generation with model preferences
-- **`creative_story`**: High-temperature creative writing
-- **`multi_turn_conversation`**: Build conversation context
-- **`research_question`**: Multi-step agentic research
-- **`translate_and_explain`**: Sequential sampling workflow
+The bundled `sampling_demo` server remains useful as a schema example, but it no longer exercises backend sampling. Its tools accept optional caller-generated fields and fall back to deterministic text when those fields are omitted.
 
 ## Model Selection
 

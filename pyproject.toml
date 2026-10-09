@@ -24,12 +24,6 @@ dependencies = [
     "cryptography>=44.0.0,<51.0.0",
     "duckdb-engine>=0.17.0,<1.0.0",
     "fastapi>=0.115.0,<1.0.0",
-    # Pinned below 4.0: FastMCP 4 implements MCP 2026-07-28, which removed
-    # server-initiated requests (SEP-2322). That deletes Context.sample() and
-    # leaves no back-channel for sampling/createMessage, so the sampling_demo
-    # and tool_planner servers cannot work. Raising this cap requires first
-    # redesigning those servers to stop relying on server-initiated sampling.
-    # Tracked in https://github.com/sandialabs/atlas-ui-3/issues/905
     "fastmcp[tasks]>=3.4.3,<4.0.0",
     "httpx>=0.28.1,<1.0.0",
     "itsdangerous>=2.0.0,<3.0.0",
