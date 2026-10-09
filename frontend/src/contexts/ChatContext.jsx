@@ -1071,7 +1071,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		conversationWorkspaceIdRef.current =
 			pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null
 		if (conversationClassificationRef.current === null) {
-			conversationClassificationRef.current = { recorded: true, level: activeComplianceFilter ?? null }
+			// Levels disabled: nothing is recorded, as on the server, so the
+			// conversation stays migratable if levels are enabled later.
+			conversationClassificationRef.current = complianceEnabled
+				? { recorded: true, level: activeComplianceFilter ?? null }
+				: { recorded: false }
 		}
 		// A turn is a deliberate action too, and it has just told the server which
 		// workspace this conversation belongs to. Letting a queued restore fire

@@ -1223,12 +1223,21 @@ class ChatService:
                 "The running turn has not started yet. Wait a moment, then send "
                 "the message again."
             )
-        return conv_class.resume_refusal(
+        refusal = conv_class.resume_refusal(
             binding,
             active_level,
             compliance_enabled=self._compliance_enabled(),
             compliance_mgr=self._compliance_manager(),
         )
+        if refusal:
+            conv_class.audit_refusal(
+                "steer",
+                session.context.get("conversation_id"),
+                session.user_email,
+                binding,
+                active_level,
+            )
+        return refusal
 
     async def _in_flight_conversation(
         self, conversation_id: str, user_email: Optional[str]

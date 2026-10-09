@@ -60,7 +60,7 @@ export function classificationRefusal(conv, { complianceEnabled, activeLevel, le
       }
       return canonicalLevel(level, levels) === active
         ? null
-        : `This conversation was saved under ${level} and cannot be continued under ${activeLabel}. Switch the compliance level to ${level} to continue it, or start a new conversation.`
+        : `This conversation was saved under ${canonicalLevel(level, levels)} and cannot be continued under ${activeLabel}. Switch the compliance level to ${canonicalLevel(level, levels)} to continue it, or start a new conversation.`
     default:
       return "This conversation's recorded compliance level could not be read, so it cannot be continued. Start a new conversation."
   }

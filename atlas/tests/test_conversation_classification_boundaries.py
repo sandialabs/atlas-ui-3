@@ -456,7 +456,7 @@ async def test_client_held_history_without_a_store_binds_to_the_restore_level(us
 
 
 @pytest.mark.asyncio
-async def test_steering_into_a_turn_at_another_level_is_refused(use_manager):
+async def test_steering_into_a_turn_at_another_level_is_refused(use_manager, caplog):
     service, sessions = _make_service(None)
     sid = _new_session(sessions)
     sessions[sid].context[conv_class.SESSION_BINDING_KEY] = conv_class.make_binding("classified", "CUI")
@@ -464,6 +464,7 @@ async def test_steering_into_a_turn_at_another_level_is_refused(use_manager):
     assert await service.steering_classification_refusal(sid, "CUI-Basic") is None
     assert await service.steering_classification_refusal(sid, "UUR")
     assert await service.steering_classification_refusal(sid, None)
+    assert any("Refused steer of conversation" in r.getMessage() for r in caplog.records)
     # An undefined level is refused, not read as no level.
     assert "not defined" in await service.steering_classification_refusal(sid, "Bogus")
 
