@@ -106,10 +106,12 @@ describe('ComplianceBanner', () => {
     expect(screen.queryByText('UUR')).toBeNull()
   })
 
-  it('draws two bounded bands for edge stripes', () => {
+  it('draws two bounded bands for edge stripes, leaving a solid center', () => {
     setChat({ activeComplianceFilter: 'CUI' })
     const { container } = render(<ComplianceBanner />)
 
+    // The banner body stays solid so the label sits on the base color.
+    expect(banner().style.backgroundImage).toBe('')
     const bands = container.querySelectorAll('[aria-hidden="true"]')
     expect(bands).toHaveLength(2)
     for (const band of bands) {

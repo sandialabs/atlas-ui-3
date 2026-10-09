@@ -167,12 +167,8 @@ function ChatInterface() {
 
   return (
     <div
-      className="relative flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
-      style={{ height: 'var(--app-viewport-height, 100vh)' }}
+      className="relative flex flex-col w-full h-full min-h-0 bg-gray-900 text-gray-200 overflow-hidden"
     >
-      {/* Compliance classification banner - full width, at the very top */}
-      <ComplianceBanner />
-
       {/* Banner Panel - full width across the top */}
       <BannerPanel />
 
@@ -284,16 +280,28 @@ function AppRoutes() {
   const { features } = useChat()
 
   return (
-    <Routes>
-      <Route path="/" element={<ChatInterface />} />
-      {features?.marketplace && <Route path="/marketplace" element={<MarketplacePanel />} />}
-      <Route path="/help" element={<HelpPage />} />
-      <Route path="/admin" element={<AdminDashboard />} />
-      <Route path="/files" element={<FilesPage />} />
-      <Route path="/admin/logview" element={<LogViewer />} /> {/* New route for LogViewer */}
-      <Route path="/admin/telemetry" element={<TelemetryDashboard />} />
-      {features?.agent_portal && <Route path="/agent-portal" element={<AgentPortal />} />}
-    </Routes>
+    <div
+      className="flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
+      style={{ height: 'var(--app-viewport-height, 100vh)' }}
+    >
+      {/* Compliance classification banner: shared shell, above every route, so
+          an open conversation's marking survives in-app navigation (issue #1045). */}
+      <ComplianceBanner />
+
+      {/* Route content fills the space below the banner and scrolls within it. */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <Routes>
+          <Route path="/" element={<ChatInterface />} />
+          {features?.marketplace && <Route path="/marketplace" element={<MarketplacePanel />} />}
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/files" element={<FilesPage />} />
+          <Route path="/admin/logview" element={<LogViewer />} /> {/* New route for LogViewer */}
+          <Route path="/admin/telemetry" element={<TelemetryDashboard />} />
+          {features?.agent_portal && <Route path="/agent-portal" element={<AgentPortal />} />}
+        </Routes>
+      </div>
+    </div>
   )
 }
 

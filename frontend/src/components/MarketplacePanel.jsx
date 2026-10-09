@@ -98,7 +98,7 @@ const MarketplacePanel = () => {
   const totalCount = serverList.length
 
   return (
-    <div className="h-screen bg-gray-900 text-gray-200 flex flex-col">
+    <div className="h-full bg-gray-900 text-gray-200 flex flex-col">
       {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700 p-4 flex-shrink-0">
         <div className="w-full px-6 flex items-center justify-between">

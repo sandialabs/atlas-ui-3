@@ -72,11 +72,12 @@ export function resolveComplianceBanner({
   return NEUTRAL_BANNER
 }
 
-// Background style for the banner body.
+// Background style for the banner body. Edge stripes are drawn as separate
+// top/bottom bands (stripeBandStyle), so the body stays solid under the label.
 export function bannerBackgroundStyle(banner) {
   const background = banner?.background_color || '#374151'
   const pattern = banner?.pattern
-  if (!pattern || pattern.type === 'solid') {
+  if (!pattern || pattern.type === 'solid' || pattern.type === 'edge_stripes') {
     return { backgroundColor: background }
   }
   const width = Number.isFinite(pattern.width) ? pattern.width : 8
@@ -88,8 +89,7 @@ export function bannerBackgroundStyle(banner) {
       backgroundImage: stripeGradient(0, color, background, width),
     }
   }
-  // diagonal_stripes and edge_stripes share the diagonal gradient; edge_stripes
-  // is applied by the component to top/bottom bands only.
+  // diagonal_stripes.
   return {
     backgroundColor: background,
     backgroundImage: stripeGradient(angle, color, background, width),

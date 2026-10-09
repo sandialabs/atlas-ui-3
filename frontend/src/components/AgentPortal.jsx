@@ -1568,7 +1568,7 @@ function AgentPortal() {
   }, [paletteOpen, fullscreenSlot, focusedSlot, layout])
 
   return (
-    <div className="flex flex-col h-screen w-full bg-gray-900 text-gray-200">
+    <div className="flex flex-col h-full w-full bg-gray-900 text-gray-200">
       <div
         role="alert"
         className="flex items-center gap-3 px-4 py-2 bg-red-900/70 border-b-2 border-red-500 text-red-100 text-sm"

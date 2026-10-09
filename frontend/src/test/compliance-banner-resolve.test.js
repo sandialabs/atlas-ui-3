@@ -12,6 +12,8 @@ import {
   resolveComplianceBanner,
   anyBannerConfigured,
   findComplianceLevel,
+  bannerBackgroundStyle,
+  stripeBandStyle,
   NEUTRAL_BANNER,
 } from '../utils/complianceBanner'
 
@@ -131,5 +133,32 @@ describe('resolveComplianceBanner', () => {
       activeConversation: true,
       conversationClassification: { state: 'classified', level: 'Internal' },
     })).toBeNull()
+  })
+})
+
+describe('banner styles', () => {
+  const stripeBanner = {
+    background_color: '#502B85',
+    pattern: { type: 'diagonal_stripes', color: '#9871B9', width: 8, angle: 45 },
+  }
+
+  it('keeps the edge-stripe body solid and stripes the bands', () => {
+    const edge = {
+      background_color: '#502B85',
+      pattern: { type: 'edge_stripes', color: '#9871B9', width: 8, angle: 45 },
+    }
+    expect(bannerBackgroundStyle(edge).backgroundImage).toBeUndefined()
+    expect(bannerBackgroundStyle(edge).backgroundColor).toBe('#502B85')
+    expect(stripeBandStyle(edge).backgroundImage).toContain('repeating-linear-gradient')
+  })
+
+  it('applies the gradient to the body for full-banner stripes', () => {
+    expect(bannerBackgroundStyle(stripeBanner).backgroundImage).toContain('repeating-linear-gradient')
+    expect(stripeBandStyle(stripeBanner)).toBeNull()
+  })
+
+  it('draws a solid body with no band for a solid banner', () => {
+    expect(bannerBackgroundStyle({ background_color: '#007A33' })).toEqual({ backgroundColor: '#007A33' })
+    expect(stripeBandStyle({ background_color: '#007A33' })).toBeNull()
   })
 })
