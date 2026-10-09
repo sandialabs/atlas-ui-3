@@ -22,6 +22,7 @@ import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
+import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
@@ -401,6 +402,16 @@ export const ChatProvider = ({ children }) => {
 	// autosave cannot silently re-bind a conversation just because it was opened
 	// while a different workspace was active.
 	const conversationWorkspaceIdRef = useRef(null)
+	// The data classification this conversation was created under (issue
+	// #1042), for the local autosave: set by the first turn of a new chat or
+	// read from the loaded record, never re-derived from the active level, so a
+	// level switch cannot relabel a locally saved conversation. The server keeps
+	// its own record; this mirrors it for client-held history.
+	// null: no conversation yet; { recorded: false }: legacy/unreadable record.
+	const conversationClassificationRef = useRef(null)
+	// Whether the open conversation was loaded from history (so it exists
+	// regardless of what this tab has sent).
+	const conversationLoadedRef = useRef(false)
 
 	const switchWorkspace = useCallback(workspaceId => {
 		const ws = workspaceList.find(w => w.id === workspaceId)
@@ -909,6 +920,30 @@ export const ChatProvider = ({ children }) => {
 				: 'A compliance level is required. Select a compliance level before sending.')
 			return false
 		}
+		// The open conversation keeps the level it was recorded at (issue
+		// #1042). The server refuses a mismatched turn on its own; refusing it
+		// here too keeps the prompt out of the transcript, where the local
+		// autosave would otherwise persist it under the recorded level.
+		// Only once the server has accepted a turn of this conversation (it is
+		// saved, loaded, or has a reply): a first turn the server refused left
+		// nothing behind, so the next send may pick a level.
+		// A `local_*` id is the browser autosave's own, not the server's word.
+		const accepted = conversationLoadedRef.current ||
+			(!!activeConversationId && !String(activeConversationId).startsWith('local_')) ||
+			latestMessagesRef.current.some(m => m.role === 'assistant')
+		const bound = accepted ? conversationClassificationRef.current : null
+		if (bound) {
+			const refusal = classificationRefusal(
+				bound.recorded
+					? { data_classification_state: bound.level === null ? 'unclassified' : 'classified', data_classification: bound.level }
+					: { data_classification_state: bound.invalid ? 'invalid' : 'legacy', data_classification: null },
+				{ complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels },
+			)
+			if (refusal) {
+				toast.error(refusal)
+				return false
+			}
+		}
 		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
 		const dropExcluded = (keys, levelOf) => {
 			if (!activeComplianceFilter) return keys
@@ -1045,6 +1080,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// means the conversation's binding is the queued one.
 		conversationWorkspaceIdRef.current =
 			pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null
+		if (conversationClassificationRef.current === null || !accepted) {
+			// Levels disabled: nothing is recorded, as on the server, so the
+			// conversation stays migratable if levels are enabled later.
+			conversationClassificationRef.current = complianceEnabled
+				? { recorded: true, level: activeComplianceFilter ?? null }
+				: { recorded: false }
+		}
 		// A turn is a deliberate action too, and it has just told the server which
 		// workspace this conversation belongs to. Letting a queued restore fire
 		// afterwards would swap the selections out from under the turn the user
@@ -1094,7 +1136,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, mcpKeyLevel, ragKeyLevel])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -1166,7 +1208,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// so they are not part of what Undo puts back.
 				messages: latestMessagesRef.current.filter(m => !isReplayPlaceholder(m)).map(m => buildPersistedMessage(m)),
 				canvasContent: files.canvasContent || '',
-				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
+				metadata: {
+					workspace_id: conversationWorkspaceIdRef.current || null,
+					// The conversation's recorded classification (issue #1042):
+					// Undo reloads through loadSavedConversation, which reads it
+					// back, so the restored view keeps its level instead of being
+					// read as legacy (and the local autosave keeps the record).
+					...(conversationClassificationRef.current?.recorded
+						? { data_classification: conversationClassificationRef.current.level }
+						// An unreadable record stays unreadable (any non-string,
+						// non-null value reads back as invalid), never legacy.
+						: conversationClassificationRef.current?.invalid ? { data_classification: { invalid: true } } : {}),
+				},
 			}
 			: null
 
@@ -1210,6 +1263,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// fire into the fresh chat once the workspace list finishes loading.
 		pendingWorkspaceRestoreRef.current = null
 		conversationWorkspaceIdRef.current = null
+		conversationClassificationRef.current = null
+		conversationLoadedRef.current = false
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -1404,6 +1459,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 						role: msg.role,
 						content: msg.content || '',
 					})),
+				// The active level (null for none): the server refuses a
+				// conversation recorded under another classification (#1042).
+				compliance_level_filter: activeComplianceFilter ?? null,
 			})
 		}
 
@@ -1420,6 +1478,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// Remember the binding as loaded so the local autosave re-persists *this*
 			// conversation's workspace rather than whatever is active at save time.
 			conversationWorkspaceIdRef.current = meta.workspace_id || null
+			conversationLoadedRef.current = true
+			const recorded = classificationOf(conversationData)
+			conversationClassificationRef.current = (recorded.state === 'classified' || recorded.state === 'unclassified')
+				? { recorded: true, level: recorded.level }
+				: { recorded: false, invalid: recorded.state === 'invalid' }
 			restoreWorkspace(meta.workspace_id)
 		}
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
@@ -1427,7 +1490,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// callback down -- and re-subscribe everything that depends on it -- on
 		// every streaming frame.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun, activeComplianceFilter])
 
 	// A new socket cannot receive the old run's stream. Reuse the reopen path
 	// to replace missed rows and arm the joined view's polling/final refresh --
@@ -1533,6 +1596,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				messages: conversationData.messages
 					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
 					.map(msg => ({ role: msg.role, content: msg.content || '' })),
+				compliance_level_filter: activeComplianceFilter ?? null,
 			})
 		}
 		// Live-only rows and agent-loop answers have no stored counterpart;
@@ -1619,7 +1683,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		restoreContext()
 		if (stillInFlight && !live) rearmJoinedRun(conversationData.id)
 		return true
-	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun, streamToken])
+	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun, streamToken, activeComplianceFilter])
 
 	// Mid-run refresh for a conversation this tab joined (issue: parallel-run
 	// tool-call visibility). A joined view holds the snapshot the run had when
@@ -1962,6 +2026,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// Auto-save to browser IndexedDB when saveMode is 'local'
 	useEffect(() => {
 		if (saveMode !== 'local') return
+		// An unreadable local record (issue #1042) cannot be continued, and
+		// rewriting it would drop the record and turn it into a legacy one.
+		if (conversationClassificationRef.current?.invalid) return
 		const userMessages = messages.filter(m => m.role === 'user')
 		if (userMessages.length === 0) return
 
@@ -1987,7 +2054,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// The conversation's own binding -- not `activeWorkspaceId`, which would
 				// rewrite the stored workspace ~1s after merely opening the
 				// conversation and destroy the binding with no user action.
-				metadata: { agent_mode: !!agent?.agentModeEnabled, workspace_id: conversationWorkspaceIdRef.current || null },
+				metadata: {
+					agent_mode: !!agent?.agentModeEnabled,
+					workspace_id: conversationWorkspaceIdRef.current || null,
+					// The conversation's recorded classification (issue #1042); a
+					// legacy record stays unlabelled rather than being stamped.
+					...(conversationClassificationRef.current?.recorded
+						? { data_classification: conversationClassificationRef.current.level }
+						: {}),
+				},
 			}).catch(e => console.error('Failed to save conversation locally:', e))
 		}, 1000)
 
@@ -2089,6 +2164,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		clearToolsAndPrompts: guarded.clearToolsAndPrompts,
 		complianceLevelFilter: selections.complianceLevelFilter,
 		setComplianceLevelFilter: selections.setComplianceLevelFilter,
+		// The level that actually applies (null when the feature is off), and
+		// whether levels are enforced -- for conversation classification checks.
+		activeComplianceFilter,
+		complianceEnabled,
 		complianceLevels,
 		complianceMode,
 		complianceRequired,

@@ -66,6 +66,7 @@ from atlas.core.user_identity import normalize_user_email
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
+from atlas.domain.conversation_classification import ERROR_CODE as CONVERSATION_CLASSIFICATION_ERROR
 from atlas.domain.errors import (
     AuthorizationError,
     ContextWindowExceededError,
@@ -1787,6 +1788,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 if tracked_run is not None:
                     steering = tracked_run.steering
                     if steering is not None and steering.active:
+                        refusal = await chat_service.steering_classification_refusal(
+                            tracked_run.session_id, data.get("compliance_level_filter")
+                        )
+                        if refusal:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": refusal,
+                                "error_type": CONVERSATION_CLASSIFICATION_ERROR,
+                                # Marks a refused steer: the run keeps going,
+                                # so the client must not end the turn.
+                                "steering": True,
+                                "run_id": tracked_run.run_id,
+                                "conversation_id": tracked_run.conversation_id,
+                            })
+                            continue
                         try:
                             steering.queue.put_nowait(data.get("content", ""))
                         except asyncio.QueueFull:
@@ -1829,6 +1845,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 if should_steer(active_chat_task, data.get("conversation_id")):
+                    refusal = await chat_service.steering_classification_refusal(
+                        session_id, data.get("compliance_level_filter")
+                    )
+                    if refusal:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": refusal,
+                            "error_type": CONVERSATION_CLASSIFICATION_ERROR,
+                            "steering": True,
+                        })
+                        continue
                     content = data.get("content", "")
                     steering = active_chat_task["steering"]
                     try:
@@ -2174,10 +2201,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Validation error in chat handler: {e}")
                         turn_failure.append("validation")
                         log_metric("error", user_email, error_type="validation")
+                        # A conversation-classification refusal (issue #1042)
+                        # keeps its own type so the client can say why.
+                        error_type = (
+                            e.code
+                            if getattr(e, "code", None) == CONVERSATION_CLASSIFICATION_ERROR
+                            else "validation"
+                        )
                         await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
-                            "error_type": "validation"
+                            "error_type": error_type,
                         })
                     except AuthorizationError as e:
                         logger.warning(f"Authorization error in chat handler: {e}")
@@ -2417,7 +2451,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         session_id=session_id,
                         conversation_id=data.get("conversation_id", ""),
                         messages=data.get("messages", []),
-                        user_email=user_email
+                        user_email=user_email,
+                        # The client's active level, when it sends one: a
+                        # conversation recorded under another classification
+                        # is refused before it is loaded (issue #1042).
+                        compliance_level=data.get("compliance_level_filter", UNSET),
                     )
                 except DomainError as e:
                     logger.warning(

@@ -53,9 +53,19 @@ export function useConversationHistory() {
     }
   }, [fetchConversations, activeTag])
 
-  const loadConversation = useCallback(async (conversationId) => {
+  // `complianceLevel` is the active level ('' for none). When given, the server
+  // refuses a conversation recorded under another classification (issue #1042)
+  // with 409 and no content; that comes back as `{ classificationRefused }`.
+  const loadConversation = useCallback(async (conversationId, { complianceLevel } = {}) => {
     try {
-      const res = await fetch(`/api/conversations/${conversationId}`)
+      const query = complianceLevel === undefined
+        ? ''
+        : `?${new URLSearchParams({ compliance_level: complianceLevel ?? '' })}`
+      const res = await fetch(`/api/conversations/${conversationId}${query}`)
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}))
+        return { classificationRefused: true, message: body.detail || 'This conversation cannot be opened under the selected compliance level.' }
+      }
       if (!res.ok) return null
       return await res.json()
     } catch (e) {

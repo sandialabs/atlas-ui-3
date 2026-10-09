@@ -6,6 +6,8 @@
  * useConversationHistory.
  */
 
+import { classificationOf } from './conversationClassification'
+
 const DB_NAME = 'atlas-chat-local'
 const DB_VERSION = 1
 const STORE_NAME = 'conversations'
@@ -159,6 +161,10 @@ function summaryFromRecord(record) {
     message_count: record.message_count || record.messages?.length || 0,
     model: record.model,
     tags: record.tags || [],
+    // The conversation's recorded classification (issue #1042), in the same
+    // shape the server listing uses.
+    data_classification: classificationOf({ metadata: record.metadata || {} }).level,
+    data_classification_state: classificationOf({ metadata: record.metadata || {} }).state,
     _local: true,
   }
 }
