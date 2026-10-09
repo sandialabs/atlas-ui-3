@@ -1,8 +1,14 @@
 # Error Flow Diagram
 
-Last updated: 2026-09-10
+Last updated: 2026-10-04
 
 ## Complete Error Handling Flow
+
+Plain, RAG, and tools mode runners enter through `run_streaming`; their unused non-streaming
+runner methods and their `safe_call_llm_with_tools` wrapper have been removed.
+The diagram shows errors that propagate to the WebSocket boundary. Streaming
+helpers can instead preserve partial text or use a non-streaming fallback;
+strict CLI mode re-raises failures so the command exits nonzero.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -29,19 +35,13 @@ Last updated: 2026-09-10
 				      │
 				      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                   ToolsModeRunner.run()                              │
+│                   ToolsModeRunner.run_streaming()                    │
 │                      (modes/tools.py)                                │
 └─────────────────────────────────────────────────────────────────────┘
 				      │
 				      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│           error_utils.safe_call_llm_with_tools()                     │
-│              (utilities/error_utils.py)                              │
-└─────────────────────────────────────────────────────────────────────┘
-				      │
-				      ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                  LLMCaller.call_with_tools()                         │
+│                  LiteLLMCaller.stream_with_tools()                   │
 │                  (modules/llm/litellm_caller.py)                     │
 └─────────────────────────────────────────────────────────────────────┘
 				      │
@@ -68,7 +68,7 @@ Last updated: 2026-09-10
 		      │                         │
 		      │                         ▼
 		      │              ┌──────────────────────────────┐
-		      │              │ error_utils.classify_llm_    │
+		      │              │ error_handler.classify_llm_  │
 		      │              │       error(exception)        │
 		      │              │                               │
 		      │              │  Returns:                     │
@@ -312,4 +312,3 @@ reply.
 4. **Error Type Field**: The `error_type` field allows the frontend to potentially handle different error types differently in the future (e.g., automatic retry for timeouts). `error_type_for()` in `error_handler.py` maps a domain error class to the same vocabulary the WebSocket handler in `main.py` uses, so every error frame carries one regardless of which path raised it.
 
 5. **No Sensitive Data Exposure**: API keys, stack traces, and other sensitive information are never sent to the frontend.
-

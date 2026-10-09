@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from atlas.application.chat.agent.agentic_loop import AgenticLoop
 from atlas.application.chat.agent.protocols import AgentContext
-from atlas.application.chat.utilities.tool_executor import execute_tools_workflow
+from atlas.application.chat.modes.tools import ToolsModeRunner
 from atlas.application.chat.utilities.tool_image_context import (
     MAX_TOOL_IMAGES_PER_TURN,
     ToolImageInjector,
@@ -34,6 +34,7 @@ from atlas.application.chat.utilities.tool_image_context import (
     model_supports_vision,
 )
 from atlas.domain.messages.models import ConversationHistory, ToolResult
+from atlas.domain.sessions.models import Session
 from atlas.interfaces.llm import LLMResponse
 
 _PNG_B64 = base64.b64encode(
@@ -526,42 +527,60 @@ class TestSynthesisUserQuestionLookup:
         # skip it and use the real textual question instead. Feeding the
         # list to the prompt provider's ``.strip()`` used to raise and be
         # swallowed, silently dropping the configured synthesis prompt.
-        from atlas.application.chat.utilities.tool_executor import (
-            synthesize_tool_results,
-        )
-
         class _PromptProvider:
             def get_tool_synthesis_prompt(self, user_question):
                 return f"PROMPT[{user_question}]"
+
+        # Driven through run_streaming (as TestToolsStreamingInjectsToolImages
+        # does) so the list-content user turn is produced by the real pipeline
+        # instead of calling the private _stream_synthesis directly.
+        llm_response = LLMResponse(
+            content="",
+            tool_calls=[SimpleNamespace(
+                id="call_1", type="function",
+                function=SimpleNamespace(name="screenshot", arguments="{}"),
+            )],
+        )
+        tool_mgr = MagicMock()
+
+        async def fake_execute(tool_call_obj, context=None):
+            return _image_result(tool_call_id=tool_call_obj.id)
+
+        tool_mgr.execute_tool = AsyncMock(side_effect=fake_execute)
 
         class _LlmCaller:
             def __init__(self):
                 self.prompts_seen = []
 
-            async def call_plain(self, model, messages, user_email=None):
+            async def stream_with_tools(self, *args, **kwargs):
+                yield llm_response
+
+            async def stream_plain(self, model, messages, user_email=None):
                 self.prompts_seen.extend(
                     m["content"] for m in messages
                     if m.get("role") == "system" and str(m.get("content", "")).startswith("PROMPT")
                 )
-                return "answer"
+                yield "answer"
 
         caller = _LlmCaller()
-        messages = [
-            {"role": "user", "content": "check the rocket"},
-            {"role": "tool", "content": "{}", "tool_call_id": "c1"},
-            {"role": "user", "content": [
-                {"type": "text", "text": "[Automated system note]"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,x"}},
-            ]},
-        ]
-        await synthesize_tool_results(
-            model="m", messages=messages, llm_caller=caller,
-            prompt_provider=_PromptProvider(),
+        messages = [{"role": "user", "content": "check the rocket"}]
+        config = _vision_config()
+        config.app_settings.tools_mode_max_extra_rounds = 0
+        runner = ToolsModeRunner(
+            caller, tool_mgr, AsyncMock(),
+            prompt_provider=_PromptProvider(), config_manager=config,
+        )
+        runner.skip_approval = True
+        await runner.run_streaming(
+            messages=messages,
+            model="vision-model",
+            session=Session(),
+            selected_tools=["screenshot"],
         )
         assert caller.prompts_seen == ["PROMPT[check the rocket]"]
 
 
-class TestExecuteToolsWorkflowInjectsToolImages:
+class TestToolsStreamingInjectsToolImages:
     @pytest.mark.asyncio
     async def test_images_reach_synthesis_call(self):
         llm_response = LLMResponse(
@@ -582,26 +601,30 @@ class TestExecuteToolsWorkflowInjectsToolImages:
             def __init__(self):
                 self.calls = []
 
-            async def call_plain(self, model, messages, user_email=None):
+            async def stream_with_tools(self, *args, **kwargs):
+                yield llm_response
+
+            async def stream_plain(self, model, messages, user_email=None):
                 self.calls.append(messages)
-                return "I can see it"
+                yield "I can see it"
 
         llm_caller = _LlmCaller()
 
         messages = [{"role": "user", "content": "screenshot"}]
-        final, tool_results = await execute_tools_workflow(
-            llm_response=llm_response,
+        config = _vision_config()
+        config.app_settings.tools_mode_max_extra_rounds = 0
+        runner = ToolsModeRunner(
+            llm_caller, tool_mgr, AsyncMock(), config_manager=config,
+        )
+        runner.skip_approval = True
+        final = await runner.run_streaming(
             messages=messages,
             model="vision-model",
-            session_context={},
-            tool_manager=tool_mgr,
-            llm_caller=llm_caller,
-            prompt_provider=None,
-            skip_approval=True,
-            image_injector=ToolImageInjector(enabled=True),
+            session=Session(),
+            selected_tools=["screenshot"],
         )
 
-        assert final == "I can see it"
+        assert final["message"] == "I can see it"
         synthesis_messages = llm_caller.calls[-1]
         image_messages = [
             m for m in synthesis_messages
@@ -612,10 +635,10 @@ class TestExecuteToolsWorkflowInjectsToolImages:
             )
         ]
         assert len(image_messages) == 1
-        assert tool_results[0].success is True
+        tool_mgr.execute_tool.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_without_injector_behavior_unchanged(self):
+    async def test_non_vision_model_does_not_receive_image_blocks(self):
         llm_response = LLMResponse(
             content="",
             tool_calls=[SimpleNamespace(
@@ -631,20 +654,24 @@ class TestExecuteToolsWorkflowInjectsToolImages:
         tool_mgr.execute_tool = AsyncMock(side_effect=fake_execute)
 
         class _LlmCaller:
-            async def call_plain(self, model, messages, user_email=None):
-                return "answer"
+            async def stream_with_tools(self, *args, **kwargs):
+                yield llm_response
+
+            async def stream_plain(self, model, messages, user_email=None):
+                yield "answer"
 
         messages = [{"role": "user", "content": "screenshot"}]
-        await execute_tools_workflow(
-            llm_response=llm_response,
+        config = _vision_config()
+        config.app_settings.tools_mode_max_extra_rounds = 0
+        runner = ToolsModeRunner(
+            _LlmCaller(), tool_mgr, AsyncMock(), config_manager=config,
+        )
+        runner.skip_approval = True
+        await runner.run_streaming(
             messages=messages,
-            model="vision-model",
-            session_context={},
-            tool_manager=tool_mgr,
-            llm_caller=_LlmCaller(),
-            prompt_provider=None,
-            skip_approval=True,
-            # No image_injector: legacy behavior (no image message).
+            model="text-model",
+            session=Session(),
+            selected_tools=["screenshot"],
         )
         assert not any(
             m.get("role") == "user" and isinstance(m.get("content"), list)

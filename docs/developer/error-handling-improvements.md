@@ -1,7 +1,7 @@
 ```markdown
 # Error Handling Improvements
 
-Last updated: 2026-03-10
+Last updated: 2026-10-04
 
 ## Problem
 When backend errors occurred (especially rate limiting from services like Cerebras), users were left staring at a non-responsive UI with no indication of what went wrong. Errors were only visible in backend logs.
@@ -68,7 +68,7 @@ Added `_raise_llm_domain_error()` static method to `LiteLLMCaller` that maps lit
 
 **When to use which:**
 - `LiteLLMCaller._raise_llm_domain_error()` -- use in `litellm_caller.py` except blocks where you have the raw litellm exception and want to raise the domain error immediately. This uses `isinstance()` checks against litellm types for accurate classification.
-- `classify_llm_error()` in `error_handler.py` -- use in higher-level orchestration code (e.g., `safe_call_llm_with_tools`) where you receive a generic `Exception` and need to classify it by error string heuristics. Returns a tuple of `(error_class, user_msg, log_msg)`.
+- `classify_llm_error()` in `error_handler.py` -- use in higher-level orchestration code (e.g., `stream_and_accumulate` in `modes/streaming_helpers.py`) where you receive a generic `Exception` and need to classify it by error string heuristics. Returns a tuple of `(error_class, user_msg, log_msg)`.
 
 ### 6. AgentModeRunner Error Cleanup (2026-03-10)
 

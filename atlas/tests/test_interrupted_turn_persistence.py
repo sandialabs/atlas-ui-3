@@ -606,18 +606,16 @@ class TestToolsModeCancel:
                       "arguments": {"a": 3, "b": 4}})
             raise asyncio.CancelledError()
 
-        llm_response = MagicMock()
-        llm_response.tool_calls = [MagicMock()]
-        llm_response.content = ""
+        async def stream(*args, **kwargs):
+            yield LLMResponse(content="", tool_calls=[_tools_tc("tc1", "calc_add")])
 
         with patch("atlas.application.chat.modes.tools.error_handler.safe_get_tools_schema",
                    new=AsyncMock(return_value=[{"type": "function", "function": {"name": "calc_add"}}])), \
-             patch("atlas.application.chat.modes.tools.tool_executor.execute_tools_workflow",
+             patch("atlas.application.chat.modes.tools.tool_executor.execute_multiple_tools",
                    new=workflow), \
-             patch.object(runner.llm, "call_with_tools",
-                          new=AsyncMock(return_value=llm_response), create=True):
+             patch.object(runner.llm, "stream_with_tools", new=stream):
             with pytest.raises(asyncio.CancelledError):
-                await runner.run(
+                await runner.run_streaming(
                     session=session,
                     model="test-model",
                     messages=[{"role": "user", "content": "add 1 and 2"}],
@@ -643,8 +641,7 @@ class TestToolsModeCancel:
 
 
 class TestToolsModeArtifactCancel:
-    """The second guard in ToolsModeRunner.run: a stop delivered while
-    artifacts are being processed, after the workflow returned. Without it the
+    """A stop delivered while artifacts are being processed. Without the guard the
     unwind skips the flush and the completed calls are gone.
     """
 
@@ -663,7 +660,7 @@ class TestToolsModeArtifactCancel:
                       "arguments": {"a": 1, "b": 2}})
             await cb({"type": "tool_complete", "tool_call_id": "tc1",
                       "tool_name": "calc_add", "success": True, "result": "3"})
-            return "The answer is 3", []
+            return []
 
         async def artifacts(*args, **kwargs):
             raise asyncio.CancelledError()
@@ -676,18 +673,16 @@ class TestToolsModeArtifactCancel:
             artifact_processor=artifacts,
         )
 
-        llm_response = MagicMock()
-        llm_response.tool_calls = [MagicMock()]
-        llm_response.content = ""
+        async def stream(*args, **kwargs):
+            yield LLMResponse(content="", tool_calls=[_tools_tc("tc1", "calc_add")])
 
         with patch("atlas.application.chat.modes.tools.error_handler.safe_get_tools_schema",
                    new=AsyncMock(return_value=[{"type": "function", "function": {"name": "calc_add"}}])), \
-             patch("atlas.application.chat.modes.tools.tool_executor.execute_tools_workflow",
+             patch("atlas.application.chat.modes.tools.tool_executor.execute_multiple_tools",
                    new=workflow), \
-             patch.object(runner.llm, "call_with_tools",
-                          new=AsyncMock(return_value=llm_response), create=True):
+             patch.object(runner.llm, "stream_with_tools", new=stream):
             with pytest.raises(asyncio.CancelledError):
-                await runner.run(
+                await runner.run_streaming(
                     session=session,
                     model="test-model",
                     messages=[{"role": "user", "content": "add 1 and 2"}],

@@ -1021,22 +1021,28 @@ class TestRepairKeysOnShapeNotJustFinishReason:
 class TestTruncationFlagSurvivesReclassification:
     """`truncated` decides text that is persisted into history."""
 
-    def test_safe_call_llm_with_tools_forwards_it(self):
+    def test_tools_stream_preserves_truncation_details(self):
         import asyncio
+        from unittest.mock import AsyncMock, MagicMock
 
-        from atlas.application.chat.utilities.error_handler import safe_call_llm_with_tools
+        from atlas.application.chat.modes.tools import ToolsModeRunner
+        from atlas.domain.sessions.models import Session
 
         class FailingLLM:
-            async def call_with_tools(self, *a, **k):
+            async def stream_with_tools(self, *a, **k):
                 raise LLMMalformedToolCallError(
                     "The model ran out of room.", tool_names=["read_file"], truncated=True,
                 )
+                yield  # pragma: no cover
+
+        runner = ToolsModeRunner(FailingLLM(), MagicMock(), AsyncMock())
+        runner.raise_on_stream_error = True
 
         with pytest.raises(LLMMalformedToolCallError) as info:
-            asyncio.run(safe_call_llm_with_tools(
-                llm_caller=FailingLLM(), model="gemma",
+            asyncio.run(runner.run_streaming(
+                session=Session(), model="test-model",
                 messages=[{"role": "user", "content": "hi"}],
-                tools_schema=[{"type": "function"}],
+                selected_tools=["read_file"],
             ))
 
         assert info.value.truncated is True
