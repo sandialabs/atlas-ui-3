@@ -1796,6 +1796,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "type": "error",
                                 "message": refusal,
                                 "error_type": CONVERSATION_CLASSIFICATION_ERROR,
+                                # Marks a refused steer: the run keeps going,
+                                # so the client must not end the turn.
+                                "steering": True,
                                 "run_id": tracked_run.run_id,
                                 "conversation_id": tracked_run.conversation_id,
                             })
@@ -1850,6 +1853,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": refusal,
                             "error_type": CONVERSATION_CLASSIFICATION_ERROR,
+                            "steering": True,
                         })
                         continue
                     content = data.get("content", "")

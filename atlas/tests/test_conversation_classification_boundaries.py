@@ -620,3 +620,47 @@ async def test_switching_to_an_empty_record_drops_the_previous_history(use_manag
     )
     seen = await _turn(service, sid, "UUR", conversation_id="conv-empty-uur")
     assert seen == [[]], "no CUI message may reach the UUR turn"
+
+
+def test_a_stored_level_with_whitespace_still_saves(repo):
+    """The binding strips the stored value; the save guard must compare alike."""
+    assert _save(repo, {"data_classification": " CUI "}) is not None
+    assert _save(repo, {"data_classification": "CUI"}, count=4) is not None
+    assert len(repo.get_conversation(CONV, USER)["messages"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_rest_fetch_level_edge_cases(use_manager, repo, monkeypatch):
+    from atlas.infrastructure.app_factory import app_factory
+    from atlas.routes import conversation_routes
+
+    await _seed_cui(repo)
+    cm = MagicMock()
+    cm.app_settings.feature_compliance_levels_enabled = True
+    monkeypatch.setattr(app_factory, "conversation_repository", repo, raising=False)
+    monkeypatch.setattr(app_factory, "get_config_manager", lambda: cm)
+    monkeypatch.setattr(
+        conversation_routes, "_in_flight_conversation", AsyncMock(return_value=None)
+    )
+
+    # An undefined level is refused rather than read as no level.
+    undefined = await conversation_routes.get_conversation(
+        CONV, compliance_level="Bogus", current_user=USER
+    )
+    assert undefined.status_code == 409
+    assert "messages" not in json.loads(undefined.body)
+    # An empty value means "no level": a CUI conversation is refused.
+    empty = await conversation_routes.get_conversation(
+        CONV, compliance_level="", current_user=USER
+    )
+    assert empty.status_code == 409
+    # An alias of the recorded level is the same level.
+    aliased = await conversation_routes.get_conversation(
+        CONV, compliance_level="CUI-Basic", current_user=USER
+    )
+    assert len(aliased["messages"]) == 2
+    # No parameter: the owner's own read, as with the export.
+    plain = await conversation_routes.get_conversation(
+        CONV, compliance_level=None, current_user=USER
+    )
+    assert len(plain["messages"]) == 2

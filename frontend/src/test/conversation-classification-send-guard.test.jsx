@@ -215,4 +215,18 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     expect(chatFrames()).toHaveLength(1)
     expect(chatFrames()[0].compliance_level_filter).toBe('CUI')
   })
+
+  it('keeps the recorded level across New chat -> Undo', () => {
+    h.level = 'CUI'
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(cuiConversation) })
+    act(() => { result.current.clearChat({ skipConfirm: false }) })
+    const offer = h.toastInfo.mock.calls.find(c => c[1]?.action?.label === 'Undo')
+    expect(offer).toBeTruthy()
+    act(() => { offer[1].action.onClick() })
+    h.sendMessage.mockClear()
+    act(() => { result.current.sendChatMessage('after undo synthetic prompt') })
+    expect(h.toastError).not.toHaveBeenCalled()
+    expect(chatFrames()).toHaveLength(1)
+  })
 })

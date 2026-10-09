@@ -1198,7 +1198,16 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// so they are not part of what Undo puts back.
 				messages: latestMessagesRef.current.filter(m => !isReplayPlaceholder(m)).map(m => buildPersistedMessage(m)),
 				canvasContent: files.canvasContent || '',
-				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
+				metadata: {
+					workspace_id: conversationWorkspaceIdRef.current || null,
+					// The conversation's recorded classification (issue #1042):
+					// Undo reloads through loadSavedConversation, which reads it
+					// back, so the restored view keeps its level instead of being
+					// read as legacy (and the local autosave keeps the record).
+					...(conversationClassificationRef.current?.recorded
+						? { data_classification: conversationClassificationRef.current.level }
+						: {}),
+				},
 			}
 			: null
 

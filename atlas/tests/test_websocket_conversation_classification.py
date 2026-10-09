@@ -115,6 +115,8 @@ def test_steer_at_another_level_is_refused_not_injected(chat_service):
         registry.cancel(run.run_id, USER)
     assert frame["error_type"] == "conversation_classification"
     assert frame["run_id"] == run.run_id
+    # Marked as a steer refusal so the client does not end the running turn.
+    assert frame["steering"] is True
     steering.queue.put_nowait.assert_not_called()
     args = chat_service.steering_classification_refusal.await_args.args
     assert args == (run.session_id, "UUR")

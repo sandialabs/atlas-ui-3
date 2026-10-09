@@ -108,3 +108,21 @@ describe('alias resolution', () => {
     expect(classificationRefusal(aliased, { complianceEnabled: true, activeLevel: 'UUR', levels })).toBeTruthy()
   })
 })
+
+describe('a refused steer frame', () => {
+  it('reports the refusal without ending the running turn', async () => {
+    const { createWebSocketHandler } = await import('../handlers/chat/websocketHandlers')
+    const deps = {
+      addMessage: vi.fn(), mapMessages: vi.fn(), setIsThinking: vi.fn(),
+      setCurrentAgentStep: vi.fn(), streamToken: vi.fn(), streamEnd: vi.fn(),
+    }
+    const handler = createWebSocketHandler(deps)
+    handler({ type: 'error', error_type: 'conversation_classification', steering: true, message: 'running under CUI' })
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+    expect(deps.setIsThinking).not.toHaveBeenCalled()
+    expect(deps.setCurrentAgentStep).not.toHaveBeenCalled()
+
+    handler({ type: 'error', error_type: 'conversation_classification', message: 'saved under CUI' })
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+  })
+})

@@ -634,6 +634,12 @@ export function createWebSocketHandler(deps) {
           addMessage({ role: 'system', content: `Warning: ${data.message}`, type: 'warning', timestamp: new Date().toISOString() })
           break
         case 'error':
+          // A refused steer (issue #1042) leaves the running turn running:
+          // report it without tearing down the turn's indicators.
+          if (data.steering === true) {
+            addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
+            break
+          }
           setIsThinking(false)
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)

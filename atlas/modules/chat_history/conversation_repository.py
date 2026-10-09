@@ -680,8 +680,14 @@ def _classification_unchanged(
     if stored_has != incoming_has:
         return False
     return not stored_has or (
-        stored[CLASSIFICATION_METADATA_KEY] == incoming[CLASSIFICATION_METADATA_KEY]
+        _comparable(stored[CLASSIFICATION_METADATA_KEY])
+        == _comparable(incoming[CLASSIFICATION_METADATA_KEY])
     )
+
+
+def _comparable(value: Any) -> Any:
+    """A recorded level as the binding reads it (surrounding whitespace ignored)."""
+    return value.strip() if isinstance(value, str) else value
 
 
 def _parse_timestamp(value) -> datetime:

@@ -96,7 +96,7 @@ python scripts/stamp_conversation_classification.py --unclassified --id <convers
 
 The script only touches conversations with no record and never rewrites one.
 
-**Browser-local history** (save mode "local"). The browser records the conversation's level in its local copy, and the UI applies the same rule. The server has no stored record for client-held history, so it binds a restored local conversation to the level the client reopens it at, or treats it as legacy when the client sends none. This is no stronger than the user pasting the same text into a new conversation.
+**Browser-local history** (save mode "local"). The browser records the conversation's level in its local copy, and the UI applies the same rule. Local conversations saved before this release (or while levels were disabled) have no record, so once levels are enabled they are refused like legacy server conversations. The stamp script cannot reach them because they live only in the browser; users keep them in their local history and start new conversations to continue. The server has no stored record for client-held history, so it binds a restored local conversation to the level the client reopens it at, or treats it as legacy when the client sends none. This is no stronger than the user pasting the same text into a new conversation.
 
 ## Migrating from `compliance_level`
 
