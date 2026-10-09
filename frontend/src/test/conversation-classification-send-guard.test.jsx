@@ -243,4 +243,29 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     expect(chatFrames()).toHaveLength(1)
     expect(chatFrames()[0].compliance_level_filter).toBe('CUI')
   })
+
+  it('keeps a new chat bound once the server has replied, before its id arrives', () => {
+    h.level = 'CUI'
+    const { result, rerender } = renderChat()
+    act(() => { result.current.sendChatMessage('first synthetic prompt') })
+    act(() => { h.wsHandler({ type: 'chat_response', message: 'synthetic reply' }) })
+    h.level = 'UUR'
+    rerender()
+    h.sendMessage.mockClear()
+    act(() => { result.current.sendChatMessage('second synthetic prompt') })
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/saved under CUI/))
+    expect(chatFrames()).toHaveLength(0)
+  })
+
+  it('refuses sends in an unreadable local record even with levels disabled', () => {
+    h.level = 'UUR'
+    const { result } = renderChat()
+    act(() => {
+      result.current.loadSavedConversation({ ...cuiConversation, data_classification_state: undefined, data_classification: undefined, metadata: { data_classification: 7 } })
+    })
+    let sent
+    act(() => { sent = result.current.sendChatMessage('synthetic prompt') })
+    expect(sent).toBe(false)
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/could not be read/))
+  })
 })

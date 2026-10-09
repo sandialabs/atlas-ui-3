@@ -921,14 +921,16 @@ export const ChatProvider = ({ children }) => {
 		// #1042). The server refuses a mismatched turn on its own; refusing it
 		// here too keeps the prompt out of the transcript, where the local
 		// autosave would otherwise persist it under the recorded level.
-		// Only once the conversation exists (saved or loaded): a first turn the
-		// server refused left nothing behind, so the next send may pick a level.
-		const bound = activeConversationId ? conversationClassificationRef.current : null
+		// Only once the server has accepted a turn of this conversation (it is
+		// saved, loaded, or has a reply): a first turn the server refused left
+		// nothing behind, so the next send may pick a level.
+		const accepted = !!activeConversationId || latestMessagesRef.current.some(m => m.role === 'assistant')
+		const bound = accepted ? conversationClassificationRef.current : null
 		if (bound) {
 			const refusal = classificationRefusal(
 				bound.recorded
 					? { data_classification_state: bound.level === null ? 'unclassified' : 'classified', data_classification: bound.level }
-					: { data_classification_state: 'legacy', data_classification: null },
+					: { data_classification_state: bound.invalid ? 'invalid' : 'legacy', data_classification: null },
 				{ complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels },
 			)
 			if (refusal) {
@@ -1072,7 +1074,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// means the conversation's binding is the queued one.
 		conversationWorkspaceIdRef.current =
 			pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null
-		if (conversationClassificationRef.current === null || !activeConversationId) {
+		if (conversationClassificationRef.current === null || !accepted) {
 			// Levels disabled: nothing is recorded, as on the server, so the
 			// conversation stays migratable if levels are enabled later.
 			conversationClassificationRef.current = complianceEnabled
