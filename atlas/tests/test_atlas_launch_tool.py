@@ -23,6 +23,7 @@ from atlas.application.chat.runs.launcher import (
     get_child_runs,
     launch_sub_conversation,
     launch_tool_enabled,
+    resolve_child_tools,
     resolve_workspace,
 )
 from atlas.application.chat.runs.registry import RunRegistry, RunStatus, reset_run_registry
@@ -1391,3 +1392,30 @@ async def test_a_step_holding_both_calls_discovers_before_it_launches(discovery_
 
     for service in factory.services:
         service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_real_chat_service_filters_child_tools_instead_of_refusing():
+    """`resolve_child_tools` must use the service's live tool authorization.
+
+    The launcher builds its child service with ``AppFactory.create_chat_service``
+    and reads ``chat_service.tool_authorization``. The launch-tool tests above
+    use a ``SimpleNamespace`` stand-in that always provides that attribute, so
+    they cannot catch a real ``ChatService`` that stopped exposing it. This test
+    goes through the actual factory: with the attribute present the workspace's
+    tools are filtered and returned; without it every launch would be refused
+    with "tool authorization is not configured".
+    """
+    from atlas.application.chat.policies.tool_authorization import ToolAuthorizationService
+    from atlas.infrastructure.app_factory import app_factory
+
+    service = app_factory.create_chat_service(connection=None)
+    assert isinstance(service.tool_authorization, ToolAuthorizationService)
+
+    # atlas_canvas is a built-in tool gated independently of any MCP server, so
+    # it is authorized for every user and makes the filter result deterministic
+    # without depending on the test environment's mcp.json.
+    workspace_config = {"selected_tools": ["atlas_canvas"]}
+    tools = await resolve_child_tools(service, workspace_config, "test@example.com")
+
+    assert tools == ["atlas_canvas"]

@@ -531,17 +531,6 @@ class TestSynthesisUserQuestionLookup:
             def get_tool_synthesis_prompt(self, user_question):
                 return f"PROMPT[{user_question}]"
 
-        class _LlmCaller:
-            def __init__(self):
-                self.prompts_seen = []
-
-            async def stream_plain(self, model, messages, user_email=None):
-                self.prompts_seen.extend(
-                    m["content"] for m in messages
-                    if m.get("role") == "system" and str(m.get("content", "")).startswith("PROMPT")
-                )
-                yield "answer"
-
         # Driven through run_streaming (as TestToolsStreamingInjectsToolImages
         # does) so the list-content user turn is produced by the real pipeline
         # instead of calling the private _stream_synthesis directly.

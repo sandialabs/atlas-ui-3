@@ -65,20 +65,43 @@ class TestChatCliEnvFile:
 
 def test_legacy_approval_file_option_is_a_deprecated_no_op(tmp_path, monkeypatch, capsys):
     _load_resolver(tmp_path, monkeypatch)
-    from atlas.atlas_chat_cli import _warn_deprecated_flags, build_parser
+    from os import environ
+
+    from atlas.atlas_chat_cli import (
+        _apply_config_overrides_from_args,
+        _warn_deprecated_flags,
+        build_parser,
+    )
 
     # The retired approvals-file flag still parses so existing scripts keep
     # working, but it is ignored (tool approvals come from mcp.json now).
     args = build_parser().parse_args(["--tool-approvals-config", "unused.json"])
     assert args.tool_approvals_config == "unused.json"
 
-    monkeypatch.delenv("TOOL_APPROVALS_CONFIG_FILE", raising=False)
-    from os import environ
-
-    assert "TOOL_APPROVALS_CONFIG_FILE" not in environ
-
     _warn_deprecated_flags(args)
     assert "--tool-approvals-config is deprecated and ignored" in capsys.readouterr().err
+
+    # Applying overrides with the flag must still apply a sibling config flag
+    # while leaving TOOL_APPROVALS_CONFIG_FILE unset. Asserting both halves is
+    # what makes this test able to fail: the previous form deleted the variable
+    # and then asserted it was absent without ever running the override step.
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "atlas-chat",
+            "--tool-approvals-config",
+            "unused.json",
+            "--mcp-config",
+            "custom-mcp.json",
+        ],
+    )
+    monkeypatch.delenv("TOOL_APPROVALS_CONFIG_FILE", raising=False)
+    # Register restoration before the override writes directly to os.environ.
+    monkeypatch.setenv("MCP_CONFIG_FILE", "")
+    _apply_config_overrides_from_args()
+
+    assert environ["MCP_CONFIG_FILE"] == "custom-mcp.json"
+    assert "TOOL_APPROVALS_CONFIG_FILE" not in environ
 
 
 def test_no_deprecation_warning_without_the_legacy_flag(tmp_path, monkeypatch, capsys):

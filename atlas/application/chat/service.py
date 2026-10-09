@@ -34,6 +34,7 @@ from .modes.agent import AgentModeRunner
 from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
 from .modes.tools import ToolsModeRunner
+from .policies.tool_authorization import ToolAuthorizationService
 from .preprocessors.message_builder import build_session_context
 
 # Import utilities
@@ -154,6 +155,15 @@ class ChatService:
         # once the user opts in so subsequent turns persist normally.
         self._incognito_save_floor: dict = {}
         self._save_floor_locked: set = set()
+
+        # Tool authorization is read off the service by the launch tool's
+        # ``resolve_child_tools`` (see runs/launcher.py) to re-check a
+        # workspace's saved tools against the caller's current access before
+        # starting a sub-conversation, so it is not unused even though no
+        # method here references it directly.
+        self.tool_authorization = ToolAuthorizationService(
+            tool_manager=self.tool_manager, config_manager=self.config_manager
+        )
 
         # Initialize mode runners
         self.plain_mode = PlainModeRunner(
