@@ -229,4 +229,18 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     expect(h.toastError).not.toHaveBeenCalled()
     expect(chatFrames()).toHaveLength(1)
   })
+
+  it('does not lock a new chat to a level the server never accepted', () => {
+    h.level = 'UUR'
+    const { result, rerender } = renderChat()
+    act(() => { result.current.sendChatMessage('first synthetic prompt') })
+    // No conversation_saved arrives (the server refused the first turn).
+    h.level = 'CUI'
+    rerender()
+    h.sendMessage.mockClear()
+    act(() => { result.current.sendChatMessage('second synthetic prompt') })
+    expect(h.toastError).not.toHaveBeenCalled()
+    expect(chatFrames()).toHaveLength(1)
+    expect(chatFrames()[0].compliance_level_filter).toBe('CUI')
+  })
 })

@@ -664,3 +664,13 @@ async def test_rest_fetch_level_edge_cases(use_manager, repo, monkeypatch):
         CONV, compliance_level=None, current_user=USER
     )
     assert len(plain["messages"]) == 2
+
+
+def test_stamping_logs_each_relabelled_conversation(repo, caplog):
+    _save(repo, {"agent_mode": False})
+    repo.stamp_legacy_classification("UUR", user_email=USER)
+    assert any(
+        "Stamped data classification UUR on legacy conversation" in r.getMessage()
+        and CONV in r.getMessage()
+        for r in caplog.records
+    )

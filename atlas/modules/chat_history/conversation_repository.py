@@ -612,6 +612,14 @@ class ConversationRepository:
                 current[CLASSIFICATION_METADATA_KEY] = level
                 conv.metadata_json = json.dumps(current)
                 stamped += 1
+                # Audit trail for the explicit relabel: id, owner and level.
+                logger.warning(
+                    "Stamped data classification %s on legacy conversation %s "
+                    "(user %s)",
+                    sanitize_for_logging(str(level)),
+                    sanitize_for_logging(conv.id),
+                    sanitize_for_logging(conv.user_email),
+                )
             session.commit()
             return stamped
 

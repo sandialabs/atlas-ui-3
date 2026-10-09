@@ -921,7 +921,9 @@ export const ChatProvider = ({ children }) => {
 		// #1042). The server refuses a mismatched turn on its own; refusing it
 		// here too keeps the prompt out of the transcript, where the local
 		// autosave would otherwise persist it under the recorded level.
-		const bound = conversationClassificationRef.current
+		// Only once the conversation exists (saved or loaded): a first turn the
+		// server refused left nothing behind, so the next send may pick a level.
+		const bound = activeConversationId ? conversationClassificationRef.current : null
 		if (bound) {
 			const refusal = classificationRefusal(
 				bound.recorded
@@ -1070,7 +1072,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// means the conversation's binding is the queued one.
 		conversationWorkspaceIdRef.current =
 			pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null
-		if (conversationClassificationRef.current === null) {
+		if (conversationClassificationRef.current === null || !activeConversationId) {
 			// Levels disabled: nothing is recorded, as on the server, so the
 			// conversation stays migratable if levels are enabled later.
 			conversationClassificationRef.current = complianceEnabled
@@ -1468,7 +1470,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			const recorded = classificationOf(conversationData)
 			conversationClassificationRef.current = (recorded.state === 'classified' || recorded.state === 'unclassified')
 				? { recorded: true, level: recorded.level }
-				: { recorded: false }
+				: { recorded: false, invalid: recorded.state === 'invalid' }
 			restoreWorkspace(meta.workspace_id)
 		}
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
@@ -2012,6 +2014,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// Auto-save to browser IndexedDB when saveMode is 'local'
 	useEffect(() => {
 		if (saveMode !== 'local') return
+		// An unreadable local record (issue #1042) cannot be continued, and
+		// rewriting it would drop the record and turn it into a legacy one.
+		if (conversationClassificationRef.current?.invalid) return
 		const userMessages = messages.filter(m => m.role === 'user')
 		if (userMessages.length === 0) return
 

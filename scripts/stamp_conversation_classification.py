@@ -24,7 +24,9 @@ takes an exclusive lock on the file.
 """
 
 import argparse
+import getpass
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -95,6 +97,15 @@ def main(argv=None) -> int:
         print(f"{count} legacy conversation(s) would be recorded as {level or 'unclassified'}")
         return 0
 
+    # Audit trail: who ran the stamp, and (from the repository's log) each
+    # conversation it relabelled.
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger(__name__).warning(
+        "Operator %s stamping legacy conversations as %s (scope: %s)",
+        getpass.getuser(),
+        level or "unclassified",
+        f"user {args.user}" if args.user else (f"{len(args.ids)} id(s)" if args.ids else "all users"),
+    )
     stamped = ConversationRepository(factory).stamp_legacy_classification(
         level, user_email=args.user, conversation_ids=args.ids
     )
