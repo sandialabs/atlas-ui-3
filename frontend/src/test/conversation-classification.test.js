@@ -97,3 +97,14 @@ describe('useConversationHistory.loadConversation', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('/api/conversations/c1')
   })
 })
+
+describe('alias resolution', () => {
+  const levels = [{ name: 'CUI', aliases: ['CUI-Basic'] }, { name: 'UUR', aliases: [] }]
+  it('matches a recorded level through its alias, as the server does', () => {
+    const row = { data_classification: 'CUI', data_classification_state: 'classified' }
+    expect(classificationRefusal(row, { complianceEnabled: true, activeLevel: 'CUI-Basic', levels })).toBeNull()
+    const aliased = { metadata: { data_classification: 'CUI-Basic' } }
+    expect(classificationRefusal(aliased, { complianceEnabled: true, activeLevel: 'CUI', levels })).toBeNull()
+    expect(classificationRefusal(aliased, { complianceEnabled: true, activeLevel: 'UUR', levels })).toBeTruthy()
+  })
+})

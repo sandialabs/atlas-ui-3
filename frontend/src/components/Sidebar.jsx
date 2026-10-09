@@ -87,7 +87,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     runEndedConversationId, clearRunEndedConversation,
     // Conversation classification (issue #1042): a conversation opens only
     // under the level it was recorded at.
-    activeComplianceFilter, complianceEnabled,
+    activeComplianceFilter, complianceEnabled, complianceLevels,
   } = useChat()
   const toast = useToast()
 
@@ -278,7 +278,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     if (conv._optimistic) return
     // Don't reload the conversation we're already viewing
     if (activeConversationId && conv.id === activeConversationId) return
-    const level = { complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter }
+    const level = { complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels }
     // Explain the refusal up front; the server applies the same rule on the
     // fetch, the restore and every turn whatever this check decides.
     const refusal = classificationRefusal(conv, level)
@@ -295,7 +295,13 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       loadSavedConversation(fullConv)
       onMobileClose?.()
     }
-  }, [history, loadSavedConversation, onMobileClose, activeConversationId, activeComplianceFilter, complianceEnabled, toast])
+  }, [history, loadSavedConversation, onMobileClose, activeConversationId, activeComplianceFilter, complianceEnabled, complianceLevels, toast])
+
+  // The same rule the click applies, so a row that would be refused always
+  // looks it -- with levels disabled too (a classified row cannot continue).
+  const rowRefusal = conv => classificationRefusal(conv, {
+    complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels,
+  })
 
   const handleDeleteAll = useCallback(async () => {
     await history.deleteAll()
@@ -419,9 +425,9 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                     key={conv.id}
                     onClick={() => handleLoadConversation(conv)}
                     onContextMenu={(e) => handleContextMenu(e, conv)}
-                    title={complianceEnabled ? (classificationRefusal(conv, { complianceEnabled: true, activeLevel: activeComplianceFilter }) || undefined) : undefined}
+                    title={rowRefusal(conv) || undefined}
                     className={`px-3 py-2 cursor-pointer border-l-2 border-b border-b-gray-700/50 transition-colors ${
-                      complianceEnabled && classificationRefusal(conv, { complianceEnabled: true, activeLevel: activeComplianceFilter }) ? 'opacity-50 ' : ''
+                      rowRefusal(conv) ? 'opacity-50 ' : ''
                     }${
                       conv._optimistic
                         ? 'bg-gray-750 border-l-blue-400 opacity-80'
@@ -442,7 +448,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-gray-600">{formatDate(conv.updated_at)}</span>
                         <span className="text-xs text-gray-600">{conv.message_count} msgs</span>
-                        {complianceEnabled && classificationLabel(conv) && (
+                        {(complianceEnabled || rowRefusal(conv)) && classificationLabel(conv) && (
                           <span
                             className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded"
                             data-testid="conversation-classification"

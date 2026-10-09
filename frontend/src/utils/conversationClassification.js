@@ -30,10 +30,18 @@ export function classificationOf(conv) {
   return { state: 'invalid', level: null }
 }
 
+// Canonical level name: aliases resolve through the deployment's definitions
+// (`levels` from /api/compliance-levels), as the server's comparison does.
+function canonicalLevel(name, levels) {
+  if (!name) return null
+  const match = (levels || []).find(l => l?.name === name || (l?.aliases || []).includes(name))
+  return match ? match.name : name
+}
+
 // Why the conversation cannot be opened under the active level, or null.
-export function classificationRefusal(conv, { complianceEnabled, activeLevel }) {
+export function classificationRefusal(conv, { complianceEnabled, activeLevel, levels = [] }) {
   const { state, level } = classificationOf(conv)
-  const active = complianceEnabled ? (activeLevel || null) : null
+  const active = complianceEnabled ? canonicalLevel(activeLevel || null, levels) : null
   const activeLabel = active || 'no compliance level'
   switch (state) {
     case 'unknown':
@@ -50,7 +58,7 @@ export function classificationRefusal(conv, { complianceEnabled, activeLevel }) 
       if (!complianceEnabled) {
         return `This conversation was saved under ${level}, and compliance levels are not enabled, so it cannot be continued.`
       }
-      return level === active
+      return canonicalLevel(level, levels) === active
         ? null
         : `This conversation was saved under ${level} and cannot be continued under ${activeLabel}. Switch the compliance level to ${level} to continue it, or start a new conversation.`
     default:

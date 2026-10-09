@@ -927,7 +927,7 @@ export const ChatProvider = ({ children }) => {
 				bound.recorded
 					? { data_classification_state: bound.level === null ? 'unclassified' : 'classified', data_classification: bound.level }
 					: { data_classification_state: 'legacy', data_classification: null },
-				{ complianceEnabled, activeLevel: activeComplianceFilter },
+				{ complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels },
 			)
 			if (refusal) {
 				toast.error(refusal)

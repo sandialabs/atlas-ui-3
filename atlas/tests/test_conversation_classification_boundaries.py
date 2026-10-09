@@ -459,11 +459,21 @@ async def test_client_held_history_without_a_store_binds_to_the_restore_level(us
 async def test_steering_into_a_turn_at_another_level_is_refused(use_manager):
     service, sessions = _make_service(None)
     sid = _new_session(sessions)
-    sessions[sid].context["compliance_level"] = "CUI"
+    sessions[sid].context[conv_class.SESSION_BINDING_KEY] = conv_class.make_binding("classified", "CUI")
 
     assert await service.steering_classification_refusal(sid, "CUI-Basic") is None
     assert await service.steering_classification_refusal(sid, "UUR")
     assert await service.steering_classification_refusal(sid, None)
+    # An undefined level is refused, not read as no level.
+    assert "not defined" in await service.steering_classification_refusal(sid, "Bogus")
+
+
+@pytest.mark.asyncio
+async def test_steering_fails_closed_without_a_session_or_binding(use_manager):
+    service, sessions = _make_service(None)
+    assert await service.steering_classification_refusal(uuid4(), "CUI")
+    sid = _new_session(sessions)  # a run whose turn has not reached its gate
+    assert await service.steering_classification_refusal(sid, "CUI")
 
 
 @pytest.mark.asyncio
@@ -550,3 +560,62 @@ async def test_unreadable_stored_metadata_fails_closed_even_when_levels_are_disa
         user_email=USER, compliance_level=None,
     )
     assert frame["type"] == "error"
+
+
+# --- review follow-ups ----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_conversations_created_while_levels_are_disabled_stay_migratable(use_manager, repo):
+    """No record is written while disabled, so the stamp script can migrate them."""
+    disabled, disabled_sessions = _make_service(repo, compliance_enabled=False)
+    await _turn(disabled, _new_session(disabled_sessions), None)
+    stored = repo.get_conversation(CONV, USER)
+    assert "data_classification" not in stored["metadata"]
+    assert stored["data_classification_state"] == "legacy"
+    # Later turns while disabled keep it unrecorded.
+    await _turn(disabled, _new_session(disabled_sessions), None)
+    assert repo.get_conversation(CONV, USER)["data_classification_state"] == "legacy"
+
+    # Levels are enabled: the conversation fails closed until it is stamped.
+    enabled, enabled_sessions = _make_service(repo)
+    with pytest.raises(ValidationError):
+        await _turn(enabled, _new_session(enabled_sessions), "UUR")
+    assert repo.stamp_legacy_classification("UUR", user_email=USER) == 1
+    seen = await _turn(enabled, _new_session(enabled_sessions), "UUR")
+    assert len(seen[0]) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_failed_store_read_refuses_the_turn_and_the_next_turn_retries(use_manager, repo):
+    await _seed_cui(repo)
+    service, sessions = _make_service(repo)
+    sid = _new_session(sessions)
+
+    with patch.object(repo, "get_conversation", side_effect=RuntimeError("store down")):
+        with pytest.raises(ValidationError) as exc:
+            await _turn(service, sid, "UUR")
+    assert "could not be loaded" in exc.value.message
+    assert repo.get_conversation(CONV, USER)["data_classification"] == "CUI"
+
+    # The store answers again: the record is loaded and the rule applies.
+    with pytest.raises(ValidationError) as exc:
+        await _turn(service, sid, "UUR")
+    assert "saved under CUI" in exc.value.message
+    seen = await _turn(service, sid, "CUI")
+    assert len(seen[0]) == 2
+
+
+@pytest.mark.asyncio
+async def test_switching_to_an_empty_record_drops_the_previous_history(use_manager, repo):
+    """An empty UUR record must not rebind a session still holding CUI history."""
+    service, sessions = _make_service(repo)
+    sid = _new_session(sessions)
+    await _turn(service, sid, "CUI", content="placeholder alpha")
+
+    repo.save_conversation(
+        conversation_id="conv-empty-uur", user_email=USER, title="t", model="m",
+        messages=[], metadata={"data_classification": "UUR"},
+    )
+    seen = await _turn(service, sid, "UUR", conversation_id="conv-empty-uur")
+    assert seen == [[]], "no CUI message may reach the UUR turn"

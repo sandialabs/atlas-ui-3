@@ -57,12 +57,28 @@ STATE_INVALID = "invalid"
 ERROR_CODE = "conversation_classification"
 
 
-def make_binding(state: str, level: Optional[str] = None) -> Dict[str, Any]:
-    return {"state": state, "level": level if state == STATE_CLASSIFIED else None}
+def make_binding(
+    state: str, level: Optional[str] = None, reason: Optional[str] = None
+) -> Dict[str, Any]:
+    binding = {"state": state, "level": level if state == STATE_CLASSIFIED else None}
+    if state == STATE_INVALID and reason:
+        # "unloaded": the store could not be read, so the record is unknown
+        # for now rather than unreadable for good.
+        binding["reason"] = reason
+    return binding
 
 
-def binding_for_new_conversation(active_level: Optional[str]) -> Dict[str, Any]:
-    """The binding a conversation gets from the turn that creates it."""
+def binding_for_new_conversation(
+    active_level: Optional[str], *, compliance_enabled: bool = True
+) -> Dict[str, Any]:
+    """The binding a conversation gets from the turn that creates it.
+
+    With compliance levels disabled nothing is recorded: the conversation is
+    created as legacy (no key), exactly like one saved before the record
+    existed, so an operator who enables levels later can still stamp it.
+    """
+    if not compliance_enabled:
+        return make_binding(STATE_LEGACY)
     if active_level:
         return make_binding(STATE_CLASSIFIED, active_level)
     return make_binding(STATE_UNCLASSIFIED)
@@ -115,7 +131,10 @@ def normalize_binding(binding: Any) -> Dict[str, Any]:
         if isinstance(level, str) and level:
             return make_binding(STATE_CLASSIFIED, level)
         return make_binding(STATE_INVALID)
-    if state in (STATE_UNCLASSIFIED, STATE_LEGACY, STATE_INVALID):
+    if state == STATE_INVALID:
+        reason = binding.get("reason")
+        return make_binding(state, reason=reason if isinstance(reason, str) else None)
+    if state in (STATE_UNCLASSIFIED, STATE_LEGACY):
         return make_binding(state)
     return make_binding(STATE_INVALID)
 
@@ -181,6 +200,11 @@ def resume_refusal(
             "start a new conversation to keep working."
         )
     if state == STATE_INVALID:
+        if binding.get("reason") == "unloaded":
+            return (
+                "This conversation could not be loaded to confirm its compliance "
+                "level, so the message was not sent. Try again."
+            )
         return (
             "This conversation's recorded compliance level could not be read, so "
             "it cannot be continued. Start a new conversation."

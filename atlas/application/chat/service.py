@@ -1082,7 +1082,9 @@ class ChatService:
             if binding is None:
                 # No server store: the client holds this history and is its
                 # only source, so it is bound to the level it is reopened at.
-                binding = conv_class.binding_for_new_conversation(active_level)
+                binding = conv_class.binding_for_new_conversation(
+                    active_level, compliance_enabled=self._compliance_enabled()
+                )
             refusal = conv_class.resume_refusal(
                 binding,
                 active_level,
@@ -1171,7 +1173,9 @@ class ChatService:
             binding = (
                 conv_class.make_binding(conv_class.STATE_LEGACY)
                 if session.history.messages
-                else conv_class.binding_for_new_conversation(active_level)
+                else conv_class.binding_for_new_conversation(
+                    active_level, compliance_enabled=self._compliance_enabled()
+                )
             )
         refusal = conv_class.resume_refusal(
             binding,
@@ -1198,26 +1202,32 @@ class ChatService:
         A steer skips handle_chat_message: it is injected into a loop already
         running at its own level. A client that has switched levels since must
         not have its new message processed under the old one (issue #1042).
+        The steer is checked against the running session's conversation
+        binding with the same rule as a turn, so it cannot carry a message
+        across a classification the turn gate would refuse.
         """
-        if not self._compliance_enabled():
-            return None
         try:
             active_level = self._resolve_active_classification(compliance_level)
         except ValidationError as e:
             return e.message
         session = await self.session_repository.get(session_id)
-        running_level = session.context.get("compliance_level") if session else None
-        mgr = self._compliance_manager()
-
-        def canon(level):
-            return (mgr.get_canonical_name(level) or level) if level else None
-
-        if canon(active_level) == canon(running_level):
-            return None
-        return (
-            f"The running turn is working under {running_level or 'no compliance level'}, "
-            f"and the selected compliance level is {active_level or 'no compliance level'}. "
-            "Wait for it to finish or stop it, then send the message again."
+        if session is None:
+            return (
+                "The running turn could not be found to confirm its compliance "
+                "level. Wait for it to finish or stop it, then send the message again."
+            )
+        binding = session.context.get(conv_class.SESSION_BINDING_KEY)
+        if binding is None:
+            # The turn has not reached its gate yet: nothing to compare with.
+            return (
+                "The running turn has not started yet. Wait a moment, then send "
+                "the message again."
+            )
+        return conv_class.resume_refusal(
+            binding,
+            active_level,
+            compliance_enabled=self._compliance_enabled(),
+            compliance_mgr=self._compliance_manager(),
         )
 
     async def _in_flight_conversation(
@@ -1583,6 +1593,17 @@ class ChatService:
             # rewind, whose truncation would be measured against the wrong
             # thread. See _turn_allows_shrink.
             session.context["hydration_failed"] = True
+            # With compliance levels enforced, the conversation's recorded
+            # classification is unknown until the store answers, so the turn
+            # is refused rather than bound to whatever level it arrived with
+            # (issue #1042). The history goes too: it is the previous
+            # conversation's, already persisted, and an empty session is what
+            # makes the next turn retry the load.
+            if self._compliance_enabled():
+                session.history.messages.clear()
+                session.context[conv_class.SESSION_BINDING_KEY] = conv_class.make_binding(
+                    conv_class.STATE_INVALID, reason="unloaded"
+                )
             # A transient read failure says nothing about the conversation's
             # workspace, so put back whatever the session was carrying rather
             # than persisting the null cleared above over a good binding.
@@ -1619,6 +1640,10 @@ class ChatService:
         )
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
+        # The history the session holds belongs to the previous conversation,
+        # so it goes too -- even when this record has nothing to load --
+        # otherwise the old history would run under the new record's binding.
+        session.history.messages.clear()
         session.context[conv_class.SESSION_BINDING_KEY] = (
             conv_class.binding_from_record(conv)
         )
@@ -1758,8 +1783,9 @@ class ChatService:
         if record is None:
             logger.warning(
                 "Conversation %s save rejected by repository (owned by another "
-                "user, or the write would have shrunk it -- see the repository "
-                "log for which); not emitting conversation_saved",
+                "user, the write would have shrunk it, or it would have changed "
+                "the recorded data classification -- see the repository log for "
+                "which); not emitting conversation_saved",
                 sanitize_for_logging(conv_id),
             )
             return False

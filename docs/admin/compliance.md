@@ -60,7 +60,7 @@ A RAG backend's discovery can also return `allowed_data_classifications` per cor
 
 A saved conversation can only be continued under the classification it was created under (issue #1042). Without this rule, history saved at one level (say `ITAR`) could be reopened later at another (`UUR`) and sent to a model or tool approved only for the second. The component check above looks at the components, not at where the history came from.
 
-**The record.** When the first turn of a conversation runs, the server stores the turn's validated active level in the conversation's metadata as `data_classification`. A conversation started with no level ("All Levels", or compliance levels disabled) records `null` (unclassified). The value comes from the server's own validation, never from a client field, and it never changes: the repository refuses a save that would change it, drop it, or add one to a conversation that has none. `GET /api/conversations`, `/search` and `/{id}` return it as `data_classification` with `data_classification_state` (`classified`, `unclassified`, `legacy` or `invalid`).
+**The record.** When the first turn of a conversation runs, the server stores the turn's validated active level in the conversation's metadata as `data_classification`. A conversation started with no level selected ("All Levels") records `null` (unclassified). While compliance levels are disabled nothing is recorded: those conversations are stored like legacy ones, so they can be stamped if you enable levels later. The value comes from the server's own validation, never from a client field, and it never changes: the repository refuses a save that would change it, drop it, or add one to a conversation that has none. `GET /api/conversations`, `/search` and `/{id}` return it as `data_classification` with `data_classification_state` (`classified`, `unclassified`, `legacy` or `invalid`).
 
 **The rule.** The active level of a turn must equal the conversation's recorded level, after alias resolution. Levels have no order, so there is no "more sensitive". A conversation is never moved to another level, silently or otherwise. To continue a conversation, select its level. To work at another level, start a new conversation.
 
@@ -69,7 +69,7 @@ A saved conversation can only be continued under the classification it was creat
 | `ITAR` | `ITAR` | yes | continues |
 | `ITAR` | `UUR` or none | yes | refused |
 | `ITAR` | (none) | no | refused |
-| unclassified | none | either | continues |
+| unclassified | none | yes | continues |
 | unclassified | any level | yes | refused |
 | legacy (no record) | anything | yes | refused |
 | legacy (no record) | (none) | no | continues |
@@ -80,11 +80,12 @@ A saved conversation can only be continued under the classification it was creat
 - **Every chat turn.** The history the session holds is bound to its conversation's record. This covers resuming from the sidebar, rehydration after a WebSocket reconnect, parallel conversation runs and sub-conversations, and switching the level, model or tools partway through a conversation. Omitting the conversation id does not detach the history. A refused turn sends nothing to a model or tool and is not saved.
 - **Restore** (`restore_conversation`). When the frame carries the client's level (`compliance_level_filter`), a mismatch is refused before the session is touched. Either way the session is bound to the stored record, so an older client that leaves the level out is still stopped at its next turn.
 - **REST fetch.** `GET /api/conversations/{id}?compliance_level=<level>` (an empty value means no level) answers a mismatch with `409` and the classification only, never the messages. The UI always sends it. Without the parameter the owner can still read the conversation, as with the export: viewing your own history does not send it anywhere.
-- **Steering.** A message sent into a running agent loop is refused if the selected level differs from the level the loop is running at.
+- **Steering.** A message sent into a running agent loop is checked against that conversation's record with the same rule, and refused on a mismatch.
+- **Store read failures.** If the stored record cannot be read when a turn needs it, the turn is refused (nothing is sent) and the next turn retries the load.
 
 Refusals are logged at WARNING with the conversation id, user, recorded and active levels, and never the conversation content.
 
-**Legacy conversations.** Conversations saved before this release have no record. While compliance levels are enabled their provenance is unknown, so they are not assumed to be any level: they stay listed (marked "Unrecorded level") and exportable, but cannot be opened into the chat or continued. With compliance levels disabled they keep working as before and stay unrecorded. If you know what a set of legacy conversations holds, record it explicitly:
+**Legacy conversations.** Conversations saved before this release, or while compliance levels were disabled, have no record. While compliance levels are enabled their provenance is unknown, so they are not assumed to be any level: they stay listed (marked "Unrecorded level") and exportable, but cannot be opened into the chat or continued. With compliance levels disabled they keep working as before and stay unrecorded. If you know what a set of legacy conversations holds, record it explicitly:
 
 ```bash
 # Stop the app first when using DuckDB (exclusive file lock).
