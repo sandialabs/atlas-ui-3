@@ -3,12 +3,9 @@
 from atlas.core.child_environment import _build_child_env
 
 
-def test_portal_extras_still_cannot_forward_secrets(monkeypatch):
-    from atlas.modules.process_manager.manager import _build_child_env as portal_env
-
-    assert portal_env is _build_child_env
+def test_extras_still_cannot_forward_secrets(monkeypatch):
     monkeypatch.setenv("BACKEND_PRIVATE_VALUE", "test-only-backend-value")
-    env = portal_env(
+    env = _build_child_env(
         extra={
             "AWS_ACCESS_KEY_ID": "test-only-value",
             "API_TOKEN": "test-only-value",
@@ -52,8 +49,8 @@ def test_bundled_mcp_config_keys_are_forwarded(monkeypatch):
     assert {key: env.get(key) for key in keys} == keys
 
 
-def test_mcp_config_keys_are_not_forwarded_to_portal(monkeypatch):
-    """The Agent Portal must not inherit credential-bearing proxy/Redis URLs."""
+def test_mcp_config_keys_are_not_forwarded_by_default(monkeypatch):
+    """Credential-bearing proxy/Redis URLs stay out unless explicitly opted in."""
     monkeypatch.setenv("MCP_REDIS_URL", "redis://user:password@redis:6379/0")
     monkeypatch.setenv("HTTP_PROXY", "http://user:password@proxy:3128")
     monkeypatch.setenv("HTTPS_PROXY", "http://user:password@proxy:3128")

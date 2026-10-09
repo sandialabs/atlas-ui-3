@@ -20,8 +20,8 @@ _ENV_ALLOW_EXACT = (
 
 # Non-secret operational configuration that bundled MCP children need to reach
 # the backend, share session state, and honor the host's proxy/CA settings.
-# Opt in with ``forward_mcp_config=True``: the Agent Portal must not inherit
-# these (some proxy and Redis URLs embed credentials).
+# Opt in with ``forward_mcp_config=True``: some proxy and Redis URLs embed
+# credentials, so forwarding them must be a deliberate choice.
 _ENV_ALLOW_CONFIG_EXACT = (
     "CHATUI_BACKEND_BASE_URL",
     "BACKEND_URL",
@@ -92,10 +92,9 @@ def _build_child_env(
     ``extra_path_dirs`` lets an absolute command find an adjacent shebang
     interpreter without inheriting the backend's full PATH. ``forward_mcp_config``
     is opt-in because the bundled MCP servers need backend URLs, shared-state
-    settings, and proxy/CA variables that the Agent Portal must not inherit
-    (some of those values embed credentials and match no denylist suffix).
+    settings, and proxy/CA variables whose values can embed credentials.
     Callers accepting trusted operator-declared secrets must merge them *after*
-    this baseline; user-controlled Agent Portal extras must retain the deny-list.
+    this baseline; caller-supplied extras must retain the deny-list.
     """
     env: Dict[str, str] = {}
     for key in _ENV_ALLOW_EXACT:

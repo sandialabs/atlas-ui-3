@@ -56,7 +56,7 @@ permits debug mode when `ENVIRONMENT=production`; one does not imply the other.
 Neither restores authentication: anyone reaching that listener can impersonate
 users and gain debug administrator access. Never use these overrides on an
 untrusted network. Debug mode always logs a security warning; the separate
-Agent Portal and authorization-bypass guards still apply.
+authorization-bypass guards still apply.
 
 **Production Mode (`DEBUG_MODE=false`):** HTTP routes raise HTTP 401 ("Not authenticated: missing user identity") if `user_email` is not set on the request state. There is no fallback to a default user — requests that bypass auth middleware are rejected.
 
