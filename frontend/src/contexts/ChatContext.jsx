@@ -1210,7 +1210,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 					// read as legacy (and the local autosave keeps the record).
 					...(conversationClassificationRef.current?.recorded
 						? { data_classification: conversationClassificationRef.current.level }
-						: {}),
+						// An unreadable record stays unreadable (any non-string,
+						// non-null value reads back as invalid), never legacy.
+						: conversationClassificationRef.current?.invalid ? { data_classification: { invalid: true } } : {}),
 				},
 			}
 			: null

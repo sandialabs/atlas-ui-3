@@ -257,7 +257,7 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     expect(chatFrames()).toHaveLength(0)
   })
 
-  it('refuses sends in an unreadable local record even with levels disabled', () => {
+  it('refuses sends in an unreadable local record, and keeps it unreadable across New chat -> Undo', () => {
     h.level = 'UUR'
     const { result } = renderChat()
     act(() => {
@@ -265,6 +265,14 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     })
     let sent
     act(() => { sent = result.current.sendChatMessage('synthetic prompt') })
+    expect(sent).toBe(false)
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/could not be read/))
+
+    h.toastError.mockClear()
+    act(() => { result.current.clearChat({ skipConfirm: false }) })
+    const offer = h.toastInfo.mock.calls.find(c => c[1]?.action?.label === 'Undo')
+    act(() => { offer[1].action.onClick() })
+    act(() => { sent = result.current.sendChatMessage('synthetic prompt after undo') })
     expect(sent).toBe(false)
     expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/could not be read/))
   })
