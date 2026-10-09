@@ -276,4 +276,23 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     expect(sent).toBe(false)
     expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/could not be read/))
   })
+
+  it('does not treat a local autosave id as the server accepting the first turn', () => {
+    vi.useFakeTimers()
+    try {
+      h.level = 'UUR'
+      const { result, rerender } = renderChat()
+      act(() => { result.current.sendChatMessage('first synthetic prompt') })
+      // The server refused; the local autosave still assigns a local_* id.
+      act(() => { vi.advanceTimersByTime(1100) })
+      h.level = 'CUI'
+      rerender()
+      h.sendMessage.mockClear()
+      act(() => { result.current.sendChatMessage('second synthetic prompt') })
+      expect(h.toastError).not.toHaveBeenCalled()
+      expect(chatFrames()).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

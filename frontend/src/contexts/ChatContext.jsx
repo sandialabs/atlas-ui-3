@@ -409,6 +409,9 @@ export const ChatProvider = ({ children }) => {
 	// its own record; this mirrors it for client-held history.
 	// null: no conversation yet; { recorded: false }: legacy/unreadable record.
 	const conversationClassificationRef = useRef(null)
+	// Whether the open conversation was loaded from history (so it exists
+	// regardless of what this tab has sent).
+	const conversationLoadedRef = useRef(false)
 
 	const switchWorkspace = useCallback(workspaceId => {
 		const ws = workspaceList.find(w => w.id === workspaceId)
@@ -924,7 +927,10 @@ export const ChatProvider = ({ children }) => {
 		// Only once the server has accepted a turn of this conversation (it is
 		// saved, loaded, or has a reply): a first turn the server refused left
 		// nothing behind, so the next send may pick a level.
-		const accepted = !!activeConversationId || latestMessagesRef.current.some(m => m.role === 'assistant')
+		// A `local_*` id is the browser autosave's own, not the server's word.
+		const accepted = conversationLoadedRef.current ||
+			(!!activeConversationId && !String(activeConversationId).startsWith('local_')) ||
+			latestMessagesRef.current.some(m => m.role === 'assistant')
 		const bound = accepted ? conversationClassificationRef.current : null
 		if (bound) {
 			const refusal = classificationRefusal(
@@ -1258,6 +1264,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		pendingWorkspaceRestoreRef.current = null
 		conversationWorkspaceIdRef.current = null
 		conversationClassificationRef.current = null
+		conversationLoadedRef.current = false
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -1471,6 +1478,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// Remember the binding as loaded so the local autosave re-persists *this*
 			// conversation's workspace rather than whatever is active at save time.
 			conversationWorkspaceIdRef.current = meta.workspace_id || null
+			conversationLoadedRef.current = true
 			const recorded = classificationOf(conversationData)
 			conversationClassificationRef.current = (recorded.state === 'classified' || recorded.state === 'unclassified')
 				? { recorded: true, level: recorded.level }
