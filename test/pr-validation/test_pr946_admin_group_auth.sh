@@ -239,7 +239,7 @@ print_header "6. AUTH_STATIC_GROUPS still yields to the authorizer"
 start_authorizer false
 RESULT=$(
     AUTH_GROUP_CHECK_API_KEY=validation-key \
-    DEBUG_MODE=false FEATURE_AGENT_PORTAL_ENABLED=false \
+    DEBUG_MODE=false \
     ADMIN_GROUP=atlas_admins ADMIN_USERS= \
     AUTH_STATIC_GROUPS=atlas_admins:carol@example.org \
     python3 - <<'PY' 2>/dev/null | tail -1
@@ -260,7 +260,7 @@ unset AUTH_GROUP_CHECK_URL
 print_header "7. Blank identities and groups are never granted"
 # ==========================================
 RESULT=$(
-    DEBUG_MODE=true FEATURE_AGENT_PORTAL_ENABLED=false \
+    DEBUG_MODE=true \
     ADMIN_GROUP=atlas_admins ADMIN_USERS= AUTH_STATIC_GROUPS= \
     ADMIN_TEST_USER= TEST_USER= \
     python3 - <<'PYBLANK' 2>/dev/null | tail -1

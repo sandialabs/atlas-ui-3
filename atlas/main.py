@@ -84,7 +84,6 @@ from atlas.infrastructure.transport.websocket_connection_adapter import WebSocke
 from atlas.modules.config.settings import agent_mode_available
 from atlas.modules.file_storage.manager import FileManager
 from atlas.routes.admin_routes import admin_router
-from atlas.routes.agent_portal_availability import load_agent_portal_router
 
 # Import essential routes
 from atlas.routes.capture_routes import capture_router
@@ -1340,9 +1339,6 @@ app.include_router(user_prompt_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
-agent_portal_router = load_agent_portal_router()
-if agent_portal_router is not None:
-    app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -2693,7 +2689,6 @@ if static_dir.exists():
         "help",
         "admin",
         "files",
-        "agent-portal",
     )
 
     @app.get("/{full_path:path}")

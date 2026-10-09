@@ -136,10 +136,6 @@ name (for example `proxy_set_header Host backend.internal`), so that the
 browser's origin no longer matches what the backend sees. Disabling the check
 entirely re-opens the hijacking path and should be a last resort.
 
-The Agent Portal stream socket has its own, stricter allowlist
-(`AGENT_PORTAL_ALLOWED_ORIGINS`) — it does not consult `Host` and does not
-admit a missing `Origin`. See [the Agent Portal threat model](../agentportal/threat-model.md).
-
 ## Configuring the Authentication Header
 
 Different reverse proxy setups use different header names to pass authenticated user information. The application supports configuring the header name via the `AUTH_USER_HEADER` environment variable.

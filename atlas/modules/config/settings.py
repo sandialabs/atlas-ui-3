@@ -1,13 +1,15 @@
 """Application settings: the ``AppSettings`` pydantic-settings model (loaded from env + ``.env``)."""
 
 import logging
-import sys
+import os
 from typing import Dict, FrozenSet, Optional
 
 from pydantic import AliasChoices, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
+
+_warned_removed_agent_portal_settings = False
 
 
 def parse_identity_list(raw: str) -> FrozenSet[str]:
@@ -833,23 +835,6 @@ class AppSettings(BaseSettings):
         description="Enable AI-generated follow-up question suggestions after each chat response",
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
-    # Agent Portal feature gate (launch and stream host processes from the UI)
-    feature_agent_portal_enabled: bool = Field(
-        False,
-        description="Enable the Agent Portal UI for launching and streaming host processes",
-        validation_alias=AliasChoices("FEATURE_AGENT_PORTAL_ENABLED"),
-    )
-    # Additional Origin header hosts (beyond loopback) allowed to open the
-    # agent_portal WebSocket stream. Comma-separated list of hostnames, e.g.
-    # "atlas-dev.example.com,atlas.internal". Loopback hosts are always allowed.
-    # Only set this when the deployment is fronted by an auth proxy (e.g.
-    # Cloudflare Access) — the WS upgrade bypasses CORS, so an attacker page
-    # on any listed origin can drive the socket if it can reach the backend.
-    agent_portal_allowed_origins: str = Field(
-        default="",
-        description="Comma-separated extra Origin hostnames allowed for agent_portal WS",
-        validation_alias=AliasChoices("AGENT_PORTAL_ALLOWED_ORIGINS"),
-    )
 
     # Origin validation for the main chat WebSocket at /ws. A WS upgrade skips
     # the CORS preflight, so without this check any page the user visits can
@@ -1047,33 +1032,30 @@ class AppSettings(BaseSettings):
         return self
 
     @model_validator(mode='after')
-    def disable_agent_portal_on_windows(self):
-        """Treat Agent Portal as unavailable on Windows hosts."""
-        if self.feature_agent_portal_enabled and sys.platform.startswith("win"):
-            logger.warning(
-                "FEATURE_AGENT_PORTAL_ENABLED=true ignored because Agent Portal is not supported on Windows."
-            )
-            self.feature_agent_portal_enabled = False
-        return self
+    def warn_removed_agent_portal_settings(self):
+        """Log a one-time warning if a removed Agent Portal setting is still set.
 
-    @model_validator(mode='after')
-    def validate_agent_portal_dev_only(self):
-        """Refuse to boot with Agent Portal enabled outside debug mode.
-
-        The feature is a dev-preview that grants any authenticated caller
-        arbitrary command execution on the host. See
-        docs/agentportal/threat-model.md for the full rationale.
+        The Agent Portal (and its ``FEATURE_AGENT_PORTAL_ENABLED`` /
+        ``AGENT_PORTAL_ALLOWED_ORIGINS`` settings) was removed. A leftover value
+        in an operator's ``.env`` is harmless but easy to miss, so surface it
+        once rather than failing to boot.
         """
-        if self.feature_agent_portal_enabled and not self.debug_mode:
-            logging.getLogger(__name__).error(
-                "SECURITY: FEATURE_AGENT_PORTAL_ENABLED=true but DEBUG_MODE=false. "
-                "The Agent Portal is a dev-only preview and must not run outside debug mode. "
-                "See docs/agentportal/threat-model.md. Refusing to start."
+        global _warned_removed_agent_portal_settings
+        if _warned_removed_agent_portal_settings:
+            return self
+        leftover = [
+            name
+            for name in ("FEATURE_AGENT_PORTAL_ENABLED", "AGENT_PORTAL_ALLOWED_ORIGINS")
+            if os.environ.get(name)
+        ]
+        if leftover:
+            logger.warning(
+                "Ignoring removed Agent Portal setting(s): %s. The Agent Portal "
+                "has been removed from Atlas; these variables have no effect and "
+                "can be deleted from your .env.",
+                ", ".join(leftover),
             )
-            raise ValueError(
-                "FEATURE_AGENT_PORTAL_ENABLED is only permitted when DEBUG_MODE=true. "
-                "See docs/agentportal/threat-model.md."
-            )
+        _warned_removed_agent_portal_settings = True
         return self
 
     @model_validator(mode='after')

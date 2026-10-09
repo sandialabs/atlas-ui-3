@@ -12,7 +12,7 @@ This file provides guidance to AI coding agents (Claude Code, GitHub Copilot, Go
 
 ## Product Direction: The Agent Loop Is a First-Class Citizen
 
-The in-app agent loop inside ATLAS is a **first-class citizen** of the product, on equal footing with the core capabilities — **chat, RAG, and MCP tools**. The ATLAS app invests in the in-chat agent loop directly: agent mode, multi-step tool use, streaming, and the surrounding UX are primary surfaces, not secondary ones. The separate **Agent Portal** continues to provide a UI-friendly surface for launching and controlling host subprocesses with **governed controls suitable for enterprise and government use** (authorization, auditing, approval gates, resource limits, and role-scoped access); work that genuinely belongs there — launching and streaming long-running host processes under governance — should still be routed there. But requests that deepen the in-chat agent loop (new tool-use behaviors, richer agent UX, better step/progress surfacing, agent-scoped governance hooks) are now in-scope and welcome; do not auto-flag them for redirection to the Agent Portal.
+The in-app agent loop inside ATLAS is a **first-class citizen** of the product, on equal footing with the core capabilities — **chat, RAG, and MCP tools**. The ATLAS app invests in the in-chat agent loop directly: agent mode, multi-step tool use, streaming, and the surrounding UX are primary surfaces, not secondary ones. Requests that deepen the in-chat agent loop (new tool-use behaviors, richer agent UX, better step/progress surfacing, agent-scoped governance hooks) are in-scope and welcome.
 
 ## Project Overview
 

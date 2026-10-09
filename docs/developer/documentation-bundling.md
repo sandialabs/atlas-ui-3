@@ -13,7 +13,7 @@ The documentation bundle (`atlas-ui-3-docs.zip`) contains the **entire `/docs/` 
 - **`/docs/archive/`** is excluded - it holds completed/superseded plans and investigations that no longer describe how the system currently works.
 - Python caches (`__pycache__/`, `*.pyc`) are excluded as noise.
 
-Everything else - `getting-started/`, `user-guide/`, `admin/`, `developer/` (including `developer/design-notes/`), `agentportal/`, `telemetry/`, `planning/`, `testing/`, `example/`, image folders, and the top-level `README.md` - is included automatically. There is no per-directory allowlist to maintain: drop a new doc into the right category and it ships on the next build.
+Everything else - `getting-started/`, `user-guide/`, `admin/`, `developer/` (including `developer/design-notes/`), `telemetry/`, `planning/`, `testing/`, `example/`, image folders, and the top-level `README.md` - is included automatically. There is no per-directory allowlist to maintain: drop a new doc into the right category and it ships on the next build.
 
 ## Generating the Bundle Locally
 

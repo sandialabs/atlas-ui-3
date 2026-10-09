@@ -14,7 +14,6 @@ This is the documentation hub for Atlas UI 3. Each area below has its own
 | [admin/](admin/README.md) | Operators | Configuration, security, storage, operations |
 | [developer/](developer/README.md) | Contributors | Architecture, conventions, MCP development, release process |
 | [developer/design-notes/](developer/design-notes/README.md) | Contributors | Point-in-time records of how shipped features were built |
-| [agentportal/](agentportal/README.md) | Operators / Contributors | Agent Portal (dev-preview): threat model, design, CLI |
 | [telemetry/](telemetry/README.md) | Operators / Contributors | OpenTelemetry audit trail and analysis |
 | [planning/](planning/README.md) | Contributors | Active design proposals and roadmap notes |
 | [testing/](testing/README.md) | Contributors | Manual test checklists and procedures |

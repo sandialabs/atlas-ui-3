@@ -190,7 +190,6 @@ models:
         "DEBUG_MODE": "false",
         "FEATURE_PROXY_SECRET_ENABLED": "true",
         "PROXY_SECRET": "validation-proxy-secret",
-        "FEATURE_AGENT_PORTAL_ENABLED": "false",
         "SKIP_AUTHORIZATION_CHECKS": "false",
         # A server-wide provider key that must never reach a delegated model.
         "OPENAI_API_KEY": "sk-server-env-key",

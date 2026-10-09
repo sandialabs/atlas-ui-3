@@ -44,9 +44,6 @@ async def test_is_user_in_group_users_group_allowed_without_authorizer(monkeypat
     not, whenever no external authorizer is configured. This is what keeps a
     default deployment usable, so it must survive changes to the mock table."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    # Dev-only preview flag; AppSettings refuses to build with it on outside
-    # debug mode.
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     _disable_external_authorizer(monkeypatch)
     config_manager.reload_configs()
 
@@ -84,7 +81,6 @@ def test_skip_authorization_checks_requires_debug_mode(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
     monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     with pytest.raises(ValueError, match="DEBUG_MODE"):
         AppSettings()
 
@@ -97,7 +93,6 @@ def test_skip_authorization_checks_refused_in_production_environment(monkeypatch
     monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     with pytest.raises(ValueError, match="ENVIRONMENT"):
         AppSettings()
 
@@ -111,7 +106,6 @@ def test_skip_authorization_checks_refused_with_external_auth_endpoint(monkeypat
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "secret")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     with pytest.raises(ValueError, match="AUTH_GROUP_CHECK_URL"):
         AppSettings()
 
@@ -125,7 +119,6 @@ async def test_is_user_in_group_denied_in_production_mode(monkeypatch):
     ``core.auth`` must turn this test red (AGENT-REVIEW-BOT-3 review on PR #758).
     """
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     _disable_external_authorizer(monkeypatch)
     config_manager.reload_configs()
 
@@ -153,7 +146,6 @@ _AUTHORIZER_API_KEY = "test-authorizer-key-not-a-credential"
 
 def _external_authorizer_env(monkeypatch, *, debug_mode: str = "false"):
     monkeypatch.setenv("DEBUG_MODE", debug_mode)
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", _AUTHORIZER_URL)
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", _AUTHORIZER_API_KEY)
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
@@ -261,7 +253,6 @@ def test_skip_authorization_checks_boot_path_refuses_to_start(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("AUTH_GROUP_CHECK_URL", raising=False)
     monkeypatch.delenv("AUTH_GROUP_CHECK_API_KEY", raising=False)
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     config_manager.reload_configs()
     try:
         with pytest.raises(ValueError, match="DEBUG_MODE"):
@@ -279,7 +270,6 @@ def test_skip_authorization_checks_boot_path_refuses_to_start(monkeypatch):
 def _production_static_env(monkeypatch):
     """Production-shaped env with no external authorizer and no mock table."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     _disable_external_authorizer(monkeypatch)
 
@@ -312,9 +302,6 @@ def test_parse_static_groups_skips_malformed_entries_without_raising():
 def test_admin_users_sugar_targets_the_configured_admin_group(monkeypatch):
     """ADMIN_USERS is sugar for a single ``<ADMIN_GROUP>:`` entry, so a renamed
     admin group must be honoured rather than a literal "admin"."""
-    # Dev-only preview flag; AppSettings refuses to build with it on outside
-    # debug mode.
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
 
     # ``admin_group``/``debug_mode`` have no validation alias, so they must be
     # passed by field name; ``ADMIN_USERS`` does, so it is passed by alias.
@@ -386,7 +373,6 @@ async def test_external_authorizer_wins_over_static_group_table(monkeypatch):
     ``ADMIN_USERS`` is the one documented exception, covered separately below.
     """
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("ADMIN_USERS", raising=False)
     monkeypatch.setenv(
         "AUTH_STATIC_GROUPS", "admin:alice@example.org;mcp_advanced:alice@example.org"
@@ -413,7 +399,6 @@ async def test_admin_group_membership_is_resolved_dynamically(monkeypatch):
     """The operator intent in issue #945: name an admin group and let the
     existing membership mechanism answer, with no static enumeration at all."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("ADMIN_USERS", raising=False)
     monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
@@ -443,7 +428,6 @@ async def test_admin_users_grants_admin_even_with_external_authorizer(monkeypatc
     group, and only ever as a grant.
     """
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.setenv("ADMIN_GROUP", "atlas_admins")
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
@@ -468,7 +452,6 @@ async def test_admin_users_and_dynamic_membership_are_independent(monkeypatch):
     """Either source alone suffices: a dynamic member who is not on the static
     list is still an admin."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.setenv("ADMIN_GROUP", "atlas_admins")
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
@@ -487,7 +470,6 @@ async def test_admin_users_override_survives_a_broken_authorizer(monkeypatch):
     """The emergency case: the authorization service is unreachable. Every
     other group fails closed; the hand-written admin allowlist still works."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
@@ -520,7 +502,6 @@ async def test_admin_users_override_applies_when_url_is_set_without_api_key(monk
     exists for. Everything else must still fail closed.
     """
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
     monkeypatch.setenv("AUTH_STATIC_GROUPS", "admin:carol@example.org")
@@ -542,7 +523,6 @@ async def test_admin_override_is_logged_as_an_audit_signal(monkeypatch, caplog):
     """A break-glass grant must be distinguishable from real group membership
     in the logs, like the SKIP_AUTHORIZATION_CHECKS bypass it sits next to."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
@@ -579,7 +559,6 @@ async def test_admin_override_audit_line_is_throttled(monkeypatch, caplog):
     request buries the signal it exists to provide: log once per identity and
     group, not once per authorization check."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org,bob@example.org")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
     monkeypatch.setenv("AUTH_GROUP_CHECK_API_KEY", "key")
@@ -642,7 +621,6 @@ async def test_blank_group_is_never_granted_in_debug_mode(monkeypatch):
     making a blank group name -- an MCP server with ``groups: [""]`` -- a
     group everybody is in."""
     monkeypatch.setenv("DEBUG_MODE", "true")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     monkeypatch.delenv("ADMIN_USERS", raising=False)
     monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
@@ -688,7 +666,6 @@ async def test_authorization_log_lines_are_sanitized(monkeypatch, caplog):
     monkeypatch.setenv("DEBUG_MODE", "true")
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("SKIP_AUTHORIZATION_CHECKS", "true")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     _disable_external_authorizer(monkeypatch)
     config_manager.reload_configs()
 
@@ -709,7 +686,6 @@ async def test_admin_override_does_not_match_a_forged_identity(monkeypatch):
     """Normalization strips only the edges, so an identity with an interior
     newline is not the allowlisted identity and gets nothing."""
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     monkeypatch.setenv("ADMIN_USERS", "alice@example.org")
     monkeypatch.setenv("AUTH_GROUP_CHECK_URL", "https://auth.example.com/check")
@@ -728,7 +704,6 @@ async def test_admin_override_does_not_match_a_forged_identity(monkeypatch):
 def test_warns_when_admin_users_is_live_alongside_an_authorizer(monkeypatch, caplog):
     """Entries that were inert before issue #945 become live admin grants on
     the restart that picks up this version. That should not be silent."""
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
 
     # ``auth_group_check_url`` has a validation alias, so a kwarg under the
     # field name is silently ignored -- it has to be passed by alias or the
@@ -760,7 +735,6 @@ async def test_blank_identity_is_never_an_admin_in_debug_mode(monkeypatch):
     "", handing admin to a blank or missing identity -- the one input an
     unauthenticated request is most likely to arrive with."""
     monkeypatch.setenv("DEBUG_MODE", "true")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     monkeypatch.delenv("ADMIN_USERS", raising=False)
     monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
@@ -783,7 +757,6 @@ async def test_debug_mock_table_is_case_and_whitespace_tolerant(monkeypatch):
     debug-only branches compared raw values while everything above them
     compared normalized ones."""
     monkeypatch.setenv("DEBUG_MODE", "true")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     monkeypatch.delenv("ADMIN_USERS", raising=False)
     monkeypatch.delenv("AUTH_STATIC_GROUPS", raising=False)
@@ -802,7 +775,6 @@ async def test_debug_mock_table_is_case_and_whitespace_tolerant(monkeypatch):
 def test_admin_user_set_is_normalized_and_separate_from_static_table(monkeypatch):
     """``ADMIN_USERS`` is exposed on its own because it is consulted under
     different rules than the ``AUTH_STATIC_GROUPS`` table."""
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
 
     settings = AppSettings(
         debug_mode=False,
@@ -822,7 +794,6 @@ def test_admin_user_set_is_normalized_and_separate_from_static_table(monkeypatch
 
 def test_warns_when_no_authorization_source_is_configured(monkeypatch, caplog):
     """The silent-collapse case from issue #910 should say so at startup."""
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
 
     with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
         AppSettings(debug_mode=False, auth_group_check_url=None)
@@ -860,7 +831,6 @@ async def test_static_config_ignored_when_authorizer_url_set_without_api_key(mon
     ``ADMIN_USERS`` is deliberately exempt (issue #945) and is covered above.
     """
     monkeypatch.setenv("DEBUG_MODE", "false")
-    monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "false")
     monkeypatch.delenv("SKIP_AUTHORIZATION_CHECKS", raising=False)
     monkeypatch.delenv("ADMIN_USERS", raising=False)
     monkeypatch.setenv("AUTH_STATIC_GROUPS", "admin:alice@example.org")
