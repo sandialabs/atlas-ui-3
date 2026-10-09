@@ -76,7 +76,6 @@ def origin_is_allowed(
     allowed_hosts: Iterable[str] = (),
     *,
     request_host: Optional[str] = None,
-    trust_loopback: bool = False,
 ) -> bool:
     """Return True if ``origin`` may open a socket to this server.
 
@@ -117,10 +116,6 @@ def origin_is_allowed(
         request_host: Raw ``Host`` header value, enabling the same-origin
             comparison. A missing or unparseable value simply fails to match;
             it does not make the check more permissive.
-        trust_loopback: Accept any loopback origin regardless of the target.
-            Only for endpoints that bind loopback themselves (the Agent
-            Portal). Off by default so a malformed ``Host`` cannot reach the
-            permissive path by accident.
     """
     if not origin:
         return False
@@ -148,12 +143,11 @@ def origin_is_allowed(
         # otherwise have that page open the production socket, with the
         # browser supplying their cookies and the proxy authenticating it.
         #
-        # `trust_loopback` is explicit rather than inferred from a missing
+        # The check is against the parsed target, never inferred from a missing
         # request_host. Inferring it meant an unparseable Host header -- a
         # bare "::1", an empty value, "host/x//y" -- produced target=None and
-        # silently took the permissive branch, so a malformed header was
-        # treated exactly like a caller that opted in.
-        if trust_loopback or (target is not None and target in LOOPBACK_HOSTS):
+        # silently took a permissive branch.
+        if target is not None and target in LOOPBACK_HOSTS:
             return True
     elif target and hostname == target:
         return True

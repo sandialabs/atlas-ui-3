@@ -4,6 +4,7 @@ Tests the centralized configuration management system without
 modifying the actual environment or configuration files.
 """
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -242,6 +243,34 @@ class TestAppSettings:
         assert hasattr(settings, "feature_agent_mode_available")
         assert hasattr(settings, "agent_mode_available")
         assert settings.agent_mode_available == settings.feature_agent_mode_available
+
+    def test_removed_agent_portal_settings_warn_and_are_ignored(self, monkeypatch, caplog):
+        """Leftover Agent Portal env vars are ignored, with a single warning."""
+        from atlas.modules.config.settings import warn_removed_agent_portal_settings
+
+        monkeypatch.setenv("FEATURE_AGENT_PORTAL_ENABLED", "true")
+        monkeypatch.setenv("AGENT_PORTAL_ALLOWED_ORIGINS", "atlas.example.com")
+
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
+            warn_removed_agent_portal_settings()
+
+        assert "FEATURE_AGENT_PORTAL_ENABLED" in caplog.text
+        assert "AGENT_PORTAL_ALLOWED_ORIGINS" in caplog.text
+        # The removed fields are gone from the settings model entirely.
+        settings = AppSettings(_env_file=None)
+        assert not hasattr(settings, "feature_agent_portal_enabled")
+        assert not hasattr(settings, "agent_portal_allowed_origins")
+
+    def test_removed_agent_portal_warning_silent_when_unset(self, monkeypatch, caplog):
+        from atlas.modules.config.settings import warn_removed_agent_portal_settings
+
+        monkeypatch.delenv("FEATURE_AGENT_PORTAL_ENABLED", raising=False)
+        monkeypatch.delenv("AGENT_PORTAL_ALLOWED_ORIGINS", raising=False)
+
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.settings"):
+            warn_removed_agent_portal_settings()
+
+        assert caplog.text == ""
 
 
 class TestConfigManagerCustomRoot:
