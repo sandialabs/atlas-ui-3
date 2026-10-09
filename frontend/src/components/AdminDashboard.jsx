@@ -79,7 +79,7 @@ const AdminDashboard = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center">
+      <div className="min-h-full bg-gray-900 text-gray-200 flex items-center justify-center">
         <div className="text-center">
           <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4" />
           <p>Loading admin dashboard...</p>
@@ -90,7 +90,7 @@ const AdminDashboard = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center">
+      <div className="min-h-full bg-gray-900 text-gray-200 flex items-center justify-center">
         <div className="text-center max-w-md">
           <Shield className="w-16 h-16 text-red-400 mx-auto mb-4" />
           <h2 className="text-xl font-bold mb-2">Access Denied</h2>
@@ -108,7 +108,7 @@ const AdminDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200 overflow-y-auto">
+    <div className="min-h-full bg-gray-900 text-gray-200 overflow-y-auto">
       <div className="w-full mx-auto p-6">
         {/* Header */}
         <div className="bg-gray-800 rounded-lg p-6 mb-6">
