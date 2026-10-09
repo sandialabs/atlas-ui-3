@@ -103,6 +103,7 @@ jobs:
         cp agent_start.sh build-artifacts/
         cp docker-compose.yml build-artifacts/
         cp Dockerfile build-artifacts/
+        cp Dockerfile.runtimeonly .dockerignore uv.lock build-artifacts/
         cp .env.example build-artifacts/ 2>/dev/null || true
         # Copy other necessary files
         cp pyproject.toml build-artifacts/

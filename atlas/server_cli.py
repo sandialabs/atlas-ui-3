@@ -97,11 +97,15 @@ def run_server(args: argparse.Namespace) -> int:
     # Determine host and port
     host = args.host if args.host is not None else os.getenv("ATLAS_HOST", "127.0.0.1")
     port = args.port if args.port is not None else int(os.getenv("PORT", "8000"))
+    # Lifespan and reload workers must validate the actual CLI-selected bind.
+    os.environ["ATLAS_HOST"] = host
 
     # Import the FastAPI app
+    from atlas.core.security_config import validate_debug_configuration
     from atlas.main import app
     from atlas.modules.config import config_manager
 
+    validate_debug_configuration(config_manager.app_settings, host)
     print(f"Starting Atlas server on {host}:{port}")
     ws_keepalive_interval = config_manager.app_settings.websocket_keepalive_interval_seconds
 

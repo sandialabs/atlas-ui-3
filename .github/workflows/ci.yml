@@ -122,6 +122,8 @@ jobs:
       uses: docker/build-push-action@v7
       with:
         context: .
+        file: ./Dockerfile
+        target: runtime
         platforms: linux/amd64
         push: false
         build-args: |
@@ -164,14 +166,15 @@ jobs:
         echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
         echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
 
-    - name: Build runtime-only Docker image
-      # Validation + cache build: no later step consumes this image, so we
-      # neither load nor push -- we only build to catch Dockerfile.runtimeonly
-      # breakages and to populate its GHA cache scope.
+    - name: Build runtime validation image
+      # Load the exact published recipe (canonical Dockerfile, runtime target)
+      # so the security checks below run against the image users receive.
       uses: docker/build-push-action@v7
       with:
         context: .
-        file: ./Dockerfile.runtimeonly
+        file: ./Dockerfile
+        target: runtime
+        load: true
         build-args: |
           VITE_APP_NAME=ATLAS
           VITE_FEATURE_ANIMATED_LOGO=true
@@ -181,8 +184,14 @@ jobs:
           APP_VERSION=${{ steps.build_meta.outputs.version }}
         tags: runtime-only-image:latest
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha,scope=atlas-runtime
-        cache-to: type=gha,scope=atlas-runtime,mode=max
+        cache-from: type=gha,scope=atlas-prod
+        cache-to: type=gha,scope=atlas-prod,mode=max
+
+    - name: Validate runtime image
+      run: ATLAS_TEST_IMAGE=runtime-only-image:latest bash test/pr-validation/test_pr1017_container_runtime.sh
+
+    - name: Validate compatibility recipe
+      run: docker build --build-arg ATLAS_RUNTIME_IMAGE=runtime-only-image:latest -f Dockerfile.runtimeonly .
 
   publish-image:
     # Branch pushes only: the PR path validates the production build in the
@@ -234,6 +243,8 @@ jobs:
       uses: docker/build-push-action@v7
       with:
         context: .
+        file: ./Dockerfile
+        target: runtime
         platforms: linux/amd64,linux/arm64
         push: true
         build-args: |

@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-09-28
+Last updated: 2026-10-04
 
 ## Overview
 
@@ -46,11 +46,16 @@ docker compose up -d postgres
 
 The `docker-compose.yml` includes a pre-configured PostgreSQL service with:
 - User: `atlas`
-- Password: `atlas`
+- Password: required through `POSTGRES_PASSWORD` (no shipped password)
 - Database: `atlas_chat_history`
-- Port: `5432`
+- Port: `127.0.0.1:5432` (host-local only)
 
-For production, change the credentials and use a persistent volume.
+The Compose file is development-only and persists PostgreSQL in a named
+volume. Supply all required Compose secrets as described in the
+[installation guide](../getting-started/installation.md#option-4-docker-compose).
+For production, provision a separately secured database with backups and
+least-privilege credentials. Compose also persists DuckDB history in the
+`atlas-data` named volume, which the container's nonroot user owns.
 
 Atlas installs both PostgreSQL drivers: `psycopg` (v3), which SQLAlchemy 2.1 and later use for `postgresql://` URLs, and `psycopg2`, which SQLAlchemy 2.0 used. To pick one explicitly, use `postgresql+psycopg://` or `postgresql+psycopg2://` (or set `DB_DRIVER` to the same scheme).
 

@@ -20,7 +20,7 @@ def create_mock_settings(backend_public_url=None):
     """Helper to create a properly mocked settings object."""
     mock_settings = MagicMock()
     mock_settings.backend_public_url = backend_public_url
-    mock_settings.capability_token_secret = "test-secret-key-for-testing"
+    mock_settings.capability_token_secret = "test-secret-key-for-testing-at-least-32-bytes"
     mock_settings.capability_token_ttl_seconds = 3600
     return mock_settings
 

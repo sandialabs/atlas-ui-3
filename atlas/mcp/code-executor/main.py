@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Secure Code Execution MCP Server using FastMCP
-Provides safe Python code execution with security controls.
+Legacy code-executor v1 MCP server for trusted code only.
+
+Its AST checks are not a security sandbox: submitted code runs with the
+server's permissions and environment. Do not expose it to untrusted users.
+Use code-executor-v2 for OS-enforced sandboxing.
 """
 
 import base64
@@ -159,7 +162,11 @@ def execute_python_code_with_file(
     file_data_base64: Annotated[str, "Framework may supply Base64 content as fallback."] = ""
 ) -> Dict[str, Any]:
     """
-    Safely execute Python code in an isolated environment with optional file upload.
+    Execute trusted Python code with optional file upload (legacy v1).
+
+    This is not a security sandbox. AST checks do not prevent access to the
+    server's filesystem, network, or environment. Use code-executor-v2 for
+    OS-enforced sandboxing; do not submit untrusted code to this server.
 
     Demonstrates two v2 behaviors described in v2_mcp_note.md:
     1) filename to downloadable URLs: If the backend rewrites filename
@@ -179,16 +186,11 @@ def execute_python_code_with_file(
         - Large data should be saved to files rather than printed to console.
         - Use plt.savefig() for plots - they will be displayed separately from text output.
 
-    Constraints:
-        - Only a limited set of safe modules are allowed (e.g., numpy, pandas, matplotlib, seaborn, json, csv, math, etc.).
-        - Imports of dangerous or unauthorized modules (e.g., os, sys, subprocess, socket, requests, pickle, threading, etc.) are blocked.
-        - Dangerous built-in functions (e.g., eval, exec, compile, __import__, getattr, setattr, input, exit, quit, etc.) are forbidden.
-        - File I/O is restricted to the execution directory, with read-only access to matplotlib/seaborn config files for plotting.
+    Execution behavior:
+        - An AST denylist rejects some imports and expressions, but is not a security boundary.
         - Matplotlib and seaborn plotting is fully supported - you MUST use plt.savefig() to create plot files (plt.show() will not work).
-        - Attribute access to __builtins__ and double-underscore attributes is forbidden.
-        - Code is executed in a temporary, isolated directory that is cleaned up after execution.
+        - Code runs in a working directory that is cleaned up after execution, without filesystem isolation.
         - Execution is time-limited (default: 30 seconds).
-        - Supports data analysis, visualization, and basic Python operations in a secure sandbox.
 
     Example usage:
         If you upload a file named "data.csv", you can access it in your code like:

@@ -57,6 +57,30 @@ Here is an example of a server configuration that uses all available options.
 *   **`require_approval`**: (list of strings) A list of tool names (without the server prefix) that will always require user approval before execution.
 *   **`allow_edit`**: (list of strings) A list of tool names for which the user is allowed to edit the arguments before approving. (Note: This is a legacy field and may be deprecated; the UI may allow editing for all approval requests).
 
+### Stdio environment isolation
+
+Stdio servers inherit only an allowlisted operating-system environment, not the
+backend's complete environment. Backend signing keys, proxy credentials, LLM
+keys, and token-encryption keys are not forwarded automatically, even when
+`env` is omitted or empty. Atlas retains the Python import path needed by its
+bundled servers.
+
+**Migration:** servers that relied on implicit inheritance must declare each
+required variable in their `env` block, for example
+`"env": {"API_KEY": "${MY_TOOL_API_KEY}"}`. Substitution reads the backend
+environment; a missing required variable prevents that server from starting.
+Only expose secrets that the particular server needs. This limits accidental
+credential exposure, but is not an operating-system sandbox for same-user code.
+
+### Python code execution
+
+The legacy `code-executor` v1 example is no longer offered by the admin catalog.
+Its AST denylist and plain subprocess execution are **not a security sandbox**.
+Existing installations are not removed automatically: disable v1 in your
+`config/mcp.json` and migrate to the `code-executor-v2` example, which uses
+Landlock and network namespace isolation. Verify the required Linux sandbox
+support on the deployment host before enabling code execution.
+
 ## Server Types
 
 The system can connect to different types of MCP servers:

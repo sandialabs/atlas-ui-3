@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from fastmcp import Client
 
+from atlas.core.child_environment import _build_child_env
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.config.config_manager import resolve_env_var
 
@@ -30,6 +31,30 @@ def _client():
     """
     from atlas.modules.mcp_tools import client
     return client
+
+
+def _stdio_path_dirs(command: Optional[list]) -> list:
+    """Directories a stdio child needs on ``PATH`` without inheriting the backend's.
+
+    Add the backend virtualenv's ``bin`` and the directory of an
+    operator-specified command so console scripts (``fastmcp``,
+    ``mcp-server-*``, ``uvx``) and adjacent shebang interpreters still resolve
+    under the pinned baseline ``PATH``.
+    """
+    dirs = [os.path.dirname(os.path.abspath(sys.executable))]
+    if command:
+        executable = command[0]
+        if executable not in {"python", "python3"}:
+            if os.path.isabs(executable):
+                resolved = executable
+            else:
+                import shutil
+                resolved = shutil.which(executable)
+            if resolved:
+                resolved_dir = os.path.dirname(os.path.abspath(resolved))
+                if resolved_dir not in dirs:
+                    dirs.append(resolved_dir)
+    return dirs
 
 
 class ConnectionMixin:
@@ -177,7 +202,30 @@ class ConnectionMixin:
             elif transport_type == "stdio":
                 # STDIO MCP server
                 command = config.get("command")
-                logger.debug("STDIO transport command for %s: %s", safe_server_name, command)
+                # Operator-declared MCP env is trusted, unlike Portal launch
+                # extras: merge it after the baseline so requested keys survive.
+                resolved_env = _build_child_env(
+                    extra_path_dirs=_stdio_path_dirs(command),
+                    forward_mcp_config=True,
+                )
+                for key, value in (config.get("env") or {}).items():
+                    try:
+                        resolved_env[key] = resolve_env_var(value)
+                    except ValueError as e:
+                        logger.error(f"Failed to resolve env var {key} for {server_name}: {e}")
+                        return None
+
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                existing_pypath = resolved_env.get("PYTHONPATH", "")
+                resolved_env["PYTHONPATH"] = (
+                    f"{project_root}{os.pathsep}{existing_pypath}" if existing_pypath else project_root
+                )
+                logger.debug(
+                    "STDIO transport command for %s: %s (env keys: %s)",
+                    safe_server_name,
+                    command,
+                    ",".join(sorted(resolved_env)),
+                )
                 if command:
                     # Ensure MCP stdio servers run under the same interpreter as the backend.
                     # In dev containers, PATH `python` may not have required deps.
@@ -186,32 +234,7 @@ class ConnectionMixin:
 
                     # Custom command specified
                     cwd = config.get("cwd")
-                    env = config.get("env")
                     logger.debug("Working directory specified for %s: %s", safe_server_name, cwd)
-
-                    # Resolve environment variables in env dict
-                    resolved_env = None
-                    if env is not None:
-                        resolved_env = {}
-                        for key, value in env.items():
-                            try:
-                                resolved_env[key] = resolve_env_var(value)
-                                logger.debug(f"Resolved env var {key} for {server_name}")
-                            except ValueError as e:
-                                logger.error(f"Failed to resolve env var {key} for {server_name}: {e}")
-                                return None  # Skip this server if env var resolution fails
-                        logger.debug("Environment variables specified for %s: %s", safe_server_name, list(resolved_env.keys()))
-
-                    # Add project root to PYTHONPATH so STDIO servers can import
-                    # atlas.mcp_shared (BlockedStateStore / create_stdio_server)
-                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                    if resolved_env is None:
-                        resolved_env = dict(os.environ)
-                    existing_pypath = resolved_env.get("PYTHONPATH", "")
-                    if existing_pypath:
-                        resolved_env["PYTHONPATH"] = f"{project_root}:{existing_pypath}"
-                    else:
-                        resolved_env["PYTHONPATH"] = project_root
 
                     # Create log handler for this server
                     log_handler = self._create_log_handler(server_name)
@@ -282,12 +305,16 @@ class ConnectionMixin:
                     if os.path.exists(server_path):
                         logger.debug(f"Server script exists for {server_name}, creating client...")
                         log_handler = self._create_log_handler(server_name)
+                        from fastmcp.client.transports import StdioTransport
+                        transport = StdioTransport(
+                            command=sys.executable, args=[os.path.abspath(server_path)], env=resolved_env
+                        )
                         client = _client().Client(
-                            server_path,
+                            transport,
                             log_handler=log_handler,
                             elicitation_handler=self._create_elicitation_handler(server_name),
                             sampling_handler=self._create_sampling_handler(server_name),
-                        )  # Client auto-detects STDIO transport from .py file
+                        )
                         logger.info(f"Created MCP client for {server_name}")
                         logger.debug(f"Successfully created client for {server_name}")
                         return client

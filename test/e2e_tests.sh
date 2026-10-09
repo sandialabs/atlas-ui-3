@@ -60,6 +60,12 @@ fi
 : "${MCP_TOKEN_ENCRYPTION_KEY:=e2e-test-mcp-token-encryption-key-not-a-secret}"
 export MCP_TOKEN_ENCRYPTION_KEY
 
+# The harness binds 0.0.0.0 inside an isolated CI container and runs the
+# backend in debug mode. The startup guard refuses a public debug bind unless
+# the operator opts in, so acknowledge it explicitly for this throwaway server.
+: "${ALLOW_DEBUG_NON_LOOPBACK:=true}"
+export ALLOW_DEBUG_NON_LOOPBACK
+
 # Start backend with startup validation
 echo "Starting backend server..."
 cd "$ATLAS_DIR"

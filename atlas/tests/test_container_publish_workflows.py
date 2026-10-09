@@ -173,6 +173,31 @@ def test_validation_images_stay_single_platform():
         assert not inputs.get("push", False)
 
 
+def test_runtime_validation_runs_against_the_published_recipe():
+    job = _load("ci.yml")["jobs"]["runtime-only-image"]
+    build = next(
+        step for step in job["steps"]
+        if step.get("uses", "").startswith("docker/build-push-action@")
+    )
+    # The runtime checks must exercise the canonical image users receive, not a
+    # parallel recipe: build the published Dockerfile target and load it.
+    assert build["with"].get("file") == "./Dockerfile"
+    assert build["with"].get("target") == "runtime"
+    assert build["with"].get("load") is True
+    validate = next(
+        step for step in job["steps"]
+        if step.get("name") == "Validate runtime image"
+    )
+    assert "test_pr1017_container_runtime.sh" in validate["run"]
+    # Dockerfile.runtimeonly is now a compatibility shim pinned to that image.
+    compat = next(
+        step for step in job["steps"]
+        if step.get("name") == "Validate compatibility recipe"
+    )
+    assert "Dockerfile.runtimeonly" in compat["run"]
+    assert "ATLAS_RUNTIME_IMAGE=runtime-only-image:latest" in compat["run"]
+
+
 def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
     jobs = _load("ci.yml")["jobs"]
     assert set(jobs) == {

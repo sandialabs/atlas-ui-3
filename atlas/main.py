@@ -1085,6 +1085,14 @@ async def lifespan(app: FastAPI):
     # Initialize configuration
     config = app_factory.get_config_manager()
 
+    from atlas.core.security_config import (
+        resolve_bind_host,
+        validate_capability_secret,
+        validate_debug_configuration,
+    )
+    validate_debug_configuration(config.app_settings, resolve_bind_host())
+    validate_capability_secret(config.app_settings.capability_token_secret)
+
     # CONFIG: Validate the MCP token encryption key at startup.
     #
     # The key is only resolved lazily, inside request handlers such as
@@ -2751,6 +2759,12 @@ if __name__ == "__main__":
     # Set ATLAS_HOST=0.0.0.0 in production environments where needed
     host = os.getenv("ATLAS_HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
+
+    from atlas.core.security_config import validate_debug_configuration
+    validate_debug_configuration(config.app_settings, host)
+    # Keep the process environment consistent with the address we are about to
+    # bind so the lifespan guard resolves the same effective host.
+    os.environ["ATLAS_HOST"] = host
 
     uvicorn.run(
         app,

@@ -1,5 +1,5 @@
 # Test-specific Dockerfile with simple E2E testing dependencies
-FROM registry.access.redhat.com/ubi9/ubi:latest
+FROM docker.io/redhat/ubi9:latest@sha256:094ea2ecfd3225af8f93807b99daa9ff33710fc705ebdf6e8466f46ed605585c
 
 # Build argument for debug mode (default: true for backward compatibility)
 ARG DEBUG_MODE=true
@@ -44,6 +44,7 @@ COPY docker-compose.yml .
 COPY agent_start.sh .
 COPY ps_agent_start.ps1 .
 COPY Dockerfile-test .
+COPY Dockerfile .dockerignore .gitignore .
 COPY Dockerfile.runtimeonly .
 
 # Copy and install frontend dependencies (keep all dependencies for testing)
