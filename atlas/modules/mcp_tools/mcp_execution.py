@@ -832,6 +832,24 @@ class ExecutionMixin:
             logger.error(f"Error getting prompt {prompt_name} from {server_name}: {e}")
             raise
 
+    def _server_classification_permits(self, server_name: str, active_level: str) -> bool:
+        """Whether ``server_name`` lists ``active_level`` (fails closed)."""
+        try:
+            from atlas.core.compliance import declared_classifications, get_compliance_manager
+
+            config = (getattr(self, "servers_config", {}) or {}).get(server_name)
+            if config is None:
+                config = (self.available_tools.get(server_name) or {}).get("config")
+            return get_compliance_manager().classification_permits(
+                active_level, declared_classifications(config)
+            )
+        except Exception:
+            logger.warning(
+                "Could not check the classification of server '%s'; denying",
+                sanitize_for_logging(server_name),
+            )
+            return False
+
     async def execute_tool(
         self,
         tool_call: ToolCall,
@@ -970,6 +988,29 @@ class ExecutionMixin:
                 sanitize_for_logging(tool_call.name),
                 sanitize_for_logging(server_name),
                 sanitize_for_logging(user_email or "<anonymous>"),
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content=error_msg,
+                success=False,
+                error=error_msg,
+            )
+
+        # Classification check at the same choke point (issue #1032). The turn
+        # gate covers the tools the user selected; this covers a call the model
+        # makes to any other tool (hallucinated or prompt-injected). The level
+        # comes from the trusted session context, never tool arguments, and is
+        # only set when the compliance feature is on.
+        active_level = context.get("compliance_level") if isinstance(context, dict) else None
+        if active_level and not self._server_classification_permits(server_name, active_level):
+            error_msg = (
+                f"Tool '{tool_call.name}' is not approved for {active_level} data"
+            )
+            logger.warning(
+                "Denied execution of tool '%s' on server '%s': not approved for the "
+                "active classification",
+                sanitize_for_logging(tool_call.name),
+                sanitize_for_logging(server_name),
             )
             return ToolResult(
                 tool_call_id=tool_call.id,

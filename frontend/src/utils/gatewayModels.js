@@ -86,6 +86,7 @@ export function gatewayModelEntry(name, gateways, user) {
   const gateway = gateways.find(g => g.name === ref.gateway)
   const teamLabel = teamLabelFor(ref.gateway, ref.teamId, user)
   const modelLevels = gateway.model_compliance_levels
+  const modelClassifications = gateway.model_allowed_data_classifications
   return {
     name,
     gateway: ref.gateway,
@@ -99,6 +100,11 @@ export function gatewayModelEntry(name, gateways, user) {
     compliance_level: modelLevels && Object.hasOwn(modelLevels, ref.modelId)
       ? modelLevels[ref.modelId]
       : gateway.compliance_level,
+    // Same precedence for the explicit classifications (issue #1032); left
+    // undefined, classificationsOf() falls back to compliance_level above.
+    allowed_data_classifications: modelClassifications && Object.hasOwn(modelClassifications, ref.modelId)
+      ? modelClassifications[ref.modelId]
+      : gateway.allowed_data_classifications,
     supports_vision: !!gateway.supports_vision,
     supports_pdf: !!gateway.supports_pdf,
     supports_tools: gateway.supports_tools !== false,

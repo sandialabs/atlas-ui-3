@@ -197,3 +197,63 @@ async def test_execute_tool_allows_allowed_tool_without_context_user_for_open_se
 
     assert result.success is True
     mock_call.assert_awaited_once()
+
+
+# --- Classification check at execution (issue #1032) -------------------------
+
+
+def _ok():
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="ok")],
+        structured_content=None, data=None, is_error=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_denies_server_not_approved_for_active_level():
+    """A model-issued call to a UUR-only server is refused in an ITAR turn."""
+    from atlas.core.compliance import ComplianceLevelManager
+
+    manager = _manager({
+        "google_search": {"enabled": True, "groups": [], "allowed_data_classifications": ["UUR"]},
+    })
+    manager._tool_index = _tool_index("google_search", "query")
+    levels = ComplianceLevelManager(None)  # permissive names: membership still applies
+    levels.levels = {}
+
+    with (
+        patch("atlas.core.compliance.get_compliance_manager", return_value=levels),
+        patch.object(manager, "call_tool", new_callable=AsyncMock) as mock_call,
+    ):
+        mock_call.return_value = _ok()
+        denied = await manager.execute_tool(
+            ToolCall(id="c1", name="google_search_query", arguments={}),
+            context={"user_email": "user@example.com", "compliance_level": "ITAR"},
+        )
+        allowed = await manager.execute_tool(
+            ToolCall(id="c2", name="google_search_query", arguments={}),
+            context={"user_email": "user@example.com", "compliance_level": "UUR"},
+        )
+        no_level = await manager.execute_tool(
+            ToolCall(id="c3", name="google_search_query", arguments={}),
+            context={"user_email": "user@example.com", "compliance_level": None},
+        )
+
+    assert denied.success is False
+    assert "not approved for ITAR" in denied.error
+    assert allowed.success is True
+    assert no_level.success is True
+    assert mock_call.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_denies_undeclared_server_under_a_level():
+    manager = _manager({"bare": {"enabled": True, "groups": []}})
+    manager._tool_index = _tool_index("bare", "run")
+    with patch.object(manager, "call_tool", new_callable=AsyncMock) as mock_call:
+        result = await manager.execute_tool(
+            ToolCall(id="c4", name="bare_run", arguments={}),
+            context={"user_email": "user@example.com", "compliance_level": "UUR"},
+        )
+    assert result.success is False
+    mock_call.assert_not_awaited()

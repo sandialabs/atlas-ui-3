@@ -261,6 +261,9 @@ async def oidc_logout(request: Request):
         # the first would leave the credential usable after logout.
         await revoke_delegated_credentials(existing.user_id)
     store.remove(session_id)
+    from atlas.core.oidc.session_refresh import forget_refresh_state
+
+    forget_refresh_state(session_id)
 
     settings = app_factory.get_config_manager().app_settings
     if settings.oidc_issuer:

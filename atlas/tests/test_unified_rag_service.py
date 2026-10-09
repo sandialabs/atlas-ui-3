@@ -12,6 +12,13 @@ from atlas.domain.unified_rag_service import UnifiedRAGService
 from atlas.modules.config.config_manager import RAGSourceConfig, RAGSourcesConfig, config_manager
 from atlas.modules.rag.client import DataSource, RAGResponse
 
+# What the mocked HTTP backend's discovery lists. Query-time checks in a
+# classified turn resolve each requested corpus against it (issue #1035).
+_DISCOVERED = [
+    DataSource(id="corpus1", label="Corpus One"),
+    DataSource(id="corpus2", label="Corpus Two"),
+]
+
 
 @pytest.fixture
 def mock_config_manager(distinct_admin_group):
@@ -382,11 +389,15 @@ class TestQueryRAGCompliance:
         def is_accessible(self, user_level, resource_level):
             return user_level == resource_level
 
+        def classification_permits(self, active_level, classifications):
+            return active_level in (classifications or [])
+
     @pytest.mark.asyncio
     async def test_query_rag_allows_matching_compliance_level(self, unified_rag_service):
         """A matching server-side compliance level should allow the query."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -417,7 +428,7 @@ class TestQueryRAGCompliance:
                 return_value=self._ComplianceManager(),
             ),
         ):
-            with pytest.raises(DataSourcePermissionError, match="not accessible"):
+            with pytest.raises(DataSourcePermissionError, match="not approved"):
                 await unified_rag_service.query_rag(
                     username=config_manager.app_settings.test_user,
                     qualified_data_source="test_http:corpus1",
@@ -439,7 +450,7 @@ class TestQueryRAGCompliance:
                 return_value=self._ComplianceManager(),
             ),
         ):
-            with pytest.raises(DataSourcePermissionError, match="not accessible"):
+            with pytest.raises(DataSourcePermissionError, match="not approved"):
                 await unified_rag_service.query_rag_batch(
                     username=config_manager.app_settings.test_user,
                     qualified_data_sources=["test_http:corpus1", "test_http:corpus2"],
@@ -462,6 +473,9 @@ class TestQueryRAGProductionEnforcementPath:
     class _ComplianceManager:
         def is_accessible(self, user_level, resource_level):
             return user_level == resource_level
+
+        def classification_permits(self, active_level, classifications):
+            return active_level in (classifications or [])
 
     @staticmethod
     def _turn_context(level, enforce=True):
@@ -515,6 +529,7 @@ class TestQueryRAGProductionEnforcementPath:
         """The allowed case must still reach the backend with no kwarg."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -557,6 +572,7 @@ class TestQueryRAGProductionEnforcementPath:
         """enforce=False (no trusted level resolved) keeps prior behaviour."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -653,6 +669,7 @@ class TestQueryRAGProductionEnforcementPath:
 
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with (
             patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
@@ -674,13 +691,11 @@ class TestQueryRAGProductionEnforcementPath:
 class TestGateAgainstTheRealComplianceManager:
     """The gate against the real ``ComplianceLevelManager``, not a stub.
 
-    Every other compliance test here substitutes a stub whose ``is_accessible``
-    is strict equality. That is the right shape for isolating the gate, but it
-    means nothing exercises the real manager -- whose behaviour with no
-    ``compliance-levels.json`` loaded is *permissive*, the opposite of the stub
-    and the opposite of the frontend's ``isComplianceAccessible``. The picker
-    mirrors this permissiveness deliberately (see
-    ``rag-panel-model-compliance.test.jsx``), so it is pinned on both sides.
+    Every other compliance test here substitutes a stub with strict
+    membership. These pin the real manager, including with no
+    ``compliance-levels.json`` loaded: names are then compared as given, and
+    membership still applies -- a classified turn never reaches a source that
+    does not list its classification (issue #1032).
     """
 
     @staticmethod
@@ -693,12 +708,8 @@ class TestGateAgainstTheRealComplianceManager:
         return ComplianceLevelManager(config_path=Path("/nonexistent/compliance-levels.json"))
 
     @pytest.mark.asyncio
-    async def test_gate_is_permissive_with_no_levels_configured(self, unified_rag_service):
-        """No levels configured: the gate must be a no-op, not a blanket denial.
-
-        A deployment that never wrote a compliance-levels.json must keep working
-        exactly as it did before query-time enforcement existed.
-        """
+    async def test_gate_applies_membership_with_no_levels_configured(self, unified_rag_service):
+        """No levels configured: membership on the raw names, still fail closed."""
         from atlas.core.compliance import (
             reset_active_compliance_context,
             set_active_compliance_context,
@@ -709,27 +720,31 @@ class TestGateAgainstTheRealComplianceManager:
 
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
-        # "Public" against the Internal-tagged test_http source: the stub used
-        # elsewhere would reject this, the real manager must allow it.
-        token = set_active_compliance_context("Public", enforce=True)
-        try:
-            with (
-                patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
-                patch(
-                    "atlas.domain.unified_rag_service.get_compliance_manager",
-                    return_value=manager,
-                ),
-            ):
-                response = await unified_rag_service.query_rag(
-                    username=config_manager.app_settings.test_user,
-                    qualified_data_source="test_http:corpus1",
-                    messages=[{"role": "user", "content": "q"}],
-                )
-        finally:
-            reset_active_compliance_context(token)
+        async def _query(level):
+            token = set_active_compliance_context(level, enforce=True)
+            try:
+                with (
+                    patch.object(unified_rag_service, "_get_http_client", return_value=mock_client),
+                    patch(
+                        "atlas.domain.unified_rag_service.get_compliance_manager",
+                        return_value=manager,
+                    ),
+                ):
+                    return await unified_rag_service.query_rag(
+                        username=config_manager.app_settings.test_user,
+                        qualified_data_source="test_http:corpus1",
+                        messages=[{"role": "user", "content": "q"}],
+                    )
+            finally:
+                reset_active_compliance_context(token)
 
+        # test_http is tagged Internal.
+        response = await _query("Internal")
         assert response.content == "ok"
+        with pytest.raises(DataSourcePermissionError):
+            await _query("Public")
         mock_client.query_rag.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -921,6 +936,7 @@ class TestQueryRAGBatch:
         """Test that batch passes first source_id (not empty string) to query_rag."""
         mock_client = AsyncMock()
         mock_client.query_rag.return_value = RAGResponse(content="ok", metadata=None)
+        mock_client.discover_data_sources.return_value = _DISCOVERED
 
         with patch.object(unified_rag_service, "_get_http_client", return_value=mock_client):
             await unified_rag_service.query_rag_batch(

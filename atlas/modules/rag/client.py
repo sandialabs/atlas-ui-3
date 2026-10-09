@@ -1,13 +1,9 @@
-"""RAG Client for integrating with RAG mock endpoint."""
+"""Shared data-source, response, and citation models for RAG integrations."""
 
-import logging
 import re
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import HTTPException
-from pydantic import BaseModel, Field, field_validator
-
-from atlas.core.http_client import create_rag_client
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 # Response shapes a v2 RAG backend can return. ``raw`` hands back retrieved
 # evidence for the caller's LLM to reason over; ``synthesized`` hands back an
@@ -21,13 +17,44 @@ class DataSource(BaseModel):
     """Represents a RAG data source with compliance information."""
     id: str
     label: str
-    compliance_level: str = "CUI"
+    # The backend's legacy per-corpus level. ``None`` when it was not sent: a
+    # missing field must not read as a classification (issue #1035). It is a
+    # display badge unless the server opts in with
+    # ``legacy_corpus_classifications`` (see atlas.domain.rag_corpus_classifications).
+    compliance_level: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("compliance_level", "complianceLevel"),
+    )
+
+    @field_validator("compliance_level", mode="before")
+    @classmethod
+    def _coerce_compliance_level(cls, v):
+        # A non-string level is unreadable; keep the field present but empty
+        # so the legacy mapping approves the corpus for nothing.
+        if v is None or isinstance(v, str):
+            return v
+        return ""
+
+    # Optional explicit list (issue #1032); narrows the server's list. Backends
+    # may send it in camelCase, like the MCP discovery contract.
+    allowed_data_classifications: Optional[List[str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("allowed_data_classifications", "allowedDataClassifications"),
+    )
+
+    @field_validator("allowed_data_classifications", mode="before")
+    @classmethod
+    def _coerce_classifications(cls, v):
+        # The shared rule (atlas.core.compliance.coerce_classifications): a
+        # malformed value approves the corpus for nothing instead of failing
+        # validation, which would hide every corpus on the server.
+        from atlas.core.compliance import coerce_classifications
+
+        return coerce_classifications(v)
     description: str = ""
     # Advertised by v2 discovery so a backend can declare, per source, which
     # contract it speaks. Absent means v1 (see docs/admin/external-rag-api.md).
     api_version: Optional[str] = None
-
-logger = logging.getLogger(__name__)
 
 
 class Section(BaseModel):
@@ -139,90 +166,3 @@ class RAGResponse(BaseModel):
     metadata: Optional[RAGMetadata] = None
     is_completion: bool = False  # True if content is already LLM-interpreted (from /rag/completions)
     annotations: List[URLCitation] = Field(default_factory=list)
-
-
-class RAGClient:
-    """Legacy RAG client for the old rag-mock service.
-
-    Note: This client is deprecated. Use UnifiedRAGService for RAG operations,
-    which handles all RAG sources configured in rag-sources.json.
-    """
-
-    def __init__(self, base_url: str = "http://localhost:8001", timeout: float = 30.0):
-        """Initialize the legacy RAG client.
-
-        Args:
-            base_url: Base URL for the RAG mock service.
-            timeout: Request timeout in seconds.
-        """
-        self.base_url = base_url
-        self.timeout = timeout
-        self.test_client = None
-        self.http_client = create_rag_client(self.base_url, self.timeout)
-        logger.warning(
-            "RAGClient is deprecated. Use UnifiedRAGService for RAG operations. "
-            "Configure RAG sources in rag-sources.json."
-        )
-        logger.info("RAGClient initialized with URL: %s", self.base_url)
-
-    async def discover_data_sources(self, user_name: str) -> List[DataSource]:
-        """Discover data sources accessible by a user.
-
-        Note: This method is deprecated. Use UnifiedRAGService.discover_data_sources() instead.
-        """
-        logger.info("discover_data_sources: user=%s (deprecated RAGClient)", user_name)
-
-        try:
-            data = await self.http_client.get(f"/v1/discover/datasources/{user_name}")
-            # Support both v1 (accessible_data_sources) and v2 (data_sources) response formats
-            sources_list = data.get("data_sources", data.get("accessible_data_sources", []))
-        except HTTPException as exc:
-            logger.warning("HTTP error discovering data sources for %s: %s", user_name, exc.detail)
-            return []
-        except Exception as exc:
-            logger.error("Unexpected error while discovering data sources for %s: %s", user_name, exc, exc_info=True)
-            return []
-
-        return [DataSource(**source_data) for source_data in sources_list]
-
-    async def query_rag(self, user_name: str, data_source: str, messages: List[Dict]) -> RAGResponse:
-        """Query RAG endpoint for a response with metadata.
-
-        Note: This method is deprecated. Use UnifiedRAGService.query_rag() instead.
-        """
-        payload = {
-            "messages": messages,
-            "user_name": user_name,
-            "data_source": data_source,
-            "model": "gpt-4-rag-mock",
-            "stream": False
-        }
-
-        logger.info("query_rag: user=%s, source=%s (deprecated RAGClient)", user_name, data_source)
-
-        try:
-            data = await self.http_client.post("/v1/chat/completions", json_data=payload)
-
-            # Extract the assistant message from the response
-            content = "No response from RAG system."
-            if "choices" in data and len(data["choices"]) > 0:
-                choice = data["choices"][0]
-                if "message" in choice and "content" in choice["message"]:
-                    content = choice["message"]["content"]
-
-            # Extract metadata if present
-            metadata = None
-            if "rag_metadata" in data and data["rag_metadata"]:
-                try:
-                    metadata = RAGMetadata(**data["rag_metadata"])
-                except Exception as e:
-                    logger.warning(f"Failed to parse RAG metadata: {e}")
-
-            return RAGResponse(content=content, metadata=metadata)
-
-        except HTTPException:
-            # Re-raise HTTPExceptions from the unified client (they already have proper error handling)
-            raise
-        except Exception as exc:
-            logger.error("Unexpected error while querying RAG for %s: %s", user_name, exc, exc_info=True)
-            raise HTTPException(status_code=500, detail="Internal server error")

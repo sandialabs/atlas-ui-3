@@ -27,9 +27,8 @@ Order of operations in the child (must match):
 
 This file is intentionally **stdlib-only** so it can be invoked by
 absolute path from any cwd, without needing the ``atlas`` package on
-``sys.path``. It mirrors ``atlas/modules/process_manager/_sandbox_launch.py``
-in style (so reviewers can compare) but adds the network-namespace and
-rlimit layers that the agent-portal version does not need.
+``sys.path``. It adds the network-namespace and rlimit layers on top of
+the Landlock filesystem ruleset.
 """
 
 from __future__ import annotations

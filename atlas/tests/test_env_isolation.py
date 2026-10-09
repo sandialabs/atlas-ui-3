@@ -14,6 +14,7 @@ guard in place so it cannot be silently removed.
 
 import os
 from pathlib import Path
+from unittest import mock
 
 from dotenv import load_dotenv
 
@@ -30,14 +31,65 @@ def test_skip_authorization_checks_is_disabled_for_tests():
     assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
 
 
+def test_compliance_required_mode_does_not_leak_into_the_suite():
+    """The compliance-required policy must not leak into unrelated tests.
+
+    ``conftest`` pins ``FEATURE_COMPLIANCE_LEVELS_ENABLED`` and
+    ``FEATURE_COMPLIANCE_LEVEL_REQUIRED`` to an explicit ``false`` and the
+    default level to an explicit empty string, because a contributor with those
+    exported would otherwise make every chat-service test that omits
+    ``compliance_level`` fail with a ``ValidationError``. Compliance-specific
+    tests opt back in via ``monkeypatch``, which overrides the session pin.
+
+    Assert the *effective* settings rather than the raw environment: ``main``
+    imports ``load_dotenv`` (``override=False``), so the environment can be
+    refilled from a developer's .env during collection -- pinning values, not
+    popping them, is what makes the effective policy deterministic.
+    """
+    assert os.environ.get("FEATURE_COMPLIANCE_LEVELS_ENABLED") == "false"
+    assert os.environ.get("FEATURE_COMPLIANCE_LEVEL_REQUIRED") == "false"
+    settings = AppSettings()
+    assert settings.compliance_level_required_effective is False
+    assert not settings.compliance_default_level
+
+
+def test_dotenv_cannot_reenable_compliance_required_mode(tmp_path):
+    """A later dotenv load must not re-enable compliance-required mode.
+
+    ``load_dotenv`` with its default ``override=False`` only fills keys that are
+    absent, so the conftest pins survive a .env that would otherwise restore the
+    policy. Mirrors ``test_dotenv_cannot_reenable_skip_authorization_checks``,
+    with ``mock.patch.dict`` wrapping the load so that if the pins ever regress
+    the leaked values are restored and do not bury every later test under a
+    spurious required-compliance failure.
+    """
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "FEATURE_COMPLIANCE_LEVELS_ENABLED=true\n"
+        "FEATURE_COMPLIANCE_LEVEL_REQUIRED=true\n"
+        "COMPLIANCE_DEFAULT_LEVEL=Internal\n"
+    )
+
+    with mock.patch.dict(os.environ):
+        load_dotenv(dotenv_path=dotenv_path)
+
+        assert os.environ.get("FEATURE_COMPLIANCE_LEVELS_ENABLED") == "false"
+        assert os.environ.get("FEATURE_COMPLIANCE_LEVEL_REQUIRED") == "false"
+        assert os.environ.get("COMPLIANCE_DEFAULT_LEVEL") == ""
+        settings = AppSettings()
+        assert settings.compliance_level_required_effective is False
+        assert not settings.compliance_default_level
+
+
 def test_dotenv_cannot_reenable_skip_authorization_checks(tmp_path):
     """A later dotenv load must not re-enable the developer-local bypass."""
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("SKIP_AUTHORIZATION_CHECKS=true\n")
 
-    load_dotenv(dotenv_path=dotenv_path)
+    with mock.patch.dict(os.environ):
+        load_dotenv(dotenv_path=dotenv_path)
 
-    assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
+        assert os.environ.get("SKIP_AUTHORIZATION_CHECKS") == "false"
 
 
 def test_dotenv_on_disk_does_not_leak_into_settings(tmp_path, monkeypatch):
@@ -67,18 +119,15 @@ def test_persistent_stores_are_redirected_off_the_repository():
     """Every store conftest redirects must resolve outside the checkout.
 
     These are the stores the suite used to write into for real: the developer's
-    chat-history and agent-portal DuckDB files, the agent-portal audit log, the
-    feedback and fine-tune-capture directories, and the encrypted MCP token
-    directory. If a redirect is dropped, the corresponding store silently goes
-    back to the repository copy, so assert on the resolved values rather than
-    trusting the conftest to stay correct.
+    chat-history DuckDB file, the feedback and fine-tune-capture directories,
+    and the encrypted MCP token directory. If a redirect is dropped, the
+    corresponding store silently goes back to the repository copy, so assert on
+    the resolved values rather than trusting the conftest to stay correct.
     """
     project_root = Path(__file__).resolve().parents[2].resolve()
 
     for var in (
         "CHAT_HISTORY_DB_URL",
-        "AGENT_PORTAL_DB_URL",
-        "AGENT_PORTAL_AUDIT_PATH",
         "RUNTIME_FEEDBACK_DIR",
         "RUNTIME_CAPTURE_DIR",
         "MCP_TOKEN_STORAGE_DIR",
@@ -106,11 +155,11 @@ def test_persistent_stores_are_redirected_off_the_repository():
 def test_isolated_singletons_name_real_module_globals():
     """Each entry in ``_SINGLETON_GLOBALS`` must name an attribute that exists.
 
-    A misspelled global is the failure mode this list exists to prevent: the
-    agent-portal e2e fixture cleared ``_singleton_manager`` (no such attribute)
-    for months, so its "fresh process manager per test" comment was false and
-    the real singleton carried processes across tests. Importing the module and
-    asserting on the attribute turns that typo into a test failure.
+    A misspelled global is the failure mode this list exists to prevent: a
+    fixture that clears a name with no such attribute leaves its "fresh
+    per test" comment false and the real singleton carries state across tests.
+    Importing the module and asserting on the attribute turns that typo into a
+    test failure.
     """
     import importlib
 

@@ -4,6 +4,8 @@ import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
 import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
+import { useComplianceLevels } from '../hooks/chat/useComplianceLevels'
+import { isComplianceAccessible, classificationsOf, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel, COMPLIANCE_EXEMPT } from '../utils/complianceAccess'
 import { useUserPrompts } from '../hooks/useUserPrompts'
 import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
@@ -20,7 +22,8 @@ import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
-import { SEARCH_TOOL, migrateToolName } from '../constants/atlasTools'
+import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
+import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -103,7 +106,7 @@ const MUTATING_SELECTION_ACTIONS = [
 	'toggleTool', 'addTools', 'removeTools',
 	'togglePrompt', 'addPrompts', 'removePrompts', 'setSinglePrompt',
 	'makePromptActive', 'clearActivePrompt', 'clearToolsAndPrompts',
-	'toggleDataSource', 'addDataSources', 'clearDataSources',
+	'toggleDataSource', 'addDataSources', 'removeDataSources', 'clearDataSources',
 	'setRagEnabled', 'toggleRagEnabled',
 ]
 
@@ -111,6 +114,11 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections()
+	const complianceEnabled = !!config.features?.compliance_levels
+	const { complianceLevels, complianceMode, defaultComplianceLevel } = useComplianceLevels(complianceEnabled)
+	// Required-level mode: there is no "All Levels" state; a session always
+	// carries a defined level and the server refuses a turn without one.
+	const complianceRequired = complianceEnabled && !!config.features?.compliance_level_required
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
@@ -267,6 +275,49 @@ export const ChatProvider = ({ children }) => {
 	const { currentModel } = config
 	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled } = selections
 
+	// Compliance level of a selection key, for the compliance filter: null when
+	// the resource is untagged, undefined when the key cannot be placed (see
+	// keysExcludedByCompliance). The built-in server is exempt.
+	const mcpKeyLevel = useCallback(
+		servers => key => {
+			const server = findServerConfigForMcpKey(key, servers)
+			if (!server) return undefined
+			if (server.server === ATLAS_SERVER) return COMPLIANCE_EXEMPT
+			return classificationsOf(server)
+		},
+		[]
+	)
+	const ragKeyLevel = useCallback(key => {
+		const sep = key.indexOf(':')
+		if (sep < 0) return undefined
+		const server = config.ragServers.find(s => s.server === key.slice(0, sep))
+		const source = server?.sources?.find(src => src.id === key.slice(sep + 1))
+		return source ? classificationsOf(source) : undefined
+	}, [config.ragServers])
+	// The filter level that actually applies: none when the feature is off.
+	const activeComplianceFilter = complianceEnabled ? selections.complianceLevelFilter : null
+
+	// A persisted filter naming a level the deployment no longer defines would
+	// hide every resource (an unknown level allows nothing) while the header
+	// select, having no such option, displays "All Levels". Drop it once the
+	// definitions are known so what the selector shows is what applies.
+	// When a level is required there is no "no filter" state to drop to: an
+	// unset or undefined level is replaced with the deployment's default (a
+	// defined level), or the first defined level if the default is not one.
+	const { complianceLevelFilter: storedComplianceFilter, setComplianceLevelFilter: storeComplianceFilter } = selections
+	useEffect(() => {
+		if (complianceLevels.length === 0) return
+		if (storedComplianceFilter && complianceLevels.some(l => l.name === storedComplianceFilter)) return
+		if (complianceRequired) {
+			const fallback = complianceLevels.some(l => l.name === defaultComplianceLevel)
+				? defaultComplianceLevel
+				: complianceLevels[0].name
+			storeComplianceFilter(fallback)
+		} else if (storedComplianceFilter) {
+			storeComplianceFilter(null)
+		}
+	}, [storedComplianceFilter, complianceLevels, complianceRequired, defaultComplianceLevel, storeComplianceFilter])
+
 	useEffect(() => {
 		if (!config.configReady || customPromptsEnabled) return
 		if (isUserPromptKey(activePromptKey)) {
@@ -351,6 +402,16 @@ export const ChatProvider = ({ children }) => {
 	// autosave cannot silently re-bind a conversation just because it was opened
 	// while a different workspace was active.
 	const conversationWorkspaceIdRef = useRef(null)
+	// The data classification this conversation was created under (issue
+	// #1042), for the local autosave: set by the first turn of a new chat or
+	// read from the loaded record, never re-derived from the active level, so a
+	// level switch cannot relabel a locally saved conversation. The server keeps
+	// its own record; this mirrors it for client-held history.
+	// null: no conversation yet; { recorded: false }: legacy/unreadable record.
+	const conversationClassificationRef = useRef(null)
+	// Whether the open conversation was loaded from history (so it exists
+	// regardless of what this tab has sent).
+	const conversationLoadedRef = useRef(false)
 
 	const switchWorkspace = useCallback(workspaceId => {
 		const ws = workspaceList.find(w => w.id === workspaceId)
@@ -838,7 +899,72 @@ export const ChatProvider = ({ children }) => {
 		// A fine-tune correction (issue #622) narrows the turn to exactly one tool
 		// via selectedToolsOverride, so honor that list for the outgoing payload
 		// instead of the persisted selection.
-		const toolsToSend = selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools]
+		// The compliance filter hides what it excludes, so nothing it excludes
+		// may go out either: a selection persisted from before the filter, one
+		// restored from a workspace, or one whose server changed level would
+		// otherwise ride along invisibly. The MCP tool path has no server-side
+		// compliance check, so this is the boundary for tools.
+		// Under a filter only what can be placed *and* is allowed goes out. A
+		// key whose server or source is not known yet (config still loading)
+		// is left to the stale-key and prune effects, but is not sent
+		// unjudged. If the level definitions are unavailable (fetch failed
+		// or in flight) the pickers deny everything, so only exempt keys go.
+		// Required-level mode: a turn without a level would be refused by the
+		// server, so refuse it here with a reason the user can act on. Reached
+		// only before the level definitions load (or if they failed to load);
+		// the effect above picks a level as soon as they are known.
+		if (complianceRequired && !activeComplianceFilter) {
+			// With no definitions the header has no selector to point at.
+			toast.error(complianceLevels.length === 0
+				? 'A compliance level is required, but the compliance levels could not be loaded. Reload the page or contact an administrator.'
+				: 'A compliance level is required. Select a compliance level before sending.')
+			return false
+		}
+		// The open conversation keeps the level it was recorded at (issue
+		// #1042). The server refuses a mismatched turn on its own; refusing it
+		// here too keeps the prompt out of the transcript, where the local
+		// autosave would otherwise persist it under the recorded level.
+		// Only once the server has accepted a turn of this conversation (it is
+		// saved, loaded, or has a reply): a first turn the server refused left
+		// nothing behind, so the next send may pick a level.
+		// A `local_*` id is the browser autosave's own, not the server's word.
+		const accepted = conversationLoadedRef.current ||
+			(!!activeConversationId && !String(activeConversationId).startsWith('local_')) ||
+			latestMessagesRef.current.some(m => m.role === 'assistant')
+		const bound = accepted ? conversationClassificationRef.current : null
+		if (bound) {
+			const refusal = classificationRefusal(
+				bound.recorded
+					? { data_classification_state: bound.level === null ? 'unclassified' : 'classified', data_classification: bound.level }
+					: { data_classification_state: bound.invalid ? 'invalid' : 'legacy', data_classification: null },
+				{ complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels },
+			)
+			if (refusal) {
+				toast.error(refusal)
+				return false
+			}
+		}
+		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
+		const dropExcluded = (keys, levelOf) => {
+			if (!activeComplianceFilter) return keys
+			return keys.filter(k => {
+				const level = levelOf(k)
+				if (level === COMPLIANCE_EXEMPT) return true
+				if (level === undefined || !levelsReady) return false
+				return isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
+			})
+		}
+		// Never send a turn to a model the active level excludes. The picker
+		// flags it; this is reached only when no allowed model exists to
+		// switch to (the prune effect moves off it otherwise).
+		if (levelsReady && !isModelComplianceAccessible(config.models, complianceLevels, activeComplianceFilter, currentModel)) {
+			toast.error(`${currentModel} is outside the ${activeComplianceFilter} compliance level. Choose an allowed model or change the compliance level.`)
+			return false
+		}
+		const toolsToSend = dropExcluded(
+			selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools],
+			mcpKeyLevel(config.tools)
+		)
 		const tagged = files.getTaggedFilesContent()
 
 		// Determine data sources to send:
@@ -853,7 +979,7 @@ export const ChatProvider = ({ children }) => {
 		const searchToolSelected = toolsToSend.some(t => migrateToolName(t) === SEARCH_TOOL)
 		const ragActivated = ragEnabled || hasSelectedSources || searchToolSelected
 		const dataSourcesToSend = ragActivated
-			? (hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds())
+			? dropExcluded(hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds(), ragKeyLevel)
 			: []
 		// When the RAG toggle alone expanded the list to "everything I can
 		// reach", the sources were not hand-picked -- the backend must not
@@ -893,7 +1019,7 @@ export const ChatProvider = ({ children }) => {
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
-			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : activePrompts,
+			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : dropExcluded(activePrompts, mcpKeyLevel(config.prompts)),
 			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
@@ -954,6 +1080,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// means the conversation's binding is the queued one.
 		conversationWorkspaceIdRef.current =
 			pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null
+		if (conversationClassificationRef.current === null || !accepted) {
+			// Levels disabled: nothing is recorded, as on the server, so the
+			// conversation stays migratable if levels are enabled later.
+			conversationClassificationRef.current = complianceEnabled
+				? { recorded: true, level: activeComplianceFilter ?? null }
+				: { recorded: false }
+		}
 		// A turn is a deliberate action too, and it has just told the server which
 		// workspace this conversation belongs to. Letting a queued restore fire
 		// afterwards would swap the selections out from under the turn the user
@@ -1003,7 +1136,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -1075,7 +1208,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// so they are not part of what Undo puts back.
 				messages: latestMessagesRef.current.filter(m => !isReplayPlaceholder(m)).map(m => buildPersistedMessage(m)),
 				canvasContent: files.canvasContent || '',
-				metadata: { workspace_id: conversationWorkspaceIdRef.current || null },
+				metadata: {
+					workspace_id: conversationWorkspaceIdRef.current || null,
+					// The conversation's recorded classification (issue #1042):
+					// Undo reloads through loadSavedConversation, which reads it
+					// back, so the restored view keeps its level instead of being
+					// read as legacy (and the local autosave keeps the record).
+					...(conversationClassificationRef.current?.recorded
+						? { data_classification: conversationClassificationRef.current.level }
+						// An unreadable record stays unreadable (any non-string,
+						// non-null value reads back as invalid), never legacy.
+						: conversationClassificationRef.current?.invalid ? { data_classification: { invalid: true } } : {}),
+				},
 			}
 			: null
 
@@ -1119,6 +1263,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// fire into the fresh chat once the workspace list finishes loading.
 		pendingWorkspaceRestoreRef.current = null
 		conversationWorkspaceIdRef.current = null
+		conversationClassificationRef.current = null
+		conversationLoadedRef.current = false
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
@@ -1313,6 +1459,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 						role: msg.role,
 						content: msg.content || '',
 					})),
+				// The active level (null for none): the server refuses a
+				// conversation recorded under another classification (#1042).
+				compliance_level_filter: activeComplianceFilter ?? null,
 			})
 		}
 
@@ -1329,6 +1478,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// Remember the binding as loaded so the local autosave re-persists *this*
 			// conversation's workspace rather than whatever is active at save time.
 			conversationWorkspaceIdRef.current = meta.workspace_id || null
+			conversationLoadedRef.current = true
+			const recorded = classificationOf(conversationData)
+			conversationClassificationRef.current = (recorded.state === 'classified' || recorded.state === 'unclassified')
+				? { recorded: true, level: recorded.level }
+				: { recorded: false, invalid: recorded.state === 'invalid' }
 			restoreWorkspace(meta.workspace_id)
 		}
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
@@ -1336,7 +1490,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// callback down -- and re-subscribe everything that depends on it -- on
 		// every streaming frame.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun])
+	}, [resetMessages, files, sendMessage, bulkAdd, restoreWorkspace, invalidateUndoOffer, streamEnd, streamToken, agent.setCurrentAgentStep, agent.setAgentPendingQuestion, runs.getRun, finishJoinedRun, activeComplianceFilter])
 
 	// A new socket cannot receive the old run's stream. Reuse the reopen path
 	// to replace missed rows and arm the joined view's polling/final refresh --
@@ -1442,6 +1596,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				messages: conversationData.messages
 					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
 					.map(msg => ({ role: msg.role, content: msg.content || '' })),
+				compliance_level_filter: activeComplianceFilter ?? null,
 			})
 		}
 		// Live-only rows and agent-loop answers have no stored counterpart;
@@ -1528,7 +1683,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		restoreContext()
 		if (stillInFlight && !live) rearmJoinedRun(conversationData.id)
 		return true
-	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun, streamToken])
+	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun, streamToken, activeComplianceFilter])
 
 	// Mid-run refresh for a conversation this tab joined (issue: parallel-run
 	// tool-call visibility). A joined view holds the snapshot the run had when
@@ -1792,51 +1947,49 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	const openChat = useCallback(() => openTranscriptInTab(false), [openTranscriptInTab])
 	const openChatAsText = useCallback(() => openTranscriptInTab(true), [openTranscriptInTab])
 
-	// Wrapper for setComplianceLevelFilter that clears incompatible selections
-	const setComplianceLevelFilterWithCleanup = useCallback((newLevel) => {
-		// If changing to a new compliance level (not clearing or setting to same)
-		if (newLevel && newLevel !== selections.complianceLevelFilter) {
-			// Clear tools that don't match the new compliance level
-			const toolsToRemove = []
-			selectedTools.forEach(toolKey => {
-				const server = findServerConfigForMcpKey(toolKey, config.tools)
-				if (server && server.compliance_level && server.compliance_level !== newLevel) {
-					toolsToRemove.push(toolKey)
-				}
-			})
-			if (toolsToRemove.length > 0) {
-				selections.removeTools(toolsToRemove)
-			}
+	// Keep every selection inside the active compliance filter, with the same
+	// membership rule as the pickers (utils/complianceAccess): a level keeps
+	// everything its panels still show (resources listing it) and drops
+	// everything they hide, untagged resources included -- a hidden selection
+	// cannot be seen or deselected in its panel, yet would still be used.
+	// Runs on a level switch and also on load (a persisted filter meeting
+	// persisted selections), after a workspace restore, and whenever the
+	// config changes a resource's level. Keys that cannot be placed yet
+	// (config still loading) are left alone; the send path holds them back.
+	const { removeTools: pruneTools, removePrompts: prunePrompts, removeDataSources: pruneDataSources } = selections
+	const { models: configModels, setCurrentModel: configSetCurrentModel } = config
+	useEffect(() => {
+		if (!activeComplianceFilter || !complianceLevelsReady(complianceLevels, activeComplianceFilter)) return
+		const excluded = (keys, levelOf) =>
+			keysExcludedByCompliance(keys, complianceLevels, activeComplianceFilter, levelOf)
+		pruneTools(excluded(selectedTools, mcpKeyLevel(config.tools)))
+		prunePrompts(excluded(selectedPrompts, mcpKeyLevel(config.prompts)))
+		pruneDataSources(excluded(selectedDataSources, ragKeyLevel))
 
-			// Clear prompts that don't match the new compliance level
-			const promptsToRemove = []
-			selectedPrompts.forEach(promptKey => {
-				const server = findServerConfigForMcpKey(promptKey, config.prompts)
-				if (server && server.compliance_level && server.compliance_level !== newLevel) {
-					promptsToRemove.push(promptKey)
-				}
-			})
-			if (promptsToRemove.length > 0) {
-				selections.removePrompts(promptsToRemove)
-			}
-
-			// Clear the active persona if the new context excludes it: the picker
-			// hides compliance-incompatible personas and the server refuses to
-			// resolve them, so keeping one selected would silently run the
-			// default prompt on the next turn.
-			if (isPersonaKey(selections.activePromptKey)) {
-				const persona = personas.personas.find(
-					p => p.id === personaIdFromKey(selections.activePromptKey)
-				)
-				if (!personaSurvivesComplianceFilter(persona, newLevel)) {
-					clearActivePrompt()
-				}
+		// The active prompt: an MCP prompt the level hides, or a persona it
+		// hides (the server refuses to resolve one, so keeping it selected
+		// would silently run the default prompt).
+		if (activePromptKey && !isUserPromptKey(activePromptKey)) {
+			if (isPersonaKey(activePromptKey)) {
+				const persona = personas.personas.find(p => p.id === personaIdFromKey(activePromptKey))
+				const allowed = level => isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
+				if (!personaSurvivesComplianceFilter(persona, activeComplianceFilter, allowed)) clearActivePrompt()
+			} else if (excluded([activePromptKey], mcpKeyLevel(config.prompts)).length > 0) {
+				clearActivePrompt()
 			}
 		}
 
-		// Set the new compliance level
-		selections.setComplianceLevelFilter(newLevel)
-	}, [selections, selectedTools, selectedPrompts, config.tools, config.prompts, personas.personas, clearActivePrompt])
+		// The model: move to one the level allows. With none available it stays
+		// selected, flagged in the picker, and the send path refuses the turn.
+		if (!isModelComplianceAccessible(configModels, complianceLevels, activeComplianceFilter, currentModel)) {
+			const replacement = firstCompliantModel(configModels, complianceLevels, activeComplianceFilter)
+			if (replacement) {
+				configSetCurrentModel(replacement)
+				toast.info(`Switched model to ${replacement} for the ${activeComplianceFilter} compliance level`)
+			}
+		}
+	}, [activeComplianceFilter, complianceLevels, config.tools, config.prompts, selectedTools, selectedPrompts, selectedDataSources, mcpKeyLevel, ragKeyLevel, pruneTools, prunePrompts, pruneDataSources, activePromptKey, personas.personas, clearActivePrompt, configModels, configSetCurrentModel, currentModel, toast])
+
 
 	// Flatten ragServers into a single list of data source objects for easier consumption
 	const ragSources = config.ragServers.flatMap(server =>
@@ -1845,6 +1998,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			serverName: server.server,
 			serverDisplayName: server.displayName,
 			serverComplianceLevel: server.complianceLevel,
+			serverClassifications: classificationsOf(server),
 		}))
 	)
 
@@ -1872,6 +2026,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// Auto-save to browser IndexedDB when saveMode is 'local'
 	useEffect(() => {
 		if (saveMode !== 'local') return
+		// An unreadable local record (issue #1042) cannot be continued, and
+		// rewriting it would drop the record and turn it into a legacy one.
+		if (conversationClassificationRef.current?.invalid) return
 		const userMessages = messages.filter(m => m.role === 'user')
 		if (userMessages.length === 0) return
 
@@ -1897,7 +2054,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// The conversation's own binding -- not `activeWorkspaceId`, which would
 				// rewrite the stored workspace ~1s after merely opening the
 				// conversation and destroy the binding with no user action.
-				metadata: { agent_mode: !!agent?.agentModeEnabled, workspace_id: conversationWorkspaceIdRef.current || null },
+				metadata: {
+					agent_mode: !!agent?.agentModeEnabled,
+					workspace_id: conversationWorkspaceIdRef.current || null,
+					// The conversation's recorded classification (issue #1042); a
+					// legacy record stays unlabelled rather than being stamped.
+					...(conversationClassificationRef.current?.recorded
+						? { data_classification: conversationClassificationRef.current.level }
+						: {}),
+				},
 			}).catch(e => console.error('Failed to save conversation locally:', e))
 		}, 1000)
 
@@ -1998,7 +2163,14 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		toggleRagEnabled: guarded.toggleRagEnabled,
 		clearToolsAndPrompts: guarded.clearToolsAndPrompts,
 		complianceLevelFilter: selections.complianceLevelFilter,
-		setComplianceLevelFilter: setComplianceLevelFilterWithCleanup,
+		setComplianceLevelFilter: selections.setComplianceLevelFilter,
+		// The level that actually applies (null when the feature is off), and
+		// whether levels are enforced -- for conversation classification checks.
+		activeComplianceFilter,
+		complianceEnabled,
+		complianceLevels,
+		complianceMode,
+		complianceRequired,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,

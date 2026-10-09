@@ -66,6 +66,7 @@ from atlas.core.user_identity import normalize_user_email
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
+from atlas.domain.conversation_classification import ERROR_CODE as CONVERSATION_CLASSIFICATION_ERROR
 from atlas.domain.errors import (
     AuthorizationError,
     ContextWindowExceededError,
@@ -81,10 +82,9 @@ from atlas.domain.errors import (
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
-from atlas.modules.config.settings import agent_mode_available
+from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
 from atlas.routes.admin_routes import admin_router
-from atlas.routes.agent_portal_availability import load_agent_portal_router
 
 # Import essential routes
 from atlas.routes.capture_routes import capture_router
@@ -116,6 +116,9 @@ from atlas.version import VERSION
 
 # Load environment variables from the parent directory
 load_dotenv(dotenv_path="../.env")
+
+# Surface (and ignore) any removed Agent Portal settings left in .env / the env
+warn_removed_agent_portal_settings()
 
 # Setup OpenTelemetry logging
 otel_config = setup_opentelemetry("atlas-ui-3-backend", "1.0.0")
@@ -1105,6 +1108,18 @@ async def lifespan(app: FastAPI):
         logger.error("STARTUP FAILED: %s", e)
         raise
 
+    # Compliance levels without a required level leave "All Levels" turns
+    # unchecked except for the RAG model floor (docs/admin/compliance.md).
+    if (
+        getattr(config.app_settings, "feature_compliance_levels_enabled", False) is True
+        and getattr(config.app_settings, "compliance_level_required_effective", False) is not True
+    ):
+        logger.warning(
+            "Compliance levels are enabled but not required: turns sent with no level "
+            "skip the per-component classification checks. Set "
+            "FEATURE_COMPLIANCE_LEVEL_REQUIRED=true to require a level on every turn."
+        )
+
     # SECURITY WARNING: Check for missing proxy secret in production
     if not config.app_settings.debug_mode:
         if not config.app_settings.feature_proxy_secret_enabled:
@@ -1336,9 +1351,6 @@ app.include_router(user_prompt_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
-agent_portal_router = load_agent_portal_router()
-if agent_portal_router is not None:
-    app.include_router(agent_portal_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -1460,8 +1472,8 @@ def _websocket_origin_allowed(websocket: WebSocket, app_settings) -> bool:
     )
 
 
-def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
-    """Resolve the OIDC login session behind a WebSocket handshake.
+async def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
+    """Refresh and resolve the OIDC login behind a handshake or incoming frame.
 
     Starlette's SessionMiddleware populates ``scope["session"]`` for websocket
     scopes as well as HTTP ones, so the browser's existing login cookie
@@ -1472,14 +1484,49 @@ def _resolve_oidc_websocket_user(websocket, app_settings) -> Optional[str]:
     """
     if not getattr(app_settings, "feature_oidc_auth_enabled", False):
         return None
-    from atlas.core.oidc.session import SESSION_COOKIE_KEY, get_session_store
+    from atlas.core.oidc.session import SESSION_COOKIE_KEY
+    from atlas.core.oidc.session_refresh import get_refreshed_session
 
     try:
         session_id = websocket.session.get(SESSION_COOKIE_KEY)
     except (AssertionError, KeyError):
         return None
-    oidc_session = get_session_store().get(session_id)
+    oidc_session = await get_refreshed_session(session_id, app_settings)
     return oidc_session.user_id if oidc_session else None
+
+
+async def _enforce_oidc_frame_session(
+    websocket, app_settings, established_user: Optional[str]
+) -> None:
+    """Re-check the OIDC login behind an established socket on every frame.
+
+    Returns normally while the socket stays authenticated. When the login
+    session was ended (logout, IdP refusal), tells the client why the socket
+    is going away -- the frame that triggered the check must not be silently
+    lost -- and raises ``WebSocketDisconnect`` so the normal disconnect
+    teardown runs: an in-flight agent or tool turn is stopped and the
+    chat-service and MCP resources are released exactly as on any other
+    disconnect.
+    """
+    if not established_user:
+        return
+    if await _resolve_oidc_websocket_user(websocket, app_settings) == established_user:
+        return
+    try:
+        await websocket.send_json({
+            "type": "session_ended",
+            "reason": "OIDC session ended. Please sign in again.",
+        })
+    except Exception:  # pragma: no cover - client already gone
+        logger.debug("Could not deliver session_ended frame", exc_info=True)
+    # 4401 (application range) says "your login session ended"; the plain
+    # 1008s elsewhere mean proxy-secret or origin problems.
+    await websocket.close(code=4401, reason="OIDC session ended. Please sign in again.")
+    # Raising (rather than returning) hands the connection to the endpoint's
+    # disconnect teardown: an in-flight agent or tool turn is stopped and the
+    # chat-service and MCP resources are released exactly as on any other
+    # disconnect.
+    raise WebSocketDisconnect(code=4401, reason="OIDC session ended. Please sign in again.")
 
 
 # WebSocket endpoint for chat
@@ -1541,7 +1588,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # An established OIDC login session authenticates the socket on its own,
     # exactly as it does for HTTP in AuthMiddleware. Checked before the proxy
     # secret because an OIDC deployment may have no reverse proxy at all.
-    oidc_ws_user = _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
+    oidc_ws_user = await _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
@@ -1685,6 +1732,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+            await _enforce_oidc_frame_session(websocket, app_settings, oidc_ws_user)
             message_type = data.get("type")
 
             # Debug: Log ALL incoming messages
@@ -1747,6 +1795,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 if tracked_run is not None:
                     steering = tracked_run.steering
                     if steering is not None and steering.active:
+                        refusal = await chat_service.steering_classification_refusal(
+                            tracked_run.session_id, data.get("compliance_level_filter")
+                        )
+                        if refusal:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": refusal,
+                                "error_type": CONVERSATION_CLASSIFICATION_ERROR,
+                                # Marks a refused steer: the run keeps going,
+                                # so the client must not end the turn.
+                                "steering": True,
+                                "run_id": tracked_run.run_id,
+                                "conversation_id": tracked_run.conversation_id,
+                            })
+                            continue
                         try:
                             steering.queue.put_nowait(data.get("content", ""))
                         except asyncio.QueueFull:
@@ -1789,6 +1852,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 if should_steer(active_chat_task, data.get("conversation_id")):
+                    refusal = await chat_service.steering_classification_refusal(
+                        session_id, data.get("compliance_level_filter")
+                    )
+                    if refusal:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": refusal,
+                            "error_type": CONVERSATION_CLASSIFICATION_ERROR,
+                            "steering": True,
+                        })
+                        continue
                     content = data.get("content", "")
                     steering = active_chat_task["steering"]
                     try:
@@ -2134,10 +2208,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Validation error in chat handler: {e}")
                         turn_failure.append("validation")
                         log_metric("error", user_email, error_type="validation")
+                        # A conversation-classification refusal (issue #1042)
+                        # keeps its own type so the client can say why.
+                        error_type = (
+                            e.code
+                            if getattr(e, "code", None) == CONVERSATION_CLASSIFICATION_ERROR
+                            else "validation"
+                        )
                         await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
-                            "error_type": "validation"
+                            "error_type": error_type,
                         })
                     except AuthorizationError as e:
                         logger.warning(f"Authorization error in chat handler: {e}")
@@ -2377,7 +2458,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         session_id=session_id,
                         conversation_id=data.get("conversation_id", ""),
                         messages=data.get("messages", []),
-                        user_email=user_email
+                        user_email=user_email,
+                        # The client's active level, when it sends one: a
+                        # conversation recorded under another classification
+                        # is refused before it is loaded (issue #1042).
+                        compliance_level=data.get("compliance_level_filter", UNSET),
                     )
                 except DomainError as e:
                     logger.warning(
@@ -2653,7 +2738,6 @@ if static_dir.exists():
         "help",
         "admin",
         "files",
-        "agent-portal",
     )
 
     @app.get("/{full_path:path}")

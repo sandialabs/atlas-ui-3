@@ -109,8 +109,15 @@ Data sources are only ever consumed by search, so the picker is the second tab,
 Integrations** tab.
 
 The left-hand **Sources** drawer is unchanged and still available; both render
-the same `DataSourcesSelector` component. Dataset names wrap instead of being
-clipped, so a long name (or one with a suffix appended) stays readable.
+the same `DataSourcesSelector` component. It slides over the chat as an
+overlay at every screen width -- opening it no longer pushes the chat to the
+right, and it covers the banner strip while open, the same way it always has
+at mobile widths. Clicking the shaded area outside it, the X in its header,
+or Escape closes it; if you opened it from the keyboard, focus returns to the
+**Sources** button when it closes (after a mouse open, click back into the
+page as usual). Dataset
+names wrap instead of being clipped, so a long name (or one with a suffix
+appended) stays readable.
 
 Data source changes apply as soon as you make them, unlike tool and prompt
 checkboxes, which are staged until you press **Save and Close**.
@@ -156,8 +163,8 @@ your administrator sets.
 ## Top bar sizing
 
 The admin shield is gone -- admin controls are the Admin tab, and the full
-dashboard is one click on from there -- and Help and Portal are icons rather
-than icon-plus-word.
+dashboard is one click on from there -- and Help is an icon rather than
+icon-plus-word.
 
 The left-hand button labels are now driven by the header's own measured width
 rather than a viewport media query. The header sits beside the sidebar and the

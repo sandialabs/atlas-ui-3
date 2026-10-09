@@ -31,7 +31,7 @@ from atlas.modules.config.litellm_gateway_models import (
 from atlas.modules.config.models import LLMConfig
 from atlas.modules.llm import litellm_gateway_client
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
-from atlas.modules.llm.litellm_gateway_client import LiteLLMGatewayClient, reset_gateway_clients
+from atlas.modules.llm.litellm_gateway_client import SIGN_IN_REQUIRED, LiteLLMGatewayClient, reset_gateway_clients
 
 _MOCK_MAIN = Path(__file__).resolve().parents[2] / "mocks" / "litellm-mock" / "main.py"
 _spec = importlib.util.spec_from_file_location("litellm_mock_main_for_tests", _MOCK_MAIN)
@@ -270,6 +270,8 @@ class TestGatewayDiscovery:
         request = manager.get_token.await_args.args[0]
         assert request.subject_token == "user-login-token"
         assert request.scope == "https://litellm.example/user_impersonation"
+        assert request.audience is None
+        assert request.actor == "litellm-gateway:enterprise"
 
     @pytest.mark.asyncio
     async def test_delegated_without_oidc_session_asks_user_to_sign_in(self):
@@ -363,15 +365,14 @@ class TestGatewayCallTarget:
 
     @pytest.mark.asyncio
     async def test_tools_path_keeps_the_team_error(self):
-        from atlas.application.chat.utilities.error_handler import safe_call_llm_with_tools
-
         caller = _caller_with_mock_transport(_llm_config())
         tools = [{"type": "function", "function": {"name": "noop", "parameters": {"type": "object"}}}]
         with pytest.raises(AuthorizationError) as exc_info:
-            await safe_call_llm_with_tools(
-                caller, f"enterprise::{GAMMA}::gpt-4o-mini",
+            async for _ in caller.stream_with_tools(
+                f"enterprise::{GAMMA}::gpt-4o-mini",
                 [{"role": "user", "content": "hi"}], tools, user_email="test@test.com",
-            )
+            ):
+                pass
         assert exc_info.value.code == "LLM_TEAM_ACCESS_DENIED"
 
     @pytest.mark.asyncio
@@ -535,6 +536,81 @@ class TestGatewayRoutes:
         assert client.get("/api/llm/gateways/enterprise/teams").status_code == 404
 
 
+class TestGatewaySignInRecovery:
+    """A delegated-token failure a fresh sign-in can fix points the picker at login."""
+
+    @staticmethod
+    def _fail_with(exc):
+        client = litellm_gateway_client._clients["enterprise"][1]
+        return patch.object(client, "list_teams", AsyncMock(side_effect=exc))
+
+    def test_sign_in_required_names_the_login_path_when_oidc_is_on(self, routes_client):
+        from atlas.routes import litellm_gateway_routes
+
+        client, _ = routes_client
+        config_manager = litellm_gateway_routes.app_factory.get_config_manager()
+        config_manager.app_settings = type("S", (), {"feature_oidc_auth_enabled": True})()
+        error = LLMAuthenticationError("Please sign in again.", code=SIGN_IN_REQUIRED)
+        with self._fail_with(error):
+            response = client.get("/api/llm/gateways/enterprise/teams")
+        assert response.status_code == 401
+        assert response.headers["X-Atlas-Sign-In"] == "/auth/oidc/login"
+
+    def test_no_login_path_without_oidc(self, routes_client):
+        client, _ = routes_client
+        error = LLMAuthenticationError("Please sign in again.", code=SIGN_IN_REQUIRED)
+        with self._fail_with(error):
+            response = client.get("/api/llm/gateways/enterprise/teams")
+        assert response.status_code == 401
+        assert "X-Atlas-Sign-In" not in response.headers
+
+    def test_other_authentication_errors_get_no_login_path(self, routes_client):
+        from atlas.routes import litellm_gateway_routes
+
+        client, _ = routes_client
+        config_manager = litellm_gateway_routes.app_factory.get_config_manager()
+        config_manager.app_settings = type("S", (), {"feature_oidc_auth_enabled": True})()
+        with self._fail_with(LLMAuthenticationError("The gateway rejected its service key.")):
+            response = client.get("/api/llm/gateways/enterprise/teams")
+        assert response.status_code == 401
+        assert "X-Atlas-Sign-In" not in response.headers
+
+    @pytest.mark.asyncio
+    async def test_missing_subject_token_is_marked_sign_in_required(self):
+        llm_config = _llm_config(auth_type="delegated", delegation={"scope": "s"})
+        with patch(
+            "atlas.core.oidc.delegation.get_delegation_manager_async",
+            AsyncMock(return_value=AsyncMock()),
+        ), patch(
+            "atlas.core.oidc.mcp_delegation.resolve_subject_token",
+            AsyncMock(return_value=None),
+        ):
+            with pytest.raises(LLMAuthenticationError) as error:
+                await _client(llm_config).list_teams("bob@example.com")
+        assert error.value.code == SIGN_IN_REQUIRED
+
+
+    @pytest.mark.asyncio
+    async def test_failed_exchange_is_not_marked_sign_in_required(self):
+        """A refused exchange is usually configuration or an outage; a fresh
+        login cannot be promised to fix it, so no sign-in link is offered."""
+        from atlas.core.oidc.delegation import DelegationError
+
+        llm_config = _llm_config(auth_type="delegated", delegation={"scope": "s"})
+        manager = AsyncMock()
+        manager.get_token.side_effect = DelegationError("invalid_client")
+        with patch(
+            "atlas.core.oidc.delegation.get_delegation_manager_async",
+            AsyncMock(return_value=manager),
+        ), patch(
+            "atlas.core.oidc.mcp_delegation.resolve_subject_token",
+            AsyncMock(return_value="user-login-token"),
+        ):
+            with pytest.raises(LLMAuthenticationError) as error:
+                await _client(llm_config).list_teams("bob@example.com")
+        assert error.value.code is None
+
+
 class TestGatewayComplianceNormalization:
     def test_gateway_level_is_canonicalized_at_load(self):
         from atlas.modules.config import config_loader
@@ -567,6 +643,38 @@ class TestGatewayModelAllowlist:
         gateway = _llm_config(models=["gpt-4o-mini", "claude-sonnet"]).litellm_gateways["enterprise"]
         assert set(gateway.models) == {"gpt-4o-mini", "claude-sonnet"}
         assert gateway.models["gpt-4o-mini"].compliance_level is None
+
+    def test_model_classifications_most_specific_declaration_wins(self):
+        """Entry list > entry level > gateway list > gateway level (#1032)."""
+        llm_config = _llm_config(
+            compliance_level="Internal",
+            allowed_data_classifications=["Internal", "SOC2"],
+            models={
+                "listed": {"allowed_data_classifications": ["Public", "HIPAA"], "compliance_level": "Public"},
+                "leveled": {"compliance_level": "Public"},
+                "plain": None,
+            },
+        )
+        gateway = llm_config.litellm_gateways["enterprise"]
+        assert gateway.model_allowed_data_classifications("listed") == ["Public", "HIPAA"]
+        assert gateway.model_allowed_data_classifications("leveled") == ["Public"]
+        assert gateway.model_allowed_data_classifications("plain") == ["Internal", "SOC2"]
+        # The synthesized ModelConfig carries the same list.
+        assert llm_config.get_model(f"enterprise::{ALPHA}::listed").allowed_data_classifications == [
+            "Public",
+            "HIPAA",
+        ]
+        legacy_only = _llm_config(compliance_level="Internal").litellm_gateways["enterprise"]
+        assert legacy_only.model_allowed_data_classifications("anything") == ["Internal"]
+        assert _llm_config().litellm_gateways["enterprise"].model_allowed_data_classifications("x") is None
+
+    def test_invalid_entry_level_does_not_inherit_gateway_classifications(self):
+        llm_config = _llm_config(
+            allowed_data_classifications=["Internal"], models={"gpt-4o-mini": {"compliance_level": "Bogus"}}
+        )
+        gateway = llm_config.litellm_gateways["enterprise"]
+        gateway.models["gpt-4o-mini"]._invalid_compliance_level = True
+        assert gateway.model_allowed_data_classifications("gpt-4o-mini") is None
 
     def test_unknown_per_model_setting_is_rejected(self):
         with pytest.raises(ValueError):
@@ -668,6 +776,7 @@ class TestGatewayModelAllowlist:
             "model_id": "gpt-4o-mini",
             "label": "gpt-4o-mini",
             "compliance_level": "Public",
+            "allowed_data_classifications": ["Public"],
         }]
 
     def test_per_model_level_is_canonicalized_at_load(self):

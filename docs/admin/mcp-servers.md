@@ -1,6 +1,6 @@
 # MCP Server Configuration
 
-Last updated: 2026-10-04
+Last updated: 2026-10-07
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
@@ -50,7 +50,8 @@ Here is an example of a server configuration that uses all available options.
 *   **`url`**: (string) For servers using `http` or `sse` transport, this is the URL of the server's endpoint.
 *   **`transport`**: (string) The communication protocol to use. Can be `stdio`, `http`, or `sse`. This takes priority over auto-detection.
 *   **`auth_token`**: (string) For HTTP/SSE servers, the bearer token used for authentication. Use environment variable substitution (e.g., `"${MCP_SERVER_TOKEN}"`) to avoid storing secrets in config files. Stdio servers ignore this field.
-*   **`compliance_level`**: (string) The security compliance level of this server (e.g., "Public", "Internal", "SOC2"). This is used for data segregation and access control.
+*   **`allowed_data_classifications`**: (list of strings) Every data classification (compliance level) this server is explicitly approved to receive. Its tools are usable only in a conversation whose selected level is in this list, checked on the server for every turn; a server that declares none is unavailable in every classified session. See [Compliance](compliance.md).
+*   **`compliance_level`**: (string, deprecated) A single level, read as a one-element `allowed_data_classifications` when that field is not set.
 *   **`auth_type`**: (string) The type of per-user authentication required. Options: `none` (default), `api_key`, `jwt`, `bearer`. When set, users must provide their own credentials via the UI.
 *   **`auth_header`**: (string) Custom HTTP header name for API key authentication. Defaults to `X-API-Key`. Only used when `auth_type` is `api_key`.
 *   **`require_approval`**: (list of strings) A list of tool names (without the server prefix) that will always require user approval before execution.

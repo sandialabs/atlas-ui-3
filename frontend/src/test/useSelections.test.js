@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useSelections, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
+import { isComplianceAccessible } from '../utils/complianceAccess'
 
 // Simple in-memory localStorage mock (per-test isolated)
 const createLocalStorageMock = () => {
@@ -221,5 +222,27 @@ describe('personaSurvivesComplianceFilter', () => {
 
   it('leaves a missing persona to the stale-key effect', () => {
     expect(personaSurvivesComplianceFilter(undefined, 'Internal')).toBe(true)
+  })
+
+  it('keeps a persona only when the new level is one of its classifications', () => {
+    // allowed_with no longer widens access: a SOC2-only persona is dropped on
+    // a switch to HIPAA, one approved for both SOC2 and HIPAA survives.
+    const levels = [
+      { name: 'Public', aliases: [], allowed_with: ['Public'] },
+      { name: 'SOC2', aliases: [], allowed_with: ['SOC2'] },
+      { name: 'HIPAA', aliases: [], allowed_with: ['HIPAA', 'SOC2'] },
+    ]
+    const hipaaAllows = classifications => isComplianceAccessible(levels, 'HIPAA', classifications)
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'SOC2' }, 'HIPAA', hipaaAllows)).toBe(false)
+    expect(personaSurvivesComplianceFilter({ allowed_data_classifications: ['SOC2', 'HIPAA'] }, 'HIPAA', hipaaAllows)).toBe(true)
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'HIPAA' }, 'HIPAA', hipaaAllows)).toBe(true)
+    expect(personaSurvivesComplianceFilter({ compliance_level: 'Public' }, 'HIPAA', hipaaAllows)).toBe(false)
+    expect(personaSurvivesComplianceFilter({}, 'HIPAA', hipaaAllows)).toBe(false)
+  })
+
+  it('reads allowed_data_classifications without a legacy level, with or without a checker', () => {
+    expect(personaSurvivesComplianceFilter({ allowed_data_classifications: ['SOC2', 'HIPAA'] }, 'HIPAA')).toBe(true)
+    expect(personaSurvivesComplianceFilter({ allowed_data_classifications: ['SOC2'] }, 'HIPAA')).toBe(false)
+    expect(personaSurvivesComplianceFilter({ allowed_data_classifications: [] }, 'HIPAA')).toBe(false)
   })
 })

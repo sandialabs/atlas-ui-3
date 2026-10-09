@@ -38,3 +38,4 @@ docs that describe how the system works today, see the
 - [Agent Steering](agent-steering-2026-08-27.md) - Mid-run user messages injected as normal user turns without stopping the loop (issue #824)
 - [Atlas Launch: Sub-Conversations](atlas-launch-sub-conversations-2026-09-13.md) - `atlas_launch` starts a bounded, workspace-scoped sub-conversation and returns a handle (issue #925)
 - [Mobile and In-Car Composer Friendliness](mobile-composer-friendliness-2026-09-16.md) - Feedback button anchored to the live composer height, New Chat confirm replaced with an Undo toast, bigger touch targets
+- [RAG Sources Drawer as an Overlay](rag-drawer-overlay-2026-10-08.md) - The Data Sources drawer overlays the chat at every width instead of reflowing it (issue #1037)

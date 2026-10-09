@@ -5,6 +5,8 @@ import { useLocalConversationHistory } from '../hooks/useLocalConversationHistor
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
 import { applyRunEndRefresh } from '../utils/runEndRefresh'
+import { classificationLabel, classificationRefusal } from '../utils/conversationClassification'
+import { useToast } from './ui/toastContext'
 
 const ContextMenu = ({ x, y, onDelete, onClose }) => {
   const menuRef = useRef(null)
@@ -83,7 +85,11 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     // went to the transcript it was streaming into, not this view, so the
     // view is reloaded from the store once the run ends.
     runEndedConversationId, clearRunEndedConversation,
+    // Conversation classification (issue #1042): a conversation opens only
+    // under the level it was recorded at.
+    activeComplianceFilter, complianceEnabled, complianceLevels,
   } = useChat()
+  const toast = useToast()
 
   const chatHistoryEnabled = features?.chat_history
   const [sidebarWidth, setSidebarWidth] = usePersistentState('chatui-sidebar-width', DEFAULT_WIDTH)
@@ -272,12 +278,30 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     if (conv._optimistic) return
     // Don't reload the conversation we're already viewing
     if (activeConversationId && conv.id === activeConversationId) return
-    const fullConv = await history.loadConversation(conv.id)
+    const level = { complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels }
+    // Explain the refusal up front; the server applies the same rule on the
+    // fetch, the restore and every turn whatever this check decides.
+    const refusal = classificationRefusal(conv, level)
+    if (refusal) {
+      toast.error(refusal)
+      return
+    }
+    const fullConv = await history.loadConversation(conv.id, { complianceLevel: activeComplianceFilter ?? '' })
+    if (fullConv?.classificationRefused) {
+      toast.error(fullConv.message)
+      return
+    }
     if (fullConv && !fullConv.error) {
       loadSavedConversation(fullConv)
       onMobileClose?.()
     }
-  }, [history, loadSavedConversation, onMobileClose, activeConversationId])
+  }, [history, loadSavedConversation, onMobileClose, activeConversationId, activeComplianceFilter, complianceEnabled, complianceLevels, toast])
+
+  // The same rule the click applies, so a row that would be refused always
+  // looks it -- with levels disabled too (a classified row cannot continue).
+  const rowRefusal = conv => classificationRefusal(conv, {
+    complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels,
+  })
 
   const handleDeleteAll = useCallback(async () => {
     await history.deleteAll()
@@ -401,7 +425,10 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                     key={conv.id}
                     onClick={() => handleLoadConversation(conv)}
                     onContextMenu={(e) => handleContextMenu(e, conv)}
+                    title={rowRefusal(conv) || undefined}
                     className={`px-3 py-2 cursor-pointer border-l-2 border-b border-b-gray-700/50 transition-colors ${
+                      rowRefusal(conv) ? 'opacity-50 ' : ''
+                    }${
                       conv._optimistic
                         ? 'bg-gray-750 border-l-blue-400 opacity-80'
                         : activeConversationId === conv.id
@@ -421,6 +448,14 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-gray-600">{formatDate(conv.updated_at)}</span>
                         <span className="text-xs text-gray-600">{conv.message_count} msgs</span>
+                        {(complianceEnabled || rowRefusal(conv)) && classificationLabel(conv) && (
+                          <span
+                            className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded"
+                            data-testid="conversation-classification"
+                          >
+                            {classificationLabel(conv)}
+                          </span>
+                        )}
                         <RunIndicator run={(runsByConversation || {})[conv.id]} />
                       </div>
                       {conv.tags && conv.tags.length > 0 && (

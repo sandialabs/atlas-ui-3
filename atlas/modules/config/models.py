@@ -89,6 +89,18 @@ ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 REASONING_EFFORT_VALUES: tuple = get_args(ReasoningEffort)
 
 
+class LiteLLMGatewayDelegation(BaseModel):
+    """Downstream token parameters for delegated LLM credentials: a gateway using
+    ``auth_type: "delegated"``, or a model using ``api_key_source: "delegated"``.
+
+    For Microsoft Entra On-Behalf-Of, ``scope`` is the LiteLLM app's delegated
+    scope (e.g. ``https://litellm.example.gov/user_impersonation``).
+    """
+    audience: Optional[str] = None
+    resource: Optional[str] = None
+    scope: Optional[str] = None
+
+
 class ModelConfig(BaseModel):
     """Configuration for a single LLM model."""
     model_name: str
@@ -103,20 +115,31 @@ class ModelConfig(BaseModel):
     )
     # Optional extra HTTP headers (e.g. for providers like OpenRouter)
     extra_headers: Optional[Dict[str, str]] = None
-    # Compliance/security level (e.g., "External", "Internal", "Public")
+    # Compliance/security level (e.g., "External", "Internal", "Public").
+    # Deprecated in favour of allowed_data_classifications; when only this is
+    # set it is read as a one-element allowed_data_classifications list.
     compliance_level: Optional[str] = None
+    # Every data classification this model is explicitly approved to receive
+    # (issue #1032). Wins over compliance_level when both are set.
+    allowed_data_classifications: Optional[List[str]] = None
     # Access groups. Empty (the default) means every user may access this model,
     # preserving the historical behavior. When non-empty, only users who are a
     # member of at least one listed group may see or use this model. Matches the
     # ``groups`` access-control convention used by MCPServerConfig / RAGSourceConfig.
     groups: List[str] = Field(default_factory=list)
     # API key source: "system" uses env var resolution, "user" requires per-user key from token storage,
-    # "globus" uses Globus OAuth token for the configured scope (requires globus_scope)
+    # "globus" uses Globus OAuth token for the configured scope (requires globus_scope),
+    # "delegated" exchanges the logged-in user's OIDC token for a short-lived token for the
+    # endpoint on every call (requires `delegation` and FEATURE_OIDC_DELEGATION_ENABLED)
     api_key_source: str = "system"
     # Globus scope identifier for models using api_key_source: "globus"
     # This is the resource_server UUID from the Globus token response other_tokens
     # Example for ALCF: "681c10cc-f684-4540-bcd7-0b4df3bc26ef"
     globus_scope: Optional[str] = None
+    # Downstream token parameters for api_key_source: "delegated", as for a LiteLLM
+    # gateway with auth_type: "delegated" (OIDC_DELEGATION_PROVIDER: RFC 8693 token
+    # exchange or Entra On-Behalf-Of).
+    delegation: Optional[LiteLLMGatewayDelegation] = None
     # Whether this model supports vision (multimodal image input).
     # When true, attached image files are sent as inline image content blocks
     # instead of being listed in the files manifest.
@@ -157,6 +180,26 @@ class ModelConfig(BaseModel):
     # with the suffix; otherwise the value is sent unchanged.
     customer_id_strip_suffix: Optional[str] = None
 
+    @model_validator(mode="after")
+    def validate_delegation(self):
+        """A delegated model must say what its token is for, checked when the config
+        loads rather than on a user's first message."""
+        if self.api_key_source == "delegated":
+            delegation = self.delegation
+            if not delegation or not (delegation.scope or delegation.audience or delegation.resource):
+                raise ValueError(
+                    f"Model '{self.model_name}': api_key_source 'delegated' requires "
+                    "delegation.scope (or audience/resource)"
+                )
+        elif self.delegation is not None:
+            # Most likely a mistyped api_key_source, which would otherwise send the
+            # system key where a per-user token was meant.
+            raise ValueError(
+                f"Model '{self.model_name}': delegation is set but api_key_source is "
+                f"{self.api_key_source!r}, not 'delegated'"
+            )
+        return self
+
     @field_validator('reasoning_effort', mode='before')
     @classmethod
     def validate_reasoning_effort(cls, v):
@@ -193,23 +236,14 @@ class ModelConfig(BaseModel):
         return normalized
 
 
-class LiteLLMGatewayDelegation(BaseModel):
-    """Downstream token parameters for a gateway using ``auth_type: "delegated"``.
-
-    For Microsoft Entra On-Behalf-Of, ``scope`` is the LiteLLM app's delegated
-    scope (e.g. ``https://litellm.example.gov/user_impersonation``).
-    """
-    audience: Optional[str] = None
-    resource: Optional[str] = None
-    scope: Optional[str] = None
-
-
 class LiteLLMGatewayModel(BaseModel):
     """Admin settings for one named model in a gateway's ``models`` allowlist."""
     model_config = ConfigDict(extra="forbid")
 
     # Overrides the gateway's compliance_level for this model.
     compliance_level: Optional[str] = None
+    # Overrides the gateway's classifications for this model (issue #1032).
+    allowed_data_classifications: Optional[List[str]] = None
     # Set at load when compliance_level names no known level: the model is
     # then unleveled, never silently given the gateway's level instead.
     _invalid_compliance_level: bool = PrivateAttr(default=False)
@@ -248,6 +282,7 @@ class LiteLLMGatewayConfig(BaseModel):
     # gateway, exactly as they do for a statically configured model.
     groups: List[str] = Field(default_factory=list)
     compliance_level: Optional[str] = None
+    allowed_data_classifications: Optional[List[str]] = None
     # Optional allowlist of LiteLLM model ids, keyed by id. When set, only these
     # models are offered or callable through the gateway (a team still has to
     # list a model for it to appear); each entry may set its own
@@ -263,7 +298,8 @@ class LiteLLMGatewayConfig(BaseModel):
     # itself, so a model_defaults entry for them would be silently misleading.
     RESERVED_MODEL_DEFAULT_KEYS: ClassVar[frozenset] = frozenset({
         "model_name", "model_url", "api_key", "api_key_source", "globus_scope",
-        "groups", "compliance_level", "extra_headers",
+        "groups", "compliance_level", "allowed_data_classifications",
+        "extra_headers", "delegation",
     })
 
     @field_validator("models", mode="before")
@@ -326,6 +362,26 @@ class LiteLLMGatewayConfig(BaseModel):
             if entry.compliance_level:
                 return entry.compliance_level
         return self.compliance_level
+
+    def model_allowed_data_classifications(self, model_id: str) -> Optional[List[str]]:
+        """The data classifications one model is approved for.
+
+        The most specific declaration wins: the model entry's list, then its
+        legacy level, then the gateway's list, then the gateway's legacy level.
+        An entry whose compliance_level was invalid stays undeclared rather
+        than inheriting the gateway's classifications.
+        """
+        entry = self.models.get(model_id)
+        if entry is not None:
+            if entry.allowed_data_classifications is not None:
+                return list(entry.allowed_data_classifications)
+            if entry._invalid_compliance_level:
+                return None
+            if entry.compliance_level:
+                return [entry.compliance_level]
+        if self.allowed_data_classifications is not None:
+            return list(self.allowed_data_classifications)
+        return [self.compliance_level] if self.compliance_level else None
 
     def effective_user_id_source(self) -> str:
         if self.user_id_source:
@@ -402,6 +458,7 @@ class LLMConfig(BaseModel):
             api_key="",
             groups=list(gateway.groups),
             compliance_level=gateway.model_compliance_level(ref.model_id),
+            allowed_data_classifications=gateway.model_allowed_data_classifications(ref.model_id),
             extra_headers=dict(gateway.extra_headers) if gateway.extra_headers else None,
         )
         return ModelConfig(**fields)
@@ -471,7 +528,8 @@ class MCPServerConfig(BaseModel):
     oauth_config: Optional[OAuthConfig] = None  # OAuth 2.1 configuration (when auth_type="oauth")
     delegation: Optional[DelegationConfig] = None  # Downstream token parameters (when auth_type="delegated")
     wormhole: bool = False  # Forward the per-session Wormhole subtoken (via WORMHOLE_FORWARD_HEADER) when connecting
-    compliance_level: Optional[str] = None  # Compliance/security level (e.g., "SOC2", "HIPAA", "Public")
+    compliance_level: Optional[str] = None  # Deprecated single level; read as [compliance_level]
+    allowed_data_classifications: Optional[List[str]] = None  # Classifications this server may receive (issue #1032)
     require_approval: List[str] = Field(default_factory=list)  # List of tool names (without server prefix) requiring approval
     allow_edit: List[str] = Field(default_factory=list)  # LEGACY. List of tool names (without server prefix) allowing argument editing
 
@@ -504,7 +562,8 @@ class RAGSourceConfig(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None  # UI icon
     groups: List[str] = Field(default_factory=list)  # Access groups
-    compliance_level: Optional[str] = None
+    compliance_level: Optional[str] = None  # Deprecated single level; read as [compliance_level]
+    allowed_data_classifications: Optional[List[str]] = None  # Classifications this source may receive (issue #1032)
     enabled: bool = True
 
     # MCP-specific fields (type="mcp")
@@ -521,6 +580,10 @@ class RAGSourceConfig(BaseModel):
     top_k: int = 4  # Number of documents to retrieve
     timeout: float = 60.0  # Request timeout in seconds
     strip_domain: bool = False  # Strip @domain from username (e.g. user@corp.com -> user)
+    # Migration aid (issue #1035): read a corpus's discovered compliance_level
+    # as its one-element classification list when it sends no
+    # allowed_data_classifications. Always narrowed by this server's list.
+    legacy_corpus_classifications: bool = False
 
     # Which ATLAS RAG contract this backend speaks (HTTP type).
     # "v1" posts the conversation to /rag/completions and gets a completion

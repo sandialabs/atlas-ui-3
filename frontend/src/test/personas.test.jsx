@@ -14,6 +14,7 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import { usePersonas } from '../hooks/usePersonas'
 import { personaKey, isPersonaKey, personaIdFromKey, isUserPromptKey } from '../hooks/chat/useSelections'
 import { buildPromptInfoByKey, resolvePromptInfo } from '../utils/chatExport'
+import { isComplianceAccessible } from '../utils/complianceAccess'
 
 vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
 vi.mock('../contexts/MarketplaceContext', () => ({ useMarketplace: vi.fn() }))
@@ -188,16 +189,18 @@ describe('PromptSelector compliance filtering', () => {
   const LEVELED = [
     { id: 'int', name: 'Internal One', description: '', compliance_level: 'Internal' },
     { id: 'pub', name: 'Public One', description: '', compliance_level: 'Public' },
+    { id: 'both', name: 'Both Levels', description: '', allowed_data_classifications: ['Public', 'Internal'] },
     { id: 'free', name: 'No Level', description: '' },
   ]
 
-  // Mirrors MarketplaceContext.isComplianceAccessible (strict mode).
-  const strictAccessible = (userLevel, resourceLevel) => {
-    if (!userLevel) return true
-    if (!resourceLevel) return false
-    const levels = { Internal: ['Internal'], Public: ['Public'] }
-    return (levels[userLevel] || []).includes(resourceLevel)
-  }
+  // Internal's allowed_with lists Public, which no longer widens access.
+  const LEVELS = [
+    { name: 'Public', aliases: [], allowed_with: ['Public'] },
+    { name: 'Internal', aliases: [], allowed_with: ['Internal', 'Public'] },
+  ]
+  // The real shared rule, as MarketplaceContext binds it.
+  const strictAccessible = (userLevel, classifications) =>
+    isComplianceAccessible(LEVELS, userLevel, classifications)
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -220,7 +223,10 @@ describe('PromptSelector compliance filtering', () => {
     openPicker()
 
     expect(screen.getByText('Internal One')).toBeInTheDocument()
+    // Public-only is excluded even though Internal's allowed_with lists Public.
     expect(screen.queryByText('Public One')).not.toBeInTheDocument()
+    // A persona whose classifications include Internal is listed.
+    expect(screen.getByText('Both Levels')).toBeInTheDocument()
     // A level-less persona is hidden while a filter is active (strict mode).
     expect(screen.queryByText('No Level')).not.toBeInTheDocument()
   })

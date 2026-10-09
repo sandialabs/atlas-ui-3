@@ -10,15 +10,14 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
-    runtime_checkable,
 )
 from uuid import UUID, uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
-from atlas.domain.errors import AuthorizationError, DomainError
+from atlas.domain import conversation_classification as conv_class
+from atlas.domain.errors import AuthorizationError, DomainError, ValidationError
 from atlas.domain.messages.models import MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.hooks import HookEvent, get_hook_manager
@@ -36,11 +35,8 @@ from .modes.agent import AgentModeRunner
 from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
 from .modes.tools import ToolsModeRunner
-
-# Import new refactored modules
 from .policies.tool_authorization import ToolAuthorizationService
-from .preprocessors.message_builder import MessageBuilder, build_session_context
-from .preprocessors.prompt_override_service import PromptOverrideService
+from .preprocessors.message_builder import build_session_context
 
 # Import utilities
 from .utilities import error_handler, file_processor
@@ -78,15 +74,6 @@ _MAX_WORKSPACE_ID_LEN = 128
 
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
-
-
-@runtime_checkable
-class ConversationOwnerRepository(Protocol):
-    """Repository capability required for conversation ownership checks."""
-
-    def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
-        """Return the owner email for a conversation, if it exists."""
-        ...
 
 
 class ChatService:
@@ -170,12 +157,14 @@ class ChatService:
         self._incognito_save_floor: dict = {}
         self._save_floor_locked: set = set()
 
-        # Initialize refactored services
+        # Tool authorization is read off the service by the launch tool's
+        # ``resolve_child_tools`` (see runs/launcher.py) to re-check a
+        # workspace's saved tools against the caller's current access before
+        # starting a sub-conversation, so it is not unused even though no
+        # method here references it directly.
         self.tool_authorization = ToolAuthorizationService(
             tool_manager=self.tool_manager, config_manager=self.config_manager
         )
-        self.prompt_override = PromptOverrideService(tool_manager=self.tool_manager)
-        self.message_builder = MessageBuilder()
 
         # Initialize mode runners
         self.plain_mode = PlainModeRunner(
@@ -301,6 +290,188 @@ class ChatService:
         logger.info(f"Created session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
         return session
 
+    def _enforce_required_compliance_level(self, compliance_level_raw: Any) -> None:
+        """Refuse a turn with no defined compliance level in required-level mode.
+
+        The UI has no "All Levels" option in this mode, but a stale bundle, the
+        CLI or a hand-crafted client can still omit the level or send one the
+        deployment does not define. With no definitions loaded, validation is
+        permissive and would accept any invented name, so that fails closed.
+        """
+        settings = getattr(getattr(self, "config_manager", None), "app_settings", None)
+        if getattr(settings, "compliance_level_required_effective", False) is not True:
+            return
+        from atlas.core.compliance import get_compliance_manager
+        compliance_mgr = get_compliance_manager()
+        if not compliance_mgr.levels:
+            logger.warning(
+                "A compliance level is required but no compliance level "
+                "definitions are loaded; refusing the chat turn"
+            )
+            raise ValidationError(
+                "A compliance level is required, but this deployment has "
+                "no compliance levels configured. Contact an administrator."
+            )
+        level = (
+            compliance_mgr.validate_compliance_level(
+                compliance_level_raw, context="chat request"
+            )
+            if isinstance(compliance_level_raw, str) and compliance_level_raw
+            else None
+        )
+        if not level:
+            raise ValidationError(
+                "A compliance level is required. Select a compliance level "
+                "and send the message again."
+            )
+
+    def _compliance_enabled(self) -> bool:
+        settings = getattr(getattr(self, "config_manager", None), "app_settings", None)
+        return getattr(settings, "feature_compliance_levels_enabled", False) is True
+
+    def _resolve_active_classification(self, compliance_level_raw: Any) -> Optional[str]:
+        """The turn's active classification, resolved once for every gate.
+
+        None when the feature is off or no level was sent. A supplied level the
+        deployment does not define is refused rather than read as no level, so
+        a misspelling cannot quietly turn every check off. With no definitions
+        loaded, validation is permissive and returns the name as given
+        (required-level mode refuses that case earlier).
+        """
+        if not self._compliance_enabled():
+            return None
+        if not isinstance(compliance_level_raw, str) or not compliance_level_raw:
+            return None
+        from atlas.core.compliance import get_compliance_manager
+
+        level = get_compliance_manager().validate_compliance_level(
+            compliance_level_raw, context="chat request"
+        )
+        if not level:
+            raise ValidationError(
+                "The selected compliance level is not defined on this deployment. "
+                "Select a defined compliance level and send the message again."
+            )
+        return level
+
+    def _enforce_data_classifications(
+        self,
+        active_level: Optional[str],
+        model: str,
+        selected_tools: Optional[List[str]],
+        selected_data_sources: Optional[List[str]],
+    ) -> None:
+        """Refuse a turn that would send data to a component not approved for it.
+
+        The active classification is the client-selected level, validated
+        against the definitions. Every component the turn names must list it
+        in its allowed data classifications (issue #1032); the check runs
+        here, not only in the UI, so a stale or hand-crafted client cannot
+        route classified data to an unapproved model, tool server or source.
+        """
+        if not active_level:
+            return
+        from atlas.core.compliance import get_compliance_manager
+
+        from .policies.classification_policy import find_classification_violations
+
+        compliance_mgr = get_compliance_manager()
+        try:
+            violations = find_classification_violations(
+                compliance_mgr,
+                active_level,
+                model=model,
+                config_manager=self.config_manager,
+                tool_manager=self.tool_manager,
+                selected_tools=selected_tools,
+                selected_data_sources=selected_data_sources,
+            )
+        except Exception as exc:
+            # Fail closed: a broken lookup must not let a classified turn run
+            # against components that were never checked.
+            logger.warning(
+                "Could not check data classifications for the turn (%s); refusing it",
+                type(exc).__name__,
+            )
+            raise ValidationError(
+                "This message could not be checked against the selected compliance "
+                "level, so it was not sent. Try again or contact an administrator."
+            ) from None
+        if violations:
+            logger.info(
+                "Refused a chat turn: %d component(s) not approved for the active "
+                "classification",
+                len(violations),
+            )
+            raise ValidationError(
+                f"Not approved for {active_level} data: {', '.join(violations)}. "
+                "Switch the model or deselect the tools and data sources named, "
+                "or choose a compliance level they are approved for, then send "
+                "the message again."
+            )
+
+    async def _enforce_corpus_classifications(
+        self,
+        active_level: Optional[str],
+        user_email: Optional[str],
+        selected_data_sources: Optional[List[str]],
+    ) -> None:
+        """Refuse selected corpora not approved for the active classification.
+
+        The per-server check in _enforce_data_classifications cannot see a
+        corpus that declares narrower classifications than its server; the
+        RAG backend's discovery can, so the selection is checked against it.
+        """
+        if not active_level or not selected_data_sources:
+            return
+        from atlas.infrastructure.app_factory import app_factory
+
+        from .policies.classification_policy import find_unapproved_corpora
+
+        try:
+            unapproved, unverified = await find_unapproved_corpora(
+                active_level,
+                user_email,
+                selected_data_sources,
+                unified_rag=app_factory.get_unified_rag_service(),
+                rag_mcp=app_factory.get_rag_mcp_service(),
+                config_manager=self.config_manager,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not check data source classifications for the turn (%s); refusing it",
+                type(exc).__name__,
+            )
+            raise ValidationError(
+                "The selected data sources could not be checked against the selected "
+                "compliance level, so the message was not sent. Try again or contact "
+                "an administrator."
+            ) from None
+        if not unapproved and not unverified:
+            return
+        logger.info(
+            "Refused a chat turn: %d data source(s) not approved and %d unverifiable "
+            "for the active classification",
+            len(unapproved),
+            len(unverified),
+        )
+        parts = []
+        if unapproved:
+            parts.append(f"Not approved for {active_level} data: data source {', '.join(unapproved)}.")
+        if unverified:
+            # The backend did not answer, or offers the user nothing on that
+            # server (for example a group restriction): approval cannot be
+            # confirmed either way, so neither is claimed.
+            parts.append(
+                f"Could not confirm that data source {', '.join(unverified)} is approved "
+                f"for {active_level} data (its RAG backend did not answer, or you do not "
+                "have access to it)."
+            )
+        raise ValidationError(
+            " ".join(parts) + " Deselect them or pick ones approved for this compliance "
+            "level, then send the message again."
+        )
+
     async def handle_chat_message(
         self,
         session_id: UUID,
@@ -340,6 +511,19 @@ class ChatService:
                 f"handle_chat_message content preview: '{sanitize_for_logging(content_preview)}', "
                 f"kwargs: {sanitized_kwargs}"
             )
+
+        # Checked before the session is touched, so a refused turn leaves no
+        # trace (no conversation rebinding or history hydration).
+        self._enforce_required_compliance_level(kwargs.get("compliance_level"))
+        active_classification = self._resolve_active_classification(
+            kwargs.get("compliance_level")
+        )
+        self._enforce_data_classifications(
+            active_classification, model, selected_tools, selected_data_sources
+        )
+        await self._enforce_corpus_classifications(
+            active_classification, user_email, selected_data_sources
+        )
 
         # Get or create session
         session = await self.session_repository.get(session_id)
@@ -447,85 +631,52 @@ class ChatService:
                     sanitize_for_logging(str(session_id)),
                 )
 
-        # Compliance levels for this turn. Two distinct values are tracked and
-        # they must not be conflated:
+        # The history this session carries -- hydrated from the store, restored
+        # from the sidebar, or accumulated by earlier turns -- belongs to a
+        # conversation with a recorded classification (issue #1042). Refuse the
+        # turn before anything is sent if the active level does not match it.
+        self._enforce_conversation_classification(
+            session, active_classification, user_email
+        )
+
+        # Compliance for this turn. The active conversation classification --
+        # the client-selected level, validated against the definitions -- is
+        # the authority (issue #1032):
         #
         #   session.context["compliance_level"]
-        #       The *user's* level, validated from the client-supplied filter.
-        #       This is the long-standing key that scopes MCP server discovery
-        #       (mcp_execution), tool execution (tool_executor) and agent
-        #       context. Its meaning is unchanged by this PR.
+        #       The active classification. It scopes MCP server discovery
+        #       (mcp_execution), tool execution (tool_executor), agent context
+        #       and query-time RAG enforcement. Every component the turn names
+        #       was already checked against it in
+        #       _enforce_data_classifications.
         #
-        #   session.context["model_compliance_level"]
-        #       The *model's* configured level, read from server-side config.
-        #       This is the trusted boundary used for query-time RAG
-        #       enforcement. A client cannot influence it.
+        #   session.context["model_data_classifications"]
+        #       The selected model's declared classifications, kept for
+        #       hooks and diagnostics. A model's metadata is a capability, not
+        #       the source of the session classification.
         #
         # Both are set every turn so a request that changes model or filter
         # clears any stale value.
-        compliance_level_raw = kwargs.pop("compliance_level", None)
+        kwargs.pop("compliance_level", None)  # resolved above as active_classification
         _config_manager = getattr(self, "config_manager", None)
-        compliance_enabled = bool(
-            _config_manager
-            and getattr(
-                _config_manager.app_settings,
-                "feature_compliance_levels_enabled",
-                False,
-            ) is True
-        )
-        trusted_compliance_level = None
+        compliance_enabled = self._compliance_enabled()
+        model_classifications = None
         if compliance_enabled:
-            from atlas.core.compliance import get_compliance_manager
-            compliance_mgr = get_compliance_manager()
+            from atlas.core.compliance import declared_classifications
             try:
-                model_config = lookup_model_config(_config_manager.llm_config, model)
-                configured_level = (
-                    getattr(model_config, "compliance_level", None)
-                    if model_config
-                    else None
+                model_classifications = declared_classifications(
+                    lookup_model_config(_config_manager.llm_config, model)
                 )
-                if isinstance(configured_level, str) and configured_level:
-                    # Context is deliberately non-identifying: this warning path
-                    # must not carry the model name into logs.
-                    trusted_compliance_level = compliance_mgr.validate_compliance_level(
-                        configured_level, context="model configuration"
-                    )
             except Exception as exc:
-                # The realistic failure modes are attribute/lookup errors on
-                # _config_manager.llm_config.models (AttributeError, TypeError,
-                # KeyError), but the catch stays broad: this guard exists so a
-                # broken compliance lookup can never break a chat turn, and
-                # narrowing it would reintroduce that risk for exception types
-                # not foreseen here. The warning names only the exception type
-                # -- never the model identifier, which compliance warning paths
-                # deliberately keep out of the log stream.
+                # Diagnostic only: the classification check already ran. The
+                # warning names only the exception type -- never the model
+                # identifier, which compliance warning paths keep out of logs.
                 logger.warning(
-                    "Could not resolve the selected model's compliance level "
-                    "(%s); RAG compliance enforcement is disabled for this turn.",
+                    "Could not resolve the selected model's data classifications (%s).",
                     type(exc).__name__,
                 )
-                trusted_compliance_level = None
-            session.context["compliance_level"] = (
-                compliance_mgr.validate_compliance_level(
-                    compliance_level_raw, context="chat request"
-                )
-                if compliance_level_raw
-                else None
-            )
-            if (
-                compliance_level_raw
-                and trusted_compliance_level
-                and session.context["compliance_level"] != trusted_compliance_level
-            ):
-                # Expected on the normal path (the client filter and the model's
-                # level are separate concepts), so this is not a warning.
-                logger.debug(
-                    "Client compliance filter differs from the model's configured "
-                    "level; RAG enforcement uses the model's level"
-                )
-        else:
-            session.context["compliance_level"] = None
-        session.context["model_compliance_level"] = trusted_compliance_level
+        session.context["compliance_level"] = active_classification
+        session.context["model_data_classifications"] = model_classifications
 
         # Opt-in fine-tune capture: when both the system flag and this user's
         # consent are on, activate a capture context for the turn so the LLM
@@ -579,18 +730,25 @@ class ChatService:
             ),
         }
 
-        # Query-time RAG enforcement engages only when a trusted level actually
-        # resolved. If the feature is on but the selected model carries no
-        # compliance level (or the lookup failed), enforce=False leaves the
-        # pre-existing permissive behaviour intact rather than rejecting every
-        # compliance-tagged source.
+        # Query-time RAG enforcement runs on the active classification. With
+        # none selected (the "All Levels" choice, only offered when a level is
+        # not required) enforce is False, and the model's classifications act
+        # as a floor instead: a source that declares classifications must
+        # share one with the model. FEATURE_COMPLIANCE_LEVEL_REQUIRED removes
+        # the no-level choice entirely.
         compliance_token = None
+        floor_token = None
         if compliance_enabled:
-            from atlas.core.compliance import set_active_compliance_context
-            compliance_token = set_active_compliance_context(
-                trusted_compliance_level,
-                enforce=bool(trusted_compliance_level),
+            from atlas.core.compliance import (
+                set_active_compliance_context,
+                set_model_classification_floor,
             )
+            compliance_token = set_active_compliance_context(
+                active_classification,
+                enforce=bool(active_classification),
+            )
+            if not active_classification and model_classifications is not None:
+                floor_token = set_model_classification_floor(model_classifications)
 
         try:
             with start_span("chat.turn", turn_attrs):
@@ -677,6 +835,9 @@ class ChatService:
             if compliance_token is not None:
                 from atlas.core.compliance import reset_active_compliance_context
                 reset_active_compliance_context(compliance_token)
+            if floor_token is not None:
+                from atlas.core.compliance import reset_model_classification_floor
+                reset_model_classification_floor(floor_token)
 
     async def _commit_turn(
         self,
@@ -821,9 +982,16 @@ class ChatService:
         session_id: UUID,
         conversation_id: str,
         messages: List[Dict[str, Any]],
-        user_email: Optional[str] = None
+        user_email: Optional[str] = None,
+        compliance_level: Any = UNSET,
     ) -> Dict[str, Any]:
         """Restore a saved conversation into the current session.
+
+        ``compliance_level`` is the client's active level. When supplied, a
+        conversation recorded under another classification is refused here,
+        before the session is touched (issue #1042); either way the session
+        is bound to the conversation's recorded classification, so the next
+        turn is checked against it no matter what the client sends.
 
         Resets the session, loads previous messages into history,
         and maps the session to the original conversation_id so
@@ -863,6 +1031,7 @@ class ChatService:
         # display-only fallback and is NOT persisted back.
         canonical_messages = messages
         stored_workspace_id = None
+        binding = None
         if getattr(self, "conversation_repository", None) is not None:
             # A conversation with a run in flight is ahead of its stored
             # record, and may not have one at all yet: a tracked run's
@@ -891,6 +1060,35 @@ class ChatService:
             conv_metadata = conv.get("metadata")
             if isinstance(conv_metadata, dict):
                 stored_workspace_id = conv_metadata.get("workspace_id")
+            binding = conv_class.binding_from_record(conv)
+
+        if compliance_level is not UNSET:
+            try:
+                active_level = self._resolve_active_classification(compliance_level)
+            except ValidationError as e:
+                return self._classification_error_frame(conversation_id, e.message)
+            if binding is None:
+                # No server store: the client holds this history and is its
+                # only source, so it is bound to the level it is reopened at.
+                binding = conv_class.binding_for_new_conversation(
+                    active_level, compliance_enabled=self._compliance_enabled()
+                )
+            refusal = conv_class.resume_refusal(
+                binding,
+                active_level,
+                compliance_enabled=self._compliance_enabled(),
+                compliance_mgr=self._compliance_manager(),
+            )
+            if refusal:
+                conv_class.audit_refusal(
+                    "restore", conversation_id, user_email, binding, active_level
+                )
+                return self._classification_error_frame(conversation_id, refusal)
+        elif binding is None:
+            # Client-held history restored without a level: its provenance is
+            # unknown, so it is treated like a legacy record (fails closed
+            # while compliance levels are enforced).
+            binding = conv_class.make_binding(conv_class.STATE_LEGACY)
 
         # Reset the session
         await self.end_session(session_id)
@@ -906,6 +1104,7 @@ class ChatService:
         # rehydrate path: an unbound conversation must read as unbound, never
         # inherit whatever the session was carrying.
         session.context["workspace_id"] = stored_workspace_id
+        session.context[conv_class.SESSION_BINDING_KEY] = binding
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical
@@ -926,7 +1125,107 @@ class ChatService:
             "type": "conversation_restored",
             "conversation_id": conversation_id,
             "message_count": loaded,
+            "data_classification": conv_class.normalize_binding(binding)["level"],
+            "data_classification_state": conv_class.normalize_binding(binding)["state"],
         }
+
+    @staticmethod
+    def _classification_error_frame(conversation_id: str, message: str) -> Dict[str, Any]:
+        return {
+            "type": "error",
+            "message": message,
+            "error_type": conv_class.ERROR_CODE,
+            "conversation_id": conversation_id,
+        }
+
+    @staticmethod
+    def _compliance_manager():
+        from atlas.core.compliance import get_compliance_manager
+
+        return get_compliance_manager()
+
+    def _enforce_conversation_classification(
+        self,
+        session: Session,
+        active_level: Optional[str],
+        user_email: Optional[str],
+    ) -> None:
+        """Refuse a turn whose session history is bound to another classification.
+
+        A session with no binding and no history is a new conversation: it is
+        bound to this turn's level. History without a binding has unknown
+        provenance and is treated as legacy (fail closed).
+        """
+        binding = session.context.get(conv_class.SESSION_BINDING_KEY)
+        if binding is None:
+            binding = (
+                conv_class.make_binding(conv_class.STATE_LEGACY)
+                if session.history.messages
+                else conv_class.binding_for_new_conversation(
+                    active_level, compliance_enabled=self._compliance_enabled()
+                )
+            )
+        refusal = conv_class.resume_refusal(
+            binding,
+            active_level,
+            compliance_enabled=self._compliance_enabled(),
+            compliance_mgr=self._compliance_manager(),
+        )
+        if refusal:
+            conv_class.audit_refusal(
+                "turn",
+                session.context.get("conversation_id"),
+                user_email,
+                binding,
+                active_level,
+            )
+            raise ValidationError(refusal, code=conv_class.ERROR_CODE)
+        session.context[conv_class.SESSION_BINDING_KEY] = conv_class.normalize_binding(binding)
+
+    async def steering_classification_refusal(
+        self, session_id: UUID, compliance_level: Any
+    ) -> Optional[str]:
+        """Why a steering message may not join the running turn, or None.
+
+        A steer skips handle_chat_message: it is injected into a loop already
+        running at its own level. A client that has switched levels since must
+        not have its new message processed under the old one (issue #1042).
+        The steer is checked against the running session's conversation
+        binding with the same rule as a turn, so it cannot carry a message
+        across a classification the turn gate would refuse.
+        """
+        try:
+            active_level = self._resolve_active_classification(compliance_level)
+        except ValidationError as e:
+            return e.message
+        session = await self.session_repository.get(session_id)
+        if session is None:
+            return (
+                "The running turn could not be found to confirm its compliance "
+                "level. Wait for it to finish or stop it, then send the message again."
+            )
+        binding = session.context.get(conv_class.SESSION_BINDING_KEY)
+        if binding is None:
+            # The turn has not reached its gate yet: nothing to compare with.
+            return (
+                "The running turn has not started yet. Wait a moment, then send "
+                "the message again."
+            )
+        refusal = conv_class.resume_refusal(
+            binding,
+            active_level,
+            compliance_enabled=self._compliance_enabled(),
+            compliance_mgr=self._compliance_manager(),
+        )
+        if refusal:
+            conv_class.audit_refusal(
+                "steer",
+                session.context.get("conversation_id"),
+                session.user_email,
+                binding,
+                active_level,
+            )
+        return refusal
 
     async def _in_flight_conversation(
         self, conversation_id: str, user_email: Optional[str]
@@ -1291,6 +1590,17 @@ class ChatService:
             # rewind, whose truncation would be measured against the wrong
             # thread. See _turn_allows_shrink.
             session.context["hydration_failed"] = True
+            # With compliance levels enforced, the conversation's recorded
+            # classification is unknown until the store answers, so the turn
+            # is refused rather than bound to whatever level it arrived with
+            # (issue #1042). The history goes too: it is the previous
+            # conversation's, already persisted, and an empty session is what
+            # makes the next turn retry the load.
+            if self._compliance_enabled():
+                session.history.messages.clear()
+                session.context[conv_class.SESSION_BINDING_KEY] = conv_class.make_binding(
+                    conv_class.STATE_INVALID, reason="unloaded"
+                )
             # A transient read failure says nothing about the conversation's
             # workspace, so put back whatever the session was carrying rather
             # than persisting the null cleared above over a good binding.
@@ -1308,7 +1618,11 @@ class ChatService:
 
         if not conv:
             # A conversation_id the store has never seen: the client is naming a
-            # new conversation, which is the normal first-turn case.
+            # new conversation, which is the normal first-turn case. An empty
+            # session takes its classification from this turn; a non-empty one
+            # keeps the binding of the history it still holds.
+            if not session.history.messages:
+                session.context.pop(conv_class.SESSION_BINDING_KEY, None)
             return 0
 
         # Read the binding as soon as the record is in hand, before the message
@@ -1320,6 +1634,15 @@ class ChatService:
             conv_metadata.get("workspace_id")
             if isinstance(conv_metadata, dict)
             else None
+        )
+        # The stored classification replaces whatever the session carried, and
+        # binds even an empty record: it is the conversation's, not the turn's.
+        # The history the session holds belongs to the previous conversation,
+        # so it goes too -- even when this record has nothing to load --
+        # otherwise the old history would run under the new record's binding.
+        session.history.messages.clear()
+        session.context[conv_class.SESSION_BINDING_KEY] = (
+            conv_class.binding_from_record(conv)
         )
 
         messages = conv.get("messages")
@@ -1432,23 +1755,34 @@ class ChatService:
                     title = msg.content[:200]
                     break
 
+        metadata = {
+            "agent_mode": bool(session.context.get("agent_mode")),
+            "workspace_id": session.context.get("workspace_id"),
+        }
+        # Server-managed classification record (issue #1042), from the binding
+        # the turn gate checked -- never from a client field. Legacy history
+        # is written without one; the repository refuses any change.
+        classification = conv_class.metadata_value(
+            session.context.get(conv_class.SESSION_BINDING_KEY)
+        )
+        if classification is not ...:
+            metadata[conv_class.CLASSIFICATION_METADATA_KEY] = classification
+
         record = self.conversation_repository.save_conversation(
             conversation_id=conv_id,
             user_email=normalize_user_email(user_email),
             title=title,
             model=model,
             messages=messages,
-            metadata={
-                "agent_mode": bool(session.context.get("agent_mode")),
-                "workspace_id": session.context.get("workspace_id"),
-            },
+            metadata=metadata,
             allow_shrink=allow_shrink,
         )
         if record is None:
             logger.warning(
                 "Conversation %s save rejected by repository (owned by another "
-                "user, or the write would have shrunk it -- see the repository "
-                "log for which); not emitting conversation_saved",
+                "user, the write would have shrunk it, or it would have changed "
+                "the recorded data classification -- see the repository log for "
+                "which); not emitting conversation_saved",
                 sanitize_for_logging(conv_id),
             )
             return False

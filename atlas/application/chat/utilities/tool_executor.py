@@ -15,13 +15,10 @@ from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
 from atlas.domain.errors import ToolError
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
-from atlas.interfaces.llm import LLMResponse
 from atlas.modules.llm.tool_call_guard import repair_structural_json
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
-    CANVAS_TOOL_NAME,
     LEGACY_SERVER_NAMES,
-    normalize_tool_name,
 )
 from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
@@ -29,7 +26,6 @@ from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredExceptio
 
 from ..approval_manager import get_approval_manager, resolve_approval_timeout
 from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
-from .tool_image_context import ToolImageInjector
 
 logger = logging.getLogger(__name__)
 
@@ -115,83 +111,6 @@ async def execute_multiple_tools(
         else:
             final.append(res)
     return final
-
-
-async def execute_tools_workflow(
-    llm_response: LLMResponse,
-    messages: List[Dict],
-    model: str,
-    session_context: Dict[str, Any],
-    tool_manager,
-    llm_caller,
-    prompt_provider,
-    update_callback: Optional[UpdateCallback] = None,
-    config_manager=None,
-    skip_approval: bool = False,
-    user_email: Optional[str] = None,
-    image_injector: Optional["ToolImageInjector"] = None,
-) -> tuple[str, List[ToolResult]]:
-    """
-    Execute the complete tools workflow: calls -> results -> synthesis.
-
-    Pure function that coordinates tool execution without maintaining state.
-
-    ``image_injector`` (issue #909) receives the step's tool results right
-    after their messages are appended, so tool-returned images reach the
-    synthesis call as a synthetic user message when the model supports
-    vision.
-    """
-    logger.debug("Entering execute_tools_workflow")
-    # Add assistant message with tool calls
-    messages.append({
-        "role": "assistant",
-        "content": llm_response.content,
-        "tool_calls": llm_response.tool_calls
-    })
-
-    # Execute all tool calls in parallel
-    tool_results = await execute_multiple_tools(
-        tool_calls=llm_response.tool_calls,
-        session_context=session_context,
-        tool_manager=tool_manager,
-        update_callback=update_callback,
-        config_manager=config_manager,
-        skip_approval=skip_approval,
-    )
-
-    # Add tool results to messages
-    for result in tool_results:
-        messages.append({
-            "role": "tool",
-            "content": result.content,
-            "tool_call_id": result.tool_call_id
-        })
-
-    if image_injector is not None:
-        tool_names: Dict[Any, str] = {}
-        for tc in (llm_response.tool_calls or []):
-            try:
-                tool_names[tc.id] = tc.function.name
-            except AttributeError:
-                fn = tc.get("function") if isinstance(tc, dict) else None
-                tool_names[tc.get("id") if isinstance(tc, dict) else None] = (
-                    fn.get("name", "") if isinstance(fn, dict) else ""
-                )
-        image_injector.after_tool_results(messages, tool_results, tool_names=tool_names)
-
-    # Determine if synthesis is needed
-    final_response = await handle_synthesis_decision(
-        llm_response=llm_response,
-        messages=messages,
-        model=model,
-        session_context=session_context,
-        llm_caller=llm_caller,
-        prompt_provider=prompt_provider,
-        update_callback=update_callback,
-        user_email=user_email,
-    )
-
-    return final_response, tool_results
 
 
 def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]:
@@ -1049,117 +968,6 @@ def inject_context_into_args(parsed_args: Dict[str, Any], session_context: Dict[
         logger.warning(f"Non-fatal: failed to inject tool args: {inj_err}")
 
     return parsed_args
-
-
-async def handle_synthesis_decision(
-    llm_response: LLMResponse,
-    messages: List[Dict[str, Any]],
-    model: str,
-    session_context: Dict[str, Any],
-    llm_caller,
-    prompt_provider,
-    update_callback: Optional[UpdateCallback] = None,
-    user_email: Optional[str] = None,
-) -> str:
-    """
-    Decide whether synthesis is needed and execute accordingly.
-
-    Pure function that doesn't maintain state.
-    """
-    # Check if we have only canvas tools. Guard against a response with no tool
-    # calls at all (None or []): that is not "canvas-only" and must fall through
-    # to synthesis instead of claiming content was displayed in the canvas.
-    response_tool_calls = llm_response.tool_calls or []
-    canvas_tool_calls = [
-        tc for tc in response_tool_calls
-        if normalize_tool_name(tc.function.name) == CANVAS_TOOL_NAME
-    ]
-    has_only_canvas_tools = bool(response_tool_calls) and len(canvas_tool_calls) == len(response_tool_calls)
-
-    if has_only_canvas_tools:
-        # Canvas tools don't need follow-up
-        return llm_response.content or "Content displayed in canvas."
-
-    # Add updated files manifest before synthesis
-    files_manifest = build_files_manifest(session_context)
-    if files_manifest:
-        updated_manifest = {
-            "role": "system",
-            "content": (
-                "Available session files (updated after tool runs):\n"
-                f"{files_manifest['content'].split('Available session files:')[1].split('(You can ask')[0].strip()}\n\n"
-                "(You can ask to open or analyze any of these by name.)"
-            )
-        }
-        messages.append(updated_manifest)
-
-    # Notify frontend that tool synthesis is starting
-    if update_callback:
-        try:
-            await update_callback({"type": "tool_synthesis_start"})
-        except Exception:
-            logger.debug("Failed to send tool_synthesis_start notification")
-
-    # Get final synthesis
-    return await synthesize_tool_results(
-        model=model,
-        messages=messages,
-        llm_caller=llm_caller,
-        prompt_provider=prompt_provider,
-        update_callback=update_callback,
-        user_email=user_email,
-    )
-
-
-async def synthesize_tool_results(
-    model: str,
-    messages: List[Dict[str, Any]],
-    llm_caller,
-    prompt_provider,
-    update_callback: Optional[UpdateCallback] = None,
-    user_email: Optional[str] = None,
-) -> str:
-    """
-    Prepare augmented messages with synthesis prompt and obtain final answer.
-
-    Pure function that coordinates LLM call for synthesis.
-    """
-    # Extract latest user question (walk backwards). Only plain-string user
-    # messages count: multimodal user turns (inline image/PDF blocks from
-    # build_messages, or the synthetic tool-image message from issue #909)
-    # carry a list of content blocks, and the prompt provider's
-    # ``user_question.strip()`` would raise on those, silently dropping the
-    # configured synthesis prompt.
-    user_question = ""
-    for m in reversed(messages):
-        if (
-            m.get("role") == "user"
-            and isinstance(m.get("content"), str)
-            and m.get("content")
-        ):
-            user_question = m["content"]
-            break
-
-    prompt_text = None
-    if prompt_provider:
-        prompt_text = prompt_provider.get_tool_synthesis_prompt(user_question or "the user's last request")
-
-    synthesis_messages = list(messages)
-    if prompt_text:
-        synthesis_messages.append({
-            "role": "system",
-            "content": prompt_text
-        })
-    else:
-        logger.info("Proceeding without dedicated tool synthesis prompt (fallback)")
-
-    final_response = await llm_caller.call_plain(model, synthesis_messages, user_email=user_email)
-
-    # Do not emit a separate 'tool_synthesis' assistant-visible event here.
-    # The chat service will emit a single 'chat_response' for the final answer
-    # to avoid duplicate assistant messages in the UI.
-
-    return final_response
 
 
 def build_files_manifest(session_context: Dict[str, Any]) -> Optional[Dict[str, str]]:

@@ -7,7 +7,7 @@ model key (``<gateway>::<team_id>::<model_id>``) sent with each chat turn; see
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -17,11 +17,16 @@ from atlas.domain.errors import AuthorizationError, LLMAuthenticationError, LLMS
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config.litellm_gateway_models import build_gateway_model_key, is_key_safe_part
 from atlas.modules.config.models import LiteLLMGatewayConfig
-from atlas.modules.llm.litellm_gateway_client import get_gateway_client
+from atlas.modules.llm.litellm_gateway_client import SIGN_IN_REQUIRED, get_gateway_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/llm/gateways", tags=["llm-gateways"])
+
+# Tells the model picker where a fresh sign-in starts, so a delegated-token
+# failure offers a recovery link instead of a dead-end error.
+SIGN_IN_HEADER = "X-Atlas-Sign-In"
+OIDC_SIGN_IN_PATH = "/auth/oidc/login"
 
 async def build_gateway_summaries(llm_config: Any, current_user: str, app_settings: Any) -> List[Dict[str, Any]]:
     """Gateways the user may use, in the shape ``/api/config`` returns them."""
@@ -55,6 +60,20 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
             else:
                 reachable = {gateway.compliance_level}
             summary["compliance_levels"] = sorted(reachable, key=lambda level: (level is None, level or ""))
+            # The same, as each model's allowed data classifications (issue
+            # #1032; None: undeclared). The client filters on these.
+            if gateway.allowed_data_classifications is not None:
+                summary["allowed_data_classifications"] = list(gateway.allowed_data_classifications)
+            if gateway.models:
+                summary["model_allowed_data_classifications"] = {
+                    model_id: gateway.model_allowed_data_classifications(model_id)
+                    for model_id in gateway.models
+                }
+                summary["model_classifications"] = [
+                    gateway.model_allowed_data_classifications(model_id) for model_id in gateway.models
+                ]
+            else:
+                summary["model_classifications"] = [gateway.model_allowed_data_classifications("")]
         summaries.append(summary)
     return summaries
 
@@ -76,7 +95,11 @@ def _raise_http(exc: Exception) -> None:
     if isinstance(exc, AuthorizationError):
         raise HTTPException(status_code=403, detail=exc.message) from None
     if isinstance(exc, LLMAuthenticationError):
-        raise HTTPException(status_code=401, detail=exc.message) from None
+        headers = None
+        app_settings = getattr(app_factory.get_config_manager(), "app_settings", None)
+        if exc.code == SIGN_IN_REQUIRED and getattr(app_settings, "feature_oidc_auth_enabled", False):
+            headers = {SIGN_IN_HEADER: OIDC_SIGN_IN_PATH}
+        raise HTTPException(status_code=401, detail=exc.message, headers=headers) from None
     if isinstance(exc, LLMServiceError):
         raise HTTPException(status_code=502, detail=exc.message) from None
     raise exc
@@ -126,9 +149,9 @@ async def list_gateway_models(
         _raise_http(exc)
     app_settings = getattr(app_factory.get_config_manager(), "app_settings", None)
     compliance_enabled = getattr(app_settings, "feature_compliance_levels_enabled", False)
-    models: List[Dict[str, Optional[str]]] = []
+    models: List[Dict[str, Any]] = []
     for model_id in model_ids:
-        entry: Dict[str, Optional[str]] = {
+        entry: Dict[str, Any] = {
             "name": build_gateway_model_key(gateway_name, team.team_id, model_id),
             "model_id": model_id,
             "label": model_id,
@@ -136,6 +159,9 @@ async def list_gateway_models(
         level = gateway.model_compliance_level(model_id)
         if compliance_enabled and level:
             entry["compliance_level"] = level
+        classifications = gateway.model_allowed_data_classifications(model_id)
+        if compliance_enabled and classifications is not None:
+            entry["allowed_data_classifications"] = classifications
         models.append(entry)
     return {
         "gateway": gateway_name,

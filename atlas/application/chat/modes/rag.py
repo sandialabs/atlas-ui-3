@@ -40,51 +40,6 @@ class RagModeRunner:
         # an error message, so `atlas-chat` exits non-zero on LLM failures.
         self.raise_on_stream_error = False
 
-    async def run(
-        self,
-        session: Session,
-        model: str,
-        messages: List[Dict[str, str]],
-        data_sources: List[str],
-        user_email: str,
-        temperature: float = 0.7,
-    ) -> Dict[str, Any]:
-        """
-        Execute RAG mode.
-
-        Args:
-            session: Current chat session
-            model: LLM model to use
-            messages: Message history
-            data_sources: List of data sources to query
-            user_email: User email for authorization
-            temperature: LLM temperature parameter
-
-        Returns:
-            Response dictionary
-        """
-        # Call LLM with RAG
-        response_content = await self.llm.call_with_rag(
-            model, messages, data_sources, user_email, temperature=temperature
-        )
-
-        # Add assistant message to history
-        assistant_message = Message(
-            role=MessageRole.ASSISTANT,
-            content=response_content,
-            metadata={"data_sources": data_sources}
-        )
-        session.history.add_message(assistant_message)
-
-        # Publish events
-        await self.event_publisher.publish_chat_response(
-            message=response_content,
-            has_pending_tools=False,
-        )
-        await self.event_publisher.publish_response_complete()
-
-        return event_notifier.create_chat_response(response_content)
-
     async def run_streaming(
         self,
         session: Session,

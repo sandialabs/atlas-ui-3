@@ -634,6 +634,12 @@ export function createWebSocketHandler(deps) {
           addMessage({ role: 'system', content: `Warning: ${data.message}`, type: 'warning', timestamp: new Date().toISOString() })
           break
         case 'error':
+          // A refused steer (issue #1042) leaves the running turn running:
+          // report it without tearing down the turn's indicators.
+          if (data.steering === true) {
+            addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
+            break
+          }
           setIsThinking(false)
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
@@ -743,6 +749,23 @@ export function createWebSocketHandler(deps) {
           break
         case 'agent_control':
           // Client→server message type (e.g. stop). Silently ignore if echoed back (#54).
+          break
+        case 'session_ended':
+          // The server ended the OIDC login behind this socket and is about
+          // to close it with 4401. Stop the turn cleanly instead of leaving
+          // the thinking spinner running into a misleading timeout error.
+          setIsThinking(false)
+          clearAgentRunning()
+          if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+          setCurrentAgentStep(0)
+          if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
+          endTokenStream()
+          addMessage({
+            role: 'system',
+            content: 'Your session ended. Sign in again, then resend your message.',
+            type: 'warning',
+            timestamp: new Date().toISOString(),
+          })
           break
         default:
           // New backend sends { type: 'agent_update', update_type: '...' }

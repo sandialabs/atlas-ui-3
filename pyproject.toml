@@ -1,6 +1,6 @@
 [project]
 name = "atlas-chat"
-version = "0.6.0"
+version = "0.7.0"
 description = "Trusted AI agent platform with MCP, RAG, access control, and auditable tool use"
 readme = "README.md"
 license = { text = "MIT" }
@@ -95,7 +95,6 @@ dev = [
 atlas-chat = "atlas.atlas_chat_cli:main"
 atlas-server = "atlas.server_cli:main"
 atlas-init = "atlas.init_cli:main"
-atlas-portal = "atlas.portal_cli:main"
 atlas-finetune-export = "atlas.finetune_export_cli:main"
 
 [project.urls]

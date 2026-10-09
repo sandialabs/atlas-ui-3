@@ -46,10 +46,8 @@ os.environ["APP_LOG_DIR"] = _TELEMETRY_TMPDIR
 # test modules do) binds the process-wide chat-history engine to the real
 # ``<project_root>/data/chat_history.db``. Measured consequences before this
 # guard: ``test_security_header_injection`` inserted a real conversation row
-# on every run (318 accumulated rows, all from test identities), the
-# agent-portal e2e tests appended 1181 audit rows to ``data/agent_portal.db``
-# plus ``data/agent_portal_audit.jsonl``, and a feedback route test dropped a
-# JSON file into ``runtime/feedback/`` each run.
+# on every run (318 accumulated rows, all from test identities), and a
+# feedback route test dropped a JSON file into ``runtime/feedback/`` each run.
 #
 # That is developer-data corruption on its own, and it also makes any
 # emptiness/count assertion depend on what previous tests -- and previous
@@ -59,8 +57,6 @@ os.environ["APP_LOG_DIR"] = _TELEMETRY_TMPDIR
 # specific value still override them with ``monkeypatch``.
 _STATE_TMPDIR = tempfile.mkdtemp(prefix="atlas-test-state-")
 os.environ["CHAT_HISTORY_DB_URL"] = f"duckdb:///{_STATE_TMPDIR}/chat_history.db"
-os.environ["AGENT_PORTAL_DB_URL"] = f"duckdb:///{_STATE_TMPDIR}/agent_portal.db"
-os.environ["AGENT_PORTAL_AUDIT_PATH"] = f"{_STATE_TMPDIR}/agent_portal_audit.jsonl"
 os.environ["RUNTIME_FEEDBACK_DIR"] = f"{_STATE_TMPDIR}/feedback"
 os.environ["RUNTIME_CAPTURE_DIR"] = f"{_STATE_TMPDIR}/finetune_capture"
 os.environ["MCP_TOKEN_STORAGE_DIR"] = f"{_STATE_TMPDIR}/tokens"
@@ -82,6 +78,32 @@ os.environ["MCP_TOKEN_STORAGE_DIR"] = f"{_STATE_TMPDIR}/tokens"
 from atlas.modules.config.settings import AppSettings  # noqa: E402
 
 AppSettings.model_config["env_file"] = None
+
+# --- Compliance-feature isolation ----------------------------------------
+# ``FEATURE_COMPLIANCE_LEVEL_REQUIRED`` (with ``FEATURE_COMPLIANCE_LEVELS_ENABLED``)
+# makes ``ChatService.handle_chat_message()`` reject any turn that does not carry a
+# concrete ``compliance_level``. That is a deployment policy, not a property of the
+# code under test, yet ``AppSettings`` reads those flags straight from the process
+# environment -- so a contributor (or CI runner) with them exported silently turns
+# ``ValidationError: A compliance level is required...`` into the result of every
+# chat-service test that omits ``compliance_level``: the agent-mode integration,
+# MCP-prompt-override, and system-prompt-loading tests among them. Those tests
+# correctly omit the argument because compliance-required mode is not their
+# scenario.
+#
+# Pin all three to explicit values for the session -- including the default
+# level, *pinned empty* rather than popped. ``atlas.main`` calls
+# ``load_dotenv("../.env")`` (override=False) at import, which refills any
+# environment key that is missing, so a popped ``COMPLIANCE_DEFAULT_LEVEL`` would
+# be restored by a developer's .env and the guard would depend on import order.
+# An explicit value is left alone by ``load_dotenv`` with ``override=False``.
+# Compliance-specific tests still opt in with ``monkeypatch.setenv`` / direct
+# settings overrides, which take precedence over this session-level pin (see
+# ``test_compliance_level_required.py``). This is a test-isolation guard, not a
+# product behavior change -- runtime policy is untouched.
+os.environ["FEATURE_COMPLIANCE_LEVELS_ENABLED"] = "false"
+os.environ["FEATURE_COMPLIANCE_LEVEL_REQUIRED"] = "false"
+os.environ["COMPLIANCE_DEFAULT_LEVEL"] = ""
 
 # --- External authorizer isolation ---------------------------------------
 # ``core.auth.is_user_in_group`` prefers a configured external authorization
@@ -189,24 +211,16 @@ def _isolate_config_cache():
 
 
 # Process-wide singletons that app code memoizes in a module global. Tests that
-# pin one (a temp-backed PortalStore, a HookManager, a ProcessManager) or that
-# merely touch a lazy getter leave it populated for every later test, which is a
-# silent channel between tests: a leaked ProcessManager carries its whole
-# process table forward, and a leaked HookManager makes later turns fire hooks
-# they never asked for. Both were observed in the suite before this fixture.
+# pin one (a temp-backed store, a HookManager) or that merely touch a lazy getter
+# leave it populated for every later test, which is a silent channel between
+# tests: a leaked HookManager makes later turns fire hooks they never asked for.
+# This was observed in the suite before this fixture.
 #
 # Snapshot-and-restore rather than reset-to-None: restoring the prior value is
 # correct whether the module global was empty or already legitimately populated.
 _SINGLETON_GLOBALS = (
     ("atlas.modules.chat_history.database", "_engine"),
     ("atlas.modules.chat_history.database", "_session_factory"),
-    ("atlas.modules.process_manager.manager", "_singleton"),
-    ("atlas.modules.process_manager.manager", "_idle_sweeper_task"),
-    ("atlas.modules.agent_portal.portal_store", "_singleton"),
-    ("atlas.modules.agent_portal.presets_store", "_singleton"),
-    ("atlas.modules.agent_portal.database", "_engine"),
-    ("atlas.modules.agent_portal.database", "_session_factory"),
-    ("atlas.modules.agent_portal.audit_log", "_resolved_path"),
     ("atlas.modules.mcp_tools.token_storage", "_token_storage"),
     ("atlas.modules.mcp_tools.wormhole_token_store", "_wormhole_store"),
     ("atlas.hooks.manager", "_hook_manager"),
@@ -225,11 +239,10 @@ def _release(value) -> None:
     test left there: a SQLAlchemy engine keeps its pooled DuckDB connection
     until garbage collection, and a sweeper task keeps running.
 
-    Dispatch is by *type*, never by method name. ``ProcessManager.cancel`` is
-    ``async def cancel(self, process_id, *, sigkill_after=3.0)`` -- a
-    name-based ``value.cancel()`` would raise TypeError, and the surrounding
-    ``except`` would hide it. Types not listed here are simply dropped, which
-    is what restoring the previous value already did.
+    Dispatch is by *type*, never by method name. A resource with an
+    ``async def cancel(self, ...)`` would blow up if we called it by name, and
+    the surrounding ``except`` would hide that. Types not listed here are
+    simply dropped, which is what restoring the previous value already did.
     """
     try:
         if isinstance(value, Engine):

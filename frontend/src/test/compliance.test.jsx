@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { isComplianceAccessible, classificationsOf } from '../utils/complianceAccess';
 
 describe('Compliance Level Filtering', () => {
   describe('Compliance Level Accessibility Logic', () => {
@@ -17,19 +18,9 @@ describe('Compliance Level Filtering', () => {
       ]
     };
 
-    // Helper function to simulate isComplianceAccessible with STRICT MODE
-    const isAccessible = (userLevel, resourceLevel, levels) => {
-      // If user level is not set, all resources are accessible
-      if (!userLevel) return true;
-      
-      // STRICT MODE: If user has selected a compliance level but resource has none, deny access
-      if (!resourceLevel) return false;
-
-      const userLevelObj = levels.levels.find(l => l.name === userLevel);
-      if (!userLevelObj) return false;
-
-      return userLevelObj.allowed_with.includes(resourceLevel);
-    };
+    // The real shared rule (utils/complianceAccess), not a local copy.
+    const isAccessible = (userLevel, resourceLevel, levels) =>
+      isComplianceAccessible(levels.levels, userLevel, resourceLevel);
 
     it('should allow Public to access only Public resources', () => {
       expect(isAccessible('Public', 'Public', complianceLevels)).toBe(true);
@@ -37,16 +28,26 @@ describe('Compliance Level Filtering', () => {
       expect(isAccessible('Public', 'External', complianceLevels)).toBe(false);
     });
 
-    it('should allow HIPAA to access HIPAA and SOC2 resources', () => {
+    it('should not let allowed_with widen HIPAA to SOC2-only resources', () => {
       expect(isAccessible('HIPAA', 'HIPAA', complianceLevels)).toBe(true);
-      expect(isAccessible('HIPAA', 'SOC2', complianceLevels)).toBe(true);
+      // HIPAA lists SOC2 in allowed_with, but that no longer grants access.
+      expect(isAccessible('HIPAA', 'SOC2', complianceLevels)).toBe(false);
+      expect(isAccessible('HIPAA', ['SOC2'], complianceLevels)).toBe(false);
       expect(isAccessible('HIPAA', 'Public', complianceLevels)).toBe(false);
       expect(isAccessible('HIPAA', 'Internal', complianceLevels)).toBe(false);
     });
 
-    it('should allow FedRAMP to access FedRAMP and SOC2 resources', () => {
+    it('should allow HIPAA on a resource whose classifications include HIPAA', () => {
+      expect(isAccessible('HIPAA', ['SOC2', 'HIPAA'], complianceLevels)).toBe(true);
+      expect(isAccessible('SOC2', ['SOC2', 'HIPAA'], complianceLevels)).toBe(true);
+      expect(isAccessible('Public', ['SOC2', 'HIPAA'], complianceLevels)).toBe(false);
+      expect(isAccessible('HIPAA', [], complianceLevels)).toBe(false);
+    });
+
+    it('should limit FedRAMP to resources classified for FedRAMP', () => {
       expect(isAccessible('FedRAMP', 'FedRAMP', complianceLevels)).toBe(true);
-      expect(isAccessible('FedRAMP', 'SOC2', complianceLevels)).toBe(true);
+      expect(isAccessible('FedRAMP', 'SOC2', complianceLevels)).toBe(false);
+      expect(isAccessible('FedRAMP', ['SOC2', 'FedRAMP'], complianceLevels)).toBe(true);
       expect(isAccessible('FedRAMP', 'HIPAA', complianceLevels)).toBe(false);
       expect(isAccessible('FedRAMP', 'Public', complianceLevels)).toBe(false);
     });
@@ -70,22 +71,24 @@ describe('Compliance Level Filtering', () => {
       expect(isAccessible(null, null, complianceLevels)).toBe(true);
     });
 
-    it('should filter tools by compliance level allowlist with strict mode', () => {
+    it('should filter tools by their data classifications with strict mode', () => {
       const tools = [
         { name: 'public-tool', compliance_level: 'Public' },
         { name: 'internal-tool', compliance_level: 'Internal' },
         { name: 'soc2-tool', compliance_level: 'SOC2' },
+        { name: 'soc2-hipaa-tool', allowed_data_classifications: ['SOC2', 'HIPAA'] },
         { name: 'hipaa-tool', compliance_level: 'HIPAA' },
         { name: 'no-compliance-tool', compliance_level: null }
       ];
 
       // Filter tools for HIPAA user - STRICT MODE (no untagged resources)
       const hipaaTools = tools.filter(tool =>
-        isAccessible('HIPAA', tool.compliance_level, complianceLevels)
+        isAccessible('HIPAA', classificationsOf(tool), complianceLevels)
       );
 
       expect(hipaaTools.map(t => t.name)).toContain('hipaa-tool');
-      expect(hipaaTools.map(t => t.name)).toContain('soc2-tool');
+      expect(hipaaTools.map(t => t.name)).toContain('soc2-hipaa-tool');
+      expect(hipaaTools.map(t => t.name)).not.toContain('soc2-tool');
       expect(hipaaTools.map(t => t.name)).not.toContain('no-compliance-tool'); // STRICT MODE
       expect(hipaaTools.map(t => t.name)).not.toContain('public-tool');
       expect(hipaaTools.map(t => t.name)).not.toContain('internal-tool');
@@ -124,47 +127,27 @@ describe('Compliance Level Filtering', () => {
     });
   });
 
-  describe('Allowlist Model Security', () => {
-    it('should ensure allowlist is not bidirectional', () => {
-      const levels = {
-        levels: [
-          { name: 'SOC2', allowed_with: ['SOC2'] },
-          { name: 'HIPAA', allowed_with: ['HIPAA', 'SOC2'] }
-        ]
-      };
+  describe('Explicit Classification Security', () => {
+    const levels = [
+      { name: 'Public', allowed_with: ['Public'] },
+      { name: 'SOC2', allowed_with: ['SOC2'] },
+      { name: 'HIPAA', allowed_with: ['HIPAA', 'SOC2'] }
+    ];
 
-      const isAccessible = (userLevel, resourceLevel, levels) => {
-        if (!userLevel || !resourceLevel) return true;
-        const userLevelObj = levels.levels.find(l => l.name === userLevel);
-        if (!userLevelObj) return true;
-        return userLevelObj.allowed_with.includes(resourceLevel);
-      };
-
-      // HIPAA can access SOC2
-      expect(isAccessible('HIPAA', 'SOC2', levels)).toBe(true);
-
-      // But SOC2 cannot access HIPAA (not bidirectional)
-      expect(isAccessible('SOC2', 'HIPAA', levels)).toBe(false);
+    it('should not grant access through allowed_with in either direction', () => {
+      // allowed_with no longer widens access: HIPAA cannot reach SOC2-only
+      // resources, and SOC2 cannot reach HIPAA-only ones.
+      expect(isComplianceAccessible(levels, 'HIPAA', 'SOC2')).toBe(false);
+      expect(isComplianceAccessible(levels, 'SOC2', 'HIPAA')).toBe(false);
+      // Only a resource that lists the level is reachable under it.
+      expect(isComplianceAccessible(levels, 'HIPAA', ['SOC2', 'HIPAA'])).toBe(true);
+      expect(isComplianceAccessible(levels, 'SOC2', ['SOC2', 'HIPAA'])).toBe(true);
     });
 
     it('should prevent mixing data from different security environments', () => {
-      const levels = {
-        levels: [
-          { name: 'Public', allowed_with: ['Public'] },
-          { name: 'HIPAA', allowed_with: ['HIPAA', 'SOC2'] }
-        ]
-      };
-
-      const isAccessible = (userLevel, resourceLevel, levels) => {
-        if (!userLevel || !resourceLevel) return true;
-        const userLevelObj = levels.levels.find(l => l.name === userLevel);
-        if (!userLevelObj) return true;
-        return userLevelObj.allowed_with.includes(resourceLevel);
-      };
-
       // Public and HIPAA should NOT mix
-      expect(isAccessible('Public', 'HIPAA', levels)).toBe(false);
-      expect(isAccessible('HIPAA', 'Public', levels)).toBe(false);
+      expect(isComplianceAccessible(levels, 'Public', 'HIPAA')).toBe(false);
+      expect(isComplianceAccessible(levels, 'HIPAA', 'Public')).toBe(false);
     });
   });
 });
