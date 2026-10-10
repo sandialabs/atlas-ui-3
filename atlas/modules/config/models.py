@@ -247,6 +247,11 @@ GATEWAY_RESERVED_MODEL_KEYS = frozenset({
 
 def validate_gateway_model_settings(settings: Dict[str, Any], where: str) -> None:
     """Reject ModelConfig settings a gateway model may not take, at load time."""
+    # ModelConfig ignores unknown fields, so a misspelt setting would otherwise
+    # be dropped without a word.
+    unknown = sorted(set(settings) - set(ModelConfig.model_fields))
+    if unknown:
+        raise ValueError(f"unknown model setting(s) in {where}: {', '.join(unknown)}")
     reserved = sorted(set(settings) & GATEWAY_RESERVED_MODEL_KEYS)
     if reserved:
         raise ValueError(
@@ -288,11 +293,7 @@ class LiteLLMGatewayModel(BaseModel):
 
     @model_validator(mode="after")
     def validate_settings(self):
-        settings = self.settings()
-        unknown = sorted(set(settings) - set(ModelConfig.model_fields))
-        if unknown:
-            raise ValueError(f"unknown model setting(s) in a models entry: {', '.join(unknown)}")
-        validate_gateway_model_settings(settings, "a models entry")
+        validate_gateway_model_settings(self.settings(), "a models entry")
         return self
 
     def settings(self) -> Dict[str, Any]:

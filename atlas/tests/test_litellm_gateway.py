@@ -924,15 +924,30 @@ class TestGatewayPerModelSettings:
         assert (llama.supports_tools, llama.supports_vision) == (False, False)
         assert llama.max_tokens == 256
 
-    @pytest.mark.parametrize("entry, message", [
+    # The call target overwrites model_url and api_key itself, but not
+    # api_key_source, globus_scope or delegation: for those the load-time check
+    # is the only guard, so each is tested.
+    REFUSED_SETTINGS = [
         ({"model_url": "http://elsewhere"}, "may not set model_url"),
         ({"api_key": "sk-other"}, "may not set api_key"),
+        ({"api_key_source": "user"}, "may not set api_key_source"),
+        ({"globus_scope": "urn:globus:auth:scope:example"}, "may not set globus_scope"),
+        ({"delegation": {"scope": "api://other/.default"}}, "may not set delegation"),
         ({"supports_teleport": True}, "unknown model setting"),
         ({"max_tokens": "lots"}, "max_tokens"),
-    ])
+    ]
+
+    @pytest.mark.parametrize("entry, message", REFUSED_SETTINGS)
     def test_entry_rejects_reserved_unknown_and_bad_settings(self, entry, message):
         with pytest.raises(ValidationError, match=message):
             _llm_config(models={"gpt-4o-mini": entry})
+
+    @pytest.mark.parametrize("defaults, message", REFUSED_SETTINGS)
+    def test_model_defaults_reject_the_same_settings(self, defaults, message):
+        # Validated alike: an unknown key in model_defaults is refused too,
+        # not silently dropped.
+        with pytest.raises(ValidationError, match=message):
+            _llm_config(model_defaults=defaults)
 
     @pytest.mark.asyncio
     async def test_gateway_summary_gives_each_allowlisted_models_capabilities(self):

@@ -13,7 +13,8 @@
 # - atlas-chat through two models of one team reaches the mock with each
 #   model's own max_tokens
 # - A gateway model entry with a reserved field, an unknown field or an
-#   invalid value is refused when the config loads
+#   invalid value is refused when the config loads, each with its own error,
+#   and an unknown field in model_defaults is refused too
 # - Run the backend unit test suite
 
 set -uo pipefail
@@ -177,27 +178,39 @@ print_result $? "Mock received each model's own max_tokens (default 256, overrid
 
 # --- Invalid entries are refused at load ---------------------------------------
 print_header "PR #1049: invalid model entries"
-for case in "api_key: sk-other|A reserved field" "supports_telepathy: true|An unknown field" "max_tokens: lots|An invalid value"; do
-    entry="${case%%|*}"
-    label="${case##*|}"
-    python3 - "$entry" <<'EOF'
+# Each case: where the setting goes (entry or defaults) | the setting | the
+# error expected ("" = accepted) | label. The gateway is otherwise valid (it
+# has its api_key), so only the setting under test can refuse it.
+for case in \
+    "entry|supports_tools: true||A valid setting in a model entry is accepted" \
+    "entry|api_key_source: user|may not set api_key_source|A reserved field (api_key_source) in a model entry is refused" \
+    "entry|delegation: {scope: api://other/.default}|may not set delegation|A reserved field (delegation) in a model entry is refused" \
+    "entry|supports_telepathy: true|unknown model setting(s) in a models entry|An unknown field in a model entry is refused" \
+    "entry|max_tokens: lots|valid integer|An invalid value in a model entry is refused" \
+    "defaults|supports_telepathy: true|unknown model setting(s) in model_defaults|An unknown field in model_defaults is refused"; do
+    where="${case%%|*}"; rest="${case#*|}"
+    setting="${rest%%|*}"; rest="${rest#*|}"
+    expected="${rest%%|*}"; label="${rest#*|}"
+    python3 - "$where" "$setting" "$expected" <<'EOF'
 import sys, yaml
 from pydantic import ValidationError
 from atlas.modules.config.models import LLMConfig
-entry = yaml.safe_load(sys.argv[1])
-config = {
-    "models": {},
-    "litellm_gateways": {"enterprise": {"base_url": "http://127.0.0.1:1", "models": {"gpt-4o-mini": entry}}},
-}
+where, setting, expected = sys.argv[1], yaml.safe_load(sys.argv[2]), sys.argv[3]
+gateway = {"base_url": "http://127.0.0.1:1", "api_key": "sk-mock-litellm-master", "models": {"gpt-4o-mini": {}}}
+if where == "entry":
+    gateway["models"]["gpt-4o-mini"] = setting
+else:
+    gateway["model_defaults"] = setting
 try:
-    LLMConfig(**config)
+    LLMConfig(models={}, litellm_gateways={"enterprise": gateway})
 except ValidationError as exc:
-    print(exc.errors()[0]["msg"][:160])
-    sys.exit(0)
-print("accepted:", entry)
-sys.exit(1)
+    message = "; ".join(error["msg"] for error in exc.errors())
+    print(message[:200])
+    sys.exit(0 if expected and expected in message else 1)
+print("accepted:", setting)
+sys.exit(0 if not expected else 1)
 EOF
-    print_result $? "$label in a model entry is refused at load"
+    print_result $? "$label"
 done
 
 # --- Unit tests -------------------------------------------------------------
