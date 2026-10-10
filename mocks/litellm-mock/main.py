@@ -229,6 +229,18 @@ def _stream(completion_id: str, model: str, text: str):
     yield "data: [DONE]\n\n"
 
 
+def _pdf_parts(messages: list) -> int:
+    """How many PDFs arrived inline, as OpenAI ``file`` content parts."""
+    return sum(
+        1
+        for message in messages
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for part in message["content"]
+        if isinstance(part, dict) and part.get("type") == "file"
+        and str((part.get("file") or {}).get("file_data", "")).startswith("data:application/pdf")
+    )
+
+
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
@@ -245,6 +257,8 @@ async def chat_completions(request: Request):
         "customer_id": request.headers.get("x-litellm-customer-id"),
         "stream": bool(body.get("stream")),
         "message_count": len(body.get("messages") or []),
+        "max_tokens": body.get("max_tokens"),
+        "pdf_parts": _pdf_parts(body.get("messages") or []),
     }
     _request_log.append(record)
     del _request_log[:-200]

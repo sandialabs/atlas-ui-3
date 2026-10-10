@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Users, Wrench, Eye, Loader2, RefreshCw, Shield } from 'lucide-react'
+import { Users, Loader2, RefreshCw, Shield } from 'lucide-react'
 import { classificationLabel } from '../utils/complianceAccess'
+import CapabilityIcons from './CapabilityIcons'
 import {
   parseGatewayModelKey,
   rememberTeamLabel,
@@ -196,6 +197,10 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
             <div className="rounded border border-gray-700">
               {shownModels.map(model => {
                 const selected = model.name === currentModel
+                // The team's models listing gives each model's capabilities;
+                // the gateway's defaults cover an older backend that doesn't.
+                const vision = model.supports_vision ?? gateway.supports_vision
+                const tools = model.supports_tools ?? gateway.supports_tools
                 return (
                   <button
                     key={model.name}
@@ -215,8 +220,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                           {classificationLabel(model)}
                         </span>
                       )}
-                      <Eye className={`w-3.5 h-3.5 ${gateway.supports_vision ? 'text-green-400' : 'text-gray-600'}`} />
-                      <Wrench className={`w-3.5 h-3.5 ${gateway.supports_tools !== false ? 'text-blue-400' : 'text-gray-600'}`} />
+                      <CapabilityIcons vision={vision} tools={tools} />
                     </span>
                   </button>
                 )
