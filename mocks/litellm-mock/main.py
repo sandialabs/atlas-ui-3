@@ -245,6 +245,7 @@ async def chat_completions(request: Request):
         "customer_id": request.headers.get("x-litellm-customer-id"),
         "stream": bool(body.get("stream")),
         "message_count": len(body.get("messages") or []),
+        "max_tokens": body.get("max_tokens"),
     }
     _request_log.append(record)
     del _request_log[:-200]
