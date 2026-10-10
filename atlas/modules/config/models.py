@@ -261,11 +261,8 @@ def validate_gateway_model_settings(settings: Dict[str, Any], where: str) -> Non
     ModelConfig(model_name="probe", model_url="http://probe", **settings)
 
 
-def gateway_capabilities(settings: Dict[str, Any]) -> Dict[str, bool]:
-    """Capabilities from a gateway model's settings, read from a validated
-    ModelConfig, so they agree with the server's (a quoted "false" is false to
-    both) and take ModelConfig's defaults for anything not set."""
-    config = ModelConfig(model_name="probe", model_url="http://probe", **settings)
+def capabilities_of(config: ModelConfig) -> Dict[str, bool]:
+    """The capabilities the client shows and gates for a model."""
     return {
         "supports_vision": config.supports_vision,
         "supports_pdf": config.supports_pdf,
@@ -400,13 +397,41 @@ class LiteLLMGatewayConfig(BaseModel):
         entry = self.models.get(model_id)
         return {**self.model_defaults, **(entry.settings() if entry is not None else {})}
 
+    def build_model_config(self, model_id: str, model_url: str, description: str) -> ModelConfig:
+        """The ModelConfig of one model reached through this gateway: its
+        settings, with every field that identifies or authorizes it taken from
+        the gateway. Both the call target and the capabilities the client is
+        given are built here, so the two cannot disagree."""
+        fields = {"description": description, **self.model_settings(model_id)}
+        fields.update(
+            model_name=model_id,
+            model_url=model_url,
+            # The gateway client supplies the bearer token per call (a service
+            # key or a delegated token), so no static key is resolved here.
+            api_key="",
+            # Refused in the settings at load, and pinned here as well, so a
+            # setting that slipped past that check still cannot change where
+            # the model's credentials come from.
+            api_key_source="system",
+            globus_scope=None,
+            delegation=None,
+            groups=list(self.groups),
+            compliance_level=self.model_compliance_level(model_id),
+            allowed_data_classifications=self.model_allowed_data_classifications(model_id),
+            extra_headers=dict(self.extra_headers) if self.extra_headers else None,
+        )
+        return ModelConfig(**fields)
+
     def model_capabilities(self, model_id: str) -> Dict[str, bool]:
-        """One model's capabilities as the client shows and gates them."""
-        return gateway_capabilities(self.model_settings(model_id))
+        """One model's capabilities as the client shows and gates them, read
+        from the ModelConfig its calls use (no capability depends on the URL,
+        so an unresolved base_url does not matter here)."""
+        return capabilities_of(self.build_model_config(model_id, self.base_url, model_id))
 
     def default_capabilities(self) -> Dict[str, bool]:
-        """The capabilities of a model with no settings of its own."""
-        return gateway_capabilities(self.model_defaults)
+        """The capabilities of a model with no allowlist entry of its own."""
+        # Allowlist ids are never empty, so "" names such a model.
+        return self.model_capabilities("")
 
     def model_compliance_level(self, model_id: str) -> Optional[str]:
         """The compliance level of one model: its own, else the gateway's."""
@@ -504,19 +529,7 @@ class LLMConfig(BaseModel):
             # its models are unknown rather than an error on every lookup.
             logger.error("LiteLLM gateway base_url is not configured (environment variable unset)")
             return None
-        fields = {"description": f"{ref.model_id} via {gateway_label}", **gateway.model_settings(ref.model_id)}
-        fields.update(
-            model_name=ref.model_id,
-            model_url=base_url,
-            # The gateway client supplies the bearer token per call (a service
-            # key or a delegated token), so no static key is resolved here.
-            api_key="",
-            groups=list(gateway.groups),
-            compliance_level=gateway.model_compliance_level(ref.model_id),
-            allowed_data_classifications=gateway.model_allowed_data_classifications(ref.model_id),
-            extra_headers=dict(gateway.extra_headers) if gateway.extra_headers else None,
-        )
-        return ModelConfig(**fields)
+        return gateway.build_model_config(ref.model_id, base_url, f"{ref.model_id} via {gateway_label}")
 
 
 def lookup_model_config(llm_config: Any, model_name: str) -> Optional[ModelConfig]:

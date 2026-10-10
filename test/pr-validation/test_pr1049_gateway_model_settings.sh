@@ -12,9 +12,14 @@
 #   capabilities, a model the allowlist leaves unset taking the defaults
 # - atlas-chat through two models of one team reaches the mock with each
 #   model's own max_tokens
+# - A WebSocket chat turn with a PDF attached, as the web UI sends it, reaches
+#   the mock as an inline document for claude-sonnet (supports_pdf) and not
+#   for gpt-4o-mini (the default, false)
 # - A gateway model entry with a reserved field, an unknown field or an
 #   invalid value is refused when the config loads, each with its own error,
 #   and an unknown field in model_defaults is refused too
+# - The backend refuses to start with an unknown field in model_defaults,
+#   naming the field (the breaking change in changes/1048.breaking.md)
 # - Run the backend unit test suite
 
 set -uo pipefail
@@ -66,7 +71,7 @@ trap 'kill $BACKEND_PID $MOCK_PID 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
 
 MOCK_PORT=4177
 PORT=8177
-for p in $MOCK_PORT $PORT; do
+for p in $MOCK_PORT $PORT 8178; do
     if curl -s "http://127.0.0.1:$p/" > /dev/null 2>&1; then
         echo "FAILED: Port $p is already in use by another process"
         exit 1
@@ -176,6 +181,25 @@ print(got)
 "
 print_result $? "Mock received each model's own max_tokens (default 256, override 1024)"
 
+# --- Chat with a PDF: only a supports_pdf model gets it inline -------------------
+# supports_pdf has no effect in the UI: the server decides whether an attached
+# PDF goes to the model inline or as a file reference, so it is checked at the
+# mock, from a chat turn sent over the WebSocket as the web UI sends it.
+curl -s -X DELETE "$MOCK_URL/mock/requests" > /dev/null
+python "$FIXTURES_DIR/ws_pdf.py" "$PORT" "enterprise::team-alpha-7f3a::claude-sonnet"
+print_result $? "Chat turn with a PDF through claude-sonnet completes"
+python "$FIXTURES_DIR/ws_pdf.py" "$PORT" "enterprise::team-alpha-7f3a::gpt-4o-mini"
+print_result $? "Chat turn with a PDF through gpt-4o-mini completes"
+
+curl -s "$MOCK_URL/mock/requests" | python3 -c "
+import sys, json
+reqs = json.load(sys.stdin)['requests']
+got = [(r['model'], r['pdf_parts'], r['outcome']) for r in reqs]
+assert got == [('claude-sonnet', 1, 'ok'), ('gpt-4o-mini', 0, 'ok')], got
+print(got)
+"
+print_result $? "Mock received the PDF inline from claude-sonnet only (supports_pdf per model)"
+
 # --- Invalid entries are refused at load ---------------------------------------
 print_header "PR #1049: invalid model entries"
 # Each case: where the setting goes (entry or defaults) | the setting | the
@@ -212,6 +236,34 @@ sys.exit(0 if not expected else 1)
 EOF
     print_result $? "$label"
 done
+
+# --- A refused config stops startup ------------------------------------------
+# The LLM config is fatal when invalid, so the upgrade-time effect of the new
+# model_defaults check is a server that does not start, with the field named.
+BAD_CONFIG_DIR="$WORK_DIR/config-bad"
+mkdir -p "$BAD_CONFIG_DIR"
+sed 's/^      max_tokens: 256$/      max_tokens: 256\n      supports_telepathy: true/' \
+    "$FIXTURES_DIR/llmconfig.yml" > "$BAD_CONFIG_DIR/llmconfig.yml"
+echo '{}' > "$BAD_CONFIG_DIR/mcp.json"
+cd "$ATLAS_DIR"
+APP_CONFIG_DIR="$BAD_CONFIG_DIR" PORT=8178 python main.py > "$WORK_DIR/backend-bad.log" 2>&1 &
+BAD_PID=$!
+cd "$PROJECT_ROOT"
+for i in $(seq 1 30); do
+    kill -0 $BAD_PID 2>/dev/null || break
+    sleep 1
+done
+if kill -0 $BAD_PID 2>/dev/null; then
+    kill $BAD_PID 2>/dev/null
+    echo "  backend was still running after 30s"
+    false
+else
+    wait $BAD_PID
+    STATUS=$?
+    echo "  exit status $STATUS"
+    [ "$STATUS" -ne 0 ] && grep -q "unknown model setting(s) in model_defaults: supports_telepathy" "$WORK_DIR/backend-bad.log"
+fi
+print_result $? "Backend refuses to start with an unknown model_defaults field, naming it"
 
 # --- Unit tests -------------------------------------------------------------
 print_header "Backend unit test suite"

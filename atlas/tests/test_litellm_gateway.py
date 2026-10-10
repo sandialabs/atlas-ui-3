@@ -924,9 +924,6 @@ class TestGatewayPerModelSettings:
         assert (llama.supports_tools, llama.supports_vision) == (False, False)
         assert llama.max_tokens == 256
 
-    # The call target overwrites model_url and api_key itself, but not
-    # api_key_source, globus_scope or delegation: for those the load-time check
-    # is the only guard, so each is tested.
     REFUSED_SETTINGS = [
         ({"model_url": "http://elsewhere"}, "may not set model_url"),
         ({"api_key": "sk-other"}, "may not set api_key"),
@@ -948,6 +945,37 @@ class TestGatewayPerModelSettings:
         # not silently dropped.
         with pytest.raises(ValidationError, match=message):
             _llm_config(model_defaults=defaults)
+
+    def test_call_target_pins_every_reserved_field(self):
+        # Defense in depth behind the load-time check: settings that bypass it
+        # (here, written into the loaded config) still cannot change any field
+        # that identifies or authorizes the model.
+        from atlas.modules.config.models import GATEWAY_RESERVED_MODEL_KEYS, lookup_model_config
+
+        key = f"enterprise::{ALPHA}::gpt-4o-mini"
+        llm_config = _llm_config(models={"gpt-4o-mini": {"supports_tools": True}})
+        clean = lookup_model_config(llm_config, key)
+        smuggled = {
+            "model_name": "other-model",
+            "model_url": "http://elsewhere",
+            "api_key": "sk-other",
+            "api_key_source": "delegated",
+            "globus_scope": "urn:globus:auth:scope:example",
+            "groups": ["everyone"],
+            "compliance_level": "Public",
+            "allowed_data_classifications": ["Public"],
+            "extra_headers": {"x-litellm-team-id": "team-other"},
+            "delegation": {"scope": "api://other/.default"},
+        }
+        assert set(smuggled) == GATEWAY_RESERVED_MODEL_KEYS
+        gateway = llm_config.litellm_gateways["enterprise"]
+        gateway.model_defaults.update(smuggled)
+        gateway.models["gpt-4o-mini"].model_extra.update(smuggled)
+
+        pinned = lookup_model_config(llm_config, key)
+        for field in GATEWAY_RESERVED_MODEL_KEYS:
+            assert getattr(pinned, field) == getattr(clean, field), field
+        assert pinned.supports_tools is True
 
     @pytest.mark.asyncio
     async def test_gateway_summary_gives_each_allowlisted_models_capabilities(self):
