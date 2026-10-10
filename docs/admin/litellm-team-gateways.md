@@ -1,6 +1,6 @@
 # Enterprise LiteLLM Team Gateways
 
-Last updated: 2026-10-07
+Last updated: 2026-10-10
 
 Some deployments reach their models through an enterprise
 [LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) where access and
@@ -43,7 +43,8 @@ litellm_gateways:
     models:                                    # optional allowlist; omit = every team model
       gpt-4.1:
         compliance_level: "SOC2"               # overrides the gateway's level
-      claude-sonnet: {}                        # allowed; inherits "Internal"
+        supports_vision: true                  # overrides model_defaults for this model
+      claude-sonnet: {}                        # allowed; inherits "Internal" and model_defaults
     model_defaults:                            # applied to every team model
       max_tokens: 4096
       supports_tools: true
@@ -68,7 +69,7 @@ litellm_gateways:
 | `groups` | `[]` | Atlas groups allowed to use the gateway, as for a model's `groups`. |
 | `allowed_data_classifications` | - | Data classifications every model reached through the gateway is approved for, unless a `models` entry sets its own. See [Compliance](compliance.md). |
 | `compliance_level` | - | Deprecated single level; read as `[compliance_level]` when `allowed_data_classifications` is unset. |
-| `models` | `{}` (all) | Admin allowlist of LiteLLM model ids. When set, only these models are offered and callable through the gateway (see [Limiting the models](#limiting-the-models)). Each entry may set `allowed_data_classifications` or `compliance_level`. A plain list (`models: [gpt-4.1, claude-sonnet]`) allows models without per-model settings. |
+| `models` | `{}` (all) | Admin allowlist of LiteLLM model ids. When set, only these models are offered and callable through the gateway (see [Limiting the models](#limiting-the-models)). Each entry may set `allowed_data_classifications` or `compliance_level`, and any field `model_defaults` may, for that model (see [Per-model settings](#per-model-settings)). A plain list (`models: [gpt-4.1, claude-sonnet]`) allows models without per-model settings. |
 | `extra_headers` | - | Static headers sent on every chat request. |
 | `model_defaults` | `{}` | Any [model field](llm-config.md#configuration-fields-explained) except the identity and access fields (`model_name`, `model_url`, `api_key`, `api_key_source`, `globus_scope`, `groups`, `compliance_level`, `allowed_data_classifications`, `extra_headers`). Validated when the file loads. |
 
@@ -109,9 +110,41 @@ litellm_gateways:
   unleveled, as it would for a static model. It does not inherit the gateway's level. The level drives the server-side compliance checks. It also drives
   the compliance filter in the model picker: the gateway stays listed while any
   of its models passes the filter, and models that don't pass are hidden.
-- Each entry accepts only `allowed_data_classifications` and `compliance_level`; other model settings still come
-  from `model_defaults`. Removing a model from the list takes effect when the
-  new configuration is loaded.
+- Removing a model from the list takes effect when the new configuration is
+  loaded.
+
+### Per-model settings
+
+`model_defaults` applies to every model a gateway offers. Models differ, though:
+under one team, one model may take tools and images, another tools only, another
+neither. An allowlist entry may set any field `model_defaults` may, and it
+overrides the default for that model:
+
+```yaml
+litellm_gateways:
+  enterprise:
+    model_defaults:                  # every model, unless its entry says otherwise
+      supports_tools: false
+      max_tokens: 4096
+    models:
+      llama-3.3-70b: {}              # the defaults: no tools
+      gpt-4.1-mini:
+        supports_tools: true         # tools only
+      claude-sonnet:
+        compliance_level: "Internal"
+        supports_tools: true         # tools, images and PDFs
+        supports_vision: true
+        supports_pdf: true
+        max_tokens: 8192
+```
+
+- **Where it applies:** the model's configuration on the server (tool use,
+  attachments, `max_tokens` and the rest), the picker's per-model tool and vision
+  icons, and the chat's file and tool controls for a selected model.
+- **Validated when the file loads,** like `model_defaults`: the identity and
+  access fields are refused, as is an unknown field or a bad value.
+- **Models not in `models`:** with no allowlist, every model gets
+  `model_defaults`; to give models their own settings, list them.
 
 ### Authentication
 
@@ -232,9 +265,9 @@ completion. Validate that path in staging before relying on it.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/config`, `GET /api/config/shell` | `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, compliance_level?, compliance_levels?, model_compliance_levels?}]`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps each allowlisted model id to its level (`null` when the model is unleveled). `model_allowed_data_classifications` maps each allowlisted model id to its classifications and `model_classifications` lists them, which is what the picker filters on. |
+| `GET /api/config`, `GET /api/config/shell` | `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, model_capabilities?, compliance_level?, compliance_levels?, model_compliance_levels?}]`. `supports_*` are the gateway's `model_defaults`; `model_capabilities` maps each allowlisted model id to its own `{supports_vision, supports_pdf, supports_tools}`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps each allowlisted model id to its level (`null` when the model is unleveled). `model_allowed_data_classifications` maps each allowlisted model id to its classifications and `model_classifications` lists them, which is what the picker filters on. |
 | `GET /api/llm/gateways/{gateway}/teams[?refresh=true]` | `{gateway, teams: [{team_id, label}]}` |
-| `GET /api/llm/gateways/{gateway}/models?team_id=...[&refresh=true]` | `{gateway, team_id, team_label, models: [{name, model_id, label, compliance_level?, allowed_data_classifications?}]}`, limited to the allowlist when one is set |
+| `GET /api/llm/gateways/{gateway}/models?team_id=...[&refresh=true]` | `{gateway, team_id, team_label, models: [{name, model_id, label, supports_vision, supports_pdf, supports_tools, compliance_level?, allowed_data_classifications?}]}`, limited to the allowlist when one is set; each model's capabilities are its own ([Per-model settings](#per-model-settings)) |
 
 Errors: `401` the gateway could not authenticate the user, `403` not a member
 of the team, `404` unknown or restricted gateway, `502` LiteLLM unreachable.

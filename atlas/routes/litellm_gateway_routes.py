@@ -43,6 +43,13 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
             "supports_pdf": bool(defaults.get("supports_pdf", False)),
             "supports_tools": bool(defaults.get("supports_tools", True)),
         }
+        # Each allowlisted model's own capabilities (its entry over the
+        # defaults above), so the client shows and gates a saved selection by
+        # its model, not the gateway.
+        if gateway.models:
+            summary["model_capabilities"] = {
+                model_id: gateway.model_capabilities(model_id) for model_id in gateway.models
+            }
         if getattr(app_settings, "feature_compliance_levels_enabled", False):
             if gateway.compliance_level:
                 summary["compliance_level"] = gateway.compliance_level
@@ -155,6 +162,7 @@ async def list_gateway_models(
             "name": build_gateway_model_key(gateway_name, team.team_id, model_id),
             "model_id": model_id,
             "label": model_id,
+            **gateway.model_capabilities(model_id),
         }
         level = gateway.model_compliance_level(model_id)
         if compliance_enabled and level:
