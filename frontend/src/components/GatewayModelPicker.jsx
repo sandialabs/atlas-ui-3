@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Users, Wrench, Eye, Loader2, RefreshCw, Shield } from 'lucide-react'
+import { Users, Loader2, RefreshCw, Shield } from 'lucide-react'
 import { classificationLabel } from '../utils/complianceAccess'
+import CapabilityIcons from './CapabilityIcons'
 import {
   parseGatewayModelKey,
   rememberTeamLabel,
@@ -61,18 +62,6 @@ const LoadError = ({ prefix, error }) => (
     )}
   </p>
 )
-
-// One capability icon. Color alone can't tell models apart, so the icon also
-// carries its meaning as a tooltip and an accessible name.
-const CapabilityIcon = ({ icon, supported, color, yes, no }) => {
-  const Icon = icon
-  const text = supported ? yes : no
-  return (
-    <span role="img" aria-label={text} title={text} className="inline-flex">
-      <Icon aria-hidden="true" className={`w-3.5 h-3.5 ${supported ? color : 'text-gray-600'}`} />
-    </span>
-  )
-}
 
 /**
  * Team-then-model selection for one enterprise LiteLLM gateway.
@@ -231,10 +220,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                           {classificationLabel(model)}
                         </span>
                       )}
-                      <CapabilityIcon icon={Eye} supported={!!vision} color="text-green-400"
-                        yes="Accepts images" no="No image input" />
-                      <CapabilityIcon icon={Wrench} supported={tools !== false} color="text-blue-400"
-                        yes="Uses tools" no="No tool use" />
+                      <CapabilityIcons vision={vision} tools={tools} />
                     </span>
                   </button>
                 )

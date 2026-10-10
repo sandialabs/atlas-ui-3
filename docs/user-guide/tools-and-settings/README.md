@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-10-02
+Last updated: 2026-10-10
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -81,7 +81,8 @@ the model, the tools, and the prompts, in that order.
 
 The model picker moved out of the top bar. It behaves exactly as it did there
 -- vision/tools capability icons, the expandable model card, and the per-model
-API key button -- but the menu opens upward.
+API key button -- but the menu opens upward. Hovering a capability icon names
+it ("Accepts images", "No tool use"), and screen readers read the same names.
 
 ### Tools
 

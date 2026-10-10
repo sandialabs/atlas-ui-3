@@ -171,6 +171,18 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     expect(await names('gpt-4o-mini')).toEqual([['No image input', 'No image input'], ['No tool use', 'No tool use']])
   })
 
+  it('names the ordinary models\' capability icons too', () => {
+    setup({ models: [
+      { name: 'static-model', supports_tools: true },
+      { name: 'vision-model', supports_vision: true, supports_tools: false },
+    ] })
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    const names = (label) => within(screen.getByRole('button', { name: new RegExp(`^${label}`) }))
+      .getAllByRole('img').map(icon => [icon.getAttribute('aria-label'), icon.getAttribute('title')])
+    expect(names('static-model')).toEqual([['No image input', 'No image input'], ['Uses tools', 'Uses tools']])
+    expect(names('vision-model')).toEqual([['Accepts images', 'Accepts images'], ['No tool use', 'No tool use']])
+  })
+
   it('keeps gateway models out of the flat list and labels the current one', async () => {
     rememberTeamLabel('enterprise', 'team-alpha', 'Project Alpha', 'test@test.com')
     setup({ currentModel: 'enterprise::team-alpha::claude-sonnet' })

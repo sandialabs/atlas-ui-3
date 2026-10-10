@@ -7,6 +7,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
 import GatewayModelPicker from './GatewayModelPicker'
+import CapabilityIcons from './CapabilityIcons'
 
 /**
  * Chat model picker.
@@ -146,8 +147,7 @@ const ModelSelector = () => {
                       >
                         <span className="truncate">{modelName}</span>
                         <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                          <Eye className={`w-3.5 h-3.5 ${model.supports_vision ? 'text-green-400' : 'text-gray-600'}`} />
-                          <Wrench className={`w-3.5 h-3.5 ${model.supports_tools !== false ? 'text-blue-400' : 'text-gray-600'}`} />
+                          <CapabilityIcons vision={model.supports_vision} tools={model.supports_tools} />
                         </span>
                       </button>
                       {needsUserKey && (
