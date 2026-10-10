@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import ModelSelector from '../components/ModelSelector'
 import { useChat } from '../contexts/ChatContext'
 import {
@@ -162,6 +162,13 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     const [miniEye, miniWrench] = await iconClasses('gpt-4o-mini')
     expect(miniEye).toContain('text-gray-600')
     expect(miniWrench).toContain('text-gray-600')
+    // Not by color alone: each icon names what it means, as a tooltip too.
+    const names = async (label) => {
+      const row = await screen.findByRole('button', { name: new RegExp(label) })
+      return within(row).getAllByRole('img').map(icon => [icon.getAttribute('aria-label'), icon.getAttribute('title')])
+    }
+    expect(await names('claude-sonnet')).toEqual([['Accepts images', 'Accepts images'], ['Uses tools', 'Uses tools']])
+    expect(await names('gpt-4o-mini')).toEqual([['No image input', 'No image input'], ['No tool use', 'No tool use']])
   })
 
   it('keeps gateway models out of the flat list and labels the current one', async () => {

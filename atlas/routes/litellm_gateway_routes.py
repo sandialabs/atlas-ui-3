@@ -34,14 +34,11 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
     for name, gateway in (getattr(llm_config, "litellm_gateways", None) or {}).items():
         if not await is_model_allowed(gateway, current_user):
             continue
-        defaults = gateway.model_defaults
         summary: Dict[str, Any] = {
             "name": name,
             "display_name": gateway.display_name or name,
             "description": gateway.description,
-            "supports_vision": bool(defaults.get("supports_vision", False)),
-            "supports_pdf": bool(defaults.get("supports_pdf", False)),
-            "supports_tools": bool(defaults.get("supports_tools", True)),
+            **gateway.default_capabilities(),
         }
         # Each allowlisted model's own capabilities (its entry over the
         # defaults above), so the client shows and gates a saved selection by

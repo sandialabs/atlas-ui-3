@@ -886,6 +886,33 @@ class TestGatewayPerModelSettings:
             "supports_vision": True, "supports_pdf": True, "supports_tools": True,
         }
 
+    @pytest.mark.asyncio
+    async def test_quoted_booleans_mean_what_the_server_does(self):
+        # YAML quoting (or an env-substituted value) gives strings; capabilities
+        # follow the validated ModelConfig, so "false" is false, not truthy.
+        from atlas.modules.config.models import lookup_model_config
+        from atlas.routes.litellm_gateway_routes import build_gateway_summaries
+
+        llm_config = _llm_config(
+            model_defaults={"supports_tools": "false", "supports_vision": "true"},
+            models={"gpt-4o-mini": {"supports_pdf": "true", "supports_vision": "false"}, "claude-sonnet": {}},
+        )
+        gateway = llm_config.litellm_gateways["enterprise"]
+        assert gateway.default_capabilities() == {
+            "supports_vision": True, "supports_pdf": False, "supports_tools": False,
+        }
+        assert gateway.model_capabilities("gpt-4o-mini") == {
+            "supports_vision": False, "supports_pdf": True, "supports_tools": False,
+        }
+        target = lookup_model_config(llm_config, f"enterprise::{ALPHA}::gpt-4o-mini")
+        assert (target.supports_vision, target.supports_pdf, target.supports_tools) == (False, True, False)
+
+        settings = type("S", (), {"feature_compliance_levels_enabled": False})()
+        with patch("atlas.core.model_access.is_user_in_group", AsyncMock(return_value=True)):
+            (summary,) = await build_gateway_summaries(llm_config, "test@test.com", settings)
+        assert (summary["supports_vision"], summary["supports_pdf"], summary["supports_tools"]) == (True, False, False)
+        assert summary["model_capabilities"]["gpt-4o-mini"]["supports_vision"] is False
+
     def test_call_target_uses_the_models_own_settings(self):
         from atlas.modules.config.models import lookup_model_config
 

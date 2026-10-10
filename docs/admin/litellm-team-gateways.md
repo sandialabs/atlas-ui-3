@@ -71,7 +71,7 @@ litellm_gateways:
 | `compliance_level` | - | Deprecated single level; read as `[compliance_level]` when `allowed_data_classifications` is unset. |
 | `models` | `{}` (all) | Admin allowlist of LiteLLM model ids. When set, only these models are offered and callable through the gateway (see [Limiting the models](#limiting-the-models)). Each entry may set `allowed_data_classifications` or `compliance_level`, and any field `model_defaults` may, for that model (see [Per-model settings](#per-model-settings)). A plain list (`models: [gpt-4.1, claude-sonnet]`) allows models without per-model settings. |
 | `extra_headers` | - | Static headers sent on every chat request. |
-| `model_defaults` | `{}` | Any [model field](llm-config.md#configuration-fields-explained) except the identity and access fields (`model_name`, `model_url`, `api_key`, `api_key_source`, `globus_scope`, `groups`, `compliance_level`, `allowed_data_classifications`, `extra_headers`). Validated when the file loads. |
+| `model_defaults` | `{}` | Any [model field](llm-config.md#configuration-fields-explained) except the identity and access fields (`model_name`, `model_url`, `api_key`, `api_key_source`, `globus_scope`, `groups`, `compliance_level`, `allowed_data_classifications`, `extra_headers`, `delegation`). Validated when the file loads. |
 
 A gateway name must not contain `::`, and no model in the top-level `models`
 may start with `<gateway>::`.
@@ -141,8 +141,12 @@ litellm_gateways:
 - **Where it applies:** the model's configuration on the server (tool use,
   attachments, `max_tokens` and the rest), the picker's per-model tool and vision
   icons, and the chat's file and tool controls for a selected model.
+- **Merged field by field, shallowly:** a field the entry sets replaces the
+  default's value whole, and every field it doesn't set keeps the default. The
+  merge never reaches inside a field's value.
 - **Validated when the file loads,** like `model_defaults`: the identity and
-  access fields are refused, as is an unknown field or a bad value.
+  access fields (those listed under `model_defaults` above) are refused, as is
+  an unknown field or a bad value.
 - **Models not in `models`:** with no allowlist, every model gets
   `model_defaults`; to give models their own settings, list them.
 

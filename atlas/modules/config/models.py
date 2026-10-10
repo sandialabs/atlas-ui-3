@@ -256,6 +256,18 @@ def validate_gateway_model_settings(settings: Dict[str, Any], where: str) -> Non
     ModelConfig(model_name="probe", model_url="http://probe", **settings)
 
 
+def gateway_capabilities(settings: Dict[str, Any]) -> Dict[str, bool]:
+    """Capabilities from a gateway model's settings, read from a validated
+    ModelConfig, so they agree with the server's (a quoted "false" is false to
+    both) and take ModelConfig's defaults for anything not set."""
+    config = ModelConfig(model_name="probe", model_url="http://probe", **settings)
+    return {
+        "supports_vision": config.supports_vision,
+        "supports_pdf": config.supports_pdf,
+        "supports_tools": config.supports_tools,
+    }
+
+
 class LiteLLMGatewayModel(BaseModel):
     """Admin settings for one named model in a gateway's ``models`` allowlist.
 
@@ -388,14 +400,12 @@ class LiteLLMGatewayConfig(BaseModel):
         return {**self.model_defaults, **(entry.settings() if entry is not None else {})}
 
     def model_capabilities(self, model_id: str) -> Dict[str, bool]:
-        """One model's capabilities as the client shows and gates them, with
-        ModelConfig's defaults for anything not set."""
-        settings = self.model_settings(model_id)
-        return {
-            "supports_vision": bool(settings.get("supports_vision", False)),
-            "supports_pdf": bool(settings.get("supports_pdf", False)),
-            "supports_tools": bool(settings.get("supports_tools", True)),
-        }
+        """One model's capabilities as the client shows and gates them."""
+        return gateway_capabilities(self.model_settings(model_id))
+
+    def default_capabilities(self) -> Dict[str, bool]:
+        """The capabilities of a model with no settings of its own."""
+        return gateway_capabilities(self.model_defaults)
 
     def model_compliance_level(self, model_id: str) -> Optional[str]:
         """The compliance level of one model: its own, else the gateway's."""
