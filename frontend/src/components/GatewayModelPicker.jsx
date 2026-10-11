@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Users, Loader2, RefreshCw, Shield } from 'lucide-react'
-import { classificationLabel } from '../utils/complianceAccess'
+import { Users, Loader2, RefreshCw } from 'lucide-react'
 import CapabilityIcons from './CapabilityIcons'
+import ClassificationBadge from './ClassificationBadge'
 import {
   parseGatewayModelKey,
   rememberTeamLabel,
@@ -214,12 +214,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                   >
                     <span className="truncate">{model.label || model.model_id}</span>
                     <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                      {showCompliance && classificationLabel(model) && (
-                        <span className="inline-flex items-center gap-0.5 px-1 rounded text-[10px] bg-blue-600 text-white">
-                          <Shield className="w-2.5 h-2.5" />
-                          {classificationLabel(model)}
-                        </span>
-                      )}
+                      {showCompliance && <ClassificationBadge resource={model} />}
                       <CapabilityIcons vision={vision} tools={tools} />
                     </span>
                   </button>

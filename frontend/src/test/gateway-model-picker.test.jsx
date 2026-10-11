@@ -314,6 +314,26 @@ describe('admin-allowlisted gateway models with their own classifications', () =
     vi.restoreAllMocks()
   })
 
+  it('badges the ordinary models\' levels in their rows too, as the gateway\'s', () => {
+    const models = [
+      { name: 'static-model', supports_tools: true, compliance_level: 'Internal', allowed_data_classifications: ['Internal'] },
+      { name: 'both-levels', supports_tools: true, allowed_data_classifications: ['Public', 'Internal'] },
+      { name: 'undeclared', supports_tools: true },
+    ]
+    setup({ models, features: { compliance_levels: true } })
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    const row = (name) => screen.getByRole('button', { name: new RegExp(`^${name}`) })
+    expect(within(row('static-model')).getByText('Internal')).toBeTruthy()
+    expect(within(row('both-levels')).getByText('Public, Internal')).toBeTruthy()
+    expect(within(row('undeclared')).queryByText(/Public|Internal/)).toBeNull()
+  })
+
+  it('shows no level badge in the rows with compliance levels off', () => {
+    setup({ models: [{ name: 'static-model', supports_tools: true, allowed_data_classifications: ['Internal'] }] })
+    fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
+    expect(within(screen.getByRole('button', { name: /^static-model/ })).queryByText('Internal')).toBeNull()
+  })
+
   it('labels a saved selection with the model level, not the gateway level', () => {
     expect(gatewayModelEntry('enterprise::t1::gpt-4o-mini', [LEVELED_GATEWAY], 'a@x.com').compliance_level)
       .toBe('Public')

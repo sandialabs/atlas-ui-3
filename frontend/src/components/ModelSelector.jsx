@@ -8,6 +8,7 @@ import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
 import GatewayModelPicker from './GatewayModelPicker'
 import CapabilityIcons from './CapabilityIcons'
+import ClassificationBadge from './ClassificationBadge'
 
 /**
  * Chat model picker.
@@ -147,6 +148,7 @@ const ModelSelector = () => {
                       >
                         <span className="truncate">{modelName}</span>
                         <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                          {complianceEnabled && <ClassificationBadge resource={model} />}
                           <CapabilityIcons vision={model.supports_vision} tools={model.supports_tools} />
                         </span>
                       </button>
