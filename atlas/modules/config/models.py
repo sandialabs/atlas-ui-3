@@ -236,9 +236,49 @@ class ModelConfig(BaseModel):
         return normalized
 
 
+# ModelConfig fields that identify or authorize a gateway model; they come from
+# the gateway itself, so model_defaults and allowlist entries may not set them.
+GATEWAY_RESERVED_MODEL_KEYS = frozenset({
+    "model_name", "model_url", "api_key", "api_key_source", "globus_scope",
+    "groups", "compliance_level", "allowed_data_classifications",
+    "extra_headers", "delegation",
+})
+
+
+def validate_gateway_model_settings(settings: Dict[str, Any], where: str) -> None:
+    """Reject ModelConfig settings a gateway model may not take, at load time."""
+    # ModelConfig ignores unknown fields, so a misspelt setting would otherwise
+    # be dropped without a word.
+    unknown = sorted(set(settings) - set(ModelConfig.model_fields))
+    if unknown:
+        raise ValueError(f"unknown model setting(s) in {where}: {', '.join(unknown)}")
+    reserved = sorted(set(settings) & GATEWAY_RESERVED_MODEL_KEYS)
+    if reserved:
+        raise ValueError(
+            f"{where} may not set {', '.join(reserved)}; configure these on the gateway itself"
+        )
+    # Surface a bad value at load time rather than on first use.
+    ModelConfig(model_name="probe", model_url="http://probe", **settings)
+
+
+def capabilities_of(config: ModelConfig) -> Dict[str, bool]:
+    """The capabilities the client shows and gates for a model."""
+    return {
+        "supports_vision": config.supports_vision,
+        "supports_pdf": config.supports_pdf,
+        "supports_tools": config.supports_tools,
+    }
+
+
 class LiteLLMGatewayModel(BaseModel):
-    """Admin settings for one named model in a gateway's ``models`` allowlist."""
-    model_config = ConfigDict(extra="forbid")
+    """Admin settings for one named model in a gateway's ``models`` allowlist.
+
+    Besides its compliance, an entry may set any field ``model_defaults`` may
+    (``supports_tools``, ``supports_vision``, ``max_tokens``, ...), overriding
+    the gateway's default for this model, so one gateway can offer models with
+    different capabilities.
+    """
+    model_config = ConfigDict(extra="allow")
 
     # Overrides the gateway's compliance_level for this model.
     compliance_level: Optional[str] = None
@@ -247,6 +287,15 @@ class LiteLLMGatewayModel(BaseModel):
     # Set at load when compliance_level names no known level: the model is
     # then unleveled, never silently given the gateway's level instead.
     _invalid_compliance_level: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def validate_settings(self):
+        validate_gateway_model_settings(self.settings(), "a models entry")
+        return self
+
+    def settings(self) -> Dict[str, Any]:
+        """The entry's ModelConfig settings (its fields other than compliance)."""
+        return dict(self.model_extra or {})
 
 
 class LiteLLMGatewayConfig(BaseModel):
@@ -296,11 +345,7 @@ class LiteLLMGatewayConfig(BaseModel):
 
     # Fields that identify or authorize the model; they come from the gateway
     # itself, so a model_defaults entry for them would be silently misleading.
-    RESERVED_MODEL_DEFAULT_KEYS: ClassVar[frozenset] = frozenset({
-        "model_name", "model_url", "api_key", "api_key_source", "globus_scope",
-        "groups", "compliance_level", "allowed_data_classifications",
-        "extra_headers", "delegation",
-    })
+    RESERVED_MODEL_DEFAULT_KEYS: ClassVar[frozenset] = GATEWAY_RESERVED_MODEL_KEYS
 
     @field_validator("models", mode="before")
     @classmethod
@@ -321,14 +366,7 @@ class LiteLLMGatewayConfig(BaseModel):
     @field_validator("model_defaults")
     @classmethod
     def validate_model_defaults(cls, v):
-        reserved = sorted(set(v) & cls.RESERVED_MODEL_DEFAULT_KEYS)
-        if reserved:
-            raise ValueError(
-                f"model_defaults may not set {', '.join(reserved)}; "
-                "configure these on the gateway itself"
-            )
-        # Surface a bad key or value at load time rather than on first use.
-        ModelConfig(model_name="probe", model_url="http://probe", **v)
+        validate_gateway_model_settings(v, "model_defaults")
         return v
 
     @model_validator(mode="after")
@@ -352,6 +390,48 @@ class LiteLLMGatewayConfig(BaseModel):
     def allows_model(self, model_id: str) -> bool:
         """Whether the admin allowlist (if any) permits this LiteLLM model id."""
         return not self.models or model_id in self.models
+
+    def model_settings(self, model_id: str) -> Dict[str, Any]:
+        """ModelConfig settings for one model: ``model_defaults``, overridden by
+        its allowlist entry's own settings."""
+        entry = self.models.get(model_id)
+        return {**self.model_defaults, **(entry.settings() if entry is not None else {})}
+
+    def build_model_config(self, model_id: str, model_url: str, description: str) -> ModelConfig:
+        """The ModelConfig of one model reached through this gateway: its
+        settings, with every field that identifies or authorizes it taken from
+        the gateway. Both the call target and the capabilities the client is
+        given are built here, so the two cannot disagree."""
+        fields = {"description": description, **self.model_settings(model_id)}
+        fields.update(
+            model_name=model_id,
+            model_url=model_url,
+            # The gateway client supplies the bearer token per call (a service
+            # key or a delegated token), so no static key is resolved here.
+            api_key="",
+            # Refused in the settings at load, and pinned here as well, so a
+            # setting that slipped past that check still cannot change where
+            # the model's credentials come from.
+            api_key_source="system",
+            globus_scope=None,
+            delegation=None,
+            groups=list(self.groups),
+            compliance_level=self.model_compliance_level(model_id),
+            allowed_data_classifications=self.model_allowed_data_classifications(model_id),
+            extra_headers=dict(self.extra_headers) if self.extra_headers else None,
+        )
+        return ModelConfig(**fields)
+
+    def model_capabilities(self, model_id: str) -> Dict[str, bool]:
+        """One model's capabilities as the client shows and gates them, read
+        from the ModelConfig its calls use (no capability depends on the URL,
+        so an unresolved base_url does not matter here)."""
+        return capabilities_of(self.build_model_config(model_id, self.base_url, model_id))
+
+    def default_capabilities(self) -> Dict[str, bool]:
+        """The capabilities of a model with no allowlist entry of its own."""
+        # Allowlist ids are never empty, so "" names such a model.
+        return self.model_capabilities("")
 
     def model_compliance_level(self, model_id: str) -> Optional[str]:
         """The compliance level of one model: its own, else the gateway's."""
@@ -449,19 +529,7 @@ class LLMConfig(BaseModel):
             # its models are unknown rather than an error on every lookup.
             logger.error("LiteLLM gateway base_url is not configured (environment variable unset)")
             return None
-        fields = {"description": f"{ref.model_id} via {gateway_label}", **gateway.model_defaults}
-        fields.update(
-            model_name=ref.model_id,
-            model_url=base_url,
-            # The gateway client supplies the bearer token per call (a service
-            # key or a delegated token), so no static key is resolved here.
-            api_key="",
-            groups=list(gateway.groups),
-            compliance_level=gateway.model_compliance_level(ref.model_id),
-            allowed_data_classifications=gateway.model_allowed_data_classifications(ref.model_id),
-            extra_headers=dict(gateway.extra_headers) if gateway.extra_headers else None,
-        )
-        return ModelConfig(**fields)
+        return gateway.build_model_config(ref.model_id, base_url, f"{ref.model_id} via {gateway_label}")
 
 
 def lookup_model_config(llm_config: Any, model_name: str) -> Optional[ModelConfig]:

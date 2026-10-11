@@ -77,8 +77,22 @@ export function lastTeamFor(gateway, user) {
 }
 
 /**
+ * A gateway model's capabilities: its own (`model_capabilities`, for models
+ * the gateway's allowlist names) or else the gateway's model defaults.
+ */
+export function gatewayModelCapabilities(gateway, modelId) {
+  const own = gateway.model_capabilities
+  const caps = own && Object.hasOwn(own, modelId) ? own[modelId] : gateway
+  return {
+    supports_vision: !!caps.supports_vision,
+    supports_pdf: !!caps.supports_pdf,
+    supports_tools: caps.supports_tools !== false,
+  }
+}
+
+/**
  * The model-list entry for a gateway model key, shaped like the entries in
- * /api/config `models` (capabilities come from the gateway's model defaults).
+ * /api/config `models` (capabilities: gatewayModelCapabilities).
  */
 export function gatewayModelEntry(name, gateways, user) {
   const ref = parseGatewayModelKey(name, gateways)
@@ -105,9 +119,7 @@ export function gatewayModelEntry(name, gateways, user) {
     allowed_data_classifications: modelClassifications && Object.hasOwn(modelClassifications, ref.modelId)
       ? modelClassifications[ref.modelId]
       : gateway.allowed_data_classifications,
-    supports_vision: !!gateway.supports_vision,
-    supports_pdf: !!gateway.supports_pdf,
-    supports_tools: gateway.supports_tools !== false,
+    ...gatewayModelCapabilities(gateway, ref.modelId),
   }
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Users, Wrench, Eye, Loader2, RefreshCw, Shield } from 'lucide-react'
-import { classificationLabel } from '../utils/complianceAccess'
+import { Users, Loader2, RefreshCw } from 'lucide-react'
+import CapabilityIcons from './CapabilityIcons'
+import ClassificationBadge from './ClassificationBadge'
 import {
   parseGatewayModelKey,
   rememberTeamLabel,
@@ -196,6 +197,10 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
             <div className="rounded border border-gray-700">
               {shownModels.map(model => {
                 const selected = model.name === currentModel
+                // The team's models listing gives each model's capabilities;
+                // the gateway's defaults cover an older backend that doesn't.
+                const vision = model.supports_vision ?? gateway.supports_vision
+                const tools = model.supports_tools ?? gateway.supports_tools
                 return (
                   <button
                     key={model.name}
@@ -209,14 +214,8 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                   >
                     <span className="truncate">{model.label || model.model_id}</span>
                     <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                      {showCompliance && classificationLabel(model) && (
-                        <span className="inline-flex items-center gap-0.5 px-1 rounded text-[10px] bg-blue-600 text-white">
-                          <Shield className="w-2.5 h-2.5" />
-                          {classificationLabel(model)}
-                        </span>
-                      )}
-                      <Eye className={`w-3.5 h-3.5 ${gateway.supports_vision ? 'text-green-400' : 'text-gray-600'}`} />
-                      <Wrench className={`w-3.5 h-3.5 ${gateway.supports_tools !== false ? 'text-blue-400' : 'text-gray-600'}`} />
+                      {showCompliance && <ClassificationBadge resource={model} />}
+                      <CapabilityIcons vision={vision} tools={tools} />
                     </span>
                   </button>
                 )

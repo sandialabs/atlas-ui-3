@@ -1,0 +1,27 @@
+# PR 1049: one team gateway whose allowlisted models have different
+# capabilities and max_tokens, backed by mocks/litellm-mock.
+models:
+  static-model:
+    model_url: "${PR1049_LITELLM_URL}"
+    model_name: "gpt-4o-mini"
+    api_key: "sk-mock-litellm-master"
+
+litellm_gateways:
+  enterprise:
+    display_name: "Enterprise LiteLLM (mock)"
+    base_url: "${PR1049_LITELLM_URL}"
+    api_key: "sk-mock-litellm-master"
+    model_defaults:
+      supports_tools: false
+      max_tokens: 256
+    models:
+      # Project Alpha's two models: tools only, and everything with a larger
+      # max_tokens. Project Beta's model takes the defaults.
+      gpt-4o-mini:
+        supports_tools: true
+      claude-sonnet:
+        supports_tools: true
+        supports_vision: true
+        supports_pdf: true
+        max_tokens: 1024
+      llama-3.3-70b: {}

@@ -20,6 +20,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from atlas.core.log_sanitizer import get_current_user
 from atlas.core.model_access import ModelAccessDecision, check_model_access
@@ -775,6 +776,9 @@ class TestGatewayModelAllowlist:
             "name": f"enterprise::{ALPHA}::gpt-4o-mini",
             "model_id": "gpt-4o-mini",
             "label": "gpt-4o-mini",
+            "supports_vision": False,
+            "supports_pdf": False,
+            "supports_tools": False,
             "compliance_level": "Public",
             "allowed_data_classifications": ["Public"],
         }]
@@ -839,3 +843,159 @@ class TestGatewayModelAllowlist:
         error_class, user_msg, _ = classify_llm_error(exc_info.value)
         assert "no longer available on this LiteLLM gateway" in user_msg
         assert error_type_for(error_class) == "authorization"
+
+
+def _mixed_capabilities_config() -> LLMConfig:
+    """One gateway, three models: the defaults (no tools), tools only, and tools
+    with vision and PDF."""
+    return _llm_config(
+        models={
+            "llama-3.3-70b": None,
+            "gpt-4o-mini": {"supports_tools": True},
+            "claude-sonnet": {
+                "compliance_level": "Internal",
+                "supports_tools": True,
+                "supports_vision": True,
+                "supports_pdf": True,
+                "max_tokens": 4096,
+            },
+        },
+    )
+
+
+class TestGatewayPerModelSettings:
+    """An allowlist entry may set any model_defaults field for its model."""
+
+    def test_entry_settings_override_the_defaults(self):
+        gateway = _mixed_capabilities_config().litellm_gateways["enterprise"]
+        assert gateway.model_settings("llama-3.3-70b") == {"max_tokens": 256, "supports_tools": False}
+        assert gateway.model_settings("gpt-4o-mini") == {"max_tokens": 256, "supports_tools": True}
+        assert gateway.model_settings("claude-sonnet") == {
+            "max_tokens": 4096, "supports_tools": True, "supports_vision": True, "supports_pdf": True,
+        }
+        # Compliance stays the entry's own field, never a model setting.
+        assert gateway.models["claude-sonnet"].compliance_level == "Internal"
+        assert "compliance_level" not in gateway.model_settings("claude-sonnet")
+
+    def test_capabilities_per_model(self):
+        gateway = _mixed_capabilities_config().litellm_gateways["enterprise"]
+        none = {"supports_vision": False, "supports_pdf": False, "supports_tools": False}
+        assert gateway.model_capabilities("llama-3.3-70b") == none
+        assert gateway.model_capabilities("gpt-4o-mini") == {**none, "supports_tools": True}
+        assert gateway.model_capabilities("claude-sonnet") == {
+            "supports_vision": True, "supports_pdf": True, "supports_tools": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_quoted_booleans_mean_what_the_server_does(self):
+        # YAML quoting (or an env-substituted value) gives strings; capabilities
+        # follow the validated ModelConfig, so "false" is false, not truthy.
+        from atlas.modules.config.models import lookup_model_config
+        from atlas.routes.litellm_gateway_routes import build_gateway_summaries
+
+        llm_config = _llm_config(
+            model_defaults={"supports_tools": "false", "supports_vision": "true"},
+            models={"gpt-4o-mini": {"supports_pdf": "true", "supports_vision": "false"}, "claude-sonnet": {}},
+        )
+        gateway = llm_config.litellm_gateways["enterprise"]
+        assert gateway.default_capabilities() == {
+            "supports_vision": True, "supports_pdf": False, "supports_tools": False,
+        }
+        assert gateway.model_capabilities("gpt-4o-mini") == {
+            "supports_vision": False, "supports_pdf": True, "supports_tools": False,
+        }
+        target = lookup_model_config(llm_config, f"enterprise::{ALPHA}::gpt-4o-mini")
+        assert (target.supports_vision, target.supports_pdf, target.supports_tools) == (False, True, False)
+
+        settings = type("S", (), {"feature_compliance_levels_enabled": False})()
+        with patch("atlas.core.model_access.is_user_in_group", AsyncMock(return_value=True)):
+            (summary,) = await build_gateway_summaries(llm_config, "test@test.com", settings)
+        assert (summary["supports_vision"], summary["supports_pdf"], summary["supports_tools"]) == (True, False, False)
+        assert summary["model_capabilities"]["gpt-4o-mini"]["supports_vision"] is False
+
+    def test_call_target_uses_the_models_own_settings(self):
+        from atlas.modules.config.models import lookup_model_config
+
+        llm_config = _mixed_capabilities_config()
+        sonnet = lookup_model_config(llm_config, f"enterprise::{ALPHA}::claude-sonnet")
+        assert (sonnet.supports_tools, sonnet.supports_vision, sonnet.supports_pdf) == (True, True, True)
+        assert sonnet.max_tokens == 4096
+        llama = lookup_model_config(llm_config, f"enterprise::{ALPHA}::llama-3.3-70b")
+        assert (llama.supports_tools, llama.supports_vision) == (False, False)
+        assert llama.max_tokens == 256
+
+    REFUSED_SETTINGS = [
+        ({"model_url": "http://elsewhere"}, "may not set model_url"),
+        ({"api_key": "sk-other"}, "may not set api_key"),
+        ({"api_key_source": "user"}, "may not set api_key_source"),
+        ({"globus_scope": "urn:globus:auth:scope:example"}, "may not set globus_scope"),
+        ({"delegation": {"scope": "api://other/.default"}}, "may not set delegation"),
+        ({"supports_teleport": True}, "unknown model setting"),
+        ({"max_tokens": "lots"}, "max_tokens"),
+    ]
+
+    @pytest.mark.parametrize("entry, message", REFUSED_SETTINGS)
+    def test_entry_rejects_reserved_unknown_and_bad_settings(self, entry, message):
+        with pytest.raises(ValidationError, match=message):
+            _llm_config(models={"gpt-4o-mini": entry})
+
+    @pytest.mark.parametrize("defaults, message", REFUSED_SETTINGS)
+    def test_model_defaults_reject_the_same_settings(self, defaults, message):
+        # Validated alike: an unknown key in model_defaults is refused too,
+        # not silently dropped.
+        with pytest.raises(ValidationError, match=message):
+            _llm_config(model_defaults=defaults)
+
+    def test_call_target_pins_every_reserved_field(self):
+        # Defense in depth behind the load-time check: settings that bypass it
+        # (here, written into the loaded config) still cannot change any field
+        # that identifies or authorizes the model.
+        from atlas.modules.config.models import GATEWAY_RESERVED_MODEL_KEYS, lookup_model_config
+
+        key = f"enterprise::{ALPHA}::gpt-4o-mini"
+        llm_config = _llm_config(models={"gpt-4o-mini": {"supports_tools": True}})
+        clean = lookup_model_config(llm_config, key)
+        smuggled = {
+            "model_name": "other-model",
+            "model_url": "http://elsewhere",
+            "api_key": "sk-other",
+            "api_key_source": "delegated",
+            "globus_scope": "urn:globus:auth:scope:example",
+            "groups": ["everyone"],
+            "compliance_level": "Public",
+            "allowed_data_classifications": ["Public"],
+            "extra_headers": {"x-litellm-team-id": "team-other"},
+            "delegation": {"scope": "api://other/.default"},
+        }
+        assert set(smuggled) == GATEWAY_RESERVED_MODEL_KEYS
+        gateway = llm_config.litellm_gateways["enterprise"]
+        gateway.model_defaults.update(smuggled)
+        gateway.models["gpt-4o-mini"].model_extra.update(smuggled)
+
+        pinned = lookup_model_config(llm_config, key)
+        for field in GATEWAY_RESERVED_MODEL_KEYS:
+            assert getattr(pinned, field) == getattr(clean, field), field
+        assert pinned.supports_tools is True
+
+    @pytest.mark.asyncio
+    async def test_gateway_summary_gives_each_allowlisted_models_capabilities(self):
+        from atlas.routes.litellm_gateway_routes import build_gateway_summaries
+
+        settings = type("S", (), {"feature_compliance_levels_enabled": False})()
+        with patch("atlas.core.model_access.is_user_in_group", AsyncMock(return_value=True)):
+            (summary,) = await build_gateway_summaries(_mixed_capabilities_config(), "test@test.com", settings)
+        # The gateway's own fields stay the defaults, for models the map doesn't name.
+        assert summary["supports_tools"] is False
+        caps = summary["model_capabilities"]
+        assert caps["gpt-4o-mini"] == {"supports_vision": False, "supports_pdf": False, "supports_tools": True}
+        assert caps["claude-sonnet"]["supports_vision"] is True
+        assert caps["llama-3.3-70b"]["supports_tools"] is False
+
+    @pytest.mark.asyncio
+    async def test_gateway_summary_without_allowlist_has_no_capability_map(self):
+        from atlas.routes.litellm_gateway_routes import build_gateway_summaries
+
+        settings = type("S", (), {"feature_compliance_levels_enabled": False})()
+        with patch("atlas.core.model_access.is_user_in_group", AsyncMock(return_value=True)):
+            (summary,) = await build_gateway_summaries(_llm_config(), "test@test.com", settings)
+        assert "model_capabilities" not in summary
