@@ -7,6 +7,7 @@ validation and allowlist checking.
 
 import json
 import logging
+import re
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,171 @@ logger = logging.getLogger(__name__)
 
 
 COMPLIANCE_LEVELS_FILE = "compliance-levels.json"
+
+# Optional, presentation-only banner configuration (issue #1045). A banner
+# never affects authorization: a malformed banner is dropped from the payload
+# and the level behaves exactly as before. See docs/admin/compliance.md.
+BANNER_PATTERN_TYPES = ("solid", "diagonal_stripes", "horizontal_stripes", "edge_stripes")
+BANNER_STRIPE_WIDTH_MIN = 2.0
+BANNER_STRIPE_WIDTH_MAX = 32.0
+BANNER_DEFAULT_STRIPE_WIDTH = 8.0
+BANNER_DEFAULT_STRIPE_ANGLE = 45.0
+BANNER_MAX_STRIPE_ANGLE = 360.0
+BANNER_DEFAULT_TEXT_COLOR = "#FFFFFF"
+_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+
+
+def _is_hex_color(value: Any) -> bool:
+    """Whether ``value`` is a CSS hex color (``#rgb``, ``#rgba``, ``#rrggbb`` or ``#rrggbbaa``)."""
+    return isinstance(value, str) and bool(_HEX_COLOR_RE.match(value.strip()))
+
+
+def _coerce_stripe_width(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not (BANNER_STRIPE_WIDTH_MIN <= float(value) <= BANNER_STRIPE_WIDTH_MAX):
+        return None
+    return float(value)
+
+
+def _coerce_stripe_angle(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not (0.0 <= float(value) <= BANNER_MAX_STRIPE_ANGLE):
+        return None
+    return float(value)
+
+
+def _level_ref(level_name: str) -> str:
+    return sanitize_for_logging(level_name) if level_name else "level"
+
+
+def normalize_banner_pattern(raw: Any, level_name: str = "") -> Optional[Dict[str, Any]]:
+    """Validate a banner ``pattern`` object.
+
+    Returns the normalized pattern, or ``None`` for a solid (unstriped)
+    banner. An unknown type, an invalid color, or a width outside the bounded
+    range drops the pattern -- the banner renders solid -- with a warning.
+    Irrelevant properties for the chosen type are ignored, not rejected.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        logger.warning(
+            "compliance-levels.json: banner pattern for %s is not an object; "
+            "rendering the banner solid.",
+            _level_ref(level_name),
+        )
+        return None
+
+    pattern_type = raw.get("type", "solid")
+    if not isinstance(pattern_type, str) or pattern_type not in BANNER_PATTERN_TYPES:
+        logger.warning(
+            "compliance-levels.json: unknown banner pattern type on %s; "
+            "rendering the banner solid.",
+            _level_ref(level_name),
+        )
+        return None
+    if pattern_type == "solid":
+        return None
+
+    color = raw.get("color")
+    if not _is_hex_color(color):
+        logger.warning(
+            "compliance-levels.json: banner pattern on %s has no valid hex "
+            "color; rendering the banner solid.",
+            _level_ref(level_name),
+        )
+        return None
+
+    if "width" in raw:
+        width = _coerce_stripe_width(raw.get("width"))
+        if width is None:
+            logger.warning(
+                "compliance-levels.json: banner pattern width on %s must be "
+                "between %s and %s; rendering the banner solid.",
+                _level_ref(level_name),
+                BANNER_STRIPE_WIDTH_MIN,
+                BANNER_STRIPE_WIDTH_MAX,
+            )
+            return None
+    else:
+        width = BANNER_DEFAULT_STRIPE_WIDTH
+
+    angle = BANNER_DEFAULT_STRIPE_ANGLE
+    if "angle" in raw:
+        coerced = _coerce_stripe_angle(raw.get("angle"))
+        if coerced is None:
+            logger.warning(
+                "compliance-levels.json: banner pattern angle on %s is not a "
+                "number in 0-360; using %s degrees.",
+                _level_ref(level_name),
+                BANNER_DEFAULT_STRIPE_ANGLE,
+            )
+        else:
+            angle = coerced
+
+    return {
+        "type": pattern_type,
+        "color": color.strip(),
+        "width": width,
+        "angle": angle,
+    }
+
+
+def normalize_banner(raw: Any, level_name: str = "") -> Optional[Dict[str, Any]]:
+    """Validate a level's optional ``banner`` object.
+
+    Returns the normalized banner, or ``None`` when there is none or it is too
+    malformed to present. ``background_color`` is required (a banner with no
+    color would be invisible); ``label`` falls back to the level name and
+    ``text_color`` to white. Validation only ever omits presentation -- it
+    never touches enforcement.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        logger.warning(
+            "compliance-levels.json: banner for %s is not an object; ignoring it.",
+            _level_ref(level_name),
+        )
+        return None
+
+    background = raw.get("background_color")
+    if not _is_hex_color(background):
+        logger.warning(
+            "compliance-levels.json: banner for %s has no valid hex "
+            "background_color; ignoring the banner.",
+            _level_ref(level_name),
+        )
+        return None
+
+    label = raw.get("label")
+    if isinstance(label, str) and label.strip():
+        label = label.strip()
+    else:
+        logger.warning(
+            "compliance-levels.json: banner for %s has no label; using the level name.",
+            _level_ref(level_name),
+        )
+        label = level_name
+
+    text_color = raw.get("text_color", BANNER_DEFAULT_TEXT_COLOR)
+    if not _is_hex_color(text_color):
+        logger.warning(
+            "compliance-levels.json: banner for %s has no valid hex text_color; "
+            "using %s.",
+            _level_ref(level_name),
+            BANNER_DEFAULT_TEXT_COLOR,
+        )
+        text_color = BANNER_DEFAULT_TEXT_COLOR
+
+    return {
+        "label": label,
+        "background_color": background.strip(),
+        "text_color": text_color.strip(),
+        "pattern": normalize_banner_pattern(raw.get("pattern"), level_name),
+    }
 
 
 def _default_search_paths() -> List[Path]:
@@ -59,6 +225,8 @@ class ComplianceLevel:
     description: str
     aliases: List[str]
     allowed_with: List[str]  # List of compliance levels that can be used together
+    # Optional presentation-only banner (issue #1045). Never affects access.
+    banner: Optional[Dict[str, Any]] = None
 
 
 class ComplianceLevelManager:
@@ -98,7 +266,8 @@ class ComplianceLevelManager:
                     name=level_data['name'],
                     description=level_data.get('description', ''),
                     aliases=level_data.get('aliases', []),
-                    allowed_with=level_data.get('allowed_with', [level_data['name']])
+                    allowed_with=level_data.get('allowed_with', [level_data['name']]),
+                    banner=normalize_banner(level_data.get('banner'), level_data['name']),
                 )
                 self.levels[level.name] = level
 
@@ -320,6 +489,18 @@ class ComplianceLevelManager:
             List of compliance level names in definition order
         """
         return list(self.levels.keys())
+
+    def get_banner(self, name: Optional[str]) -> Optional[Dict[str, Any]]:
+        """The presentation banner for a level (or alias), if it has one.
+
+        Returns the normalized banner dict, or ``None`` when the name is
+        unknown or the level has no (valid) banner. Presentation only.
+        """
+        canonical = self.get_canonical_name(name)
+        if not canonical:
+            return None
+        level = self.levels.get(canonical)
+        return level.banner if level else None
 
 
 def coerce_classifications(value: Any) -> Optional[List[str]]:

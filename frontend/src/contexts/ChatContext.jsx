@@ -409,6 +409,12 @@ export const ChatProvider = ({ children }) => {
 	// its own record; this mirrors it for client-held history.
 	// null: no conversation yet; { recorded: false }: legacy/unreadable record.
 	const conversationClassificationRef = useRef(null)
+	// The same record as state, for the shell-level classification banner
+	// (issue #1045): the banner must follow the open conversation's recorded
+	// classification, not the possibly-stale global selector, and re-render as
+	// conversations are opened, reset or bound on their first turn.
+	// { state, level } mirroring classificationOf(), or null with no conversation.
+	const [activeConversationClassification, setActiveConversationClassification] = useState(null)
 	// Whether the open conversation was loaded from history (so it exists
 	// regardless of what this tab has sent).
 	const conversationLoadedRef = useRef(false)
@@ -1086,6 +1092,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			conversationClassificationRef.current = complianceEnabled
 				? { recorded: true, level: activeComplianceFilter ?? null }
 				: { recorded: false }
+			setActiveConversationClassification(complianceEnabled
+				? { state: activeComplianceFilter ? 'classified' : 'unclassified', level: activeComplianceFilter ?? null }
+				: { state: 'legacy', level: null })
 		}
 		// A turn is a deliberate action too, and it has just told the server which
 		// workspace this conversation belongs to. Letting a queued restore fire
@@ -1264,6 +1273,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		pendingWorkspaceRestoreRef.current = null
 		conversationWorkspaceIdRef.current = null
 		conversationClassificationRef.current = null
+		setActiveConversationClassification(null)
 		conversationLoadedRef.current = false
 		files.setCanvasContent('')
 		files.setCustomUIContent(null)
@@ -1483,6 +1493,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			conversationClassificationRef.current = (recorded.state === 'classified' || recorded.state === 'unclassified')
 				? { recorded: true, level: recorded.level }
 				: { recorded: false, invalid: recorded.state === 'invalid' }
+			setActiveConversationClassification(recorded)
 			restoreWorkspace(meta.workspace_id)
 		}
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
@@ -2171,6 +2182,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		complianceLevels,
 		complianceMode,
 		complianceRequired,
+		// The open conversation's recorded classification ({ state, level }), or
+		// null with no conversation; drives the shell classification banner (#1045).
+		activeConversationClassification,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,

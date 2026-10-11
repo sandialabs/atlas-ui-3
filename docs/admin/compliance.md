@@ -1,6 +1,6 @@
 # Compliance and Data Security
 
-Last updated: 2026-10-08
+Last updated: 2026-10-09
 
 The compliance system is designed to prevent the unintentional mixing of data from different security environments. This is essential for organizations that handle sensitive information.
 
@@ -112,6 +112,62 @@ The script only touches conversations with no record and never rewrites one.
 ## Enabling the Compliance Selector
 
 Set `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`. The header then shows a compliance level selector (in the overflow menu on narrow screens) listing every defined level, plus "All Levels" for no filter.
+
+## Classification Banner (optional)
+
+A level may carry a presentation-only `banner` object in `compliance-levels.json`. When it does, ATLAS shows a compact, full-viewport-width marking at the very top of the application, above the header and sidebar, persistent while scrolling. This is a security-context indicator only: it never grants or withholds access, cannot be dismissed, and never lets a user switch levels. Everything in this section is optional; **levels without a `banner` render exactly as before, and a deployment where no level defines one is completely unchanged.**
+
+```json
+{
+  "name": "CUI",
+  "description": "Controlled Unclassified Information",
+  "aliases": [],
+  "allowed_with": ["CUI"],
+  "banner": {
+    "label": "CONTROLLED UNCLASSIFIED INFORMATION",
+    "background_color": "#502B85",
+    "text_color": "#FFFFFF",
+    "pattern": {
+      "type": "edge_stripes",
+      "color": "#9871B9",
+      "width": 8,
+      "angle": 45
+    }
+  }
+}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `label` | no | Text shown, centered and uppercased. Defaults to the level name. |
+| `background_color` | yes | CSS hex color for the banner body (`#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`). A banner with no valid color is ignored. |
+| `text_color` | no | CSS hex color for the label. Defaults to `#FFFFFF`. |
+| `pattern` | no | Stripe configuration (below). Omit for a solid banner. |
+
+`pattern` is optional; the default is `solid` (no stripes). Ignore the properties that do not apply to a type.
+
+| `pattern.type` | Effect |
+|---|---|
+| `solid` | No stripes. |
+| `diagonal_stripes` | Stripes across the whole banner. |
+| `horizontal_stripes` | Horizontal stripes across the whole banner. |
+| `edge_stripes` | Narrow striped bands at the top and bottom, leaving a solid center under the label. Prefer this for readability. |
+
+| `pattern` field | Meaning |
+|---|---|
+| `color` | Secondary stripe color (CSS hex). Required for a striped pattern. |
+| `width` | Stripe width in pixels, between 2 and 32. Defaults to 8. |
+| `angle` | Stripe angle in degrees (0-360), used by `diagonal_stripes` and `edge_stripes`. Defaults to 45. |
+
+Stripes use CSS gradients, not image assets. Invalid presentation is dropped safely: an unknown `type`, a non-hex `color`, or a `width` outside the range renders the banner solid (with a warning at startup); a malformed `angle` falls back to 45. A missing or malformed `label` falls back to the level name and a missing or malformed `text_color` to white. A malformed banner is omitted from `/api/compliance-levels` and never changes enforcement.
+
+The marking follows the conversation, not the selector:
+
+- **New / empty conversation** uses the currently selected compliance level. A level with no banner shows nothing.
+- **An open conversation** uses its server-recorded, immutable `data_classification` (see [Saved Conversations Keep Their Classification](#saved-conversations-keep-their-classification)), so switching the selector cannot relabel history. It updates when switching conversations, restoring, reloading, or reconnecting.
+- If the recorded classification cannot be trusted (a legacy or unreadable record, a level the deployment no longer defines, or one not yet resolved), the banner shows a neutral **CLASSIFICATION UNAVAILABLE** marking rather than falling back to a less restrictive one.
+
+Configure the markings to match your deployment's actual requirements; the colors and labels in the example are illustrative, not prescribed government markings.
 
 ## Requiring a Compliance Level
 

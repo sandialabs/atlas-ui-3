@@ -557,7 +557,7 @@ const TelemetryDashboard = () => {
 
   if (authError) {
     return (
-      <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center p-6">
+      <div className="min-h-full bg-gray-900 text-gray-200 flex items-center justify-center p-6">
         <div className="max-w-md text-center">
           <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-red-400" />
           <h1 className="text-xl font-semibold mb-2">Admin access required</h1>
@@ -582,7 +582,7 @@ const TelemetryDashboard = () => {
   }[tab]
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200 overflow-y-auto">
+    <div className="min-h-full bg-gray-900 text-gray-200 overflow-y-auto">
       <div className="w-full max-w-7xl mx-auto p-6">
         <div className="bg-gray-800 rounded-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-2">
