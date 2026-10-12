@@ -169,9 +169,7 @@ def test_bundled_minio_file_is_opt_in_and_fail_closed():
     # image's ownership, while an arbitrary mount path would be created
     # root-owned and the server would exit immediately.
     assert services["minio"]["volumes"] == ["minio-data:/bitnami/minio/data"]
-    assert services["minio"]["command"] == [
-        "server", "/bitnami/minio/data", "--console-address", ":9001",
-    ]
+    assert services["minio"]["command"] == 'server /bitnami/minio/data --console-address ":9001"'
     init = services["minio-init"]
     assert init["entrypoint"] == ["/bin/sh", "-ec"]
     # mc writes its alias configuration under HOME; the image runs as uid 1001
