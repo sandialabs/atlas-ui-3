@@ -73,12 +73,14 @@ services:
       # Session store: "memory" (process-local, default) or a custom type
       # registered in atlas.infrastructure.sessions.factory (issue #760)
       - SESSION_REPOSITORY_TYPE=memory
-      # Chat history DB (choose one). DuckDB is the default and needs no
-      # database credentials or extra services. For the bundled PostgreSQL
-      # service, add -f docker-compose.postgres.yml and set POSTGRES_PASSWORD
-      # plus a postgresql:// CHAT_HISTORY_DB_URL in your environment or .env
-      # (URL-encode special characters in the password):
-      - CHAT_HISTORY_DB_URL=${CHAT_HISTORY_DB_URL:-duckdb:////data/chat_history.db}
+      # Chat history DB. Hard-coded, not environment-interpolated on purpose:
+      # a host-oriented .env (duckdb:///data/chat_history.db, relative to the
+      # project root) must not leak into the container, where only the
+      # absolute /data path on the atlas-data volume is writable by the
+      # nonroot runtime UID (issue #1052 review). The bundled PostgreSQL file
+      # overrides this value with its own atlas-ui overlay; point the stack
+      # at a different database with an additional override file.
+      - CHAT_HISTORY_DB_URL=duckdb:////data/chat_history.db
       - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
       - FEATURE_COMPLIANCE_LEVEL_REQUIRED=false
       - FEATURE_METRICS_LOGGING_ENABLED=false

@@ -96,46 +96,72 @@ a separately maintained derivative image or an external MCP service.
 ### Option 4: Docker Compose
 
 `docker-compose.yml` is a **development-only** stack, not a production
-deployment template. The base stack starts only the Atlas application,
-against your own object storage and DuckDB chat history. Bundled MinIO and
-PostgreSQL are opt-in through additional Compose files, and Compose only asks
-for the credentials of services you actually include (issue #1052): an
-external-S3 deployment never needs `MINIO_ROOT_PASSWORD`, and DuckDB never
-needs `POSTGRES_PASSWORD`. Supply the secrets above and storage credentials in
-your environment or a protected `.env` file next to the Compose files. Compose
-refuses to start when a required credential is missing or empty:
+deployment template. The base stack starts only the Atlas application against
+your own object storage and DuckDB chat history. Bundled MinIO and PostgreSQL
+are opt-in through additional Compose files, and Compose only asks for the
+credentials of services you actually include (issue #1052): an external-S3
+deployment never needs `MINIO_ROOT_PASSWORD`, and DuckDB never needs
+`POSTGRES_PASSWORD`. Supply the secrets above and storage credentials in your
+environment or a protected `.env` file next to the Compose files. Compose
+refuses to start when a required credential is missing or empty.
+
+To store files in the bundled MinIO, include its file. MinIO's root account
+then uses the same `S3_ACCESS_KEY` / `S3_SECRET_KEY` pair, so the stack has
+exactly one object-storage credential (MinIO requires that user to be at
+least 3 and the password at least 8 characters long):
 
 ```bash
 export S3_ENDPOINT=http://minio:9000
 export S3_ACCESS_KEY=atlas-local
 export S3_SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 export PROXY_SECRET="$PROXY_SECRET"   # from the "Generate deployment secrets first" step
-docker compose up -d
-```
-
-To store files in the bundled MinIO instead of your own S3 endpoint, include
-its file. MinIO's root account then uses the same `S3_ACCESS_KEY` /
-`S3_SECRET_KEY` pair, so the stack has exactly one object-storage credential
-(MinIO requires that user to be at least 3 and the password at least 8
-characters long):
-
-```bash
 docker compose -f docker-compose.yml -f docker-compose.minio.yml up -d
 ```
 
+To store files in your own S3-compatible endpoint instead, run the base stack
+alone and point `S3_ENDPOINT` at it:
+
+```bash
+export S3_ENDPOINT=https://s3.example.com
+export S3_ACCESS_KEY=...   # your access key
+export S3_SECRET_KEY=...   # your secret key
+export PROXY_SECRET="$PROXY_SECRET"
+docker compose up -d
+```
+
 To store chat history in the bundled PostgreSQL instead of DuckDB, include its
-file and point `CHAT_HISTORY_DB_URL` at it, keeping the same password
-(URL-encode special characters):
+file and set `POSTGRES_PASSWORD` — the stack builds `CHAT_HISTORY_DB_URL`
+from it automatically (keep the password URL-safe: letters, digits, and
+`-._~`):
 
 ```bash
 export POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
-export CHAT_HISTORY_DB_URL="postgresql://atlas:${POSTGRES_PASSWORD}@postgres:5432/atlas_chat_history"
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
 ```
 
-Tip: `export COMPOSE_FILE=docker-compose.yml:docker-compose.minio.yml:docker-compose.postgres.yml`
-selects the bundled stack for every subsequent `docker compose` command in the
-current shell.
+To use an external database with the Compose stack, add your own override
+file that sets `CHAT_HISTORY_DB_URL` (the `.env` value is for host-run Atlas;
+the container only accepts its own absolute `/data` DuckDB path or an
+operator-provided override). Tip:
+`export COMPOSE_FILE=docker-compose.yml:docker-compose.minio.yml:docker-compose.postgres.yml`
+selects the bundled stack for every subsequent `docker compose` command in
+the current shell.
+
+#### Upgrading from the single-file stack
+
+Stacks started before this change keep working, but the layout changed:
+
+- Plain `docker compose up` now starts only Atlas. Add
+  `-f docker-compose.minio.yml` (and/or `-f docker-compose.postgres.yml`) to
+  keep using the bundled services.
+- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` are no longer read. The bundled
+  MinIO root account is now your `S3_ACCESS_KEY` / `S3_SECRET_KEY` pair, and
+  `S3_ENDPOINT` must be `http://minio:9000` (the stack pins these itself).
+- To keep an existing `minio-data` volume readable, set
+  `S3_ACCESS_KEY` to the old `MINIO_ROOT_USER` (`atlas-minio` if you never
+  set it) and `S3_SECRET_KEY` to the old `MINIO_ROOT_PASSWORD`.
+- `CHAT_HISTORY_DB_URL` from your `.env` no longer reaches the container;
+  the bundled PostgreSQL file supplies its own URL from `POSTGRES_PASSWORD`.
 
 `DEBUG_MODE` is no longer set, so proxy-secret enforcement is active: the stack
 rejects any request that does not carry the `X-Proxy-Secret` header. Reaching

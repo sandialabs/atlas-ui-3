@@ -56,12 +56,20 @@ services:
   # Overlay fragment: attaches the application to the bundled services only
   # when this file is loaded. The base docker-compose.yml has no MinIO
   # dependency, so external-S3 deployments neither start nor wait for one.
+  # Storage settings are pinned here so a host-oriented .env (e.g.
+  # S3_ENDPOINT=http://localhost:9000, which would point the container at its
+  # own loopback) cannot leak into the stack, and so the bucket always matches
+  # what minio-init creates.
   atlas-ui:
     depends_on:
       minio:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    environment:
+      - S3_ENDPOINT=http://minio:9000
+      - S3_BUCKET_NAME=atlas-files
+      - S3_USE_SSL=false
 
 networks:
   atlas-network:

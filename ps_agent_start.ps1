@@ -254,6 +254,24 @@ function Initialize-ContainerRuntime {
     }
 }
 
+# Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
+# Returns "" when the URL cannot be parsed.
+function Get-UrlHost {
+    param([string]$Url)
+    if ($Url -notmatch '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]*)') {
+        return ""
+    }
+    $authority = $Matches[1] -replace '^.*@', ''
+    return ($authority -replace ':[0-9]*$', '')
+}
+
+# True when the given host means "this machine" (empty counts as local: the
+# application defaults its S3 endpoint to localhost).
+function Test-LocalHost {
+    param([string]$Host_ = "")
+    return ($Host_ -eq "" -or $Host_ -eq "localhost" -or $Host_ -eq "127.0.0.1" -or $Host_ -eq "[::1]" -or $Host_ -eq "::1")
+}
+
 # =============================================================================
 # INFRASTRUCTURE FUNCTIONS
 # =============================================================================
@@ -270,26 +288,41 @@ function Initialize-MinIO {
 
     if ($useMockS3 -eq "true") {
         Write-Host "Using Mock S3 (no Docker/Podman required)"
-    } else {
-        if ($null -eq $script:CONTAINER_CMD) {
-            Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $script:ENV_FILE"
+        return
+    }
+
+    if ($null -eq $script:CONTAINER_CMD) {
+        Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $script:ENV_FILE"
+        exit 1
+    }
+
+    # The bundled MinIO is only for a local S3_ENDPOINT. An external endpoint
+    # means the operator runs their own storage; do not start or require
+    # anything local for it (issue #1052).
+    $s3Endpoint = $env:S3_ENDPOINT
+    if (-not $s3Endpoint) { $s3Endpoint = "" }
+    if (-not (Test-LocalHost (Get-UrlHost $s3Endpoint))) {
+        Write-Host "S3_ENDPOINT=$s3Endpoint is not local; not starting bundled MinIO"
+        return
+    }
+
+    # Check if MinIO container is running
+    $minioRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-minio" -Quiet
+
+    if (-not $minioRunning) {
+        Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
+        Set-Location $PROJECT_ROOT
+
+        & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "MinIO failed to start. Check that S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY and the application secrets are set in $script:ENV_FILE (bundled MinIO reuses S3_ACCESS_KEY/S3_SECRET_KEY as its root credentials)."
             exit 1
         }
 
-        # Check if MinIO container is running
-        $minioRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-minio" -Quiet
-
-        if (-not $minioRunning) {
-            Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
-            Set-Location $PROJECT_ROOT
-
-            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init
-
-            Write-Host "MinIO started successfully"
-            Start-Sleep -Seconds 3
-        } else {
-            Write-Host "MinIO is already running"
-        }
+        Write-Host "MinIO started successfully"
+        Start-Sleep -Seconds 3
+    } else {
+        Write-Host "MinIO is already running"
     }
     Set-Location $PROJECT_ROOT
 }
@@ -323,6 +356,14 @@ function Initialize-ChatHistoryDb {
             exit 1
         }
 
+        # Start the bundled container only for a local database. An external
+        # postgresql:// URL means the operator runs their own database; leave
+        # it alone (issue #1052).
+        if (-not (Test-LocalHost (Get-UrlHost $dbUrl))) {
+            Write-Host "CHAT_HISTORY_DB_URL points at an external database; not starting bundled PostgreSQL"
+            return
+        }
+
         $pgRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-postgres" -Quiet
         if (-not $pgRunning) {
             Write-Host "PostgreSQL is not running. Starting with $script:COMPOSE_CMD..."
@@ -332,6 +373,10 @@ function Initialize-ChatHistoryDb {
             # #1052), which is self-contained: starting it alone requires only
             # POSTGRES_PASSWORD, not the application stack's secrets.
             & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.postgres.yml up -d postgres
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "PostgreSQL failed to start. Check that POSTGRES_PASSWORD is set in $script:ENV_FILE."
+                exit 1
+            }
 
             Write-Host "Waiting for PostgreSQL to be ready..."
             $maxWait = 60

@@ -35,7 +35,7 @@ The path is relative to the project root. The `data/` directory is created autom
 Best for production deployments with multiple users.
 
 ```bash
-CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@localhost:5432/atlas_chat_history
+CHAT_HISTORY_DB_URL=postgresql://atlas:<POSTGRES_PASSWORD>@localhost:5432/atlas_chat_history
 ```
 
 Start the PostgreSQL container. It lives in its own Compose file
@@ -43,7 +43,7 @@ Start the PostgreSQL container. It lives in its own Compose file
 credential:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d postgres
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
 ```
 
 The bundled PostgreSQL service has:
@@ -52,8 +52,12 @@ The bundled PostgreSQL service has:
 - Database: `atlas_chat_history`
 - Port: `127.0.0.1:5432` (host-local only)
 
-`agent_start.sh` starts it automatically when `CHAT_HISTORY_DB_URL` is a
-`postgresql://` URL. Supply all required Compose secrets as described in the
+When that file is loaded, the stack also builds the container's
+`CHAT_HISTORY_DB_URL` from `POSTGRES_PASSWORD` automatically, so the
+credential is configured in one place. `agent_start.sh` starts the bundled
+container automatically when `CHAT_HISTORY_DB_URL` is a `postgresql://` URL
+pointing at the local machine; URLs for externally managed databases are left
+alone. Supply all required Compose secrets as described in the
 [installation guide](../getting-started/installation.md#option-4-docker-compose).
 For production, provision a separately secured database with backups and
 least-privilege credentials. Compose also persists DuckDB history in the

@@ -126,9 +126,11 @@ def test_base_compose_is_loopback_only_with_private_persistent_storage():
     env = dict(entry.split("=", 1) for entry in atlas["environment"])
     assert "DEBUG_MODE" not in env
     assert "AGENT_LOOP_STRATEGY" not in env
-    # DuckDB is the default chat history backend and needs no database
-    # credentials; a postgresql:// URL is operator-supplied (issue #1052).
-    assert env["CHAT_HISTORY_DB_URL"].startswith("${CHAT_HISTORY_DB_URL:-duckdb:")
+    # Chat history is hard-coded to the container-only absolute DuckDB path:
+    # a host-oriented .env (duckdb:///data/chat_history.db, relative to the
+    # project root) must not leak into the container, where only /data on the
+    # atlas-data volume is writable by the nonroot runtime UID (issue #1052).
+    assert env["CHAT_HISTORY_DB_URL"] == "duckdb:////data/chat_history.db"
     assert env["CAPABILITY_TOKEN_SECRET"].startswith("${CAPABILITY_TOKEN_SECRET:?")
     # DEBUG_MODE is gone, so proxy-secret enforcement is active; a missing
     # secret would 503 every protected route while the heartbeat still passes.
@@ -169,23 +171,44 @@ def test_bundled_minio_file_is_opt_in_and_fail_closed():
     assert "mc anonymous set none myminio/atlas-files" in script
     assert "anonymous set download" not in script
     assert "${" not in script
-    # The application entry is an overlay fragment: it only attaches the
-    # bundled services as dependencies when this file is loaded.
-    assert set(services["atlas-ui"]) == {"depends_on"}
-    depends_on = services["atlas-ui"]["depends_on"]
+    # The application entry is an overlay fragment: it attaches the bundled
+    # services as dependencies and pins the storage settings this stack
+    # implies, so a host-oriented .env (e.g. S3_ENDPOINT=http://localhost:9000,
+    # which would point the container at its own loopback) cannot leak in and
+    # the bucket always matches what minio-init creates.
+    overlay = services["atlas-ui"]
+    assert set(overlay) == {"depends_on", "environment"}
+    depends_on = overlay["depends_on"]
     assert depends_on["minio"]["condition"] == "service_healthy"
     assert depends_on["minio-init"]["condition"] == "service_completed_successfully"
+    overlay_env = dict(entry.split("=", 1) for entry in overlay["environment"])
+    assert overlay_env["S3_ENDPOINT"] == "http://minio:9000"
+    assert overlay_env["S3_BUCKET_NAME"] == "atlas-files"
+    assert overlay_env["S3_USE_SSL"] == "false"
 
 
 def test_bundled_postgres_file_is_opt_in_and_fail_closed():
     compose = yaml.safe_load(compose_path("docker-compose.postgres.yml").read_text())
     services = compose["services"]
-    assert set(services) == {"postgres"}
+    assert set(services) == {"postgres", "atlas-ui"}
     postgres = services["postgres"]
     assert re.search(r"@sha256:[a-f0-9]{64}$", postgres["image"])
     for port in postgres.get("ports", []):
         assert port.startswith("127.0.0.1:")
     assert postgres["environment"]["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD:?")
+    # When the bundled database is selected, chat history points at it with
+    # the same single-sourced credential; the base file's container-only
+    # DuckDB path is replaced by this overlay, never by a host .env value.
+    # The build stanza keeps the file renderable on its own (agent_start.sh
+    # starts PostgreSQL from it alone); merging keeps the base build args.
+    overlay = services["atlas-ui"]
+    assert set(overlay) == {"build", "environment"}
+    assert overlay["build"]["dockerfile"] == "Dockerfile"
+    overlay_env = dict(entry.split("=", 1) for entry in overlay["environment"])
+    assert overlay_env["CHAT_HISTORY_DB_URL"].startswith(
+        "postgresql://atlas:${POSTGRES_PASSWORD:?"
+    )
+    assert overlay_env["CHAT_HISTORY_DB_URL"].endswith("@postgres:5432/atlas_chat_history")
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -201,6 +224,18 @@ def test_compose_rejects_missing_or_empty_required_secrets(combo_name, files, se
     assert secret in result.stderr
 
 
+@pytest.mark.parametrize("combo_name", list(COMPOSE_COMBOS))
+def test_every_backend_combination_renders_successfully(combo_name):
+    """All supported backend combinations produce a valid merged model.
+
+    Guards against merge or schema errors that only appear when a
+    combination is rendered with every credential it needs.
+    """
+    files = COMPOSE_COMBOS[combo_name]
+    result = render_compose(files, baseline_environment())
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "combo_name,files,unused_secret",
     [
@@ -210,16 +245,20 @@ def test_compose_rejects_missing_or_empty_required_secrets(combo_name, files, se
         ("bundled-postgres", ("docker-compose.yml", "docker-compose.postgres.yml"), "MINIO_ROOT_PASSWORD"),
     ],
 )
-def test_unused_backend_credentials_are_not_required(combo_name, files, unused_secret):
+def test_unused_backend_credentials_are_ignored(combo_name, files, unused_secret):
     """A backend's credentials are required only when its Compose file is used.
 
     Encodes the issue #1052 acceptance criteria: DuckDB works without
-    POSTGRES_PASSWORD and external S3 works without MINIO_ROOT_PASSWORD.
+    POSTGRES_PASSWORD and external S3 works without MINIO_ROOT_PASSWORD. The
+    unused credential is deliberately SET in the environment to prove it is
+    neither required nor leaked into the rendered stack.
     """
+    sentinel = f"unused-{unused_secret.lower()}-sentinel"
     env = baseline_environment()
-    env.pop(unused_secret, None)
+    env[unused_secret] = sentinel
     result = render_compose(files, env)
     assert result.returncode == 0, result.stderr
+    assert sentinel not in result.stdout
 
 
 def test_minio_credentials_are_not_interpreted_as_shell():

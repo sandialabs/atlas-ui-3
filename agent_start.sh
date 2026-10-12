@@ -89,31 +89,62 @@ setup_container_runtime() {
 # INFRASTRUCTURE FUNCTIONS
 # =============================================================================
 
+# Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
+# Prints the host, or nothing when the URL cannot be parsed.
+url_host() {
+    printf '%s\n' "$1" \
+        | sed -n 's|^[a-zA-Z][a-zA-Z0-9+.-]*://\([^/?#]*\).*|\1|p' \
+        | sed 's/^.*@//; s/:[0-9]*$//'
+}
+
+# True when the given host means "this machine" (empty counts as local:
+# the application defaults its S3 endpoint to localhost).
+is_local_host() {
+    case "$1" in
+        "" | localhost | 127.0.0.1 | ::1 | "[::1]") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 setup_minio() {
     local use_mock_s3="${USE_MOCK_S3:-true}"
+    local s3_endpoint="${S3_ENDPOINT:-}"
 
-    # Read USE_MOCK_S3 from env file if it exists
+    # Read USE_MOCK_S3 and S3_ENDPOINT from env file if it exists
     if [ -f "$ENV_FILE" ]; then
         use_mock_s3=$(grep -E "^USE_MOCK_S3=" "$ENV_FILE" | cut -d '=' -f2)
+        s3_endpoint=$(grep -E "^S3_ENDPOINT=" "$ENV_FILE" | cut -d '=' -f2-)
     fi
-    
+
     if [ "$use_mock_s3" = "true" ]; then
         echo "Using Mock S3 (no Docker/Podman required)"
-    else
-        if [ -z "$CONTAINER_CMD" ]; then
-            echo "Error: Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $ENV_FILE"
+        return
+    fi
+
+    if [ -z "$CONTAINER_CMD" ]; then
+        echo "Error: Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $ENV_FILE"
+        exit 1
+    fi
+
+    # The bundled MinIO is only for a local S3_ENDPOINT. An external endpoint
+    # means the operator runs their own storage; do not start or require
+    # anything local for it (issue #1052).
+    if ! is_local_host "$(url_host "$s3_endpoint")"; then
+        echo "S3_ENDPOINT=$s3_endpoint is not local; not starting bundled MinIO"
+        return
+    fi
+
+    if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
+        echo "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
+        cd "$PROJECT_ROOT"
+        if ! $COMPOSE_CMD -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init; then
+            echo "Error: MinIO failed to start. Check that S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY and the application secrets are set in $ENV_FILE (bundled MinIO reuses S3_ACCESS_KEY/S3_SECRET_KEY as its root credentials)."
             exit 1
         fi
-
-        if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
-            echo "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
-            cd "$PROJECT_ROOT"
-            $COMPOSE_CMD -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init
-            echo "MinIO started successfully"
-            sleep 3
-        else
-            echo "MinIO is already running"
-        fi
+        echo "MinIO started successfully"
+        sleep 3
+    else
+        echo "MinIO is already running"
     fi
     cd "$PROJECT_ROOT"
 }
@@ -146,13 +177,24 @@ setup_chat_history_db() {
             exit 1
         fi
 
+        # Start the bundled container only for a local database. An external
+        # postgresql:// URL means the operator runs their own database; leave
+        # it alone (issue #1052).
+        if ! is_local_host "$(url_host "$db_url")"; then
+            echo "CHAT_HISTORY_DB_URL points at an external database; not starting bundled PostgreSQL"
+            return
+        fi
+
         if ! $CONTAINER_CMD ps | grep -q atlas-postgres; then
             echo "PostgreSQL is not running. Starting with $COMPOSE_CMD..."
             cd "$PROJECT_ROOT"
             # The bundled PostgreSQL lives in its own Compose file (issue
             # #1052), which is self-contained: starting it alone requires only
             # POSTGRES_PASSWORD, not the application stack's secrets.
-            $COMPOSE_CMD -f docker-compose.postgres.yml up -d postgres
+            if ! $COMPOSE_CMD -f docker-compose.postgres.yml up -d postgres; then
+                echo "Error: PostgreSQL failed to start. Check that POSTGRES_PASSWORD is set in $ENV_FILE."
+                exit 1
+            fi
             echo "Waiting for PostgreSQL to be ready..."
             max_wait=60
             waited=0
