@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-12
+
+### Breaking Changes
+- **#1016:** Removed the Agent Portal: the `/agent-portal` UI, the `atlas-portal` CLI, the `/api/agent-portal/*` routes, the host-process manager, and their settings, tests and docs are gone. If you had `FEATURE_AGENT_PORTAL_ENABLED`, `AGENT_PORTAL_ALLOWED_ORIGINS`, `AGENT_PORTAL_DB_URL` or `AGENT_PORTAL_AUDIT_PATH` set, they are now ignored (a one-time startup warning notes this) and can be deleted. Leftover data at `data/agent_portal.db`, `data/agent_portal_audit.jsonl` and `<APP_CONFIG_DIR>/agent_portal_presets.json` is no longer read and can also be removed.
+- **#1018:** Removed the deprecated `RAGClient` class (use `AtlasRAGClient` or `UnifiedRAGService`) and the inert `TOOL_APPROVALS_CONFIG_FILE` setting; tool approvals now come only from `mcp.json`. The `--tool-approvals-config` CLI flag is still accepted but ignored, with a deprecation warning.
+- **#1032:** Models, MCP servers and RAG sources (and individual RAG corpora) now declare the data classifications they may receive with `allowed_data_classifications`, and the server refuses any chat turn whose selected compliance level is not listed by the model, the servers behind its tools, or its data sources; an undefined level is refused too. Components with no declaration are unavailable in classified sessions, `allowed_with` no longer grants access across levels (personas must now match the selected level exactly), and query-time RAG enforcement follows the selected level, falling back to the model's classifications when none is selected. A legacy `compliance_level` is still read as a one-element list; see docs/admin/compliance.md for migration. For integrators: `ComplianceLevelManager.is_accessible` now applies the same membership rule (an untagged resource is denied under a selected level), and the session context key `model_compliance_level` is replaced by `model_data_classifications` (a list).
+- **#1048:** LiteLLM team gateways: an unknown field in a gateway's `model_defaults` is now refused when the config loads, as in a `models` entry, instead of being silently ignored, so the server will not start until it is fixed (the error names the field). Check existing gateway configs for misspelt settings before upgrading.
+
+### Features
+- **#1022:** Static models can use `api_key_source: "delegated"` with a `delegation` block, as LiteLLM team gateways can: each call carries a short-lived token obtained for the logged-in user (RFC 8693 token exchange or Entra On-Behalf-Of) instead of a shared key, and fails rather than falling back to another credential.
+- **#1029:** Operators can require a concrete compliance level with `FEATURE_COMPLIANCE_LEVEL_REQUIRED=true` (alongside `FEATURE_COMPLIANCE_LEVELS_ENABLED`): the header selector drops "All Levels" and starts on `COMPLIANCE_DEFAULT_LEVEL` (or the first defined level), and the server rejects chat turns that carry no valid compliance level.
+- **#1035:** HTTP RAG sources can set `legacy_corpus_classifications: true` to treat each corpus's discovered `compliance_level` as its classification list (narrowed by the server's list) while backends migrate to `allowed_data_classifications`.
+- **#1045:** Add an optional, per-level classification banner: configure a `banner` (label, colors, and an optional stripe pattern) on a level in `compliance-levels.json` and ATLAS shows a persistent, full-width marking at the top of the app, following each conversation's recorded classification. Deployments that configure no banner are unchanged.
+- **#1048:** LiteLLM team gateways: an entry in a gateway's `models` allowlist may set any field `model_defaults` may (`supports_tools`, `supports_vision`, `supports_pdf`, `max_tokens`, ...), so one gateway can offer models with different capabilities; the model picker and the chat's file and tool controls follow the selected model. With compliance levels on, the model list's rows now show each model's levels, as a gateway's model rows already did.
+
+### Fixes
+- **#1019:** Refreshed OIDC access tokens whenever a login session is used, and ended the
+  session with delegated-credential cleanup when the IdP refuses its refresh
+  grant; transient IdP outages no longer end sessions.
+- **#1028:** Fixed compliance level filtering: the compliance levels file is now actually loaded from `config/` or the package defaults (previously the header selector never appeared), and the selected level now consistently applies its allowlist to tools, prompts, personas, data sources and the model -- hidden selections are deselected and never sent, and a model outside the level is switched or flagged. Upgrade note: level definitions now take effect, so a deployment that tags resources with level names not in the bundled defaults (for example "CUI") must define them in `config/compliance-levels.json`; undefined names are treated as unset.
+- **#1037:** Opening the Data Sources drawer no longer shifts the chat layout: the drawer now slides over the chat as an overlay at every screen width, with a click-outside backdrop on desktop as well as mobile. On desktop it behaves as a modal -- Escape, the X, or clicking the shaded area closes it, and the chat is reachable again once it is closed.
+- **#1040:** When the IdP rejects an OIDC token refresh, the server log now names the IdP's error codes (Entra AADSTS numbers) and trace/correlation IDs (never the error text), and the LiteLLM team picker offers a "Sign in again" link when a session has no usable delegated token.
+
+### Security
+- **#1017:** Hardened shipped debug and capability-secret defaults, local Compose storage access, and nonroot container builds; the unsafe v1 code-executor example is no longer installable from the admin catalog. Stdio MCP servers no longer inherit backend credentials: operators must explicitly declare required variables with `${VAR}` in each server's `env` configuration.
+
+  **Upgrade notes (breaking changes):**
+
+  - The published image moved from UBI9 to Debian slim and now runs as UID/GID `10001:10001`; writable host bind mounts must be owned by that UID (the dev Compose stack uses Docker-managed named volumes instead).
+  - Node.js, npm/npx, pip, and the `test/`, `docs/`, and `scripts/` trees are no longer in the image, so Node-based stdio MCP servers and `npx`/`uvx` commands need an external service or a separately maintained derivative image.
+  - Existing `CAPABILITY_TOKEN_SECRET` values that are shorter than 32 bytes or match a known placeholder now abort startup; generate one with `openssl rand -hex 32`.
+  - `Dockerfile.runtimeonly` now defaults `ATLAS_RUNTIME_IMAGE` to the published tag, and Docker Compose requires `PROXY_SECRET` (and no longer sets `DEBUG_MODE`).
+  - `ALLOW_DEBUG_NON_LOOPBACK` no longer also lifts the `ENVIRONMENT=production` debug refusal; use the new `ALLOW_DEBUG_PRODUCTION` override.
+- **#1035:** HTTP RAG queries now check every requested corpus against its own data classifications at query time, so a stale selection, direct request or agent `atlas_search` call cannot reach a corpus discovery hides; a batch with any disallowed or unlisted corpus is refused before anything is sent. Behavior change: in a classified session the backend's discovery must list every queried corpus for that user, and queries fail closed while discovery is unavailable (`DATA_SOURCE_UNVERIFIED`) or does not list the corpus (`DATA_SOURCE_NOT_LISTED`).
+- **#1042:** Saved conversations now record the data classification they were created under, and the server refuses to restore, reopen or continue one under a different compliance level, including after a reconnect, in parallel runs and through direct API calls. Conversations saved before this release (or while compliance levels are disabled) have no record and cannot be continued while compliance levels are enforced. They stay listed and exportable, and an operator can record a level for them with `scripts/stamp_conversation_classification.py` (see docs/admin/compliance.md).
+
+### Internal
+- **#1018:** Removed unused chat-mode implementations, legacy helpers, unreferenced UI components, and checked-in generated artifacts. Chat modes continue to use the existing streaming pipeline, with regression coverage for buffered output, tool execution, and error handling.
+- **#1027:** Fixed the Security Checks workflow failing on fork pull requests by skipping the PR summary comment when the token is read-only.
+- **#1030:** Isolated the Python test suite from developer-local compliance feature flags so `FEATURE_COMPLIANCE_LEVEL_REQUIRED` no longer leaks from a contributor's shell or `.env` and fails unrelated chat, agent-mode, and system-prompt tests.
+- **#1034:** Follow-up to #1031: hardened the test-suite compliance isolation so `COMPLIANCE_DEFAULT_LEVEL` is pinned rather than cleared, and a developer's `.env` loaded with `override=False` can no longer restore it and make results depend on local configuration.
+
 ## [0.7.0] - 2026-10-05
 
 ### Features
