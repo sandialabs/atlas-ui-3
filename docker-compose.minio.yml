@@ -32,7 +32,12 @@ services:
     entrypoint: ["/opt/bitnami/minio/bin/minio"]
     command: server /bitnami/minio/data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "http://127.0.0.1:9000"]
+      # The image ships curl; probe MinIO's readiness endpoint directly.
+      # `mc ready` cannot be used here: it requires a configured alias (a raw
+      # URL is rejected) and would still fail inside the container because
+      # mc cannot write its configuration under the image's non-writable
+      # HOME=/ (issue #1052 CI startup check).
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 5

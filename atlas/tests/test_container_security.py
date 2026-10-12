@@ -170,6 +170,12 @@ def test_bundled_minio_file_is_opt_in_and_fail_closed():
     # root-owned and the server would exit immediately.
     assert services["minio"]["volumes"] == ["minio-data:/bitnami/minio/data"]
     assert services["minio"]["command"] == 'server /bitnami/minio/data --console-address ":9001"'
+    # The image ships curl but mc cannot run as the healthcheck: it needs a
+    # configured alias and cannot write its configuration under the image's
+    # HOME=/ as uid 1001. The readiness endpoint needs neither.
+    assert services["minio"]["healthcheck"]["test"] == [
+        "CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/ready",
+    ]
     init = services["minio-init"]
     assert init["entrypoint"] == ["/bin/sh", "-ec"]
     # mc writes its alias configuration under HOME; the image runs as uid 1001
