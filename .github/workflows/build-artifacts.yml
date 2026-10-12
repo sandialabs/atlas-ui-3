@@ -101,7 +101,7 @@ jobs:
         cp -r prompts build-artifacts/
         # Copy deployment files
         cp agent_start.sh build-artifacts/
-        cp docker-compose.yml build-artifacts/
+        cp docker-compose.yml docker-compose.minio.yml docker-compose.postgres.yml build-artifacts/
         cp Dockerfile build-artifacts/
         cp Dockerfile.runtimeonly .dockerignore uv.lock build-artifacts/
         cp .env.example build-artifacts/ 2>/dev/null || true

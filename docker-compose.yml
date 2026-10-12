@@ -1,66 +1,19 @@
 # Local development only. Never expose this stack directly to an untrusted network.
 # Public deployments require an authenticated reverse proxy and operator-managed storage.
+#
+# This base stack starts only the Atlas application, against your own object
+# storage (S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY below) and DuckDB chat
+# history, which needs no database credentials. Bundled MinIO and PostgreSQL
+# are opt-in through additional Compose files, so you are never asked for the
+# credentials of services you do not run (issue #1052):
+#
+#   bundled MinIO:      docker compose -f docker-compose.yml -f docker-compose.minio.yml up -d
+#   bundled PostgreSQL: docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+#
+# Credentials are enforced at configuration time and fail closed: Compose
+# refuses to render a stack whose included services are missing a secret, and
+# no shipped default passwords or placeholder secrets exist.
 services:
-  minio:
-    # Archival images are for this loopback-only development stack, not production.
-    image: docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
-    container_name: atlas-minio
-    ports:
-      - "127.0.0.1:9000:9000"  # S3 API
-      - "127.0.0.1:9001:9001"  # Web Console
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in your environment or .env}
-    volumes:
-      - minio-data:/data
-    entrypoint: ["/opt/bitnami/minio/bin/minio"]
-    command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "mc", "ready", "http://127.0.0.1:9000"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - atlas-network
-
-  minio-init:
-    image: docker.io/bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
-    container_name: atlas-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in your environment or .env}
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        mc alias set myminio http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mb myminio/atlas-files --ignore-existing
-        mc anonymous set none myminio/atlas-files
-        echo 'MinIO initialization complete'
-    networks:
-      - atlas-network
-
-  postgres:
-    image: docker.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
-    container_name: atlas-postgres
-    ports:
-      - "127.0.0.1:5432:5432"
-    environment:
-      POSTGRES_USER: atlas
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or .env}
-      POSTGRES_DB: atlas_chat_history
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas_chat_history"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - atlas-network
-
   atlas-ui:
     build:
       context: .
@@ -120,11 +73,12 @@ services:
       # Session store: "memory" (process-local, default) or a custom type
       # registered in atlas.infrastructure.sessions.factory (issue #760)
       - SESSION_REPOSITORY_TYPE=memory
-      # Chat history DB (choose one):
-      # DuckDB (default, no extra services required):
-      - CHAT_HISTORY_DB_URL=duckdb:////data/chat_history.db
-      # PostgreSQL (production / multi-user):
-      # - CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@postgres:5432/atlas_chat_history
+      # Chat history DB (choose one). DuckDB is the default and needs no
+      # database credentials or extra services. For the bundled PostgreSQL
+      # service, add -f docker-compose.postgres.yml and set POSTGRES_PASSWORD
+      # plus a postgresql:// CHAT_HISTORY_DB_URL in your environment or .env
+      # (URL-encode special characters in the password):
+      - CHAT_HISTORY_DB_URL=${CHAT_HISTORY_DB_URL:-duckdb:////data/chat_history.db}
       - FEATURE_COMPLIANCE_LEVELS_ENABLED=false
       - FEATURE_COMPLIANCE_LEVEL_REQUIRED=false
       - FEATURE_METRICS_LOGGING_ENABLED=false
@@ -178,13 +132,17 @@ services:
       # closed, so a direct browser hit is rejected until a proxy is in front.
       - PROXY_SECRET=${PROXY_SECRET:?set PROXY_SECRET (>=32 chars) in your environment or .env}
       
-      # S3/MinIO Storage Configuration
-      - S3_ENDPOINT=http://minio:9000
-      - S3_BUCKET_NAME=atlas-files
-      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-atlas-minio}
-      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in your environment or .env}
-      - S3_REGION=us-east-1
-      - S3_USE_SSL=false
+      # Object storage (required). This development stack runs against real
+      # object storage (USE_MOCK_S3=false) and has no IAM credential chain,
+      # so it cannot fall back to anonymous access. With
+      # docker-compose.minio.yml included, these credentials are also the
+      # bundled MinIO root credentials -- one credential pair for the stack.
+      - S3_ENDPOINT=${S3_ENDPOINT:?set S3_ENDPOINT in your environment or .env (use http://minio:9000 with docker-compose.minio.yml)}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-atlas-files}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:?set S3_ACCESS_KEY in your environment or .env}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?set S3_SECRET_KEY in your environment or .env}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_USE_SSL=${S3_USE_SSL:-false}
       - USE_MOCK_S3=false
       
       # Content Security Policy (CSP) configuration
@@ -193,11 +151,6 @@ services:
       - atlas-logs:/app/logs
       - ./config:/app/config
       - atlas-data:/data
-    depends_on:
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
     networks:
       - atlas-network
 
@@ -208,5 +161,3 @@ networks:
 volumes:
   atlas-data:
   atlas-logs:
-  minio-data:
-  postgres-data:

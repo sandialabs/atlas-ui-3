@@ -10,10 +10,75 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-REQUIRED_SECRETS = (
-    "CAPABILITY_TOKEN_SECRET", "MCP_TOKEN_ENCRYPTION_KEY",
-    "MINIO_ROOT_PASSWORD", "POSTGRES_PASSWORD", "PROXY_SECRET",
-)
+
+# Secrets the application stack always requires in Compose: Atlas cannot boot
+# without them and no insecure fallback exists.
+APP_SECRETS = ("CAPABILITY_TOKEN_SECRET", "MCP_TOKEN_ENCRYPTION_KEY", "PROXY_SECRET")
+# The Compose stack runs against real object storage (USE_MOCK_S3=false) and
+# has no IAM credential chain, so static S3 credentials are required.
+S3_SETTINGS = ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY")
+# Credential of the bundled PostgreSQL, required only when its Compose file is
+# included. The bundled MinIO needs no separate credential: it reuses the
+# application's S3_ACCESS_KEY / S3_SECRET_KEY pair (issue #1052).
+POSTGRES_SECRETS = ("POSTGRES_PASSWORD",)
+
+COMPOSE_COMBOS = {
+    "application-only": ("docker-compose.yml",),
+    "bundled-minio": ("docker-compose.yml", "docker-compose.minio.yml"),
+    "bundled-postgres": ("docker-compose.yml", "docker-compose.postgres.yml"),
+    "bundled-minio-and-postgres": (
+        "docker-compose.yml", "docker-compose.minio.yml", "docker-compose.postgres.yml",
+    ),
+}
+
+REQUIRED_BY_COMBO = [
+    (name, files, secret)
+    for name, files in COMPOSE_COMBOS.items()
+    for secret in APP_SECRETS + S3_SETTINGS + (
+        POSTGRES_SECRETS if "docker-compose.postgres.yml" in files else ()
+    )
+]
+
+# Every candidate credential, pre-populated so a test only has to remove the
+# one it exercises.
+BASELINE_ENV = {
+    **{name: "container-regression-value-only" for name in APP_SECRETS + S3_SETTINGS},
+    "POSTGRES_PASSWORD": "container-regression-value-only",
+}
+
+
+def compose_path(name):
+    path = ROOT / name
+    if not path.exists():
+        pytest.skip(f"{name} not present in this checkout")
+    return path
+
+
+def render_compose(files, env):
+    """Run `docker compose config` for a backend combination.
+
+    Configuration rendering needs no daemon, so this validates interpolation
+    and merging exactly as a startup would see it.
+    """
+    if not shutil.which("docker"):
+        pytest.skip("Docker Compose is not installed")
+    command = ["docker", "compose", "--env-file", "/dev/null"]
+    for name in files:
+        compose_path(name)
+        command += ["-f", str(ROOT / name)]
+    command.append("config")
+    result = subprocess.run(
+        command, env=env, text=True, capture_output=True, check=False,
+    )
+    if "compose" in result.stderr and "not a docker command" in result.stderr:
+        pytest.skip("Docker Compose plugin is not installed")
+    return result
+
+
+def baseline_environment(drop=()):
+    env = {key: value for key, value in os.environ.items() if key not in BASELINE_ENV}
+    env.update({key: value for key, value in BASELINE_ENV.items() if key not in drop})
+    return env
 
 
 def test_published_runtime_is_multistage_nonroot():
@@ -43,15 +108,15 @@ def test_published_runtime_is_multistage_nonroot():
     assert "COPY .env.example ./atlas/.env.example" in recipe
 
 
-def test_compose_is_loopback_only_with_private_persistent_storage():
-    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+def test_base_compose_is_loopback_only_with_private_persistent_storage():
+    compose = yaml.safe_load(compose_path("docker-compose.yml").read_text())
     services = compose["services"]
-    for service in services.values():
-        for port in service.get("ports", []):
-            assert port.startswith("127.0.0.1:")
-        if "image" in service:
-            assert re.search(r"@sha256:[a-f0-9]{64}$", service["image"])
+    # The base stack is the application only; bundled infrastructure is
+    # opt-in (issue #1052).
+    assert set(services) == {"atlas-ui"}
     atlas = services["atlas-ui"]
+    for port in atlas.get("ports", []):
+        assert port.startswith("127.0.0.1:")
     assert atlas["labels"]["org.atlas.deployment"] == "development-only"
     # Logs and data must be Docker-managed volumes: the runtime UID (10001)
     # cannot write host-owned bind mounts, so a bind mount here fails startup.
@@ -61,7 +126,9 @@ def test_compose_is_loopback_only_with_private_persistent_storage():
     env = dict(entry.split("=", 1) for entry in atlas["environment"])
     assert "DEBUG_MODE" not in env
     assert "AGENT_LOOP_STRATEGY" not in env
-    assert env["CHAT_HISTORY_DB_URL"] == "duckdb:////data/chat_history.db"
+    # DuckDB is the default chat history backend and needs no database
+    # credentials; a postgresql:// URL is operator-supplied (issue #1052).
+    assert env["CHAT_HISTORY_DB_URL"].startswith("${CHAT_HISTORY_DB_URL:-duckdb:")
     assert env["CAPABILITY_TOKEN_SECRET"].startswith("${CAPABILITY_TOKEN_SECRET:?")
     # DEBUG_MODE is gone, so proxy-secret enforcement is active; a missing
     # secret would 503 every protected route while the heartbeat still passes.
@@ -69,40 +136,94 @@ def test_compose_is_loopback_only_with_private_persistent_storage():
     # Token storage must live on the writable named volume, not the host-owned
     # ./config bind mount that the nonroot UID cannot write.
     assert env["MCP_TOKEN_STORAGE_DIR"] == "/data/tokens"
-    assert env["S3_SECRET_KEY"].startswith("${MINIO_ROOT_PASSWORD:?")
-    assert services["postgres"]["environment"]["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD:?")
+    # Object storage credentials belong to the application and are required:
+    # this stack has no IAM credential chain, and they are never derived from
+    # the optional bundled MinIO (issue #1052).
+    for name in S3_SETTINGS:
+        assert env[name].startswith("${" + name + ":?")
+    # No bundled-service credential may leak into the base stack.
+    assert "depends_on" not in atlas
+    raw = compose_path("docker-compose.yml").read_text()
+    assert "MINIO_ROOT" not in raw
+    assert "${POSTGRES_PASSWORD" not in raw
+
+
+def test_bundled_minio_file_is_opt_in_and_fail_closed():
+    compose = yaml.safe_load(compose_path("docker-compose.minio.yml").read_text())
+    services = compose["services"]
+    assert set(services) == {"minio", "minio-init", "atlas-ui"}
+    for name in ("minio", "minio-init"):
+        service = services[name]
+        assert re.search(r"@sha256:[a-f0-9]{64}$", service["image"])
+        for port in service.get("ports", []):
+            assert port.startswith("127.0.0.1:")
+    environment = services["minio"]["environment"]
+    # One credential pair for the whole stack: MinIO's root account is the
+    # application's S3 pair, not an independently shipped default.
+    assert environment["MINIO_ROOT_USER"].startswith("${S3_ACCESS_KEY:?")
+    assert environment["MINIO_ROOT_PASSWORD"].startswith("${S3_SECRET_KEY:?")
     init = services["minio-init"]
     assert init["entrypoint"] == ["/bin/sh", "-ec"]
     script = init["command"][0]
     assert '"$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"' in script
     assert "mc anonymous set none myminio/atlas-files" in script
     assert "anonymous set download" not in script
-    assert "${MINIO_ROOT_PASSWORD" not in script
+    assert "${" not in script
+    # The application entry is an overlay fragment: it only attaches the
+    # bundled services as dependencies when this file is loaded.
+    assert set(services["atlas-ui"]) == {"depends_on"}
+    depends_on = services["atlas-ui"]["depends_on"]
+    assert depends_on["minio"]["condition"] == "service_healthy"
+    assert depends_on["minio-init"]["condition"] == "service_completed_successfully"
 
 
-@pytest.mark.parametrize("missing", REQUIRED_SECRETS)
+def test_bundled_postgres_file_is_opt_in_and_fail_closed():
+    compose = yaml.safe_load(compose_path("docker-compose.postgres.yml").read_text())
+    services = compose["services"]
+    assert set(services) == {"postgres"}
+    postgres = services["postgres"]
+    assert re.search(r"@sha256:[a-f0-9]{64}$", postgres["image"])
+    for port in postgres.get("ports", []):
+        assert port.startswith("127.0.0.1:")
+    assert postgres["environment"]["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD:?")
+
+
 @pytest.mark.parametrize("empty", [False, True])
-def test_compose_rejects_missing_or_empty_required_secrets(missing, empty):
-    if not shutil.which("docker"):
-        pytest.skip("Docker Compose is not installed")
-    env = {k: v for k, v in os.environ.items() if k not in REQUIRED_SECRETS}
-    env.update({key: "container-regression-value-only" for key in REQUIRED_SECRETS})
+@pytest.mark.parametrize("combo_name,files,secret", REQUIRED_BY_COMBO)
+def test_compose_rejects_missing_or_empty_required_secrets(combo_name, files, secret, empty):
     if empty:
-        env[missing] = ""
+        env = baseline_environment()
+        env[secret] = ""
     else:
-        del env[missing]
-    result = subprocess.run(
-        ["docker", "compose", "--env-file", "/dev/null", "-f", str(ROOT / "docker-compose.yml"), "config"],
-        env=env, text=True, capture_output=True, check=False,
-    )
-    if "compose" in result.stderr and "not a docker command" in result.stderr:
-        pytest.skip("Docker Compose plugin is not installed")
+        env = baseline_environment(drop=(secret,))
+    result = render_compose(files, env)
     assert result.returncode != 0
-    assert missing in result.stderr
+    assert secret in result.stderr
+
+
+@pytest.mark.parametrize(
+    "combo_name,files,unused_secret",
+    [
+        ("application-only", ("docker-compose.yml",), "MINIO_ROOT_PASSWORD"),
+        ("application-only", ("docker-compose.yml",), "POSTGRES_PASSWORD"),
+        ("bundled-minio", ("docker-compose.yml", "docker-compose.minio.yml"), "POSTGRES_PASSWORD"),
+        ("bundled-postgres", ("docker-compose.yml", "docker-compose.postgres.yml"), "MINIO_ROOT_PASSWORD"),
+    ],
+)
+def test_unused_backend_credentials_are_not_required(combo_name, files, unused_secret):
+    """A backend's credentials are required only when its Compose file is used.
+
+    Encodes the issue #1052 acceptance criteria: DuckDB works without
+    POSTGRES_PASSWORD and external S3 works without MINIO_ROOT_PASSWORD.
+    """
+    env = baseline_environment()
+    env.pop(unused_secret, None)
+    result = render_compose(files, env)
+    assert result.returncode == 0, result.stderr
 
 
 def test_minio_credentials_are_not_interpreted_as_shell():
-    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    compose = yaml.safe_load(compose_path("docker-compose.minio.yml").read_text())
     script = compose["services"]["minio-init"]["command"][0].replace("$$", "$")
     credential = 'spaces " ; $(printf should-not-execute) `printf neither`'
     result = subprocess.run(

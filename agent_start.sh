@@ -108,7 +108,7 @@ setup_minio() {
         if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
             echo "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
             cd "$PROJECT_ROOT"
-            $COMPOSE_CMD up -d minio minio-init
+            $COMPOSE_CMD -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init
             echo "MinIO started successfully"
             sleep 3
         else
@@ -149,11 +149,14 @@ setup_chat_history_db() {
         if ! $CONTAINER_CMD ps | grep -q atlas-postgres; then
             echo "PostgreSQL is not running. Starting with $COMPOSE_CMD..."
             cd "$PROJECT_ROOT"
-            $COMPOSE_CMD up -d postgres
+            # The bundled PostgreSQL lives in its own Compose file (issue
+            # #1052), which is self-contained: starting it alone requires only
+            # POSTGRES_PASSWORD, not the application stack's secrets.
+            $COMPOSE_CMD -f docker-compose.postgres.yml up -d postgres
             echo "Waiting for PostgreSQL to be ready..."
             max_wait=60
             waited=0
-            until $COMPOSE_CMD exec -T postgres pg_isready >/dev/null 2>&1; do
+            until $COMPOSE_CMD -f docker-compose.postgres.yml exec -T postgres pg_isready >/dev/null 2>&1; do
                 if [ "$waited" -ge "$max_wait" ]; then
                     echo "PostgreSQL did not become ready within ${max_wait}s."
                     exit 1

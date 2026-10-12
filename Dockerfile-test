@@ -38,9 +38,11 @@ ENV PATH="/root/.local/bin:$PATH"
 COPY pyproject.toml .
 
 # Files needed by env-sync tests (including startup scripts and the Dockerfile
-# itself, checked by the removed-flag regression guard)
+# itself, checked by the removed-flag regression guard). The bundled
+# infrastructure Compose files are read by test_container_security.py, which
+# skips gracefully when they are absent.
 COPY .env.example .
-COPY docker-compose.yml .
+COPY docker-compose.yml docker-compose.minio.yml docker-compose.postgres.yml .
 COPY agent_start.sh .
 COPY ps_agent_start.ps1 .
 COPY Dockerfile-test .

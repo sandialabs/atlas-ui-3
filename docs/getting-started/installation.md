@@ -1,6 +1,6 @@
 # Installation
 
-Last updated: 2026-10-04
+Last updated: 2026-10-12
 
 This guide provides everything you need to get Atlas UI 3 running, whether you prefer using Docker for a quick setup or setting up a local development environment.
 
@@ -96,17 +96,46 @@ a separately maintained derivative image or an external MCP service.
 ### Option 4: Docker Compose
 
 `docker-compose.yml` is a **development-only** stack, not a production
-deployment template. Supply the secrets above and storage credentials in your
-environment or a protected `.env` file next to it. Compose refuses to start
-when required credentials are missing:
+deployment template. The base stack starts only the Atlas application,
+against your own object storage and DuckDB chat history. Bundled MinIO and
+PostgreSQL are opt-in through additional Compose files, and Compose only asks
+for the credentials of services you actually include (issue #1052): an
+external-S3 deployment never needs `MINIO_ROOT_PASSWORD`, and DuckDB never
+needs `POSTGRES_PASSWORD`. Supply the secrets above and storage credentials in
+your environment or a protected `.env` file next to the Compose files. Compose
+refuses to start when a required credential is missing or empty:
 
 ```bash
-export MINIO_ROOT_USER=atlas-local
-export MINIO_ROOT_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
-export POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
+export S3_ENDPOINT=http://minio:9000
+export S3_ACCESS_KEY=atlas-local
+export S3_SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 export PROXY_SECRET="$PROXY_SECRET"   # from the "Generate deployment secrets first" step
-docker compose up
+docker compose up -d
 ```
+
+To store files in the bundled MinIO instead of your own S3 endpoint, include
+its file. MinIO's root account then uses the same `S3_ACCESS_KEY` /
+`S3_SECRET_KEY` pair, so the stack has exactly one object-storage credential
+(MinIO requires that user to be at least 3 and the password at least 8
+characters long):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.minio.yml up -d
+```
+
+To store chat history in the bundled PostgreSQL instead of DuckDB, include its
+file and point `CHAT_HISTORY_DB_URL` at it, keeping the same password
+(URL-encode special characters):
+
+```bash
+export POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_hex(32))")
+export CHAT_HISTORY_DB_URL="postgresql://atlas:${POSTGRES_PASSWORD}@postgres:5432/atlas_chat_history"
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+```
+
+Tip: `export COMPOSE_FILE=docker-compose.yml:docker-compose.minio.yml:docker-compose.postgres.yml`
+selects the bundled stack for every subsequent `docker compose` command in the
+current shell.
 
 `DEBUG_MODE` is no longer set, so proxy-secret enforcement is active: the stack
 rejects any request that does not carry the `X-Proxy-Secret` header. Reaching
@@ -117,22 +146,25 @@ client-supplied copies (an nginx example is in
 A bare `http://127.0.0.1:8000` hit only proves the container is up — the
 heartbeat healthcheck does not test authentication.
 
-All published ports bind to `127.0.0.1`: Atlas on 8000, MinIO on 9000/9001,
-and PostgreSQL on 5432. The MinIO initializer makes `atlas-files` private,
-including revoking the old anonymous-download policy on an existing bucket.
-Keep storage credentials stable for existing volumes. Changing environment
-variables alone does not rotate an existing PostgreSQL database password.
+All published ports bind to `127.0.0.1`: Atlas on 8000, MinIO on 9000/9001
+when the bundled MinIO file is included, and PostgreSQL on 5432 when the
+bundled PostgreSQL file is included. The MinIO initializer makes `atlas-files`
+private, including revoking the old anonymous-download policy on an existing
+bucket. Keep storage credentials stable for existing volumes. Changing
+environment variables alone does not rotate an existing PostgreSQL database
+password.
 
-The `atlas-data`, `atlas-logs`, and `minio-data` named volumes preserve DuckDB
-history, logs, uploaded files, and per-user MCP tokens (`/data/tokens`) across
-container recreation. The image runs as UID/GID `10001:10001`, so Docker-managed
-volumes are used instead of host bind mounts for writable state; mount `./config`
-for operator overrides. Because that bind mount is host-owned, the nonroot UID
-cannot write it: `chown -R 10001:10001 config` before `docker compose up` if you
-use the admin MCP editor, which writes `mcp.json` there. Use separately managed
+The `atlas-data` and `atlas-logs` named volumes (plus `minio-data` when the
+bundled MinIO file is included) preserve DuckDB history, logs, uploaded files,
+and per-user MCP tokens (`/data/tokens`) across container recreation. The
+image runs as UID/GID `10001:10001`, so Docker-managed volumes are used
+instead of host bind mounts for writable state; mount `./config` for operator
+overrides. Because that bind mount is host-owned, the nonroot UID cannot write
+it: `chown -R 10001:10001 config` before `docker compose up` if you use the
+admin MCP editor, which writes `mcp.json` there. Use separately managed
 storage, backups, and least-privilege credentials in production. Do not enable
-debug mode to bypass proxy setup in this container: it listens on a non-loopback
-address inside its network.
+debug mode to bypass proxy setup in this container: it listens on a
+non-loopback address inside its network.
 
 ## Local Development Setup
 

@@ -269,7 +269,7 @@ When enabled: `/api/config` includes model/server `compliance_level` and effecti
 ## S3 Storage
 
 - **Mock S3 (default)**: `USE_MOCK_S3=true` -- in-process, no Podman needed
-- **MinIO**: `USE_MOCK_S3=false` -- requires `podman-compose up -d minio minio-init` (Podman reads the existing `docker-compose.yml`)
+- **MinIO**: `USE_MOCK_S3=false` -- requires `podman-compose -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init` (bundled MinIO and PostgreSQL live in opt-in Compose files; see issue #1052)
 
 ## Security
 

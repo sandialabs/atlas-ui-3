@@ -283,7 +283,7 @@ function Initialize-MinIO {
             Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
             Set-Location $PROJECT_ROOT
 
-            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL up -d minio minio-init
+            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init
 
             Write-Host "MinIO started successfully"
             Start-Sleep -Seconds 3
@@ -328,14 +328,17 @@ function Initialize-ChatHistoryDb {
             Write-Host "PostgreSQL is not running. Starting with $script:COMPOSE_CMD..."
             Set-Location $PROJECT_ROOT
 
-            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL up -d postgres
+            # The bundled PostgreSQL lives in its own Compose file (issue
+            # #1052), which is self-contained: starting it alone requires only
+            # POSTGRES_PASSWORD, not the application stack's secrets.
+            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.postgres.yml up -d postgres
 
             Write-Host "Waiting for PostgreSQL to be ready..."
             $maxWait = 60
             $waited = 0
             $ready = $false
             while ($waited -lt $maxWait) {
-                & $script:COMPOSE_HEAD @script:COMPOSE_TAIL exec -T postgres pg_isready 2>$null 1>$null
+                & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.postgres.yml exec -T postgres pg_isready 2>$null 1>$null
                 if ($LASTEXITCODE -eq 0) {
                     $ready = $true
                     break

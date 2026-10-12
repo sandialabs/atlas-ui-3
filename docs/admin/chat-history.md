@@ -38,20 +38,22 @@ Best for production deployments with multiple users.
 CHAT_HISTORY_DB_URL=postgresql://atlas:atlas@localhost:5432/atlas_chat_history
 ```
 
-Start the PostgreSQL container:
+Start the PostgreSQL container. It lives in its own Compose file
+(`docker-compose.postgres.yml`), so DuckDB deployments never need its
+credential:
 
 ```bash
-docker compose up -d postgres
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d postgres
 ```
 
-The `docker-compose.yml` includes a pre-configured PostgreSQL service with:
+The bundled PostgreSQL service has:
 - User: `atlas`
 - Password: required through `POSTGRES_PASSWORD` (no shipped password)
 - Database: `atlas_chat_history`
 - Port: `127.0.0.1:5432` (host-local only)
 
-The Compose file is development-only and persists PostgreSQL in a named
-volume. Supply all required Compose secrets as described in the
+`agent_start.sh` starts it automatically when `CHAT_HISTORY_DB_URL` is a
+`postgresql://` URL. Supply all required Compose secrets as described in the
 [installation guide](../getting-started/installation.md#option-4-docker-compose).
 For production, provision a separately secured database with backups and
 least-privilege credentials. Compose also persists DuckDB history in the
