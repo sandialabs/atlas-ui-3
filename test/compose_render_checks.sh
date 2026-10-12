@@ -195,6 +195,7 @@ if docker info >/dev/null 2>&1; then
         print_result 0 "bundled MinIO starts healthy and its initializer exits cleanly"
     else
         print_result 1 "bundled MinIO starts healthy and its initializer exits cleanly"
+        run_isolated "${FILES_MINIO[@]}" logs minio minio-init 2>&1 || true
         run_isolated "${FILES_MINIO[@]}" ps -a 2>&1 || true
     fi
     run_isolated "${FILES_MINIO[@]}" down -v --remove-orphans >/dev/null 2>&1 || true

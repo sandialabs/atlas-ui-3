@@ -164,8 +164,19 @@ def test_bundled_minio_file_is_opt_in_and_fail_closed():
     # application's S3 pair, not an independently shipped default.
     assert environment["MINIO_ROOT_USER"].startswith("${S3_ACCESS_KEY:?")
     assert environment["MINIO_ROOT_PASSWORD"].startswith("${S3_SECRET_KEY:?")
+    # The image runs as uid 1001 and declares its data volume at
+    # /bitnami/minio/data: mounting there seeds the named volume with the
+    # image's ownership, while an arbitrary mount path would be created
+    # root-owned and the server would exit immediately.
+    assert services["minio"]["volumes"] == ["minio-data:/bitnami/minio/data"]
+    assert services["minio"]["command"] == [
+        "server", "/bitnami/minio/data", "--console-address", ":9001",
+    ]
     init = services["minio-init"]
     assert init["entrypoint"] == ["/bin/sh", "-ec"]
+    # mc writes its alias configuration under HOME; the image runs as uid 1001
+    # with a non-writable HOME=/, so the initializer redirects it to /tmp.
+    assert init["environment"]["HOME"] == "/tmp"
     script = init["command"][0]
     assert '"$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"' in script
     assert "mc anonymous set none myminio/atlas-files" in script
