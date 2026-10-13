@@ -189,12 +189,19 @@ expect_render_without "bundled MinIO stack ignores a set POSTGRES_PASSWORD" "unu
 expect_render_without "bundled PostgreSQL stack ignores a set MINIO_ROOT_PASSWORD" "unused-sentinel" \
     "${ALL_SECRETS[@]}" MINIO_ROOT_PASSWORD=unused-sentinel -- "${FILES_POSTGRES[@]}"
 
-# 3. Every supported combination renders successfully with all credentials.
+# 3. Every supported combination renders successfully with all credentials,
+#    and each bundled file also renders alone (agent_start.sh starts them
+#    individually for a host-run Atlas).
 for combo in "${COMBO_NAMES[@]}"; do
     mapfile -d '' -t combo_files < <(files_for_combo "$combo")
     expect_render_ok "$combo renders with every credential" \
         "${ALL_SECRETS[@]}" -- "${combo_files[@]}"
 done
+expect_render_ok "standalone bundled PostgreSQL renders with only POSTGRES_PASSWORD" \
+    "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" -- -f "$PROJECT_ROOT/docker-compose.postgres.yml"
+expect_render_ok "standalone bundled MinIO renders with only the S3 credential pair" \
+    S3_ACCESS_KEY=pr-validation-access-key S3_SECRET_KEY=pr-validation-secret-key \
+    -- -f "$PROJECT_ROOT/docker-compose.minio.yml"
 
 # 4. Host-oriented .env values cannot break the container paths: the DuckDB
 #    URL is hard-coded to the absolute /data path, and the bundled MinIO file

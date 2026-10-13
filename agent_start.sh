@@ -89,6 +89,7 @@ setup_container_runtime() {
 # INFRASTRUCTURE FUNCTIONS
 # =============================================================================
 
+# url-host helpers start
 # Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
 # Prints the host, or nothing when the URL cannot be parsed.
 url_host() {
@@ -97,14 +98,24 @@ url_host() {
         | sed 's/^.*@//; s/:[0-9]*$//'
 }
 
-# True when the given host means "this machine" (empty counts as local:
-# the application defaults its S3 endpoint to localhost).
+# True when the given host means "this machine": loopback in any of its
+# spellings. Hostnames are case-insensitive and the whole 127.0.0.0/8 range
+# loops back, not just .1.
 is_local_host() {
-    case "$1" in
-        "" | localhost | 127.0.0.1 | ::1 | "[::1]") return 0 ;;
+    local host
+    host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$host" in
+        localhost | 127.0.0.1 | ::1 | "[::1]" | 127.*) return 0 ;;
         *) return 1 ;;
     esac
 }
+
+# Redact userinfo (user:password@) from a URL so credentials never reach
+# terminal output or logs.
+redact_url() {
+    printf '%s\n' "$1" | sed 's|://[^/?#]*@|://***@|'
+}
+# url-host helpers end
 
 setup_minio() {
     # setup_environment has already sourced $ENV_FILE (set -a), so read the
@@ -131,11 +142,11 @@ setup_minio() {
         local s3_host
         s3_host="$(url_host "$s3_endpoint")"
         if [ -z "$s3_host" ]; then
-            echo "Error: cannot parse S3_ENDPOINT='$s3_endpoint'. Use a scheme://host[:port] URL."
+            echo "Error: cannot parse S3_ENDPOINT='$(redact_url "$s3_endpoint")'. Use a scheme://host[:port] URL."
             exit 1
         fi
         if ! is_local_host "$s3_host"; then
-            echo "S3_ENDPOINT=$s3_endpoint is not local; not starting bundled MinIO"
+            echo "S3_ENDPOINT=$(redact_url "$s3_endpoint") is not local; not starting bundled MinIO"
             return
         fi
     fi
@@ -143,8 +154,11 @@ setup_minio() {
     if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
         echo "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
         cd "$PROJECT_ROOT"
-        if ! $COMPOSE_CMD -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init; then
-            echo "Error: MinIO failed to start. Check that S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY and the application secrets are set in $ENV_FILE (bundled MinIO reuses S3_ACCESS_KEY/S3_SECRET_KEY as its root credentials)."
+        # The bundled MinIO file is self-contained: starting it alone requires
+        # only S3_ACCESS_KEY/S3_SECRET_KEY (its root credentials), not the
+        # application stack's secrets (issue #1052).
+        if ! $COMPOSE_CMD -f docker-compose.minio.yml up -d minio minio-init; then
+            echo "Error: MinIO failed to start. Check that S3_ACCESS_KEY and S3_SECRET_KEY are set in $ENV_FILE (they are also the bundled MinIO root credentials)."
             exit 1
         fi
         echo "MinIO started successfully"
@@ -185,11 +199,11 @@ setup_chat_history_db() {
         local db_host
         db_host="$(url_host "$db_url")"
         if [ -z "$db_host" ]; then
-            echo "Error: cannot parse CHAT_HISTORY_DB_URL='$db_url'. Use a scheme://[user[:password]@]host[:port]/database URL."
+            echo "Error: cannot parse CHAT_HISTORY_DB_URL='$(redact_url "$db_url")'. Use a scheme://[user[:password]@]host[:port]/database URL."
             exit 1
         fi
         if ! is_local_host "$db_host"; then
-            echo "CHAT_HISTORY_DB_URL points at an external database; not starting bundled PostgreSQL"
+            echo "CHAT_HISTORY_DB_URL=$(redact_url "$db_url") points at an external database; not starting bundled PostgreSQL"
             return
         fi
 

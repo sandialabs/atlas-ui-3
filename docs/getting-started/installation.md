@@ -142,10 +142,12 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
 To use an external database with the Compose stack, add your own override
 file that sets `CHAT_HISTORY_DB_URL` (the `.env` value is for host-run Atlas;
 the container only accepts its own absolute `/data` DuckDB path or an
-operator-provided override). Tip:
+operator-provided override). `S3_ENDPOINT` may hold any value in `.env` for
+host-run Atlas; the bundled MinIO file overrides it inside the stack. Tip:
 `export COMPOSE_FILE=docker-compose.yml:docker-compose.minio.yml:docker-compose.postgres.yml`
 selects the bundled stack for every subsequent `docker compose` command in
 the current shell.
+
 #### Upgrading from the single-file stack
 
 Stacks started before this change need new settings before they start again:
@@ -156,16 +158,15 @@ configuration with a clear message until the variables below are set.
 - Plain `docker compose up` now starts only Atlas. Add
   `-f docker-compose.minio.yml` (and/or `-f docker-compose.postgres.yml`) to
   keep using the bundled services.
-- The bundled MinIO root account is now your `S3_ACCESS_KEY` /
-  `S3_SECRET_KEY` pair, and `S3_ENDPOINT` must be `http://minio:9000` (the
-  stack pins these itself).
-- To keep data in an existing `minio-data` volume, set `S3_ACCESS_KEY` to the
-  old `MINIO_ROOT_USER` (`atlas-minio` if you never set it) and
-  `S3_SECRET_KEY` to the old `MINIO_ROOT_PASSWORD`. The server now also
-  stores data under `/bitnami/minio/data` instead of `/data`; a volume that
-  the old stack created (it could only fail on startup) holds nothing, so
-  `docker compose -p <project> down -v` and a fresh start is safe if the new
-  stack reports a permission error on it.
+- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` are no longer read; Compose now
+  demands the application's `S3_ACCESS_KEY` / `S3_SECRET_KEY` pair instead.
+  Set `S3_ACCESS_KEY` to the old `MINIO_ROOT_USER` (`atlas-minio` if you
+  never set it) and `S3_SECRET_KEY` to the old `MINIO_ROOT_PASSWORD`.
+- The bundled MinIO server now stores data under `/bitnami/minio/data`
+  instead of `/data`. The named volume of an old stack holds nothing — the
+  previous configuration could not start the server — so if the new stack
+  reports a permission error on it, remove it with
+  `docker compose -p <project> down -v` and start fresh.
 - `CHAT_HISTORY_DB_URL` from your `.env` no longer reaches the container;
   the bundled PostgreSQL file supplies its own URL from `POSTGRES_PASSWORD`.
 

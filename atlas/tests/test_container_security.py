@@ -190,9 +190,12 @@ def test_bundled_minio_file_is_opt_in_and_fail_closed():
     # services as dependencies and pins the storage settings this stack
     # implies, so a host-oriented .env (e.g. S3_ENDPOINT=http://localhost:9000,
     # which would point the container at its own loopback) cannot leak in and
-    # the bucket always matches what minio-init creates.
+    # the bucket always matches what minio-init creates. The build stanza
+    # keeps the file renderable on its own (agent_start.sh starts MinIO from
+    # it alone); merging keeps the base build args.
     overlay = services["atlas-ui"]
-    assert set(overlay) == {"depends_on", "environment"}
+    assert set(overlay) == {"build", "depends_on", "environment"}
+    assert overlay["build"]["dockerfile"] == "Dockerfile"
     depends_on = overlay["depends_on"]
     assert depends_on["minio"]["condition"] == "service_healthy"
     assert depends_on["minio-init"]["condition"] == "service_completed_successfully"

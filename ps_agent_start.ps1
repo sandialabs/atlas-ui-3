@@ -254,6 +254,7 @@ function Initialize-ContainerRuntime {
     }
 }
 
+# url-host helpers start
 # Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
 # Returns "" when the URL cannot be parsed.
 function Get-UrlHost {
@@ -265,12 +266,24 @@ function Get-UrlHost {
     return ($authority -replace ':[0-9]*$', '')
 }
 
-# True when the given host means "this machine" (empty counts as local: the
-# application defaults its S3 endpoint to localhost).
+# True when the given host means "this machine": loopback in any of its
+# spellings. Hostnames are case-insensitive and the whole 127.0.0.0/8 range
+# loops back, not just .1.
 function Test-LocalHost {
     param([string]$Host_ = "")
-    return ($Host_ -eq "" -or $Host_ -eq "localhost" -or $Host_ -eq "127.0.0.1" -or $Host_ -eq "[::1]" -or $Host_ -eq "::1")
+    $normalized = $Host_.ToLowerInvariant()
+    return ($normalized -eq "localhost" -or $normalized -eq "127.0.0.1" -or
+        $normalized -eq "[::1]" -or $normalized -eq "::1" -or
+        $normalized.StartsWith("127."))
 }
+
+# Redact userinfo (user:password@) from a URL so credentials never reach
+# terminal output or logs.
+function Hide-UrlUserInfo {
+    param([string]$Url)
+    return ($Url -replace '://[^/?#]*@', '://***@')
+}
+# url-host helpers end
 
 # =============================================================================
 # INFRASTRUCTURE FUNCTIONS
@@ -305,11 +318,11 @@ function Initialize-MinIO {
     if ($s3Endpoint) {
         $s3Host = Get-UrlHost $s3Endpoint
         if (-not $s3Host) {
-            Write-Error "Cannot parse S3_ENDPOINT='$s3Endpoint'. Use a scheme://host[:port] URL."
+            Write-Error "Cannot parse S3_ENDPOINT='$(Hide-UrlUserInfo $s3Endpoint)'. Use a scheme://host[:port] URL."
             exit 1
         }
         if (-not (Test-LocalHost $s3Host)) {
-            Write-Host "S3_ENDPOINT=$s3Endpoint is not local; not starting bundled MinIO"
+            Write-Host "S3_ENDPOINT=$(Hide-UrlUserInfo $s3Endpoint) is not local; not starting bundled MinIO"
             return
         }
     }
@@ -321,9 +334,12 @@ function Initialize-MinIO {
         Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
         Set-Location $PROJECT_ROOT
 
-        & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.yml -f docker-compose.minio.yml up -d minio minio-init
+        # The bundled MinIO file is self-contained: starting it alone requires
+        # only S3_ACCESS_KEY/S3_SECRET_KEY (its root credentials), not the
+        # application stack's secrets (issue #1052).
+        & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.minio.yml up -d minio minio-init
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "MinIO failed to start. Check that S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY and the application secrets are set in $script:ENV_FILE (bundled MinIO reuses S3_ACCESS_KEY/S3_SECRET_KEY as its root credentials)."
+            Write-Error "MinIO failed to start. Check that S3_ACCESS_KEY and S3_SECRET_KEY are set in $script:ENV_FILE (they are also the bundled MinIO root credentials)."
             exit 1
         }
 
@@ -369,11 +385,11 @@ function Initialize-ChatHistoryDb {
         # it alone (issue #1052).
         $dbHost = Get-UrlHost $dbUrl
         if (-not $dbHost) {
-            Write-Error "Cannot parse CHAT_HISTORY_DB_URL='$dbUrl'. Use a scheme://[user[:password]@]host[:port]/database URL."
+            Write-Error "Cannot parse CHAT_HISTORY_DB_URL='$(Hide-UrlUserInfo $dbUrl)'. Use a scheme://[user[:password]@]host[:port]/database URL."
             exit 1
         }
         if (-not (Test-LocalHost $dbHost)) {
-            Write-Host "CHAT_HISTORY_DB_URL points at an external database; not starting bundled PostgreSQL"
+            Write-Host "CHAT_HISTORY_DB_URL=$(Hide-UrlUserInfo $dbUrl) points at an external database; not starting bundled PostgreSQL"
             return
         }
 
