@@ -101,8 +101,8 @@ url_host() {
         | sed -n 's|^[a-zA-Z][a-zA-Z0-9+.-]*://\([^/?#]*\).*|\1|p' \
         | sed 's/^.*@//; s/:[0-9]*$//')"
     case "$host" in
-        "" | "[::1]") printf '%s\n' "$host" ;;
-        *:*) : ;;  # stray colon outside bracketed IPv6: malformed, unparseable
+        "" | \[*\]) printf '%s\n' "$host" ;;
+        *:*) : ;;  # stray colon outside a bracketed IPv6 literal: malformed
         *) printf '%s\n' "$host" ;;
     esac
 }
@@ -122,10 +122,11 @@ is_local_host() {
 
 # Redact userinfo (user:password@) from a URL so credentials never reach
 # terminal output or logs. The match runs through the last '@' so passwords
-# containing '/', '?' or '#' cannot slip through; over-redacting a malformed
-# URL is acceptable for display purposes.
+# containing '/', '?' or '#' cannot slip through, and a second rule covers
+# scheme-less values; over-redacting a malformed URL is acceptable for
+# display purposes.
 redact_url() {
-    printf '%s\n' "$1" | sed 's|://.*@|://***@|'
+    printf '%s\n' "$1" | sed 's|://.*@|://***@|; t; s|^[^@/]*:[^@]*@|***@|'
 }
 # url-host helpers end
 
@@ -154,7 +155,8 @@ setup_minio() {
     # cloud keys that must not become a local dev container's root password.
     # Either way, do not start or require anything local for it (issue #1052).
     if [ -z "$s3_endpoint" ]; then
-        echo "S3_ENDPOINT is not set; set it to http://localhost:9000 to use bundled MinIO, or to your own S3 endpoint"
+        echo "WARNING: USE_MOCK_S3 is not 'true' but S3_ENDPOINT is not set; uploads will fail." >&2
+        echo "         Set S3_ENDPOINT=http://localhost:9000 to use bundled MinIO, or point it at your own S3 endpoint." >&2
         return
     fi
     local s3_host

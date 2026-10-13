@@ -267,7 +267,7 @@ function Get-UrlHost {
     }
     $authority = $Matches[1] -replace '^.*@', ''
     $host_ = $authority -replace ':[0-9]*$', ''
-    if ($host_ -match ':' -and $host_ -ne '[::1]') {
+    if ($host_ -match ':' -and $host_ -notmatch '^\[.*\]$') {
         return ""
     }
     return $host_
@@ -288,11 +288,16 @@ function Test-LocalHost {
 
 # Redact userinfo (user:password@) from a URL so credentials never reach
 # terminal output or logs. The match runs through the last '@' so passwords
-# containing '/', '?' or '#' cannot slip through; over-redacting a malformed
-# URL is acceptable for display purposes.
+# containing '/', '?' or '#' cannot slip through, and a second rule covers
+# scheme-less values; over-redacting a malformed URL is acceptable for
+# display purposes.
 function Hide-UrlUserInfo {
     param([string]$Url)
-    return ($Url -replace '://.*@', '://***@')
+    $redacted = $Url -replace '://.*@', '://***@'
+    if ($redacted -eq $Url) {
+        $redacted = $Url -replace '^[^@/]*:[^@]*@', '***@'
+    }
+    return $redacted
 }
 # url-host helpers end
 
@@ -330,7 +335,7 @@ function Initialize-MinIO {
     # Either way, do not start or require anything local for it (issue #1052).
     $s3Endpoint = $env:S3_ENDPOINT
     if (-not $s3Endpoint) {
-        Write-Host "S3_ENDPOINT is not set; set it to http://localhost:9000 to use bundled MinIO, or to your own S3 endpoint"
+        Write-Warning "USE_MOCK_S3 is not 'true' but S3_ENDPOINT is not set; uploads will fail. Set S3_ENDPOINT=http://localhost:9000 to use bundled MinIO, or point it at your own S3 endpoint."
         return
     }
     $s3Host = Get-UrlHost $s3Endpoint
