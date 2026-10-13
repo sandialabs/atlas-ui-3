@@ -160,17 +160,26 @@ configuration with a clear message until the variables below are set.
   keep using the bundled services.
 - `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` are no longer read; Compose now
   demands the application's `S3_ACCESS_KEY` / `S3_SECRET_KEY` pair instead.
-  For a stack that ran before v0.8.0 (pre-#1017), the bundled MinIO used the
-  shipped `minioadmin` / `minioadmin` credentials and kept files in the
-  host bind mount `./data/minio`: set `S3_ACCESS_KEY=minioadmin` and
-  `S3_SECRET_KEY=minioadmin` to read that bucket, migrate the files, and
-  rotate to generated credentials afterwards — `minioadmin` is publicly
-  known. For a v0.8.0-era stack, use the credentials you set as
-  `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` back then.
-- The server now stores data under `/bitnami/minio/data` instead of `/data`.
-  A leftover `minio-data` named volume from a v0.8.0-era stack holds nothing
-  (that configuration could not start the server). If the new stack reports
-  a permission error on it, remove just that volume with
+  Set both to freshly generated values — object data is independent of the
+  root credential, so migrated files stay readable without the old
+  `minioadmin`/`minioadmin` pair (which is publicly known; do not reuse it).
+- Stacks that ran before v0.8.0 kept files in the host bind mount
+  `./data/minio`, which the bundled MinIO file does not mount (it uses the
+  `minio-data` named volume). Copy them in before first use, with the
+  ownership the server's uid 1001 expects:
+
+  ```bash
+  docker volume create <project>_minio-data
+  docker run --rm -u root \
+    -v <project>_minio-data:/target -v "$PWD/data/minio":/src:ro \
+    docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20 \
+    sh -c 'cp -a /src/. /target/ && chown -R 1001:1001 /target'
+  ```
+
+- The server stores data under `/bitnami/minio/data`. A leftover
+  `minio-data` named volume from a v0.8.0-era stack holds nothing (that
+  configuration could not start the server). If the new stack reports a
+  permission error on it, remove just that volume with
   `docker volume rm <project>_minio-data` (find the exact name with
   `docker volume ls`). Do NOT use `docker compose down -v` for this: it
   deletes every volume of the project, including `atlas-data` (chat history

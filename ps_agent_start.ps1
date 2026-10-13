@@ -256,14 +256,21 @@ function Initialize-ContainerRuntime {
 
 # url-host helpers start
 # Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
-# Returns "" when the URL cannot be parsed.
+# Returns "" when the URL cannot be parsed. A colon in the extracted
+# authority (outside bracketed IPv6) means the URL is malformed — e.g. an
+# unencoded '/' in a password leaves userinfo behind — and is rejected like
+# any other unparseable value.
 function Get-UrlHost {
     param([string]$Url)
     if ($Url -notmatch '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]*)') {
         return ""
     }
     $authority = $Matches[1] -replace '^.*@', ''
-    return ($authority -replace ':[0-9]*$', '')
+    $host_ = $authority -replace ':[0-9]*$', ''
+    if ($host_ -match ':' -and $host_ -ne '[::1]') {
+        return ""
+    }
+    return $host_
 }
 
 # True when the given host means "this machine": the name "localhost" in any
@@ -316,22 +323,24 @@ function Initialize-MinIO {
         exit 1
     }
 
-    # The bundled MinIO is only for a local S3_ENDPOINT (or an unset one: the
-    # application defaults its endpoint to localhost). An external endpoint
-    # means the operator runs their own storage; do not start or require
-    # anything local for it (issue #1052).
+    # The bundled MinIO is only for an explicitly local S3_ENDPOINT. An
+    # external endpoint means the operator runs their own storage, and an
+    # unset endpoint is ambiguous: the configured S3 credentials may be real
+    # cloud keys that must not become a local dev container's root password.
+    # Either way, do not start or require anything local for it (issue #1052).
     $s3Endpoint = $env:S3_ENDPOINT
-    if (-not $s3Endpoint) { $s3Endpoint = "" }
-    if ($s3Endpoint) {
-        $s3Host = Get-UrlHost $s3Endpoint
-        if (-not $s3Host) {
-            Write-Error "Cannot parse S3_ENDPOINT='$(Hide-UrlUserInfo $s3Endpoint)'. Use a scheme://host[:port] URL."
-            exit 1
-        }
-        if (-not (Test-LocalHost $s3Host)) {
-            Write-Host "S3_ENDPOINT=$(Hide-UrlUserInfo $s3Endpoint) is not local; not starting bundled MinIO"
-            return
-        }
+    if (-not $s3Endpoint) {
+        Write-Host "S3_ENDPOINT is not set; set it to http://localhost:9000 to use bundled MinIO, or to your own S3 endpoint"
+        return
+    }
+    $s3Host = Get-UrlHost $s3Endpoint
+    if (-not $s3Host) {
+        Write-Error "Cannot parse S3_ENDPOINT='$(Hide-UrlUserInfo $s3Endpoint)'. Use a scheme://host[:port] URL."
+        exit 1
+    }
+    if (-not (Test-LocalHost $s3Host)) {
+        Write-Host "S3_ENDPOINT=$(Hide-UrlUserInfo $s3Endpoint) is not local; not starting bundled MinIO"
+        return
     }
 
     # Check if MinIO container is running

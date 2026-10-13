@@ -54,6 +54,7 @@ postgresql://atlas:pw@localhost:5432/atlas_chat_history|localhost|0
 postgresql://atlas:pw@db.internal:5432/atlas_chat_history|db.internal|1
 postgresql://atlas:p@ss@db.internal:5432/x|db.internal|1
 postgresql+psycopg://db.internal:5432/x|db.internal|1
+postgresql://atlas:pa/ss@localhost/atlas_chat_history||1
 duckdb:///data/chat_history.db||1
 ||1
 garbage||1
@@ -96,6 +97,7 @@ $cases = @(
     @("postgresql://atlas:pw@db.internal:5432/atlas_chat_history", "db.internal", 1),
     @("postgresql://atlas:p@ss@db.internal:5432/x", "db.internal", 1),
     @("postgresql+psycopg://db.internal:5432/x", "db.internal", 1),
+    @("postgresql://atlas:pa/ss@localhost/atlas_chat_history", "", 1),
     @("duckdb:///data/chat_history.db", "", 1),
     @("", "", 1),
     @("garbage", "", 1)

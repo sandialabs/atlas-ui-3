@@ -7,7 +7,7 @@
 #
 # The file is self-contained, so it can also start MinIO alone for a
 # host-run Atlas (agent_start.sh does this automatically when USE_MOCK_S3 is
-# false and S3_ENDPOINT is local):
+# false and S3_ENDPOINT is explicitly a loopback endpoint):
 #
 #   docker compose -f docker-compose.minio.yml up -d minio minio-init
 #

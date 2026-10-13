@@ -91,11 +91,20 @@ setup_container_runtime() {
 
 # url-host helpers start
 # Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
-# Prints the host, or nothing when the URL cannot be parsed.
+# Prints the host, or nothing when the URL cannot be parsed. A colon in the
+# extracted authority (outside bracketed IPv6) means the URL is malformed —
+# e.g. an unencoded '/' in a password leaves userinfo behind — and is
+# rejected like any other unparseable value.
 url_host() {
-    printf '%s\n' "$1" \
+    local host
+    host="$(printf '%s\n' "$1" \
         | sed -n 's|^[a-zA-Z][a-zA-Z0-9+.-]*://\([^/?#]*\).*|\1|p' \
-        | sed 's/^.*@//; s/:[0-9]*$//'
+        | sed 's/^.*@//; s/:[0-9]*$//')"
+    case "$host" in
+        "" | "[::1]") printf '%s\n' "$host" ;;
+        *:*) : ;;  # stray colon outside bracketed IPv6: malformed, unparseable
+        *) printf '%s\n' "$host" ;;
+    esac
 }
 
 # True when the given host means "this machine": the name "localhost" in any
@@ -139,21 +148,24 @@ setup_minio() {
         exit 1
     fi
 
-    # The bundled MinIO is only for a local S3_ENDPOINT (or an unset one: the
-    # application defaults its endpoint to localhost). An external endpoint
-    # means the operator runs their own storage; do not start or require
-    # anything local for it (issue #1052).
-    if [ -n "$s3_endpoint" ]; then
-        local s3_host
-        s3_host="$(url_host "$s3_endpoint")"
-        if [ -z "$s3_host" ]; then
-            echo "Error: cannot parse S3_ENDPOINT='$(redact_url "$s3_endpoint")'. Use a scheme://host[:port] URL."
-            exit 1
-        fi
-        if ! is_local_host "$s3_host"; then
-            echo "S3_ENDPOINT=$(redact_url "$s3_endpoint") is not local; not starting bundled MinIO"
-            return
-        fi
+    # The bundled MinIO is only for an explicitly local S3_ENDPOINT. An
+    # external endpoint means the operator runs their own storage, and an
+    # unset endpoint is ambiguous: the configured S3 credentials may be real
+    # cloud keys that must not become a local dev container's root password.
+    # Either way, do not start or require anything local for it (issue #1052).
+    if [ -z "$s3_endpoint" ]; then
+        echo "S3_ENDPOINT is not set; set it to http://localhost:9000 to use bundled MinIO, or to your own S3 endpoint"
+        return
+    fi
+    local s3_host
+    s3_host="$(url_host "$s3_endpoint")"
+    if [ -z "$s3_host" ]; then
+        echo "Error: cannot parse S3_ENDPOINT='$(redact_url "$s3_endpoint")'. Use a scheme://host[:port] URL."
+        exit 1
+    fi
+    if ! is_local_host "$s3_host"; then
+        echo "S3_ENDPOINT=$(redact_url "$s3_endpoint") is not local; not starting bundled MinIO"
+        return
     fi
 
     if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
