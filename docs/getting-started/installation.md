@@ -160,13 +160,21 @@ configuration with a clear message until the variables below are set.
   keep using the bundled services.
 - `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` are no longer read; Compose now
   demands the application's `S3_ACCESS_KEY` / `S3_SECRET_KEY` pair instead.
-  Set `S3_ACCESS_KEY` to the old `MINIO_ROOT_USER` (`atlas-minio` if you
-  never set it) and `S3_SECRET_KEY` to the old `MINIO_ROOT_PASSWORD`.
-- The bundled MinIO server now stores data under `/bitnami/minio/data`
-  instead of `/data`. The named volume of an old stack holds nothing — the
-  previous configuration could not start the server — so if the new stack
-  reports a permission error on it, remove it with
-  `docker compose -p <project> down -v` and start fresh.
+  For a stack that ran before v0.8.0 (pre-#1017), the bundled MinIO used the
+  shipped `minioadmin` / `minioadmin` credentials and kept files in the
+  host bind mount `./data/minio`: set `S3_ACCESS_KEY=minioadmin` and
+  `S3_SECRET_KEY=minioadmin` to read that bucket, migrate the files, and
+  rotate to generated credentials afterwards — `minioadmin` is publicly
+  known. For a v0.8.0-era stack, use the credentials you set as
+  `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` back then.
+- The server now stores data under `/bitnami/minio/data` instead of `/data`.
+  A leftover `minio-data` named volume from a v0.8.0-era stack holds nothing
+  (that configuration could not start the server). If the new stack reports
+  a permission error on it, remove just that volume with
+  `docker volume rm <project>_minio-data` (find the exact name with
+  `docker volume ls`). Do NOT use `docker compose down -v` for this: it
+  deletes every volume of the project, including `atlas-data` (chat history
+  and stored MCP tokens) and `atlas-logs`.
 - `CHAT_HISTORY_DB_URL` from your `.env` no longer reaches the container;
   the bundled PostgreSQL file supplies its own URL from `POSTGRES_PASSWORD`.
 

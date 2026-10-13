@@ -98,30 +98,35 @@ url_host() {
         | sed 's/^.*@//; s/:[0-9]*$//'
 }
 
-# True when the given host means "this machine": loopback in any of its
-# spellings. Hostnames are case-insensitive and the whole 127.0.0.0/8 range
-# loops back, not just .1.
+# True when the given host means "this machine": the name "localhost" in any
+# case, or a dotted-quad IPv4 loopback address (the whole 127.0.0.0/8 range
+# loops back, not just .1). Hostnames that merely start with "127." — e.g.
+# 127.example.com — are NOT loopback and must not match.
 is_local_host() {
     local host
     host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
     case "$host" in
-        localhost | 127.0.0.1 | ::1 | "[::1]" | 127.*) return 0 ;;
-        *) return 1 ;;
+        localhost | ::1 | "[::1]") return 0 ;;
     esac
+    printf '%s' "$host" | grep -qE '^127\.[0-9]+\.[0-9]+\.[0-9]+$'
 }
 
 # Redact userinfo (user:password@) from a URL so credentials never reach
-# terminal output or logs.
+# terminal output or logs. The match runs through the last '@' so passwords
+# containing '/', '?' or '#' cannot slip through; over-redacting a malformed
+# URL is acceptable for display purposes.
 redact_url() {
-    printf '%s\n' "$1" | sed 's|://[^/?#]*@|://***@|'
+    printf '%s\n' "$1" | sed 's|://.*@|://***@|'
 }
 # url-host helpers end
 
 setup_minio() {
     # setup_environment has already sourced $ENV_FILE (set -a), so read the
     # loaded values here. Re-scraping the file would keep quoting, miss values
-    # set only in the shell, and truncate at '=' characters.
-    local use_mock_s3="${USE_MOCK_S3:-true}"
+    # set only in the shell, and truncate at '=' characters. USE_MOCK_S3
+    # defaults to false like the application's own default: with real object
+    # storage selected implicitly, bundled MinIO is what makes it work.
+    local use_mock_s3="${USE_MOCK_S3:-false}"
     local s3_endpoint="${S3_ENDPOINT:-}"
 
     if [ "$use_mock_s3" = "true" ]; then

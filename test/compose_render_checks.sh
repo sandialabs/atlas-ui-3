@@ -246,6 +246,22 @@ if docker info >/dev/null 2>&1; then
     fi
     run_isolated "${FILES_MINIO[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 
+    # The launchers start MinIO from the overlay file alone; exercise that
+    # path too (it must not require the application stack's secrets).
+    standalone_minio_env=(S3_ACCESS_KEY=pr-validation-access-key S3_SECRET_KEY=pr-validation-secret-key)
+    if "${CLEAN_ENV[@]}" "${standalone_minio_env[@]}" $COMPOSE --env-file /dev/null -p "$project" \
+            -f "$PROJECT_ROOT/docker-compose.minio.yml" up -d minio minio-init &&
+        bounded "${CLEAN_ENV[@]}" "${standalone_minio_env[@]}" $COMPOSE --env-file /dev/null -p "$project" \
+            -f "$PROJECT_ROOT/docker-compose.minio.yml" wait minio-init >/dev/null 2>&1; then
+        print_result 0 "standalone bundled MinIO starts healthy from its own file"
+    else
+        print_result 1 "standalone bundled MinIO starts healthy from its own file"
+        "${CLEAN_ENV[@]}" "${standalone_minio_env[@]}" $COMPOSE --env-file /dev/null -p "$project" \
+            -f "$PROJECT_ROOT/docker-compose.minio.yml" logs minio minio-init 2>&1 || true
+    fi
+    "${CLEAN_ENV[@]}" "${standalone_minio_env[@]}" $COMPOSE --env-file /dev/null -p "$project" \
+        -f "$PROJECT_ROOT/docker-compose.minio.yml" down -v --remove-orphans >/dev/null 2>&1 || true
+
     if run_isolated -f "$PROJECT_ROOT/docker-compose.postgres.yml" up -d postgres; then
         pg_ready=0
         waited=0

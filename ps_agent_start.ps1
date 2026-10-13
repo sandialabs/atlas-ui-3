@@ -266,22 +266,26 @@ function Get-UrlHost {
     return ($authority -replace ':[0-9]*$', '')
 }
 
-# True when the given host means "this machine": loopback in any of its
-# spellings. Hostnames are case-insensitive and the whole 127.0.0.0/8 range
-# loops back, not just .1.
+# True when the given host means "this machine": the name "localhost" in any
+# case, or a dotted-quad IPv4 loopback address (the whole 127.0.0.0/8 range
+# loops back, not just .1). Hostnames that merely start with "127." — e.g.
+# 127.example.com — are NOT loopback and must not match.
 function Test-LocalHost {
     param([string]$Host_ = "")
     $normalized = $Host_.ToLowerInvariant()
-    return ($normalized -eq "localhost" -or $normalized -eq "127.0.0.1" -or
-        $normalized -eq "[::1]" -or $normalized -eq "::1" -or
-        $normalized.StartsWith("127."))
+    if ($normalized -eq "localhost" -or $normalized -eq "[::1]" -or $normalized -eq "::1") {
+        return $true
+    }
+    return ($normalized -match '^127\.\d+\.\d+\.\d+$')
 }
 
 # Redact userinfo (user:password@) from a URL so credentials never reach
-# terminal output or logs.
+# terminal output or logs. The match runs through the last '@' so passwords
+# containing '/', '?' or '#' cannot slip through; over-redacting a malformed
+# URL is acceptable for display purposes.
 function Hide-UrlUserInfo {
     param([string]$Url)
-    return ($Url -replace '://[^/?#]*@', '://***@')
+    return ($Url -replace '://.*@', '://***@')
 }
 # url-host helpers end
 
@@ -296,7 +300,10 @@ function Initialize-MinIO {
     # misclassify USE_MOCK_S3="false").
     $useMockS3 = $env:USE_MOCK_S3
     if (-not $useMockS3) {
-        $useMockS3 = "true"
+        # Default like the application itself (USE_MOCK_S3=false): with real
+        # object storage selected implicitly, bundled MinIO is what makes it
+        # work.
+        $useMockS3 = "false"
     }
 
     if ($useMockS3 -eq "true") {

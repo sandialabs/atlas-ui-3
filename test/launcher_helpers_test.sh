@@ -46,6 +46,7 @@ http://localhost:9000|localhost|0
 HTTP://LocalHost:9000|LocalHost|0
 http://127.0.0.1:9000|127.0.0.1|0
 http://127.7.7.7:9000|127.7.7.7|0
+http://127.example.com:9000|127.example.com|1
 http://[::1]:9000|[::1]|0
 http://minio:9000|minio|1
 https://s3.example.com|s3.example.com|1
@@ -63,6 +64,10 @@ CASES
     }
     check_redact "postgresql://atlas:secret@localhost:5432/db" "postgresql://***@localhost:5432/db"
     print_result $? "bash redact_url hides userinfo"
+    check_redact "postgresql://atlas:pa/ss@db.internal/x" "postgresql://***@db.internal/x"
+    print_result $? "bash redact_url hides malformed userinfo with a slash"
+    check_redact "postgresql://atlas:p?q@s/db" "postgresql://***@s/db"
+    print_result $? "bash redact_url hides malformed userinfo with ? and #"
     check_redact "http://localhost:9000" "http://localhost:9000"
     print_result $? "bash redact_url leaves URLs without userinfo alone"
 else
@@ -83,6 +88,7 @@ $cases = @(
     @("HTTP://LocalHost:9000", "LocalHost", 0),
     @("http://127.0.0.1:9000", "127.0.0.1", 0),
     @("http://127.7.7.7:9000", "127.7.7.7", 0),
+    @("http://127.example.com:9000", "127.example.com", 1),
     @("http://[::1]:9000", "[::1]", 0),
     @("http://minio:9000", "minio", 1),
     @("https://s3.example.com", "s3.example.com", 1),
@@ -106,6 +112,8 @@ foreach ($case in $cases) {
     }
 }
 if ((Hide-UrlUserInfo "postgresql://atlas:secret@localhost:5432/db") -ne "postgresql://***@localhost:5432/db") { $failed = 1 }
+if ((Hide-UrlUserInfo "postgresql://atlas:pa/ss@db.internal/x") -ne "postgresql://***@db.internal/x") { $failed = 1 }
+if ((Hide-UrlUserInfo "postgresql://atlas:p?q@s/db") -ne "postgresql://***@s/db") { $failed = 1 }
 if ((Hide-UrlUserInfo "http://localhost:9000") -ne "http://localhost:9000") { $failed = 1 }
 if ($failed -ne 0) { exit 1 }
 Write-Output "PASSED: PowerShell url-host helpers"
