@@ -296,14 +296,22 @@ function Initialize-MinIO {
         exit 1
     }
 
-    # The bundled MinIO is only for a local S3_ENDPOINT. An external endpoint
+    # The bundled MinIO is only for a local S3_ENDPOINT (or an unset one: the
+    # application defaults its endpoint to localhost). An external endpoint
     # means the operator runs their own storage; do not start or require
     # anything local for it (issue #1052).
     $s3Endpoint = $env:S3_ENDPOINT
     if (-not $s3Endpoint) { $s3Endpoint = "" }
-    if (-not (Test-LocalHost (Get-UrlHost $s3Endpoint))) {
-        Write-Host "S3_ENDPOINT=$s3Endpoint is not local; not starting bundled MinIO"
-        return
+    if ($s3Endpoint) {
+        $s3Host = Get-UrlHost $s3Endpoint
+        if (-not $s3Host) {
+            Write-Error "Cannot parse S3_ENDPOINT='$s3Endpoint'. Use a scheme://host[:port] URL."
+            exit 1
+        }
+        if (-not (Test-LocalHost $s3Host)) {
+            Write-Host "S3_ENDPOINT=$s3Endpoint is not local; not starting bundled MinIO"
+            return
+        }
     }
 
     # Check if MinIO container is running
@@ -359,7 +367,12 @@ function Initialize-ChatHistoryDb {
         # Start the bundled container only for a local database. An external
         # postgresql:// URL means the operator runs their own database; leave
         # it alone (issue #1052).
-        if (-not (Test-LocalHost (Get-UrlHost $dbUrl))) {
+        $dbHost = Get-UrlHost $dbUrl
+        if (-not $dbHost) {
+            Write-Error "Cannot parse CHAT_HISTORY_DB_URL='$dbUrl'. Use a scheme://[user[:password]@]host[:port]/database URL."
+            exit 1
+        }
+        if (-not (Test-LocalHost $dbHost)) {
             Write-Host "CHAT_HISTORY_DB_URL points at an external database; not starting bundled PostgreSQL"
             return
         }

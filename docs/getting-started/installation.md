@@ -146,20 +146,26 @@ operator-provided override). Tip:
 `export COMPOSE_FILE=docker-compose.yml:docker-compose.minio.yml:docker-compose.postgres.yml`
 selects the bundled stack for every subsequent `docker compose` command in
 the current shell.
-
 #### Upgrading from the single-file stack
 
-Stacks started before this change keep working, but the layout changed:
+Stacks started before this change need new settings before they start again:
+the base stack no longer knows about `MINIO_ROOT_USER` /
+`MINIO_ROOT_PASSWORD` or a bundled `postgres` service, so Compose now fails
+configuration with a clear message until the variables below are set.
 
 - Plain `docker compose up` now starts only Atlas. Add
   `-f docker-compose.minio.yml` (and/or `-f docker-compose.postgres.yml`) to
   keep using the bundled services.
-- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` are no longer read. The bundled
-  MinIO root account is now your `S3_ACCESS_KEY` / `S3_SECRET_KEY` pair, and
-  `S3_ENDPOINT` must be `http://minio:9000` (the stack pins these itself).
-- To keep an existing `minio-data` volume readable, set
-  `S3_ACCESS_KEY` to the old `MINIO_ROOT_USER` (`atlas-minio` if you never
-  set it) and `S3_SECRET_KEY` to the old `MINIO_ROOT_PASSWORD`.
+- The bundled MinIO root account is now your `S3_ACCESS_KEY` /
+  `S3_SECRET_KEY` pair, and `S3_ENDPOINT` must be `http://minio:9000` (the
+  stack pins these itself).
+- To keep data in an existing `minio-data` volume, set `S3_ACCESS_KEY` to the
+  old `MINIO_ROOT_USER` (`atlas-minio` if you never set it) and
+  `S3_SECRET_KEY` to the old `MINIO_ROOT_PASSWORD`. The server now also
+  stores data under `/bitnami/minio/data` instead of `/data`; a volume that
+  the old stack created (it could only fail on startup) holds nothing, so
+  `docker compose -p <project> down -v` and a fresh start is safe if the new
+  stack reports a permission error on it.
 - `CHAT_HISTORY_DB_URL` from your `.env` no longer reaches the container;
   the bundled PostgreSQL file supplies its own URL from `POSTGRES_PASSWORD`.
 

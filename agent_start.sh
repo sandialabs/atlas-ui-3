@@ -107,14 +107,11 @@ is_local_host() {
 }
 
 setup_minio() {
+    # setup_environment has already sourced $ENV_FILE (set -a), so read the
+    # loaded values here. Re-scraping the file would keep quoting, miss values
+    # set only in the shell, and truncate at '=' characters.
     local use_mock_s3="${USE_MOCK_S3:-true}"
     local s3_endpoint="${S3_ENDPOINT:-}"
-
-    # Read USE_MOCK_S3 and S3_ENDPOINT from env file if it exists
-    if [ -f "$ENV_FILE" ]; then
-        use_mock_s3=$(grep -E "^USE_MOCK_S3=" "$ENV_FILE" | cut -d '=' -f2)
-        s3_endpoint=$(grep -E "^S3_ENDPOINT=" "$ENV_FILE" | cut -d '=' -f2-)
-    fi
 
     if [ "$use_mock_s3" = "true" ]; then
         echo "Using Mock S3 (no Docker/Podman required)"
@@ -126,12 +123,21 @@ setup_minio() {
         exit 1
     fi
 
-    # The bundled MinIO is only for a local S3_ENDPOINT. An external endpoint
+    # The bundled MinIO is only for a local S3_ENDPOINT (or an unset one: the
+    # application defaults its endpoint to localhost). An external endpoint
     # means the operator runs their own storage; do not start or require
     # anything local for it (issue #1052).
-    if ! is_local_host "$(url_host "$s3_endpoint")"; then
-        echo "S3_ENDPOINT=$s3_endpoint is not local; not starting bundled MinIO"
-        return
+    if [ -n "$s3_endpoint" ]; then
+        local s3_host
+        s3_host="$(url_host "$s3_endpoint")"
+        if [ -z "$s3_host" ]; then
+            echo "Error: cannot parse S3_ENDPOINT='$s3_endpoint'. Use a scheme://host[:port] URL."
+            exit 1
+        fi
+        if ! is_local_host "$s3_host"; then
+            echo "S3_ENDPOINT=$s3_endpoint is not local; not starting bundled MinIO"
+            return
+        fi
     fi
 
     if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
@@ -150,14 +156,10 @@ setup_minio() {
 }
 
 setup_chat_history_db() {
-    local chat_history_enabled="false"
-    local db_url=""
-
-    # Read settings from env file
-    if [ -f "$ENV_FILE" ]; then
-        chat_history_enabled=$(grep -E "^FEATURE_CHAT_HISTORY_ENABLED=" "$ENV_FILE" | cut -d '=' -f2)
-        db_url=$(grep -E "^CHAT_HISTORY_DB_URL=" "$ENV_FILE" | cut -d '=' -f2)
-    fi
+    # setup_environment has already sourced $ENV_FILE (set -a); read the loaded
+    # values instead of re-scraping the file (see setup_minio).
+    local chat_history_enabled="${FEATURE_CHAT_HISTORY_ENABLED:-false}"
+    local db_url="${CHAT_HISTORY_DB_URL:-}"
 
     if [ "$chat_history_enabled" != "true" ]; then
         echo "Chat history disabled (FEATURE_CHAT_HISTORY_ENABLED != true)"
@@ -180,7 +182,13 @@ setup_chat_history_db() {
         # Start the bundled container only for a local database. An external
         # postgresql:// URL means the operator runs their own database; leave
         # it alone (issue #1052).
-        if ! is_local_host "$(url_host "$db_url")"; then
+        local db_host
+        db_host="$(url_host "$db_url")"
+        if [ -z "$db_host" ]; then
+            echo "Error: cannot parse CHAT_HISTORY_DB_URL='$db_url'. Use a scheme://[user[:password]@]host[:port]/database URL."
+            exit 1
+        fi
+        if ! is_local_host "$db_host"; then
             echo "CHAT_HISTORY_DB_URL points at an external database; not starting bundled PostgreSQL"
             return
         fi

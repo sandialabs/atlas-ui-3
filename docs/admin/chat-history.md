@@ -38,13 +38,17 @@ Best for production deployments with multiple users.
 CHAT_HISTORY_DB_URL=postgresql://atlas:<POSTGRES_PASSWORD>@localhost:5432/atlas_chat_history
 ```
 
-Start the PostgreSQL container. It lives in its own Compose file
-(`docker-compose.postgres.yml`), so DuckDB deployments never need its
-credential:
+Start the PostgreSQL container. It lives in its own self-contained Compose
+file (`docker-compose.postgres.yml`), so DuckDB deployments never need its
+credential, and this command starts only PostgreSQL — not the containerized
+application:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+docker compose -f docker-compose.postgres.yml up -d postgres
 ```
+
+To run the whole Compose stack with bundled PostgreSQL, include both files
+(`docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d`).
 
 The bundled PostgreSQL service has:
 - User: `atlas`
