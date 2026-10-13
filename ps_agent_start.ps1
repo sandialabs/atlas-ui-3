@@ -254,6 +254,53 @@ function Initialize-ContainerRuntime {
     }
 }
 
+# url-host helpers start
+# Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
+# Returns "" when the URL cannot be parsed. A colon in the extracted
+# authority (outside bracketed IPv6) means the URL is malformed — e.g. an
+# unencoded '/' in a password leaves userinfo behind — and is rejected like
+# any other unparseable value.
+function Get-UrlHost {
+    param([string]$Url)
+    if ($Url -notmatch '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]*)') {
+        return ""
+    }
+    $authority = $Matches[1] -replace '^.*@', ''
+    $host_ = $authority -replace ':[0-9]*$', ''
+    if ($host_ -match ':' -and $host_ -notmatch '^\[.*\]$') {
+        return ""
+    }
+    return $host_
+}
+
+# True when the given host means "this machine": the name "localhost" in any
+# case, or a dotted-quad IPv4 loopback address (the whole 127.0.0.0/8 range
+# loops back, not just .1). Hostnames that merely start with "127." — e.g.
+# 127.example.com — are NOT loopback and must not match.
+function Test-LocalHost {
+    param([string]$Host_ = "")
+    $normalized = $Host_.ToLowerInvariant()
+    if ($normalized -eq "localhost" -or $normalized -eq "[::1]" -or $normalized -eq "::1") {
+        return $true
+    }
+    return ($normalized -match '^127\.\d+\.\d+\.\d+$')
+}
+
+# Redact userinfo (user:password@) from a URL so credentials never reach
+# terminal output or logs. The match runs through the last '@' so passwords
+# containing '/', '?' or '#' cannot slip through, and a second rule covers
+# scheme-less values; over-redacting a malformed URL is acceptable for
+# display purposes.
+function Hide-UrlUserInfo {
+    param([string]$Url)
+    $redacted = $Url -replace '://.*@', '://***@'
+    if ($redacted -eq $Url) {
+        $redacted = $Url -replace '^[^@/]*:[^@]*@', '***@'
+    }
+    return $redacted
+}
+# url-host helpers end
+
 # =============================================================================
 # INFRASTRUCTURE FUNCTIONS
 # =============================================================================
@@ -265,31 +312,62 @@ function Initialize-MinIO {
     # misclassify USE_MOCK_S3="false").
     $useMockS3 = $env:USE_MOCK_S3
     if (-not $useMockS3) {
-        $useMockS3 = "true"
+        # Default like the application itself (USE_MOCK_S3=false): with real
+        # object storage selected implicitly, bundled MinIO is what makes it
+        # work.
+        $useMockS3 = "false"
     }
 
     if ($useMockS3 -eq "true") {
         Write-Host "Using Mock S3 (no Docker/Podman required)"
-    } else {
-        if ($null -eq $script:CONTAINER_CMD) {
-            Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $script:ENV_FILE"
+        return
+    }
+
+    if ($null -eq $script:CONTAINER_CMD) {
+        Write-Error "Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $script:ENV_FILE"
+        exit 1
+    }
+
+    # The bundled MinIO is only for an explicitly local S3_ENDPOINT. An
+    # external endpoint means the operator runs their own storage, and an
+    # unset endpoint is ambiguous: the configured S3 credentials may be real
+    # cloud keys that must not become a local dev container's root password.
+    # Either way, do not start or require anything local for it (issue #1052).
+    $s3Endpoint = $env:S3_ENDPOINT
+    if (-not $s3Endpoint) {
+        Write-Warning "USE_MOCK_S3 is not 'true' but S3_ENDPOINT is not set; uploads will fail. Set S3_ENDPOINT=http://localhost:9000 to use bundled MinIO, or point it at your own S3 endpoint."
+        return
+    }
+    $s3Host = Get-UrlHost $s3Endpoint
+    if (-not $s3Host) {
+        Write-Error "Cannot parse S3_ENDPOINT='$(Hide-UrlUserInfo $s3Endpoint)'. Use a scheme://host[:port] URL."
+        exit 1
+    }
+    if (-not (Test-LocalHost $s3Host)) {
+        Write-Host "S3_ENDPOINT=$(Hide-UrlUserInfo $s3Endpoint) is not local; not starting bundled MinIO"
+        return
+    }
+
+    # Check if MinIO container is running
+    $minioRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-minio" -Quiet
+
+    if (-not $minioRunning) {
+        Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
+        Set-Location $PROJECT_ROOT
+
+        # The bundled MinIO file is self-contained: starting it alone requires
+        # only S3_ACCESS_KEY/S3_SECRET_KEY (its root credentials), not the
+        # application stack's secrets (issue #1052).
+        & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.minio.yml up -d minio minio-init
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "MinIO failed to start. Check that S3_ACCESS_KEY and S3_SECRET_KEY are set in $script:ENV_FILE (they are also the bundled MinIO root credentials)."
             exit 1
         }
 
-        # Check if MinIO container is running
-        $minioRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-minio" -Quiet
-
-        if (-not $minioRunning) {
-            Write-Host "MinIO is not running. Starting MinIO with $script:COMPOSE_CMD..."
-            Set-Location $PROJECT_ROOT
-
-            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL up -d minio minio-init
-
-            Write-Host "MinIO started successfully"
-            Start-Sleep -Seconds 3
-        } else {
-            Write-Host "MinIO is already running"
-        }
+        Write-Host "MinIO started successfully"
+        Start-Sleep -Seconds 3
+    } else {
+        Write-Host "MinIO is already running"
     }
     Set-Location $PROJECT_ROOT
 }
@@ -323,19 +401,39 @@ function Initialize-ChatHistoryDb {
             exit 1
         }
 
+        # Start the bundled container only for a local database. An external
+        # postgresql:// URL means the operator runs their own database; leave
+        # it alone (issue #1052).
+        $dbHost = Get-UrlHost $dbUrl
+        if (-not $dbHost) {
+            Write-Error "Cannot parse CHAT_HISTORY_DB_URL='$(Hide-UrlUserInfo $dbUrl)'. Use a scheme://[user[:password]@]host[:port]/database URL."
+            exit 1
+        }
+        if (-not (Test-LocalHost $dbHost)) {
+            Write-Host "CHAT_HISTORY_DB_URL=$(Hide-UrlUserInfo $dbUrl) points at an external database; not starting bundled PostgreSQL"
+            return
+        }
+
         $pgRunning = & $script:CONTAINER_CMD ps 2>$null | Select-String -Pattern "atlas-postgres" -Quiet
         if (-not $pgRunning) {
             Write-Host "PostgreSQL is not running. Starting with $script:COMPOSE_CMD..."
             Set-Location $PROJECT_ROOT
 
-            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL up -d postgres
+            # The bundled PostgreSQL lives in its own Compose file (issue
+            # #1052), which is self-contained: starting it alone requires only
+            # POSTGRES_PASSWORD, not the application stack's secrets.
+            & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.postgres.yml up -d postgres
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "PostgreSQL failed to start. Check that POSTGRES_PASSWORD is set in $script:ENV_FILE."
+                exit 1
+            }
 
             Write-Host "Waiting for PostgreSQL to be ready..."
             $maxWait = 60
             $waited = 0
             $ready = $false
             while ($waited -lt $maxWait) {
-                & $script:COMPOSE_HEAD @script:COMPOSE_TAIL exec -T postgres pg_isready 2>$null 1>$null
+                & $script:COMPOSE_HEAD @script:COMPOSE_TAIL -f docker-compose.postgres.yml exec -T postgres pg_isready 2>$null 1>$null
                 if ($LASTEXITCODE -eq 0) {
                     $ready = $true
                     break

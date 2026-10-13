@@ -1,0 +1,61 @@
+# Optional bundled PostgreSQL for chat history (issue #1052).
+#
+# Include it when chat history should run on PostgreSQL instead of DuckDB:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+#
+# This file is self-contained, so it can also start PostgreSQL alone for a
+# host-run Atlas (agent_start.sh does this automatically when
+# CHAT_HISTORY_DB_URL is a postgresql:// URL pointing at the local machine):
+#
+#   docker compose -f docker-compose.postgres.yml up -d postgres
+#
+# The password is required and fails closed: configuration refuses to render
+# when POSTGRES_PASSWORD is missing or empty, and no default password ships.
+# DuckDB deployments never need this file or that variable. Keep the password
+# URL-safe (letters, digits, and -._~): it is interpolated into the
+# CHAT_HISTORY_DB_URL connection URL below. To use a different database with
+# the Compose stack, add your own override file that sets CHAT_HISTORY_DB_URL.
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    container_name: atlas-postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or .env}
+      POSTGRES_DB: atlas_chat_history
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas_chat_history"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - atlas-network
+
+  # Overlay fragment: when the bundled PostgreSQL is selected, chat history
+  # uses it. The base docker-compose.yml hard-codes the container-only DuckDB
+  # path (a host-oriented .env must not leak into the container), so the
+  # connection URL is defined here, single-sourced from POSTGRES_PASSWORD.
+  #
+  # The build stanza keeps this file valid on its own (a Compose service must
+  # have an image or a build context even when it is not started, and
+  # agent_start.sh renders this file alone to start only PostgreSQL). Merging
+  # with the base file keeps the base's build arguments; never start this
+  # service standalone — the base file's atlas-ui is the real application.
+  atlas-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - CHAT_HISTORY_DB_URL=postgresql://atlas:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or .env}@postgres:5432/atlas_chat_history
+
+networks:
+  atlas-network:
+    driver: bridge
+
+volumes:
+  postgres-data:

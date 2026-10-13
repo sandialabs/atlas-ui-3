@@ -35,6 +35,21 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
 
+    - name: Validate Compose backend combinations
+      # The hermetic test image has no Docker CLI, so the Compose
+      # interpolation tests in test_container_security.py skip inside it.
+      # Render every supported backend combination on the host instead
+      # (issue #1052): included backends fail closed on missing credentials,
+      # unused backends never demand any.
+      run: bash test/compose_render_checks.sh
+
+    - name: Validate launcher URL helpers
+      # agent_start.sh and ps_agent_start.ps1 parse S3_ENDPOINT and
+      # CHAT_HISTORY_DB_URL to decide whether a bundled backend should start;
+      # table-test both launchers' helpers on the host (the PowerShell table
+      # skips cleanly when pwsh is unavailable).
+      run: bash test/launcher_helpers_test.sh
+
     - name: Build test Docker image
       uses: docker/build-push-action@v7
       with:
