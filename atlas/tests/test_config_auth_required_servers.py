@@ -21,6 +21,15 @@ from atlas.modules.mcp_tools.mcp_user_discovery import UserDiscoveryMixin
 
 
 def _set_proxy_secret_on_app(secret="test-proxy-secret"):
+    # Force the shared app's middleware stack to build *before* mutating the
+    # declarative middleware kwargs. Starlette caches ``middleware_stack`` on
+    # the first request, so a later kwargs mutation is inert; mutating before
+    # that first request (which happens when this test runs first in an xdist
+    # worker) would bake proxy-secret enforcement into the process-wide app and
+    # 401 every subsequent test that omits the header. Building first keeps the
+    # helper from leaking across tests (issue #1057).
+    if getattr(app, "middleware_stack", None) is None:
+        app.middleware_stack = app.build_middleware_stack()
     for middleware in app.user_middleware:
         if middleware.cls.__name__ == "AuthMiddleware":
             middleware.kwargs["proxy_secret"] = secret

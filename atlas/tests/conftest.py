@@ -123,6 +123,18 @@ os.environ["COMPLIANCE_DEFAULT_LEVEL"] = ""
 for _authorizer_var in ("AUTH_GROUP_CHECK_URL", "AUTH_GROUP_CHECK_API_KEY"):
     os.environ.pop(_authorizer_var, None)
 
+# --- Proxy-secret isolation ----------------------------------------------
+# ``FEATURE_PROXY_SECRET_ENABLED`` defaults to true. A contributor (or CI
+# runner) with it exported, and no ``PROXY_SECRET``, makes ``AuthMiddleware``
+# fail closed for every request, so each ``TestClient(app)`` call without the
+# proxy header returns 401/503 for reasons unrelated to the code under test.
+# Pin it off for the session so the shared app is deterministic; the CI test
+# container bakes the same value into ``/app/.env``. Tests that exercise proxy
+# enforcement build their own app or middleware (see ``test_middleware_auth.py``
+# and ``test_oidc_auth.py``) and are unaffected. This is a test-isolation guard,
+# not a product behavior change.
+os.environ["FEATURE_PROXY_SECRET_ENABLED"] = "false"
+
 # --- Authorization-bypass isolation --------------------------------------
 # ``SKIP_AUTHORIZATION_CHECKS=true`` is a developer-local escape hatch that makes
 # *every* authenticated user a member of *every* group, including admin. When a

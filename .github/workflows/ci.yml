@@ -68,6 +68,22 @@ jobs:
         echo "Running tests in debug mode (DEBUG_MODE=true)"
         docker run --rm --workdir /app -e DEBUG_MODE=true test-image:latest bash /app/test/run_tests.sh all
 
+    - name: Run backend tests under pytest-xdist
+      # Parallel collection and execution are a supported path (issue #1057):
+      # every worker must collect an identical test sequence and run without
+      # resource collisions. A representative two-worker run guards the
+      # determinism fixes (sorted parametrization, proxy-secret test isolation)
+      # without the cost of repeating the whole suite at -n auto. Tests live
+      # under atlas/ (the package), so run from /app/atlas with the same
+      # PYTHONPATH the reverse-order step uses.
+      run: |
+        echo "Running the backend suite under pytest-xdist (-n 2)"
+        docker run --rm --workdir /app/atlas \
+          -e DEBUG_MODE=true \
+          -e PYTHONPATH=/app:/app/scripts \
+          test-image:latest \
+          python -m pytest tests -q --tb=short -n 2 -p no:cacheprovider
+
     - name: Run tests in reverse collection order
       # The suite runs in one process, so a test that leaks state can be masked
       # by the alphabetical order CI happens to use. Re-running it reversed is
