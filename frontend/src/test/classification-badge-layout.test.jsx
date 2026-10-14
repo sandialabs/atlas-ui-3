@@ -93,6 +93,18 @@ describe('model picker rows', () => {
       `${LONG_NAME} No image input Uses tools Allowed data classifications: ${MANY.join(', ')}`)
   })
 
+  it('keeps a model awaiting an API key focusable but unselectable', () => {
+    useChat.mockClear()
+    setup({ models: [{ name: 'keyed', api_key_source: 'user', allowed_data_classifications: MANY }] })
+    const row = screen.getByRole('button', { name: /^keyed / })
+    expect(row).not.toBeDisabled()
+    expect(row).toHaveAttribute('aria-disabled', 'true')
+    row.focus()
+    expect(row).toHaveFocus()
+    fireEvent.click(row)
+    expect(useChat.mock.results.at(-1).value.setCurrentModel).not.toHaveBeenCalled()
+  })
+
   it('keeps the menu inside a narrow viewport', () => {
     setup({ models: [{ name: 'm', allowed_data_classifications: MANY }] })
     const row = screen.getByRole('button', { name: /^m / })

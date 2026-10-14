@@ -138,12 +138,16 @@ const ModelSelector = () => {
                 return (
                   <div key={modelName} className="border-b border-gray-700 last:border-b-0 first:rounded-t-lg last:rounded-b-lg">
                     <div className="flex items-center">
+                      {/* A model awaiting the user's API key stays focusable
+                          (aria-disabled, not `disabled`) so keyboard users can
+                          still reach its full classification list (#1055). */}
                       <button
+                        type="button"
                         onClick={() => !isDisabled && handleModelSelect(modelName)}
                         className={`group flex-1 min-w-0 text-left px-3 py-2 text-sm ${
                           isDisabled ? 'text-gray-500 cursor-not-allowed' : 'text-gray-200 hover:bg-gray-700'
                         }`}
-                        disabled={isDisabled}
+                        aria-disabled={isDisabled || undefined}
                         title={isDisabled ? 'Configure your API key to use this model' : modelName}
                       >
                         {/* The name gets the full row width and wraps rather
