@@ -117,6 +117,117 @@ def test_parse_without_compliance_level_defaults_to_none(tmp_path):
     assert parse_persona_file(path).compliance_level is None
 
 
+# -- allowed_data_classifications frontmatter (issue #1062) --------------------
+
+
+def test_parse_allowed_data_classifications_canonicalizes_and_drops_unknown(
+    tmp_path, monkeypatch
+):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "multi.md", """---
+allowed_data_classifications:
+  - SOC 2
+  - Internal
+  - NotARealLevel
+---
+Body""")
+    persona = parse_persona_file(path)
+
+    # Aliases canonicalize; an unknown level is dropped, never kept.
+    assert persona.allowed_data_classifications == ["SOC2", "Internal"]
+    # The new field is not a single level, so no legacy level is inferred.
+    assert persona.compliance_level is None
+
+
+def test_legacy_compliance_level_maps_to_one_element_list(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "legacy.md", "---\ncompliance_level: SOC 2\n---\nBody")
+    persona = parse_persona_file(path)
+
+    assert persona.compliance_level == "SOC2"
+    assert persona.allowed_data_classifications == ["SOC2"]
+
+
+def test_allowed_data_classifications_wins_when_both_are_present(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "both.md", """---
+compliance_level: HIPAA
+allowed_data_classifications:
+  - Public
+---
+Body""")
+    persona = parse_persona_file(path)
+
+    assert persona.allowed_data_classifications == ["Public"]
+    # The legacy field is ignored for access decisions when the new one shows.
+    assert persona.compliance_level is None
+
+
+def test_explicit_empty_allowed_data_classifications_is_declared_nothing(
+    tmp_path, monkeypatch
+):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "empty.md", "---\nallowed_data_classifications: []\n---\nBody")
+    persona = parse_persona_file(path)
+
+    # An explicit empty allowlist is not "undeclared": it approves the persona
+    # for no classified session.
+    assert persona.allowed_data_classifications == []
+
+
+def test_unreadable_allowed_data_classifications_declares_nothing(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    # A scalar where the list belongs must not be read as a level.
+    path = write(tmp_path, "scalar.md", "---\nallowed_data_classifications: 5\n---\nBody")
+    assert parse_persona_file(path).allowed_data_classifications == []
+
+    # A present-but-null key also declares nothing rather than falling back to a
+    # concurrent legacy level.
+    path = write(tmp_path, "null.md", """---
+compliance_level: HIPAA
+allowed_data_classifications:
+---
+Body""")
+    persona = parse_persona_file(path)
+    assert persona.allowed_data_classifications == []
+    assert persona.compliance_level is None
+
+
+def test_all_unknown_allowed_data_classifications_declares_nothing(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "typo.md", """---
+allowed_data_classifications:
+  - NoSuchLevel
+---
+Body""")
+    assert parse_persona_file(path).allowed_data_classifications == []
+
+
+
 def test_library_loads_sorted_and_skips_readme(tmp_path):
     write(tmp_path, "README.md", "# Not a persona\n\nDocs.")
     write(tmp_path, "second.md", "---\nname: Second\norder: 20\n---\nB")
@@ -468,3 +579,109 @@ async def test_compliance_filter_flows_through_chat_system_prompt(compliance_set
         group_check=group_check,
         compliance_level_filter="Internal",
     ) is None
+
+
+# -- allowed_data_classifications enforcement (issue #1062) --------------------
+
+
+@pytest.fixture
+def multi_classification_setup(tmp_path, monkeypatch):
+    """A library with an allowlisted persona plus a configured manager."""
+    from atlas.modules.prompts import persona_library
+
+    write(tmp_path, "plain.md", "Plain prompt")
+    write(tmp_path, "multi.md", """---
+allowed_data_classifications:
+  - Internal
+  - SOC 2
+---
+Multi prompt""")
+
+    library = PersonaLibrary([tmp_path])
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_persona_library", lambda: library)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+    monkeypatch.setattr(persona_library, "_compliance_feature_enabled", lambda: True)
+
+    async def in_any_group(user, group):
+        return True
+
+    return persona_library, in_any_group
+
+
+@pytest.mark.asyncio
+async def test_multi_classification_persona_visible_at_each_listed_level(
+    multi_classification_setup,
+):
+    persona_library, group_check = multi_classification_setup
+    resolve = persona_library.resolve_persona_prompt
+
+    assert await resolve(
+        "multi", "a@b.com", group_check, compliance_level_filter="Internal"
+    ) == "Multi prompt"
+    # An alias resolves to the same class as the canonical name.
+    assert await resolve(
+        "multi", "a@b.com", group_check, compliance_level_filter="SOC2"
+    ) == "Multi prompt"
+
+
+@pytest.mark.asyncio
+async def test_multi_classification_persona_hidden_at_other_levels(
+    multi_classification_setup,
+):
+    persona_library, group_check = multi_classification_setup
+    resolve = persona_library.resolve_persona_prompt
+
+    # Public is not in the allowlist, and HIPAA's allowed_with listing SOC2 no
+    # longer widens access (issue #1032).
+    assert await resolve(
+        "multi", "a@b.com", group_check, compliance_level_filter="Public"
+    ) is None
+    assert await resolve(
+        "multi", "a@b.com", group_check, compliance_level_filter="HIPAA"
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_undeclared_persona_hidden_only_under_an_active_filter(
+    multi_classification_setup,
+):
+    persona_library, group_check = multi_classification_setup
+    resolve = persona_library.resolve_persona_prompt
+
+    assert await resolve(
+        "plain", "a@b.com", group_check, compliance_level_filter="Internal"
+    ) is None
+    assert await resolve(
+        "plain", "a@b.com", group_check, compliance_level_filter=None
+    ) == "Plain prompt"
+    assert await resolve(
+        "multi", "a@b.com", group_check, compliance_level_filter=None
+    ) == "Multi prompt"
+
+
+def test_to_dict_reports_both_legacy_and_effective_classifications(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    multi = parse_persona_file(
+        write(tmp_path, "multi.md", """---
+allowed_data_classifications:
+  - Internal
+  - SOC 2
+---
+Body""")
+    )
+    multi_dict = multi.to_dict(include_content=False)
+    assert multi_dict["allowed_data_classifications"] == ["Internal", "SOC2"]
+    assert multi_dict["compliance_level"] is None
+
+    legacy = parse_persona_file(
+        write(tmp_path, "legacy.md", "---\ncompliance_level: Internal\n---\nBody")
+    )
+    legacy_dict = legacy.to_dict(include_content=False)
+    assert legacy_dict["allowed_data_classifications"] == ["Internal"]
+    assert legacy_dict["compliance_level"] == "Internal"
+

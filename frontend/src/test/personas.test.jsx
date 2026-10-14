@@ -246,6 +246,50 @@ describe('PromptSelector compliance filtering', () => {
     expect(screen.getByText('No Level')).toBeInTheDocument()
   })
 
+  it('reads the effective allowlist the server sends for a legacy persona', () => {
+    // The API folds a legacy compliance_level into allowed_data_classifications
+    // and still echoes compliance_level; the picker must key off the list.
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [
+        {
+          id: 'legacy',
+          name: 'Legacy Leveled',
+          description: '',
+          compliance_level: 'Public',
+          allowed_data_classifications: ['Public'],
+        },
+      ],
+      complianceLevelFilter: 'Internal',
+      features: { compliance_levels: true },
+    })
+
+    openPicker()
+
+    expect(screen.queryByText('Legacy Leveled')).not.toBeInTheDocument()
+  })
+
+  it('honors a multi-level allowlist from the server', () => {
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [
+        {
+          id: 'multi',
+          name: 'Multi Leveled',
+          description: '',
+          compliance_level: null,
+          allowed_data_classifications: ['Public', 'Internal'],
+        },
+      ],
+      complianceLevelFilter: 'Internal',
+      features: { compliance_levels: true },
+    })
+
+    openPicker()
+
+    expect(screen.getByText('Multi Leveled')).toBeInTheDocument()
+  })
+
   it('ignores the filter when the compliance feature is off', () => {
     useChat.mockReturnValue({
       ...baseContext,

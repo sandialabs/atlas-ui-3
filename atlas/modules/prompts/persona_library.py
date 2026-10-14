@@ -10,6 +10,9 @@ File format -- YAML frontmatter plus the prompt body::
     name: Research Assistant
     description: Careful, citation-first answers
     access_group: research-team    # optional; omit to show to everyone
+    allowed_data_classifications:  # optional; explicit allowlist of levels
+      - UUR
+      - CUI
     order: 10                      # optional sort hint
     ---
     You are a meticulous research assistant...
@@ -18,6 +21,13 @@ Everything below the frontmatter block is the prompt text. ``access_group``
 accepts a single group or a list; a persona with none is visible to every
 authenticated user, which keeps the "just add a file" workflow the issue asks
 for from silently hiding personas behind a group nobody is in.
+
+``allowed_data_classifications`` mirrors the field on models, MCP servers and
+RAG sources (issue #1062): an explicit allowlist of the levels a persona may be
+used at, exact membership after alias resolution. The legacy single-value
+``compliance_level`` maps to a one-element list when the new field is absent;
+when both are present the new field wins. A persona that declares nothing is
+unavailable in a classified session (fail closed).
 
 Files are read once at startup and cached; ``reload()`` re-reads them.
 """
@@ -32,7 +42,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import yaml
 
-from atlas.core.compliance import get_compliance_manager
+from atlas.core.compliance import coerce_classifications, get_compliance_manager
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +96,7 @@ class Persona:
         order: int = 1000,
         source: str = "",
         compliance_level: Optional[str] = None,
+        allowed_data_classifications: Optional[List[str]] = None,
     ):
         self.id = persona_id
         self.name = name
@@ -94,7 +105,10 @@ class Persona:
         self.access_groups = access_groups or []
         self.order = order
         self.source = source
+        # Legacy single level, kept for the picker's badge and older clients.
         self.compliance_level = compliance_level
+        # Effective explicit allowlist (issue #1062) or None when undeclared.
+        self.allowed_data_classifications = allowed_data_classifications
 
     def to_dict(self, include_content: bool = True) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -104,6 +118,8 @@ class Persona:
             "access_groups": list(self.access_groups),
             "compliance_level": self.compliance_level,
         }
+        if self.allowed_data_classifications is not None:
+            data["allowed_data_classifications"] = list(self.allowed_data_classifications)
         if include_content:
             data["content"] = self.content
         else:
@@ -168,14 +184,38 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
     except (TypeError, ValueError):
         order = 1000
 
-    # Validated on load like the compliance level of a model or MCP server:
-    # aliases canonicalize and an unknown level becomes None with a warning.
+    # Validated on load like the classifications of a model or MCP server:
+    # aliases canonicalize and an unknown level is dropped with a warning so a
+    # typo can only narrow what a persona is approved for, never widen it.
+    manager = get_compliance_manager()
     compliance_level = None
-    compliance_raw = metadata.get("compliance_level")
-    if compliance_raw:
-        compliance_level = get_compliance_manager().validate_compliance_level(
-            str(compliance_raw), context=f"persona file {path.name}"
+    allowed_data_classifications = None
+    legacy_raw = metadata.get("compliance_level")
+    if "allowed_data_classifications" in metadata:
+        # New field wins when present (even when empty: an explicit "approve for
+        # nothing" is honored), consistent with the other config surfaces.
+        coerced = coerce_classifications(metadata.get("allowed_data_classifications"))
+        if coerced is None:
+            # The key was present but held an unreadable value (null, a mapping,
+            # a number): treat it as "declared nothing" rather than undeclared so
+            # the persona cannot fall back to a broader legacy level.
+            coerced = []
+        allowed_data_classifications = manager.validate_classifications(
+            coerced, context=f"persona file {path.name}"
         )
+        if legacy_raw:
+            logger.warning(
+                "Persona %s: both allowed_data_classifications and the deprecated "
+                "compliance_level are set; allowed_data_classifications is used.",
+                path.name,
+            )
+    elif legacy_raw:
+        # Backward compatibility: a legacy single level is a one-element list.
+        compliance_level = manager.validate_compliance_level(
+            str(legacy_raw), context=f"persona file {path.name}"
+        )
+        if compliance_level:
+            allowed_data_classifications = [compliance_level]
 
     return Persona(
         persona_id=persona_id,
@@ -188,6 +228,7 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
         order=order,
         source=path.name,
         compliance_level=compliance_level,
+        allowed_data_classifications=allowed_data_classifications,
     )
 
 
@@ -375,16 +416,19 @@ def _compliance_feature_enabled() -> bool:
         return False
 
 
-def _compliance_allows(user_level: Optional[str], persona_level: Optional[str]) -> bool:
+def _compliance_allows(
+    user_level: Optional[str],
+    classifications: Optional[List[str]],
+) -> bool:
     """Strict mirror of the client picker's filtering for tools and prompts:
-    with a compliance filter active a persona needs a level the filter allows
-    (a level-less persona is hidden); with no filter, every persona goes.
+    with a compliance filter active a persona needs a level in its
+    ``allowed_data_classifications`` (a persona that declares nothing is
+    hidden); with no filter, every persona goes. Exact membership after alias
+    resolution -- ``allowed_with`` never widens it (issue #1032).
     """
     if not user_level:
         return True
-    if not persona_level:
-        return False
-    return get_compliance_manager().is_accessible(user_level, persona_level)
+    return get_compliance_manager().classification_permits(user_level, classifications)
 
 
 async def resolve_persona_prompt(
@@ -399,11 +443,12 @@ async def resolve_persona_prompt(
     an id and resolves the text here -- re-checking the access group so a
     hand-crafted client cannot select a persona it was never offered. When the
     compliance-levels feature is on, the turn's compliance filter is enforced
-    the same strict way the picker filters: a persona whose level the filter
-    does not allow (including a level-less persona under an active filter)
-    resolves to None. Returns None (i.e. "use the default system prompt") for an
-    unknown, unauthorized, compliance-blocked, or unreadable persona rather
-    than failing the turn.
+    the same strict way the picker filters: a persona whose
+    ``allowed_data_classifications`` the filter does not include (including a
+    persona that declares nothing under an active filter) resolves to None.
+    Returns None (i.e. "use the default system prompt") for an unknown,
+    unauthorized, compliance-blocked, or unreadable persona rather than failing
+    the turn.
     """
     if not persona_id:
         return None
@@ -429,7 +474,9 @@ async def resolve_persona_prompt(
         validated = get_compliance_manager().validate_compliance_level(
             compliance_level_filter, context="chat request"
         )
-        if validated and not _compliance_allows(validated, persona.compliance_level):
+        if validated and not _compliance_allows(
+            validated, persona.allowed_data_classifications
+        ):
             logger.warning(
                 "Ignoring persona id blocked by the active compliance filter"
             )
