@@ -241,12 +241,22 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
                 path.name,
             )
     elif legacy_raw:
-        # Backward compatibility: a legacy single level is a one-element list.
-        compliance_level = manager.validate_compliance_level(
-            str(legacy_raw), context=f"persona file {path.name}"
-        )
-        if compliance_level:
-            allowed_data_classifications = [compliance_level]
+        if isinstance(legacy_raw, (list, tuple)):
+            # A list here is a mistake: str() would turn it into a bogus level
+            # name. Point the admin at the field that takes a list and fail
+            # closed rather than publishing the repr as a level.
+            logger.warning(
+                "Persona %s: compliance_level takes a single level; put a list "
+                "under allowed_data_classifications instead.",
+                path.name,
+            )
+        else:
+            # Backward compatibility: a legacy single level is a one-element list.
+            compliance_level = manager.validate_compliance_level(
+                str(legacy_raw), context=f"persona file {path.name}"
+            )
+            if compliance_level:
+                allowed_data_classifications = [compliance_level]
 
     return Persona(
         persona_id=persona_id,

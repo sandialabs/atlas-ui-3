@@ -268,6 +268,26 @@ Body""")
     assert parse_persona_file(path).allowed_data_classifications == ["Internal"]
 
 
+def test_legacy_compliance_level_as_list_fails_closed(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    # A list under the single-valued field is a mistake: it must not become the
+    # repr string "['CUI', 'UUR']" as the persona's level.
+    path = write(tmp_path, "listed.md", """---
+compliance_level:
+  - Internal
+  - SOC 2
+---
+Body""")
+    persona = parse_persona_file(path)
+    assert persona.compliance_level is None
+    assert persona.allowed_data_classifications is None
+
+
+
 
 
 def test_library_loads_sorted_and_skips_readme(tmp_path):
@@ -661,9 +681,10 @@ async def test_multi_classification_persona_visible_at_each_listed_level(
     assert await resolve(
         "multi", "a@b.com", group_check, compliance_level_filter="Internal"
     ) == "Multi prompt"
-    # An alias resolves to the same class as the canonical name.
+    # An alias of the active level resolves to the same class as the
+    # canonical name (the persona lists the aliased "SOC 2").
     assert await resolve(
-        "multi", "a@b.com", group_check, compliance_level_filter="SOC2"
+        "multi", "a@b.com", group_check, compliance_level_filter="SOC 2"
     ) == "Multi prompt"
 
 

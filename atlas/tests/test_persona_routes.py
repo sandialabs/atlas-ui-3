@@ -1,9 +1,12 @@
 """Tests for the /api/personas routes (issue #880)."""
 
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from atlas.core.compliance import ComplianceLevelManager
 from atlas.core.log_sanitizer import get_current_user
 from atlas.modules.prompts.persona_library import PersonaLibrary
 from atlas.routes import persona_routes
@@ -105,6 +108,21 @@ def test_list_exposes_effective_allowed_data_classifications(tmp_path, monkeypat
     )
     library = PersonaLibrary([tmp_path])
     monkeypatch.setattr(persona_routes, "get_persona_library", lambda: library)
+
+    # Pin the level definitions so the test does not depend on the shipped
+    # compliance-levels.json or on test order.
+    cfg = tmp_path / "compliance-levels.json"
+    cfg.write_text(json.dumps({
+        "levels": [
+            {"name": "Public", "allowed_with": ["Public"]},
+            {"name": "Internal", "allowed_with": ["Internal"]},
+        ]
+    }), encoding="utf-8")
+    from atlas.modules.prompts import persona_library
+
+    monkeypatch.setattr(
+        persona_library, "get_compliance_manager", lambda: ComplianceLevelManager(config_path=cfg)
+    )
 
     async def not_in_any_group(user, group):
         return False
