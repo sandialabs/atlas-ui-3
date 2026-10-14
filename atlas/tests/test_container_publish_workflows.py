@@ -151,7 +151,7 @@ def test_production_e2e_runs_on_the_pr_path():
 def test_production_steps_run_with_debug_mode_false():
     test_job = _load("ci.yml")["jobs"]["test"]
     for name in (
-        "Run backend tests in production mode",
+        "Run backend tests in production mode (pytest-xdist)",
         "Run e2e tests in production mode",
     ):
         step = next(s for s in test_job["steps"] if s.get("name") == name)
@@ -211,8 +211,12 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
 
     test_steps = {step.get("name"): step for step in jobs["test"]["steps"]}
     assert "run_tests.sh all" in test_steps["Run tests in debug mode"]["run"]
-    assert "run_tests.sh atlas" in test_steps["Run backend tests in production mode"]["run"]
-    assert "run_tests.sh all" not in test_steps["Run backend tests in production mode"]["run"]
+    # The production backend pass is the parallel (pytest-xdist) run; it must
+    # not fall back to the serial wrapper.
+    prod_backend_run = test_steps["Run backend tests in production mode (pytest-xdist)"]["run"]
+    assert "-n 2" in prod_backend_run
+    assert "python -m pytest tests" in prod_backend_run
+    assert "run_tests.sh" not in prod_backend_run
     assert test_steps["Run tests in reverse collection order"]["if"] == (
         "github.event_name == 'push' && github.ref == 'refs/heads/main'"
     )

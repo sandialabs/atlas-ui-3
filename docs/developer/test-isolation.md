@@ -101,14 +101,26 @@ python -m pytest tests/<suspect>.py tests/<victim>.py -q
 
 ## Running in parallel (pytest-xdist)
 
-`pytest-xdist` is a `dev` dependency. Run the backend suite with two or more
-workers for a much faster wall-clock time:
+`pytest-xdist` is in the `dev` extra, so `uv pip install -e ".[dev]"` (or
+`".[dev,mcp-demos]"`) provides it. Run the backend suite with two or more
+workers for a much faster wall-clock time. Set the same environment the CI run
+uses so a local command behaves like CI:
 
 ```bash
+# one-time, from the repo root
+uv venv && source .venv/bin/activate && uv pip install -e ".[dev,mcp-demos]"
+
 cd atlas
-python -m pytest tests -q -n 2          # representative run (CI uses this)
-python -m pytest tests -q -n auto       # one worker per CPU
+export MCP_CONFIG_FILE=mcp-test.json      # intentionally absent: no bundled MCP servers
+export PYTHONPATH="$PWD/..:$PWD/../scripts"
+python -m pytest tests -q -n 2           # representative run (CI uses this)
+python -m pytest tests -q -n auto        # one worker per CPU
 ```
+
+CI runs the backend suite at `-n 2` with `DEBUG_MODE=false`. Running the
+parallel command in debug mode (`DEBUG_MODE=true`) is fine, but debug mode
+skips `AuthMiddleware`'s proxy-secret check, so it is a weaker guard against a
+shared-app middleware regression.
 
 ### Why collection must be deterministic
 
@@ -141,10 +153,12 @@ done
 
 - **Never mutate the shared `app`'s middleware declaratively.** Starlette
   caches `app.middleware_stack` on the first request. Changing
-  `app.user_middleware[i].kwargs` before that first request (possible when a
-  test runs first in a worker) bakes the change into the process-wide app for
-  every later test. Build the stack first, or better, build a dedicated app
-  for the test.
+  `app.user_middleware[i].kwargs` bakes the change into the process-wide app for
+  every later test (and, under xdist, every other test on that worker) -- and
+  because the stack is captured on first use, a "build it first" workaround only
+  hides the edit until something rebuilds the stack. Build a dedicated app for
+  the test instead; `test_middleware_auth.py` is the model. The suite no longer
+  mutates the shared app (issue #1057).
 - **Give each test its own resources.** Ports, temp files, and databases must
   be per-test (`tmp_path`) or worker-unique. The session-scoped temp redirects
   in `conftest.py` are *worker-local*, not shared across workers: every worker
@@ -164,10 +178,10 @@ done
 ### Files that need special care
 
 There is currently no test that must be forced serial; the full suite passes
-at `-n 2` and `-n auto`. Files that exercise process-wide state and are the
-most likely to regress are the ones that touch the shared `app` middleware
-(`test_routes_config_smoke.py`, `test_config_auth_required_servers.py`),
-module singletons, or the session-scoped temp stores. CI runs the backend
-suite at `-n 2` on every PR so such a regression fails there rather than only
-on a developer's machine.
+at `-n 2` and `-n auto`. What makes that safe is the session-level isolation in
+`conftest.py` (env pins, config/singleton snapshots) plus the rule that tests
+build their own app rather than editing the shared one. The files most likely
+to regress are those that touch the shared `app` middleware, module singletons,
+or the worker-local temp stores. CI runs the backend suite at `-n 2` on every
+PR so such a regression fails there rather than only on a developer's machine.
 
