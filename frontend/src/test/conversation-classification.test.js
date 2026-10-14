@@ -73,6 +73,14 @@ describe('classificationLock (issue #1044)', () => {
       .toEqual({ locked: false, level: null, placeholder: null, guidance: null })
   })
 
+  it('stays unlocked until the server accepts the first turn', () => {
+    expect(classificationLock({
+      complianceEnabled: true,
+      activeConversationClassification: { state: 'classified', level: 'CUI' },
+      conversationAccepted: false,
+    }).locked).toBe(false)
+  })
+
   it('stays unlocked when compliance levels are disabled', () => {
     expect(classificationLock({
       complianceEnabled: false,

@@ -51,6 +51,8 @@ const setChat = (over = {}) => {
     complianceLevelFilter: 'Internal',
     setComplianceLevelFilter: vi.fn(),
     complianceRequired: false,
+    activeConversationClassification: null,
+    conversationAccepted: true,
     selectedDataSources: new Set(),
     ...over,
   })
@@ -134,6 +136,7 @@ describe('header compliance selector lock (issue #1044)', () => {
     setChat({
       complianceLevelFilter: 'Public',
       activeConversationClassification: { state: 'classified', level: 'Internal' },
+      conversationAccepted: true,
     })
     for (const select of openSelectors()) {
       expect(select.disabled).toBe(true)
@@ -143,6 +146,19 @@ describe('header compliance selector lock (issue #1044)', () => {
       expect(select.title).toMatch(/Start a new conversation/)
       // The recorded level is displayed even though the global filter differs.
       expect(optionLabels(select)).toEqual(['Public', 'Internal'])
+    }
+  })
+
+  it('stays unlocked after a first turn the server has not accepted', () => {
+    setChat({
+      complianceLevelFilter: 'Public',
+      activeConversationClassification: { state: 'classified', level: 'Internal' },
+      conversationAccepted: false,
+    })
+    for (const select of openSelectors()) {
+      expect(select.disabled).toBe(false)
+      expect(select.dataset.locked).toBe('false')
+      expect(select.value).toBe('Public')
     }
   })
 

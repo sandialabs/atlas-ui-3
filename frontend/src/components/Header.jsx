@@ -68,17 +68,20 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
     setComplianceLevelFilter,
     complianceRequired,
     activeConversationClassification,
+    conversationAccepted,
     selectedDataSources
   } = useChat()
   const { complianceLevels } = useMarketplace()
-  // A conversation that has begun is bound to its recorded classification
-  // (issue #1044): the selector is locked, showing that level rather than the
-  // global value, and only a New Chat unlocks it. The server enforces the same
-  // boundary (#1043); this keeps the UI from offering a transition it would
-  // refuse.
+  // A conversation the server has accepted is bound to its recorded
+  // classification (issue #1044): the selector is locked, showing that level
+  // rather than the global value, and only a New Chat unlocks it. A first turn
+  // the server refused leaves the selector open to correct the level. The server
+  // enforces the same boundary (#1043); this keeps the UI from offering a
+  // transition it would refuse.
   const lock = classificationLock({
     complianceEnabled: !!features?.compliance_levels,
     activeConversationClassification,
+    conversationAccepted,
   })
   const displayLevel = lock.locked ? lock.level : complianceLevelFilter
   // A saved level stays selectable even if the definitions failed to load or

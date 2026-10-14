@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   saveLocalConv: vi.fn(() => Promise.resolve()),
   saveMode: 'none',
   level: 'UUR',
+  setComplianceLevelFilter: vi.fn(),
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -85,7 +86,7 @@ vi.mock('../hooks/chat/useSelections', async (importActual) => {
       makePromptActive: vi.fn(),
       setSinglePrompt: vi.fn(),
       clearToolsAndPrompts: vi.fn(),
-      setComplianceLevelFilter: vi.fn(),
+      setComplianceLevelFilter: h.setComplianceLevelFilter,
       setRagEnabled: vi.fn(),
       applyWorkspace: h.applyWorkspace,
       snapshotSelections: h.snapshotSelections,
@@ -186,12 +187,16 @@ beforeEach(() => {
 })
 
 describe('conversation classification in the chat context (issue #1042)', () => {
-  it('sends the active level with the restore frame', () => {
+  it("sends the conversation's recorded level with the restore frame and syncs the selector", () => {
     h.level = 'UUR'
     const { result } = renderChat()
     act(() => { result.current.loadSavedConversation(cuiConversation) })
     const restore = h.sendMessage.mock.calls.map(c => c[0]).find(f => f.type === 'restore_conversation')
-    expect(restore.compliance_level_filter).toBe('UUR')
+    expect(restore.compliance_level_filter).toBe('CUI')
+    // The recorded level is authoritative on load (#1044): the selector moves to
+    // it so the locked value and the outbound level agree.
+    expect(h.setComplianceLevelFilter).toHaveBeenCalledWith('CUI')
+    expect(result.current.conversationAccepted).toBe(true)
   })
 
   it('refuses a send under another level without touching the transcript', () => {
@@ -294,5 +299,25 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // The header locks the level selector off `conversationAccepted` (issue
+  // #1044); a first turn the server refused must leave it open to correct.
+  it('is unaccepted after a first send until the server replies', () => {
+    h.level = 'CUI'
+    const { result } = renderChat()
+    expect(result.current.conversationAccepted).toBe(false)
+    act(() => { result.current.sendChatMessage('first synthetic prompt') })
+    expect(result.current.activeConversationClassification?.state).toBe('classified')
+    expect(result.current.conversationAccepted).toBe(false)
+    act(() => { h.wsHandler({ type: 'chat_response', message: 'synthetic reply' }) })
+    expect(result.current.conversationAccepted).toBe(true)
+  })
+
+  it('is accepted as soon as a saved conversation is loaded', () => {
+    h.level = 'CUI'
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(cuiConversation) })
+    expect(result.current.conversationAccepted).toBe(true)
   })
 })

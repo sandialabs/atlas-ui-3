@@ -1459,6 +1459,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// some providers, and with no conversation repository configured the
 		// client payload is canonical, so a narration row would replay as a
 		// second assistant turn and break strict alternation.
+		// The conversation's recorded classification is authoritative on load
+		// (issues #1042/#1044): a saved conversation is bound to its level, so
+		// the restore frame carries that level rather than the possibly-stale
+		// global value, and the selector is synced to it below. A reconnect
+		// keeps the level already bound.
+		const recorded = reconnecting ? null : classificationOf(conversationData)
+		const recordedBound = !!recorded &&
+			(recorded.state === 'classified' || recorded.state === 'unclassified')
+		const restoreLevel = recordedBound ? recorded.level : (activeComplianceFilter ?? null)
 		if (sendMessage) {
 			sendMessage({
 				type: 'restore_conversation',
@@ -1469,9 +1478,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 						role: msg.role,
 						content: msg.content || '',
 					})),
-				// The active level (null for none): the server refuses a
+				// The conversation's level (null for none): the server refuses a
 				// conversation recorded under another classification (#1042).
-				compliance_level_filter: activeComplianceFilter ?? null,
+				compliance_level_filter: restoreLevel ?? null,
 			})
 		}
 
@@ -1489,11 +1498,18 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// conversation's workspace rather than whatever is active at save time.
 			conversationWorkspaceIdRef.current = meta.workspace_id || null
 			conversationLoadedRef.current = true
-			const recorded = classificationOf(conversationData)
 			conversationClassificationRef.current = (recorded.state === 'classified' || recorded.state === 'unclassified')
 				? { recorded: true, level: recorded.level }
 				: { recorded: false, invalid: recorded.state === 'invalid' }
 			setActiveConversationClassification(recorded)
+			// The recorded level is authoritative on load (#1044): sync the
+			// selector to it, so the locked value and the value outbound frames
+			// use agree. Without this, an Undo restore at a different global
+			// level would show the conversation's level but keep refusing every
+			// continuation under the stale one.
+			if (complianceEnabled && recordedBound) {
+				selections.setComplianceLevelFilter(recorded.level)
+			}
 			restoreWorkspace(meta.workspace_id)
 		}
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
@@ -2098,6 +2114,16 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		return eventId
 	}, [addMessage])
 
+	// Whether the server has accepted a turn of the open conversation (issue
+	// #1044): a new chat is unbound until the server replies or assigns a real
+	// id, so a first turn it refuses leaves the classification selector open for
+	// the user to correct the level without discarding the chat. Mirrors the
+	// acceptance test in sendChatMessage; a `local_*` id is the browser
+	// autosave's own, not the server's word.
+	const conversationAccepted = conversationLoadedRef.current ||
+		(!!activeConversationId && !String(activeConversationId).startsWith('local_')) ||
+		messages.some(m => m.role === 'assistant')
+
 	const value = {
 		// Parallel conversation runs (issue #884): conversation_id -> run record,
 		// including conversations that are not on screen.
@@ -2185,6 +2211,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// The open conversation's recorded classification ({ state, level }), or
 		// null with no conversation; drives the shell classification banner (#1045).
 		activeConversationClassification,
+		// Whether the server has accepted a turn of the open conversation; the
+		// header locks the classification selector only once it has (#1044).
+		conversationAccepted,
 		agentModeEnabled: agent.agentModeEnabled,
 		setAgentModeEnabled: agent.setAgentModeEnabled,
 		agentMaxSteps: agent.agentMaxSteps,
