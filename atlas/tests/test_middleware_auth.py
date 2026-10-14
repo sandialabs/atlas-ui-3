@@ -499,3 +499,35 @@ def test_heartbeat_bypasses_auth_with_proxy_secret():
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
+
+
+def test_proxy_secret_enforcement_defaults_on(monkeypatch):
+    """The shipped default is proxy-secret enforcement on.
+
+    The test session pins ``FEATURE_PROXY_SECRET_ENABLED=false`` for isolation,
+    so this is the one place that asserts the production default rather than the
+    test override (issue #1057).
+    """
+    from atlas.modules.config.settings import AppSettings
+
+    monkeypatch.delenv("FEATURE_PROXY_SECRET_ENABLED", raising=False)
+    assert AppSettings(_env_file=None).feature_proxy_secret_enabled is True
+
+
+def test_shared_app_auth_middleware_kwargs_match_settings():
+    """``main.app``'s AuthMiddleware is wired from settings, unmutated.
+
+    Complements the conftest autouse mutation guard: that fixture catches an
+    edit after the fact, while this pins the wiring itself so a wrong value in
+    ``main.py`` fails here (issue #1057).
+    """
+    from main import app
+
+    from atlas.modules.config.config_manager import config_manager
+
+    settings = config_manager.app_settings
+    middleware = next(m for m in app.user_middleware if m.cls is AuthMiddleware)
+    assert middleware.kwargs["debug_mode"] is settings.debug_mode
+    assert middleware.kwargs["proxy_secret_enabled"] is settings.feature_proxy_secret_enabled
+    assert middleware.kwargs["proxy_secret"] == settings.proxy_secret
+    assert middleware.kwargs["proxy_secret_header"] == settings.proxy_secret_header

@@ -49,7 +49,8 @@ The test scripts are designed to run inside Docker containers with the following
 
 The CI/CD pipeline (`.github/workflows/ci.yml`) builds and tests in parallel:
 1. The `ci-test` job builds the test image, runs all suites with debug mode
-   enabled, then runs the backend and e2e suites in production mode.
+   enabled, then runs the backend and e2e suites in production mode. The
+   production-mode backend run uses `pytest-xdist` (`-n 2`).
 2. The production and runtime-only images are validated in separate jobs.
 3. On branch pushes a separate publish job pushes the multi-platform production
    image only after the test and runtime-only jobs pass.
@@ -59,6 +60,26 @@ The CI/CD pipeline (`.github/workflows/ci.yml`) builds and tests in parallel:
 
 The pull-request status checks are `ci-test`, `production-image`, and
 `runtime-only-image`.
+
+## Parallel Runs
+
+The backend suite supports `pytest-xdist`. From `atlas/`, set the same
+environment CI uses:
+
+```bash
+export MCP_CONFIG_FILE=mcp-test.json
+export PYTHONPATH="$PWD/..:$PWD/../scripts"
+python -m pytest tests -q -n 2      # representative (what CI runs)
+python -m pytest tests -q -n auto   # one worker per CPU
+```
+
+`pytest-xdist` ships in the `dev` extra (`uv pip install -e ".[dev]"`). Every
+worker must collect an identical test sequence, so parametrize from ordered
+collections (sort any `set`/`frozenset` first) and never mutate the shared app's
+middleware stack. See
+[`docs/developer/test-isolation.md`](../docs/developer/test-isolation.md) for
+the determinism rules, the collection-seed check, and how to serialize a test
+that genuinely needs it.
 
 ## Local Testing
 
