@@ -23,11 +23,12 @@ authenticated user, which keeps the "just add a file" workflow the issue asks
 for from silently hiding personas behind a group nobody is in.
 
 ``allowed_data_classifications`` mirrors the field on models, MCP servers and
-RAG sources (issue #1062): an explicit allowlist of the levels a persona may be
+RAG sources (issue #1062): an explicit list of the levels a persona may be
 used at, exact membership after alias resolution. The legacy single-value
 ``compliance_level`` maps to a one-element list when the new field is absent;
-when both are present the new field wins. A persona that declares nothing is
-unavailable in a classified session (fail closed).
+when both are present the new field wins. Unlike the other config surfaces the
+value must be a list -- a scalar is a hand-authoring mistake that fails closed.
+A persona that declares nothing is unavailable in a classified session.
 
 Files are read once at startup and cached; ``reload()`` re-reads them.
 """
@@ -42,7 +43,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import yaml
 
-from atlas.core.compliance import coerce_classifications, get_compliance_manager
+from atlas.core.compliance import get_compliance_manager
 
 logger = logging.getLogger(__name__)
 
@@ -192,16 +193,25 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
     allowed_data_classifications = None
     legacy_raw = metadata.get("compliance_level")
     if "allowed_data_classifications" in metadata:
-        # New field wins when present (even when empty: an explicit "approve for
-        # nothing" is honored), consistent with the other config surfaces.
-        coerced = coerce_classifications(metadata.get("allowed_data_classifications"))
-        if coerced is None:
-            # The key was present but held an unreadable value (null, a mapping,
-            # a number): treat it as "declared nothing" rather than undeclared so
-            # the persona cannot fall back to a broader legacy level.
-            coerced = []
+        # Frontmatter is hand-authored, so the value must be an explicit list:
+        # a scalar (including the tempting `allowed_data_classifications: CUI`)
+        # or any other shape is a configuration error that fails closed rather
+        # than being read as a one-element allowlist. The new field takes
+        # precedence over a legacy level, even when it is malformed: a bad new
+        # value must not silently fall back to broader access.
+        raw_new = metadata.get("allowed_data_classifications")
+        if isinstance(raw_new, (list, tuple)):
+            entries = [c for c in raw_new if isinstance(c, str) and c]
+        else:
+            logger.warning(
+                "Persona %s: allowed_data_classifications must be a list of "
+                "level names; treating the persona as approved for no "
+                "classified session.",
+                path.name,
+            )
+            entries = []
         allowed_data_classifications = manager.validate_classifications(
-            coerced, context=f"persona file {path.name}"
+            entries, context=f"persona file {path.name}"
         )
         if legacy_raw:
             logger.warning(
@@ -471,11 +481,11 @@ async def resolve_persona_prompt(
         return None
 
     if compliance_level_filter and _compliance_feature_enabled():
-        validated = get_compliance_manager().validate_compliance_level(
-            compliance_level_filter, context="chat request"
-        )
-        if validated and not _compliance_allows(
-            validated, persona.allowed_data_classifications
+        # The raw filter goes straight to the shared rule: an undefined filter
+        # level matches no classification (fail closed), rather than skipping
+        # the check. classification_permits resolves aliases itself.
+        if not _compliance_allows(
+            compliance_level_filter, persona.allowed_data_classifications
         ):
             logger.warning(
                 "Ignoring persona id blocked by the active compliance filter"

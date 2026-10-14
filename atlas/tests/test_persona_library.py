@@ -213,6 +213,29 @@ Body""")
     assert persona.compliance_level is None
 
 
+def test_string_scalar_allowed_data_classifications_fails_closed(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    # `allowed_data_classifications: Internal` is a common authoring mistake: it
+    # must not silently become a one-element allowlist.
+    path = write(tmp_path, "scalar.md", "---\nallowed_data_classifications: Internal\n---\nBody")
+    assert parse_persona_file(path).allowed_data_classifications == []
+
+    # ...and it must not fall back to a broader legacy level either.
+    path = write(tmp_path, "scalar_and_legacy.md", """---
+compliance_level: HIPAA
+allowed_data_classifications: Internal
+---
+Body""")
+    persona = parse_persona_file(path)
+    assert persona.allowed_data_classifications == []
+    assert persona.compliance_level is None
+
+
+
 def test_all_unknown_allowed_data_classifications_declares_nothing(tmp_path, monkeypatch):
     from atlas.modules.prompts import persona_library
 
@@ -639,6 +662,19 @@ async def test_multi_classification_persona_hidden_at_other_levels(
     ) is None
     assert await resolve(
         "multi", "a@b.com", group_check, compliance_level_filter="HIPAA"
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_filter_level_fails_closed(multi_classification_setup):
+    persona_library, group_check = multi_classification_setup
+
+    # A filter that names no defined level must not skip the persona check.
+    assert await persona_library.resolve_persona_prompt(
+        "multi", "a@b.com", group_check, compliance_level_filter="NotARealLevel"
+    ) is None
+    assert await persona_library.resolve_persona_prompt(
+        "plain", "a@b.com", group_check, compliance_level_filter="NotARealLevel"
     ) is None
 
 

@@ -8,9 +8,8 @@ prompt selector, with no code changes and no MCP prompt server.
 name: Research Assistant          # optional; defaults to the filename
 description: One-line summary     # optional; shown under the name in the picker
 access_group: research-team       # optional; a group name or a list of them
-allowed_data_classifications:     # optional; explicit allowlist of levels
+allowed_data_classifications:     # optional; explicit list of levels
   - Internal
-compliance_level: Internal        # deprecated single-level form; prefer the list
 order: 10                         # optional sort hint (default 1000)
 ---
 You are a meticulous research assistant...
@@ -25,9 +24,11 @@ Everything below the closing `---` is the prompt text.
 - With `allowed_data_classifications`, the persona is filtered by the user's
   active compliance level like any tool or prompt: the selected level must be
   one of the listed levels (aliases resolve). An active filter hides personas
-  that list no level, an empty list, or an unrecognized level. The legacy
-  `compliance_level` is read as a one-element list when the new field is
-  absent; when both are present the list wins.
+  that list no level, an empty list, or an unrecognized level. The value must be
+  a YAML list; a scalar (e.g. `allowed_data_classifications: Internal`) is
+  rejected and the persona is approved for nothing. The legacy
+  `compliance_level` is read as a one-element list when the new field is absent;
+  when both are present the list wins.
 - The persona `id` comes from the filename, so renaming a file changes its id.
 
 Files are read at server startup. To override or extend this packaged set, point

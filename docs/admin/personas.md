@@ -90,8 +90,12 @@ compliance_level: CUI
 
 is interpreted exactly as `allowed_data_classifications: [CUI]`. When **both**
 fields appear, `allowed_data_classifications` wins (the deprecated field is
-ignored for access decisions, and a warning is logged). To migrate, replace the
-single value with a list:
+ignored for access decisions, and a warning is logged) — including when the new
+value is malformed, so a bad list never falls back to broader legacy access.
+Because the frontmatter is hand-authored, `allowed_data_classifications` must be
+a YAML list; a scalar such as `allowed_data_classifications: CUI` is rejected
+(fail closed), unlike elsewhere in the config. To migrate, replace the single
+value with a list:
 
 ```markdown
 ---
