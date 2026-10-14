@@ -81,7 +81,7 @@ describe('model picker rows', () => {
 
   it('gives the model name its own unclipped line above the badge', () => {
     setup({ models: [{ name: LONG_NAME, supports_tools: true, allowed_data_classifications: MANY }] })
-    const row = screen.getByRole('button', { name: new RegExp(`^${LONG_NAME.replace(/[.:]/g, '\\$&')}`) })
+    const row = screen.getByRole('button', { name: n => n.startsWith(`${LONG_NAME} `) })
     expect(row).toHaveClass('group')
     const name = within(row).getByText(LONG_NAME)
     // Wraps instead of truncating, and does not share its line with the badge.
