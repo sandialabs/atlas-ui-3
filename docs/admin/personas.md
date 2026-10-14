@@ -26,7 +26,9 @@ YAML frontmatter for the metadata, everything below it for the prompt text:
 name: Research Assistant          # optional; defaults to the filename
 description: Careful, source-first answers
 access_group: research-team       # optional; one group or a list of them
-compliance_level: Internal        # optional; a level from compliance-levels.json
+allowed_data_classifications:     # optional; explicit allowlist of levels
+  - Internal
+  - SOC2
 order: 10                         # optional sort hint (default 1000)
 ---
 You are a meticulous research assistant.
@@ -40,7 +42,8 @@ You are a meticulous research assistant.
 | `name` | no | Label in the picker. Defaults to a title-cased filename. |
 | `description` | no | One-line subtitle under the name. |
 | `access_group` | no | Group name, or list of names. Omit to show to everyone. |
-| `compliance_level` | no | Compliance level name (aliases canonicalize). Omit for no level. |
+| `allowed_data_classifications` | no | Explicit allowlist of compliance levels (aliases canonicalize). Omit for no level. |
+| `compliance_level` | no | Deprecated single-level form of the field above. |
 | `order` | no | Sort hint; lower sorts first, ties break on name. |
 | `id` | no | Stable identifier. Defaults to a slug of the filename. |
 
@@ -59,15 +62,60 @@ Notes:
 - The persona id comes from the filename, so renaming a file changes its id and
   users who had it selected fall back to the default prompt.
 - With `FEATURE_COMPLIANCE_LEVELS_ENABLED` on, personas are filtered by the
-  current compliance context exactly like MCP tools and prompts: when a user
-  selects a compliance level, the picker shows only personas whose
-  `compliance_level` the selected level's `allowed_with` permits — a persona
-  with **no** level is hidden while a filter is active. The server re-checks
-  the same rule when resolving the turn's `persona_id`, so a stale selection or
-  hand-crafted client falls back to the default prompt. Changing the filter
-  clears an active persona the new context excludes. Level names are validated
-  on load (aliases canonicalize; an unknown level is dropped with a warning).
-  With the feature off, `compliance_level` is inert metadata.
+  current compliance context exactly like MCP tools and prompts. The rule is the
+  same one applied to models, MCP servers and RAG sources (issue #1032): the
+  selected level must be a member of the persona's
+  `allowed_data_classifications` after alias resolution. A persona with **no**
+  classifications (or an empty list) is hidden while a filter is active. The
+  server re-checks the same rule when resolving the turn's `persona_id`, so a
+  stale selection or hand-crafted client falls back to the default prompt.
+  Changing the filter clears an active persona the new context excludes. Level
+  names are validated on load (aliases canonicalize; an unknown level is dropped
+  with a warning, which can only narrow access). With the feature off,
+  classifications are inert metadata.
+
+### Classification allowlist and migration from `compliance_level`
+
+`allowed_data_classifications` is an **explicit allowlist**, not a hierarchy:
+the persona is usable at each listed level and nowhere else. A level's
+`allowed_with` in `compliance-levels.json` never widens a persona's access.
+
+The legacy single-value `compliance_level` still works. A persona written as:
+
+```markdown
+---
+compliance_level: CUI
+---
+```
+
+is interpreted exactly as `allowed_data_classifications: [CUI]`. When **both**
+fields appear, `allowed_data_classifications` wins (the deprecated field is
+ignored for access decisions, and a warning is logged) — including when the new
+value is malformed, so a bad list never falls back to broader legacy access.
+Because the frontmatter is hand-authored, `allowed_data_classifications` must be
+a YAML list; a scalar such as `allowed_data_classifications: CUI` is rejected
+(fail closed), unlike elsewhere in the config. To migrate, replace the single
+value with a list — before:
+
+```markdown
+---
+compliance_level: CUI
+---
+```
+
+after:
+
+```markdown
+---
+allowed_data_classifications:
+  - CUI
+  - CUI_no_ECI_no_ITAR_no_PII
+---
+```
+
+A missing or empty allowlist — and any typo or non-list value — makes the
+persona unavailable in a classified session (fail closed) rather than silently
+broadening access.
 
 Personas are independent of the custom-prompt library (`FEATURE_CUSTOM_PROMPTS_ENABLED`)
 and of chat history: they need no per-user storage, so they work with those

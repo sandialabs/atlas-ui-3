@@ -246,6 +246,72 @@ describe('PromptSelector compliance filtering', () => {
     expect(screen.getByText('No Level')).toBeInTheDocument()
   })
 
+  it('reads the effective allowlist the server sends for a legacy persona', () => {
+    // The API folds a legacy compliance_level into allowed_data_classifications
+    // and still echoes compliance_level; when the two disagree the list wins.
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [
+        {
+          id: 'legacy',
+          name: 'Legacy Leveled',
+          description: '',
+          compliance_level: 'Internal',
+          allowed_data_classifications: ['Public'],
+        },
+      ],
+      complianceLevelFilter: 'Internal',
+      features: { compliance_levels: true },
+    })
+
+    openPicker()
+
+    // Hidden at Internal: the allowlist (Public) wins over the legacy level.
+    expect(screen.queryByText('Legacy Leveled')).not.toBeInTheDocument()
+  })
+
+  it('hides a persona whose allowlist is empty', () => {
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [
+        {
+          id: 'none',
+          name: 'Empty Allowlist',
+          description: '',
+          compliance_level: null,
+          allowed_data_classifications: [],
+        },
+      ],
+      complianceLevelFilter: 'Internal',
+      features: { compliance_levels: true },
+    })
+
+    openPicker()
+
+    expect(screen.queryByText('Empty Allowlist')).not.toBeInTheDocument()
+  })
+
+  it('honors a multi-level allowlist from the server', () => {
+    useChat.mockReturnValue({
+      ...baseContext,
+      personas: [
+        {
+          id: 'multi',
+          name: 'Multi Leveled',
+          description: '',
+          compliance_level: null,
+          allowed_data_classifications: ['Public', 'Internal'],
+        },
+      ],
+      complianceLevelFilter: 'Internal',
+      features: { compliance_levels: true },
+    })
+
+    openPicker()
+
+    expect(screen.getByText('Multi Leveled')).toBeInTheDocument()
+  })
+
   it('ignores the filter when the compliance feature is off', () => {
     useChat.mockReturnValue({
       ...baseContext,

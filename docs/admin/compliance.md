@@ -193,7 +193,7 @@ If no `compliance-levels.json` can be loaded, the UI has no levels to offer and 
 
 ## What the Selector Does in the UI
 
-Choosing a level applies the same rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when the selected level is one of its allowed data classifications. A resource with none is hidden while a level is selected. With "All Levels", nothing is filtered. Personas carry a single `compliance_level` and must match the selected level. The built-in `atlas` tools are exempt, as above. In the data sources panel, a source whose RAG server is not approved for the level is shown disabled, because the server will not query it.
+Choosing a level applies the same rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when the selected level is one of its allowed data classifications. A resource with none is hidden while a level is selected. With "All Levels", nothing is filtered. Personas declare `allowed_data_classifications` (the legacy `compliance_level` is read as a one-element list) and must match the selected level; see [Preconfigured personas](./personas.md). The built-in `atlas` tools are exempt, as above. In the data sources panel, a source whose RAG server is not approved for the level is shown disabled, because the server will not query it.
 
 Selections follow the same rule, so what is sent is always what the panels show:
 
