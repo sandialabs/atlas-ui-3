@@ -146,14 +146,20 @@ done
   every later test. Build the stack first, or better, build a dedicated app
   for the test.
 - **Give each test its own resources.** Ports, temp files, and databases must
-  be per-test (`tmp_path`) or worker-unique; the session-scoped temp redirects
-  in `conftest.py` are shared across all workers.
+  be per-test (`tmp_path`) or worker-unique. The session-scoped temp redirects
+  in `conftest.py` are *worker-local*, not shared across workers: every worker
+  imports `conftest.py` and runs `tempfile.mkdtemp()` itself, so each worker
+  gets its own directories. They are shared only among the tests that run
+  inside a single worker, which is where cross-test leakage can hide.
 - **Run resource-heavy or subprocess-heavy tests serialized if they need it.**
   Preference order: (1) fix the isolation so the test is parallel-safe;
   (2) group the tests that share a resource with
-  `@pytest.mark.xdist_group("name")` so xdist keeps them on one worker;
-  (3) keep a whole file on one worker with `--dist loadfile`. Never disable
-  xdist globally (`-p no:xdist`) to work around one test.
+  `@pytest.mark.xdist_group("name")` so xdist keeps them on one worker -- the
+  marker is only honored by the `loadgroup` scheduler, so run the grouped set
+  with `--dist loadgroup` (`python -m pytest tests --dist loadgroup -n auto`);
+  the default `load` scheduler ignores the marker and may still run the group
+  concurrently; (3) keep a whole file on one worker with `--dist loadfile`.
+  Never disable xdist globally (`-p no:xdist`) to work around one test.
 
 ### Files that need special care
 

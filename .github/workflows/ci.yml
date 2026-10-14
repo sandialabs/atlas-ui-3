@@ -75,11 +75,15 @@ jobs:
       # determinism fixes (sorted parametrization, proxy-secret test isolation)
       # without the cost of repeating the whole suite at -n auto. Tests live
       # under atlas/ (the package), so run from /app/atlas with the same
-      # PYTHONPATH the reverse-order step uses.
+      # PYTHONPATH the reverse-order step uses. MCP_CONFIG_FILE points at the
+      # intentionally-absent mcp-test.json (as test/run_tests.sh does) so a
+      # worker that enters the shared app lifespan does not discover and start
+      # every bundled MCP server.
       run: |
         echo "Running the backend suite under pytest-xdist (-n 2)"
         docker run --rm --workdir /app/atlas \
           -e DEBUG_MODE=true \
+          -e MCP_CONFIG_FILE=mcp-test.json \
           -e PYTHONPATH=/app:/app/scripts \
           test-image:latest \
           python -m pytest tests -q --tb=short -n 2 -p no:cacheprovider
