@@ -88,22 +88,21 @@ jobs:
     - name: Run backend tests in production mode (pytest-xdist)
       # This is the representative parallel run (issue #1057): every worker must
       # collect an identical test sequence and run without resource collisions.
-      # DEBUG_MODE=false keeps AuthMiddleware's proxy-secret check active, so a
-      # reintroduced shared-app middleware mutation surfaces here instead of
-      # being masked by debug mode's skip. MCP_CONFIG_FILE points at the
-      # intentionally-absent mcp-test.json (as test/run_tests.sh does) so a
-      # worker that enters the shared app lifespan does not discover and start
-      # every bundled MCP server. Two workers is enough to catch collection
-      # divergence without paying for a full -n auto repeat of the suite.
+      # It goes through test/run_tests.sh (like the serial passes) so it gets
+      # the same env -- notably MCP_CONFIG_FILE=mcp-test.json, which keeps a
+      # worker entering the shared app lifespan from discovering and starting
+      # every bundled MCP server. DEBUG_MODE=false keeps AuthMiddleware's
+      # proxy-secret check active, so a reintroduced shared-app middleware
+      # mutation surfaces here instead of being masked by debug mode's skip.
+      # Two workers is enough to catch collection divergence without paying for
+      # a full -n auto repeat of the suite.
       timeout-minutes: 15
       run: |
         echo "Running backend tests in production mode (DEBUG_MODE=false) under pytest-xdist (-n 2)"
-        docker run --rm --workdir /app/atlas \
+        docker run --rm --workdir /app \
           -e DEBUG_MODE=false \
-          -e MCP_CONFIG_FILE=mcp-test.json \
-          -e PYTHONPATH=/app:/app/scripts \
-          test-image:latest \
-          python -m pytest tests -q --tb=short -n 2 -p no:cacheprovider
+          -e PYTEST_ARGS="-n 2 -p no:cacheprovider" \
+          test-image:latest bash /app/test/run_tests.sh atlas
 
     - name: Run e2e tests in production mode
       # DEBUG_MODE changes the live server's auth behaviour (test-user fallback,

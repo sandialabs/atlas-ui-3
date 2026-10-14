@@ -211,12 +211,13 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
 
     test_steps = {step.get("name"): step for step in jobs["test"]["steps"]}
     assert "run_tests.sh all" in test_steps["Run tests in debug mode"]["run"]
-    # The production backend pass is the parallel (pytest-xdist) run; it must
-    # not fall back to the serial wrapper.
+    # The production backend pass is the parallel (pytest-xdist) run; it goes
+    # through the same wrapper as the serial passes and forwards -n 2 via
+    # PYTEST_ARGS.
     prod_backend_run = test_steps["Run backend tests in production mode (pytest-xdist)"]["run"]
-    assert "-n 2" in prod_backend_run
-    assert "python -m pytest tests" in prod_backend_run
-    assert "run_tests.sh" not in prod_backend_run
+    assert "run_tests.sh atlas" in prod_backend_run
+    assert "run_tests.sh all" not in prod_backend_run
+    assert 'PYTEST_ARGS="-n 2' in prod_backend_run
     assert test_steps["Run tests in reverse collection order"]["if"] == (
         "github.event_name == 'push' && github.ref == 'refs/heads/main'"
     )

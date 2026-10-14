@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import os
 import shutil
 import sys
@@ -315,6 +316,36 @@ def _isolate_module_singletons():
         yield
     finally:
         restore_singletons(saved)
+
+
+@pytest.fixture(autouse=True)
+def _guard_shared_app_middleware():
+    """Fail if a test mutates the shared FastAPI app's middleware declaratively.
+
+    ``main.app`` is process-wide, and Starlette captures ``user_middleware``
+    kwargs into ``middleware_stack`` on first use, so an edit made by one test
+    leaks into every later test -- and, under pytest-xdist, every other test on
+    that worker regardless of order. Tests that need non-default middleware must
+    build their own app (the model is ``test_middleware_auth.py``); the
+    production wiring is asserted against settings in ``test_middleware_auth``
+    too. Snapshotting before and after each test turns a reintroduced edit into
+    a deterministic failure here instead of one that depends on collection
+    order (issue #1057).
+    """
+    try:
+        from main import app
+    except Exception:  # pragma: no cover - import guards are exercised elsewhere
+        yield
+        return
+    before = [(m.cls, copy.deepcopy(m.kwargs)) for m in app.user_middleware]
+    try:
+        yield
+    finally:
+        after = [(m.cls, m.kwargs) for m in app.user_middleware]
+        assert after == before, (
+            "a test mutated the shared app's middleware; build a dedicated "
+            "FastAPI() for the test instead of editing main.app"
+        )
 
 
 # Groups the debug-only mock table in ``core.auth`` grants to the *non-admin*

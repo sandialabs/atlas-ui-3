@@ -120,7 +120,12 @@ python -m pytest tests -q -n auto        # one worker per CPU
 CI runs the backend suite at `-n 2` with `DEBUG_MODE=false`. Running the
 parallel command in debug mode (`DEBUG_MODE=true`) is fine, but debug mode
 skips `AuthMiddleware`'s proxy-secret check, so it is a weaker guard against a
-shared-app middleware regression.
+shared-app middleware regression. To run through the same wrapper CI uses
+(which sets `MCP_CONFIG_FILE`, `PROJECT_ROOT`, and `PYTEST_ARGS`):
+
+```bash
+PYTEST_ARGS="-n 2" bash test/run_tests.sh atlas
+```
 
 ### Why collection must be deterministic
 
@@ -158,7 +163,9 @@ done
   because the stack is captured on first use, a "build it first" workaround only
   hides the edit until something rebuilds the stack. Build a dedicated app for
   the test instead; `test_middleware_auth.py` is the model. The suite no longer
-  mutates the shared app (issue #1057).
+  mutates the shared app (issue #1057), and the autouse
+  `_guard_shared_app_middleware` fixture in `conftest.py` fails any test that
+  reintroduces it.
 - **Give each test its own resources.** Ports, temp files, and databases must
   be per-test (`tmp_path`) or worker-unique. The session-scoped temp redirects
   in `conftest.py` are *worker-local*, not shared across workers: every worker
