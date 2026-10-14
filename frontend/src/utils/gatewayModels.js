@@ -8,6 +8,8 @@
  * atlas/modules/config/litellm_gateway_models.py.
  */
 
+import { userStorageKey as storageKey } from './userStorage'
+
 export const GATEWAY_KEY_SEPARATOR = '::'
 
 const TEAM_LABELS_STORAGE_KEY = 'chatui-gateway-team-labels'
@@ -28,11 +30,8 @@ export function parseGatewayModelKey(name, gateways) {
   return { gateway, teamId, modelId }
 }
 
-// Per-user so one person's teams never label or preselect another's picker
-// on a shared browser.
-function storageKey(base, user) {
-  return `${base}:${user || ''}`
-}
+// Keys are per-user (storageKey) so one person's teams never label or
+// preselect another's picker on a shared browser.
 
 function readJson(key) {
   try {

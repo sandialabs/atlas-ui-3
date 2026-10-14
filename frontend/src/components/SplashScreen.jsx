@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import { X, CheckCircle } from 'lucide-react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { isKnownUser, userStorageKey } from '../utils/userStorage'
+
+const DISMISS_KEY = 'splash-screen-dismissed'
 
 /**
  * SplashScreen component that displays important policies and information.
@@ -9,10 +12,12 @@ import DOMPurify from 'dompurify'
  * Features:
  * - Displays a configurable message body defined in a markdown file
  * - Can be dismissed or require acceptance
- * - Tracks dismissal using localStorage for N days
+ * - Tracks dismissal using localStorage for N days, per signed-in user
+ *   (`user`), so one account's acceptance never counts for the next account
+ *   on a shared browser (issue #1050). Nothing shows until the user is known.
  * - Fully configurable via backend API
  */
-const SplashScreen = ({ config, onClose }) => {
+const SplashScreen = ({ config, user, onClose }) => {
   const [isVisible, setIsVisible] = useState(false)
   
   useEffect(() => {
@@ -20,9 +25,14 @@ const SplashScreen = ({ config, onClose }) => {
     if (!config || !config.enabled) {
       return
     }
+    // Whose acceptance applies is not known until the config loads.
+    if (!isKnownUser(user)) {
+      setIsVisible(false)
+      return
+    }
 
     // Check if already dismissed
-    const dismissKey = 'splash-screen-dismissed'
+    const dismissKey = userStorageKey(DISMISS_KEY, user)
     const dismissedData = localStorage.getItem(dismissKey)
     
     if (dismissedData && !config.show_on_every_visit) {
@@ -44,12 +54,12 @@ const SplashScreen = ({ config, onClose }) => {
     
     // Show splash screen
     setIsVisible(true)
-  }, [config])
+  }, [config, user])
   
   const handleDismiss = () => {
     if (config.dismissible) {
       // Save dismissal to localStorage
-      const dismissKey = 'splash-screen-dismissed'
+      const dismissKey = userStorageKey(DISMISS_KEY, user)
       const dismissalData = {
         timestamp: new Date().toISOString(),
         version: config.title || 'default'
@@ -65,7 +75,7 @@ const SplashScreen = ({ config, onClose }) => {
   
   const handleAccept = () => {
     // Save acceptance to localStorage
-    const dismissKey = 'splash-screen-dismissed'
+    const dismissKey = userStorageKey(DISMISS_KEY, user)
     const dismissalData = {
       timestamp: new Date().toISOString(),
       version: config.title || 'default',

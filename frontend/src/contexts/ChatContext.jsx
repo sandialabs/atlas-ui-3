@@ -24,6 +24,7 @@ import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
+import { isKnownUser } from '../utils/userStorage'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -113,7 +114,7 @@ const MUTATING_SELECTION_ACTIONS = [
 export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
-	const selections = useSelections()
+	const selections = useSelections(config.user)
 	const complianceEnabled = !!config.features?.compliance_levels
 	const { complianceLevels, complianceMode, defaultComplianceLevel } = useComplianceLevels(complianceEnabled)
 	// Required-level mode: there is no "All Levels" state; a session always
@@ -2069,6 +2070,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// An unreadable local record (issue #1042) cannot be continued, and
 		// rewriting it would drop the record and turn it into a legacy one.
 		if (conversationClassificationRef.current?.invalid) return
+		// Local records belong to the signed-in user (issue #1050); with no
+		// one known yet there is no owner to save under.
+		const owner = config.user
+		if (!isKnownUser(owner)) return
 		const userMessages = messages.filter(m => m.role === 'user')
 		if (userMessages.length === 0) return
 
@@ -2103,7 +2108,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 						? { data_classification: conversationClassificationRef.current.level }
 						: {}),
 				},
-			}).catch(e => console.error('Failed to save conversation locally:', e))
+			}, owner).catch(e => console.error('Failed to save conversation locally:', e))
 		}, 1000)
 
 		return () => {

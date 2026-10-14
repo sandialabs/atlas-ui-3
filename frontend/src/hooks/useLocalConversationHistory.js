@@ -4,12 +4,18 @@
  * Drop-in replacement for useConversationHistory -- exposes the same
  * return shape so the Sidebar can swap between local and server storage
  * without changing its rendering logic.
+ *
+ * Scoped to `user`, the signed-in account (issue #1050): another account's
+ * locally saved conversations on this browser are never listed, opened,
+ * exported or deleted. Until the user is known nothing is.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import * as db from '../utils/localConversationDB'
+import { isKnownUser } from '../utils/userStorage'
 
-export function useLocalConversationHistory() {
+export function useLocalConversationHistory(user) {
+  const owner = isKnownUser(user) ? user : null
   const [conversations, setConversations] = useState([])
   const [loading, setLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -17,17 +23,22 @@ export function useLocalConversationHistory() {
   const tags = []
   const activeTag = null
 
+  // A different account signed in: drop the previous one's list.
+  useEffect(() => {
+    setConversations([])
+  }, [owner])
+
   const fetchConversations = useCallback(async () => {
     setLoading(true)
     try {
-      const list = await db.listConversations(50)
+      const list = await db.listConversations(owner, 50)
       setConversations(list)
     } catch (e) {
       console.error('Failed to fetch local conversations:', e)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [owner])
 
   const searchConversations = useCallback(async (query) => {
     if (!query || !query.trim()) {
@@ -37,49 +48,49 @@ export function useLocalConversationHistory() {
     setSearchQuery(query)
     setLoading(true)
     try {
-      const results = await db.searchConversations(query.trim(), 20)
+      const results = await db.searchConversations(owner, query.trim(), 20)
       setConversations(results)
     } catch (e) {
       console.error('Local search failed:', e)
     } finally {
       setLoading(false)
     }
-  }, [fetchConversations])
+  }, [owner, fetchConversations])
 
   const loadConversation = useCallback(async (conversationId) => {
     try {
-      return await db.getConversation(conversationId)
+      return await db.getConversation(conversationId, owner)
     } catch (e) {
       console.error('Failed to load local conversation:', e)
       return null
     }
-  }, [])
+  }, [owner])
 
   const deleteConversation = useCallback(async (conversationId) => {
     try {
-      await db.deleteConversation(conversationId)
-      setConversations((prev) => prev.filter((c) => c.id !== conversationId))
-      return true
+      const deleted = await db.deleteConversation(conversationId, owner)
+      if (deleted) setConversations((prev) => prev.filter((c) => c.id !== conversationId))
+      return deleted
     } catch (e) {
       console.error('Failed to delete local conversation:', e)
       return false
     }
-  }, [])
+  }, [owner])
 
   const deleteAll = useCallback(async () => {
     try {
-      const count = await db.deleteAllConversations()
+      const count = await db.deleteAllConversations(owner)
       setConversations([])
       return count
     } catch (e) {
       console.error('Failed to delete all local conversations:', e)
       return 0
     }
-  }, [])
+  }, [owner])
 
   const downloadAll = useCallback(async () => {
     try {
-      const all = await db.exportAllConversations()
+      const all = await db.exportAllConversations(owner)
       const exportData = {
         export_date: new Date().toISOString(),
         source: 'browser-local',
@@ -103,7 +114,7 @@ export function useLocalConversationHistory() {
       console.error('Failed to export local conversations:', e)
       return false
     }
-  }, [])
+  }, [owner])
 
   // Stubs for tag operations (not supported for browser-local storage)
   const fetchTags = useCallback(async () => {}, [])
@@ -112,10 +123,10 @@ export function useLocalConversationHistory() {
   const removeTag = useCallback(async () => false, [])
   const updateTitle = useCallback(async (conversationId, title) => {
     try {
-      const conv = await db.getConversation(conversationId)
+      const conv = await db.getConversation(conversationId, owner)
       if (!conv) return false
       conv.title = title
-      await db.saveConversation(conv)
+      await db.saveConversation(conv, owner)
       setConversations((prev) =>
         prev.map((c) => (c.id === conversationId ? { ...c, title } : c))
       )
@@ -124,7 +135,7 @@ export function useLocalConversationHistory() {
       console.error('Failed to update local title:', e)
       return false
     }
-  }, [])
+  }, [owner])
 
   return {
     conversations,
