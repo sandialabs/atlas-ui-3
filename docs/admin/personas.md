@@ -95,14 +95,18 @@ value is malformed, so a bad list never falls back to broader legacy access.
 Because the frontmatter is hand-authored, `allowed_data_classifications` must be
 a YAML list; a scalar such as `allowed_data_classifications: CUI` is rejected
 (fail closed), unlike elsewhere in the config. To migrate, replace the single
-value with a list:
+value with a list — before:
 
 ```markdown
 ---
-# before
 compliance_level: CUI
+---
+```
 
-# after
+after:
+
+```markdown
+---
 allowed_data_classifications:
   - CUI
   - CUI_no_ECI_no_ITAR_no_PII

@@ -211,7 +211,9 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
             dropped = 0
             for entry in raw_new:
                 if isinstance(entry, str) and entry.strip():
-                    entries.append(entry)
+                    # Stored stripped: a padded "Internal " must not reach the
+                    # unknown-level drop after passing the guard.
+                    entries.append(entry.strip())
                 else:
                     # An unquoted YAML 1.1 value such as `- NO` parses as a bool,
                     # and `- 5` as an int; both would otherwise vanish silently.

@@ -1,6 +1,7 @@
 """Tests for the preconfigured persona library (issue #880)."""
 
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -285,6 +286,55 @@ Body""")
     persona = parse_persona_file(path)
     assert persona.compliance_level is None
     assert persona.allowed_data_classifications is None
+
+
+def test_padded_allowlist_entry_is_stripped(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    path = write(tmp_path, "padded.md", """---
+allowed_data_classifications:
+  - " Internal "
+---
+Body""")
+    assert parse_persona_file(path).allowed_data_classifications == ["Internal"]
+
+
+def test_fail_closed_paths_warn(tmp_path, monkeypatch, caplog):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    logger = "atlas.modules.prompts.persona_library"
+    # A scalar where the list belongs is the admin's only signal that the
+    # persona failed closed.
+    with caplog.at_level(logging.WARNING, logger=logger):
+        parse_persona_file(
+            write(tmp_path, "scalar.md", "---\nallowed_data_classifications: Internal\n---\nBody")
+        )
+    assert "must be a YAML list" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=logger):
+        parse_persona_file(write(tmp_path, "mixed.md", """---
+allowed_data_classifications:
+  - Internal
+  - NO
+---
+Body"""))
+    assert "ignored" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=logger):
+        parse_persona_file(write(tmp_path, "listed.md", """---
+compliance_level:
+  - Internal
+---
+Body"""))
+    assert "allowed_data_classifications" in caplog.text
 
 
 
