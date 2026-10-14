@@ -323,9 +323,9 @@ describe('admin-allowlisted gateway models with their own classifications', () =
     setup({ models, features: { compliance_levels: true } })
     fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
     const row = (name) => screen.getByRole('button', { name: new RegExp(`^${name}`) })
-    expect(within(row('static-model')).getByText('Internal')).toBeTruthy()
-    expect(within(row('both-levels')).getByText('Public, Internal')).toBeTruthy()
-    expect(within(row('undeclared')).queryByText(/Public|Internal/)).toBeNull()
+    expect(row('static-model')).toHaveAccessibleName(/Allowed data classifications: Internal$/)
+    expect(row('both-levels')).toHaveAccessibleName(/Allowed data classifications: Public, Internal$/)
+    expect(within(row('undeclared')).queryByTestId('classification-badge')).toBeNull()
   })
 
   it('shows no level badge in the rows with compliance levels off', () => {
