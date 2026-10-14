@@ -10,6 +10,7 @@ import {
   classificationOf,
   classificationRefusal,
   classificationLabel,
+  classificationLock,
 } from '../utils/conversationClassification'
 import { useConversationHistory } from '../hooks/useConversationHistory'
 
@@ -63,6 +64,49 @@ describe('classificationRefusal', () => {
     expect(classificationLabel(cui)).toBe('CUI')
     expect(classificationLabel(none)).toBeNull()
     expect(classificationLabel(legacy)).toBe('Unrecorded level')
+  })
+})
+
+describe('classificationLock (issue #1044)', () => {
+  it('leaves a new conversation unlocked until a level is bound', () => {
+    expect(classificationLock({ complianceEnabled: true, activeConversationClassification: null }))
+      .toEqual({ locked: false, level: null, placeholder: null, guidance: null })
+  })
+
+  it('stays unlocked when compliance levels are disabled', () => {
+    expect(classificationLock({
+      complianceEnabled: false,
+      activeConversationClassification: { state: 'classified', level: 'CUI' },
+    }).locked).toBe(false)
+  })
+
+  it('locks a classified conversation to its recorded level and guides the user', () => {
+    const lock = classificationLock({
+      complianceEnabled: true,
+      activeConversationClassification: { state: 'classified', level: 'CUI' },
+    })
+    expect(lock.locked).toBe(true)
+    expect(lock.level).toBe('CUI')
+    expect(lock.guidance).toMatch(/classified CUI/)
+    expect(lock.guidance).toMatch(/Start a new conversation/)
+  })
+
+  it('locks records with no usable level behind a placeholder', () => {
+    const cases = {
+      unclassified: 'Unclassified',
+      legacy: 'Unrecorded level',
+      invalid: 'Unreadable level',
+    }
+    for (const [state, placeholder] of Object.entries(cases)) {
+      const lock = classificationLock({
+        complianceEnabled: true,
+        activeConversationClassification: { state, level: null },
+      })
+      expect(lock.locked).toBe(true)
+      expect(lock.level).toBeNull()
+      expect(lock.placeholder).toBe(placeholder)
+      expect(lock.guidance).toMatch(/Start a new conversation/)
+    }
   })
 })
 

@@ -85,6 +85,8 @@ A saved conversation can only be continued under the classification it was creat
 
 Refusals are logged at WARNING with the conversation id, user, recorded and active levels, and never the conversation content.
 
+**The header selector locks.** The UI mirrors the rule so a user is never invited to make a change the server would refuse (issue #1044). Until a conversation begins, the level selector works as before. Once the first turn starts -- or a saved conversation is opened -- the selector is disabled and shows that conversation's recorded classification, even if the global value differs. Its tooltip explains the lock: *"This conversation is classified CUI. Start a new conversation to use a different security level."* Opening another conversation shows that conversation's record, and starting a new chat unlocks selection; selection is never carried from one conversation into another. The lock is a usability safeguard only -- the server rule above is the boundary, so a modified client, stale state or a direct API call is still refused.
+
 **Legacy conversations.** Conversations saved before this release, or while compliance levels were disabled, have no record. While compliance levels are enabled their provenance is unknown, so they are not assumed to be any level: they stay listed (marked "Unrecorded level") and exportable, but cannot be opened into the chat or continued. With compliance levels disabled they keep working as before and stay unrecorded. If you know what a set of legacy conversations holds, record it explicitly:
 
 ```bash

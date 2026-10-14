@@ -74,3 +74,40 @@ export function classificationLabel(conv) {
   if (state === 'invalid') return 'Unreadable level'
   return null
 }
+
+// Whether the header's classification selector must be locked for the open
+// conversation (issue #1044). Once a conversation has begun -- a new chat after
+// its first turn, or a saved one opened from history -- its classification is
+// fixed and the selector may not change it; only starting a new chat unlocks
+// selection. `activeConversationClassification` is the open conversation's
+// record ({ state, level }, from ChatContext) or null with no conversation.
+//
+// The server stays the authority (issue #1043, conversation_classification.py):
+// this only stops the UI from offering a transition the server would refuse.
+// Returns the level to display when locked, a placeholder label for a record
+// with no usable level, and the guidance shown to the user.
+export function classificationLock({ complianceEnabled, activeConversationClassification }) {
+  const state = activeConversationClassification?.state
+  if (!complianceEnabled || !state) {
+    return { locked: false, level: null, placeholder: null, guidance: null }
+  }
+  if (state === 'classified' && activeConversationClassification.level) {
+    const level = activeConversationClassification.level
+    return {
+      locked: true,
+      level,
+      placeholder: level,
+      guidance: `This conversation is classified ${level}. Start a new conversation to use a different security level.`,
+    }
+  }
+  const placeholder = state === 'legacy' ? 'Unrecorded level'
+    : state === 'invalid' ? 'Unreadable level'
+    : state === 'unclassified' ? 'Unclassified'
+    : 'Locked'
+  return {
+    locked: true,
+    level: null,
+    placeholder,
+    guidance: `This conversation is locked to ${placeholder} and cannot be changed. Start a new conversation to use a different security level.`,
+  }
+}

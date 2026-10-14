@@ -117,3 +117,57 @@ describe('header compliance selector', () => {
     expect(setComplianceLevelFilter.mock.calls).toEqual([['Public'], ['Public']])
   })
 })
+
+describe('header compliance selector lock (issue #1044)', () => {
+  it('stays enabled and changeable for a new, unbound conversation', () => {
+    const setComplianceLevelFilter = vi.fn()
+    setChat({ activeConversationClassification: null, setComplianceLevelFilter })
+    for (const select of openSelectors()) {
+      expect(select.disabled).toBe(false)
+      expect(select.dataset.locked).toBe('false')
+      fireEvent.change(select, { target: { value: 'Public' } })
+    }
+    expect(setComplianceLevelFilter.mock.calls).toEqual([['Public'], ['Public']])
+  })
+
+  it('locks a begun conversation to its recorded level, not the global value', () => {
+    setChat({
+      complianceLevelFilter: 'Public',
+      activeConversationClassification: { state: 'classified', level: 'Internal' },
+    })
+    for (const select of openSelectors()) {
+      expect(select.disabled).toBe(true)
+      expect(select.dataset.locked).toBe('true')
+      expect(select.value).toBe('Internal')
+      expect(select.title).toMatch(/classified Internal/)
+      expect(select.title).toMatch(/Start a new conversation/)
+      // The recorded level is displayed even though the global filter differs.
+      expect(optionLabels(select)).toEqual(['Public', 'Internal'])
+    }
+  })
+
+  it('locks an unclassified conversation behind a placeholder option', () => {
+    setChat({
+      complianceLevelFilter: 'Internal',
+      activeConversationClassification: { state: 'unclassified', level: null },
+    })
+    for (const select of openSelectors()) {
+      expect(select.disabled).toBe(true)
+      expect(select.value).toBe('')
+      expect(optionLabels(select)[0]).toBe('Unclassified')
+      expect(select.title).toMatch(/Start a new conversation/)
+    }
+  })
+
+  it('shows a recorded level the deployment no longer defines', () => {
+    setChat({
+      complianceLevelFilter: null,
+      activeConversationClassification: { state: 'classified', level: 'CUI' },
+    })
+    for (const select of openSelectors()) {
+      expect(select.disabled).toBe(true)
+      expect(select.value).toBe('CUI')
+      expect(optionLabels(select)).toContain('CUI')
+    }
+  })
+})

@@ -6,6 +6,7 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import WorkspaceSelector from './WorkspaceSelector'
 import { Database, Wrench, Bot, ExternalLink, FileText, Plus, CircleHelp, Shield, FolderOpen, Monitor, Menu, X, PanelLeft, HardDrive, Cloud, Printer } from 'lucide-react'
 import { nextSaveMode } from '../utils/saveModeConfig'
+import { classificationLock } from '../utils/conversationClassification'
 import { useElementWidth } from '../hooks/useElementWidth'
 import { useToast } from './ui/toastContext'
 
@@ -66,14 +67,25 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
     complianceLevelFilter,
     setComplianceLevelFilter,
     complianceRequired,
+    activeConversationClassification,
     selectedDataSources
   } = useChat()
   const { complianceLevels } = useMarketplace()
+  // A conversation that has begun is bound to its recorded classification
+  // (issue #1044): the selector is locked, showing that level rather than the
+  // global value, and only a New Chat unlocks it. The server enforces the same
+  // boundary (#1043); this keeps the UI from offering a transition it would
+  // refuse.
+  const lock = classificationLock({
+    complianceEnabled: !!features?.compliance_levels,
+    activeConversationClassification,
+  })
+  const displayLevel = lock.locked ? lock.level : complianceLevelFilter
   // A saved level stays selectable even if the definitions failed to load or
   // no longer list it, so the user can always clear a filter that is hiding
   // everything; otherwise the selector would vanish with the filter active.
-  const complianceOptions = complianceLevelFilter && !complianceLevels.some(l => l.name === complianceLevelFilter)
-    ? [...complianceLevels, { name: complianceLevelFilter, description: 'Not defined by this deployment' }]
+  const complianceOptions = displayLevel && !complianceLevels.some(l => l.name === displayLevel)
+    ? [...complianceLevels, { name: displayLevel, description: lock.locked ? 'Recorded classification' : 'Not defined by this deployment' }]
     : complianceLevels
   const { connectionStatus, isConnected } = useWS()
   const toast = useToast()
@@ -326,15 +338,22 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 border border-gray-600">
               <Shield className="w-4 h-4 text-blue-400" />
               <select
-                value={complianceLevelFilter || ''}
+                value={lock.locked ? (lock.level || '') : (complianceLevelFilter || '')}
                 onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
-                className="bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                title="Select compliance level for this session"
+                disabled={lock.locked}
+                className={`bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${lock.locked ? 'opacity-70 cursor-not-allowed' : ''}`}
+                title={lock.locked ? lock.guidance : 'Select compliance level for this session'}
                 aria-label="Compliance level"
+                aria-disabled={lock.locked || undefined}
+                data-locked={lock.locked ? 'true' : 'false'}
               >
-                {complianceRequired
-                  ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
-                  : <option value="">All Levels</option>}
+                {lock.locked
+                  ? (lock.level
+                    ? null
+                    : <option value="">{lock.placeholder}</option>)
+                  : complianceRequired
+                    ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
+                    : <option value="">All Levels</option>}
                 {complianceOptions.map(level => (
                   <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                 ))}
@@ -498,14 +517,22 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                     <span className="text-sm text-gray-200">Compliance Level</span>
                   </div>
                   <select
-                    value={complianceLevelFilter || ''}
+                    value={lock.locked ? (lock.level || '') : (complianceLevelFilter || '')}
                     onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
-                    className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={lock.locked}
+                    className={`w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${lock.locked ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    title={lock.locked ? lock.guidance : undefined}
                     aria-label="Compliance level"
+                    aria-disabled={lock.locked || undefined}
+                    data-locked={lock.locked ? 'true' : 'false'}
                   >
-                    {complianceRequired
-                      ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
-                      : <option value="">All Levels</option>}
+                    {lock.locked
+                      ? (lock.level
+                        ? null
+                        : <option value="">{lock.placeholder}</option>)
+                      : complianceRequired
+                        ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
+                        : <option value="">All Levels</option>}
                     {complianceOptions.map(level => (
                       <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
                     ))}
