@@ -120,12 +120,17 @@ python -m pytest tests -q -n auto        # one worker per CPU
 CI runs the backend suite at `-n 2` with `DEBUG_MODE=false`. Running the
 parallel command in debug mode (`DEBUG_MODE=true`) is fine, but debug mode
 skips `AuthMiddleware`'s proxy-secret check, so it is a weaker guard against a
-shared-app middleware regression. To run through the same wrapper CI uses
-(which sets `MCP_CONFIG_FILE`, `PROJECT_ROOT`, and `PYTEST_ARGS`):
+shared-app middleware regression. To run through the same wrapper CI uses,
+return to the repo root (the block above ends in `atlas/`) and pass the pytest
+options via `PYTEST_ARGS`, which `test/atlas_tests.sh` forwards to pytest:
 
 ```bash
-PYTEST_ARGS="-n 2" bash test/run_tests.sh atlas
+cd ..                                    # back to the repo root
+PYTEST_ARGS="-n 2 -p no:cacheprovider" bash test/run_tests.sh atlas
 ```
+
+The wrapper sets `MCP_CONFIG_FILE`, `PROJECT_ROOT`, and its own timeout, so the
+invocation matches CI's production-mode pass.
 
 ### Why collection must be deterministic
 
