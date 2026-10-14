@@ -118,9 +118,15 @@ class Persona:
             "description": self.description,
             "access_groups": list(self.access_groups),
             "compliance_level": self.compliance_level,
+            # Always present, matching the other resource payloads and the
+            # client's classificationsOf contract: an explicit null means the
+            # persona declares no classifications.
+            "allowed_data_classifications": (
+                list(self.allowed_data_classifications)
+                if self.allowed_data_classifications is not None
+                else None
+            ),
         }
-        if self.allowed_data_classifications is not None:
-            data["allowed_data_classifications"] = list(self.allowed_data_classifications)
         if include_content:
             data["content"] = self.content
         else:
@@ -201,12 +207,27 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
         # value must not silently fall back to broader access.
         raw_new = metadata.get("allowed_data_classifications")
         if isinstance(raw_new, (list, tuple)):
-            entries = [c for c in raw_new if isinstance(c, str) and c]
+            entries = []
+            dropped = 0
+            for entry in raw_new:
+                if isinstance(entry, str) and entry.strip():
+                    entries.append(entry)
+                else:
+                    # An unquoted YAML 1.1 value such as `- NO` parses as a bool,
+                    # and `- 5` as an int; both would otherwise vanish silently.
+                    dropped += 1
+            if dropped:
+                logger.warning(
+                    "Persona %s: ignored %d non-string or empty "
+                    "allowed_data_classifications entry(ies); quote each level "
+                    "name on its own '- Level' line.",
+                    path.name, dropped,
+                )
         else:
             logger.warning(
-                "Persona %s: allowed_data_classifications must be a list of "
-                "level names; treating the persona as approved for no "
-                "classified session.",
+                "Persona %s: allowed_data_classifications must be a YAML list of "
+                "level names (one '- Level' line each); treating the persona as "
+                "approved for no classified session.",
                 path.name,
             )
             entries = []

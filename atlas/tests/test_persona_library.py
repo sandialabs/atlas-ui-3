@@ -250,6 +250,25 @@ Body""")
     assert parse_persona_file(path).allowed_data_classifications == []
 
 
+def test_non_string_allowlist_entries_are_dropped(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    # `- NO` parses as a YAML bool and `- 5` as an int; neither may enter the
+    # allowlist, and the real level still does.
+    path = write(tmp_path, "mixed.md", """---
+allowed_data_classifications:
+  - Internal
+  - NO
+  - 5
+---
+Body""")
+    assert parse_persona_file(path).allowed_data_classifications == ["Internal"]
+
+
+
 
 def test_library_loads_sorted_and_skips_readme(tmp_path):
     write(tmp_path, "README.md", "# Not a persona\n\nDocs.")
@@ -720,4 +739,11 @@ Body""")
     legacy_dict = legacy.to_dict(include_content=False)
     assert legacy_dict["allowed_data_classifications"] == ["Internal"]
     assert legacy_dict["compliance_level"] == "Internal"
+
+    # An undeclared persona still carries the key, as an explicit null, so the
+    # client's classificationsOf contract is the same for every resource.
+    plain = parse_persona_file(write(tmp_path, "plain.md", "Just a prompt."))
+    plain_dict = plain.to_dict(include_content=False)
+    assert plain_dict["allowed_data_classifications"] is None
+    assert "allowed_data_classifications" in plain_dict
 
