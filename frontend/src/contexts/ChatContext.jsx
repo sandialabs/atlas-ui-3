@@ -1812,6 +1812,19 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			...(msg.metadata || {}),
 		}))
 		if (restored.length > 0) bulkAdd(restored)
+		// Restore the classification for the recovered view (issue #1044). This
+		// no-id path is a local, display-only recovery -- no server history is
+		// implied -- but the conversation was begun under a level, so its record
+		// is restored and the header stays locked to it rather than showing an
+		// empty, selectable state beside a classified transcript.
+		const recovered = classificationOf({ metadata: snapshot.metadata || {} })
+		conversationClassificationRef.current = (recovered.state === 'classified' || recovered.state === 'unclassified')
+			? { recorded: true, level: recovered.level }
+			: { recorded: false, invalid: recovered.state === 'invalid' }
+		setActiveConversationClassification(recovered)
+		if (complianceEnabled && (recovered.state === 'classified' || recovered.state === 'unclassified')) {
+			selections.setComplianceLevelFilter(recovered.level)
+		}
 		// Message.jsx renders an unrecognised system subtype from `content`, not
 		// `text` -- set both so the row is actually visible. A note nobody can
 		// read is worse than no note: it would leave Undo looking like a full
@@ -1828,7 +1841,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			id: `system_${Date.now()}_${generateSecureRandomString()}`,
 		})
 		return Promise.resolve()
-	}, [loadSavedConversation, resetMessages, bulkAdd, addMessage])
+	}, [loadSavedConversation, resetMessages, bulkAdd, addMessage, complianceEnabled, selections])
 
 	restoreUndoSnapshotRef.current = restoreUndoSnapshot
 
