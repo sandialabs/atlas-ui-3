@@ -983,6 +983,27 @@ def test_reload_reports_shadowed_duplicate_id(tmp_path):
     assert shadow[0].level == "info"
 
 
+def test_report_strips_raw_control_characters(tmp_path):
+    from atlas.modules.prompts import persona_library
+
+    # A raw (non-`!r`) message is the YAML-error path; escape sequences and line
+    # separators must be removed, not passed through to the log.
+    diagnostics = []
+    persona_library._report(
+        diagnostics,
+        "warning",
+        tmp_path / "p.md",
+        "Persona p.md: bad \x1b[31mred\x1b[0m \u2028 line\nnext",
+    )
+
+    message = diagnostics[0].message
+    assert "\x1b" not in message
+    assert "\u2028" not in message
+    assert "\n" not in message
+    assert "red" in message
+    assert "next" in message
+
+
 def test_diagnostics_are_sanitized_against_log_injection(tmp_path, monkeypatch, caplog):
     from atlas.modules.prompts import persona_library
 
@@ -1009,8 +1030,10 @@ def test_reload_reports_buffered_diagnostics_even_when_a_file_raises(tmp_path, m
     from atlas.modules.prompts import persona_library
 
     write(tmp_path, "x.md", "Body")
+    calls = []
 
     def boom(path, diagnostics=None):
+        calls.append(path)
         persona_library._report(diagnostics, "warning", path, f"Persona {path.name}: boom")
         raise RuntimeError("kaboom")
 
@@ -1022,6 +1045,10 @@ def test_reload_reports_buffered_diagnostics_even_when_a_file_raises(tmp_path, m
 
     # The buffered diagnostic is reported from the finally block, not lost.
     assert [d.source for d in library.diagnostics] == ["x.md"]
+    # The failed result is cached, so a later request does not reload and
+    # re-log the whole report.
+    assert library.all_personas() == []
+    assert len(calls) == 1
 
 
 def test_allowlist_canonicalizes_aliases_and_dedupes(tmp_path, monkeypatch):

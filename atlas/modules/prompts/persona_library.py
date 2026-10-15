@@ -202,30 +202,25 @@ def _canonicalize_classifications(
 ) -> List[str]:
     """Canonicalize an allowlist, naming each unknown entry in a report.
 
-    ``ComplianceLevelManager.validate_classifications`` drops unknown names but
-    logs one generic "invalid compliance level" line that never says *which*
-    entry was wrong. Reporting each unknown name here, before the valid entries
-    reach the manager, is what turns a silent narrowing into an actionable
-    startup line -- and keeps the manager from warning a second time. The entry
-    is echoed with ``!r`` so an invisible or bidirectional character is shown as
-    an escape instead of being silently stripped.
+    The alias/permissive rules live in
+    ``ComplianceLevelManager.partition_classifications``; this only adds the
+    persona-facing report. ``validate_classifications`` (the other caller) logs
+    one generic "invalid compliance level" line that never says *which* entry
+    was wrong, so a silent narrowing would otherwise be unauditable. Each
+    rejected entry is echoed with ``!r`` so an invisible or bidirectional
+    character is shown as an escape instead of being silently stripped.
     """
-    canonical: List[str] = []
-    for entry in entries:
-        if manager.is_valid_level(entry):
-            resolved = manager.get_canonical_name(entry) or entry
-            if resolved not in canonical:
-                canonical.append(resolved)
-        else:
-            _report(
-                diagnostics,
-                "warning",
-                path,
-                f"Persona {path.name}: allowed_data_classifications entry "
-                f"{entry!r} is not a configured data classification; dropping it "
-                f"so the persona is not approved for that level.",
-            )
-    return canonical
+    accepted, rejected = manager.partition_classifications(entries)
+    for entry in rejected:
+        _report(
+            diagnostics,
+            "warning",
+            path,
+            f"Persona {path.name}: allowed_data_classifications entry "
+            f"{entry!r} is not a configured data classification; dropping it "
+            f"so the persona is not approved for that level.",
+        )
+    return accepted
 
 
 def parse_persona_file(
@@ -372,8 +367,9 @@ def parse_persona_file(
         else:
             # Backward compatibility: a legacy single level is a one-element list.
             legacy_value = str(legacy_raw)
-            if manager.is_valid_level(legacy_value):
-                compliance_level = manager.get_canonical_name(legacy_value) or legacy_value
+            accepted, rejected = manager.partition_classifications([legacy_value])
+            if accepted:
+                compliance_level = accepted[0]
             else:
                 _report(
                     diagnostics,
@@ -481,11 +477,13 @@ class PersonaLibrary:
 
             personas.sort(key=lambda p: (p.order, p.name.lower()))
         finally:
-            # Buffered diagnostics must survive an unexpected failure mid-loop,
-            # and must not leave a previous run's report in place.
+            # Cache what loaded and report from here even if the loop raised:
+            # buffered diagnostics must survive, a previous run's report must not
+            # linger, and leaving ``_personas`` as None would make every later
+            # request reload and re-log the whole report.
+            self._personas = personas
             self._report_diagnostics(diagnostics)
 
-        self._personas = personas
         logger.info("Loaded %d preconfigured persona(s)", len(personas))
         return personas
 

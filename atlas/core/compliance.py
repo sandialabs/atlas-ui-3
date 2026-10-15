@@ -365,6 +365,39 @@ class ComplianceLevelManager:
 
         return canonical
 
+    def partition_classifications(
+        self, classifications: Optional[Sequence[str]], context: str = ""
+    ) -> Tuple[List[str], List[str]]:
+        """Split an ``allowed_data_classifications`` list into accepted and rejected.
+
+        Accepted names are canonical (aliases resolved) and de-duplicated;
+        rejected names are those that name no defined level, kept raw so a caller
+        can report exactly which entry was wrong. With no definitions loaded
+        every name is accepted (permissive mode, matching
+        :meth:`validate_compliance_level`). ``None`` or a non-list yields two
+        empty lists.
+
+        This is the one canonicalization rule callers should use when they need
+        the rejected names (e.g. the persona loader's startup report);
+        :meth:`validate_classifications` is the same rule without them.
+        """
+        accepted: List[str] = []
+        rejected: List[str] = []
+        if not classifications:
+            return accepted, rejected
+        for name in classifications:
+            if not isinstance(name, str) or not name:
+                continue
+            canonical = self.get_canonical_name(name)
+            if canonical is None:
+                if self.levels:
+                    rejected.append(name)
+                    continue
+                canonical = name  # permissive mode: no definitions loaded
+            if canonical not in accepted:
+                accepted.append(canonical)
+        return accepted, rejected
+
     def validate_classifications(
         self, classifications: Optional[Sequence[str]], context: str = ""
     ) -> Optional[List[str]]:
@@ -378,14 +411,12 @@ class ComplianceLevelManager:
         """
         if classifications is None:
             return None
-        out: List[str] = []
-        for name in classifications:
-            if not isinstance(name, str) or not name:
-                continue
-            canonical = self.validate_compliance_level(name, context=context)
-            if canonical and canonical not in out:
-                out.append(canonical)
-        return out
+        accepted, rejected = self.partition_classifications(classifications)
+        for name in rejected:
+            # Re-run the single-value validator so the existing, sanitized
+            # warning is emitted for each unknown entry.
+            self.validate_compliance_level(name, context=context)
+        return accepted
 
     def classification_permits(
         self,
