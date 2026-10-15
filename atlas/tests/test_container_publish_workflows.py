@@ -74,7 +74,7 @@ def test_branch_publishing_is_gated_on_validation():
     workflow = _load("ci.yml")
     publish = workflow["jobs"]["publish-image"]
     assert publish["if"] == "github.event_name != 'pull_request'"
-    assert set(publish["needs"]) == {"test", "runtime-only-image"}
+    assert set(publish["needs"]) == {"test", "python-versions", "runtime-only-image"}
     # Every dependency must run on push, or publishing stops silently while CI
     # stays green.
     for dep in publish["needs"]:
@@ -166,7 +166,9 @@ def test_validation_images_stay_single_platform():
         for _, step in _build_pushes(_load("ci.yml"))
         if step.get("name") not in publication_names
     ]
-    assert len(validation_builds) == 3
+    # production image, runtime validation image, the 3.14 test image, and the
+    # per-version test image. All stay on the runner's architecture.
+    assert len(validation_builds) == 4
     for build in validation_builds:
         inputs = build["with"]
         assert inputs.get("platforms", "linux/amd64") == "linux/amd64"
@@ -202,6 +204,7 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
     jobs = _load("ci.yml")["jobs"]
     assert set(jobs) == {
         "test",
+        "python-versions",
         "production-image",
         "runtime-only-image",
         "publish-image",
@@ -231,10 +234,17 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
     required_checks = checks_step["env"]["REQUIRED_CHECKS"].split(",")
     # The release gate must require the renamed PR jobs, and must no longer wait
     # on the retired serial check.
-    pr_job_names = {
-        step_job.get("name", job_id)
-        for job_id, step_job in jobs.items()
-        if job_id != "publish-image"
-    }
+    pr_job_names = set()
+    for job_id, step_job in jobs.items():
+        if job_id == "publish-image":
+            continue
+        display = step_job.get("name", job_id)
+        versions = step_job.get("strategy", {}).get("matrix", {}).get("python")
+        if versions and "${{ matrix.python }}" in display:
+            pr_job_names.update(
+                display.replace("${{ matrix.python }}", version) for version in versions
+            )
+        else:
+            pr_job_names.add(display)
     assert pr_job_names <= set(required_checks)
     assert "build-and-test" not in required_checks
