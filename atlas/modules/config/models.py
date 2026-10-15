@@ -179,6 +179,40 @@ class ModelConfig(BaseModel):
     # applies when pass_user_as_customer_id is true and the value actually ends
     # with the suffix; otherwise the value is sent unchanged.
     customer_id_strip_suffix: Optional[str] = None
+    # Tags attributed to every request to this model, sent as the
+    # "x-litellm-tags" HTTP header (comma-separated, per LiteLLM's request-tags
+    # convention).  A LiteLLM proxy records them in its spend logs, so a tag
+    # like "atlas" lets the operator isolate ATLAS traffic from other clients
+    # of the same proxy.  Accepts either a YAML list or a single string (which
+    # may itself be a comma-separated list).
+    litellm_tags: Optional[List[str]] = None
+
+    @field_validator("litellm_tags", mode="before")
+    @classmethod
+    def normalize_litellm_tags(cls, v):
+        """Normalize tags to a clean list of strings, rejecting bad shapes at load.
+
+        LiteLLM takes tags as a comma-separated string in the header, so a
+        single string value is split on commas here; a YAML list is kept as-is.
+        Whitespace is trimmed and empty entries dropped, so a stray comma or a
+        blank entry cannot send an empty tag.
+        """
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.split(",")
+        if not isinstance(v, (list, tuple)):
+            raise ValueError("litellm_tags must be a string or a list of strings")
+        tags: List[str] = []
+        for tag in v:
+            if not isinstance(tag, str):
+                raise ValueError(
+                    f"litellm_tags entries must be strings, got {type(tag).__name__}"
+                )
+            cleaned = tag.strip()
+            if cleaned:
+                tags.append(cleaned)
+        return tags or None
 
     @model_validator(mode="after")
     def validate_delegation(self):

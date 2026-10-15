@@ -1047,6 +1047,26 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                     model_name,
                 )
 
+        # Attribute each request to this model with the configured LiteLLM
+        # tags, sent as a comma-separated "x-litellm-tags" header.  A LiteLLM
+        # proxy records these in its spend logs, so a static tag (e.g. "atlas")
+        # lets the operator separate ATLAS traffic from other clients.  Explicit
+        # extra_headers are authoritative, as for the customer id below: an
+        # operator who pinned x-litellm-tags there keeps that value.
+        litellm_tags = getattr(model_config, "litellm_tags", None)
+        if litellm_tags:
+            has_explicit_tags = any(
+                key.lower() == "x-litellm-tags" for key in extra_headers_resolved
+            )
+            if has_explicit_tags:
+                logger.debug(
+                    "Model '%s' already sets x-litellm-tags via extra_headers; "
+                    "keeping the configured value instead of litellm_tags.",
+                    model_name,
+                )
+            else:
+                extra_headers_resolved["x-litellm-tags"] = ",".join(litellm_tags)
+
         if extra_headers_resolved:
             kwargs["extra_headers"] = extra_headers_resolved
 
