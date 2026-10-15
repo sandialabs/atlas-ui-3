@@ -96,8 +96,13 @@ def test_published_runtime_is_multistage_nonroot():
     assert "/api/heartbeat" in final
     assert 'os.environ.get(\'PORT\', \'8000\')' in final
     assert "HEALTHCHECK " in final
-    assert "/usr/local/lib/python3.12/ensurepip" in final
-    assert "/usr/local/lib/python3.12/site-packages/pip*" in final
+    # Pip removal must follow the interpreter. A hardcoded python3.12 path
+    # left ensurepip in place when the base image moved to a newer Python
+    # (Dependabot PR #1060).
+    assert 'print("%d.%d" % (sys.version_info[0], sys.version_info[1]))' in final
+    assert "/usr/local/lib/python${pyver}/ensurepip" in final
+    assert "/usr/local/lib/python${pyver}/site-packages/pip*" in final
+    assert "python3.12" not in final
     assert "uv sync --frozen --no-dev --extra mcp-demos --no-editable" in recipe
     assert "--ignore-requires-python" not in recipe
     assert "COPY --from=frontend-build /app/frontend/dist /app/atlas/static" in recipe

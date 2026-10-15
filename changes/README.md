@@ -46,5 +46,10 @@ CI validates the filename and type, requires a normal PR to add a fragment,
 and rejects direct edits to `CHANGELOG.md` (release branches are exempt). Do
 not edit `CHANGELOG.md` yourself.
 
+Dependabot pull requests (`dependabot/*`, opened by `dependabot[bot]` on this
+repository) are exempt from the fragment requirement. Dependabot only updates
+lockfiles, image pins, and action SHAs, and it cannot add a fragment. Those
+PRs still may not edit `CHANGELOG.md`.
+
 See [docs/developer/release-process.md](../docs/developer/release-process.md)
 for the full release runbook.
