@@ -103,14 +103,28 @@ export function classificationLock({ complianceEnabled, activeConversationClassi
       guidance: `This conversation is classified ${level}. Start a new conversation to use a different security level.`,
     }
   }
-  const placeholder = state === 'legacy' ? 'Unrecorded level'
-    : state === 'invalid' ? 'Unreadable level'
-    : state === 'unclassified' ? 'Unclassified'
-    : 'Locked'
+  let placeholder, guidance
+  switch (state) {
+    case 'unclassified':
+      placeholder = 'Unclassified'
+      guidance = `This conversation was saved with no compliance level and is locked. Start a new conversation at a specific compliance level to continue working.`
+      break
+    case 'legacy':
+      placeholder = 'Unrecorded level'
+      guidance = `This conversation was saved before compliance levels were recorded and is locked. Start a new conversation to add a compliance level.`
+      break
+    case 'invalid':
+      placeholder = 'Unreadable level'
+      guidance = `This conversation has an unreadable compliance level and is locked. Start a new conversation.`
+      break
+    default:
+      placeholder = 'Locked'
+      guidance = `This conversation is locked and cannot be changed. Start a new conversation to use a different security level.`
+  }
   return {
     locked: true,
     level: null,
     placeholder,
-    guidance: `This conversation is locked to ${placeholder} and cannot be changed. Start a new conversation to use a different security level.`,
+    guidance,
   }
 }
