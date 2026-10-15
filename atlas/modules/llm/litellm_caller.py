@@ -1060,9 +1060,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             )
             if has_explicit_tags:
                 logger.debug(
-                    "Model '%s' already sets x-litellm-tags via extra_headers; "
-                    "keeping the configured value instead of litellm_tags.",
-                    sanitize_for_logging(model_name),
+                    "A model already sets x-litellm-tags via extra_headers; "
+                    "keeping the configured value instead of litellm_tags."
                 )
             else:
                 extra_headers_resolved["x-litellm-tags"] = ",".join(litellm_tags)

@@ -60,7 +60,8 @@ class ModelHandler(BaseHTTPRequestHandler):
         try:
             streaming = bool(json.loads(body or b"{}").get("stream"))
         except ValueError:
-            pass
+            # A non-JSON body cannot request streaming; treat it as a plain call.
+            streaming = False
         if streaming:
             chunks = (
                 'data: {"id":"c","object":"chat.completion.chunk","choices":'
