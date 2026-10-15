@@ -257,7 +257,10 @@ if grep -q "changelog_fragments.py validate" "$ARTIFACTS" \
     && grep -q "changelog_fragments.py guard" "$ARTIFACTS" \
     && grep -q -- "--require-fragment" "$ARTIFACTS" \
     && grep -q "HEAD_REPO" "$ARTIFACTS" \
-    && grep -q "THIS_REPO" "$ARTIFACTS"; then
+    && grep -q "THIS_REPO" "$ARTIFACTS" \
+    && grep -q 'PR_AUTHOR' "$ARTIFACTS" \
+    && grep -q 'dependabot\[bot\]' "$ARTIFACTS" \
+    && grep -q 'dependabot/\*' "$ARTIFACTS"; then
     print_result 0 "build-artifacts.yml validates and guards fragments (incl. fork-safe exemption)"
 else
     print_result 1 "build-artifacts.yml validates and guards fragments (incl. fork-safe exemption)"

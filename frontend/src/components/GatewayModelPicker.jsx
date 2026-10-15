@@ -206,17 +206,21 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                     key={model.name}
                     type="button"
                     onClick={() => handleModelSelect(model)}
-                    className={`w-full text-left px-2 py-1.5 text-sm flex items-center gap-2 border-b border-gray-700 last:border-b-0 hover:bg-gray-700 ${
+                    className={`group w-full text-left px-2 py-1.5 text-sm block border-b border-gray-700 last:border-b-0 hover:bg-gray-700 ${
                       selected ? 'text-blue-300' : 'text-gray-200'
                     }`}
                     aria-pressed={selected}
                     title={model.model_id}
                   >
-                    <span className="truncate">{model.label || model.model_id}</span>
-                    <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                      {showCompliance && <ClassificationBadge resource={model} />}
-                      <CapabilityIcons vision={vision} tools={tools} />
+                    {/* Same layout as the flat model list: the name wraps at
+                        full width, classifications go below (issue #1055). */}
+                    <span className="flex items-start gap-2">
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{model.label || model.model_id}</span>
+                      <span className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                        <CapabilityIcons vision={vision} tools={tools} />
+                      </span>
                     </span>
+                    {showCompliance && <ClassificationBadge resource={model} />}
                   </button>
                 )
               })}

@@ -120,7 +120,7 @@ const ModelSelector = () => {
       {dropdownOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }} />
-          <div className="absolute bottom-full left-0 mb-1 w-72 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
+          <div className="absolute bottom-full left-0 mb-1 w-72 max-w-[calc(100vw-2rem)] bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
             {listedModels.length === 0 && llmGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
             ) : visibleListedModels.length === 0 && visibleGateways.length === 0 ? (
@@ -138,19 +138,28 @@ const ModelSelector = () => {
                 return (
                   <div key={modelName} className="border-b border-gray-700 last:border-b-0 first:rounded-t-lg last:rounded-b-lg">
                     <div className="flex items-center">
+                      {/* A model awaiting the user's API key stays focusable
+                          (aria-disabled, not `disabled`) so keyboard users can
+                          still reach its full classification list (#1055). */}
                       <button
+                        type="button"
                         onClick={() => !isDisabled && handleModelSelect(modelName)}
-                        className={`flex-1 min-w-0 text-left px-3 py-2 text-sm flex items-center gap-2 ${
+                        className={`group flex-1 min-w-0 text-left px-3 py-2 text-sm ${
                           isDisabled ? 'text-gray-500 cursor-not-allowed' : 'text-gray-200 hover:bg-gray-700'
                         }`}
-                        disabled={isDisabled}
+                        aria-disabled={isDisabled || undefined}
                         title={isDisabled ? 'Configure your API key to use this model' : modelName}
                       >
-                        <span className="truncate">{modelName}</span>
-                        <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                          {complianceEnabled && <ClassificationBadge resource={model} />}
-                          <CapabilityIcons vision={model.supports_vision} tools={model.supports_tools} />
+                        {/* The name gets the full row width and wraps rather
+                            than being crowded out; classifications sit on
+                            their own line below it (issue #1055). */}
+                        <span className="flex items-start gap-2">
+                          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{modelName}</span>
+                          <span className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                            <CapabilityIcons vision={model.supports_vision} tools={model.supports_tools} />
+                          </span>
                         </span>
+                        {complianceEnabled && <ClassificationBadge resource={model} />}
                       </button>
                       {needsUserKey && (
                         <button
@@ -194,8 +203,8 @@ const ModelSelector = () => {
                             Tools {model.supports_tools !== false ? '' : '(no)'}
                           </span>
                           {complianceEnabled && classificationLabel(model) && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white">
-                              <Shield className="w-3 h-3" />
+                            <span className="inline-flex items-start gap-1 min-w-0 max-w-full px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white [overflow-wrap:anywhere]">
+                              <Shield className="w-3 h-3 flex-shrink-0 mt-px" />
                               {classificationLabel(model)}
                             </span>
                           )}

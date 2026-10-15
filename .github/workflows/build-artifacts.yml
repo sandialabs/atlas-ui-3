@@ -36,6 +36,9 @@ jobs:
         HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         THIS_REPO: ${{ github.repository }}
         BASE_REF: ${{ github.base_ref }}
+        # PR author, not the actor who re-ran the job. A maintainer re-run
+        # must keep the same exemption the opening event had.
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
       run: |
         set -euo pipefail
         # Merge-base diff, so only the PR's own changes count even when main
@@ -50,6 +53,16 @@ jobs:
         if [[ "$HEAD_REPO" == "$THIS_REPO" \
               && ( "$HEAD_REF" == release/* || "$HEAD_REF" == hotfix/* ) ]]; then
           args+=(--allow-changelog)
+        fi
+        # Dependabot only updates lockfiles, image pins, and action SHAs, and
+        # it cannot add a changes/ fragment. Drop the fragment requirement for
+        # its PRs. A direct CHANGELOG.md edit is still rejected. Quote the
+        # author: unquoted [bot] is a glob character class. A fork cannot
+        # impersonate dependabot[bot].
+        if [[ "$HEAD_REPO" == "$THIS_REPO" \
+              && "$PR_AUTHOR" == "dependabot[bot]" \
+              && "$HEAD_REF" == dependabot/* ]]; then
+          args=()
         fi
         python scripts/changelog_fragments.py guard \
           --changed-files /tmp/changed-files.txt "${args[@]}"
@@ -101,7 +114,7 @@ jobs:
         cp -r prompts build-artifacts/
         # Copy deployment files
         cp agent_start.sh build-artifacts/
-        cp docker-compose.yml build-artifacts/
+        cp docker-compose.yml docker-compose.minio.yml docker-compose.postgres.yml build-artifacts/
         cp Dockerfile build-artifacts/
         cp Dockerfile.runtimeonly .dockerignore uv.lock build-artifacts/
         cp .env.example build-artifacts/ 2>/dev/null || true

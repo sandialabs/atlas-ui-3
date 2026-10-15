@@ -1,0 +1,107 @@
+# Optional bundled MinIO for the development stack (issue #1052).
+#
+# Include it only when Atlas should store files in this bundled MinIO instead
+# of your own S3 endpoint:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.minio.yml up -d
+#
+# The file is self-contained, so it can also start MinIO alone for a
+# host-run Atlas (agent_start.sh does this automatically when USE_MOCK_S3 is
+# false and S3_ENDPOINT is explicitly a loopback endpoint):
+#
+#   docker compose -f docker-compose.minio.yml up -d minio minio-init
+#
+# MinIO's root account IS the application's S3_ACCESS_KEY / S3_SECRET_KEY
+# pair, so the stack has exactly one object-storage credential pair. Those
+# credentials are required and enforced here even when the file runs alone,
+# so configuration fails closed when they are missing or empty. Never reuse
+# production credentials in this development stack. MinIO requires its root
+# user to be at least 3 and its password at least 8 characters long.
+services:
+  minio:
+    # Archival images are for this loopback-only development stack, not production.
+    image: docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+    container_name: atlas-minio
+    ports:
+      - "127.0.0.1:9000:9000"  # S3 API
+      - "127.0.0.1:9001:9001"  # Web Console
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in your environment or .env (also the bundled MinIO root user)}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set S3_SECRET_KEY in your environment or .env (also the bundled MinIO root password)}
+    volumes:
+      # The image declares its data volume at /bitnami/minio/data and runs as
+      # uid 1001. Mounting there seeds the named volume with the image's
+      # directory ownership; a mount at an arbitrary path would be created
+      # root-owned and the server would exit immediately (issue #1052 CI
+      # startup check).
+      - minio-data:/bitnami/minio/data
+    entrypoint: ["/opt/bitnami/minio/bin/minio"]
+    command: server /bitnami/minio/data --console-address ":9001"
+    healthcheck:
+      # The image ships curl; probe MinIO's readiness endpoint directly.
+      # `mc ready` cannot be used here: it requires a configured alias (a raw
+      # URL is rejected) and would still fail inside the container because
+      # mc cannot write its configuration under the image's non-writable
+      # HOME=/ (issue #1052 CI startup check).
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - atlas-network
+
+  minio-init:
+    image: docker.io/bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
+    container_name: atlas-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in your environment or .env (also the bundled MinIO root user)}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set S3_SECRET_KEY in your environment or .env (also the bundled MinIO root password)}
+      # The image runs as uid 1001 with HOME=/, which is not writable: mc
+      # stores its alias configuration under HOME, so point it at /tmp.
+      HOME: /tmp
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set myminio http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb myminio/atlas-files --ignore-existing
+        mc anonymous set none myminio/atlas-files
+        echo 'MinIO initialization complete'
+    networks:
+      - atlas-network
+
+  # Overlay fragment: attaches the application to the bundled services only
+  # when this file is loaded. The base docker-compose.yml has no MinIO
+  # dependency, so external-S3 deployments neither start nor wait for one.
+  # Storage settings are pinned here so a host-oriented .env (e.g.
+  # S3_ENDPOINT=http://localhost:9000, which would point the container at its
+  # own loopback) cannot leak into the stack, and so the bucket always matches
+  # what minio-init creates.
+  #
+  # The build stanza keeps this file valid on its own (a Compose service must
+  # have an image or a build context even when it is not started, and
+  # agent_start.sh renders this file alone to start only MinIO). Merging with
+  # the base file keeps the base's build arguments; never start this service
+  # standalone — the base file's atlas-ui is the real application.
+  atlas-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      - S3_ENDPOINT=http://minio:9000
+      - S3_BUCKET_NAME=atlas-files
+      - S3_USE_SSL=false
+
+networks:
+  atlas-network:
+    driver: bridge
+
+volumes:
+  minio-data:

@@ -89,44 +89,110 @@ setup_container_runtime() {
 # INFRASTRUCTURE FUNCTIONS
 # =============================================================================
 
-setup_minio() {
-    local use_mock_s3="${USE_MOCK_S3:-true}"
+# url-host helpers start
+# Extract the host from a scheme://[user[:password]@]host[:port][/path] URL.
+# Prints the host, or nothing when the URL cannot be parsed. A colon in the
+# extracted authority (outside bracketed IPv6) means the URL is malformed —
+# e.g. an unencoded '/' in a password leaves userinfo behind — and is
+# rejected like any other unparseable value.
+url_host() {
+    local host
+    host="$(printf '%s\n' "$1" \
+        | sed -n 's|^[a-zA-Z][a-zA-Z0-9+.-]*://\([^/?#]*\).*|\1|p' \
+        | sed 's/^.*@//; s/:[0-9]*$//')"
+    case "$host" in
+        "" | \[*\]) printf '%s\n' "$host" ;;
+        *:*) : ;;  # stray colon outside a bracketed IPv6 literal: malformed
+        *) printf '%s\n' "$host" ;;
+    esac
+}
 
-    # Read USE_MOCK_S3 from env file if it exists
-    if [ -f "$ENV_FILE" ]; then
-        use_mock_s3=$(grep -E "^USE_MOCK_S3=" "$ENV_FILE" | cut -d '=' -f2)
-    fi
-    
+# True when the given host means "this machine": the name "localhost" in any
+# case, or a dotted-quad IPv4 loopback address (the whole 127.0.0.0/8 range
+# loops back, not just .1). Hostnames that merely start with "127." — e.g.
+# 127.example.com — are NOT loopback and must not match.
+is_local_host() {
+    local host
+    host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$host" in
+        localhost | ::1 | "[::1]") return 0 ;;
+    esac
+    printf '%s' "$host" | grep -qE '^127\.[0-9]+\.[0-9]+\.[0-9]+$'
+}
+
+# Redact userinfo (user:password@) from a URL so credentials never reach
+# terminal output or logs. The match runs through the last '@' so passwords
+# containing '/', '?' or '#' cannot slip through, and a second rule covers
+# scheme-less values; over-redacting a malformed URL is acceptable for
+# display purposes.
+redact_url() {
+    printf '%s\n' "$1" | sed 's|://.*@|://***@|; t; s|^[^@/]*:[^@]*@|***@|'
+}
+# url-host helpers end
+
+setup_minio() {
+    # setup_environment has already sourced $ENV_FILE (set -a), so read the
+    # loaded values here. Re-scraping the file would keep quoting, miss values
+    # set only in the shell, and truncate at '=' characters. USE_MOCK_S3
+    # defaults to false like the application's own default: with real object
+    # storage selected implicitly, bundled MinIO is what makes it work.
+    local use_mock_s3="${USE_MOCK_S3:-false}"
+    local s3_endpoint="${S3_ENDPOINT:-}"
+
     if [ "$use_mock_s3" = "true" ]; then
         echo "Using Mock S3 (no Docker/Podman required)"
-    else
-        if [ -z "$CONTAINER_CMD" ]; then
-            echo "Error: Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $ENV_FILE"
+        return
+    fi
+
+    if [ -z "$CONTAINER_CMD" ]; then
+        echo "Error: Container runtime not available. Please install Docker or Podman, or set USE_MOCK_S3=true in $ENV_FILE"
+        exit 1
+    fi
+
+    # The bundled MinIO is only for an explicitly local S3_ENDPOINT. An
+    # external endpoint means the operator runs their own storage, and an
+    # unset endpoint is ambiguous: the configured S3 credentials may be real
+    # cloud keys that must not become a local dev container's root password.
+    # Either way, do not start or require anything local for it (issue #1052).
+    if [ -z "$s3_endpoint" ]; then
+        echo "WARNING: USE_MOCK_S3 is not 'true' but S3_ENDPOINT is not set; uploads will fail." >&2
+        echo "         Set S3_ENDPOINT=http://localhost:9000 to use bundled MinIO, or point it at your own S3 endpoint." >&2
+        return
+    fi
+    local s3_host
+    s3_host="$(url_host "$s3_endpoint")"
+    if [ -z "$s3_host" ]; then
+        echo "Error: cannot parse S3_ENDPOINT='$(redact_url "$s3_endpoint")'. Use a scheme://host[:port] URL."
+        exit 1
+    fi
+    if ! is_local_host "$s3_host"; then
+        echo "S3_ENDPOINT=$(redact_url "$s3_endpoint") is not local; not starting bundled MinIO"
+        return
+    fi
+
+    if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
+        echo "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
+        cd "$PROJECT_ROOT"
+        # The bundled MinIO file is self-contained: starting it alone requires
+        # only S3_ACCESS_KEY/S3_SECRET_KEY (its root credentials), not the
+        # application stack's secrets (issue #1052).
+        if ! $COMPOSE_CMD -f docker-compose.minio.yml up -d minio minio-init; then
+            echo "Error: MinIO failed to start. Check that S3_ACCESS_KEY and S3_SECRET_KEY are set in $ENV_FILE (they are also the bundled MinIO root credentials)."
             exit 1
         fi
-
-        if ! $CONTAINER_CMD ps | grep -q atlas-minio; then
-            echo "MinIO is not running. Starting MinIO with $COMPOSE_CMD..."
-            cd "$PROJECT_ROOT"
-            $COMPOSE_CMD up -d minio minio-init
-            echo "MinIO started successfully"
-            sleep 3
-        else
-            echo "MinIO is already running"
-        fi
+        echo "MinIO started successfully"
+        sleep 3
+    else
+        echo "MinIO is already running"
     fi
     cd "$PROJECT_ROOT"
 }
 
 setup_chat_history_db() {
-    local chat_history_enabled="false"
-    local db_url=""
-
-    # Read settings from env file
-    if [ -f "$ENV_FILE" ]; then
-        chat_history_enabled=$(grep -E "^FEATURE_CHAT_HISTORY_ENABLED=" "$ENV_FILE" | cut -d '=' -f2)
-        db_url=$(grep -E "^CHAT_HISTORY_DB_URL=" "$ENV_FILE" | cut -d '=' -f2)
-    fi
+    # setup_environment has already sourced $ENV_FILE (set -a); read the loaded
+    # values instead of re-scraping the file (see setup_minio).
+    local chat_history_enabled="${FEATURE_CHAT_HISTORY_ENABLED:-false}"
+    local db_url="${CHAT_HISTORY_DB_URL:-}"
 
     if [ "$chat_history_enabled" != "true" ]; then
         echo "Chat history disabled (FEATURE_CHAT_HISTORY_ENABLED != true)"
@@ -146,14 +212,34 @@ setup_chat_history_db() {
             exit 1
         fi
 
+        # Start the bundled container only for a local database. An external
+        # postgresql:// URL means the operator runs their own database; leave
+        # it alone (issue #1052).
+        local db_host
+        db_host="$(url_host "$db_url")"
+        if [ -z "$db_host" ]; then
+            echo "Error: cannot parse CHAT_HISTORY_DB_URL='$(redact_url "$db_url")'. Use a scheme://[user[:password]@]host[:port]/database URL."
+            exit 1
+        fi
+        if ! is_local_host "$db_host"; then
+            echo "CHAT_HISTORY_DB_URL=$(redact_url "$db_url") points at an external database; not starting bundled PostgreSQL"
+            return
+        fi
+
         if ! $CONTAINER_CMD ps | grep -q atlas-postgres; then
             echo "PostgreSQL is not running. Starting with $COMPOSE_CMD..."
             cd "$PROJECT_ROOT"
-            $COMPOSE_CMD up -d postgres
+            # The bundled PostgreSQL lives in its own Compose file (issue
+            # #1052), which is self-contained: starting it alone requires only
+            # POSTGRES_PASSWORD, not the application stack's secrets.
+            if ! $COMPOSE_CMD -f docker-compose.postgres.yml up -d postgres; then
+                echo "Error: PostgreSQL failed to start. Check that POSTGRES_PASSWORD is set in $ENV_FILE."
+                exit 1
+            fi
             echo "Waiting for PostgreSQL to be ready..."
             max_wait=60
             waited=0
-            until $COMPOSE_CMD exec -T postgres pg_isready >/dev/null 2>&1; do
+            until $COMPOSE_CMD -f docker-compose.postgres.yml exec -T postgres pg_isready >/dev/null 2>&1; do
                 if [ "$waited" -ge "$max_wait" ]; then
                     echo "PostgreSQL did not become ready within ${max_wait}s."
                     exit 1

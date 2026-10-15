@@ -1,6 +1,6 @@
 # Release Process
 
-Last updated: 2026-10-02
+Last updated: 2026-10-14
 
 This document is the canonical runbook for cutting a release of Atlas
 UI 3. Normal releases are **fully automated on a weekly schedule**; if you
@@ -99,7 +99,10 @@ CI (`build-artifacts`) validates fragment names and types, requires a normal
 PR to add a fragment, and fails a normal PR that edits `CHANGELOG.md`
 directly. Release branches (`release/*`, `hotfix/*`) are exempt because the
 bump must rewrite the changelog; the exemption applies only to branches in
-this repository, not forks.
+this repository, not forks. Dependabot pull requests on this repository
+(`dependabot/*`, author `dependabot[bot]`) are exempt from the fragment
+requirement only: Dependabot cannot add a `changes/` file, and a direct
+`CHANGELOG.md` edit on those PRs still fails.
 
 ### Automated weekly releases
 
