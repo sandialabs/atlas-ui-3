@@ -229,7 +229,7 @@ describe('compliance filter per user', () => {
 
   it('does not carry one user\'s filter over to the next', () => {
     const alice = renderHook(() => useSelections(ALICE))
-    act(() => alice.result.current.setComplianceLevelFilter('SECRET'))
+    act(() => alice.result.current.setComplianceLevelFilter('CUI'))
     alice.unmount()
 
     const bob = renderHook(() => useSelections(BOB))
@@ -237,11 +237,11 @@ describe('compliance filter per user', () => {
     bob.unmount()
 
     const aliceAgain = renderHook(() => useSelections(ALICE))
-    expect(aliceAgain.result.current.complianceLevelFilter).toBe('SECRET')
+    expect(aliceAgain.result.current.complianceLevelFilter).toBe('CUI')
   })
 
   it('ignores the pre-#1050 browser-wide filter', () => {
-    localStorage.setItem('chatui-compliance-level-filter', JSON.stringify('SECRET'))
+    localStorage.setItem('chatui-compliance-level-filter', JSON.stringify('CUI'))
     const { result } = renderHook(() => useSelections(BOB))
     expect(result.current.complianceLevelFilter).toBeNull()
   })
