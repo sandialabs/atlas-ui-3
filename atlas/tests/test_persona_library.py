@@ -898,7 +898,7 @@ def test_reload_logs_a_problem_summary_once(tmp_path, monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger=logger):
         PersonaLibrary([tmp_path]).all_personas()
 
-    assert "configuration problem(s) found" in caplog.text
+    assert "configuration problem(s) detected" in caplog.text
     assert "allowed_data_classifications must be a YAML list" in caplog.text
     # The warning is emitted by the library, not also by the bare parser call.
     assert caplog.text.count("must be a YAML list") == 1
@@ -928,3 +928,97 @@ def test_diagnostics_collapse_embedded_newlines_to_one_line(tmp_path, monkeypatc
     rendered = [r.getMessage() for r in caplog.records if "broken.md" in r.getMessage()]
     assert len(rendered) == 1
     assert all("\n" not in line for line in rendered)
+
+
+def test_reload_reports_unknown_legacy_compliance_level(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    write(tmp_path, "bad.md", "---\ncompliance_level: NotARealLevel\n---\nBody")
+
+    library = PersonaLibrary([tmp_path])
+    personas = library.all_personas()
+
+    # The persona still loads (fail open on the legacy typo) but carries no
+    # level, and the diagnostic names the bad value.
+    assert personas[0].compliance_level is None
+    assert personas[0].allowed_data_classifications is None
+    assert [d.level for d in library.diagnostics] == ["warning"]
+    assert "NotARealLevel" in library.diagnostics[0].message
+    assert "compliance_level" in library.diagnostics[0].message
+
+
+def test_reload_silent_for_aliased_legacy_compliance_level(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    write(tmp_path, "soc.md", "---\ncompliance_level: SOC 2\n---\nBody")
+
+    library = PersonaLibrary([tmp_path])
+    personas = library.all_personas()
+
+    assert personas[0].compliance_level == "SOC2"
+    assert personas[0].allowed_data_classifications == ["SOC2"]
+    assert library.diagnostics == []
+
+
+def test_reload_reports_shadowed_duplicate_id(tmp_path):
+    write(tmp_path, "a.md", "---\nname: First\norder: 1\n---\nBody")
+    write(tmp_path, "b.md", "---\nname: Second\norder: 2\n---\nBody")
+
+    # Both files slugify to id "a"/"b", so force a collision via explicit ids.
+    (tmp_path / "b.md").write_text("---\nid: a\nname: Second\n---\nBody", encoding="utf-8")
+
+    library = PersonaLibrary([tmp_path])
+    personas = library.all_personas()
+
+    assert [p.id for p in personas] == ["a"]
+    shadow = [d for d in library.diagnostics if "shadowed" in d.message]
+    assert len(shadow) == 1
+    assert shadow[0].source == "b.md"
+    assert shadow[0].level == "info"
+
+
+def test_diagnostics_are_sanitized_against_log_injection(tmp_path, monkeypatch, caplog):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    # A level name carrying a control/line-separator sequence must not be able
+    # to forge a second log entry.
+    write(tmp_path, "inject.md", '---\nallowed_data_classifications:\n  - "Bad\\u2028Level\\nFake"\n---\nBody')
+
+    logger = "atlas.modules.prompts.persona_library"
+    with caplog.at_level(logging.WARNING, logger=logger):
+        library = PersonaLibrary([tmp_path])
+        library.all_personas()
+
+    assert library.diagnostics
+    for diagnostic in library.diagnostics:
+        assert "\n" not in diagnostic.message
+        assert "\u2028" not in diagnostic.message
+    assert all("\n" not in r.getMessage() for r in caplog.records)
+
+
+def test_reload_reports_buffered_diagnostics_even_when_a_file_raises(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    write(tmp_path, "x.md", "Body")
+
+    def boom(path, diagnostics=None):
+        persona_library._report(diagnostics, "warning", path, f"Persona {path.name}: boom")
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(persona_library, "parse_persona_file", boom)
+
+    library = persona_library.PersonaLibrary([tmp_path])
+    with pytest.raises(RuntimeError):
+        library.reload()
+
+    # The buffered diagnostic is reported from the finally block, not lost.
+    assert [d.source for d in library.diagnostics] == ["x.md"]

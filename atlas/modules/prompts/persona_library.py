@@ -48,6 +48,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 import yaml
 
 from atlas.core.compliance import get_compliance_manager
+from atlas.core.log_sanitizer import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +92,11 @@ def _report(
     ``parse_persona_file`` called on its own logs immediately; ``reload()``
     passes a list so the same problem is emitted once, from the library, as
     part of the per-persona startup report instead of mid-parse. The message is
-    flattened to a single line either way.
+    flattened to one line and stripped of control characters before either path
+    (an unknown level name or a YAML error is echoed back, so it must not be
+    able to forge a log line).
     """
-    message = _one_line(message)
+    message = sanitize_for_logging(_one_line(message))
     if diagnostics is None:
         getattr(logger, level)(message)
     else:
@@ -410,21 +413,22 @@ class PersonaLibrary:
 
     @property
     def diagnostics(self) -> List[PersonaDiagnostic]:
-        """Problems found the last time the files were read, one per persona."""
+        """Problems found the last time the files were read, one per problem."""
         return list(self._diagnostics)
 
     def _report_diagnostics(self, diagnostics: List[PersonaDiagnostic]) -> None:
         """Print one clear line per persona describing each detected problem.
 
         The parser stays quiet while a collector is in play, so this is the
-        single place a misconfiguration reaches the startup log.
+        single place a misconfiguration reaches the startup log. Always called
+        from a ``finally`` in :meth:`reload`, so the collector reflects the run
+        that just happened even if it raised part way through.
         """
         self._diagnostics = list(diagnostics)
         if not diagnostics:
             return
         logger.warning(
-            "Preconfigured personas: %d configuration problem(s) found; the "
-            "affected personas were skipped or narrowed.",
+            "Preconfigured personas: %d configuration problem(s) detected.",
             len(diagnostics),
         )
         for diagnostic in diagnostics:
@@ -436,37 +440,48 @@ class PersonaLibrary:
         seen_ids: Dict[str, str] = {}
         diagnostics: List[PersonaDiagnostic] = []
 
-        for directory in self._search_paths:
-            try:
-                if not directory.is_dir():
+        try:
+            for directory in self._search_paths:
+                try:
+                    if not directory.is_dir():
+                        continue
+                except OSError:  # pragma: no cover - defensive, e.g. permission denied
                     continue
-            except OSError:  # pragma: no cover - defensive, e.g. permission denied
-                continue
 
-            for path in sorted(directory.glob("*.md")):
-                if not _is_persona_file(path):
-                    continue
-                persona = parse_persona_file(path, diagnostics)
-                if persona is None:
-                    continue
-                if persona.id in seen_ids:
-                    # First directory wins, mirroring the config override layering.
-                    logger.info(
-                        "Persona id '%s' from %s is shadowed by %s",
-                        persona.id, path, seen_ids[persona.id],
-                    )
-                    continue
-                seen_ids[persona.id] = str(path)
-                personas.append(persona)
+                for path in sorted(directory.glob("*.md")):
+                    if not _is_persona_file(path):
+                        continue
+                    persona = parse_persona_file(path, diagnostics)
+                    if persona is None:
+                        continue
+                    if persona.id in seen_ids:
+                        # First directory wins, mirroring the config override
+                        # layering; surface it so a duplicate is not silent.
+                        _report(
+                            diagnostics,
+                            "info",
+                            path,
+                            f"Persona {path.name}: id '{persona.id}' is already "
+                            f"provided by {seen_ids[persona.id]}; this file is "
+                            f"shadowed and was not loaded.",
+                        )
+                        continue
+                    seen_ids[persona.id] = str(path)
+                    personas.append(persona)
 
-            # Only the first existing directory is authoritative, so an admin who
-            # creates their own folder is not padded with the packaged samples.
-            if personas or any(_is_persona_file(p) for p in directory.glob("*.md")):
-                break
+                # Only the first existing directory is authoritative, so an admin
+                # who creates their own folder is not padded with the packaged
+                # samples.
+                if personas or any(_is_persona_file(p) for p in directory.glob("*.md")):
+                    break
 
-        personas.sort(key=lambda p: (p.order, p.name.lower()))
+            personas.sort(key=lambda p: (p.order, p.name.lower()))
+        finally:
+            # Buffered diagnostics must survive an unexpected failure mid-loop,
+            # and must not leave a previous run's report in place.
+            self._report_diagnostics(diagnostics)
+
         self._personas = personas
-        self._report_diagnostics(diagnostics)
         logger.info("Loaded %d preconfigured persona(s)", len(personas))
         return personas
 

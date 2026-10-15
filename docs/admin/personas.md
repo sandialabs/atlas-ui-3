@@ -148,13 +148,17 @@ persona for each problem it finds, then a `Loaded N preconfigured persona(s)`
 summary, so a skipped or narrowed persona is never silent. For example:
 
 ```
-Preconfigured personas: 3 configuration problem(s) found; the affected personas were skipped or narrowed.
+Preconfigured personas: 3 configuration problem(s) detected.
 Persona broken.md: invalid YAML frontmatter, skipping the file: ...
 Persona analyst.md: allowed_data_classifications entry 'NoSuchLevel' is not a configured data classification; dropping it so the persona is not approved for that level.
 Persona analyst.md: ignored 1 non-string or empty allowed_data_classifications entry(ies); quote each level name on its own '- Level' line.
 Loaded 4 preconfigured persona(s)
 ```
 
-The same problems are available programmatically on `PersonaLibrary.diagnostics`
-(one `PersonaDiagnostic` with `source`, `level` and `message` per problem), which
-is what the startup report is built from.
+Embedded line breaks in a problem (a PyYAML error, say) are collapsed, and each
+problem is one physical log line. A file whose id duplicates one already loaded
+is reported too, so a shadowed file is not silently ignored. The same problems
+are available programmatically on `PersonaLibrary.diagnostics` (one
+`PersonaDiagnostic` with `source`, `level` and `message` per problem), which is
+what the startup report is built from; it is refreshed on every `reload()`, even
+if that load fails.
