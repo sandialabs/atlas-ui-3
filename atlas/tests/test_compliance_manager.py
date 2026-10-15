@@ -229,6 +229,8 @@ class TestComplianceLevelManager:
         assert manager.partition_classifications(None) == ([], [])
         assert manager.partition_classifications([]) == ([], [])
         assert manager.partition_classifications(["Bogus"]) == ([], ["Bogus"])
+        # A bare string is not an allowlist; it must not iterate per character.
+        assert manager.partition_classifications("Internal") == ([], [])
 
     def test_get_accessible_levels_public(self, temp_compliance_config):
         """Test getting accessible levels for Public."""

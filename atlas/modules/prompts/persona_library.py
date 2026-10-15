@@ -96,11 +96,20 @@ def _report(
     (an unknown level name or a YAML error is echoed back, so it must not be
     able to forge a log line).
     """
-    message = sanitize_for_logging(_one_line(message))
+    diagnostic = _diagnostic(level, path.name, message)
     if diagnostics is None:
-        getattr(logger, level)(message)
+        getattr(logger, level)(diagnostic.message)
     else:
-        diagnostics.append(PersonaDiagnostic(source=path.name, level=level, message=message))
+        diagnostics.append(diagnostic)
+
+
+def _diagnostic(level: str, source: str, message: str) -> PersonaDiagnostic:
+    """Build a sanitized, single-line diagnostic (``source`` may be empty)."""
+    return PersonaDiagnostic(
+        source=source,
+        level=level,
+        message=sanitize_for_logging(_one_line(message)),
+    )
 
 
 # Directory name looked up under the prompt/config search paths.
@@ -440,6 +449,7 @@ class PersonaLibrary:
         seen_ids: Dict[str, str] = {}
         diagnostics: List[PersonaDiagnostic] = []
 
+        failed_error: Optional[Exception] = None
         try:
             for directory in self._search_paths:
                 try:
@@ -476,12 +486,26 @@ class PersonaLibrary:
                     break
 
             personas.sort(key=lambda p: (p.order, p.name.lower()))
+        except Exception as exc:
+            failed_error = exc
+            raise
         finally:
-            # Cache what loaded and report from here even if the loop raised:
-            # buffered diagnostics must survive, a previous run's report must not
-            # linger, and leaving ``_personas`` as None would make every later
-            # request reload and re-log the whole report.
-            self._personas = personas
+            # Report from here even if the loop raised: buffered diagnostics must
+            # survive and a previous run's report must not linger. On failure
+            # serve nothing rather than a truncated list, and cache that so every
+            # later request does not reload and re-log the same crash.
+            if failed_error is None:
+                self._personas = personas
+            else:
+                self._personas = []
+                diagnostics.append(
+                    _diagnostic(
+                        "error",
+                        "",
+                        f"Persona loading failed; no personas are available until "
+                        f"the next successful reload: {failed_error!r}",
+                    )
+                )
             self._report_diagnostics(diagnostics)
 
         logger.info("Loaded %d preconfigured persona(s)", len(personas))

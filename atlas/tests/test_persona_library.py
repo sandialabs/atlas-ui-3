@@ -1043,10 +1043,14 @@ def test_reload_reports_buffered_diagnostics_even_when_a_file_raises(tmp_path, m
     with pytest.raises(RuntimeError):
         library.reload()
 
-    # The buffered diagnostic is reported from the finally block, not lost.
-    assert [d.source for d in library.diagnostics] == ["x.md"]
-    # The failed result is cached, so a later request does not reload and
-    # re-log the whole report.
+    # The buffered diagnostic is reported from the finally block, not lost, and
+    # the failure itself is reported as an error-level diagnostic.
+    assert [d.source for d in library.diagnostics] == ["x.md", ""]
+    assert library.diagnostics[-1].level == "error"
+    assert "no personas are available" in library.diagnostics[-1].message
+    assert "kaboom" in library.diagnostics[-1].message
+    # The failed result is cached as empty, so a later request does not reload
+    # and re-log the whole report.
     assert library.all_personas() == []
     assert len(calls) == 1
 

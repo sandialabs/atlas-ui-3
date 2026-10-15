@@ -383,7 +383,9 @@ class ComplianceLevelManager:
         """
         accepted: List[str] = []
         rejected: List[str] = []
-        if not classifications:
+        # A bare string would otherwise iterate character by character; only an
+        # explicit list/tuple is an allowlist.
+        if not isinstance(classifications, (list, tuple)):
             return accepted, rejected
         for name in classifications:
             if not isinstance(name, str) or not name:
