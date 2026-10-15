@@ -232,6 +232,23 @@ def _canonicalize_classifications(
     return accepted
 
 
+def _yaml_error_message(path: Path, error: yaml.YAMLError) -> str:
+    """One-line description of a frontmatter parse error at its file line.
+
+    ``match.group(1)`` (the frontmatter body) starts on file line 2, so a
+    ``problem_mark`` line is offset by the opening fence; YAML's own multi-line
+    context/caret rendering is dropped in favour of the short problem text.
+    """
+    problem = str(getattr(error, "problem", "") or "invalid syntax")
+    mark = getattr(error, "problem_mark", None)
+    if mark is not None:
+        return (
+            f"Persona {path.name}: invalid YAML frontmatter at line "
+            f"{mark.line + 2} ({problem}), skipping the file"
+        )
+    return f"Persona {path.name}: invalid YAML frontmatter ({problem}), skipping the file"
+
+
 def parse_persona_file(
     path: Path, diagnostics: Optional[List[PersonaDiagnostic]] = None
 ) -> Optional[Persona]:
@@ -256,12 +273,7 @@ def parse_persona_file(
         except yaml.YAMLError as e:
             # Fail closed: keeping the body with empty metadata would drop the
             # access_group and publish a gated persona to everyone.
-            _report(
-                diagnostics,
-                "error",
-                path,
-                f"Persona {path.name}: invalid YAML frontmatter, skipping the file: {e}",
-            )
+            _report(diagnostics, "error", path, _yaml_error_message(path, e))
             return None
         if parsed is not None and not isinstance(parsed, dict):
             # Same failure mode as broken YAML: the access_group is unreadable,
@@ -449,7 +461,8 @@ class PersonaLibrary:
         seen_ids: Dict[str, str] = {}
         diagnostics: List[PersonaDiagnostic] = []
 
-        failed_error: Optional[Exception] = None
+        failed_error: Optional[BaseException] = None
+        succeeded = False
         try:
             for directory in self._search_paths:
                 try:
@@ -486,7 +499,10 @@ class PersonaLibrary:
                     break
 
             personas.sort(key=lambda p: (p.order, p.name.lower()))
-        except Exception as exc:
+            succeeded = True
+        except BaseException as exc:
+            # BaseException too: KeyboardInterrupt/SystemExit must not fall
+            # through and cache a partial, unsorted list either.
             failed_error = exc
             raise
         finally:
@@ -494,7 +510,7 @@ class PersonaLibrary:
             # survive and a previous run's report must not linger. On failure
             # serve nothing rather than a truncated list, and cache that so every
             # later request does not reload and re-log the same crash.
-            if failed_error is None:
+            if succeeded:
                 self._personas = personas
             else:
                 self._personas = []

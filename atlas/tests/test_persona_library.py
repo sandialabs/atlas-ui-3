@@ -922,8 +922,11 @@ def test_diagnostics_collapse_embedded_newlines_to_one_line(tmp_path, monkeypatc
     diagnostic = library.diagnostics[0]
     assert "\n" not in diagnostic.message
     assert "\r" not in diagnostic.message
-    # The collapsed line keeps the parser detail, just without the breaks.
-    assert "while parsing a flow sequence" in diagnostic.message
+    # The short problem text is kept; the multi-line context/caret rendering is
+    # not. The bad line is reported at its real file line (the frontmatter body
+    # starts on line 2).
+    assert "invalid YAML frontmatter at line 2" in diagnostic.message
+    assert "while parsing a flow sequence" not in diagnostic.message
 
     rendered = [r.getMessage() for r in caplog.records if "broken.md" in r.getMessage()]
     assert len(rendered) == 1

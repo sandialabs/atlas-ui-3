@@ -149,7 +149,7 @@ summary, so a skipped or narrowed persona is never silent. For example:
 
 ```
 Preconfigured personas: 3 configuration problem(s) detected.
-Persona broken.md: invalid YAML frontmatter, skipping the file: ...
+Persona broken.md: invalid YAML frontmatter at line 2 (expected ',' or ']', but got '<stream end>'), skipping the file
 Persona analyst.md: allowed_data_classifications entry 'NoSuchLevel' is not a configured data classification; dropping it so the persona is not approved for that level.
 Persona analyst.md: ignored 1 non-string or empty allowed_data_classifications entry(ies); quote each level name on its own '- Level' line.
 Loaded 4 preconfigured persona(s)
