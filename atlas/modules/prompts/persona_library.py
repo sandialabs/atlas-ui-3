@@ -30,7 +30,10 @@ when both are present the new field wins. Unlike the other config surfaces the
 value must be a list -- a scalar is a hand-authoring mistake that fails closed.
 A persona that declares nothing is unavailable in a classified session.
 
-Files are read once at startup and cached; ``reload()`` re-reads them.
+Files are read once at startup and cached; ``reload()`` re-reads them. Every
+misconfiguration it detects is reported as a :class:`PersonaDiagnostic` and
+printed as one clear line per persona (also available at ``library.diagnostics``)
+so a skipped or narrowed persona is never silent.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
@@ -46,6 +50,42 @@ import yaml
 from atlas.core.compliance import get_compliance_manager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PersonaDiagnostic:
+    """One detected problem with a persona markdown file.
+
+    Misconfigured personas are skipped or narrowed at load time, which is
+    invisible to the user whose persona simply never appears. The library
+    collects a diagnostic for each problem so startup can print one clear line
+    per persona describing exactly what was wrong (``level`` is a
+    :mod:`logging` level name so the line is emitted at the same severity the
+    parser would have used).
+    """
+
+    source: str
+    level: str
+    message: str
+
+
+def _report(
+    diagnostics: Optional[List[PersonaDiagnostic]],
+    level: str,
+    path: Path,
+    message: str,
+) -> None:
+    """Record one persona problem, or log it when no collector is supplied.
+
+    ``parse_persona_file`` called on its own logs immediately; ``reload()``
+    passes a list so the same problem is emitted once, from the library, as
+    part of the per-persona startup report instead of mid-parse.
+    """
+    if diagnostics is None:
+        getattr(logger, level)(message)
+    else:
+        diagnostics.append(PersonaDiagnostic(source=path.name, level=level, message=message))
+
 
 # Directory name looked up under the prompt/config search paths.
 PERSONA_DIR_NAME = "personas"
@@ -138,12 +178,51 @@ class Persona:
         return data
 
 
-def parse_persona_file(path: Path) -> Optional[Persona]:
-    """Parse one markdown persona file, or return None if it is unusable."""
+def _canonicalize_classifications(
+    manager,
+    entries: Sequence[str],
+    path: Path,
+    diagnostics: Optional[List[PersonaDiagnostic]],
+) -> List[str]:
+    """Canonicalize an allowlist, naming each unknown entry in a report.
+
+    ``ComplianceLevelManager.validate_classifications`` drops unknown names but
+    logs one generic "invalid compliance level" line that never says *which*
+    entry was wrong. Reporting each unknown name here, before the valid entries
+    reach the manager, is what turns a silent narrowing into an actionable
+    startup line -- and keeps the manager from warning a second time.
+    """
+    canonical: List[str] = []
+    for entry in entries:
+        if manager.is_valid_level(entry):
+            resolved = manager.get_canonical_name(entry) or entry
+            if resolved not in canonical:
+                canonical.append(resolved)
+        else:
+            _report(
+                diagnostics,
+                "warning",
+                path,
+                f"Persona {path.name}: allowed_data_classifications entry "
+                f"'{entry}' is not a configured data classification; dropping it "
+                f"so the persona is not approved for that level.",
+            )
+    return canonical
+
+
+def parse_persona_file(
+    path: Path, diagnostics: Optional[List[PersonaDiagnostic]] = None
+) -> Optional[Persona]:
+    """Parse one markdown persona file, or return None if it is unusable.
+
+    When ``diagnostics`` is supplied every problem is appended to it instead of
+    being logged mid-parse, so :meth:`PersonaLibrary.reload` can print one clear
+    line per persona (and its collector is exposed as ``library.diagnostics``).
+    """
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as e:
-        logger.error("Could not read persona file %s: %s", path, e)
+        _report(diagnostics, "error", path, f"Persona {path.name}: could not read the file: {e}")
         return None
 
     metadata: Dict[str, Any] = {}
@@ -155,17 +234,21 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
         except yaml.YAMLError as e:
             # Fail closed: keeping the body with empty metadata would drop the
             # access_group and publish a gated persona to everyone.
-            logger.error(
-                "Persona %s: invalid YAML frontmatter, skipping the file: %s",
-                path.name, e,
+            _report(
+                diagnostics,
+                "error",
+                path,
+                f"Persona {path.name}: invalid YAML frontmatter, skipping the file: {e}",
             )
             return None
         if parsed is not None and not isinstance(parsed, dict):
             # Same failure mode as broken YAML: the access_group is unreadable,
             # so the only safe default is "visible to no one".
-            logger.error(
-                "Persona %s: frontmatter is not a mapping, skipping the file",
-                path.name,
+            _report(
+                diagnostics,
+                "error",
+                path,
+                f"Persona {path.name}: frontmatter is not a mapping, skipping the file",
             )
             return None
         if isinstance(parsed, dict):
@@ -174,12 +257,19 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
 
     content = body.strip()
     if not content:
-        logger.warning("Persona %s: no prompt text below the frontmatter, skipping", path.name)
+        _report(
+            diagnostics,
+            "warning",
+            path,
+            f"Persona {path.name}: no prompt text below the frontmatter, skipping",
+        )
         return None
     if len(content) > MAX_PERSONA_CHARS:
-        logger.warning(
-            "Persona %s: prompt is %d chars, truncating to %d",
-            path.name, len(content), MAX_PERSONA_CHARS,
+        _report(
+            diagnostics,
+            "warning",
+            path,
+            f"Persona {path.name}: prompt is {len(content)} chars, truncating to {MAX_PERSONA_CHARS}",
         )
         content = content[:MAX_PERSONA_CHARS]
 
@@ -219,44 +309,62 @@ def parse_persona_file(path: Path) -> Optional[Persona]:
                     # and `- 5` as an int; both would otherwise vanish silently.
                     dropped += 1
             if dropped:
-                logger.warning(
-                    "Persona %s: ignored %d non-string or empty "
-                    "allowed_data_classifications entry(ies); quote each level "
-                    "name on its own '- Level' line.",
-                    path.name, dropped,
+                _report(
+                    diagnostics,
+                    "warning",
+                    path,
+                    f"Persona {path.name}: ignored {dropped} non-string or empty "
+                    f"allowed_data_classifications entry(ies); quote each level "
+                    f"name on its own '- Level' line.",
                 )
         else:
-            logger.warning(
-                "Persona %s: allowed_data_classifications must be a YAML list of "
-                "level names (one '- Level' line each); treating the persona as "
-                "approved for no classified session.",
-                path.name,
+            _report(
+                diagnostics,
+                "warning",
+                path,
+                f"Persona {path.name}: allowed_data_classifications must be a YAML "
+                f"list of level names (one '- Level' line each); treating the "
+                f"persona as approved for no classified session.",
             )
             entries = []
-        allowed_data_classifications = manager.validate_classifications(
-            entries, context=f"persona file {path.name}"
+        allowed_data_classifications = _canonicalize_classifications(
+            manager, entries, path, diagnostics
         )
         if legacy_raw:
-            logger.warning(
-                "Persona %s: both allowed_data_classifications and the deprecated "
-                "compliance_level are set; allowed_data_classifications is used.",
-                path.name,
+            _report(
+                diagnostics,
+                "warning",
+                path,
+                f"Persona {path.name}: both allowed_data_classifications and the "
+                f"deprecated compliance_level are set; allowed_data_classifications "
+                f"is used.",
             )
     elif legacy_raw:
         if isinstance(legacy_raw, (list, tuple)):
             # A list here is a mistake: str() would turn it into a bogus level
             # name. Point the admin at the field that takes a list and fail
             # closed rather than publishing the repr as a level.
-            logger.warning(
-                "Persona %s: compliance_level takes a single level; put a list "
-                "under allowed_data_classifications instead.",
-                path.name,
+            _report(
+                diagnostics,
+                "warning",
+                path,
+                f"Persona {path.name}: compliance_level takes a single level; put a "
+                f"list under allowed_data_classifications instead.",
             )
         else:
             # Backward compatibility: a legacy single level is a one-element list.
-            compliance_level = manager.validate_compliance_level(
-                str(legacy_raw), context=f"persona file {path.name}"
-            )
+            legacy_value = str(legacy_raw)
+            if manager.is_valid_level(legacy_value):
+                compliance_level = manager.get_canonical_name(legacy_value) or legacy_value
+            else:
+                _report(
+                    diagnostics,
+                    "warning",
+                    path,
+                    f"Persona {path.name}: compliance_level '{legacy_value}' is not a "
+                    f"configured data classification; ignoring it so the persona is "
+                    f"approved for no classified session.",
+                )
             if compliance_level:
                 allowed_data_classifications = [compliance_level]
 
@@ -281,15 +389,39 @@ class PersonaLibrary:
     def __init__(self, search_paths: Sequence[Path]):
         self._search_paths = [Path(p) for p in search_paths]
         self._personas: Optional[List[Persona]] = None
+        self._diagnostics: List[PersonaDiagnostic] = []
 
     @property
     def search_paths(self) -> List[Path]:
         return list(self._search_paths)
 
+    @property
+    def diagnostics(self) -> List[PersonaDiagnostic]:
+        """Problems found the last time the files were read, one per persona."""
+        return list(self._diagnostics)
+
+    def _report_diagnostics(self, diagnostics: List[PersonaDiagnostic]) -> None:
+        """Print one clear line per persona describing each detected problem.
+
+        The parser stays quiet while a collector is in play, so this is the
+        single place a misconfiguration reaches the startup log.
+        """
+        self._diagnostics = list(diagnostics)
+        if not diagnostics:
+            return
+        logger.warning(
+            "Preconfigured personas: %d configuration problem(s) found; the "
+            "affected personas were skipped or narrowed.",
+            len(diagnostics),
+        )
+        for diagnostic in diagnostics:
+            getattr(logger, diagnostic.level)("%s", diagnostic.message)
+
     def reload(self) -> List[Persona]:
         """Re-read persona files from disk and return them."""
         personas: List[Persona] = []
         seen_ids: Dict[str, str] = {}
+        diagnostics: List[PersonaDiagnostic] = []
 
         for directory in self._search_paths:
             try:
@@ -301,7 +433,7 @@ class PersonaLibrary:
             for path in sorted(directory.glob("*.md")):
                 if not _is_persona_file(path):
                     continue
-                persona = parse_persona_file(path)
+                persona = parse_persona_file(path, diagnostics)
                 if persona is None:
                     continue
                 if persona.id in seen_ids:
@@ -321,6 +453,7 @@ class PersonaLibrary:
 
         personas.sort(key=lambda p: (p.order, p.name.lower()))
         self._personas = personas
+        self._report_diagnostics(diagnostics)
         logger.info("Loaded %d preconfigured persona(s)", len(personas))
         return personas
 

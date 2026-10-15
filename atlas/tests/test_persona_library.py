@@ -818,3 +818,87 @@ Body""")
     assert plain_dict["allowed_data_classifications"] is None
     assert "allowed_data_classifications" in plain_dict
 
+
+
+# -- startup diagnostics: one clear line per persona per problem -------------
+
+
+def test_reload_reports_each_unknown_classification_by_name(tmp_path, monkeypatch, caplog):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    write(tmp_path, "typo.md", """---
+allowed_data_classifications:
+  - Internal
+  - NoSuchLevel
+  - AlsoMissing
+---
+Body""")
+
+    logger = "atlas.modules.prompts.persona_library"
+    with caplog.at_level(logging.WARNING, logger=logger):
+        library = PersonaLibrary([tmp_path])
+        personas = library.all_personas()
+
+    # The valid entry survives; each bad one is a separate diagnostic that names
+    # the offending value and the file, so startup is never silently narrow.
+    assert personas[0].allowed_data_classifications == ["Internal"]
+    diagnostics = library.diagnostics
+    assert [d.source for d in diagnostics] == ["typo.md", "typo.md"]
+    assert all(d.level == "warning" for d in diagnostics)
+    assert "NoSuchLevel" in diagnostics[0].message
+    assert "AlsoMissing" in diagnostics[1].message
+    assert diagnostics[0].message.count("typo.md") == 1
+    # Each problem is printed once, from the library, as its own log line.
+    assert caplog.text.count("NoSuchLevel") == 1
+    assert caplog.text.count("AlsoMissing") == 1
+
+
+def test_reload_reports_every_skipped_file(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    write(tmp_path, "broken.md", "---\naccess_group: [unclosed\n---\nBody")
+    write(tmp_path, "empty.md", "---\nname: Nothing\n---\n\n   \n")
+    write(tmp_path, "ok.md", "A fine prompt.")
+
+    library = PersonaLibrary([tmp_path])
+    personas = library.all_personas()
+
+    assert [p.id for p in personas] == ["ok"]
+    by_source = {d.source: d for d in library.diagnostics}
+    assert set(by_source) == {"broken.md", "empty.md"}
+    assert by_source["broken.md"].level == "error"
+    assert "invalid YAML frontmatter" in by_source["broken.md"].message
+    assert by_source["empty.md"].level == "warning"
+    assert "no prompt text" in by_source["empty.md"].message
+
+
+def test_clean_library_has_no_diagnostics(tmp_path):
+    write(tmp_path, "ok.md", "A fine prompt.")
+
+    library = PersonaLibrary([tmp_path])
+    assert library.all_personas()
+    assert library.diagnostics == []
+
+
+def test_reload_logs_a_problem_summary_once(tmp_path, monkeypatch, caplog):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    write(tmp_path, "scalar.md", "---\nallowed_data_classifications: Internal\n---\nBody")
+
+    logger = "atlas.modules.prompts.persona_library"
+    with caplog.at_level(logging.WARNING, logger=logger):
+        PersonaLibrary([tmp_path]).all_personas()
+
+    assert "configuration problem(s) found" in caplog.text
+    assert "allowed_data_classifications must be a YAML list" in caplog.text
+    # The warning is emitted by the library, not also by the bare parser call.
+    assert caplog.text.count("must be a YAML list") == 1
