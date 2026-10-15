@@ -192,14 +192,16 @@ class ModelConfig(BaseModel):
     @field_validator("litellm_tags", mode="before")
     @classmethod
     def normalize_litellm_tags(cls, v):
-        """Normalize tags to a clean list of strings, rejecting bad shapes at load.
+        """Normalize tags to a clean list of printable-ASCII strings at load.
 
         LiteLLM takes tags as a comma-separated string in the header, so every
         entry (whether the whole value is a string or one list item) is split on
-        commas here; whitespace is trimmed and empty entries dropped.  A tag is
-        rejected when it holds a control character, because such a value cannot
-        be sent in an HTTP header and would otherwise fail only on the first
-        request for the model.
+        commas here; whitespace is trimmed and empty entries dropped.  Numbers
+        are stringified so an unquoted YAML value (``[atlas, 2026]``) does not
+        block startup.  A tag is rejected unless every character is printable
+        ASCII: an HTTP header cannot carry a control character or a non-ASCII
+        byte, and such a value would otherwise fail only on the first request
+        for the model.
         """
         if v is None:
             return None
@@ -209,6 +211,10 @@ class ModelConfig(BaseModel):
             raise ValueError("litellm_tags must be a string or a list of strings")
         tags: List[str] = []
         for entry in v:
+            if isinstance(entry, bool):
+                raise ValueError("litellm_tags entries must be strings, not booleans")
+            if isinstance(entry, (int, float)):
+                entry = str(entry)
             if not isinstance(entry, str):
                 raise ValueError(
                     f"litellm_tags entries must be strings, got {type(entry).__name__}"
@@ -217,10 +223,11 @@ class ModelConfig(BaseModel):
                 cleaned = tag.strip()
                 if not cleaned:
                     continue
-                if any(ord(ch) < 32 or ord(ch) == 127 for ch in cleaned):
+                if any(not (0x20 <= ord(ch) < 0x7F) for ch in cleaned):
                     raise ValueError(
-                        "litellm_tags may not contain control characters such as "
-                        "a newline or tab; they cannot be sent in an HTTP header"
+                        "litellm_tags may contain only printable ASCII characters; "
+                        "a control character or non-ASCII character cannot be sent "
+                        "in an HTTP header"
                     )
                 tags.append(cleaned)
         return tags or None
@@ -243,6 +250,23 @@ class ModelConfig(BaseModel):
                 f"Model '{self.model_name}': delegation is set but api_key_source is "
                 f"{self.api_key_source!r}, not 'delegated'"
             )
+        return self
+
+    @model_validator(mode="after")
+    def warn_on_litellm_tags_override(self):
+        """Report a litellm_tags / explicit-header conflict once, at load.
+
+        The header built from ``litellm_tags`` is skipped when the operator has
+        pinned ``x-litellm-tags`` in ``extra_headers``. Saying so here, once,
+        beats a per-request debug log that never names the model.
+        """
+        if self.litellm_tags and self.extra_headers:
+            if any(key.lower() == "x-litellm-tags" for key in self.extra_headers):
+                logger.warning(
+                    "Model '%s' sets both litellm_tags and an explicit x-litellm-tags "
+                    "header in extra_headers; the explicit header wins.",
+                    self.model_name,
+                )
         return self
 
     @field_validator('reasoning_effort', mode='before')

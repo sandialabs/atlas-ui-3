@@ -144,17 +144,27 @@ class TestLiteLLMTagsConfig:
 
     def test_control_characters_rejected(self):
         """A tag with a control character is rejected at config load."""
-        with pytest.raises(ValidationError):
-            ModelConfig(
-                model_name="m", model_url="https://x/v1", api_key="k",
-                litellm_tags=["atlas\nprod"],
-            )
+        for bad in ["atlas\nprod", "atlas\rprod", "atlas\x00prod", "atlas\tprod"]:
+            with pytest.raises(ValidationError):
+                ModelConfig(
+                    model_name="m", model_url="https://x/v1", api_key="k",
+                    litellm_tags=[bad],
+                )
 
-    def test_tab_character_rejected(self):
+    def test_non_ascii_rejected(self):
+        """A non-ASCII tag would fail to encode into an HTTP header."""
+        for bad in ["café", "atlas\u0085prod"]:
+            with pytest.raises(ValidationError):
+                ModelConfig(
+                    model_name="m", model_url="https://x/v1", api_key="k",
+                    litellm_tags=[bad],
+                )
+
+    def test_del_character_rejected(self):
         with pytest.raises(ValidationError):
             ModelConfig(
                 model_name="m", model_url="https://x/v1", api_key="k",
-                litellm_tags="atlas\tprod",
+                litellm_tags=["atlas\x7fprod"],
             )
 
     def test_env_var_is_literal(self):
@@ -171,11 +181,19 @@ class TestLiteLLMTagsConfig:
         )
         assert cfg.litellm_tags is None
 
-    def test_non_string_entry_rejected(self):
+    def test_numeric_entry_coerced(self):
+        """An unquoted YAML number is stringified instead of blocking startup."""
+        cfg = ModelConfig(
+            model_name="m", model_url="https://x/v1", api_key="k",
+            litellm_tags=["atlas", 2026],
+        )
+        assert cfg.litellm_tags == ["atlas", "2026"]
+
+    def test_bool_entry_rejected(self):
         with pytest.raises(ValidationError):
             ModelConfig(
                 model_name="m", model_url="https://x/v1", api_key="k",
-                litellm_tags=["atlas", 1],
+                litellm_tags=["atlas", True],
             )
 
     def test_bad_type_rejected(self):
@@ -183,3 +201,16 @@ class TestLiteLLMTagsConfig:
             ModelConfig(
                 model_name="m", model_url="https://x/v1", api_key="k", litellm_tags=5
             )
+
+    def test_conflict_with_explicit_header_warns_at_load(self, caplog):
+        """The litellm_tags / explicit-header conflict is reported once, at load."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.models"):
+            ModelConfig(
+                model_name="litellm-model", model_url="https://x/v1", api_key="k",
+                litellm_tags=["atlas"],
+                extra_headers={"x-litellm-tags": "pinned"},
+            )
+        assert "the explicit header wins" in caplog.text
+        assert "litellm-model" in caplog.text
