@@ -45,12 +45,20 @@ FROM python-base AS runtime
 # requirement. Remove ensurepip too so it cannot recreate pip. Resolve the
 # stdlib directory from the interpreter so a base-image bump cannot leave pip
 # behind under a new pythonX.Y path. rm -rf exits 0 when nothing matched, so
-# the imports below fail the build if either module is still present.
-RUN pyver="$(python -c 'import sys; print("%d.%d" % (sys.version_info[0], sys.version_info[1]))')" && \
+# the checks below fail the build if either module is still present.
+# python -I ignores PYTHONPATH and the current directory, so a stray pip
+# elsewhere cannot hide a copy left in the runtime interpreter.
+RUN pyver="$(python -I -c 'import sys; print("%d.%d" % (sys.version_info[0], sys.version_info[1]))')" && \
     rm -rf "/usr/local/lib/python${pyver}/ensurepip" \
       /usr/local/lib/python${pyver}/site-packages/pip* /usr/local/bin/pip* && \
-    ! python -c 'import pip' && \
-    ! python -c 'import ensurepip' && \
+    if python -I -c 'import pip'; then \
+      echo "pip is still importable; the runtime image must not ship pip" >&2; \
+      exit 1; \
+    fi && \
+    if python -I -c 'import ensurepip'; then \
+      echo "ensurepip is still importable; the runtime image must not ship ensurepip" >&2; \
+      exit 1; \
+    fi && \
     groupadd --gid 10001 atlas && \
     useradd --uid 10001 --gid atlas --create-home atlas && \
     mkdir -p /app/logs /app/runtime/logs /app/runtime/feedback /app/runtime/uploads /data && \
