@@ -902,3 +902,29 @@ def test_reload_logs_a_problem_summary_once(tmp_path, monkeypatch, caplog):
     assert "allowed_data_classifications must be a YAML list" in caplog.text
     # The warning is emitted by the library, not also by the bare parser call.
     assert caplog.text.count("must be a YAML list") == 1
+
+
+def test_diagnostics_collapse_embedded_newlines_to_one_line(tmp_path, monkeypatch, caplog):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    # A YAML syntax error renders as several context/caret lines; one problem
+    # must still be one physical log line.
+    write(tmp_path, "broken.md", "---\naccess_group: [unclosed\n---\nBody")
+
+    logger = "atlas.modules.prompts.persona_library"
+    with caplog.at_level(logging.WARNING, logger=logger):
+        library = PersonaLibrary([tmp_path])
+        library.all_personas()
+
+    diagnostic = library.diagnostics[0]
+    assert "\n" not in diagnostic.message
+    assert "\r" not in diagnostic.message
+    # The collapsed line keeps the parser detail, just without the breaks.
+    assert "while parsing a flow sequence" in diagnostic.message
+
+    rendered = [r.getMessage() for r in caplog.records if "broken.md" in r.getMessage()]
+    assert len(rendered) == 1
+    assert all("\n" not in line for line in rendered)

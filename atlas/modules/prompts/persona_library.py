@@ -69,6 +69,17 @@ class PersonaDiagnostic:
     message: str
 
 
+# PyYAML's syntax errors are multi-line (context plus caret lines) and a
+# classification string can carry a newline too; collapse embedded line breaks
+# so one problem stays one physical log line, whatever the source.
+_LINE_BREAK_RE = re.compile(r"\s*[\r\n]+\s*")
+
+
+def _one_line(message: str) -> str:
+    """Flatten embedded line breaks so a diagnostic is a single log line."""
+    return _LINE_BREAK_RE.sub(" ", message).strip()
+
+
 def _report(
     diagnostics: Optional[List[PersonaDiagnostic]],
     level: str,
@@ -79,8 +90,10 @@ def _report(
 
     ``parse_persona_file`` called on its own logs immediately; ``reload()``
     passes a list so the same problem is emitted once, from the library, as
-    part of the per-persona startup report instead of mid-parse.
+    part of the per-persona startup report instead of mid-parse. The message is
+    flattened to a single line either way.
     """
+    message = _one_line(message)
     if diagnostics is None:
         getattr(logger, level)(message)
     else:
