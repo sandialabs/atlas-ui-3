@@ -7,21 +7,16 @@ from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config.config_manager import config_manager
 
 
-def _set_proxy_secret_on_app(secret="test-proxy-secret"):
-    for middleware in app.user_middleware:
-        if middleware.cls.__name__ == "AuthMiddleware":
-            middleware.kwargs["proxy_secret"] = secret
-            middleware.kwargs["proxy_secret_enabled"] = True
-            return
-    raise AssertionError("AuthMiddleware not found")
-
-
 def _headers():
-    return {"X-User-Email": config_manager.app_settings.test_user, "X-Proxy-Secret": "test-proxy-secret"}
+    # Proxy-secret enforcement is disabled for the test session (conftest pins
+    # FEATURE_PROXY_SECRET_ENABLED=false); the middleware-enforcement path is
+    # covered by test_middleware_auth.py, which builds its own app. Mutating the
+    # shared app's middleware here used to leak enforcement into every later
+    # test (and every other test in an xdist worker) -- issue #1057.
+    return {"X-User-Email": config_manager.app_settings.test_user}
 
 
 def test_config_endpoint_smoke(monkeypatch):
-    _set_proxy_secret_on_app()
     client = TestClient(app)
     resp = client.get("/api/config", headers=_headers())
     assert resp.status_code == 200
@@ -35,7 +30,6 @@ def test_config_endpoint_smoke(monkeypatch):
 
 def test_rag_discovery_skipped_when_feature_disabled(monkeypatch):
     """Verify RAG discovery is not attempted when feature_rag_enabled is False."""
-    _set_proxy_secret_on_app()
     mock_unified_rag = MagicMock()
     mock_unified_rag.discover_data_sources = AsyncMock(return_value=[])
 
@@ -67,7 +61,6 @@ def test_rag_discovery_skipped_when_feature_disabled(monkeypatch):
 
 def test_atlas_rag_pseudo_server_skipped_when_dedicated_flag_disabled(monkeypatch):
     """atlas_rag MCP discovery/tool exposure should require its dedicated flag."""
-    _set_proxy_secret_on_app()
     mock_unified_rag = MagicMock()
     mock_unified_rag.discover_data_sources = AsyncMock(return_value=[])
 
@@ -101,7 +94,6 @@ def test_atlas_rag_pseudo_server_skipped_when_dedicated_flag_disabled(monkeypatc
 
 def _config_tools(monkeypatch, sleep_cap):
     """Fetch /api/config with the sleep cap forced to *sleep_cap*."""
-    _set_proxy_secret_on_app()
     cm = app_factory.get_config_manager()
     original_cap = cm.app_settings.agent_sleep_max_seconds
     original_tools = cm.app_settings.feature_tools_enabled

@@ -1,9 +1,12 @@
 """Tests for the /api/personas routes (issue #880)."""
 
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from atlas.core.compliance import ComplianceLevelManager
 from atlas.core.log_sanitizer import get_current_user
 from atlas.modules.prompts.persona_library import PersonaLibrary
 from atlas.routes import persona_routes
@@ -90,3 +93,51 @@ def test_member_sees_the_gated_persona(tmp_path, monkeypatch):
 
     assert [p["id"] for p in client.get("/api/personas").json()["personas"]] == ["gated"]
     assert client.get("/api/personas/gated").status_code == 200
+
+
+def test_list_exposes_effective_allowed_data_classifications(tmp_path, monkeypatch):
+    # Issue #1062: the picker filters personas on the same
+    # allowed_data_classifications field as models and tools.
+    (tmp_path / "multi.md").write_text(
+        "---\nname: Multi\nallowed_data_classifications:\n  - Internal\n  - Public\n---\nMulti prompt",
+        encoding="utf-8",
+    )
+    (tmp_path / "legacy.md").write_text(
+        "---\nname: Legacy\ncompliance_level: Internal\n---\nLegacy prompt",
+        encoding="utf-8",
+    )
+    library = PersonaLibrary([tmp_path])
+    monkeypatch.setattr(persona_routes, "get_persona_library", lambda: library)
+
+    # Pin the level definitions so the test does not depend on the shipped
+    # compliance-levels.json or on test order.
+    cfg = tmp_path / "compliance-levels.json"
+    cfg.write_text(json.dumps({
+        "levels": [
+            {"name": "Public", "allowed_with": ["Public"]},
+            {"name": "Internal", "allowed_with": ["Internal"]},
+        ]
+    }), encoding="utf-8")
+    from atlas.modules.prompts import persona_library
+
+    monkeypatch.setattr(
+        persona_library, "get_compliance_manager", lambda: ComplianceLevelManager(config_path=cfg)
+    )
+
+    async def not_in_any_group(user, group):
+        return False
+
+    monkeypatch.setattr(persona_routes, "is_user_in_group", not_in_any_group)
+
+    app = FastAPI()
+    app.include_router(persona_routes.router)
+    app.dependency_overrides[get_current_user] = lambda: "alice@test.com"
+    client = TestClient(app)
+
+    personas = {p["id"]: p for p in client.get("/api/personas").json()["personas"]}
+    assert set(personas["multi"]["allowed_data_classifications"]) == {"Internal", "Public"}
+    assert personas["multi"]["compliance_level"] is None
+    # A legacy persona keeps its single level and folds it into the new field.
+    assert personas["legacy"]["compliance_level"] == "Internal"
+    assert personas["legacy"]["allowed_data_classifications"] == ["Internal"]
+
