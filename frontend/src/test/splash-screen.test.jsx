@@ -290,5 +290,17 @@ describe('SplashScreen', () => {
       rerender(<SplashScreen config={config} user="bob@example.com" />)
       expect(screen.getByText('Must accept')).toBeInTheDocument()
     })
+
+    it('hides a notice shown for a previous user when the next user accepted it', () => {
+      localStorage.setItem(
+        'splash-screen-dismissed:bob@example.com',
+        JSON.stringify({ timestamp: new Date().toISOString(), accepted: true }),
+      )
+      const { container, rerender } = render(<SplashScreen config={config} user="alice@example.com" />)
+      expect(screen.getByText('Must accept')).toBeInTheDocument()
+
+      rerender(<SplashScreen config={config} user="bob@example.com" />)
+      expect(container.firstChild).toBeNull()
+    })
   })
 })

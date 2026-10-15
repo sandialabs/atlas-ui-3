@@ -25,9 +25,11 @@ const SplashScreen = ({ config, user, onClose }) => {
     if (!config || !config.enabled) {
       return
     }
+    // The acceptance applies to a specific user: hide any splash shown for a
+    // previous one before deciding for this user (issue #1050).
+    setIsVisible(false)
     // Whose acceptance applies is not known until the config loads.
     if (!isKnownUser(user)) {
-      setIsVisible(false)
       return
     }
 

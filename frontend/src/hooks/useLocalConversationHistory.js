@@ -10,7 +10,7 @@
  * exported or deleted. Until the user is known nothing is.
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import * as db from '../utils/localConversationDB'
 import { isKnownUser } from '../utils/userStorage'
 
@@ -23,20 +23,28 @@ export function useLocalConversationHistory(user) {
   const tags = []
   const activeTag = null
 
+  // The owner each in-flight read was issued for. When the signed-in user
+  // changes, a read still in flight belongs to the previous account and must
+  // not repopulate the list (issue #1050).
+  const ownerRef = useRef(owner)
+  ownerRef.current = owner
+
   // A different account signed in: drop the previous one's list.
   useEffect(() => {
     setConversations([])
   }, [owner])
 
   const fetchConversations = useCallback(async () => {
+    const requestedOwner = owner
     setLoading(true)
     try {
-      const list = await db.listConversations(owner, 50)
+      const list = await db.listConversations(requestedOwner, 50)
+      if (ownerRef.current !== requestedOwner) return
       setConversations(list)
     } catch (e) {
       console.error('Failed to fetch local conversations:', e)
     } finally {
-      setLoading(false)
+      if (ownerRef.current === requestedOwner) setLoading(false)
     }
   }, [owner])
 
@@ -45,21 +53,26 @@ export function useLocalConversationHistory(user) {
       setSearchQuery('')
       return fetchConversations()
     }
+    const requestedOwner = owner
     setSearchQuery(query)
     setLoading(true)
     try {
-      const results = await db.searchConversations(owner, query.trim(), 20)
+      const results = await db.searchConversations(requestedOwner, query.trim(), 20)
+      if (ownerRef.current !== requestedOwner) return
       setConversations(results)
     } catch (e) {
       console.error('Local search failed:', e)
     } finally {
-      setLoading(false)
+      if (ownerRef.current === requestedOwner) setLoading(false)
     }
   }, [owner, fetchConversations])
 
   const loadConversation = useCallback(async (conversationId) => {
+    const requestedOwner = owner
     try {
-      return await db.getConversation(conversationId, owner)
+      const conv = await db.getConversation(conversationId, requestedOwner)
+      if (ownerRef.current !== requestedOwner) return null
+      return conv
     } catch (e) {
       console.error('Failed to load local conversation:', e)
       return null
@@ -67,9 +80,12 @@ export function useLocalConversationHistory(user) {
   }, [owner])
 
   const deleteConversation = useCallback(async (conversationId) => {
+    const requestedOwner = owner
     try {
-      const deleted = await db.deleteConversation(conversationId, owner)
-      if (deleted) setConversations((prev) => prev.filter((c) => c.id !== conversationId))
+      const deleted = await db.deleteConversation(conversationId, requestedOwner)
+      if (deleted && ownerRef.current === requestedOwner) {
+        setConversations((prev) => prev.filter((c) => c.id !== conversationId))
+      }
       return deleted
     } catch (e) {
       console.error('Failed to delete local conversation:', e)
@@ -78,9 +94,10 @@ export function useLocalConversationHistory(user) {
   }, [owner])
 
   const deleteAll = useCallback(async () => {
+    const requestedOwner = owner
     try {
-      const count = await db.deleteAllConversations(owner)
-      setConversations([])
+      const count = await db.deleteAllConversations(requestedOwner)
+      if (ownerRef.current === requestedOwner) setConversations([])
       return count
     } catch (e) {
       console.error('Failed to delete all local conversations:', e)
@@ -122,11 +139,13 @@ export function useLocalConversationHistory(user) {
   const addTag = useCallback(async () => null, [])
   const removeTag = useCallback(async () => false, [])
   const updateTitle = useCallback(async (conversationId, title) => {
+    const requestedOwner = owner
     try {
-      const conv = await db.getConversation(conversationId, owner)
-      if (!conv) return false
+      const conv = await db.getConversation(conversationId, requestedOwner)
+      if (!conv || ownerRef.current !== requestedOwner) return false
       conv.title = title
-      await db.saveConversation(conv, owner)
+      await db.saveConversation(conv, requestedOwner)
+      if (ownerRef.current !== requestedOwner) return false
       setConversations((prev) =>
         prev.map((c) => (c.id === conversationId ? { ...c, title } : c))
       )

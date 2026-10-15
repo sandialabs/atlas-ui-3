@@ -10,6 +10,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { useSelections } from '../hooks/chat/useSelections'
 import { useChatConfig, resolveStartingModel } from '../hooks/chat/useChatConfig'
+import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import * as db from '../utils/localConversationDB'
 import { isKnownUser, userStorageKey } from '../utils/userStorage'
 
@@ -342,5 +343,39 @@ describe('selected model per user', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/llm/gateways/corp/teams'))
     await new Promise(r => setTimeout(r, 0))
     expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
+  })
+
+  it('restores the saved model when the full config fails but the shell succeeds', async () => {
+    localStorage.setItem(`chatui-current-model:${BOB}`, 'claude-3')
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url === '/api/config/shell') return { ok: true, json: async () => config(BOB) }
+      if (url === '/api/config') return { ok: false, status: 503, json: async () => ({}) }
+      return { ok: false, status: 404, json: async () => ({}) }
+    }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(result.current.currentModel).toBe('claude-3'))
+  })
+})
+
+describe('useLocalConversationHistory across accounts', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('drops a list read that finishes after the account changed', async () => {
+    let resolveAlice
+    vi.spyOn(db, 'listConversations').mockImplementation((owner) => (
+      owner === ALICE
+        ? new Promise(resolve => { resolveAlice = () => resolve([{ id: 'a1', title: 'Alice chat' }]) })
+        : Promise.resolve([])
+    ))
+
+    const { result, rerender } = renderHook(
+      ({ u }) => useLocalConversationHistory(u),
+      { initialProps: { u: ALICE } },
+    )
+    let pending
+    act(() => { pending = result.current.fetchConversations() })
+    rerender({ u: BOB })
+    await act(async () => { resolveAlice(); await pending })
+    expect(result.current.conversations).toEqual([])
   })
 })

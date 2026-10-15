@@ -313,37 +313,47 @@ export function useChatConfig() {
     return cfg
   }, [fetchShellConfig, fetchFullConfig])
 
+  // Load config on mount (shell first, then the full response). The state it
+  // applies -- the signed-in user and the model list -- drives the per-user
+  // model restoration below.
+  useEffect(() => {
+    fetchConfig()
+  }, [fetchConfig])
+
   // Once the config says who is signed in, start them on their own saved
   // model (or the default), never on a model another account picked on this
-  // browser.
+  // browser. Driven by identity rather than one fetch: a shell response is
+  // enough (so a slow or failed full /api/config does not leave the model
+  // unset), and a refresh that changes the signed-in user restores that
+  // user's model too.
+  const restoredForUserRef = useRef(null)
   useEffect(() => {
+    if (!isKnownUser(user) || !models.length) return
+    if (restoredForUserRef.current === user) return
+    restoredForUserRef.current = user
+
+    const saved = readSavedModel(user)
+    const model = resolveStartingModel(saved, { models, llm_gateways: llmGateways })
+    setCurrentModel(model)
+    currentModelRef.current = model
+    if (model) writeSavedModel(user, model)
+
+    // A saved team-gateway model stays only while the user is still in
+    // that team; otherwise fall back to the default model.
+    const parsed = parseGatewayModelKey(model, llmGateways)
+    if (!parsed) return
     let cancelled = false
     ;(async () => {
-      const cfg = await fetchConfig()
-      if (!cfg || cancelled) return
-      const user = cfg.user
-      // A model picked while the config was loading wins over the saved one.
-      const saved = currentModelRef.current || readSavedModel(user)
-      const model = resolveStartingModel(saved, cfg)
-      if (model !== currentModelRef.current) {
-        setCurrentModel(model)
-        currentModelRef.current = model
-      }
-      if (model) writeSavedModel(user, model)
-
-      // A saved team-gateway model stays only while the user is still in
-      // that team; otherwise fall back to the default model.
-      const parsed = parseGatewayModelKey(model, cfg.llm_gateways || [])
-      if (!parsed) return
       const member = await gatewayTeamStillMember(parsed)
-      if (member || cancelled || currentModelRef.current !== model) return
-      const fallback = defaultModelOf(cfg)
+      if (cancelled || member) return
+      if (restoredForUserRef.current !== user || currentModelRef.current !== model) return
+      const fallback = defaultModelOf({ models })
       setCurrentModel(fallback)
       currentModelRef.current = fallback
       writeSavedModel(user, fallback)
     })()
     return () => { cancelled = true }
-  }, [fetchConfig])
+  }, [user, models, llmGateways])
 
   // The current gateway model joins the list so every "look up the current
   // model's capabilities" call site finds it like any configured model.
