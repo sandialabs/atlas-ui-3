@@ -95,7 +95,7 @@ def test_production_override_is_off_by_default_and_loads_from_environment(monkey
 
 @pytest.mark.parametrize(
     "secret",
-    [*_CAPABILITY_SECRET_PLACEHOLDERS, "x", "x" * 31, " " * 40, " " * 32 + "short"],
+    [*sorted(_CAPABILITY_SECRET_PLACEHOLDERS), "x", "x" * 31, " " * 40, " " * 32 + "short"],
 )
 def test_unsafe_capability_secret_rejected_by_settings_and_resolution(secret, monkeypatch):
     from atlas.core import capabilities

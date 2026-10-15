@@ -32,9 +32,10 @@ const PromptSelector = () => {
   const dropdownRef = useRef(null)
 
   // Personas are filtered by the current compliance context exactly like MCP
-  // tools and prompts: with a filter active, a persona needs a compliance
-  // level the filter allows (a level-less persona is hidden). The server
-  // re-checks the same rule when resolving the turn's persona_id.
+  // tools and prompts: with a filter active, the selected level must be one of
+  // the persona's allowed_data_classifications (the legacy compliance_level
+  // counts as a one-element list; a persona that declares nothing is hidden).
+  // The server re-checks the same rule when resolving the turn's persona_id.
   const complianceEnabled = !!features.compliance_levels
   const visiblePersonas = (complianceEnabled && complianceLevelFilter)
     ? personas.filter(p => isComplianceAccessible(complianceLevelFilter, classificationsOf(p)))

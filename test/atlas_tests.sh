@@ -49,6 +49,9 @@ if [ -f tests/test_config_module.py ] || [ -f tests/test_file_storage_module.py 
 fi
 
 echo "Running pytest on atlas/tests directory"
-timeout --foreground 300 python -u -m pytest tests -v --tb=short
+# PYTEST_ARGS lets a caller add plugins/options (e.g. "-n 2" for pytest-xdist,
+# issue #1057) without a second, divergent pytest invocation.
+# shellcheck disable=SC2086
+timeout --foreground 300 python -u -m pytest tests -v --tb=short ${PYTEST_ARGS:-}
 
 echo "Atlas tests completed"
