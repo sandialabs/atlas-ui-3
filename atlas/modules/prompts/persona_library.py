@@ -206,7 +206,9 @@ def _canonicalize_classifications(
     logs one generic "invalid compliance level" line that never says *which*
     entry was wrong. Reporting each unknown name here, before the valid entries
     reach the manager, is what turns a silent narrowing into an actionable
-    startup line -- and keeps the manager from warning a second time.
+    startup line -- and keeps the manager from warning a second time. The entry
+    is echoed with ``!r`` so an invisible or bidirectional character is shown as
+    an escape instead of being silently stripped.
     """
     canonical: List[str] = []
     for entry in entries:
@@ -220,7 +222,7 @@ def _canonicalize_classifications(
                 "warning",
                 path,
                 f"Persona {path.name}: allowed_data_classifications entry "
-                f"'{entry}' is not a configured data classification; dropping it "
+                f"{entry!r} is not a configured data classification; dropping it "
                 f"so the persona is not approved for that level.",
             )
     return canonical
@@ -377,7 +379,7 @@ def parse_persona_file(
                     diagnostics,
                     "warning",
                     path,
-                    f"Persona {path.name}: compliance_level '{legacy_value}' is not a "
+                    f"Persona {path.name}: compliance_level {legacy_value!r} is not a "
                     f"configured data classification; ignoring it so the persona is "
                     f"approved for no classified session.",
                 )
@@ -425,12 +427,14 @@ class PersonaLibrary:
         that just happened even if it raised part way through.
         """
         self._diagnostics = list(diagnostics)
-        if not diagnostics:
-            return
-        logger.warning(
-            "Preconfigured personas: %d configuration problem(s) detected.",
-            len(diagnostics),
-        )
+        # Count only the entries that a WARNING threshold actually shows, so the
+        # header never announces a problem whose detail line is filtered out.
+        problem_count = sum(1 for d in diagnostics if d.level != "info")
+        if problem_count:
+            logger.warning(
+                "Preconfigured personas: %d configuration problem(s) detected.",
+                problem_count,
+            )
         for diagnostic in diagnostics:
             getattr(logger, diagnostic.level)("%s", diagnostic.message)
 

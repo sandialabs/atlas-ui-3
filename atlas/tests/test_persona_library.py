@@ -1022,3 +1022,60 @@ def test_reload_reports_buffered_diagnostics_even_when_a_file_raises(tmp_path, m
 
     # The buffered diagnostic is reported from the finally block, not lost.
     assert [d.source for d in library.diagnostics] == ["x.md"]
+
+
+def test_allowlist_canonicalizes_aliases_and_dedupes(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+    monkeypatch.setattr(persona_library, "get_compliance_manager", lambda: manager)
+
+    # An alias listed next to its canonical name, a duplicate, and one unknown:
+    # the result is canonical and de-duplicated, with exactly one diagnostic.
+    diagnostics = []
+    result = persona_library._canonicalize_classifications(
+        manager, ["SOC 2", "SOC2", "Internal", "Internal", "NotARealLevel"],
+        tmp_path / "p.md", diagnostics,
+    )
+
+    assert result == ["SOC2", "Internal"]
+    assert len(diagnostics) == 1
+    assert "NotARealLevel" in diagnostics[0].message
+
+
+def test_unknown_entry_is_echoed_with_escapes(tmp_path, monkeypatch):
+    from atlas.modules.prompts import persona_library
+
+    manager = configured_compliance_manager(tmp_path)
+
+    diagnostics = []
+    result = persona_library._canonicalize_classifications(
+        manager, ["Bad\u2028Level\tX"], tmp_path / "p.md", diagnostics,
+    )
+
+    assert result == []
+    assert len(diagnostics) == 1
+    message = diagnostics[0].message
+    # Invisible/format characters show as escapes instead of vanishing.
+    assert "\\u2028" in message
+    assert "\\t" in message
+    assert "\u2028" not in message
+    assert "\t" not in message
+
+
+def test_info_only_diagnostics_do_not_log_a_warning_header(tmp_path, caplog):
+    (tmp_path / "a.md").write_text("---\nid: dup\nname: First\n---\nBody", encoding="utf-8")
+    (tmp_path / "b.md").write_text("---\nid: dup\nname: Second\n---\nBody", encoding="utf-8")
+
+    logger = "atlas.modules.prompts.persona_library"
+    with caplog.at_level(logging.INFO, logger=logger):
+        library = PersonaLibrary([tmp_path])
+        library.all_personas()
+
+    # The shadowed-id notice is info, so no WARNING header announces a problem
+    # whose detail line a WARNING threshold would hide.
+    assert "configuration problem(s) detected" not in caplog.text
+    assert any(
+        r.levelno == logging.INFO and "shadowed" in r.getMessage()
+        for r in caplog.records
+    )
