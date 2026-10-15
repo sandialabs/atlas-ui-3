@@ -85,6 +85,8 @@ A saved conversation can only be continued under the classification it was creat
 
 Refusals are logged at WARNING with the conversation id, user, recorded and active levels, and never the conversation content.
 
+**The header selector locks.** The UI mirrors the rule so a user is never invited to make a change the server would refuse (issue #1044). Until a conversation begins, the level selector works as before. Once the server accepts the first turn -- or a saved conversation is opened -- the selector is disabled and shows that conversation's recorded classification, even if the global value differs. (A first turn the server refused left nothing behind, so the selector stays open to correct the level.) Opening a conversation also sets the selector to its recorded level, so the locked value and the level outbound frames carry agree; opening another conversation shows that conversation's record, and starting a new chat unlocks selection without carrying anything over. The lock's tooltip explains it: *"This conversation is classified CUI. Start a new conversation to use a different security level."* The lock is a usability safeguard only -- the server rule above is the boundary, so a modified client, stale state or a direct API call is still refused.
+
 **Legacy conversations.** Conversations saved before this release, or while compliance levels were disabled, have no record. While compliance levels are enabled their provenance is unknown, so they are not assumed to be any level: they stay listed (marked "Unrecorded level") and exportable, but cannot be opened into the chat or continued. With compliance levels disabled they keep working as before and stay unrecorded. If you know what a set of legacy conversations holds, record it explicitly:
 
 ```bash
@@ -191,7 +193,7 @@ If no `compliance-levels.json` can be loaded, the UI has no levels to offer and 
 
 ## What the Selector Does in the UI
 
-Choosing a level applies the same rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when the selected level is one of its allowed data classifications. A resource with none is hidden while a level is selected. With "All Levels", nothing is filtered. Personas carry a single `compliance_level` and must match the selected level. The built-in `atlas` tools are exempt, as above. In the data sources panel, a source whose RAG server is not approved for the level is shown disabled, because the server will not query it.
+Choosing a level applies the same rule everywhere -- the tools and prompts panels, the persona picker, the data sources panel and the model picker: a resource is shown only when the selected level is one of its allowed data classifications. A resource with none is hidden while a level is selected. With "All Levels", nothing is filtered. Personas declare `allowed_data_classifications` (the legacy `compliance_level` is read as a one-element list) and must match the selected level; see [Preconfigured personas](./personas.md). The built-in `atlas` tools are exempt, as above. In the data sources panel, a source whose RAG server is not approved for the level is shown disabled, because the server will not query it.
 
 Selections follow the same rule, so what is sent is always what the panels show:
 

@@ -20,19 +20,14 @@ from atlas.modules.mcp_tools.mcp_user_clients import UserClientMixin
 from atlas.modules.mcp_tools.mcp_user_discovery import UserDiscoveryMixin
 
 
-def _set_proxy_secret_on_app(secret="test-proxy-secret"):
-    for middleware in app.user_middleware:
-        if middleware.cls.__name__ == "AuthMiddleware":
-            middleware.kwargs["proxy_secret"] = secret
-            middleware.kwargs["proxy_secret_enabled"] = True
-            return
-    raise AssertionError("AuthMiddleware not found")
-
-
 def _headers():
+    # Proxy-secret enforcement is disabled for the test session (conftest pins
+    # FEATURE_PROXY_SECRET_ENABLED=false); the enforcement path itself is
+    # covered by test_middleware_auth.py, which builds its own app. Mutating the
+    # shared app's middleware here used to leak enforcement into later tests and
+    # other tests in the same xdist worker -- issue #1057.
     return {
         "X-User-Email": config_manager.app_settings.test_user,
-        "X-Proxy-Secret": "test-proxy-secret",
     }
 
 
@@ -80,7 +75,6 @@ def _servers_by_name(payload):
 
 
 def _run(manager):
-    _set_proxy_secret_on_app()
     settings = app_factory.get_config_manager().app_settings
     original = settings.feature_tools_enabled
     object.__setattr__(settings, "feature_tools_enabled", True)

@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   saveLocalConv: vi.fn(() => Promise.resolve()),
   saveMode: 'none',
   level: 'UUR',
+  setComplianceLevelFilter: vi.fn(),
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -85,7 +86,7 @@ vi.mock('../hooks/chat/useSelections', async (importActual) => {
       makePromptActive: vi.fn(),
       setSinglePrompt: vi.fn(),
       clearToolsAndPrompts: vi.fn(),
-      setComplianceLevelFilter: vi.fn(),
+      setComplianceLevelFilter: h.setComplianceLevelFilter,
       setRagEnabled: vi.fn(),
       applyWorkspace: h.applyWorkspace,
       snapshotSelections: h.snapshotSelections,
@@ -183,21 +184,31 @@ beforeEach(() => {
   vi.clearAllMocks()
   h.sendMessage.mockImplementation(() => true)
   h.saveMode = 'local'
+  // Model the real setter: it persists the level, so a later render sees it.
+  h.setComplianceLevelFilter.mockImplementation((value) => { h.level = value })
 })
 
 describe('conversation classification in the chat context (issue #1042)', () => {
-  it('sends the active level with the restore frame', () => {
+  it("sends the conversation's recorded level with the restore frame and syncs the selector", () => {
     h.level = 'UUR'
     const { result } = renderChat()
     act(() => { result.current.loadSavedConversation(cuiConversation) })
     const restore = h.sendMessage.mock.calls.map(c => c[0]).find(f => f.type === 'restore_conversation')
-    expect(restore.compliance_level_filter).toBe('UUR')
+    expect(restore.compliance_level_filter).toBe('CUI')
+    // The recorded level is authoritative on load (#1044): the selector moves to
+    // it so the locked value and the outbound level agree.
+    expect(h.setComplianceLevelFilter).toHaveBeenCalledWith('CUI')
+    expect(result.current.conversationAccepted).toBe(true)
   })
 
-  it('refuses a send under another level without touching the transcript', () => {
-    h.level = 'UUR'
-    const { result } = renderChat()
+  it('refuses a send after a mid-conversation level switch without touching the transcript', () => {
+    h.level = 'CUI'
+    const { result, rerender } = renderChat()
     act(() => { result.current.loadSavedConversation(cuiConversation) })
+    // A switch the locked selector no longer allows, but an older client or a
+    // direct state change could still make.
+    h.level = 'UUR'
+    rerender()
     const before = result.current.messages.length
     let sent
     act(() => { sent = result.current.sendChatMessage('second synthetic prompt') })
@@ -228,6 +239,44 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     act(() => { result.current.sendChatMessage('after undo synthetic prompt') })
     expect(h.toastError).not.toHaveBeenCalled()
     expect(chatFrames()).toHaveLength(1)
+  })
+
+  it('syncs the level when Undo restores a differently-classified conversation', () => {
+    h.level = 'CUI'
+    const { result, rerender } = renderChat()
+    act(() => { result.current.loadSavedConversation(cuiConversation) })
+    act(() => { result.current.clearChat({ skipConfirm: false }) })
+    // The user picks another level on the fresh chat before Undo.
+    h.level = 'UUR'
+    rerender()
+    const offer = h.toastInfo.mock.calls.find(c => c[1]?.action?.label === 'Undo')
+    act(() => { offer[1].action.onClick() })
+    rerender()
+    // The recorded level is restored as the effective level, so the locked
+    // selector and outbound frames agree (#1044).
+    expect(h.setComplianceLevelFilter).toHaveBeenCalledWith('CUI')
+    expect(result.current.activeComplianceFilter).toBe('CUI')
+    h.sendMessage.mockClear()
+    act(() => { result.current.sendChatMessage('after undo synthetic prompt') })
+    expect(h.toastError).not.toHaveBeenCalled()
+    expect(chatFrames()).toHaveLength(1)
+    expect(chatFrames()[0].compliance_level_filter).toBe('CUI')
+  })
+
+  it('restores the classification on a no-id (local) Undo', () => {
+    h.level = 'CUI'
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('first synthetic prompt') })
+    act(() => { h.wsHandler({ type: 'chat_response', message: 'synthetic reply' }) })
+    // No conversation_saved frame: the chat is local, so Undo takes the no-id
+    // path, which still restores the level and keeps the header locked.
+    expect(result.current.activeConversationId).toBeNull()
+    act(() => { result.current.clearChat({ skipConfirm: false }) })
+    const offer = h.toastInfo.mock.calls.find(c => c[1]?.action?.label === 'Undo')
+    act(() => { offer[1].action.onClick() })
+    expect(result.current.activeConversationClassification?.state).toBe('classified')
+    expect(result.current.activeConversationClassification?.level).toBe('CUI')
+    expect(result.current.conversationAccepted).toBe(true)
   })
 
   it('does not lock a new chat to a level the server never accepted', () => {
@@ -294,5 +343,25 @@ describe('conversation classification in the chat context (issue #1042)', () => 
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // The header locks the level selector off `conversationAccepted` (issue
+  // #1044); a first turn the server refused must leave it open to correct.
+  it('is unaccepted after a first send until the server replies', () => {
+    h.level = 'CUI'
+    const { result } = renderChat()
+    expect(result.current.conversationAccepted).toBe(false)
+    act(() => { result.current.sendChatMessage('first synthetic prompt') })
+    expect(result.current.activeConversationClassification?.state).toBe('classified')
+    expect(result.current.conversationAccepted).toBe(false)
+    act(() => { h.wsHandler({ type: 'chat_response', message: 'synthetic reply' }) })
+    expect(result.current.conversationAccepted).toBe(true)
+  })
+
+  it('is accepted as soon as a saved conversation is loaded', () => {
+    h.level = 'CUI'
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(cuiConversation) })
+    expect(result.current.conversationAccepted).toBe(true)
   })
 })

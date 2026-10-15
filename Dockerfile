@@ -42,9 +42,12 @@ RUN mkdir -p /app/config && \
 
 FROM python-base AS runtime
 # The base includes pip for building Python applications; it is not a runtime
-# requirement. Remove ensurepip too so it cannot recreate pip.
-RUN rm -rf /usr/local/lib/python3.12/ensurepip \
-      /usr/local/lib/python3.12/site-packages/pip* /usr/local/bin/pip* && \
+# requirement. Remove ensurepip too so it cannot recreate pip. Resolve the
+# stdlib directory from the interpreter so a base-image bump cannot leave pip
+# behind under a new pythonX.Y path.
+RUN pyver="$(python -c 'import sys; print("%d.%d" % (sys.version_info[0], sys.version_info[1]))')" && \
+    rm -rf "/usr/local/lib/python${pyver}/ensurepip" \
+      /usr/local/lib/python${pyver}/site-packages/pip* /usr/local/bin/pip* && \
     groupadd --gid 10001 atlas && \
     useradd --uid 10001 --gid atlas --create-home atlas && \
     mkdir -p /app/logs /app/runtime/logs /app/runtime/feedback /app/runtime/uploads /data && \
