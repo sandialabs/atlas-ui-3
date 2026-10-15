@@ -1199,11 +1199,13 @@ async def lifespan(app: FastAPI):
     # Preconfigured personas (issue #880): read the markdown folder once here so
     # a malformed file surfaces in the startup log rather than on a user's first
     # request, and so listing them never touches the filesystem per request.
+    # ``reload()`` prints one clear line per persona for every misconfiguration
+    # it detects (bad frontmatter, an unknown allowed_data_classifications
+    # entry, ...) and logs the loaded count itself.
     try:
         from atlas.modules.prompts.persona_library import get_persona_library
 
-        personas = get_persona_library().reload()
-        logger.info("Loaded %d preconfigured persona(s)", len(personas))
+        get_persona_library().reload()
     except Exception as e:
         logger.error(f"Failed to load preconfigured personas: {e}", exc_info=True)
 

@@ -59,6 +59,9 @@ Notes:
   Invalid YAML frontmatter — or frontmatter that is not a mapping — is logged
   and the **file is skipped** (fail closed): a typo must not silently drop an
   `access_group` and publish a gated persona to everyone.
+- Every detected problem is printed at startup as **one clear line per persona**
+  that names the file and what was wrong (see [Startup diagnostics](#startup-diagnostics)).
+  A misconfigured persona is skipped or narrowed, never silently dropped.
 - The persona id comes from the filename, so renaming a file changes its id and
   users who had it selected fall back to the default prompt.
 - With `FEATURE_COMPLIANCE_LEVELS_ENABLED` on, personas are filtered by the
@@ -70,9 +73,9 @@ Notes:
   server re-checks the same rule when resolving the turn's `persona_id`, so a
   stale selection or hand-crafted client falls back to the default prompt.
   Changing the filter clears an active persona the new context excludes. Level
-  names are validated on load (aliases canonicalize; an unknown level is dropped
-  with a warning, which can only narrow access). With the feature off,
-  classifications are inert metadata.
+  names are validated on load: aliases canonicalize and an unknown name is
+  dropped with a warning naming that entry, which can only narrow access. With
+  the feature off, classifications are inert metadata.
 
 ### Classification allowlist and migration from `compliance_level`
 
@@ -137,7 +140,25 @@ to 100k chars each, and the picker only shows two lines).
 `GET /api/personas/{id}` returns one persona with its full `content` (404 if it
 does not exist *or* is gated behind a group the caller is not in).
 
-## Operating notes
+## Startup diagnostics
 
-Files are read once at server startup, so restart Atlas after adding or editing
-a persona. Parse problems are reported in the startup log with the filename.
+Personas are read once at server startup, so restart Atlas after adding or
+editing a persona. The loader validates every file and prints one line per
+persona for each problem it finds, then a `Loaded N preconfigured persona(s)`
+summary, so a skipped or narrowed persona is never silent. For example:
+
+```
+Preconfigured personas: 3 configuration problem(s) detected.
+Persona broken.md: invalid YAML frontmatter at line 2 (expected ',' or ']', but got '<stream end>'), skipping the file
+Persona analyst.md: allowed_data_classifications entry 'NoSuchLevel' is not a configured data classification; dropping it so the persona is not approved for that level.
+Persona analyst.md: ignored 1 non-string or empty allowed_data_classifications entry(ies); quote each level name on its own '- Level' line.
+Loaded 4 preconfigured persona(s)
+```
+
+Embedded line breaks in a problem (a PyYAML error, say) are collapsed, and each
+problem is one physical log line. A file whose id duplicates one already loaded
+is reported too, so a shadowed file is not silently ignored. The same problems
+are available programmatically on `PersonaLibrary.diagnostics` (one
+`PersonaDiagnostic` with `source`, `level` and `message` per problem), which is
+what the startup report is built from; it is refreshed on every `reload()`, even
+if that load fails.
