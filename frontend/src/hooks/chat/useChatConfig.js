@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { parseGatewayModelKey, withGatewayModel } from '../../utils/gatewayModels'
+import { isKnownUser, userStorageKey } from '../../utils/userStorage'
 
 const DEFAULT_FEATURES = {
   workspaces: false,
@@ -26,6 +27,67 @@ const DEFAULT_FILE_UPLOAD = {
 }
 
 export const CONFIG_CACHE_KEY = 'chatui-config-cache'
+
+// The selected model is remembered per user (issue #1050): on a shared
+// browser the next account must not start on the previous one's model.
+const CURRENT_MODEL_KEY = 'chatui-current-model'
+
+function readSavedModel(user) {
+  if (!isKnownUser(user)) return ''
+  try {
+    return localStorage.getItem(userStorageKey(CURRENT_MODEL_KEY, user)) || ''
+  } catch {
+    return ''
+  }
+}
+
+function writeSavedModel(user, model) {
+  if (!isKnownUser(user)) return
+  try {
+    localStorage.setItem(userStorageKey(CURRENT_MODEL_KEY, user), model)
+  } catch (e) {
+    console.warn('Failed to save current model to localStorage:', e)
+  }
+}
+
+function defaultModelOf(cfg) {
+  const first = cfg.models?.[0]
+  return first ? (first.name || first) : ''
+}
+
+/**
+ * The model to start `cfg.user` on: their saved model while the config still
+ * offers it (a configured model, or a key on a configured gateway), else the
+ * default. Team membership of a gateway model is checked separately
+ * (gatewayTeamStillMember), since it needs a request.
+ */
+export function resolveStartingModel(saved, cfg) {
+  if (saved) {
+    const modelNames = (cfg.models || []).map(m => m.name || m)
+    if (modelNames.includes(saved) || parseGatewayModelKey(saved, cfg.llm_gateways || [])) {
+      return saved
+    }
+  }
+  return defaultModelOf(cfg)
+}
+
+/**
+ * Whether the signed-in user is still in the team a gateway model key names.
+ * Resolves true when it cannot tell (a failed request): the server checks
+ * membership on every turn anyway, so a transient error must not discard
+ * the user's choice.
+ */
+export async function gatewayTeamStillMember(parsedKey) {
+  try {
+    const res = await fetch(`/api/llm/gateways/${encodeURIComponent(parsedKey.gateway)}/teams`)
+    if (!res.ok) return true
+    const body = await res.json()
+    const teams = Array.isArray(body?.teams) ? body.teams : []
+    return teams.some(t => t?.team_id === parsedKey.teamId)
+  } catch {
+    return true
+  }
+}
 
 /**
  * Try to read cached config from localStorage.
@@ -115,13 +177,11 @@ export function useChatConfig() {
       : DEFAULT_FILE_UPLOAD
   )
   const [isCanvasOpen, setIsCanvasOpen] = useState(false)
-  const [currentModel, setCurrentModel] = useState(() => {
-    try {
-      return localStorage.getItem('chatui-current-model') || ''
-    } catch {
-      return ''
-    }
-  })
+  // Empty until /api/config says who is signed in; then their saved model.
+  const [currentModel, setCurrentModel] = useState('')
+  const currentModelRef = useRef('')
+  currentModelRef.current = currentModel
+  const userRef = useRef('Unknown')
   const [agentModeAvailable, setAgentModeAvailable] = useState(
     cached.current ? !!cached.current.agent_mode_available : false
   )
@@ -155,6 +215,7 @@ export function useChatConfig() {
     setModels(cfg.models || [])
     setLlmGateways(cfg.llm_gateways || [])
     setUser(cfg.user || 'Unknown')
+    userRef.current = cfg.user || 'Unknown'
     setFeatures(prev => ({ ...DEFAULT_FEATURES, ...(cfg.features || prev) }))
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
     setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
@@ -229,6 +290,7 @@ export function useChatConfig() {
         setTools([])
         setDataSources([])
         setUser('Unauthenticated')
+        userRef.current = 'Unauthenticated'
         setFeatures(DEFAULT_FEATURES)
         setFileUpload(DEFAULT_FILE_UPLOAD)
         setAgentModeAvailable(false)
@@ -251,29 +313,53 @@ export function useChatConfig() {
     return cfg
   }, [fetchShellConfig, fetchFullConfig])
 
+  // Load config on mount (shell first, then the full response). The state it
+  // applies -- the signed-in user and the model list -- drives the per-user
+  // model restoration below.
   useEffect(() => {
-    (async () => {
-      const cfg = await fetchConfig()
-      if (cfg) {
-        // Set default model if none saved and models available
-        if (!currentModel && cfg.models?.length) {
-          const defaultModel = cfg.models[0].name || cfg.models[0]
-          setCurrentModel(defaultModel)
-          localStorage.setItem('chatui-current-model', defaultModel)
-        }
-        // Validate saved model is still available
-        else if (currentModel && cfg.models?.length) {
-          const modelNames = cfg.models.map(m => m.name || m)
-          const isGatewayModel = !!parseGatewayModelKey(currentModel, cfg.llm_gateways || [])
-          if (!modelNames.includes(currentModel) && !isGatewayModel) {
-            const defaultModel = cfg.models[0].name || cfg.models[0]
-            setCurrentModel(defaultModel)
-            localStorage.setItem('chatui-current-model', defaultModel)
-          }
-        }
-      }
+    fetchConfig()
+  }, [fetchConfig])
+
+  // Once the config says who is signed in, start them on their own saved
+  // model (or the default), never on a model another account picked on this
+  // browser. Driven by identity rather than one fetch: a shell response is
+  // enough (so a slow or failed full /api/config does not leave the model
+  // unset), and a refresh that changes the signed-in user restores that
+  // user's model too.
+  const restoredForUserRef = useRef(null)
+  useEffect(() => {
+    if (!isKnownUser(user) || !models.length) return
+    if (restoredForUserRef.current === user) return
+    restoredForUserRef.current = user
+
+    const saved = readSavedModel(user)
+    const model = resolveStartingModel(saved, { models, llm_gateways: llmGateways })
+    setCurrentModel(model)
+    currentModelRef.current = model
+    if (model) writeSavedModel(user, model)
+  }, [user, models, llmGateways])
+
+  // A saved team-gateway model stays only while the user is still in that
+  // team; otherwise fall back to the default model. Keyed on the selected
+  // model rather than the config fetch, so a config refresh (a new models or
+  // gateways array for the same user) cannot cancel a membership check that
+  // is still in flight and leave a stale team model selected.
+  const membershipCheckRef = useRef(0)
+  useEffect(() => {
+    if (!isKnownUser(user)) return
+    const parsed = parseGatewayModelKey(currentModel, llmGateways)
+    if (!parsed) return
+    const token = ++membershipCheckRef.current
+    ;(async () => {
+      const member = await gatewayTeamStillMember(parsed)
+      if (token !== membershipCheckRef.current || member) return
+      if (restoredForUserRef.current !== user || currentModelRef.current !== currentModel) return
+      const fallback = defaultModelOf({ models })
+      setCurrentModel(fallback)
+      currentModelRef.current = fallback
+      writeSavedModel(user, fallback)
     })()
-  }, [currentModel, fetchConfig])
+  }, [user, currentModel, models, llmGateways])
 
   // The current gateway model joins the list so every "look up the current
   // model's capabilities" call site finds it like any configured model.
@@ -298,11 +384,8 @@ export function useChatConfig() {
     currentModel,
     setCurrentModel: (model) => {
       setCurrentModel(model)
-      try {
-        localStorage.setItem('chatui-current-model', model)
-      } catch (e) {
-        console.warn('Failed to save current model to localStorage:', e)
-      }
+      currentModelRef.current = model
+      writeSavedModel(userRef.current, model)
     },
     agentModeAvailable,
     agentMaxStepsLimit,

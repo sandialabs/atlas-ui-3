@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { usePersistentState } from './usePersistentState'
 import { CANVAS_TOOL, migrateToolName, migrateToolNames } from '../../constants/atlasTools'
 import { classificationsOf } from '../../utils/complianceAccess'
+import { isKnownUser, userStorageKey } from '../../utils/userStorage'
 
 const toSet = arr => new Set(arr)
 const toArray = set => Array.from(set)
@@ -43,12 +44,17 @@ export const personaSurvivesComplianceFilter = (persona, newLevel, isAllowed) =>
   return isAllowed ? !!isAllowed(classifications) : classifications.includes(newLevel)
 }
 
-export function useSelections() {
+// `user` is the signed-in account; the compliance filter is remembered per
+// user (issue #1050) and only in memory until the user is known.
+export function useSelections(user) {
   // Auto-select canvas tool if empty
   const [toolsRaw, setToolsRaw] = usePersistentState('chatui-selected-tools', [CANVAS_TOOL])
   const [promptsRaw, setPromptsRaw] = usePersistentState('chatui-selected-prompts', [])
   const [dataSourcesRaw, setDataSourcesRaw] = usePersistentState('chatui-selected-data-sources', [])
-  const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState('chatui-compliance-level-filter', null)
+  const [complianceLevelFilter, setComplianceLevelFilter] = usePersistentState(
+    isKnownUser(user) ? userStorageKey('chatui-compliance-level-filter', user) : null,
+    null
+  )
 
   // RAG toggle: persistent boolean for enabling/disabling RAG
   const [ragEnabled, setRagEnabled] = usePersistentState('chatui-rag-enabled', false)

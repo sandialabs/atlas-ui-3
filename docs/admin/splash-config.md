@@ -54,7 +54,7 @@ The message body is supplied by `splash-screen.md` and rendered as markdown. The
 *   **`title`**: (string) The title displayed at the top of the splash screen modal.
 *   **`dismissible`**: (boolean) Whether users can dismiss the splash screen.
 *   **`require_accept`**: (boolean) If `true`, users must click the accept button. If `false`, users can dismiss casually.
-*   **`dismiss_duration_days`**: (number) Number of days before showing the splash screen again after dismissal.
+*   **`dismiss_duration_days`**: (number) Number of days before showing the splash screen again after dismissal. Dismissal is remembered per signed-in user in the browser, so another account signing in on the same browser is still shown the splash screen.
 *   **`accept_button_text`**: (string) Text for the accept button (shown when `require_accept` is `true`).
 *   **`dismiss_button_text`**: (string) Text for the dismiss button (shown when `require_accept` is `false`).
 *   **`show_on_every_visit`**: (boolean) If `true`, the splash screen will show every time, ignoring dismissal tracking.

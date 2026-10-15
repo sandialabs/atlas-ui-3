@@ -60,3 +60,5 @@ Database: `atlas-chat-local`, version 1, object store: `conversations`
 - Indexes: `user_email`, `updated_at`
 - Each record stores the full conversation including messages array
 - `summaryFromRecord()` converts full records to the list-view summary shape with `_local: true` flag
+- Each record stores its owner in `user_email` (issue #1050). Every function takes the signed-in user, and listing, opening, search, export and deletion only touch that user's records, so several accounts can share one browser profile without seeing or deleting each other's local conversations. A save never overwrites a record another user owns. Records saved before #1050 have no owner; they are left in place but no account sees them. This is a convenience boundary, not access control: anyone with the browser profile can read IndexedDB directly.
+

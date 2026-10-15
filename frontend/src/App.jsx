@@ -275,6 +275,12 @@ function ChatInterface() {
   )
 }
 
+// The splash acceptance is remembered per signed-in user (issue #1050).
+function UserSplashScreen({ config }) {
+  const { user } = useChat()
+  return <SplashScreen config={config} user={user} />
+}
+
 function AppRoutes() {
   const { features } = useChat()
 
@@ -335,7 +341,7 @@ function App() {
             <WSProvider>
               <ChatProvider>
                 <MarketplaceProvider>
-                  <SplashScreen config={splashConfig} />
+                  <UserSplashScreen config={splashConfig} />
                   <AppRoutes />
                 </MarketplaceProvider>
               </ChatProvider>

@@ -88,6 +88,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     // Conversation classification (issue #1042): a conversation opens only
     // under the level it was recorded at.
     activeComplianceFilter, complianceEnabled, complianceLevels,
+    user,
   } = useChat()
   const toast = useToast()
 
@@ -104,7 +105,8 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
   // Both hooks are always called (React rules), but only the active one is used
   const serverHistory = useConversationHistory()
-  const localHistory = useLocalConversationHistory()
+  // Locally saved conversations are per signed-in user (issue #1050).
+  const localHistory = useLocalConversationHistory(user)
   const history = saveMode === 'local' ? localHistory : serverHistory
 
   // Fetch conversations on mount, when feature is enabled, or when save mode changes
@@ -113,8 +115,9 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       history.fetchConversations()
       history.fetchTags()
     }
+  // `user`: a different account signed in sees its own local list.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatHistoryEnabled, saveMode])
+  }, [chatHistoryEnabled, saveMode, user])
 
   // Auto-refresh conversation list when messages change
   useEffect(() => {
