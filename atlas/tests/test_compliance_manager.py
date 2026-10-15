@@ -212,6 +212,26 @@ class TestComplianceLevelManager:
         # A list of only unknown names approves the component for nothing.
         assert manager.validate_classifications(["Bogus"]) == []
 
+    def test_partition_classifications_returns_rejected_names(self, temp_compliance_config):
+        manager = ComplianceLevelManager(temp_compliance_config)
+
+        accepted, rejected = manager.partition_classifications(
+            ["SOC 2", "SOC2", "HIPAA", "Bogus", "AlsoBogus"]
+        )
+
+        # Aliases canonicalize and duplicates collapse; every unknown name is
+        # returned raw so a caller can name exactly what was wrong.
+        assert accepted == ["SOC2", "HIPAA"]
+        assert rejected == ["Bogus", "AlsoBogus"]
+
+        # None/empty yields two empty lists, and the same rule as
+        # validate_classifications for a list of only unknown names.
+        assert manager.partition_classifications(None) == ([], [])
+        assert manager.partition_classifications([]) == ([], [])
+        assert manager.partition_classifications(["Bogus"]) == ([], ["Bogus"])
+        # A bare string is not an allowlist; it must not iterate per character.
+        assert manager.partition_classifications("Internal") == ([], [])
+
     def test_get_accessible_levels_public(self, temp_compliance_config):
         """Test getting accessible levels for Public."""
         manager = ComplianceLevelManager(temp_compliance_config)

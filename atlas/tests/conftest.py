@@ -1,8 +1,10 @@
 import asyncio
+import copy
 import os
 import shutil
 import sys
 import tempfile
+import warnings
 from pathlib import Path
 
 from sqlalchemy.engine import Engine
@@ -122,6 +124,18 @@ os.environ["COMPLIANCE_DEFAULT_LEVEL"] = ""
 # product behavior change -- runtime authorization is untouched.
 for _authorizer_var in ("AUTH_GROUP_CHECK_URL", "AUTH_GROUP_CHECK_API_KEY"):
     os.environ.pop(_authorizer_var, None)
+
+# --- Proxy-secret isolation ----------------------------------------------
+# ``FEATURE_PROXY_SECRET_ENABLED`` defaults to true. A contributor (or CI
+# runner) with it exported, and no ``PROXY_SECRET``, makes ``AuthMiddleware``
+# fail closed for every request, so each ``TestClient(app)`` call without the
+# proxy header returns 401/503 for reasons unrelated to the code under test.
+# Pin it off for the session so the shared app is deterministic; the CI test
+# container bakes the same value into ``/app/.env``. Tests that exercise proxy
+# enforcement build their own app or middleware (see ``test_middleware_auth.py``
+# and ``test_oidc_auth.py``) and are unaffected. This is a test-isolation guard,
+# not a product behavior change.
+os.environ["FEATURE_PROXY_SECRET_ENABLED"] = "false"
 
 # --- Authorization-bypass isolation --------------------------------------
 # ``SKIP_AUTHORIZATION_CHECKS=true`` is a developer-local escape hatch that makes
@@ -303,6 +317,75 @@ def _isolate_module_singletons():
         yield
     finally:
         restore_singletons(saved)
+
+
+@pytest.fixture(autouse=True)
+def _guard_shared_app_middleware():
+    """Fail if a test mutates the shared FastAPI app's middleware.
+
+    ``main.app`` is process-wide, and Starlette captures ``user_middleware``
+    kwargs into ``middleware_stack`` on first use, so an edit made by one test
+    leaks into every later test -- and, under pytest-xdist, every other test on
+    that worker regardless of order. Tests that need non-default middleware must
+    build their own app (the model is ``test_middleware_auth.py``); the
+    production wiring is asserted against settings in ``test_middleware_auth``
+    too.
+
+    Two structures are checked, because either can be edited: the declarative
+    ``user_middleware`` kwargs (snapshotted before/after), and -- when a request
+    has already built it -- the live ``AuthMiddleware`` instance on
+    ``middleware_stack``, whose attributes must still match the declared
+    kwargs. That second check catches an edit that is reverted before teardown
+    but was already baked into the built stack. This turns a reintroduced edit
+    into a deterministic failure instead of one that depends on collection
+    order (issue #1057).
+    """
+    try:
+        from main import app
+    except ImportError as exc:  # pragma: no cover - import guards run elsewhere
+        warnings.warn(
+            f"shared-app middleware guard disabled: cannot import main.app ({exc})",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        yield
+        return
+    before = [(m.cls, copy.deepcopy(m.kwargs)) for m in app.user_middleware]
+    try:
+        yield
+    finally:
+        after = [(m.cls, m.kwargs) for m in app.user_middleware]
+        assert after == before, (
+            "a test mutated the shared app's middleware; build a dedicated "
+            "FastAPI() for the test instead of editing main.app"
+        )
+        built = _built_auth_middleware(app)
+        declared = next(
+            (m.kwargs for m in app.user_middleware if m.cls.__name__ == "AuthMiddleware"),
+            None,
+        )
+        if built is not None and declared is not None:
+            for key in ("debug_mode", "proxy_secret_enabled", "proxy_secret_header", "proxy_secret"):
+                assert getattr(built, key, None) == declared.get(key), (
+                    "the built AuthMiddleware no longer matches the app's declared "
+                    f"middleware kwargs ({key}); a test likely mutated the shared "
+                    "app's middleware"
+                )
+
+
+def _built_auth_middleware(app):
+    """Walk the built ASGI middleware chain to the AuthMiddleware instance.
+
+    Starlette wraps each middleware around the next via ``.app``; return the
+    first node that is an ``AuthMiddleware`` (or ``None`` before the stack is
+    built).
+    """
+    node = getattr(app, "middleware_stack", None)
+    while node is not None:
+        if node.__class__.__name__ == "AuthMiddleware":
+            return node
+        node = getattr(node, "app", None)
+    return None
 
 
 # Groups the debug-only mock table in ``core.auth`` grants to the *non-admin*
