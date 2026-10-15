@@ -1051,7 +1051,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         # tags, sent as a comma-separated "x-litellm-tags" header.  A LiteLLM
         # proxy records these in its spend logs, so a static tag (e.g. "atlas")
         # lets the operator separate ATLAS traffic from other clients.  Explicit
-        # extra_headers are authoritative, as for the customer id below: an
+        # extra_headers are authoritative, as for the customer id above: an
         # operator who pinned x-litellm-tags there keeps that value.
         litellm_tags = getattr(model_config, "litellm_tags", None)
         if litellm_tags:

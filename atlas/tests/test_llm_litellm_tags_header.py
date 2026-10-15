@@ -134,6 +134,37 @@ class TestLiteLLMTagsConfig:
         )
         assert cfg.litellm_tags == ["atlas", "prod"]
 
+    def test_list_entry_with_comma_is_split(self):
+        """A list entry holding commas matches a comma-separated string value."""
+        cfg = ModelConfig(
+            model_name="m", model_url="https://x/v1", api_key="k",
+            litellm_tags=["atlas,prod"],
+        )
+        assert cfg.litellm_tags == ["atlas", "prod"]
+
+    def test_control_characters_rejected(self):
+        """A tag with a control character is rejected at config load."""
+        with pytest.raises(ValidationError):
+            ModelConfig(
+                model_name="m", model_url="https://x/v1", api_key="k",
+                litellm_tags=["atlas\nprod"],
+            )
+
+    def test_tab_character_rejected(self):
+        with pytest.raises(ValidationError):
+            ModelConfig(
+                model_name="m", model_url="https://x/v1", api_key="k",
+                litellm_tags="atlas\tprod",
+            )
+
+    def test_env_var_is_literal(self):
+        """Tags are literal: ${ENV_VAR} is not expanded."""
+        cfg = ModelConfig(
+            model_name="m", model_url="https://x/v1", api_key="k",
+            litellm_tags=["${ATLAS_TAG}"],
+        )
+        assert cfg.litellm_tags == ["${ATLAS_TAG}"]
+
     def test_empty_value_is_none(self):
         cfg = ModelConfig(
             model_name="m", model_url="https://x/v1", api_key="k", litellm_tags=""

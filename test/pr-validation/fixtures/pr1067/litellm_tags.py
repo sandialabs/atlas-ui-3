@@ -158,6 +158,18 @@ models:
                 pass
         asyncio.run(_drain())
 
+    def call_with_tools(model_name):
+        tools_schema = [{
+            "type": "function",
+            "function": {
+                "name": "ping", "description": "ping",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }]
+        return asyncio.run(
+            LiteLLMCaller().call_with_tools(model_name, messages, tools_schema)
+        )
+
     CALLS.clear()
     call_plain("tagged-list")
     check("A tag list is sent as the comma-separated x-litellm-tags header",
@@ -184,6 +196,11 @@ models:
     CALLS.clear()
     stream("tagged-list")
     check("The streaming path also sends x-litellm-tags",
+          CALLS and CALLS[-1]["tags"] == "atlas,prod", str(CALLS[-1]) if CALLS else "no call")
+
+    CALLS.clear()
+    call_with_tools("tagged-list")
+    check("The tool-carrying path also sends x-litellm-tags",
           CALLS and CALLS[-1]["tags"] == "atlas,prod", str(CALLS[-1]) if CALLS else "no call")
 
     if FAILURES:

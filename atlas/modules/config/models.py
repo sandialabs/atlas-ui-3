@@ -184,7 +184,9 @@ class ModelConfig(BaseModel):
     # convention).  A LiteLLM proxy records them in its spend logs, so a tag
     # like "atlas" lets the operator isolate ATLAS traffic from other clients
     # of the same proxy.  Accepts either a YAML list or a single string (which
-    # may itself be a comma-separated list).
+    # may itself be a comma-separated list); every entry is split on commas so
+    # the two forms agree.  Values are sent literally: unlike extra_headers,
+    # ${ENV_VAR} placeholders are not expanded.
     litellm_tags: Optional[List[str]] = None
 
     @field_validator("litellm_tags", mode="before")
@@ -192,25 +194,34 @@ class ModelConfig(BaseModel):
     def normalize_litellm_tags(cls, v):
         """Normalize tags to a clean list of strings, rejecting bad shapes at load.
 
-        LiteLLM takes tags as a comma-separated string in the header, so a
-        single string value is split on commas here; a YAML list is kept as-is.
-        Whitespace is trimmed and empty entries dropped, so a stray comma or a
-        blank entry cannot send an empty tag.
+        LiteLLM takes tags as a comma-separated string in the header, so every
+        entry (whether the whole value is a string or one list item) is split on
+        commas here; whitespace is trimmed and empty entries dropped.  A tag is
+        rejected when it holds a control character, because such a value cannot
+        be sent in an HTTP header and would otherwise fail only on the first
+        request for the model.
         """
         if v is None:
             return None
         if isinstance(v, str):
-            v = v.split(",")
+            v = [v]
         if not isinstance(v, (list, tuple)):
             raise ValueError("litellm_tags must be a string or a list of strings")
         tags: List[str] = []
-        for tag in v:
-            if not isinstance(tag, str):
+        for entry in v:
+            if not isinstance(entry, str):
                 raise ValueError(
-                    f"litellm_tags entries must be strings, got {type(tag).__name__}"
+                    f"litellm_tags entries must be strings, got {type(entry).__name__}"
                 )
-            cleaned = tag.strip()
-            if cleaned:
+            for tag in entry.split(","):
+                cleaned = tag.strip()
+                if not cleaned:
+                    continue
+                if any(ord(ch) < 32 or ord(ch) == 127 for ch in cleaned):
+                    raise ValueError(
+                        "litellm_tags may not contain control characters such as "
+                        "a newline or tab; they cannot be sent in an HTTP header"
+                    )
                 tags.append(cleaned)
         return tags or None
 
