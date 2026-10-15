@@ -212,22 +212,36 @@ class ModelConfig(BaseModel):
         tags: List[str] = []
         for entry in v:
             if isinstance(entry, bool):
-                raise ValueError("litellm_tags entries must be strings, not booleans")
-            if isinstance(entry, (int, float)):
+                raise ValueError(
+                    f"litellm_tags entries must be strings, but a boolean ({entry!r}) "
+                    "was read; quote YAML words like 'on', 'yes' and 'no' so YAML "
+                    "treats them as strings"
+                )
+            if isinstance(entry, int):
                 entry = str(entry)
+            elif isinstance(entry, float):
+                raise ValueError(
+                    f"litellm_tags does not accept a float ({entry!r}); YAML would "
+                    "change its value. Quote the value to send it literally."
+                )
             if not isinstance(entry, str):
                 raise ValueError(
-                    f"litellm_tags entries must be strings, got {type(entry).__name__}"
+                    f"litellm_tags entries must be strings, got "
+                    f"{type(entry).__name__} ({entry!r}); quote the value to send it "
+                    "literally"
                 )
             for tag in entry.split(","):
                 cleaned = tag.strip()
                 if not cleaned:
                     continue
-                if any(not (0x20 <= ord(ch) < 0x7F) for ch in cleaned):
+                bad = next(
+                    (ch for ch in cleaned if not (0x20 <= ord(ch) < 0x7F)), None
+                )
+                if bad is not None:
                     raise ValueError(
-                        "litellm_tags may contain only printable ASCII characters; "
-                        "a control character or non-ASCII character cannot be sent "
-                        "in an HTTP header"
+                        f"litellm_tags entry {cleaned!r} contains {bad!r} "
+                        f"(U+{ord(bad):04X}); tags may contain only printable ASCII "
+                        "because an HTTP header cannot carry that character"
                     )
                 tags.append(cleaned)
         return tags or None
@@ -250,23 +264,6 @@ class ModelConfig(BaseModel):
                 f"Model '{self.model_name}': delegation is set but api_key_source is "
                 f"{self.api_key_source!r}, not 'delegated'"
             )
-        return self
-
-    @model_validator(mode="after")
-    def warn_on_litellm_tags_override(self):
-        """Report a litellm_tags / explicit-header conflict once, at load.
-
-        The header built from ``litellm_tags`` is skipped when the operator has
-        pinned ``x-litellm-tags`` in ``extra_headers``. Saying so here, once,
-        beats a per-request debug log that never names the model.
-        """
-        if self.litellm_tags and self.extra_headers:
-            if any(key.lower() == "x-litellm-tags" for key in self.extra_headers):
-                logger.warning(
-                    "Model '%s' sets both litellm_tags and an explicit x-litellm-tags "
-                    "header in extra_headers; the explicit header wins.",
-                    self.model_name,
-                )
         return self
 
     @field_validator('reasoning_effort', mode='before')
@@ -337,6 +334,33 @@ def capabilities_of(config: ModelConfig) -> Dict[str, bool]:
         "supports_pdf": config.supports_pdf,
         "supports_tools": config.supports_tools,
     }
+
+
+def _pins_litellm_tags_header(extra_headers: Optional[Dict[str, str]]) -> bool:
+    """Whether ``extra_headers`` explicitly sets x-litellm-tags (case-insensitive)."""
+    return bool(extra_headers) and any(
+        key.lower() == "x-litellm-tags" for key in extra_headers
+    )
+
+
+def _warn_on_litellm_tags_override(
+    litellm_tags: Optional[List[str]],
+    extra_headers: Optional[Dict[str, str]],
+    where: str,
+) -> None:
+    """Warn once, at load, when litellm_tags would lose to an explicit header.
+
+    The header built from ``litellm_tags`` is skipped when x-litellm-tags is
+    pinned in ``extra_headers``. Reporting that here -- rather than from a
+    per-request path, where a gateway rebuilds its ModelConfig on every lookup --
+    says which component is affected without log spam.
+    """
+    if litellm_tags and _pins_litellm_tags_header(extra_headers):
+        logger.warning(
+            "%s sets both litellm_tags and an explicit x-litellm-tags header in "
+            "extra_headers; the explicit header wins.",
+            where,
+        )
 
 
 class LiteLLMGatewayModel(BaseModel):
@@ -450,6 +474,35 @@ class LiteLLMGatewayConfig(BaseModel):
                 raise ValueError(
                     "auth_type 'delegated' requires delegation.scope (or audience/resource)"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def warn_on_litellm_tags_override(self):
+        """Warn once, at load, for a gateway whose pinned header beats its tags.
+
+        A gateway applies ``extra_headers`` (including a pinned x-litellm-tags)
+        to every model it serves, while ``litellm_tags`` may come from
+        ``model_defaults`` or a model entry. When both are present the explicit
+        header wins for every such model. Say so once, here, rather than on each
+        call -- a gateway rebuilds its models on every lookup.
+        """
+        if not _pins_litellm_tags_header(self.extra_headers):
+            return self
+        affected = []
+        if self.model_defaults.get("litellm_tags"):
+            affected.append("model_defaults")
+        affected.extend(
+            f"model '{model_id}'"
+            for model_id, entry in self.models.items()
+            if entry.settings().get("litellm_tags")
+        )
+        if affected:
+            logger.warning(
+                "LiteLLM gateway '%s' pins x-litellm-tags in extra_headers, which "
+                "overrides litellm_tags set by %s; the explicit header wins.",
+                self.display_name or "gateway",
+                ", ".join(affected),
+            )
         return self
 
     def resolved_base_url(self) -> str:
@@ -569,6 +622,19 @@ class LLMConfig(BaseModel):
                     f"Model name(s) {', '.join(clashing)} collide with LiteLLM gateway "
                     f"'{gateway_name}' model keys; rename the model or the gateway"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def warn_on_litellm_tags_override(self):
+        """Report a litellm_tags / explicit-header conflict once, at load.
+
+        Gateway models are synthesized on every lookup, so this lives on the
+        config, not on ModelConfig, to avoid a warning on every request.
+        """
+        for name, model in self.models.items():
+            _warn_on_litellm_tags_override(
+                model.litellm_tags, model.extra_headers, f"Model '{name}'"
+            )
         return self
 
     def get_model(self, model_name: str) -> Optional[ModelConfig]:

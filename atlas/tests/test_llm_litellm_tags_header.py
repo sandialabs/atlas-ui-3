@@ -7,12 +7,14 @@ per LiteLLM's request-tags convention) when a model is configured with
 Added: 2026-10-14
 """
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
-from atlas.modules.config.config_manager import ModelConfig
+from atlas.modules.config.config_manager import LLMConfig, ModelConfig
+from atlas.modules.config.models import LiteLLMGatewayConfig
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
 
@@ -182,12 +184,20 @@ class TestLiteLLMTagsConfig:
         assert cfg.litellm_tags is None
 
     def test_numeric_entry_coerced(self):
-        """An unquoted YAML number is stringified instead of blocking startup."""
+        """An unquoted YAML integer is stringified instead of blocking startup."""
         cfg = ModelConfig(
             model_name="m", model_url="https://x/v1", api_key="k",
             litellm_tags=["atlas", 2026],
         )
         assert cfg.litellm_tags == ["atlas", "2026"]
+
+    def test_float_entry_rejected(self):
+        """A float would change the tag silently, so it is rejected."""
+        with pytest.raises(ValidationError):
+            ModelConfig(
+                model_name="m", model_url="https://x/v1", api_key="k",
+                litellm_tags=["atlas", 2026.10],
+            )
 
     def test_bool_entry_rejected(self):
         with pytest.raises(ValidationError):
@@ -202,15 +212,62 @@ class TestLiteLLMTagsConfig:
                 model_name="m", model_url="https://x/v1", api_key="k", litellm_tags=5
             )
 
-    def test_conflict_with_explicit_header_warns_at_load(self, caplog):
-        """The litellm_tags / explicit-header conflict is reported once, at load."""
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.models"):
+    def test_error_names_offending_tag_and_character(self):
+        """The rejection message identifies the tag and character, not <redacted>."""
+        with pytest.raises(ValidationError) as excinfo:
             ModelConfig(
-                model_name="litellm-model", model_url="https://x/v1", api_key="k",
-                litellm_tags=["atlas"],
-                extra_headers={"x-litellm-tags": "pinned"},
+                model_name="m", model_url="https://x/v1", api_key="k",
+                litellm_tags=["bad\u0085tag"],
             )
+        message = str(excinfo.value)
+        assert "bad\\x85tag" in message or "bad" in message
+        assert "U+0085" in message
+
+
+class TestLiteLLMTagsOverrideWarning:
+    """The litellm_tags / explicit-header conflict is reported once, at load."""
+
+    def test_static_model_conflict_warns_at_config_load(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.models"):
+            LLMConfig(models={
+                "litellm-model": ModelConfig(
+                    model_name="litellm-model", model_url="https://x/v1", api_key="k",
+                    litellm_tags=["atlas"],
+                    extra_headers={"x-litellm-tags": "pinned"},
+                ),
+            })
         assert "the explicit header wins" in caplog.text
         assert "litellm-model" in caplog.text
+
+    def test_no_conflict_no_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.models"):
+            LLMConfig(models={
+                "tagged": ModelConfig(
+                    model_name="tagged", model_url="https://x/v1", api_key="k",
+                    litellm_tags=["atlas"],
+                ),
+            })
+        assert "x-litellm-tags" not in caplog.text
+
+    def test_gateway_conflict_warns_at_load_not_per_lookup(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="atlas.modules.config.models"):
+            config = LLMConfig(
+                models={},
+                litellm_gateways={
+                    "enterprise": LiteLLMGatewayConfig(
+                        base_url="https://litellm.example.com",
+                        api_key="sk-test",
+                        display_name="Enterprise",
+                        extra_headers={"x-litellm-tags": "pinned"},
+                        model_defaults={"litellm_tags": ["atlas"]},
+                    ),
+                },
+            )
+            at_load = caplog.text.count("overrides litellm_tags")
+            # Gateway models are rebuilt on every lookup; the warning must not
+            # grow with each one.
+            config.get_model("enterprise::team-1::gpt-4o")
+            config.get_model("enterprise::team-1::gpt-4o")
+        assert at_load >= 1
+        assert caplog.text.count("overrides litellm_tags") == at_load
+        assert "Enterprise" in caplog.text
