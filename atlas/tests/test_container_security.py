@@ -105,9 +105,8 @@ def test_published_runtime_is_multistage_nonroot():
         if re.search(r"\bAS python-base\s*$", stage.splitlines()[0])
     ]
     assert len(base_stages) == 1
-    shipped = re.search(r"python:(\d+\.\d+)", base_stages[0].splitlines()[0])
-    assert shipped, base_stages[0].splitlines()[0]
-    assert not re.search(r"python\d+\.\d+", final), shipped.group(1)
+    assert re.search(r"python:\d+\.\d+", base_stages[0].splitlines()[0])
+    assert not re.search(r"python\d+\.\d+", final)
     assert 'print("%d.%d" % (sys.version_info[0], sys.version_info[1]))' in final
     assert "/usr/local/lib/python${pyver}/ensurepip" in final
     assert "/usr/local/lib/python${pyver}/site-packages/pip*" in final
@@ -115,6 +114,9 @@ def test_published_runtime_is_multistage_nonroot():
     assert "python -I -c 'import ensurepip'" in final
     assert "pip is still importable; the runtime image must not ship pip" in final
     assert "ensurepip is still importable; the runtime image must not ship ensurepip" in final
+    runtime_script = (ROOT / "test/pr-validation/test_pr1017_container_runtime.sh").read_text()
+    assert 'for module in pip ensurepip' in runtime_script
+    assert '-I -c "import ${module}"' in runtime_script
     assert "uv sync --frozen --no-dev --extra mcp-demos --no-editable" in recipe
     assert "--ignore-requires-python" not in recipe
     assert "COPY --from=frontend-build /app/frontend/dist /app/atlas/static" in recipe

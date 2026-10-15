@@ -48,6 +48,15 @@ asyncio.run(check_mcp())
 print("Runtime surface and bundled MCP checks passed")
 PY
 
+# Isolated mode ignores PYTHONPATH and the working directory, matching the
+# Dockerfile build guard. A successful import means pip survived removal.
+for module in pip ensurepip; do
+    if "$engine" run --rm --entrypoint python "$image" -I -c "import ${module}"; then
+        echo "${module} is still importable in the runtime image" >&2
+        exit 1
+    fi
+done
+
 name="atlas-runtime-check-$$"
 cleanup() { "$engine" rm -f "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

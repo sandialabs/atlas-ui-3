@@ -57,8 +57,6 @@ jobs:
         file: ./Dockerfile-test
         load: true
         tags: test-image:latest
-        build-args: |
-          PYTHON_VERSION=3.14
         cache-from: type=gha,scope=atlas-test
         cache-to: type=gha,scope=atlas-test,mode=max
 
