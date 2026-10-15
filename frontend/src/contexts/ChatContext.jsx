@@ -241,6 +241,10 @@ export const ChatProvider = ({ children }) => {
 	activeConversationIdRef.current = activeConversationId
 	const reconnectResyncGenerationRef = useRef(0)
 	const localSaveTimerRef = useRef(null)
+	// Which account a local conversation belongs to (issue #1050): a
+	// mid-session account change must not file the previous user's open
+	// conversation under the new owner.
+	const localConvOwnerRef = useRef(null)
 
 	// Method to add a file to attachments
 	const addAttachment = useCallback((fileId) => {
@@ -2074,6 +2078,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// one known yet there is no owner to save under.
 		const owner = config.user
 		if (!isKnownUser(owner)) return
+		// A local conversation belongs to the account that opened it: after an
+		// account change, keep saving the open conversation under its original
+		// owner rather than filing it under the new one.
+		const attributed = localConvOwnerRef.current
+		if (attributed && attributed.id === activeConversationId && attributed.owner !== owner) return
+		localConvOwnerRef.current = { id: activeConversationId, owner }
 		const userMessages = messages.filter(m => m.role === 'user')
 		if (userMessages.length === 0) return
 
@@ -2115,7 +2125,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [messages?.length, saveMode, activeConversationId, currentModel])
+	}, [messages?.length, saveMode, activeConversationId, currentModel, config.user])
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {

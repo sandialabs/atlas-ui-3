@@ -337,23 +337,29 @@ export function useChatConfig() {
     setCurrentModel(model)
     currentModelRef.current = model
     if (model) writeSavedModel(user, model)
+  }, [user, models, llmGateways])
 
-    // A saved team-gateway model stays only while the user is still in
-    // that team; otherwise fall back to the default model.
-    const parsed = parseGatewayModelKey(model, llmGateways)
+  // A saved team-gateway model stays only while the user is still in that
+  // team; otherwise fall back to the default model. Keyed on the selected
+  // model rather than the config fetch, so a config refresh (a new models or
+  // gateways array for the same user) cannot cancel a membership check that
+  // is still in flight and leave a stale team model selected.
+  const membershipCheckRef = useRef(0)
+  useEffect(() => {
+    if (!isKnownUser(user)) return
+    const parsed = parseGatewayModelKey(currentModel, llmGateways)
     if (!parsed) return
-    let cancelled = false
+    const token = ++membershipCheckRef.current
     ;(async () => {
       const member = await gatewayTeamStillMember(parsed)
-      if (cancelled || member) return
-      if (restoredForUserRef.current !== user || currentModelRef.current !== model) return
+      if (token !== membershipCheckRef.current || member) return
+      if (restoredForUserRef.current !== user || currentModelRef.current !== currentModel) return
       const fallback = defaultModelOf({ models })
       setCurrentModel(fallback)
       currentModelRef.current = fallback
       writeSavedModel(user, fallback)
     })()
-    return () => { cancelled = true }
-  }, [user, models, llmGateways])
+  }, [user, currentModel, models, llmGateways])
 
   // The current gateway model joins the list so every "look up the current
   // model's capabilities" call site finds it like any configured model.

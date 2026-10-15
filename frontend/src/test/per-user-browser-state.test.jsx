@@ -345,6 +345,31 @@ describe('selected model per user', () => {
     expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
   })
 
+  it('drops a non-member gateway model even when the full config reloads the model list', async () => {
+    localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-a::gpt-x')
+    // Shell supplies the models immediately; the slower full config arrives
+    // with fresh models/gateways arrays while the membership check is still in
+    // flight. The check must not be cancelled by that reload.
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url === '/api/config/shell') return { ok: true, json: async () => config(BOB) }
+      if (url === '/api/config') {
+        await new Promise(r => setTimeout(r, 50))
+        return { ok: true, json: async () => config(BOB) }
+      }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) {
+        await new Promise(r => setTimeout(r, 150))
+        return { ok: true, json: async () => ({ teams: [{ team_id: 'team-b', label: 'B' }] }) }
+      }
+      return { ok: false, json: async () => ({}) }
+    }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(
+      () => expect(localStorage.getItem(`chatui-current-model:${BOB}`)).toBe('gpt-4o'),
+      { timeout: 2000 },
+    )
+    expect(result.current.currentModel).toBe('gpt-4o')
+  })
+
   it('restores the saved model when the full config fails but the shell succeeds', async () => {
     localStorage.setItem(`chatui-current-model:${BOB}`, 'claude-3')
     vi.stubGlobal('fetch', vi.fn(async (url) => {
