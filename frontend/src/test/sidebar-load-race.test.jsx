@@ -35,6 +35,7 @@ import Sidebar from '../components/Sidebar'
 const CONVERSATIONS = [
   { id: 'conv-x', title: 'Conversation X', updated_at: new Date().toISOString(), message_count: 2 },
   { id: 'conv-y', title: 'Conversation Y', updated_at: new Date().toISOString(), message_count: 2 },
+  { id: 'conv-start', title: 'Conversation On Screen', updated_at: new Date().toISOString(), message_count: 2 },
 ]
 
 function deferred() {
@@ -133,6 +134,16 @@ describe('Sidebar conversation open race (#1014)', () => {
     render(<Sidebar />)
     fireEvent.click(screen.getByText('Conversation X'))
     fireEvent.click(screen.getByText('unsaved prompt'))
+
+    await act(async () => { pending['conv-x'].resolve(full('conv-x')) })
+    expect(h.chat.loadSavedConversation).toHaveBeenCalledTimes(1)
+    expect(h.chat.loadSavedConversation.mock.calls[0][0].id).toBe('conv-x')
+  })
+
+  it('clicking the conversation already on screen does not cancel a pending open', async () => {
+    render(<Sidebar />)
+    fireEvent.click(screen.getByText('Conversation X'))
+    fireEvent.click(screen.getByText('Conversation On Screen'))
 
     await act(async () => { pending['conv-x'].resolve(full('conv-x')) })
     expect(h.chat.loadSavedConversation).toHaveBeenCalledTimes(1)

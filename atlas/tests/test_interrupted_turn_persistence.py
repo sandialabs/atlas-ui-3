@@ -2005,3 +2005,19 @@ class TestChatServiceFailedTurnPersistence:
                 )
         contents = [m["content"] for m in repo.saved[-1]["messages"]]
         assert contents.count(FAILED_TURN_CONTENT) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_failing_save_does_not_mask_the_model_error(self):
+        """The model error is what the transport turns into the run's
+        `failed/rate_limit` status; a store failure while saving the turn
+        must not replace it."""
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+
+        def broken_save(**_kwargs):
+            raise RuntimeError("store is down")
+
+        repo.save_conversation = broken_save
+        # _run asserts the RateLimitError (not the RuntimeError) propagates.
+        await self._run(service, uuid4(), RateLimitError("slow down"))

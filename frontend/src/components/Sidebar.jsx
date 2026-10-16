@@ -292,10 +292,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   }, [activeConversationId, newChatCount])
 
   const handleLoadConversation = useCallback(async (conv) => {
-    // An optimistic row is not openable, so clicking it changes nothing --
-    // including an open already under way.
     if (conv._optimistic) return
-    const seq = ++loadSeqRef.current
     // Don't reload the conversation we're already viewing
     if (activeConversationId && conv.id === activeConversationId) return
     const level = { complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels }
@@ -306,6 +303,10 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       toast.error(refusal)
       return
     }
+    // Counted only for a click that goes on to open something: an optimistic
+    // row, the conversation already on screen, or a refused row changes
+    // nothing, so it must not cancel an open already under way either.
+    const seq = ++loadSeqRef.current
     const fullConv = await history.loadConversation(conv.id, { complianceLevel: activeComplianceFilter ?? '' })
     if (seq !== loadSeqRef.current) return
     if (fullConv?.classificationRefused) {
