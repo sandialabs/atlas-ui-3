@@ -12,7 +12,7 @@ development for asking Atlas questions about Atlas itself.
 
 | Tool | Purpose |
 |------|---------|
-| `search_docs(query, limit=8, include_archive=False)` | Rank Markdown pages by keyword overlap with the query. Title, heading, and file-path matches outweigh body matches, and pages covering more distinct query words rank higher. Common stopwords ("how", "do", "the", ...) are ignored. Each match returns `path`, `title`, `score`, `matched_terms`, and up to three line-numbered `snippets`. |
+| `search_docs(query, limit=8, include_archive=False)` | Rank Markdown pages by keyword overlap with the query. Title, heading, and file-path matches outweigh body matches, and pages covering more distinct query words rank higher. Common stopwords ("how", "do", "the", ...) are ignored, and hyphenated words and filenames are split, so `whitelist` matches `domain-whitelist.md`. Each match returns `path`, `title`, `score`, `matched_terms`, and up to three line-numbered `snippets`. |
 | `read_doc(path, start_line=1, max_lines=200)` | Return a page, or a line range of it (max 400 lines per call), with `total_lines` and a `truncated` flag so the model can page through long docs. |
 | `list_docs(section=None, include_archive=False)` | List pages with titles, optionally limited to one top-level folder such as `admin` or `developer`. |
 
@@ -46,8 +46,10 @@ Then reload MCP config (`POST /admin/mcp/reload`) or restart the backend.
 ## Pointing at a different folder
 
 By default the server reads `<repo>/docs`, resolved from its own file
-location, which works from a source checkout. When Atlas is installed as a
-package, or to index another Markdown tree, pass `ATLAS_DOCS_ROOT` through the
+location, which works from a source checkout. A package install has no repo
+docs folder, so without an override every tool returns a "Docs folder not
+found" error rather than indexing unrelated files. To use it there, or to
+index another Markdown tree, pass `ATLAS_DOCS_ROOT` through the
 server's `env` block (stdio servers do not inherit the backend environment;
 see [MCP Server Configuration](../admin/mcp-servers.md#stdio-environment-isolation)):
 
@@ -60,6 +62,8 @@ see [MCP Server Configuration](../admin/mcp-servers.md#stdio-environment-isolati
 - Read-only: no tool writes to disk.
 - Paths are resolved and must stay inside the docs root; `..` traversal and
   symlinks that point outside it are rejected, and only `.md` files are read.
+- Tool output uses paths relative to the docs root and never exposes the
+  absolute server path.
 - Search is a full scan per call. That is fine for a docs folder of a few
   hundred pages; a large corpus should use a real index or the RAG
   integration instead.

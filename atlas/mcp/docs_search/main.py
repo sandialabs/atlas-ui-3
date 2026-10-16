@@ -28,7 +28,10 @@ from atlas.mcp_shared.server_factory import create_stdio_server
 
 mcp = create_stdio_server("Docs Search")
 
-DEFAULT_DOCS_ROOT = Path(__file__).resolve().parents[3] / "docs"
+# <repo>/atlas/mcp/docs_search/main.py -> <repo>. Only trusted when it looks
+# like a source checkout; in a package install this is site-packages.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_DOCS_ROOT = _REPO_ROOT / "docs"
 DOC_SUFFIX = ".md"
 # docs/archive holds shipped/abandoned plans and is excluded from the AI doc
 # bundle; skip it by default so stale designs do not outrank current docs.
@@ -41,7 +44,8 @@ TITLE_WEIGHT = 5
 HEADING_WEIGHT = 3
 PATH_WEIGHT = 2
 
-_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_\-]*")
+# Hyphens split tokens so "domain-whitelist" matches "whitelist".
+_TOKEN_RE = re.compile(r"[a-z0-9_]+")
 # Common words dropped from queries so "how do I configure X" ranks on X.
 _STOPWORDS = frozenset(
     "a an and are as at be by can do does for from how i in is it me my of on "
@@ -49,10 +53,23 @@ _STOPWORDS = frozenset(
 )
 
 
-def _docs_root() -> Path:
-    """Resolve the docs root, honoring ATLAS_DOCS_ROOT when set."""
+def _docs_root() -> Optional[Path]:
+    """Resolve the docs root, honoring ATLAS_DOCS_ROOT when set.
+
+    Returns None when no usable docs folder exists, including a package
+    install where the default would point into site-packages.
+    """
     override = os.environ.get("ATLAS_DOCS_ROOT", "").strip()
-    return Path(override).expanduser().resolve() if override else DEFAULT_DOCS_ROOT
+    if override:
+        root = Path(override).expanduser().resolve()
+    elif (_REPO_ROOT / "pyproject.toml").is_file():
+        root = DEFAULT_DOCS_ROOT
+    else:
+        return None
+    return root if root.is_dir() else None
+
+
+_ROOT_ERROR = {"results": {"error": "Docs folder not found. Set ATLAS_DOCS_ROOT in the server's env block."}}
 
 
 def _tokenize(text: str) -> List[str]:
@@ -98,7 +115,7 @@ def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, A
     """Score a document against query terms and collect matching line numbers."""
     title = _doc_title(lines, rel_path)
     title_tokens = set(_tokenize(title))
-    path_tokens = set(_tokenize(rel_path.replace("/", " ")))
+    path_tokens = set(_tokenize(rel_path.removesuffix(DOC_SUFFIX)))
     score = 0
     matched_terms = set()
     hit_lines: List[int] = []
@@ -180,8 +197,8 @@ def search_docs(query: str, limit: int = 8, include_archive: bool = False) -> Di
         return {"results": {"error": "Query must contain at least one letter or digit"}}
 
     root = _docs_root()
-    if not root.is_dir():
-        return {"results": {"error": f"Docs folder not found: {root}. Set ATLAS_DOCS_ROOT."}}
+    if root is None:
+        return _ROOT_ERROR
 
     limit = max(1, min(int(limit), MAX_RESULTS))
     matches = []
@@ -233,6 +250,8 @@ def read_doc(path: str, start_line: int = 1, max_lines: int = 200) -> Dict[str, 
         non-Markdown files.
     """
     root = _docs_root()
+    if root is None:
+        return _ROOT_ERROR
     try:
         doc_path = _safe_doc_path(root, path)
     except (PermissionError, ValueError) as e:
@@ -240,9 +259,14 @@ def read_doc(path: str, start_line: int = 1, max_lines: int = 200) -> Dict[str, 
     if not doc_path.is_file():
         return {"results": {"error": f"Document not found: {path}"}}
 
-    lines = doc_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    try:
+        lines = doc_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        return {"results": {"error": f"Error reading document: {e}"}}
     total = len(lines)
     start = max(1, int(start_line))
+    if total and start > total:
+        return {"results": {"error": f"start_line {start} is past the end of {path} ({total} lines)"}}
     count = max(1, min(int(max_lines), MAX_READ_LINES))
     end = min(total, start + count - 1)
     return {
@@ -269,12 +293,12 @@ def list_docs(section: Optional[str] = None, include_archive: bool = False) -> D
         include_archive: Include docs/archive pages. Default False.
 
     Returns:
-        Dictionary with "results" containing docs_root, count, and documents
+        Dictionary with "results" containing count and documents
         (each with path and title).
     """
     root = _docs_root()
-    if not root.is_dir():
-        return {"results": {"error": f"Docs folder not found: {root}. Set ATLAS_DOCS_ROOT."}}
+    if root is None:
+        return _ROOT_ERROR
 
     section_name = (section or "").strip("/")
     if section_name == ARCHIVE_DIR:
@@ -291,7 +315,7 @@ def list_docs(section: Optional[str] = None, include_archive: bool = False) -> D
             continue
         documents.append({"path": rel.as_posix(), "title": _doc_title(head, rel.name)})
 
-    return {"results": {"docs_root": str(root), "count": len(documents), "documents": documents}}
+    return {"results": {"count": len(documents), "documents": documents}}
 
 
 if __name__ == "__main__":

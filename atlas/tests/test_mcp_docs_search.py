@@ -100,10 +100,30 @@ def test_search_ignores_stopwords(monkeypatch, docs):
     assert "error" not in ds.search_docs("how to")["results"]
 
 
-def test_search_missing_docs_root(monkeypatch, tmp_path):
+def test_search_splits_hyphenated_words_and_paths(monkeypatch, docs):
+    (docs / "admin" / "domain-whitelist.md").write_text("# Allowed Hosts\n\nUse a domain-whitelist.\n", encoding="utf-8")
+    ds = _load_module(monkeypatch)
+    top = ds.search_docs("whitelist")["results"]["matches"][0]
+    assert top["path"] == "admin/domain-whitelist.md"
+    # The hyphenated filename now contributes "servers" as a path token.
+    paths = [m["path"] for m in ds.search_docs("servers")["results"]["matches"]]
+    assert paths[0] == "admin/mcp-servers.md"
+
+
+def test_missing_docs_root_errors_for_every_tool(monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_DOCS_ROOT", str(tmp_path / "nope"))
     ds = _load_module(monkeypatch)
-    assert "not found" in ds.search_docs("mcp")["results"]["error"].lower()
+    for result in (ds.search_docs("mcp"), ds.read_doc("README.md"), ds.list_docs()):
+        assert "atlas_docs_root" in result["results"]["error"].lower()
+
+
+def test_packaged_install_without_override_reports_missing_root(monkeypatch, tmp_path):
+    monkeypatch.delenv("ATLAS_DOCS_ROOT", raising=False)
+    ds = _load_module(monkeypatch)
+    # Simulate site-packages: no pyproject.toml beside the would-be docs folder.
+    monkeypatch.setattr(ds, "_REPO_ROOT", tmp_path)
+    (tmp_path / "docs").mkdir()
+    assert "atlas_docs_root" in ds.list_docs()["results"]["error"].lower()
 
 
 # --- read_doc --------------------------------------------------------------
@@ -119,6 +139,9 @@ def test_read_doc_full_and_range(monkeypatch, docs):
     part = ds.read_doc("admin/mcp-servers.md", start_line=5, max_lines=1)["results"]
     assert part["content"] == "## Authentication"
     assert part["truncated"] is True
+
+    past_end = ds.read_doc("admin/mcp-servers.md", start_line=999)["results"]
+    assert "past the end" in past_end["error"]
 
 
 @pytest.mark.parametrize(
