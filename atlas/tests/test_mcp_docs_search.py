@@ -199,6 +199,19 @@ def test_iter_docs_skips_bad_symlinks_and_unreadable_dirs(monkeypatch, docs):
         locked.chmod(0o755)
 
 
+def test_unresolvable_paths_never_leak_root(monkeypatch, docs):
+    try:
+        os.symlink(docs / "admin" / "cycle.md", docs / "admin" / "cycle.md")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    ds = _load_module(monkeypatch)
+    assert ds.list_docs()["results"]["count"] == 3
+    assert "error" not in ds.search_docs("mcp")["results"]
+    for bad in ("admin/cycle.md", "x" * 300 + ".md"):
+        err = ds.read_doc(bad)["results"]["error"]
+        assert str(docs) not in err
+
+
 def test_titles_agree_across_tools(monkeypatch, docs):
     body = "intro\n" * 30 + "# Late Title\n"
     (docs / "developer" / "late.md").write_text(body, encoding="utf-8")

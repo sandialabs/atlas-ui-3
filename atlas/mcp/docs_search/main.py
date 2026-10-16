@@ -103,7 +103,12 @@ def _tokenize(text: str) -> List[str]:
 
 def _safe_doc_path(root: Path, path: str) -> Path:
     """Resolve ``path`` under ``root`` and reject anything that escapes it."""
-    candidate = (root / path.lstrip("/")).resolve()
+    try:
+        # RuntimeError: symlink loop (Python < 3.13); OSError: e.g. name too
+        # long. Both messages carry the absolute path, so never echo them.
+        candidate = (root / path.lstrip("/")).resolve()
+    except (OSError, RuntimeError):
+        raise ValueError(f"Cannot resolve document path: '{path}'")
     try:
         candidate.relative_to(root)
     except ValueError:
@@ -336,7 +341,11 @@ def read_doc(path: str, start_line: int = 1, max_lines: int = 200) -> Dict[str, 
         doc_path = _safe_doc_path(root, path)
     except (PermissionError, ValueError) as e:
         return {"results": {"error": str(e)}}
-    if not doc_path.is_file():
+    try:
+        exists = doc_path.is_file()
+    except OSError:
+        exists = False
+    if not exists:
         return {"results": {"error": f"Document not found: {path}"}}
 
     try:
