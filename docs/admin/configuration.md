@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-08-21
+Last updated: 2026-10-15
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -34,7 +34,7 @@ Key settings in the `.env` file include:
 *   **API Keys**: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.
 *   **Authentication Header**: `AUTH_USER_HEADER` configures the HTTP header name used to extract the authenticated username from your reverse proxy (default: `X-User-Email`).
 *   **Feature Flags**: Enable or disable major features like `FEATURE_AGENT_MODE_AVAILABLE`.
-*   **Branding Flags**: Control frontend branding such as `VITE_APP_NAME` and the optional `VITE_FEATURE_POWERED_BY_ATLAS` badge on the welcome screen.
+*   **Branding Flags**: Control frontend branding such as `VITE_APP_NAME`, the optional `VITE_FEATURE_POWERED_BY_ATLAS` badge on the welcome screen, and `VITE_WELCOME_MESSAGE`, which replaces the instructional text under the welcome-screen logo (see [Welcome Screen Message](#welcome-screen-message)).
 *   **S3 Connection**: Configure the connection to your S3-compatible storage. For local testing, you can set `USE_MOCK_S3=true` to use an in-memory mock instead of a real S3 bucket. **This mock must never be used in production.**
 *   **Log Level**: The `LOG_LEVEL` variable controls logging verbosity and whether sensitive data (user input/output) is logged. Set to `INFO` for production to avoid logging sensitive content, or `DEBUG` for development/testing. See [Logging and Monitoring](logging-monitoring.md) for details.
 *   **Log Directory**: The `APP_LOG_DIR` variable points to the folder where the application log file (`app.jsonl`) will be stored. This path must be updated to a valid directory in your deployment environment.
@@ -188,6 +188,19 @@ LLM_RETRY_MAX_WAIT_SECONDS=300
   the defaults and a 1s base delay, five retries wait about 31s in total, well under the cap.
 - **Reverse proxies**: same consideration as `atlas_sleep` above -- a turn waiting out a backoff
   sends nothing over its WebSocket; keep proxy idle timeouts longer than the cap you configure.
+
+### Welcome Screen Message
+
+The paragraph under the logo on the empty chat screen can be replaced per deployment with the `VITE_WELCOME_MESSAGE` frontend build-time variable (issue #1072):
+
+```bash
+VITE_WELCOME_MESSAGE="Choose a model to begin. Contact your administrator for help."
+```
+
+*   **Build-time only.** Like the other `VITE_*` settings, the value is compiled into the frontend bundle when `npm run build` runs; changing it requires a rebuild. There is no backend setting or runtime API. For container images, pass it as a build argument: `docker build --build-arg VITE_WELCOME_MESSAGE="..." .`
+*   **Default.** When the variable is unset, empty, or whitespace-only, the original text is shown unchanged: "Select a model and start chatting. To explore available tools, click the Wrench icon or to view files, click the Folder icon in the top right."
+*   **Plain text.** The value is rendered as text, not HTML; any markup in it is displayed literally. Wrapping and styling match the default message.
+*   The resolved value is printed with the other branding variables in the `[atlas-ui-3] Vite build-time environment` log at the start of a frontend build.
 
 ## System Prompt Time Injection (issue #823)
 

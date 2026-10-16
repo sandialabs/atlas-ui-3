@@ -1,11 +1,13 @@
 import { useChat } from '../contexts/ChatContext'
 import AnimatedLogo from './AnimatedLogo'
+import { resolveWelcomeMessage } from '../utils/welcomeMessage'
 
 const animatedLogoEnabled =
   import.meta.env.VITE_FEATURE_ANIMATED_LOGO === 'true'
 
 const WelcomeScreen = () => {
   const { appName } = useChat()
+  const welcomeMessage = resolveWelcomeMessage(import.meta.env.VITE_WELCOME_MESSAGE)
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 min-h-0 overflow-hidden p-4 sm:p-8 text-center">
@@ -24,8 +26,8 @@ const WelcomeScreen = () => {
       )}
 
       <div className="max-w-md flex-shrink-0 hidden [@media(min-height:500px)]:block">
-        <p className="text-gray-400 text-lg">
-          Select a model and start chatting. To explore available tools, click the Wrench icon or to view files, click the Folder icon in the top right.
+        <p className="text-gray-400 text-lg" data-testid="welcome-message">
+          {welcomeMessage}
         </p>
       </div>
     </div>

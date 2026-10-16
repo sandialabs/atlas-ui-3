@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+const DEFAULT_WELCOME_MESSAGE =
+  'Select a model and start chatting. To explore available tools, click the Wrench icon or to view files, click the Folder icon in the top right.';
+
 test.describe('MCP Marketplace E2E Tests', () => {
   
   test.beforeEach(async ({ page }) => {
@@ -18,8 +21,11 @@ test.describe('MCP Marketplace E2E Tests', () => {
     // Verify main heading is present
     await expect(page.locator('h1:has-text("Chat UI")')).toBeVisible();
     
-    // Verify welcome message is displayed
-    await expect(page.locator('text=Select a model and start chatting')).toBeVisible();
+    // Verify welcome message is displayed. A frontend built with
+    // VITE_WELCOME_MESSAGE shows that text instead of the default (issue #1072);
+    // export the same value when running this spec against such a build.
+    const expectedWelcome = (process.env.VITE_WELCOME_MESSAGE || '').trim() || DEFAULT_WELCOME_MESSAGE;
+    await expect(page.getByTestId('welcome-message')).toHaveText(expectedWelcome);
   });
 
   test('should be able to toggle tools panel', async ({ page }) => {
