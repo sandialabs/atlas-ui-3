@@ -2015,9 +2015,13 @@ class TestChatServiceFailedTurnPersistence:
 
         service, repo = self._service()
 
-        def broken_save(**_kwargs):
+        attempts = []
+
+        def broken_save(**kwargs):
+            attempts.append(kwargs)
             raise RuntimeError("store is down")
 
         repo.save_conversation = broken_save
         # _run asserts the RateLimitError (not the RuntimeError) propagates.
         await self._run(service, uuid4(), RateLimitError("slow down"))
+        assert attempts, "the failed turn's save must actually have been attempted"

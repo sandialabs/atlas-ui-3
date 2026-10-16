@@ -140,14 +140,13 @@ describe('Sidebar conversation open race (#1014)', () => {
     expect(h.chat.loadSavedConversation.mock.calls[0][0].id).toBe('conv-x')
   })
 
-  it('clicking the conversation already on screen does not cancel a pending open', async () => {
+  it('clicking back to the conversation on screen cancels a pending open', async () => {
     render(<Sidebar />)
     fireEvent.click(screen.getByText('Conversation X'))
     fireEvent.click(screen.getByText('Conversation On Screen'))
 
     await act(async () => { pending['conv-x'].resolve(full('conv-x')) })
-    expect(h.chat.loadSavedConversation).toHaveBeenCalledTimes(1)
-    expect(h.chat.loadSavedConversation.mock.calls[0][0].id).toBe('conv-x')
+    expect(h.chat.loadSavedConversation).not.toHaveBeenCalled()
   })
 
   it('a single click still opens its conversation', async () => {
