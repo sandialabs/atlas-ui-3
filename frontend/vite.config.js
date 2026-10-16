@@ -24,6 +24,7 @@ const logViteEnv = () => {
     VITE_FEATURE_POWERED_BY_ATLAS: process.env.VITE_FEATURE_POWERED_BY_ATLAS,
     VITE_FEATURE_ANIMATED_LOGO: process.env.VITE_FEATURE_ANIMATED_LOGO,
     VITE_FEATURE_RAG_CITATIONS: process.env.VITE_FEATURE_RAG_CITATIONS,
+    VITE_WELCOME_MESSAGE: process.env.VITE_WELCOME_MESSAGE,
   }
 
   console.log('\n[atlas-ui-3] Vite build-time environment:')
