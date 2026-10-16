@@ -212,6 +212,11 @@ export const ChatProvider = ({ children }) => {
 	const finishJoinedRunRef = useRef(finishJoinedRun)
 	finishJoinedRunRef.current = finishJoinedRun
 	const [isSynthesizing, setIsSynthesizing] = useState(false)
+	// Bumped by every New Chat, including one pressed while the view already
+	// shows an unsaved chat (the active id stays null, so nothing else
+	// changes). The history list uses it to drop a conversation open that New
+	// Chat superseded (#1014).
+	const [newChatCount, setNewChatCount] = useState(0)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
@@ -1239,6 +1244,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// A second New Chat supersedes any offer still on screen.
 		invalidateUndoOffer()
+		setNewChatCount(n => n + 1)
 
 		// If generation is in progress, tell the backend to cancel it *before* we
 		// ask for a new session. Otherwise the in-flight task keeps streaming
@@ -2269,6 +2275,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		rewindAndResubmit,
 		sendCaptureCorrection,
 		clearChat,
+		newChatCount,
 		stopAgent,
 		stopStreaming,
 		isStreaming,

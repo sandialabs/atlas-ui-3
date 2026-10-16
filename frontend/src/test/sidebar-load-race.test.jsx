@@ -56,6 +56,7 @@ describe('Sidebar conversation open race (#1014)', () => {
       messages: [],
       saveMode: 'server',
       clearChat: vi.fn(),
+      newChatCount: 0,
       runsByConversation: {},
       backgroundSaves: 0,
       runEndedConversationId: null,
@@ -106,6 +107,36 @@ describe('Sidebar conversation open race (#1014)', () => {
 
     await act(async () => { pending['conv-x'].resolve(full('conv-x')) })
     expect(h.chat.loadSavedConversation).not.toHaveBeenCalled()
+  })
+
+  it('New Chat pressed from a chat with no id yet still cancels a pending open', async () => {
+    // Review follow-up: the active id is null before and after, so only the
+    // New Chat counter changes.
+    h.chat = { ...h.chat, activeConversationId: null }
+    const { rerender } = render(<Sidebar />)
+    fireEvent.click(screen.getByText('Conversation X'))
+
+    h.chat = { ...h.chat, newChatCount: h.chat.newChatCount + 1 }
+    rerender(<Sidebar />)
+
+    await act(async () => { pending['conv-x'].resolve(full('conv-x')) })
+    expect(h.chat.loadSavedConversation).not.toHaveBeenCalled()
+  })
+
+  it('clicking an optimistic (still saving) row does not cancel a pending open', async () => {
+    // The unsaved chat on screen is listed as an optimistic "Saving..." row.
+    h.chat = {
+      ...h.chat,
+      activeConversationId: null,
+      messages: [{ role: 'user', content: 'unsaved prompt' }],
+    }
+    render(<Sidebar />)
+    fireEvent.click(screen.getByText('Conversation X'))
+    fireEvent.click(screen.getByText('unsaved prompt'))
+
+    await act(async () => { pending['conv-x'].resolve(full('conv-x')) })
+    expect(h.chat.loadSavedConversation).toHaveBeenCalledTimes(1)
+    expect(h.chat.loadSavedConversation.mock.calls[0][0].id).toBe('conv-x')
   })
 
   it('a single click still opens its conversation', async () => {

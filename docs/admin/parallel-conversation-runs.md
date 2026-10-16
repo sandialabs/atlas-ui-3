@@ -100,6 +100,13 @@ in a new chat left nothing in the store, and its conversation disappeared when
 the run ended. Refusals that happen before the turn starts (validation,
 authorization, classification) are still never saved.
 
+Every model-call failure is saved this way, not only transient ones. That
+includes a context-window overflow and a request the provider rejected,
+content refusals among them. Continuing such a conversation as-is will usually
+fail the same way, so rewind or edit the prompt before sending again.
+Discarding the turn instead would lose the tool work of a background run
+nobody was watching.
+
 `waiting_for_input` means the run is paused on a tool approval or an MCP
 elicitation. It is the state that drives the amber "Needs approval" marker in
 the conversation list.

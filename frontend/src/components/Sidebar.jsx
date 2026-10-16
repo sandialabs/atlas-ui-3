@@ -77,6 +77,7 @@ export function RunIndicator({ run }) {
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
     features, activeConversationId, loadSavedConversation, refreshJoinedConversation, messages, saveMode, clearChat,
+    newChatCount,
     // Parallel conversation runs (issue #884): which conversations are still
     // working, including ones the user is not currently viewing.
     runsByConversation,
@@ -283,14 +284,18 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   // last and yank the view back to a conversation the user already left --
   // in the parallel-runs flow, where users hop between running conversations,
   // that reads as the app switching on its own.
+  // `newChatCount` covers New Chat pressed from a chat that has no id yet,
+  // where the active id does not change.
   const loadSeqRef = useRef(0)
   useEffect(() => {
     if (!activeConversationId) loadSeqRef.current += 1
-  }, [activeConversationId])
+  }, [activeConversationId, newChatCount])
 
   const handleLoadConversation = useCallback(async (conv) => {
-    const seq = ++loadSeqRef.current
+    // An optimistic row is not openable, so clicking it changes nothing --
+    // including an open already under way.
     if (conv._optimistic) return
+    const seq = ++loadSeqRef.current
     // Don't reload the conversation we're already viewing
     if (activeConversationId && conv.id === activeConversationId) return
     const level = { complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels }
