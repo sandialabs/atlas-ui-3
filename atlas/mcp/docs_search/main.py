@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,6 +45,9 @@ TITLE_WEIGHT = 5
 HEADING_WEIGHT = 3
 PATH_WEIGHT = 2
 TERM_CAP = 5
+# Bound per-call work: every term is checked against every line of every doc.
+MAX_QUERY_CHARS = 500
+MAX_QUERY_TERMS = 16
 # Body term frequency saturates BM25-style: BODY_MAX * tf / (tf + BODY_HALF).
 # One hit scores 1.0 and no amount of repetition reaches BODY_MAX, so a page
 # matching two query words beats a page repeating one.
@@ -52,7 +56,9 @@ BODY_HALF = 2.0
 
 # Hyphens split tokens so "domain-whitelist" matches "whitelist".
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
-_HEADING_RE = re.compile(r"#{1,6}\s")
+# CommonMark ATX heading: up to 3 spaces of indent; 4+ is an indented code block.
+_HEADING_RE = re.compile(r" {0,3}#{1,6}\s")
+_FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
 # Common words dropped from queries so "how do I configure X" ranks on X.
 _STOPWORDS = frozenset(
     "a an and are as at be by can do does for from how i in is it me my of on "
@@ -126,21 +132,27 @@ def _heading_flags(lines: List[str]) -> List[bool]:
     """Mark ATX headings ("# ".."###### "), ignoring lines inside fenced
     code blocks so shell comments in examples are not treated as headings."""
     flags = []
-    in_fence = False
+    fence = ""  # opening marker of the current fence, "" when outside one
     for line in lines:
-        stripped = line.lstrip()
-        if stripped.startswith(("```", "~~~")):
-            in_fence = not in_fence
+        m = _FENCE_RE.match(line)
+        if m:
+            marker = m.group(1)
+            if not fence:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and not line[m.end():].strip():
+                fence = ""
             flags.append(False)
             continue
-        flags.append(not in_fence and bool(_HEADING_RE.match(stripped)))
+        flags.append(not fence and bool(_HEADING_RE.match(line)))
     return flags
 
 
 def _doc_title(lines: List[str], fallback: str) -> str:
+    """First level-1 heading outside code fences, else ``fallback``."""
     for line, is_heading in zip(lines, _heading_flags(lines)):
-        if is_heading and line.lstrip().startswith("# "):
-            return line.lstrip()[2:].strip()
+        stripped = line.lstrip()
+        if is_heading and stripped.startswith("# "):
+            return stripped[2:].strip()
     return fallback
 
 
@@ -162,9 +174,10 @@ def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, A
         tokens = _tokenize(line)
         if not tokens:
             continue
+        line_counts = Counter(tokens)
         distinct = 0
         for term in terms:
-            count = tokens.count(term)
+            count = line_counts.get(term, 0)
             if count:
                 distinct += 1
                 body_counts[term] += count
@@ -224,6 +237,8 @@ def search_docs(query: str, limit: int = 8, include_archive: bool = False) -> Di
 
     Args:
         query: Free-text search terms, e.g. "mcp server authentication jwt".
+            Only the first 500 characters and 16 distinct non-stopword
+            terms are used.
         limit: Maximum number of results to return (1-25, default 8).
         include_archive: Also search docs/archive (historical plans). Default False.
 
@@ -233,9 +248,13 @@ def search_docs(query: str, limit: int = 8, include_archive: bool = False) -> Di
         docs folder), title, score, matched_terms, and up to three snippets
         containing a 1-based line number and surrounding text.
     """
-    tokens = list(dict.fromkeys(_tokenize(query)))
+    # Map each folded term back to the word the caller typed, for display.
+    original: Dict[str, str] = {}
+    for word in _TOKEN_RE.findall(query[:MAX_QUERY_CHARS].lower()):
+        original.setdefault(_fold_plural(word), word)
+    tokens = list(original)
     # Keep stopwords only when the query is nothing but stopwords.
-    terms = [t for t in tokens if t not in _STOPWORDS] or tokens
+    terms = ([t for t in tokens if t not in _STOPWORDS] or tokens)[:MAX_QUERY_TERMS]
     if not terms:
         return {"results": {"error": "Query must contain at least one letter or digit"}}
 
@@ -258,7 +277,7 @@ def search_docs(query: str, limit: int = 8, include_archive: bool = False) -> Di
             "path": rel_path,
             "title": scored["title"],
             "score": scored["score"],
-            "matched_terms": scored["matched_terms"],
+            "matched_terms": sorted(original[t] for t in scored["matched_terms"]),
             "snippets": _snippets(lines, scored["hit_lines"]),
         })
 
@@ -316,7 +335,7 @@ def read_doc(path: str, start_line: int = 1, max_lines: int = 200) -> Dict[str, 
     return {
         "results": {
             "path": doc_path.relative_to(root).as_posix(),
-            "title": _doc_title(lines, doc_path.name),
+            "title": _doc_title(lines, doc_path.relative_to(root).as_posix()),
             "start_line": start,
             "end_line": end,
             "total_lines": total,
@@ -353,11 +372,11 @@ def list_docs(section: Optional[str] = None, include_archive: bool = False) -> D
         if section_name and (len(rel.parts) < 2 or rel.parts[0] != section_name):
             continue
         try:
-            with path.open(encoding="utf-8", errors="replace") as f:
-                head = [next(f, "") for _ in range(20)]
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             continue
-        documents.append({"path": rel.as_posix(), "title": _doc_title(head, rel.name)})
+        # Same title rule as search_docs and read_doc, so tools agree.
+        documents.append({"path": rel.as_posix(), "title": _doc_title(lines, rel.as_posix())})
 
     return {"results": {"count": len(documents), "documents": documents}}
 

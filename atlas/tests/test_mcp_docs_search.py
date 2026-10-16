@@ -137,6 +137,44 @@ def test_fenced_code_comments_are_not_headings(monkeypatch, docs):
     assert match["score"] == 1  # body hit only, no heading boost
 
 
+def test_fence_rules_and_indented_hashes(monkeypatch, docs):
+    # A ~~~ line inside a ``` fence does not close it; a 4-space "# " is code.
+    (docs / "developer" / "fences.md").write_text(
+        "````md\n~~~\n# not a title\n````\n\n    # indented code\n\n# Real\n",
+        encoding="utf-8",
+    )
+    ds = _load_module(monkeypatch)
+    assert ds.read_doc("developer/fences.md")["results"]["title"] == "Real"
+    flags = ds._heading_flags(
+        (docs / "developer" / "fences.md").read_text(encoding="utf-8").splitlines()
+    )
+    assert [i for i, f in enumerate(flags) if f] == [7]
+
+
+def test_titles_agree_across_tools(monkeypatch, docs):
+    body = "intro\n" * 30 + "# Late Title\n"
+    (docs / "developer" / "late.md").write_text(body, encoding="utf-8")
+    (docs / "developer" / "untitled.md").write_text("no heading lateword\n", encoding="utf-8")
+    ds = _load_module(monkeypatch)
+    listed = {d["path"]: d["title"] for d in ds.list_docs()["results"]["documents"]}
+    for path in ("developer/late.md", "developer/untitled.md"):
+        assert listed[path] == ds.read_doc(path)["results"]["title"]
+    assert listed["developer/late.md"] == "Late Title"
+    assert listed["developer/untitled.md"] == "developer/untitled.md"
+    hit = ds.search_docs("lateword")["results"]["matches"][0]
+    assert hit["title"] == "developer/untitled.md"
+
+
+def test_query_limits_and_original_words(monkeypatch, docs):
+    ds = _load_module(monkeypatch)
+    res = ds.search_docs("servers")["results"]
+    assert res["matches"][0]["matched_terms"] == ["servers"]  # not the folded "server"
+    # Huge queries are truncated to bounded work instead of scanning every word.
+    words = " ".join(f"word{i}" for i in range(1000))
+    assert ds.search_docs(words + " mcp")["results"]["matches"] == []
+    assert ds.search_docs("mcp " + words)["results"]["matches"]
+
+
 def test_read_doc_os_error_hides_absolute_path(monkeypatch, docs):
     ds = _load_module(monkeypatch)
 
