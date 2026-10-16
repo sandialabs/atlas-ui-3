@@ -1,6 +1,6 @@
 # MCP Server Configuration
 
-Last updated: 2026-10-07
+Last updated: 2026-10-16
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
@@ -87,6 +87,8 @@ The system can connect to different types of MCP servers:
 *   **Standard I/O (`stdio`)**: Servers that are started as a subprocess and communicate over `stdin` and `stdout`.
 *   **HTTP (`http`)**: Servers that expose a standard HTTP endpoint.
 *   **Server-Sent Events (`sse`)**: Servers that stream responses over an HTTP connection.
+
+For a minimal read-only `stdio` example, see the [Docs Search MCP Example](../developer/docs-search-mcp.md), which searches and reads the repository's `docs/` folder.
 
 ## Hot Reload Note
 
