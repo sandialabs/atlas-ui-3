@@ -88,6 +88,27 @@ queued -> running -> waiting_for_input -> running -> completed
 A run stopped by the wall-clock limit is recorded as `failed`, not `cancelled`:
 `cancelled` means a person stopped it.
 
+A run whose model call fails (rate limit, timeout, provider error) is recorded
+as `failed` with the error type (`rate_limit`, `timeout`, ...) as its `error`,
+and shows the red "Failed" marker in the history list. Each run's status comes
+from its own turn, even when the user started other runs on the same connection
+while it was working (issue #1014). The failed turn is saved like a stopped one:
+the prompt and every completed tool call are kept and the turn is closed with
+"[This turn ended with an error before it finished.]", so the conversation stays
+in the history list and can be reopened and retried. Before this, a failed run
+in a new chat left nothing in the store, and its conversation disappeared when
+the run ended. Refusals that happen before the turn starts (validation,
+authorization, classification) are still never saved, and neither is a failed
+edit-and-resubmit: the stored conversation keeps the turns the edit would have
+replaced, so a failure never deletes history.
+
+Every model-call failure is saved this way, not only transient ones. That
+includes a context-window overflow and a request the provider rejected,
+content refusals among them. Continuing such a conversation as-is will usually
+fail the same way, so rewind or edit the prompt before sending again.
+Discarding the turn instead would lose the tool work of a background run
+nobody was watching.
+
 `waiting_for_input` means the run is paused on a tool approval or an MCP
 elicitation. It is the state that drives the amber "Needs approval" marker in
 the conversation list.

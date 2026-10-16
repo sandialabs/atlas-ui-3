@@ -22,7 +22,11 @@ from ..events.agent_event_relay import AgentEventRelay
 from ..utilities import event_notifier
 from ..utilities.agent_digest import build_tool_digest
 from ..utilities.citation_publishing import attach_citations, publish_citations
-from ..utilities.interrupted_turn import INTERRUPTED_TURN_CONTENT
+from ..utilities.interrupted_turn import (
+    FAILED_TURN_CONTENT,
+    INTERRUPTED_TURN_CONTENT,
+    MODEL_FAILURE_ERRORS,
+)
 
 # Closing text for a turn that ended because the model's tool call could not be
 # parsed. Mirrors INTERRUPTED_TURN_CONTENT: the turn must not be saved without an
@@ -243,6 +247,23 @@ class AgentModeRunner:
                     else MALFORMED_TOOL_CALL_TURN_CONTENT_INVALID_JSON
                 ),
                 metadata={"agent_mode": True, "incomplete": True},
+                citation_register=agent_context.citation_register,
+            )
+            await publish_citations(self.event_publisher, agent_context.citation_register)
+            await self._publish_completion(steps=0)
+            raise
+        except MODEL_FAILURE_ERRORS:
+            # The model call failed (rate limit, timeout, provider error) and
+            # ChatService saves the turn (issue #1014). Close it here, as the
+            # paths above do, from this turn's own start: a steering message
+            # is a USER row mid-turn, so a close keyed on the last USER row
+            # would leave the tool calls made before it out of the digest and
+            # a retry could repeat them.
+            self._close_turn(
+                session,
+                turn_start_index,
+                content=FAILED_TURN_CONTENT,
+                metadata={"agent_mode": True, "interrupted": True, "failed": True},
                 citation_register=agent_context.citation_register,
             )
             await publish_citations(self.event_publisher, agent_context.citation_register)

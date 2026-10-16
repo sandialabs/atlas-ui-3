@@ -77,6 +77,7 @@ export function RunIndicator({ run }) {
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
     features, activeConversationId, loadSavedConversation, refreshJoinedConversation, messages, saveMode, clearChat,
+    newChatCount,
     // Parallel conversation runs (issue #884): which conversations are still
     // working, including ones the user is not currently viewing.
     runsByConversation,
@@ -277,10 +278,27 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     }, 300)
   }, [history])
 
+  // Every click on a row is the user's latest intent, and so is New Chat.
+  // Opening a conversation awaits a fetch; without this, a slow fetch for an
+  // earlier click (or one still out when New Chat was pressed) would resolve
+  // last and yank the view back to a conversation the user already left --
+  // in the parallel-runs flow, where users hop between running conversations,
+  // that reads as the app switching on its own.
+  // `newChatCount` covers New Chat pressed from a chat that has no id yet,
+  // where the active id does not change.
+  const loadSeqRef = useRef(0)
+  useEffect(() => {
+    if (!activeConversationId) loadSeqRef.current += 1
+  }, [activeConversationId, newChatCount])
+
   const handleLoadConversation = useCallback(async (conv) => {
     if (conv._optimistic) return
-    // Don't reload the conversation we're already viewing
-    if (activeConversationId && conv.id === activeConversationId) return
+    // Don't reload the conversation we're already viewing. Clicking it is
+    // still a choice to stay here, so it cancels an open under way.
+    if (activeConversationId && conv.id === activeConversationId) {
+      loadSeqRef.current += 1
+      return
+    }
     const level = { complianceEnabled: !!complianceEnabled, activeLevel: activeComplianceFilter, levels: complianceLevels }
     // Explain the refusal up front; the server applies the same rule on the
     // fetch, the restore and every turn whatever this check decides.
@@ -289,7 +307,11 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       toast.error(refusal)
       return
     }
+    // A refused or optimistic row cannot be opened, so clicking one leaves
+    // an open already under way alone.
+    const seq = ++loadSeqRef.current
     const fullConv = await history.loadConversation(conv.id, { complianceLevel: activeComplianceFilter ?? '' })
+    if (seq !== loadSeqRef.current) return
     if (fullConv?.classificationRefused) {
       toast.error(fullConv.message)
       return

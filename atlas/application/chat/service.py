@@ -41,7 +41,7 @@ from .preprocessors.message_builder import build_session_context
 # Import utilities
 from .utilities import error_handler, file_processor
 from .utilities.conversation_loader import load_messages_into_history
-from .utilities.interrupted_turn import close_open_turn
+from .utilities.interrupted_turn import MODEL_FAILURE_ERRORS, close_open_turn
 
 logger = logging.getLogger(__name__)
 
@@ -823,6 +823,36 @@ class ChatService:
                 raise
             except Exception as e:  # pragma: no cover - defensive
                 logger.error("Failed to commit cancelled turn: %s", e, exc_info=True)
+            raise
+        except MODEL_FAILURE_ERRORS:
+            # The model call failed mid-turn (rate limit, timeout, provider
+            # error). Like a cancel, commit what completed -- the prompt and
+            # every finished tool call -- before the error reaches the
+            # transport (issue #1014). A tracked run's session is discarded
+            # when the run ends, so without this a background run that failed
+            # left nothing behind: its conversation vanished from history
+            # together with the "Failed" marker that says what happened. Only
+            # model failures are committed: every admission check ran before
+            # this ``try``, and a refusal raised there must never be saved.
+            #
+            # A failed edit-and-resubmit is the exception: its rewind already
+            # cut the later turns from the session, and committing would delete
+            # them from the store with nothing to replace them. Leave the
+            # stored conversation as it was before the edit.
+            if self._turn_allows_shrink(session):
+                logger.info("Edited turn failed in the model call; keeping the stored conversation as it was")
+                raise
+            logger.info("Chat turn failed in the model call; committing completed work")
+            try:
+                close_open_turn(session.history, failed=True)
+                await self._commit_turn(
+                    session, session_id, user_email, model, update_callback,
+                    is_incognito=turn_is_incognito, save_floor=turn_save_floor,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # pragma: no cover - defensive
+                logger.error("Failed to commit failed turn: %s", e, exc_info=True)
             raise
         except DomainError:
             # Let domain-level errors (e.g., LLM / rate limit / validation) bubble up

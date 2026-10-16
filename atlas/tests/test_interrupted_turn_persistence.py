@@ -510,6 +510,73 @@ class TestStoppedAgentTurn:
         )
 
 
+class TestFailedAgentTurnAfterSteering:
+    """A model failure after a steering message keeps the earlier tool work
+    in the turn's digest (#1014 review).
+
+    A steering message is a USER row in the middle of the turn. The runner
+    closes a failed turn from its own start, as it does a stopped one, so the
+    service's fallback -- which only looks back to the last USER row -- never
+    gets the chance to drop the tool calls made before the steer.
+    """
+
+    def test_failed_turn_digest_covers_tools_before_the_steer(self):
+        from atlas.application.chat.utilities.interrupted_turn import FAILED_TURN_CONTENT
+        from atlas.domain.errors import RateLimitError
+
+        session, runner, publisher, _fake_tools = _agent_runner_harness()
+        runner.raise_on_stream_error = True
+
+        calls = {"n": 0}
+
+        def stream_with_tools(*args, **kwargs):
+            calls["n"] += 1
+
+            async def gen():
+                if calls["n"] == 1:
+                    from atlas.interfaces.llm import LLMResponse
+                    yield LLMResponse(
+                        content="I will calculate the sum.",
+                        tool_calls=[{"id": "tc1", "type": "function",
+                                     "function": {"name": "calc_add", "arguments": "{}"}}],
+                    )
+                    return
+                raise RateLimitError("slow down")
+            return gen()
+
+        runner.agent_loop_factory.llm.stream_with_tools = stream_with_tools
+
+        async def tools_then_steer(**kwargs):
+            cb = kwargs["update_callback"]
+            await cb({"type": "tool_start", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "server_name": "calc",
+                      "arguments": {"a": 1, "b": 2}})
+            await cb({"type": "tool_complete", "tool_call_id": "tc1",
+                      "tool_name": "calc_add", "success": True, "result": "3"})
+            # What _inject_steering leaves behind: a plain USER row mid-turn.
+            session.history.add_message(Message(role=MessageRole.USER, content="also add 4"))
+            result = MagicMock()
+            result.content = "3"
+            result.tool_call_id = "tc1"
+            return [result]
+
+        with pytest.raises(RateLimitError):
+            _run_agent(session, runner, tools_then_steer)
+
+        final = session.history.messages[-1]
+        assert final.role == MessageRole.ASSISTANT
+        assert final.content == FAILED_TURN_CONTENT
+        assert final.metadata.get("failed") is True
+        digest = final.metadata.get(AGENT_TOOL_DIGEST_KEY)
+        assert digest and "calc_add" in digest, (
+            "tool calls made before the steering message must stay visible to the retry"
+        )
+        assert any(
+            call.kwargs.get("update_type") == "agent_completion"
+            for call in publisher.publish_agent_update.call_args_list
+        )
+
+
 class TestStopWhileAToolIsRunning:
     """The common case: Stop is pressed *because* a tool is slow.
 
@@ -1736,3 +1803,225 @@ class TestChatServiceCancelPersistence:
                 )
 
         assert repo.saved == []
+
+
+class TestChatServiceFailedTurnPersistence:
+    """A turn whose model call fails is committed like a stopped one (#1014).
+
+    A tracked run's session is discarded when the run ends, so a background
+    run that died on a rate limit used to leave nothing in the store: its
+    conversation vanished from history along with the "Failed" marker.
+    """
+
+    @staticmethod
+    async def _run(service, session_id, error, **kwargs):
+        sessions = service._test_sessions
+        events = []
+
+        async def update_callback(message):
+            events.append(message)
+
+        async def fake_execute(**_kwargs):
+            session = sessions[session_id]
+            session.history.add_message(Message(role=MessageRole.USER, content="work on it"))
+            session.history.add_message(_tool_row("calc_add", {"a": 1}, "3"))
+            raise error
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            with pytest.raises(type(error)):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="work on it",
+                    model="test-model",
+                    user_email=config_manager.app_settings.test_user,
+                    update_callback=update_callback,
+                    **kwargs,
+                )
+        return events
+
+    def _service(self):
+        repo = _RecordingRepo()
+        service, sessions = _make_service(conversation_repository=repo)
+        service._test_sessions = sessions
+        return service, repo
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_turn_is_persisted_and_closed(self):
+        from atlas.application.chat.utilities.interrupted_turn import FAILED_TURN_CONTENT
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+        events = await self._run(service, uuid4(), RateLimitError("slow down"))
+
+        assert repo.saved, "a failed turn's completed work must be persisted"
+        saved = repo.saved[-1]["messages"]
+        assert [m.get("message_type") for m in saved].count("tool_call") == 1
+        assert saved[-1]["role"] == "assistant"
+        assert saved[-1]["content"] == FAILED_TURN_CONTENT
+        # Told apart from a user stop, which carries `interrupted` alone.
+        assert saved[-1]["metadata"].get("failed") is True
+        assert any(e.get("type") == "conversation_saved" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_provider_authentication_failure_is_persisted(self):
+        from atlas.domain.errors import LLMAuthenticationError
+
+        service, repo = self._service()
+        await self._run(service, uuid4(), LLMAuthenticationError("bad key"))
+        assert repo.saved
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_is_not_persisted(self):
+        """Only model failures are committed: a validation or authorization
+        error is a refusal, and a refused turn must leave nothing behind."""
+        from atlas.domain.errors import AuthorizationError, ValidationError
+
+        for error in (ValidationError("no"), AuthorizationError("no")):
+            service, repo = self._service()
+            await self._run(service, uuid4(), error)
+            assert repo.saved == [], type(error).__name__
+
+    @pytest.mark.asyncio
+    async def test_incognito_failed_turn_is_not_persisted(self):
+        from atlas.domain.errors import LLMTimeoutError
+
+        service, repo = self._service()
+        await self._run(service, uuid4(), LLMTimeoutError("late"), incognito=True)
+        assert repo.saved == []
+
+    @pytest.mark.asyncio
+    async def test_a_later_failed_turn_keeps_the_earlier_turns(self):
+        """Turn N of a saved conversation fails: the save carries the whole
+        history and is held to the no-shrink guard like any other turn."""
+        from atlas.application.chat.utilities.interrupted_turn import FAILED_TURN_CONTENT
+        from atlas.domain.errors import LLMTimeoutError
+
+        service, repo = self._service()
+        session_id = uuid4()
+        sessions = service._test_sessions
+
+        async def fake_execute(**_kwargs):
+            session = sessions[session_id]
+            session.history.add_message(Message(role=MessageRole.USER, content="turn one"))
+            session.history.add_message(Message(role=MessageRole.ASSISTANT, content="answer one"))
+            session.history.add_message(Message(role=MessageRole.USER, content="turn two"))
+            raise LLMTimeoutError("late")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            with pytest.raises(LLMTimeoutError):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="turn two",
+                    model="test-model",
+                    user_email=config_manager.app_settings.test_user,
+                )
+
+        saved = repo.saved[-1]
+        assert [m["content"] for m in saved["messages"]] == [
+            "turn one", "answer one", "turn two", FAILED_TURN_CONTENT,
+        ]
+        assert not saved.get("allow_shrink")
+
+    @pytest.mark.asyncio
+    async def test_context_window_and_bad_request_failures_are_persisted(self):
+        """Deliberately not limited to transient errors: a background run
+        that hits the context limit or a provider refusal would otherwise
+        vanish with its prompt and tool work. The saved turn is closed, so
+        the user can reopen it, rewind or edit, and continue."""
+        from atlas.domain.errors import ContextWindowExceededError, LLMBadRequestError
+
+        for error in (ContextWindowExceededError("too long"), LLMBadRequestError("refused")):
+            service, repo = self._service()
+            await self._run(service, uuid4(), error)
+            assert repo.saved, type(error).__name__
+
+    @pytest.mark.asyncio
+    async def test_a_failed_edit_and_resubmit_is_not_committed(self):
+        """The rewind already cut the later turns from the session; saving the
+        failed edit would delete them from the store with nothing in their
+        place. The stored conversation stays as it was before the edit."""
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+        session_id = uuid4()
+        sessions = service._test_sessions
+
+        async def fake_execute(**_kwargs):
+            session = sessions[session_id]
+            # What the orchestrator records after truncate_at_user_index
+            # removed rows.
+            session.context["rewind_removed"] = 2
+            session.history.add_message(Message(role=MessageRole.USER, content="edited prompt"))
+            raise RateLimitError("slow down")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            with pytest.raises(RateLimitError):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="edited prompt",
+                    model="test-model",
+                    user_email=config_manager.app_settings.test_user,
+                )
+        assert repo.saved == []
+
+    @pytest.mark.asyncio
+    async def test_a_turn_the_runner_already_closed_is_not_closed_twice(self):
+        """Agent mode closes a failed turn itself; the service's fallback
+        close must then add nothing, so the marker is saved exactly once."""
+        from atlas.application.chat.utilities.interrupted_turn import (
+            FAILED_TURN_CONTENT,
+            make_interrupted_message,
+        )
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+        session_id = uuid4()
+        sessions = service._test_sessions
+
+        async def fake_execute(**_kwargs):
+            session = sessions[session_id]
+            session.history.add_message(Message(role=MessageRole.USER, content="work on it"))
+            session.history.add_message(_tool_row("calc_add", {"a": 1}, "3"))
+            # What AgentModeRunner appends before re-raising.
+            session.history.add_message(make_interrupted_message(
+                metadata={"agent_mode": True}, failed=True))
+            raise RateLimitError("slow down")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            with pytest.raises(RateLimitError):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="work on it",
+                    model="test-model",
+                    user_email=config_manager.app_settings.test_user,
+                )
+        contents = [m["content"] for m in repo.saved[-1]["messages"]]
+        assert contents.count(FAILED_TURN_CONTENT) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_failing_save_does_not_mask_the_model_error(self):
+        """The model error is what the transport turns into the run's
+        `failed/rate_limit` status; a store failure while saving the turn
+        must not replace it."""
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+
+        attempts = []
+
+        def broken_save(**kwargs):
+            attempts.append(kwargs)
+            raise RuntimeError("store is down")
+
+        repo.save_conversation = broken_save
+        # _run asserts the RateLimitError (not the RuntimeError) propagates.
+        await self._run(service, uuid4(), RateLimitError("slow down"))
+        assert attempts, "the failed turn's save must actually have been attempted"

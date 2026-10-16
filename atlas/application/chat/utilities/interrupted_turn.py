@@ -13,6 +13,7 @@ assistant message.
 import logging
 from typing import Any, Dict, Optional
 
+from atlas.domain.errors import LLMAuthenticationError, LLMError
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     DISPLAY_ONLY_MESSAGE_TYPES,
@@ -32,8 +33,22 @@ logger = logging.getLogger(__name__)
 # not need to claim one follows.
 INTERRUPTED_TURN_CONTENT = "[This turn was stopped before it finished.]"
 
+# The same closing message for a turn the model call failed under (rate
+# limit, timeout, provider error -- issue #1014). Worded for what happened:
+# nobody stopped it.
+FAILED_TURN_CONTENT = "[This turn ended with an error before it finished.]"
 
-def make_interrupted_message(metadata: Optional[Dict[str, Any]] = None) -> Message:
+# The errors that count as "the model call failed": the turn is closed with
+# FAILED_TURN_CONTENT and saved. One definition for the agent runner, which
+# closes its own turns, and ChatService, which saves them, so the two cannot
+# drift. LLMAuthenticationError is an AuthenticationError, not an LLMError.
+MODEL_FAILURE_ERRORS = (LLMError, LLMAuthenticationError)
+
+
+def make_interrupted_message(
+    metadata: Optional[Dict[str, Any]] = None,
+    failed: bool = False,
+) -> Message:
     """Build the terminal assistant message for an interrupted turn.
 
     ``metadata`` may carry an :data:`AGENT_TOOL_DIGEST_KEY` digest, which
@@ -42,16 +57,20 @@ def make_interrupted_message(metadata: Optional[Dict[str, Any]] = None) -> Messa
     same whether or not a digest is attached.
     """
     meta = {"interrupted": True}
+    if failed:
+        # Ended by a model failure rather than a stop; ``interrupted`` stays
+        # set because everything that closes over an unfinished turn keys on it.
+        meta["failed"] = True
     if metadata:
         meta.update(metadata)
     return Message(
         role=MessageRole.ASSISTANT,
-        content=INTERRUPTED_TURN_CONTENT,
+        content=FAILED_TURN_CONTENT if failed else INTERRUPTED_TURN_CONTENT,
         metadata=meta,
     )
 
 
-def close_open_turn(history: ConversationHistory) -> bool:
+def close_open_turn(history: ConversationHistory, failed: bool = False) -> bool:
     """Append a terminal assistant message if the turn has no reply yet.
 
     "Has no reply" is judged against what the model will actually see, so the
@@ -101,6 +120,7 @@ def close_open_turn(history: ConversationHistory) -> bool:
     history.add_message(
         make_interrupted_message(
             metadata={AGENT_TOOL_DIGEST_KEY: digest} if digest else None,
+            failed=failed,
         )
     )
     return True
