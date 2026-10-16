@@ -151,6 +151,32 @@ def test_fence_rules_and_indented_hashes(monkeypatch, docs):
     assert [i for i, f in enumerate(flags) if f] == [7]
 
 
+def test_inline_triple_backticks_and_empty_heading(monkeypatch, docs):
+    (docs / "developer" / "inline.md").write_text(
+        "#\n```js``` is inline\n\n# Inline Title\n", encoding="utf-8"
+    )
+    (docs / "developer" / "blank.md").write_text("# \nbody\n", encoding="utf-8")
+    ds = _load_module(monkeypatch)
+    assert ds.read_doc("developer/inline.md")["results"]["title"] == "Inline Title"
+    assert ds.read_doc("developer/blank.md")["results"]["title"] == "developer/blank.md"
+
+
+def test_symlinked_default_docs_root(monkeypatch, tmp_path, docs):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text("", encoding="utf-8")
+    try:
+        os.symlink(docs, repo / "docs")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    monkeypatch.delenv("ATLAS_DOCS_ROOT", raising=False)
+    ds = _load_module(monkeypatch)
+    monkeypatch.setattr(ds, "_REPO_ROOT", repo)
+    monkeypatch.setattr(ds, "DEFAULT_DOCS_ROOT", repo / "docs")
+    assert ds.list_docs()["results"]["count"] == 3
+    assert ds.read_doc("admin/mcp-servers.md")["results"]["title"] == "MCP Servers"
+
+
 def test_titles_agree_across_tools(monkeypatch, docs):
     body = "intro\n" * 30 + "# Late Title\n"
     (docs / "developer" / "late.md").write_text(body, encoding="utf-8")
@@ -169,6 +195,9 @@ def test_query_limits_and_original_words(monkeypatch, docs):
     ds = _load_module(monkeypatch)
     res = ds.search_docs("servers")["results"]
     assert res["matches"][0]["matched_terms"] == ["servers"]  # not the folded "server"
+    assert ds.search_docs("how do servers")["results"]["terms"] == ["servers"]
+    long_query = "mcp " + "x" * 1000
+    assert len(ds.search_docs(long_query)["results"]["query"]) == ds.MAX_QUERY_CHARS
     # Huge queries are truncated to bounded work instead of scanning every word.
     words = " ".join(f"word{i}" for i in range(1000))
     assert ds.search_docs(words + " mcp")["results"]["matches"] == []

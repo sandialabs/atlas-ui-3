@@ -76,7 +76,8 @@ def _docs_root() -> Optional[Path]:
     if override:
         root = Path(override).expanduser().resolve()
     elif (_REPO_ROOT / "pyproject.toml").is_file():
-        root = DEFAULT_DOCS_ROOT
+        # Resolve so a symlinked docs/ still passes the containment checks.
+        root = DEFAULT_DOCS_ROOT.resolve()
     else:
         return None
     return root if root.is_dir() else None
@@ -138,6 +139,11 @@ def _heading_flags(lines: List[str]) -> List[bool]:
         if m:
             marker = m.group(1)
             if not fence:
+                # A backtick fence's info string cannot contain backticks, so
+                # "```js```" is an inline code span, not an opening fence.
+                if marker[0] == "`" and "`" in line[m.end():]:
+                    flags.append(False)
+                    continue
                 fence = marker
             elif marker[0] == fence[0] and len(marker) >= len(fence) and not line[m.end():].strip():
                 fence = ""
@@ -151,7 +157,7 @@ def _doc_title(lines: List[str], fallback: str) -> str:
     """First level-1 heading outside code fences, else ``fallback``."""
     for line, is_heading in zip(lines, _heading_flags(lines)):
         stripped = line.lstrip()
-        if is_heading and stripped.startswith("# "):
+        if is_heading and stripped.startswith("# ") and stripped[2:].strip():
             return stripped[2:].strip()
     return fallback
 
@@ -243,7 +249,9 @@ def search_docs(query: str, limit: int = 8, include_archive: bool = False) -> Di
         include_archive: Also search docs/archive (historical plans). Default False.
 
     Returns:
-        Dictionary with "results" containing query, total_matches, and
+        Dictionary with "results" containing query (as used, truncated to
+        500 characters), terms (the words actually searched, after
+        stopwords and the term cap), total_matches, and
         matches: a list ordered best-first, each with path (relative to the
         docs folder), title, score, matched_terms, and up to three snippets
         containing a 1-based line number and surrounding text.
@@ -284,7 +292,8 @@ def search_docs(query: str, limit: int = 8, include_archive: bool = False) -> Di
     matches.sort(key=lambda m: (-m["score"], m["path"]))
     return {
         "results": {
-            "query": query,
+            "query": query[:MAX_QUERY_CHARS],
+            "terms": [original[t] for t in terms],
             "total_matches": len(matches),
             "matches": matches[:limit],
         }
