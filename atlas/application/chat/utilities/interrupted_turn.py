@@ -32,8 +32,16 @@ logger = logging.getLogger(__name__)
 # not need to claim one follows.
 INTERRUPTED_TURN_CONTENT = "[This turn was stopped before it finished.]"
 
+# The same closing message for a turn the model call failed under (rate
+# limit, timeout, provider error -- issue #1014). Worded for what happened:
+# nobody stopped it.
+FAILED_TURN_CONTENT = "[This turn ended with an error before it finished.]"
 
-def make_interrupted_message(metadata: Optional[Dict[str, Any]] = None) -> Message:
+
+def make_interrupted_message(
+    metadata: Optional[Dict[str, Any]] = None,
+    content: str = INTERRUPTED_TURN_CONTENT,
+) -> Message:
     """Build the terminal assistant message for an interrupted turn.
 
     ``metadata`` may carry an :data:`AGENT_TOOL_DIGEST_KEY` digest, which
@@ -46,12 +54,14 @@ def make_interrupted_message(metadata: Optional[Dict[str, Any]] = None) -> Messa
         meta.update(metadata)
     return Message(
         role=MessageRole.ASSISTANT,
-        content=INTERRUPTED_TURN_CONTENT,
+        content=content,
         metadata=meta,
     )
 
 
-def close_open_turn(history: ConversationHistory) -> bool:
+def close_open_turn(
+    history: ConversationHistory, content: str = INTERRUPTED_TURN_CONTENT
+) -> bool:
     """Append a terminal assistant message if the turn has no reply yet.
 
     "Has no reply" is judged against what the model will actually see, so the
@@ -101,6 +111,7 @@ def close_open_turn(history: ConversationHistory) -> bool:
     history.add_message(
         make_interrupted_message(
             metadata={AGENT_TOOL_DIGEST_KEY: digest} if digest else None,
+            content=content,
         )
     )
     return True

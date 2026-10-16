@@ -277,7 +277,19 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     }, 300)
   }, [history])
 
+  // Every click on a row is the user's latest intent, and so is New Chat.
+  // Opening a conversation awaits a fetch; without this, a slow fetch for an
+  // earlier click (or one still out when New Chat was pressed) would resolve
+  // last and yank the view back to a conversation the user already left --
+  // in the parallel-runs flow, where users hop between running conversations,
+  // that reads as the app switching on its own.
+  const loadSeqRef = useRef(0)
+  useEffect(() => {
+    if (!activeConversationId) loadSeqRef.current += 1
+  }, [activeConversationId])
+
   const handleLoadConversation = useCallback(async (conv) => {
+    const seq = ++loadSeqRef.current
     if (conv._optimistic) return
     // Don't reload the conversation we're already viewing
     if (activeConversationId && conv.id === activeConversationId) return
@@ -290,6 +302,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       return
     }
     const fullConv = await history.loadConversation(conv.id, { complianceLevel: activeComplianceFilter ?? '' })
+    if (seq !== loadSeqRef.current) return
     if (fullConv?.classificationRefused) {
       toast.error(fullConv.message)
       return

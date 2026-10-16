@@ -1736,3 +1736,88 @@ class TestChatServiceCancelPersistence:
                 )
 
         assert repo.saved == []
+
+
+class TestChatServiceFailedTurnPersistence:
+    """A turn whose model call fails is committed like a stopped one (#1014).
+
+    A tracked run's session is discarded when the run ends, so a background
+    run that died on a rate limit used to leave nothing in the store: its
+    conversation vanished from history along with the "Failed" marker.
+    """
+
+    @staticmethod
+    async def _run(service, session_id, error, **kwargs):
+        sessions = service._test_sessions
+        events = []
+
+        async def update_callback(message):
+            events.append(message)
+
+        async def fake_execute(**_kwargs):
+            session = sessions[session_id]
+            session.history.add_message(Message(role=MessageRole.USER, content="work on it"))
+            session.history.add_message(_tool_row("calc_add", {"a": 1}, "3"))
+            raise error
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            with pytest.raises(type(error)):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="work on it",
+                    model="test-model",
+                    user_email=config_manager.app_settings.test_user,
+                    update_callback=update_callback,
+                    **kwargs,
+                )
+        return events
+
+    def _service(self):
+        repo = _RecordingRepo()
+        service, sessions = _make_service(conversation_repository=repo)
+        service._test_sessions = sessions
+        return service, repo
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_turn_is_persisted_and_closed(self):
+        from atlas.application.chat.utilities.interrupted_turn import FAILED_TURN_CONTENT
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+        events = await self._run(service, uuid4(), RateLimitError("slow down"))
+
+        assert repo.saved, "a failed turn's completed work must be persisted"
+        saved = repo.saved[-1]["messages"]
+        assert [m.get("message_type") for m in saved].count("tool_call") == 1
+        assert saved[-1]["role"] == "assistant"
+        assert saved[-1]["content"] == FAILED_TURN_CONTENT
+        assert any(e.get("type") == "conversation_saved" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_provider_authentication_failure_is_persisted(self):
+        from atlas.domain.errors import LLMAuthenticationError
+
+        service, repo = self._service()
+        await self._run(service, uuid4(), LLMAuthenticationError("bad key"))
+        assert repo.saved
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_is_not_persisted(self):
+        """Only model failures are committed: a validation or authorization
+        error is a refusal, and a refused turn must leave nothing behind."""
+        from atlas.domain.errors import AuthorizationError, ValidationError
+
+        for error in (ValidationError("no"), AuthorizationError("no")):
+            service, repo = self._service()
+            await self._run(service, uuid4(), error)
+            assert repo.saved == [], type(error).__name__
+
+    @pytest.mark.asyncio
+    async def test_incognito_failed_turn_is_not_persisted(self):
+        from atlas.domain.errors import LLMTimeoutError
+
+        service, repo = self._service()
+        await self._run(service, uuid4(), LLMTimeoutError("late"), incognito=True)
+        assert repo.saved == []
