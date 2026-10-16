@@ -114,19 +114,28 @@ def _safe_doc_path(root: Path, path: str) -> Path:
 
 
 def _iter_docs(root: Path, include_archive: bool) -> List[Path]:
+    """Markdown files under ``root`` that read_doc would also accept.
+
+    os.walk (no followlinks, errors ignored) skips unreadable directories
+    and cannot loop on directory symlinks; file symlinks are kept only when
+    their target is a .md file inside the root.
+    """
     docs = []
-    for path in sorted(root.rglob(f"*{DOC_SUFFIX}")):
-        rel = path.relative_to(root)
-        if not include_archive and rel.parts and rel.parts[0] == ARCHIVE_DIR:
-            continue
-        # A symlink inside docs/ may point outside it; never follow those.
-        try:
-            path.resolve().relative_to(root)
-        except ValueError:
-            continue
-        if path.is_file():
-            docs.append(path)
-    return docs
+    for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: None):
+        current = Path(dirpath)
+        if not include_archive and current == root and ARCHIVE_DIR in dirnames:
+            dirnames.remove(ARCHIVE_DIR)
+        for name in filenames:
+            if not name.lower().endswith(DOC_SUFFIX):
+                continue
+            path = current / name
+            try:
+                _safe_doc_path(root, path.relative_to(root).as_posix())
+            except (PermissionError, ValueError, OSError):
+                continue
+            if path.is_file():
+                docs.append(path)
+    return sorted(docs)
 
 
 def _heading_flags(lines: List[str]) -> List[bool]:

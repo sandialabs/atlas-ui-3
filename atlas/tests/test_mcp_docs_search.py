@@ -177,6 +177,28 @@ def test_symlinked_default_docs_root(monkeypatch, tmp_path, docs):
     assert ds.read_doc("admin/mcp-servers.md")["results"]["title"] == "MCP Servers"
 
 
+def test_iter_docs_skips_bad_symlinks_and_unreadable_dirs(monkeypatch, docs):
+    try:
+        os.symlink(docs / "admin" / "notes.txt", docs / "admin" / "fake.md")
+        os.symlink(docs, docs / "developer" / "loop")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    locked = docs / "locked"
+    locked.mkdir()
+    (locked / "hidden.md").write_text("# Hidden\n", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        ds = _load_module(monkeypatch)
+        expected = {"README.md", "admin/mcp-servers.md", "developer/sampling.md"}
+        if os.access(locked, os.R_OK | os.X_OK):  # root ignores chmod 0
+            expected.add("locked/hidden.md")
+        paths = {d["path"] for d in ds.list_docs()["results"]["documents"]}
+        assert paths == expected
+        assert "error" not in ds.search_docs("authentication")["results"]
+    finally:
+        locked.chmod(0o755)
+
+
 def test_titles_agree_across_tools(monkeypatch, docs):
     body = "intro\n" * 30 + "# Late Title\n"
     (docs / "developer" / "late.md").write_text(body, encoding="utf-8")
