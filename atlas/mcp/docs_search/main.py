@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.mcp_shared.server_factory import create_stdio_server
 
@@ -43,6 +43,7 @@ MAX_SNIPPETS_PER_DOC = 3
 TITLE_WEIGHT = 5
 HEADING_WEIGHT = 3
 PATH_WEIGHT = 2
+TERM_CAP = 5
 
 # Hyphens split tokens so "domain-whitelist" matches "whitelist".
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
@@ -72,8 +73,19 @@ def _docs_root() -> Optional[Path]:
 _ROOT_ERROR = {"results": {"error": "Docs folder not found. Set ATLAS_DOCS_ROOT in the server's env block."}}
 
 
+def _fold_plural(token: str) -> str:
+    """Crude plural folding so "servers" matches "server" (not "class")."""
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+# Stopwords are compared after folding, like every other token.
+_STOPWORDS = frozenset(_fold_plural(w) for w in _STOPWORDS)
+
+
 def _tokenize(text: str) -> List[str]:
-    return _TOKEN_RE.findall(text.lower())
+    return [_fold_plural(t) for t in _TOKEN_RE.findall(text.lower())]
 
 
 def _safe_doc_path(root: Path, path: str) -> Path:
@@ -112,31 +124,39 @@ def _doc_title(lines: List[str], fallback: str) -> str:
 
 
 def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, Any]:
-    """Score a document against query terms and collect matching line numbers."""
+    """Score a document against query terms and collect matching line numbers.
+
+    Per-term counts saturate (TERM_CAP) so a long page that repeats a word
+    does not outrank a short page that is about it.
+    """
     title = _doc_title(lines, rel_path)
     title_tokens = set(_tokenize(title))
     path_tokens = set(_tokenize(rel_path.removesuffix(DOC_SUFFIX)))
-    score = 0
-    matched_terms = set()
-    hit_lines: List[int] = []
+    body_counts = dict.fromkeys(terms, 0)
+    heading_counts = dict.fromkeys(terms, 0)
+    hit_lines: List[Tuple[int, int]] = []
 
     for idx, line in enumerate(lines):
         tokens = _tokenize(line)
         if not tokens:
             continue
-        line_hits = 0
+        is_heading = line.lstrip().startswith("#")
+        distinct = 0
         for term in terms:
             count = tokens.count(term)
             if count:
-                matched_terms.add(term)
-                line_hits += count
-                if line.lstrip().startswith("#"):
-                    score += HEADING_WEIGHT * count
-        if line_hits:
-            score += line_hits
-            hit_lines.append(idx)
+                distinct += 1
+                body_counts[term] += count
+                if is_heading:
+                    heading_counts[term] += count
+        if distinct:
+            hit_lines.append((idx, distinct))
 
+    score = 0
+    matched_terms = {t for t in terms if body_counts[t]}
     for term in terms:
+        score += min(body_counts[term], TERM_CAP)
+        score += HEADING_WEIGHT * min(heading_counts[term], TERM_CAP)
         if term in title_tokens:
             score += TITLE_WEIGHT
             matched_terms.add(term)
@@ -149,22 +169,22 @@ def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, A
     return {"title": title, "score": score, "matched_terms": sorted(matched_terms), "hit_lines": hit_lines}
 
 
-def _snippets(lines: List[str], hit_lines: List[int]) -> List[Dict[str, Any]]:
-    snippets: List[Dict[str, Any]] = []
-    last_end = -1
-    for idx in hit_lines:
+def _snippets(lines: List[str], hit_lines: List[Tuple[int, int]]) -> List[Dict[str, Any]]:
+    """Pick up to MAX_SNIPPETS_PER_DOC non-overlapping snippets, preferring
+    lines that match the most distinct query terms, returned in page order."""
+    chosen: List[Tuple[int, int, int]] = []
+    for idx, _ in sorted(hit_lines, key=lambda h: (-h[1], h[0])):
         start = max(0, idx - SNIPPET_RADIUS)
-        if start <= last_end:
-            continue
         end = min(len(lines) - 1, idx + SNIPPET_RADIUS)
-        snippets.append({
-            "line": idx + 1,
-            "text": "\n".join(lines[start:end + 1]).strip(),
-        })
-        last_end = end
-        if len(snippets) >= MAX_SNIPPETS_PER_DOC:
+        if any(start <= c_end and end >= c_start for c_start, c_end, _ in chosen):
+            continue
+        chosen.append((start, end, idx))
+        if len(chosen) >= MAX_SNIPPETS_PER_DOC:
             break
-    return snippets
+    return [
+        {"line": idx + 1, "text": "\n".join(lines[start:end + 1]).strip()}
+        for start, end, idx in sorted(chosen)
+    ]
 
 
 @mcp.tool

@@ -12,7 +12,7 @@ development for asking Atlas questions about Atlas itself.
 
 | Tool | Purpose |
 |------|---------|
-| `search_docs(query, limit=8, include_archive=False)` | Rank Markdown pages by keyword overlap with the query. Title, heading, and file-path matches outweigh body matches, and pages covering more distinct query words rank higher. Common stopwords ("how", "do", "the", ...) are ignored, and hyphenated words and filenames are split, so `whitelist` matches `domain-whitelist.md`. Each match returns `path`, `title`, `score`, `matched_terms`, and up to three line-numbered `snippets`. |
+| `search_docs(query, limit=8, include_archive=False)` | Rank Markdown pages by keyword overlap with the query. Title, heading, and file-path matches outweigh body matches, per-word counts saturate so long pages do not win on length alone, and pages covering more distinct query words rank higher. Common stopwords ("how", "do", "the", ...) are ignored, and hyphenated words and filenames are split, so `whitelist` matches `domain-whitelist.md`; simple plurals fold (`servers` matches `server`). There is no semantic matching: use the RAG integration for that. Each match returns `path`, `title`, `score`, `matched_terms`, and up to three line-numbered `snippets`. |
 | `read_doc(path, start_line=1, max_lines=200)` | Return a page, or a line range of it (max 400 lines per call), with `total_lines` and a `truncated` flag so the model can page through long docs. |
 | `list_docs(section=None, include_archive=False)` | List pages with titles, optionally limited to one top-level folder such as `admin` or `developer`. |
 

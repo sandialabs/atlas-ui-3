@@ -110,6 +110,13 @@ def test_search_splits_hyphenated_words_and_paths(monkeypatch, docs):
     assert paths[0] == "admin/mcp-servers.md"
 
 
+def test_search_folds_plurals(monkeypatch, docs):
+    ds = _load_module(monkeypatch)
+    res = ds.search_docs("server")["results"]
+    assert res["matches"][0]["path"] == "admin/mcp-servers.md"
+    assert "server" in res["matches"][0]["matched_terms"]
+
+
 def test_missing_docs_root_errors_for_every_tool(monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_DOCS_ROOT", str(tmp_path / "nope"))
     ds = _load_module(monkeypatch)
