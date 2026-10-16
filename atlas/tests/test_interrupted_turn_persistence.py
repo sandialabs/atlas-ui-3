@@ -566,6 +566,7 @@ class TestFailedAgentTurnAfterSteering:
         final = session.history.messages[-1]
         assert final.role == MessageRole.ASSISTANT
         assert final.content == FAILED_TURN_CONTENT
+        assert final.metadata.get("failed") is True
         digest = final.metadata.get(AGENT_TOOL_DIGEST_KEY)
         assert digest and "calc_add" in digest, (
             "tool calls made before the steering message must stay visible to the retry"
@@ -1859,6 +1860,8 @@ class TestChatServiceFailedTurnPersistence:
         assert [m.get("message_type") for m in saved].count("tool_call") == 1
         assert saved[-1]["role"] == "assistant"
         assert saved[-1]["content"] == FAILED_TURN_CONTENT
+        # Told apart from a user stop, which carries `interrupted` alone.
+        assert saved[-1]["metadata"].get("failed") is True
         assert any(e.get("type") == "conversation_saved" for e in events)
 
     @pytest.mark.asyncio
@@ -1935,3 +1938,70 @@ class TestChatServiceFailedTurnPersistence:
             service, repo = self._service()
             await self._run(service, uuid4(), error)
             assert repo.saved, type(error).__name__
+
+    @pytest.mark.asyncio
+    async def test_a_failed_edit_and_resubmit_is_not_committed(self):
+        """The rewind already cut the later turns from the session; saving the
+        failed edit would delete them from the store with nothing in their
+        place. The stored conversation stays as it was before the edit."""
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+        session_id = uuid4()
+        sessions = service._test_sessions
+
+        async def fake_execute(**_kwargs):
+            session = sessions[session_id]
+            # What the orchestrator records after truncate_at_user_index
+            # removed rows.
+            session.context["rewind_removed"] = 2
+            session.history.add_message(Message(role=MessageRole.USER, content="edited prompt"))
+            raise RateLimitError("slow down")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            with pytest.raises(RateLimitError):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="edited prompt",
+                    model="test-model",
+                    user_email=config_manager.app_settings.test_user,
+                )
+        assert repo.saved == []
+
+    @pytest.mark.asyncio
+    async def test_a_turn_the_runner_already_closed_is_not_closed_twice(self):
+        """Agent mode closes a failed turn itself; the service's fallback
+        close must then add nothing, so the marker is saved exactly once."""
+        from atlas.application.chat.utilities.interrupted_turn import (
+            FAILED_TURN_CONTENT,
+            make_interrupted_message,
+        )
+        from atlas.domain.errors import RateLimitError
+
+        service, repo = self._service()
+        session_id = uuid4()
+        sessions = service._test_sessions
+
+        async def fake_execute(**_kwargs):
+            session = sessions[session_id]
+            session.history.add_message(Message(role=MessageRole.USER, content="work on it"))
+            session.history.add_message(_tool_row("calc_add", {"a": 1}, "3"))
+            # What AgentModeRunner appends before re-raising.
+            session.history.add_message(make_interrupted_message(
+                metadata={"agent_mode": True}, failed=True))
+            raise RateLimitError("slow down")
+
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute = AsyncMock(side_effect=fake_execute)
+        with patch.object(service, "_get_orchestrator", return_value=mock_orchestrator):
+            with pytest.raises(RateLimitError):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="work on it",
+                    model="test-model",
+                    user_email=config_manager.app_settings.test_user,
+                )
+        contents = [m["content"] for m in repo.saved[-1]["messages"]]
+        assert contents.count(FAILED_TURN_CONTENT) == 1

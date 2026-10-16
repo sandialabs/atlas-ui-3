@@ -17,13 +17,7 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain import conversation_classification as conv_class
-from atlas.domain.errors import (
-    AuthorizationError,
-    DomainError,
-    LLMAuthenticationError,
-    LLMError,
-    ValidationError,
-)
+from atlas.domain.errors import AuthorizationError, DomainError, ValidationError
 from atlas.domain.messages.models import MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.hooks import HookEvent, get_hook_manager
@@ -47,7 +41,7 @@ from .preprocessors.message_builder import build_session_context
 # Import utilities
 from .utilities import error_handler, file_processor
 from .utilities.conversation_loader import load_messages_into_history
-from .utilities.interrupted_turn import FAILED_TURN_CONTENT, close_open_turn
+from .utilities.interrupted_turn import MODEL_FAILURE_ERRORS, close_open_turn
 
 logger = logging.getLogger(__name__)
 
@@ -830,7 +824,7 @@ class ChatService:
             except Exception as e:  # pragma: no cover - defensive
                 logger.error("Failed to commit cancelled turn: %s", e, exc_info=True)
             raise
-        except (LLMError, LLMAuthenticationError):
+        except MODEL_FAILURE_ERRORS:
             # The model call failed mid-turn (rate limit, timeout, provider
             # error). Like a cancel, commit what completed -- the prompt and
             # every finished tool call -- before the error reaches the
@@ -840,13 +834,20 @@ class ChatService:
             # together with the "Failed" marker that says what happened. Only
             # model failures are committed: every admission check ran before
             # this ``try``, and a refusal raised there must never be saved.
+            #
+            # A failed edit-and-resubmit is the exception: its rewind already
+            # cut the later turns from the session, and committing would delete
+            # them from the store with nothing to replace them. Leave the
+            # stored conversation as it was before the edit.
+            if self._turn_allows_shrink(session):
+                logger.info("Edited turn failed in the model call; keeping the stored conversation as it was")
+                raise
             logger.info("Chat turn failed in the model call; committing completed work")
             try:
-                close_open_turn(session.history, content=FAILED_TURN_CONTENT)
+                close_open_turn(session.history, failed=True)
                 await self._commit_turn(
                     session, session_id, user_email, model, update_callback,
                     is_incognito=turn_is_incognito, save_floor=turn_save_floor,
-                    allow_shrink=self._turn_allows_shrink(session),
                 )
             except asyncio.CancelledError:
                 raise

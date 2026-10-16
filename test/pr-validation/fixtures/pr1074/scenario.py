@@ -116,7 +116,8 @@ async def scenario(name, a_prompt, b_prompt, failing):
     contents = [m.get("content") for m in messages]
     check(bool(messages) and contents[0] == (a_prompt if failing == "A" else b_prompt),
           f"[{name}] failed run's conversation is stored with its prompt")
-    check(FAILED_MARKER in contents, f"[{name}] failed run's stored turn ends with the failure marker")
+    check(contents.count(FAILED_MARKER) == 1 and contents[-1] == FAILED_MARKER,
+          f"[{name}] failed run's stored turn ends with the failure marker, once")
     check(any(m.get("message_type") == "tool_call" for m in messages),
           f"[{name}] failed run's completed tool call is stored")
 

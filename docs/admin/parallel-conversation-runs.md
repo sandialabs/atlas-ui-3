@@ -98,7 +98,9 @@ the prompt and every completed tool call are kept and the turn is closed with
 in the history list and can be reopened and retried. Before this, a failed run
 in a new chat left nothing in the store, and its conversation disappeared when
 the run ended. Refusals that happen before the turn starts (validation,
-authorization, classification) are still never saved.
+authorization, classification) are still never saved, and neither is a failed
+edit-and-resubmit: the stored conversation keeps the turns the edit would have
+replaced, so a failure never deletes history.
 
 Every model-call failure is saved this way, not only transient ones. That
 includes a context-window overflow and a request the provider rejected,
