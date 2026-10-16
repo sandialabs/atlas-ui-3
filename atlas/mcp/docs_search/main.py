@@ -44,9 +44,15 @@ TITLE_WEIGHT = 5
 HEADING_WEIGHT = 3
 PATH_WEIGHT = 2
 TERM_CAP = 5
+# Body term frequency saturates BM25-style: BODY_MAX * tf / (tf + BODY_HALF).
+# One hit scores 1.0 and no amount of repetition reaches BODY_MAX, so a page
+# matching two query words beats a page repeating one.
+BODY_MAX = 3.0
+BODY_HALF = 2.0
 
 # Hyphens split tokens so "domain-whitelist" matches "whitelist".
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
+_HEADING_RE = re.compile(r"#{1,6}\s")
 # Common words dropped from queries so "how do I configure X" ranks on X.
 _STOPWORDS = frozenset(
     "a an and are as at be by can do does for from how i in is it me my of on "
@@ -116,18 +122,34 @@ def _iter_docs(root: Path, include_archive: bool) -> List[Path]:
     return docs
 
 
-def _doc_title(lines: List[str], fallback: str) -> str:
+def _heading_flags(lines: List[str]) -> List[bool]:
+    """Mark ATX headings ("# ".."###### "), ignoring lines inside fenced
+    code blocks so shell comments in examples are not treated as headings."""
+    flags = []
+    in_fence = False
     for line in lines:
-        if line.startswith("# "):
-            return line[2:].strip()
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            in_fence = not in_fence
+            flags.append(False)
+            continue
+        flags.append(not in_fence and bool(_HEADING_RE.match(stripped)))
+    return flags
+
+
+def _doc_title(lines: List[str], fallback: str) -> str:
+    for line, is_heading in zip(lines, _heading_flags(lines)):
+        if is_heading and line.lstrip().startswith("# "):
+            return line.lstrip()[2:].strip()
     return fallback
 
 
 def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, Any]:
     """Score a document against query terms and collect matching line numbers.
 
-    Per-term counts saturate (TERM_CAP) so a long page that repeats a word
-    does not outrank a short page that is about it.
+    Body counts saturate (BODY_MAX) and heading counts are capped
+    (TERM_CAP) so a long page that repeats a word does not outrank a short
+    page that is about it.
     """
     title = _doc_title(lines, rel_path)
     title_tokens = set(_tokenize(title))
@@ -136,11 +158,10 @@ def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, A
     heading_counts = dict.fromkeys(terms, 0)
     hit_lines: List[Tuple[int, int]] = []
 
-    for idx, line in enumerate(lines):
+    for idx, (line, is_heading) in enumerate(zip(lines, _heading_flags(lines))):
         tokens = _tokenize(line)
         if not tokens:
             continue
-        is_heading = line.lstrip().startswith("#")
         distinct = 0
         for term in terms:
             count = tokens.count(term)
@@ -152,10 +173,11 @@ def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, A
         if distinct:
             hit_lines.append((idx, distinct))
 
-    score = 0
+    score = 0.0
     matched_terms = {t for t in terms if body_counts[t]}
     for term in terms:
-        score += min(body_counts[term], TERM_CAP)
+        tf = body_counts[term]
+        score += BODY_MAX * tf / (tf + BODY_HALF)
         score += HEADING_WEIGHT * min(heading_counts[term], TERM_CAP)
         if term in title_tokens:
             score += TITLE_WEIGHT
@@ -165,7 +187,7 @@ def _score_doc(rel_path: str, lines: List[str], terms: List[str]) -> Dict[str, A
             matched_terms.add(term)
 
     # Favor documents that cover more of the query, not just repeat one word.
-    score *= len(matched_terms)
+    score = round(score * len(matched_terms), 2)
     return {"title": title, "score": score, "matched_terms": sorted(matched_terms), "hit_lines": hit_lines}
 
 
@@ -206,9 +228,10 @@ def search_docs(query: str, limit: int = 8, include_archive: bool = False) -> Di
         include_archive: Also search docs/archive (historical plans). Default False.
 
     Returns:
-        Dictionary with "results": a list of matches, each with path (relative
-        to the docs folder), title, score, matched_terms, and up to three
-        snippets containing a 1-based line number and surrounding text.
+        Dictionary with "results" containing query, total_matches, and
+        matches: a list ordered best-first, each with path (relative to the
+        docs folder), title, score, matched_terms, and up to three snippets
+        containing a 1-based line number and surrounding text.
     """
     tokens = list(dict.fromkeys(_tokenize(query)))
     # Keep stopwords only when the query is nothing but stopwords.
@@ -282,7 +305,8 @@ def read_doc(path: str, start_line: int = 1, max_lines: int = 200) -> Dict[str, 
     try:
         lines = doc_path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as e:
-        return {"results": {"error": f"Error reading document: {e}"}}
+        # e.strerror only: str(e) would leak the absolute server path.
+        return {"results": {"error": f"Error reading document {path}: {e.strerror}"}}
     total = len(lines)
     start = max(1, int(start_line))
     if total and start > total:

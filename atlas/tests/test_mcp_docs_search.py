@@ -110,6 +110,45 @@ def test_search_splits_hyphenated_words_and_paths(monkeypatch, docs):
     assert paths[0] == "admin/mcp-servers.md"
 
 
+def test_search_term_cap_and_coverage(monkeypatch, docs):
+    # Repeating one word must not beat a page covering both terms.
+    (docs / "developer" / "spam.md").write_text(
+        "# Notes\n\n" + "quota " * 50 + "\n", encoding="utf-8"
+    )
+    (docs / "developer" / "focused.md").write_text(
+        "# Notes\n\nquota limits apply.\n", encoding="utf-8"
+    )
+    ds = _load_module(monkeypatch)
+    matches = ds.search_docs("quota limits")["results"]["matches"]
+    assert [m["path"] for m in matches] == ["developer/focused.md", "developer/spam.md"]
+    # Saturating body score: 50 repeats stay below BODY_MAX for one term.
+    assert matches[1]["score"] < ds.BODY_MAX
+
+
+def test_fenced_code_comments_are_not_headings(monkeypatch, docs):
+    (docs / "developer" / "fenced.md").write_text(
+        "Intro text.\n\n```bash\n# install widget\n```\n\n# Real Title\n",
+        encoding="utf-8",
+    )
+    ds = _load_module(monkeypatch)
+    res = ds.read_doc("developer/fenced.md")["results"]
+    assert res["title"] == "Real Title"
+    match = ds.search_docs("widget")["results"]["matches"][0]
+    assert match["score"] == 1  # body hit only, no heading boost
+
+
+def test_read_doc_os_error_hides_absolute_path(monkeypatch, docs):
+    ds = _load_module(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(docs / "admin" / "mcp-servers.md"))
+
+    monkeypatch.setattr(ds.Path, "read_text", boom)
+    err = ds.read_doc("admin/mcp-servers.md")["results"]["error"]
+    assert err == "Error reading document admin/mcp-servers.md: Permission denied"
+    assert str(docs) not in err
+
+
 def test_search_folds_plurals(monkeypatch, docs):
     ds = _load_module(monkeypatch)
     res = ds.search_docs("server")["results"]
