@@ -1,6 +1,6 @@
 # Installation
 
-Last updated: 2026-10-12
+Last updated: 2026-10-15
 
 This guide provides everything you need to get Atlas UI 3 running, whether you prefer using Docker for a quick setup or setting up a local development environment.
 
@@ -222,7 +222,7 @@ For those who want to contribute to the code or run the application natively, fo
 
 ### Prerequisites
 
-*   **Python 3.12+**
+*   **Python 3.11+** (the published image runs 3.14; CI also runs 3.12 and 3.13)
 *   **Node.js 18+** and npm
 *   **uv**: This project uses `uv` as the Python package manager. It's required.
 

@@ -1,5 +1,5 @@
 # Keep the builder and runtime Python ABI identical.
-FROM docker.io/library/python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-base
+FROM docker.io/library/python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS python-base
 
 FROM docker.io/library/node:26-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS frontend-build
 WORKDIR /app/frontend
@@ -44,10 +44,21 @@ FROM python-base AS runtime
 # The base includes pip for building Python applications; it is not a runtime
 # requirement. Remove ensurepip too so it cannot recreate pip. Resolve the
 # stdlib directory from the interpreter so a base-image bump cannot leave pip
-# behind under a new pythonX.Y path.
-RUN pyver="$(python -c 'import sys; print("%d.%d" % (sys.version_info[0], sys.version_info[1]))')" && \
+# behind under a new pythonX.Y path. rm -rf exits 0 when nothing matched, so
+# the checks below fail the build if either module is still present.
+# python -I ignores PYTHONPATH and the current directory, so a stray pip
+# elsewhere cannot hide a copy left in the runtime interpreter.
+RUN pyver="$(python -I -c 'import sys; print("%d.%d" % (sys.version_info[0], sys.version_info[1]))')" && \
     rm -rf "/usr/local/lib/python${pyver}/ensurepip" \
       /usr/local/lib/python${pyver}/site-packages/pip* /usr/local/bin/pip* && \
+    if python -I -c 'import pip'; then \
+      echo "pip is still importable; the runtime image must not ship pip" >&2; \
+      exit 1; \
+    fi && \
+    if python -I -c 'import ensurepip'; then \
+      echo "ensurepip is still importable; the runtime image must not ship ensurepip" >&2; \
+      exit 1; \
+    fi && \
     groupadd --gid 10001 atlas && \
     useradd --uid 10001 --gid atlas --create-home atlas && \
     mkdir -p /app/logs /app/runtime/logs /app/runtime/feedback /app/runtime/uploads /data && \

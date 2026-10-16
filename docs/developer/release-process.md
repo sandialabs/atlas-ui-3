@@ -1,6 +1,6 @@
 # Release Process
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 
 This document is the canonical runbook for cutting a release of Atlas
 UI 3. Normal releases are **fully automated on a weekly schedule**; if you
@@ -125,7 +125,8 @@ requirement only: Dependabot cannot add a `changes/` file, and a direct
 4. **Opens a PR** from `release/vX.Y.Z` to `main`.
 5. **Waits for CI**, then squash-merges the exact commit it watched
    (`--match-head-commit`). The gate waits for a fixed set of checks
-   (`ci-test`, `production-image`, `runtime-only-image`, `build-artifacts`, and
+   (`ci-test`, `python-3.11`, `python-3.12`, `python-3.13`, `production-image`,
+   `runtime-only-image`, `build-artifacts`, and
    the security scans) to be
    present and green — not merely for whatever happened to register — and
    if any check fails the workflow stops and leaves the PR open for a
@@ -135,7 +136,8 @@ requirement only: Dependabot cannot add a `changes/` file, and a direct
    creating any branch rather than tagging a version that never ships.
    `dry_run: true` still works without the secret.
    Branch protection on `main` must require the same check names — `ci-test`,
-   `production-image`, and `runtime-only-image` in place of the retired
+   `python-3.11`, `python-3.12`, `python-3.13`, `production-image`, and
+   `runtime-only-image` in place of the retired
    `build-and-test` — or PRs will hang on a check that never reports.
 6. **Tags** the squashed merge commit on `main` as `vX.Y.Z` (read back
    from the PR, not the moving tip of `main`).
