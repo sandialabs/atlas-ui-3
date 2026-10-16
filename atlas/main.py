@@ -2265,10 +2265,19 @@ async def websocket_endpoint(websocket: WebSocket):
                             "error_type": "unexpected"
                         })
 
+                # Issue #1014: `turn_failure` and `handle_chat` are bound here
+                # for the same reason handle_chat binds its own state. Read
+                # through the loop instead, a run that finishes after the next
+                # chat frame arrives would take its outcome from *that* turn's
+                # list -- a rate-limited run recorded as completed, or a clean
+                # one as failed with another turn's error -- and a task that had
+                # not started yet would execute the newer turn's handler.
                 async def handle_chat_guarded(
                     run_id=(run_record.run_id if run_record else None),
                     run_conversation_id=(run_record.conversation_id if run_record else None),
                     run_session_id=(run_record.session_id if run_record else None),
+                    turn_failure=turn_failure,
+                    handle_chat=handle_chat,
                 ):
                     """Run handle_chat so a dead socket cannot orphan the task.
 
