@@ -161,6 +161,11 @@ class RunRecord:
     # sub-conversation on the same capability surface without the model
     # re-choosing it. Server-side only: never part of the public dict.
     launch_spec: Optional[Dict[str, Any]] = field(default=None, repr=False, compare=False)
+    # The final assistant reply of *this* run, captured when it completes. A
+    # sub-conversation that has received follow-ups holds several runs on one
+    # conversation, so "the conversation's last assistant message" answers for
+    # the newest run only; ``atlas_result`` on an older run id reads this.
+    result: Optional[str] = field(default=None, repr=False, compare=False)
     # The exact frames that asked for input, kept so they can be re-sent.
     # A request emitted while the user was looking at another conversation (or
     # had the browser closed) is otherwise gone: the client dropped it, and the

@@ -478,6 +478,33 @@ async def resolve_child_data_sources(
     return [source for source in selected if source in authorized]
 
 
+def _content_text(content: Any) -> str:
+    return content if isinstance(content, str) else json.dumps(content)
+
+
+async def _final_reply(chat_service: Any, session_id: Any) -> Optional[str]:
+    """The last assistant message of the turn that just ran in ``session_id``.
+
+    Read from the run's own session rather than the stored conversation: once
+    a sub-conversation has had follow-ups, its stored transcript's last reply
+    belongs to whichever run finished most recently. Best effort -- ``None``
+    leaves ``atlas_result`` to fall back to the stored transcript.
+    """
+    try:
+        session = await chat_service.session_repository.get(session_id)
+        messages = list(session.history.messages)
+    except Exception:
+        logger.debug("Could not read the launched run's session", exc_info=True)
+        return None
+    for message in reversed(messages):
+        role = getattr(getattr(message, "role", None), "value", None)
+        if role == "user":
+            return None
+        if role == "assistant" and message.content:
+            return _content_text(message.content)
+    return None
+
+
 async def _run_child(
     *,
     chat_service: Any,
@@ -518,6 +545,8 @@ async def _run_child(
         if isinstance(response, dict) and response.get("type") == "error":
             outcome = RunStatus.FAILED
             error = str(response.get("message") or "Sub-conversation turn failed.")
+        else:
+            record.result = await _final_reply(chat_service, record.session_id)
     except asyncio.CancelledError:
         outcome = RunStatus.CANCELLED
         raise
@@ -823,6 +852,25 @@ async def get_child_result(
     if not record.is_terminal or record.status is not RunStatus.COMPLETED:
         return result
 
+    if record.result is not None:
+        _set_result(result, record.result)
+        return result
+    if any(
+        later.created_at > record.created_at
+        for later in get_run_registry().children_of_conversation(
+            record.parent_conversation_id, include_terminal=True
+        )
+        if later.conversation_id == record.conversation_id
+    ):
+        # A follow-up has run since, so the stored transcript's last reply is
+        # not this run's. Saying "unavailable" beats returning another run's.
+        result["result_status"] = "unavailable"
+        result["result_error"] = (
+            "A later follow-up has run in this sub-conversation; read the "
+            "latest run's result instead."
+        )
+        return result
+
     if factory is None:
         from atlas.infrastructure.app_factory import app_factory as factory
     repository = getattr(factory, "conversation_repository", None)
@@ -847,16 +895,18 @@ async def get_child_result(
     if not assistant_messages:
         result["result_status"] = "empty"
         return result
-    content = assistant_messages[-1].get("content")
-    normalized = content if isinstance(content, str) else json.dumps(content)
-    if len(normalized) > MAX_RESULT_CHARS:
-        result["result"] = normalized[:MAX_RESULT_CHARS]
+    _set_result(result, _content_text(assistant_messages[-1].get("content")))
+    return result
+
+
+def _set_result(result: Dict[str, Any], text: str) -> None:
+    if len(text) > MAX_RESULT_CHARS:
+        result["result"] = text[:MAX_RESULT_CHARS]
         result["result_status"] = "available_truncated"
         result["result_error"] = "The result was truncated to the maximum return size."
     else:
-        result["result"] = normalized
+        result["result"] = text
         result["result_status"] = "available"
-    return result
 
 
 async def execute_observation_tool(

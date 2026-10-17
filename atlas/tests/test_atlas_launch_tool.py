@@ -1829,3 +1829,75 @@ async def test_follow_up_dispatch_refuses_when_disabled(monkeypatch):
     assert result.success is False
     assert "disabled" in result.content
 
+
+
+class _RememberingChatService(_ChatService):
+    """A chat service whose session records each turn, like the real one."""
+
+    def __init__(self, connection, reply):
+        super().__init__(connection)
+        from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
+
+        self._reply = reply
+        self._history = ConversationHistory()
+        self._message, self._role = Message, MessageRole
+        self.session_repository = SimpleNamespace(get=self._get)
+
+    async def _get(self, session_id):
+        return SimpleNamespace(history=self._history)
+
+    async def handle_chat_message(self, **kwargs):
+        self._history.add_message(self._message(role=self._role.USER, content=kwargs["content"]))
+        self._history.add_message(self._message(role=self._role.ASSISTANT, content=self._reply))
+        return {"type": "response_complete"}
+
+
+@pytest.mark.asyncio
+async def test_result_reads_each_runs_own_reply_after_follow_ups():
+    registry = _install_registry()
+    _start_parent(registry)
+    replies = iter(["first answer", "second answer"])
+    factory = _Factory(lambda c: _RememberingChatService(c, next(replies)))
+    # No conversation_repository at all: the answers must come from the runs.
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(handle["run_id"]).task, timeout=1)
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "more"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(follow["run_id"]).task, timeout=1)
+
+    first = await get_child_result(handle["run_id"], _context(), factory)
+    second = await get_child_result(follow["run_id"], _context(), factory)
+
+    assert (first["result"], first["result_status"]) == ("first answer", "available")
+    assert (second["result"], second["result_status"]) == ("second answer", "available")
+
+
+@pytest.mark.asyncio
+async def test_an_older_run_never_reports_a_later_follow_ups_reply():
+    registry = _install_registry()
+    parent = _start_parent(registry)
+    first = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(first.run_id, RunStatus.COMPLETED)
+    later = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    later.created_at = first.created_at + 1
+    registry.set_status(later.run_id, RunStatus.COMPLETED)
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: {
+                "messages": [{"role": "assistant", "content": "the later reply"}]
+            }
+        )
+    )
+
+    old = await get_child_result(first.run_id, _context(), factory)
+    new = await get_child_result(later.run_id, _context(), factory)
+
+    assert old["result"] is None and old["result_status"] == "unavailable"
+    assert new["result"] == "the later reply"

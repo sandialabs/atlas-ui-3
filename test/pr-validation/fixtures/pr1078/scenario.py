@@ -236,6 +236,13 @@ async def main():
     check("FOLLOWUPMSG beta" in text and '"result_status": "available"' in text,
           "atlas_result on the new run id returns the follow-up's reply", text)
 
+    results, _, _ = await run_turn(
+        ws, f"plan=result run={launched['run_id']}", conversation_id=parent_conv,
+    )
+    text = result_text(result_for(results, "atlas_result"))
+    check("ECHO: CHILDTASK alpha" in text and "FOLLOWUPMSG" not in text,
+          "atlas_result on the ORIGINAL run id still returns that run's own reply", text)
+
     # ----------------------------------- 4. a second follow-up chains on
     results, _, _ = await run_turn(
         ws, f"plan=follow_up run={followed.get('run_id')}", conversation_id=parent_conv,

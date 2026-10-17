@@ -138,6 +138,10 @@ soon as it is admitted -- like `atlas_launch`, it never waits for the reply, whi
   lost between turns stays lost for that sub-conversation even if it comes back later. Whichever
   of the sub-conversation's run ids is passed, the follow-up continues from its *latest* run
   (reported as `previous_run_id`), so an old run id cannot resurrect a dropped tool.
+- **Results are per run.** Several runs now share one conversation, so the stored transcript's
+  last reply only answers for the newest. Each launched run captures its own final reply from
+  its session when it completes (`RunRecord.result`), and `atlas_result` returns that. An older
+  run with no captured reply reports `unavailable` rather than a later follow-up's answer.
 - **Scoping** is `atlas_result`'s: only direct children of this conversation, owned by this
   user; any other id gets the same "not a sub-conversation" refusal.
 - **Refusals.** A follow-up to a child that is still running is refused (rather than queued or
