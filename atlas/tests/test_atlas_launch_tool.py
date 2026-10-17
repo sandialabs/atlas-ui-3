@@ -2029,3 +2029,52 @@ async def test_captured_reply_skips_agent_narration_and_is_bounded():
     result = {}
     _set_result(result, captured)
     assert result["result_status"] == "available_truncated"
+
+
+@pytest.mark.asyncio
+async def test_a_launched_run_without_a_captured_reply_never_reads_the_transcript():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    factory.conversation_repository = SimpleNamespace(
+        get_conversation=lambda conversation_id, user_email: {
+            "messages": [{"role": "assistant", "content": "someone else's reply"}]
+        }
+    )
+    # _ChatService has no session_repository, so the capture fails (None).
+    handle = await _launch_and_finish(factory, registry, _context())
+    assert registry.get(handle["run_id"]).result is None
+
+    result = await get_child_result(handle["run_id"], _context(), factory)
+
+    assert result["result"] is None
+    assert result["result_status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_follow_ups_to_one_child_admit_exactly_one():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    outcomes = await asyncio.gather(
+        *(
+            follow_up_sub_conversation(
+                {"run_id": handle["run_id"], "message": f"m{i}"}, _context(), factory=factory
+            )
+            for i in range(2)
+        ),
+        return_exceptions=True,
+    )
+
+    admitted = [o for o in outcomes if isinstance(o, dict)]
+    refused = [o for o in outcomes if isinstance(o, LaunchRefused)]
+    assert len(admitted) == 1 and len(refused) == 1, outcomes
+    live = [
+        r for r in registry.children_of_conversation("parent")
+        if r.conversation_id == handle["conversation_id"] and not r.is_terminal
+    ]
+    assert len(live) == 1
+    for service in factory.services:
+        service.release.set()

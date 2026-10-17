@@ -147,9 +147,9 @@ soon as it is admitted -- like `atlas_launch`, it never waits for the reply, whi
   last reply only answers for the newest. Each launched run captures its own final reply from
   its session when it completes (`RunRecord.result`), and `atlas_result` returns that. A run that
   ended without assistant text (step budget hit, or it ended on a tool call) reports `empty`, and
-  a run whose reply could not be captured reads the stored transcript only when it is the
-  conversation's only run -- otherwise `unavailable` -- so a run is never handed another run's
-  answer.
+  a run whose reply could not be captured reports `unavailable` rather than reading the stored
+  transcript, whose last reply may belong to another run or to a turn the user typed into the
+  sub-conversation directly -- so a run is never handed another run's answer.
 - **Scoping** is `atlas_result`'s: only direct children of this conversation, owned by this
   user; any other id gets the same "not a sub-conversation" refusal.
 - **Refusals.** A follow-up to a child that is still running is refused (rather than queued or

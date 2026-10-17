@@ -881,6 +881,15 @@ async def get_child_result(
     if record.result is not None:
         _set_result(result, record.result)
         return result
+    if record.launch_spec is not None:
+        # A launched run always tries to capture its own reply, so ``None``
+        # here means its session could not be read. The transcript's last
+        # assistant message may belong to another run -- a reaped one, or a
+        # turn the user typed into the sub-conversation directly -- so it is
+        # not this run's answer to give.
+        result["result_status"] = "unavailable"
+        result["result_error"] = "This run's reply could not be captured."
+        return result
     if any(
         other.run_id != record.run_id
         for other in get_run_registry().children_of_conversation(
