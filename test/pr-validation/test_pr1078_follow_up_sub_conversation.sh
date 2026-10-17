@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for atlas_follow_up: the launching conversation sends a
+# Test script for PR #1078 (atlas_follow_up): the launching conversation sends a
 # follow-up message to a sub-conversation it launched.
 #
 #   1. /api/config advertises atlas_follow_up when FEATURE_ATLAS_LAUNCH_ENABLED
@@ -17,13 +17,13 @@
 #   9. Backend unit suite.
 #
 # A real backend is started on a free port with a scripted OpenAI-compatible
-# mock model (fixtures/pr_follow_up/mock_llm.py), a puppet that only decides
+# mock model (fixtures/pr1078/mock_llm.py), a puppet that only decides
 # which tool calls the parent makes; launch, follow-up, history hydration and
 # authorization are the real code paths.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FIXTURES="$SCRIPT_DIR/fixtures/pr_follow_up"
+FIXTURES="$SCRIPT_DIR/fixtures/pr1078"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
