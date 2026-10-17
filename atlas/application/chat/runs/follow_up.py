@@ -92,12 +92,20 @@ async def follow_up_sub_conversation(
     # Scoped exactly like ``atlas_result``: only direct children of this
     # conversation, owned by this user. A guessed or foreign run id gets the
     # same answer as an unknown one.
-    target = {record.run_id: record for record in _scoped_children(context)}.get(run_id)
-    if target is None:
+    children = _scoped_children(context)
+    addressed = next((record for record in children if record.run_id == run_id), None)
+    if addressed is None:
         raise LaunchRefused(
             "That run is not a sub-conversation of this conversation. Use a "
             "run_id from atlas_launch, atlas_get_runs or atlas_follow_up."
         )
+    # Continue from the sub-conversation's *latest* run, whichever of its run
+    # ids was passed: the latest carries the narrowest spec, and an older run
+    # id must not resurrect a tool an earlier follow-up already dropped.
+    target = max(
+        (r for r in children if r.conversation_id == addressed.conversation_id),
+        key=lambda r: r.created_at,
+    )
 
     registry = get_run_registry()
     active = registry.active_for_conversation(target.conversation_id, user_email)

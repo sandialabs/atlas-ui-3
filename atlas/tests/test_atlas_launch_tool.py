@@ -1637,11 +1637,21 @@ async def test_a_follow_up_only_gets_tools_the_caller_is_still_authorized_for():
     assert follow2["tools"] == ["math_add"]
     factory.services[-1].release.set()
 
-    access.tools = []
     await asyncio.wait_for(registry.get(follow2["run_id"]).task, timeout=1)
+    # Nor through the *original* run id, whose spec still lists the old tools:
+    # a follow-up always continues from the sub-conversation's latest run.
+    follow3 = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "via the old id"}, _context(), factory=factory
+    )
+    assert follow3["tools"] == ["math_add"]
+    assert follow3["previous_run_id"] == follow2["run_id"]
+    factory.services[-1].release.set()
+    await asyncio.wait_for(registry.get(follow3["run_id"]).task, timeout=1)
+
+    access.tools = []
     with pytest.raises(LaunchRefused, match="no tools"):
         await follow_up_sub_conversation(
-            {"run_id": follow2["run_id"], "message": "last"}, _context(), factory=factory
+            {"run_id": follow3["run_id"], "message": "last"}, _context(), factory=factory
         )
 
 

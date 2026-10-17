@@ -135,7 +135,9 @@ soon as it is admitted -- like `atlas_launch`, it never waits for the reply, whi
   only, never in the public dict). A follow-up reuses it, but re-checks every part against the
   caller now: the model through `check_model_access`, the tools through tool authorization, the
   data sources through RAG discovery. The follow-up then records the narrowed spec, so access
-  lost between turns stays lost for that sub-conversation even if it comes back later.
+  lost between turns stays lost for that sub-conversation even if it comes back later. Whichever
+  of the sub-conversation's run ids is passed, the follow-up continues from its *latest* run
+  (reported as `previous_run_id`), so an old run id cannot resurrect a dropped tool.
 - **Scoping** is `atlas_result`'s: only direct children of this conversation, owned by this
   user; any other id gets the same "not a sub-conversation" refusal.
 - **Refusals.** A follow-up to a child that is still running is refused (rather than queued or
