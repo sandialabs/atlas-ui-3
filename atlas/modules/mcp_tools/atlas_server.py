@@ -8,7 +8,8 @@ built-ins look like a crowd of servers.
 
 They are now a single server, ``atlas``, exposing ``atlas_canvas``,
 ``atlas_sleep``, ``atlas_search``, ``atlas_discover_sources``,
-``atlas_discover_launch_options`` and ``atlas_launch``. The old fully-qualified names are still
+``atlas_discover_launch_options``, ``atlas_launch`` and the sub-conversation
+tools ``atlas_get_runs``, ``atlas_result`` and ``atlas_follow_up``. The old fully-qualified names are still
 accepted -- persisted tool selections, saved conversations and non-UI clients
 all carry them -- and are normalized to the new names at the edges via
 ``normalize_tool_name``.
@@ -47,6 +48,7 @@ DISCOVER_LAUNCH_OPTIONS_TOOL_NAME = "atlas_discover_launch_options"
 LAUNCH_TOOL_NAME = "atlas_launch"
 GET_RUNS_TOOL_NAME = "atlas_get_runs"
 RESULT_TOOL_NAME = "atlas_result"
+FOLLOW_UP_TOOL_NAME = "atlas_follow_up"
 
 ATLAS_TOOL_NAMES = (
     CANVAS_TOOL_NAME,
@@ -57,6 +59,18 @@ ATLAS_TOOL_NAMES = (
     LAUNCH_TOOL_NAME,
     GET_RUNS_TOOL_NAME,
     RESULT_TOOL_NAME,
+    FOLLOW_UP_TOOL_NAME,
+)
+
+# The built-ins that only exist when sub-conversations are enabled. One tuple so
+# the schema builder, tool authorization, execution and the config payload all
+# gate the same set -- adding a launch-family tool means adding it here once.
+LAUNCH_GATED_TOOL_NAMES = (
+    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+    LAUNCH_TOOL_NAME,
+    GET_RUNS_TOOL_NAME,
+    RESULT_TOOL_NAME,
+    FOLLOW_UP_TOOL_NAME,
 )
 
 # Pre-#855 fully-qualified names -> consolidated names.
@@ -337,8 +351,9 @@ RESULT_TOOL_SCHEMA = {
         "name": RESULT_TOOL_NAME,
             "description": (
             "Return the current status and final assistant result of a direct child "
-            "launched by this conversation. Pass the run_id from atlas_launch or "
-            "atlas_get_runs. This never waits; poll with atlas_sleep between checks. "
+            "launched by this conversation. Pass the run_id from atlas_launch, "
+            "atlas_get_runs or atlas_follow_up. This never waits; poll with "
+            "atlas_sleep between checks. "
             "Results are scoped to this conversation and user. result_status is "
             "pending, available, available_truncated, empty, unreadable or "
             "unavailable; only pending is normally worth polling again."
@@ -353,6 +368,44 @@ RESULT_TOOL_SCHEMA = {
     },
 }
 
+FOLLOW_UP_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": FOLLOW_UP_TOOL_NAME,
+        "description": (
+            "Send a follow-up message to a sub-conversation this conversation "
+            "launched, and return a handle to the new turn immediately -- this "
+            "does not wait for the reply. The sub-conversation keeps its own "
+            "history, so the message can build on its earlier answer (ask a "
+            "clarifying question, request a correction, hand it the next step). "
+            "It continues on the same model, tools and data sources it was "
+            "launched with, re-checked against the user's current access. Pass "
+            "any run_id belonging to that sub-conversation (from atlas_launch, "
+            "atlas_get_runs or an earlier atlas_follow_up). The sub-conversation "
+            "must have finished its current turn; if it is still running, wait "
+            "with atlas_sleep and check atlas_result first. Read the reply with "
+            "atlas_result using the new run_id this call returns."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "run_id": {
+                    "type": "string",
+                    "description": "A run_id of the sub-conversation to continue.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": (
+                        "The follow-up message, delivered to the sub-conversation "
+                        "as its next user turn."
+                    ),
+                },
+            },
+            "required": ["run_id", "message"],
+        },
+    },
+}
+
 ATLAS_TOOL_SCHEMAS = {
     CANVAS_TOOL_NAME: CANVAS_TOOL_SCHEMA,
     SLEEP_TOOL_NAME: SLEEP_TOOL_SCHEMA,
@@ -362,13 +415,14 @@ ATLAS_TOOL_SCHEMAS = {
     LAUNCH_TOOL_NAME: LAUNCH_TOOL_SCHEMA,
     GET_RUNS_TOOL_NAME: GET_RUNS_TOOL_SCHEMA,
     RESULT_TOOL_NAME: RESULT_TOOL_SCHEMA,
+    FOLLOW_UP_TOOL_NAME: FOLLOW_UP_TOOL_SCHEMA,
 }
 
 ATLAS_SERVER_DESCRIPTION = (
     "Built-in ATLAS tools: render final content in the canvas panel, wait "
     "between agent steps, search the selected data sources, list which "
-    "sources and launch options are available and launch sub-conversations. These run "
-    "inside ATLAS rather than on an MCP server."
+    "sources and launch options are available, and launch and follow up on "
+    "sub-conversations. These run inside ATLAS rather than on an MCP server."
 )
 
 
@@ -445,12 +499,7 @@ def atlas_tool_schemas(
             continue
         if requested in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME) and not search_enabled:
             continue
-        if requested in (
-            DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
-            LAUNCH_TOOL_NAME,
-            GET_RUNS_TOOL_NAME,
-            RESULT_TOOL_NAME,
-        ) and not launch_enabled:
+        if requested in LAUNCH_GATED_TOOL_NAMES and not launch_enabled:
             continue
         schema = ATLAS_TOOL_SCHEMAS.get(requested)
         if schema is not None:

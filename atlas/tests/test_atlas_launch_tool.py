@@ -14,6 +14,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from atlas.application.chat.runs.context import clear_current_run, set_current_run
+from atlas.application.chat.runs.follow_up import (
+    execute_follow_up_tool,
+    follow_up_sub_conversation,
+)
 from atlas.application.chat.runs.launcher import (
     LaunchRefused,
     discover_launch_options,
@@ -31,7 +35,9 @@ from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_TOOL_SCHEMAS,
     DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+    FOLLOW_UP_TOOL_NAME,
     GET_RUNS_TOOL_NAME,
+    LAUNCH_GATED_TOOL_NAMES,
     LAUNCH_TOOL_NAME,
     RESULT_TOOL_NAME,
     atlas_tool_schemas,
@@ -1000,7 +1006,9 @@ async def test_the_three_launch_gates_agree_on_the_same_flag():
             tool_manager=manager, config_manager=config_manager
         )
 
-        gated_names = [LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME]
+        gated_names = [
+            LAUNCH_TOOL_NAME, GET_RUNS_TOOL_NAME, RESULT_TOOL_NAME, FOLLOW_UP_TOOL_NAME
+        ]
         assert launch_tool_enabled(settings) is enabled
         offered = [
             s["function"]["name"]
@@ -1419,3 +1427,674 @@ async def test_real_chat_service_filters_child_tools_instead_of_refusing():
     tools = await resolve_child_tools(service, workspace_config, "test@example.com")
 
     assert tools == ["atlas_canvas"]
+
+
+# ---------------------------------------------------------------------------
+# atlas_follow_up: the launching conversation continues a sub-conversation
+# ---------------------------------------------------------------------------
+
+
+def test_follow_up_is_a_built_in_launch_gated_tool():
+    assert is_atlas_tool(FOLLOW_UP_TOOL_NAME)
+    assert FOLLOW_UP_TOOL_NAME in LAUNCH_GATED_TOOL_NAMES
+    schema = ATLAS_TOOL_SCHEMAS[FOLLOW_UP_TOOL_NAME]["function"]
+    assert sorted(schema["parameters"]["required"]) == ["message", "run_id"]
+    assert sorted(schema["parameters"]["properties"]) == ["message", "run_id"]
+    assert atlas_tool_schemas([FOLLOW_UP_TOOL_NAME], launch_enabled=False) == []
+    assert [
+        s["function"]["name"]
+        for s in atlas_tool_schemas([FOLLOW_UP_TOOL_NAME], launch_enabled=True)
+    ] == [FOLLOW_UP_TOOL_NAME]
+
+
+def test_the_config_payload_lists_follow_up_only_when_launch_is_enabled():
+    from atlas.routes.config_routes import _atlas_tools_info
+
+    enabled = _atlas_tools_info(sleep_enabled=True, search_enabled=True, launch_enabled=True)
+    disabled = _atlas_tools_info(sleep_enabled=True, search_enabled=True, launch_enabled=False)
+
+    assert "follow_up" in enabled["tools"]
+    assert "follow_up" not in disabled["tools"]
+
+
+class _Access:
+    """What the user may use *right now*; tests revoke access between turns."""
+
+    def __init__(self):
+        self.tools = ["math_add", "filesystem_read"]
+
+
+def _follow_up_factory(access=None, **kwargs):
+    access = access or _Access()
+    return _Factory(lambda c: _ChatService(c, authorized=access.tools), **kwargs), access
+
+
+def _start_parent(registry, conversation_id="parent"):
+    parent = registry.start(conversation_id=conversation_id, user_email="user@example.com")
+    set_current_run(parent.run_id, parent.conversation_id)
+    return parent
+
+
+async def _launch_and_finish(factory, registry, context):
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "first task"},
+        context,
+        factory=factory,
+    )
+    service = factory.services[-1]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    service.release.set()
+    await asyncio.wait_for(registry.get(handle["run_id"]).task, timeout=1)
+    return handle
+
+
+def _context(**extra):
+    return {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY), **extra}
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_continues_the_same_sub_conversation():
+    registry = _install_registry()
+    parent = _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "now check the edge cases"},
+        _context(),
+        factory=factory,
+    )
+
+    service = factory.services[-1]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    call = service.calls[0]
+    # Same conversation id: the chat service hydrates the child's stored
+    # history, so the follow-up builds on what the child already said.
+    assert call["conversation_id"] == handle["conversation_id"]
+    assert call["content"] == "now check the edge cases"
+    assert call["model"] == "gpt-4o"
+    assert call["selected_tools"] == handle["tools"]
+    assert call["selected_data_sources"] == handle["data_sources"]
+    assert call["workspace_id"] == "ws-1"
+    assert call["agent_mode"] is True
+
+    assert follow["conversation_id"] == handle["conversation_id"]
+    assert follow["run_id"] != handle["run_id"]
+    assert follow["previous_run_id"] == handle["run_id"]
+    assert follow["parent_run_id"] == parent.run_id
+    assert follow["status"] == RunStatus.RUNNING.value
+    # The new turn is observable like any other child, and keeps its name.
+    record = registry.get(follow["run_id"])
+    assert record.title == "first task"
+    assert follow["run_id"] in [r["run_id"] for r in get_child_runs(_context())]
+    service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_accepts_the_run_id_of_an_earlier_follow_up():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+    first = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "one"}, _context(), factory=factory
+    )
+    factory.services[-1].release.set()
+    await asyncio.wait_for(registry.get(first["run_id"]).task, timeout=1)
+
+    second = await follow_up_sub_conversation(
+        {"run_id": first["run_id"], "message": "two"}, _context(), factory=factory
+    )
+
+    assert second["conversation_id"] == handle["conversation_id"]
+    factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_from_a_later_turn_of_the_same_conversation_works():
+    registry = _install_registry()
+    parent = _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+    registry.set_status(parent.run_id, RunStatus.COMPLETED)
+    later = _start_parent(registry)
+
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "more"}, _context(), factory=factory
+    )
+
+    # Hung off the turn that sent it, so stopping *that* turn stops the reply.
+    assert follow["parent_run_id"] == later.run_id
+    registry.cancel(later.run_id, "user@example.com")
+    await asyncio.sleep(0)
+    assert registry.get(follow["run_id"]).is_terminal
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_to_a_running_sub_conversation_is_refused():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+        _context(),
+        factory=factory,
+    )
+    await asyncio.wait_for(factory.services[0].started.wait(), timeout=1)
+
+    with pytest.raises(LaunchRefused, match="still working"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "hurry"}, _context(), factory=factory
+        )
+    # Refused before a chat service was built for it.
+    assert len(factory.services) == 1
+    factory.services[0].release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_to_a_run_that_is_not_this_conversations_child_is_refused():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    stranger = registry.start(
+        conversation_id="elsewhere", user_email="user@example.com",
+        parent_run_id="another-parent", depth=1,
+    )
+    registry.set_status(stranger.run_id, RunStatus.COMPLETED)
+    foreign = registry.start(conversation_id="theirs", user_email="other@example.com")
+    registry.set_status(foreign.run_id, RunStatus.COMPLETED)
+
+    for run_id in ("no-such-run", stranger.run_id, foreign.run_id):
+        with pytest.raises(LaunchRefused, match="not a sub-conversation"):
+            await follow_up_sub_conversation(
+                {"run_id": run_id, "message": "hi"}, _context(), factory=factory
+            )
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_only_gets_tools_the_caller_is_still_authorized_for():
+    registry = _install_registry()
+    _start_parent(registry)
+    access = _Access()
+    factory, _ = _follow_up_factory(access)
+    handle = await _launch_and_finish(factory, registry, _context())
+    assert handle["tools"] == ["math_add", "filesystem_read"]
+
+    access.tools = ["math_add"]
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+    )
+    assert follow["tools"] == ["math_add"]
+    factory.services[-1].release.set()
+    await asyncio.wait_for(registry.get(follow["run_id"]).task, timeout=1)
+
+    # Access that comes back later does not come back to the sub-conversation:
+    # it continues on what it was last given, which can only narrow.
+    access.tools = ["math_add", "filesystem_read"]
+    follow2 = await follow_up_sub_conversation(
+        {"run_id": follow["run_id"], "message": "and again"}, _context(), factory=factory
+    )
+    assert follow2["tools"] == ["math_add"]
+    factory.services[-1].release.set()
+
+    await asyncio.wait_for(registry.get(follow2["run_id"]).task, timeout=1)
+    # Nor through the *original* run id, whose spec still lists the old tools:
+    # a follow-up always continues from the sub-conversation's latest run.
+    follow3 = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "via the old id"}, _context(), factory=factory
+    )
+    assert follow3["tools"] == ["math_add"]
+    assert follow3["previous_run_id"] == follow2["run_id"]
+    factory.services[-1].release.set()
+    await asyncio.wait_for(registry.get(follow3["run_id"]).task, timeout=1)
+
+    access.tools = []
+    with pytest.raises(LaunchRefused, match="None of the tools") as refused:
+        await follow_up_sub_conversation(
+            {"run_id": follow3["run_id"], "message": "last"}, _context(), factory=factory
+        )
+    assert "Pick a workspace" not in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_is_refused_once_the_model_is_no_longer_available():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+    factory._models = {}
+
+    with pytest.raises(LaunchRefused, match="not available"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_at_a_different_compliance_level_is_refused():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(
+        factory, registry, _context(compliance_level="Internal")
+    )
+
+    with pytest.raises(LaunchRefused, match="compliance level"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"},
+            _context(compliance_level="Public"),
+            factory=factory,
+        )
+
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "again"},
+        _context(compliance_level="Internal"),
+        factory=factory,
+    )
+    await asyncio.wait_for(factory.services[-1].started.wait(), timeout=1)
+    assert factory.services[-1].calls[0]["compliance_level"] == "Internal"
+    assert follow["run_id"]
+    factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_from_an_incognito_turn_is_refused():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    with pytest.raises(LaunchRefused, match="incognito"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"},
+            _context(incognito=True),
+            factory=factory,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments, match",
+    [
+        ({"message": "hi"}, "'run_id' is required"),
+        ({"run_id": "x"}, "'message' is required"),
+        ({"run_id": "x", "message": "   "}, "'message' is required"),
+        ({"run_id": "x", "message": "a" * 20001}, "too long"),
+    ],
+)
+async def test_follow_up_arguments_are_validated(arguments, match):
+    _install_registry()
+    factory, _ = _follow_up_factory()
+    with pytest.raises(LaunchRefused, match=match):
+        await follow_up_sub_conversation(arguments, _context(), factory=factory)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [RunStatus.FAILED, RunStatus.CANCELLED])
+async def test_a_child_that_never_completed_a_turn_cannot_be_followed_up(status):
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(factory.services[0].started.wait(), timeout=1)
+    registry.cancel(handle["run_id"], "user@example.com", status=status)
+    await asyncio.sleep(0)
+
+    with pytest.raises(LaunchRefused, match="never completed a turn"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "hi"}, _context(), factory=factory
+        )
+    assert len(factory.services) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_a_launch_spec_cannot_be_followed_up():
+    registry = _install_registry()
+    parent = _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com",
+        parent_run_id=parent.run_id, depth=1,
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+
+    with pytest.raises(LaunchRefused, match="no longer known"):
+        await follow_up_sub_conversation(
+            {"run_id": child.run_id, "message": "hi"}, _context(), factory=factory
+        )
+
+
+@pytest.mark.asyncio
+async def test_follow_ups_count_against_the_children_per_run_cap():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory(settings=_settings(atlas_launch_max_children_per_run=1))
+    handle = await _launch_and_finish(factory, registry, _context())
+    # A second, still-running child fills the one slot.
+    await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "other"},
+        _context(),
+        factory=factory,
+    )
+
+    with pytest.raises(LaunchRefused, match="limit is 1"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+        )
+    factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_follow_up_refusal_is_a_failed_tool_result():
+    _install_registry()
+    result = await execute_follow_up_tool(
+        ToolCall(id="call-1", name=FOLLOW_UP_TOOL_NAME, arguments={"message": "hi"}),
+        {"user_email": "user@example.com", "factory": _follow_up_factory()[0]},
+    )
+    assert result.success is False
+    assert "'run_id' is required" in result.content
+
+
+@pytest.mark.asyncio
+async def test_follow_up_dispatches_through_the_manager(monkeypatch):
+    from atlas.modules.mcp_tools import mcp_execution
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+    monkeypatch.setattr(
+        mcp_execution,
+        "_client",
+        lambda: SimpleNamespace(config_manager=SimpleNamespace(app_settings=_settings())),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    result = await manager.execute_tool(
+        ToolCall(
+            id="call-1",
+            name=FOLLOW_UP_TOOL_NAME,
+            arguments={"run_id": handle["run_id"], "message": "again"},
+        ),
+        _context(factory=factory),
+    )
+
+    assert result.success is True, result.content
+    assert handle["conversation_id"] in result.content
+    assert "atlas_result" in result.content
+    factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_follow_up_dispatch_refuses_when_disabled(monkeypatch):
+    from atlas.modules.mcp_tools import mcp_execution
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    monkeypatch.setattr(
+        mcp_execution,
+        "_client",
+        lambda: SimpleNamespace(
+            config_manager=SimpleNamespace(app_settings=_settings(feature_atlas_launch_enabled=False))
+        ),
+    )
+    manager = MCPToolManager(config_path="/tmp/atlas-noop-mcp.json")
+
+    result = await manager.execute_tool(
+        ToolCall(id="call-1", name=FOLLOW_UP_TOOL_NAME, arguments={"run_id": "x", "message": "y"}),
+        {"user_email": "user@example.com"},
+    )
+
+    assert result.success is False
+    assert "disabled" in result.content
+
+
+
+class _RememberingChatService(_ChatService):
+    """A chat service whose session records each turn, like the real one."""
+
+    def __init__(self, connection, reply):
+        super().__init__(connection)
+        from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
+
+        self._reply = reply
+        self._history = ConversationHistory()
+        self._message, self._role = Message, MessageRole
+        self.session_repository = SimpleNamespace(get=self._get)
+
+    async def _get(self, session_id):
+        return SimpleNamespace(history=self._history)
+
+    async def handle_chat_message(self, **kwargs):
+        self._history.add_message(self._message(role=self._role.USER, content=kwargs["content"]))
+        self._history.add_message(self._message(role=self._role.ASSISTANT, content=self._reply))
+        return {"type": "response_complete"}
+
+
+@pytest.mark.asyncio
+async def test_result_reads_each_runs_own_reply_after_follow_ups():
+    registry = _install_registry()
+    _start_parent(registry)
+    replies = iter(["first answer", "second answer"])
+    factory = _Factory(lambda c: _RememberingChatService(c, next(replies)))
+    # No conversation_repository at all: the answers must come from the runs.
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(handle["run_id"]).task, timeout=1)
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "more"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(follow["run_id"]).task, timeout=1)
+
+    first = await get_child_result(handle["run_id"], _context(), factory)
+    second = await get_child_result(follow["run_id"], _context(), factory)
+
+    assert (first["result"], first["result_status"]) == ("first answer", "available")
+    assert (second["result"], second["result_status"]) == ("second answer", "available")
+
+
+@pytest.mark.asyncio
+async def test_runs_sharing_a_conversation_never_read_each_others_reply():
+    registry = _install_registry()
+    parent = _start_parent(registry)
+    first = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    registry.set_status(first.run_id, RunStatus.COMPLETED)
+    later = registry.start(
+        conversation_id="child", user_email="user@example.com", parent_run_id=parent.run_id, depth=1
+    )
+    later.created_at = first.created_at + 1
+    registry.set_status(later.run_id, RunStatus.COMPLETED)
+    factory = SimpleNamespace(
+        conversation_repository=SimpleNamespace(
+            get_conversation=lambda conversation_id, user_email: {
+                "messages": [{"role": "assistant", "content": "the later reply"}]
+            }
+        )
+    )
+
+    # Neither run captured its own reply, and the transcript's last message
+    # cannot be attributed to one of them -- so neither is handed it.
+    for run in (first, later):
+        result = await get_child_result(run.run_id, _context(), factory)
+        assert result["result"] is None and result["result_status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_that_ends_without_a_reply_does_not_report_the_previous_one():
+    registry = _install_registry()
+    _start_parent(registry)
+    replies = iter(["first answer", ""])
+    factory = _Factory(lambda c: _RememberingChatService(c, next(replies)))
+    factory.conversation_repository = SimpleNamespace(
+        get_conversation=lambda conversation_id, user_email: {
+            "messages": [{"role": "assistant", "content": "first answer"}]
+        }
+    )
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(handle["run_id"]).task, timeout=1)
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "more"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(follow["run_id"]).task, timeout=1)
+
+    result = await get_child_result(follow["run_id"], _context(), factory)
+
+    assert result["result"] is None
+    assert result["result_status"] == "empty"
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_to_a_child_waiting_on_the_user_says_so_instead_of_wait():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    await service.connection.send_json({"type": "tool_approval_request", "tool_call_id": "c1"})
+    assert registry.get(handle["run_id"]).status is RunStatus.WAITING_FOR_INPUT
+
+    with pytest.raises(LaunchRefused, match="waiting for the user") as refused:
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "hurry"}, _context(), factory=factory
+        )
+    assert "atlas_sleep" not in str(refused.value)
+    service.release.set()
+
+
+class _Sources:
+    """Stand-in unified RAG service; ``reachable`` is what discovery returns now."""
+
+    def __init__(self):
+        self.reachable = ["docs:handbook"]
+
+    async def discover_data_sources(self, user_email, user_compliance_level=None):
+        return [
+            {"server": s.split(":")[0], "sources": [{"id": s.split(":")[1]}]}
+            for s in self.reachable
+        ]
+
+
+@pytest.mark.asyncio
+async def test_follow_up_data_sources_are_reauthorized_from_the_launch_list():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    sources = _Sources()
+    factory.get_unified_rag_service = lambda: sources
+    handle = await _launch_and_finish(factory, registry, _context())
+    assert handle["data_sources"] == ["docs:handbook"]
+
+    # Lost (or discovery down): this turn runs without it, and says so.
+    sources.reachable = []
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+    )
+    assert follow["data_sources"] == []
+    assert follow["data_sources_unavailable"] == ["docs:handbook"]
+    factory.services[-1].release.set()
+    await asyncio.wait_for(registry.get(follow["run_id"]).task, timeout=1)
+
+    # Back again: a transient outage does not strip it from later turns, and
+    # the source is still authorized per query by the RAG service regardless.
+    sources.reachable = ["docs:handbook"]
+    follow2 = await follow_up_sub_conversation(
+        {"run_id": follow["run_id"], "message": "and again"}, _context(), factory=factory
+    )
+    assert follow2["data_sources"] == ["docs:handbook"]
+    assert follow2["data_sources_unavailable"] == []
+    await asyncio.wait_for(factory.services[-1].started.wait(), timeout=1)
+    assert factory.services[-1].calls[0]["selected_data_sources"] == ["docs:handbook"]
+    factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_captured_reply_skips_agent_narration_and_is_bounded():
+    from atlas.application.chat.runs.launcher import (
+        MAX_RESULT_CHARS,
+        _final_reply,
+        _set_result,
+    )
+    from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
+
+    def service_with(*messages):
+        history = ConversationHistory(messages=list(messages))
+
+        async def get(session_id):
+            return SimpleNamespace(history=history)
+
+        return SimpleNamespace(session_repository=SimpleNamespace(get=get))
+
+    narration = Message(
+        role=MessageRole.ASSISTANT, content="Let me check that.",
+        metadata={"agent_intermediate": True},
+    )
+    ask = Message(role=MessageRole.USER, content="go")
+
+    # The closing message was empty: narration is not the answer.
+    assert await _final_reply(service_with(ask, narration), "s") == ""
+
+    long_reply = Message(role=MessageRole.ASSISTANT, content="x" * (MAX_RESULT_CHARS * 3))
+    captured = await _final_reply(service_with(ask, narration, long_reply), "s")
+    assert len(captured) == MAX_RESULT_CHARS + 1
+    result = {}
+    _set_result(result, captured)
+    assert result["result_status"] == "available_truncated"
+
+
+@pytest.mark.asyncio
+async def test_a_launched_run_without_a_captured_reply_never_reads_the_transcript():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    factory.conversation_repository = SimpleNamespace(
+        get_conversation=lambda conversation_id, user_email: {
+            "messages": [{"role": "assistant", "content": "someone else's reply"}]
+        }
+    )
+    # _ChatService has no session_repository, so the capture fails (None).
+    handle = await _launch_and_finish(factory, registry, _context())
+    assert registry.get(handle["run_id"]).result is None
+
+    result = await get_child_result(handle["run_id"], _context(), factory)
+
+    assert result["result"] is None
+    assert result["result_status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_follow_ups_to_one_child_admit_exactly_one():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    outcomes = await asyncio.gather(
+        *(
+            follow_up_sub_conversation(
+                {"run_id": handle["run_id"], "message": f"m{i}"}, _context(), factory=factory
+            )
+            for i in range(2)
+        ),
+        return_exceptions=True,
+    )
+
+    admitted = [o for o in outcomes if isinstance(o, dict)]
+    refused = [o for o in outcomes if isinstance(o, LaunchRefused)]
+    assert len(admitted) == 1 and len(refused) == 1, outcomes
+    live = [
+        r for r in registry.children_of_conversation("parent")
+        if r.conversation_id == handle["conversation_id"] and not r.is_terminal
+    ]
+    assert len(live) == 1
+    for service in factory.services:
+        service.release.set()

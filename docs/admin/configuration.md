@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -142,8 +142,17 @@ ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
   per-tool config) are exempt from that approval and from the client's auto-approve: they still
   prompt inside the sub-conversation, which pauses until the user opens it. Keep such tools out
   of workspaces you expect to hand off.
+- **Follow-ups**: the same flag also exposes `atlas_follow_up`, which sends the next message
+  to a finished sub-conversation. It runs as a new turn of that sub-conversation on the model,
+  tools and data sources it was launched with, re-checked against the user's access at that
+  moment (a tool it loses stays lost; a data source that cannot be authorized for one turn is
+  skipped for that turn and named in the result), and counts against
+  `ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN` like a launch while it runs. A follow-up to a
+  sub-conversation that is still working, or from a turn at a different compliance level, is
+  refused. Sub-conversations stay reachable for follow-ups for 30 minutes after they finish.
 - **Cost**: every launched run is a full agent run on the model it names. Raising the caps
-  raises the worst-case spend of a single user message multiplicatively.
+  raises the worst-case spend of a single user message multiplicatively, and every follow-up
+  is another full agent run.
 
 ### Agent Mode Availability and Step Budget
 
