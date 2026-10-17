@@ -290,7 +290,8 @@ async def main():
     results, _, _ = await run_turn(intruder, f"plan=follow_up run={launched['run_id']}")
     frame = result_for(results, "atlas_follow_up")
     check(
-        (frame or {}).get("success") is not True,
+        frame is not None and frame.get("success") is False
+        and "not a sub-conversation" in result_text(frame),
         "another user cannot follow up on someone else's sub-conversation",
         result_text(frame),
     )

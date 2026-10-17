@@ -1730,6 +1730,26 @@ async def test_follow_up_arguments_are_validated(arguments, match):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [RunStatus.FAILED, RunStatus.CANCELLED])
+async def test_a_child_that_never_completed_a_turn_cannot_be_followed_up(status):
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(factory.services[0].started.wait(), timeout=1)
+    registry.cancel(handle["run_id"], "user@example.com", status=status)
+    await asyncio.sleep(0)
+
+    with pytest.raises(LaunchRefused, match="never completed a turn"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "hi"}, _context(), factory=factory
+        )
+    assert len(factory.services) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_run_without_a_launch_spec_cannot_be_followed_up():
     registry = _install_registry()
     parent = _start_parent(registry)

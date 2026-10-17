@@ -155,7 +155,9 @@ soon as it is admitted -- like `atlas_launch`, it never waits for the reply, whi
 - **Refusals.** A follow-up to a child that is still running is refused (rather than queued or
   steered into its live loop) with a hint to wait with `atlas_sleep` and poll `atlas_result` --
   except a child paused on the *user* (`waiting_for_input`), where polling would never end, so
-  the refusal tells the model to tell the user instead. A
+  the refusal tells the model to tell the user instead. A child that never completed a turn
+  (failed or cancelled before its first save) is refused too: there is no transcript to
+  continue. A
   follow-up from an incognito turn, or from a turn whose compliance level differs from the one
   the child was launched under, is refused for the same reasons a launch is.
 - **Limits and approval** go through the same `_start_child_run` helper as a launch, so the

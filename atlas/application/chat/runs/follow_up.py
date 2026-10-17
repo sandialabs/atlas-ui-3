@@ -127,6 +127,19 @@ async def follow_up_sub_conversation(
             "atlas_sleep and check atlas_result before sending a follow-up."
         )
 
+    if not any(
+        r.status is RunStatus.COMPLETED
+        for r in children
+        if r.conversation_id == target.conversation_id
+    ):
+        # Failed or cancelled before its first save: there is no transcript
+        # to continue, so a follow-up would start an empty conversation with
+        # neither the launch prompt nor a prior reply.
+        raise LaunchRefused(
+            "That sub-conversation never completed a turn, so there is nothing "
+            "to follow up on. Launch a new sub-conversation instead."
+        )
+
     spec = target.launch_spec
     if not spec:
         raise LaunchRefused(
