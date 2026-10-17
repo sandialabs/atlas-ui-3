@@ -97,6 +97,18 @@ Status folding uses a fixed priority: `waiting_for_input` > `running` >
 therefore surfaces the child that needs the user instead of a busier sibling.
 The marker shows a count when more than one conversation is in the top state.
 
+## Screenshots
+
+Expanded: a parent, its two children, a grandchild and an independent
+conversation. The count badge on each parent is its direct child count.
+
+![Expanded conversation tree](../images/issue1081-conversation-tree-expanded.png)
+
+Collapsed: only the parent row remains, with the chevron pointing right. Its
+children keep running; expanding restores them unchanged.
+
+![Collapsed conversation tree](../images/issue1081-conversation-tree-collapsed.png)
+
 ## Tests
 
 - `atlas/tests/test_conversation_lineage.py`: metadata helpers, run public
