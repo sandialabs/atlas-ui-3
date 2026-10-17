@@ -1,3 +1,5 @@
+import { arrangeConversations } from './conversationTree'
+
 /**
  * Builds the display list for the conversation sidebar.
  *
@@ -73,8 +75,12 @@ export function getDisplayConversations({
         updated_at: new Date((run.created_at || Date.now() / 1000) * 1000).toISOString(),
         message_count: 0,
         _run: true,
+        // A launched child is a run before it is a saved conversation. Its
+        // parent link lets the sidebar nest it immediately instead of waiting
+        // for the first save to persist the relationship (issue #1081).
+        parent_conversation_id: run.parent_conversation_id || null,
       })
     }
   }
-  return list
+  return arrangeConversations(list, runsByConversation)
 }

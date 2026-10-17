@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-10-02
+Last updated: 2026-10-17
 
 Issue #884.
 
@@ -115,6 +115,64 @@ the conversation list.
 
 Terminal runs stay queryable for 30 minutes so a browser reopened shortly after
 a run finished can still show how it ended.
+
+## Parent-child conversations in the history sidebar
+
+Issue #1081.
+
+A conversation started by `atlas_launch` is a real conversation in the same
+user's history. The sidebar draws that relationship instead of listing the
+child as an unrelated entry:
+
+- Children are nested under the conversation that launched them, with
+  indentation and a branch marker. Nesting follows the launch path, so a
+  grandchild sits under its own parent at the next level.
+- A parent row shows how many direct children it has. Its chevron expands or
+  collapses the group. Collapsing is a view operation only: it never stops,
+  steers or otherwise touches a run.
+- Expanded rows show their own run marker ("Running", "Needs approval",
+  "Failed", "Stopped"). A collapsed parent folds its whole subtree into one
+  marker, and a child that needs the user outranks a sibling that is merely
+  running, so hiding a group cannot hide an action waiting on the user.
+- Conversations that were not launched by another conversation stay
+  top-level. Search, tag filtering and the normal newest-first order are
+  unchanged; a child whose parent is not in the current result (deleted,
+  filtered out, or on another page) is shown top-level rather than dropped.
+- Opening a conversation inside a collapsed group expands that path
+  automatically. Everyone else's collapsed groups are left as they were.
+
+### Where the relationship is stored
+
+The live run registry knows a child's parent as soon as it is admitted, which
+covers the window before the child has any saved transcript. The durable link
+is written to the **child conversation's metadata** when its first turn is
+saved:
+
+```json
+{"parent_conversation_id": "<parent conversation id>"}
+```
+
+It is server-written: only the launch/follow-up path can set it, and a
+websocket `chat` frame cannot. The listing endpoints publish it as
+`parent_conversation_id`, and the run snapshot / `run_started` frames carry the
+same field so the tree updates immediately while the child is running.
+Because the link lives on the conversation record, the hierarchy survives a
+reload, the 30-minute registry retention window and a backend restart even
+though run *status* does not.
+
+### Privacy and authorization
+
+The relationship is an id, never a copied title, model or classification. The
+repository publishes it only when the parent conversation exists **and** is
+owned by the same user. A parent that was deleted, belongs to someone else, or
+is unavailable for any other reason is omitted, so the child appears as an
+ordinary root. Opening a child still goes through the same per-conversation
+ownership and compliance-level checks as any other history row; the parent link
+grants no access to the parent's transcript.
+
+The durable relationship does not replace #1080: after a restart the tree is
+still drawn from saved conversations, but live run status, approvals and
+results remain in memory.
 
 ## Protocol
 

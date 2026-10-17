@@ -2369,8 +2369,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             "title": run_record.title,
                             # Lets the client tell a model-launched child
                             # (atlas_launch) from a run the user started --
-                            # auto-approve is scoped to the latter.
+                            # auto-approve is scoped to the latter -- and place
+                            # it under its parent in the history tree
+                            # (issue #1081) before either conversation is saved.
                             "parent_run_id": run_record.parent_run_id,
+                            "parent_conversation_id": run_record.parent_conversation_id,
                         })
                     except Exception:
                         # The run was admitted but its task has not started:

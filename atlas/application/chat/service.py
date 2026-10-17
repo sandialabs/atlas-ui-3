@@ -17,6 +17,7 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain import conversation_classification as conv_class
+from atlas.domain.conversation_lineage import parent_conversation_id_from_metadata
 from atlas.domain.errors import AuthorizationError, DomainError, ValidationError
 from atlas.domain.messages.models import MessageType, ToolResult
 from atlas.domain.sessions.models import Session
@@ -486,6 +487,7 @@ class ChatService:
         temperature: float = 0.7,
         update_callback: Optional[UpdateCallback] = None,
         steering: Optional[Any] = None,
+        parent_conversation_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -529,6 +531,14 @@ class ChatService:
         session = await self.session_repository.get(session_id)
         if not session:
             session = await self.create_session(session_id, user_email)
+
+        # A launched sub-conversation records the conversation that started it
+        # (issue #1081). This is server-side only: the launch path passes it,
+        # never a client frame, and ``_save_conversation`` writes it into the
+        # child's metadata so the sidebar can still draw the tree after the run
+        # registry expires or the backend restarts.
+        if parent_conversation_id:
+            session.context["parent_conversation_id"] = str(parent_conversation_id)
 
         # Check incognito mode
         _incognito_sentinel = object()
@@ -1602,6 +1612,11 @@ class ChatService:
         # binding, when there is one, is assigned once the record is in hand.
         previous_workspace_id = session.context.get("workspace_id", UNSET)
         session.context["workspace_id"] = None
+        # Same rule for lineage: the binding belongs to the conversation the
+        # session was carrying, and a different conversation (or a brand-new id)
+        # must not inherit its parent.
+        previous_parent_id = session.context.get("parent_conversation_id", UNSET)
+        session.context["parent_conversation_id"] = None
 
         try:
             # Off the event loop: get_conversation issues several synchronous
@@ -1638,6 +1653,10 @@ class ChatService:
                 session.context.pop("workspace_id", None)
             else:
                 session.context["workspace_id"] = previous_workspace_id
+            if previous_parent_id is UNSET:
+                session.context.pop("parent_conversation_id", None)
+            else:
+                session.context["parent_conversation_id"] = previous_parent_id
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),
@@ -1664,6 +1683,12 @@ class ChatService:
             conv_metadata.get("workspace_id")
             if isinstance(conv_metadata, dict)
             else None
+        )
+        # The child's durable lineage travels with its stored metadata. A
+        # follow-up turn rehydrates the same conversation id, so it must read
+        # the parent back or the next save would erase the relationship.
+        session.context["parent_conversation_id"] = (
+            parent_conversation_id_from_metadata(conv_metadata)
         )
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
@@ -1789,6 +1814,13 @@ class ChatService:
             "agent_mode": bool(session.context.get("agent_mode")),
             "workspace_id": session.context.get("workspace_id"),
         }
+        # A launched sub-conversation's durable parent link (issue #1081).
+        # Only the launch path sets this context key; a normal conversation has
+        # none, and an unrelated conversation rehydrated into this session
+        # clears it in ``_hydrate_session_from_store``.
+        parent_conversation_id = session.context.get("parent_conversation_id")
+        if parent_conversation_id:
+            metadata["parent_conversation_id"] = str(parent_conversation_id)
         # Server-managed classification record (issue #1042), from the binding
         # the turn gate checked -- never from a client field. Legacy history
         # is written without one; the repository refuses any change.

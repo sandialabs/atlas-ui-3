@@ -79,6 +79,11 @@ export function useConversationRuns() {
 					// Set for a run launched by atlas_launch: the client scopes
 					// background auto-approve to runs the user started.
 					parent_run_id: data.parent_run_id || prev[data.conversation_id]?.parent_run_id || null,
+					// The launching conversation, so the history tree can nest
+					// the child before its first save persists the link.
+					parent_conversation_id: data.parent_conversation_id
+						|| prev[data.conversation_id]?.parent_conversation_id
+						|| null,
 				},
 			}))
 			return

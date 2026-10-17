@@ -1,6 +1,6 @@
 # Design Notes
 
-Last updated: 2026-09-13
+Last updated: 2026-10-17
 
 Point-in-time records of how and why specific features were built. Each is
 dated and reflects the system as of that date — useful background for
@@ -39,3 +39,4 @@ docs that describe how the system works today, see the
 - [Atlas Launch: Sub-Conversations](atlas-launch-sub-conversations-2026-09-13.md) - `atlas_launch` starts a bounded, workspace-scoped sub-conversation and returns a handle (issue #925)
 - [Mobile and In-Car Composer Friendliness](mobile-composer-friendliness-2026-09-16.md) - Feedback button anchored to the live composer height, New Chat confirm replaced with an Undo toast, bigger touch targets
 - [RAG Sources Drawer as an Overlay](rag-drawer-overlay-2026-10-08.md) - The Data Sources drawer overlays the chat at every width instead of reflowing it (issue #1037)
+- [Parent-Child Conversations in the Sidebar](conversation-tree-sidebar-2026-10-17.md) - Launched sub-conversations nest under their parent, durably and with owner-scoped links (issue #1081)
