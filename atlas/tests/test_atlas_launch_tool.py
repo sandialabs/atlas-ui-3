@@ -1649,10 +1649,11 @@ async def test_a_follow_up_only_gets_tools_the_caller_is_still_authorized_for():
     await asyncio.wait_for(registry.get(follow3["run_id"]).task, timeout=1)
 
     access.tools = []
-    with pytest.raises(LaunchRefused, match="no tools"):
+    with pytest.raises(LaunchRefused, match="None of the tools") as refused:
         await follow_up_sub_conversation(
             {"run_id": follow3["run_id"], "message": "last"}, _context(), factory=factory
         )
+    assert "Pick a workspace" not in str(refused.value)
 
 
 @pytest.mark.asyncio
@@ -1994,3 +1995,37 @@ async def test_follow_up_data_sources_are_reauthorized_from_the_launch_list():
     await asyncio.wait_for(factory.services[-1].started.wait(), timeout=1)
     assert factory.services[-1].calls[0]["selected_data_sources"] == ["docs:handbook"]
     factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_captured_reply_skips_agent_narration_and_is_bounded():
+    from atlas.application.chat.runs.launcher import (
+        MAX_RESULT_CHARS,
+        _final_reply,
+        _set_result,
+    )
+    from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
+
+    def service_with(*messages):
+        history = ConversationHistory(messages=list(messages))
+
+        async def get(session_id):
+            return SimpleNamespace(history=history)
+
+        return SimpleNamespace(session_repository=SimpleNamespace(get=get))
+
+    narration = Message(
+        role=MessageRole.ASSISTANT, content="Let me check that.",
+        metadata={"agent_intermediate": True},
+    )
+    ask = Message(role=MessageRole.USER, content="go")
+
+    # The closing message was empty: narration is not the answer.
+    assert await _final_reply(service_with(ask, narration), "s") == ""
+
+    long_reply = Message(role=MessageRole.ASSISTANT, content="x" * (MAX_RESULT_CHARS * 3))
+    captured = await _final_reply(service_with(ask, narration, long_reply), "s")
+    assert len(captured) == MAX_RESULT_CHARS + 1
+    result = {}
+    _set_result(result, captured)
+    assert result["result_status"] == "available_truncated"

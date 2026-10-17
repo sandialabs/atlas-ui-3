@@ -164,6 +164,12 @@ async def follow_up_sub_conversation(
         workspace_name=spec.get("workspace_name"),
         # The conversation keeps the name its launch prompt gave it.
         title=target.title,
+        no_tools_message=(
+            "None of the tools that sub-conversation was launched with are "
+            "still available to you, so it cannot be continued. Launch a new "
+            "sub-conversation with a workspace that has tools, or do the work "
+            "in this conversation."
+        ),
     )
 
     logger.info(

@@ -275,6 +275,8 @@ async def resolve_child_tools(
     chat_service: Any,
     workspace_config: Dict[str, Any],
     user_email: str,
+    *,
+    no_tools_message: Optional[str] = None,
 ) -> List[str]:
     """The workspace's tools, re-checked against the caller's access *now*.
 
@@ -291,7 +293,8 @@ async def resolve_child_tools(
     authorized = await authorization.filter_authorized_tools(list(selected), user_email)
     if not authorized:
         raise LaunchRefused(
-            "That workspace has no tools you are currently authorized to use, so "
+            no_tools_message
+            or "That workspace has no tools you are currently authorized to use, so "
             "a sub-conversation started under it would have nothing to work with. "
             "Pick a workspace with tools, or do the work in this conversation."
         )
@@ -501,8 +504,14 @@ async def _final_reply(chat_service: Any, session_id: Any) -> Optional[str]:
         role = getattr(getattr(message, "role", None), "value", None)
         if role == "user":
             return ""
+        if (getattr(message, "metadata", None) or {}).get("agent_intermediate"):
+            # Narration between agent steps, not the run's answer.
+            continue
         if role == "assistant" and message.content:
-            return _content_text(message.content)
+            # Bounded here, not only when read: the record is retained for
+            # the whole retention window. One char over the limit keeps the
+            # "truncated" signal for ``_set_result``.
+            return _content_text(message.content)[: MAX_RESULT_CHARS + 1]
     return ""
 
 
@@ -695,6 +704,7 @@ async def _start_child_run(
     workspace_id: Optional[str],
     workspace_name: Optional[str],
     title: Optional[str],
+    no_tools_message: Optional[str] = None,
 ) -> Tuple[Any, Dict[str, Any], List[str]]:
     """Admit a child run on ``conversation_id`` and schedule its task.
 
@@ -716,7 +726,10 @@ async def _start_child_run(
     )
     chat_service = factory.create_chat_service(connection=connection)
     tools = await resolve_child_tools(
-        chat_service, {"selected_tools": selected_tools}, user_email
+        chat_service,
+        {"selected_tools": selected_tools},
+        user_email,
+        no_tools_message=no_tools_message,
     )
     # Who answers the child's tool approvals? Nobody, unless somebody is
     # looking at the child's conversation -- and it is not in the user's
