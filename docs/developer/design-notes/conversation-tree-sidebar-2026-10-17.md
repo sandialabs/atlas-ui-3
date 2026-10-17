@@ -66,11 +66,14 @@ classification leak. Clicking a nested child still uses the normal
 `GET /api/conversations/{id}` path, including its ownership and compliance
 checks; being a child grants nothing.
 
-A parent on another page is still recognized: the visibility check queries the
-parent by id rather than requiring it to be in the current result page. Search
-results deliberately work the other way -- a matching child whose parent does
-not match the query is shown top-level, because the result set is the user's
-current frame of reference.
+A parent on another page still counts for the visibility check: the server
+queries the parent by id rather than requiring it to be in the current result
+page, so the child's recorded link stays valid. The current sidebar only knows
+the rows it fetched, so such a child is still drawn top-level until its parent
+appears -- the same as a deleted or search-filtered parent. Search results
+deliberately work this way too: a matching child whose parent does not match
+the query is shown top-level, because the result set is the user's current
+frame of reference.
 
 ### Rendering is a flat array in tree order
 
