@@ -264,13 +264,16 @@ async def test_a_follow_up_keeps_the_stored_parent_over_the_launch_argument(
 ):
     from unittest.mock import AsyncMock, patch
 
+    from atlas.domain.messages.models import Message, MessageRole
+
     _save(repo, "stored-parent")
     _save(repo, "other-parent")
     _save(repo, "child-conv", parent_id="stored-parent")
 
     async def _execute(**_ignored):
         session = await chat_service.session_repository.get(session_id)
-        assert session.context["parent_conversation_id"] == "stored-parent"
+        session.history.add_message(Message(role=MessageRole.USER, content="next step"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="done"))
         return {"type": "done"}
 
     session_id = uuid4()
@@ -356,6 +359,60 @@ async def test_hydration_restores_the_parent_link_for_the_next_turn(chat_service
     )
     assert loaded == 2
     assert session.context["parent_conversation_id"] == "parent-conv"
+
+
+@pytest.mark.asyncio
+async def test_failed_hydration_does_not_stamp_the_old_parent_on_a_new_conversation(
+    chat_service, monkeypatch
+):
+    """A store error while switching conversations must not reattach X's parent to Y."""
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("history store unavailable")
+
+    monkeypatch.setattr(
+        chat_service.conversation_repository, "get_conversation", _boom
+    )
+    session = await chat_service.create_session(uuid4(), USER)
+    session.context["conversation_id"] = "conv-x"
+    session.context["parent_conversation_id"] = "parent-of-x"
+
+    loaded = await chat_service._hydrate_session_from_store(
+        session,
+        "conv-y",
+        USER,
+        False,
+        previous_conversation_id="conv-x",
+    )
+
+    assert loaded == 0
+    assert session.context.get("parent_conversation_id") is None
+
+
+@pytest.mark.asyncio
+async def test_failed_rehydration_of_the_same_conversation_keeps_its_parent(
+    chat_service, monkeypatch
+):
+    """An empty session retrying the same conversation keeps its own link."""
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("history store unavailable")
+
+    monkeypatch.setattr(
+        chat_service.conversation_repository, "get_conversation", _boom
+    )
+    session = await chat_service.create_session(uuid4(), USER)
+    session.context["conversation_id"] = "conv-x"
+    session.context["parent_conversation_id"] = "parent-of-x"
+
+    loaded = await chat_service._hydrate_session_from_store(
+        session,
+        "conv-x",
+        USER,
+        False,
+        previous_conversation_id="conv-x",
+    )
+
+    assert loaded == 0
+    assert session.context["parent_conversation_id"] == "parent-of-x"
 
 
 @pytest.mark.asyncio
