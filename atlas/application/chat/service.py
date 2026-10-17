@@ -532,14 +532,6 @@ class ChatService:
         if not session:
             session = await self.create_session(session_id, user_email)
 
-        # A launched sub-conversation records the conversation that started it
-        # (issue #1081). This is server-side only: the launch path passes it,
-        # never a client frame, and ``_save_conversation`` writes it into the
-        # child's metadata so the sidebar can still draw the tree after the run
-        # registry expires or the backend restarts.
-        if parent_conversation_id:
-            session.context["parent_conversation_id"] = str(parent_conversation_id)
-
         # Check incognito mode
         _incognito_sentinel = object()
         incognito = kwargs.pop("incognito", _incognito_sentinel)
@@ -610,6 +602,21 @@ class ChatService:
                 )
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
+
+        # A launched sub-conversation records the conversation that started it
+        # (issue #1081). This is server-side only: the launch path passes it,
+        # never a client frame, and ``_save_conversation`` writes it into the
+        # child's metadata so the sidebar can still draw the tree after the run
+        # registry expires or the backend restarts.
+        #
+        # Applied *after* hydration, which clears the key at its start so a
+        # conversation switch cannot inherit the previous parent. A brand-new
+        # child id is unknown to the store, so hydration returns early with the
+        # key cleared and this restores the launch-supplied link. A follow-up
+        # rehydrates an existing child and has already restored the stored
+        # parent; the argument must not overwrite what the record owns.
+        if parent_conversation_id and not session.context.get("parent_conversation_id"):
+            session.context["parent_conversation_id"] = str(parent_conversation_id)
 
         # The active workspace (issue #829): the frontend sends the workspace
         # id whose selections are loaded for this turn so the conversation can

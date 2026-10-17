@@ -220,6 +220,78 @@ def test_export_strips_an_inaccessible_parent(repo):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
+async def test_a_launched_child_turn_saves_the_parent_after_hydration(chat_service, repo):
+    """The real turn path hydrates *after* the launch argument is read.
+
+    This is the regression the seeded-metadata test above cannot catch: a new
+    child conversation id is unknown to the store, hydration clears the lineage
+    key, and applying the launch argument before that point loses the link on
+    the child's very first save.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from atlas.domain.messages.models import Message, MessageRole
+
+    _save(repo, "parent-conv")
+    session_id = uuid4()
+
+    async def _execute(**_ignored):
+        session = await chat_service.session_repository.get(session_id)
+        session.history.add_message(Message(role=MessageRole.USER, content="do work"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="done"))
+        return {"type": "done"}
+
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(chat_service, "_get_orchestrator", return_value=orchestrator):
+        await chat_service.handle_chat_message(
+            session_id=session_id,
+            content="do work",
+            model="gpt-4",
+            user_email=USER,
+            conversation_id="child-conv",
+            parent_conversation_id="parent-conv",
+        )
+
+    saved = repo.get_conversation("child-conv", USER)
+    assert saved["metadata"][PARENT_CONVERSATION_METADATA_KEY] == "parent-conv"
+    assert saved["parent_conversation_id"] == "parent-conv"
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_keeps_the_stored_parent_over_the_launch_argument(
+    chat_service, repo
+):
+    from unittest.mock import AsyncMock, patch
+
+    _save(repo, "stored-parent")
+    _save(repo, "other-parent")
+    _save(repo, "child-conv", parent_id="stored-parent")
+
+    async def _execute(**_ignored):
+        session = await chat_service.session_repository.get(session_id)
+        assert session.context["parent_conversation_id"] == "stored-parent"
+        return {"type": "done"}
+
+    session_id = uuid4()
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(chat_service, "_get_orchestrator", return_value=orchestrator):
+        await chat_service.handle_chat_message(
+            session_id=session_id,
+            content="next step",
+            model="gpt-4",
+            user_email=USER,
+            conversation_id="child-conv",
+            parent_conversation_id="other-parent",
+        )
+
+    saved = repo.get_conversation("child-conv", USER)
+    assert saved["metadata"][PARENT_CONVERSATION_METADATA_KEY] == "stored-parent"
+    assert saved["parent_conversation_id"] == "stored-parent"
+
+
+@pytest.mark.asyncio
 async def test_save_conversation_persists_the_parent_link(chat_service, repo):
     from atlas.domain.messages.models import Message, MessageRole
 
