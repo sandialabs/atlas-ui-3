@@ -134,18 +134,28 @@ soon as it is admitted -- like `atlas_launch`, it never waits for the reply, whi
   model, tools, data sources, workspace and compliance level -- on its `RunRecord` (server-side
   only, never in the public dict). A follow-up reuses it, but re-checks every part against the
   caller now: the model through `check_model_access`, the tools through tool authorization, the
-  data sources through RAG discovery. The follow-up then records the narrowed spec, so access
-  lost between turns stays lost for that sub-conversation even if it comes back later. Whichever
+  data sources through RAG discovery. For tools the follow-up records the narrowed list, so a
+  tool lost between turns stays lost for that sub-conversation even if access comes back later.
+  Data sources are the exception: each follow-up re-authorizes the *launch-time* list, because
+  a source is authorized again whenever the child queries it (carrying the list forward widens
+  nothing) and a RAG discovery outage during one follow-up must not strip the sources from every
+  later turn. Sources that could not be authorized for a turn are named in the handle's
+  `data_sources_unavailable`. Whichever
   of the sub-conversation's run ids is passed, the follow-up continues from its *latest* run
   (reported as `previous_run_id`), so an old run id cannot resurrect a dropped tool.
 - **Results are per run.** Several runs now share one conversation, so the stored transcript's
   last reply only answers for the newest. Each launched run captures its own final reply from
-  its session when it completes (`RunRecord.result`), and `atlas_result` returns that. An older
-  run with no captured reply reports `unavailable` rather than a later follow-up's answer.
+  its session when it completes (`RunRecord.result`), and `atlas_result` returns that. A run that
+  ended without assistant text (step budget hit, or it ended on a tool call) reports `empty`, and
+  a run whose reply could not be captured reads the stored transcript only when it is the
+  conversation's only run -- otherwise `unavailable` -- so a run is never handed another run's
+  answer.
 - **Scoping** is `atlas_result`'s: only direct children of this conversation, owned by this
   user; any other id gets the same "not a sub-conversation" refusal.
 - **Refusals.** A follow-up to a child that is still running is refused (rather than queued or
-  steered into its live loop) with a hint to wait with `atlas_sleep` and poll `atlas_result`. A
+  steered into its live loop) with a hint to wait with `atlas_sleep` and poll `atlas_result` --
+  except a child paused on the *user* (`waiting_for_input`), where polling would never end, so
+  the refusal tells the model to tell the user instead. A
   follow-up from an incognito turn, or from a turn whose compliance level differs from the one
   the child was launched under, is refused for the same reasons a launch is.
 - **Limits and approval** go through the same `_start_child_run` helper as a launch, so the

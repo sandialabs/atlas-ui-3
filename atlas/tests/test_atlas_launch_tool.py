@@ -1876,7 +1876,7 @@ async def test_result_reads_each_runs_own_reply_after_follow_ups():
 
 
 @pytest.mark.asyncio
-async def test_an_older_run_never_reports_a_later_follow_ups_reply():
+async def test_runs_sharing_a_conversation_never_read_each_others_reply():
     registry = _install_registry()
     parent = _start_parent(registry)
     first = registry.start(
@@ -1896,8 +1896,101 @@ async def test_an_older_run_never_reports_a_later_follow_ups_reply():
         )
     )
 
-    old = await get_child_result(first.run_id, _context(), factory)
-    new = await get_child_result(later.run_id, _context(), factory)
+    # Neither run captured its own reply, and the transcript's last message
+    # cannot be attributed to one of them -- so neither is handed it.
+    for run in (first, later):
+        result = await get_child_result(run.run_id, _context(), factory)
+        assert result["result"] is None and result["result_status"] == "unavailable"
 
-    assert old["result"] is None and old["result_status"] == "unavailable"
-    assert new["result"] == "the later reply"
+
+@pytest.mark.asyncio
+async def test_a_follow_up_that_ends_without_a_reply_does_not_report_the_previous_one():
+    registry = _install_registry()
+    _start_parent(registry)
+    replies = iter(["first answer", ""])
+    factory = _Factory(lambda c: _RememberingChatService(c, next(replies)))
+    factory.conversation_repository = SimpleNamespace(
+        get_conversation=lambda conversation_id, user_email: {
+            "messages": [{"role": "assistant", "content": "first answer"}]
+        }
+    )
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(handle["run_id"]).task, timeout=1)
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "more"}, _context(), factory=factory
+    )
+    await asyncio.wait_for(registry.get(follow["run_id"]).task, timeout=1)
+
+    result = await get_child_result(follow["run_id"], _context(), factory)
+
+    assert result["result"] is None
+    assert result["result_status"] == "empty"
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_to_a_child_waiting_on_the_user_says_so_instead_of_wait():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await launch_sub_conversation(
+        {"workspace": "Research", "model": "gpt-4o", "prompt": "go"}, _context(), factory=factory
+    )
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    await service.connection.send_json({"type": "tool_approval_request", "tool_call_id": "c1"})
+    assert registry.get(handle["run_id"]).status is RunStatus.WAITING_FOR_INPUT
+
+    with pytest.raises(LaunchRefused, match="waiting for the user") as refused:
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "hurry"}, _context(), factory=factory
+        )
+    assert "atlas_sleep" not in str(refused.value)
+    service.release.set()
+
+
+class _Sources:
+    """Stand-in unified RAG service; ``reachable`` is what discovery returns now."""
+
+    def __init__(self):
+        self.reachable = ["docs:handbook"]
+
+    async def discover_data_sources(self, user_email, user_compliance_level=None):
+        return [
+            {"server": s.split(":")[0], "sources": [{"id": s.split(":")[1]}]}
+            for s in self.reachable
+        ]
+
+
+@pytest.mark.asyncio
+async def test_follow_up_data_sources_are_reauthorized_from_the_launch_list():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    sources = _Sources()
+    factory.get_unified_rag_service = lambda: sources
+    handle = await _launch_and_finish(factory, registry, _context())
+    assert handle["data_sources"] == ["docs:handbook"]
+
+    # Lost (or discovery down): this turn runs without it, and says so.
+    sources.reachable = []
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+    )
+    assert follow["data_sources"] == []
+    assert follow["data_sources_unavailable"] == ["docs:handbook"]
+    factory.services[-1].release.set()
+    await asyncio.wait_for(registry.get(follow["run_id"]).task, timeout=1)
+
+    # Back again: a transient outage does not strip it from later turns, and
+    # the source is still authorized per query by the RAG service regardless.
+    sources.reachable = ["docs:handbook"]
+    follow2 = await follow_up_sub_conversation(
+        {"run_id": follow["run_id"], "message": "and again"}, _context(), factory=factory
+    )
+    assert follow2["data_sources"] == ["docs:handbook"]
+    assert follow2["data_sources_unavailable"] == []
+    await asyncio.wait_for(factory.services[-1].started.wait(), timeout=1)
+    assert factory.services[-1].calls[0]["selected_data_sources"] == ["docs:handbook"]
+    factory.services[-1].release.set()

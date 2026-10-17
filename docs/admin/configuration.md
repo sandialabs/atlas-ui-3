@@ -145,7 +145,8 @@ ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
 - **Follow-ups**: the same flag also exposes `atlas_follow_up`, which sends the next message
   to a finished sub-conversation. It runs as a new turn of that sub-conversation on the model,
   tools and data sources it was launched with, re-checked against the user's access at that
-  moment (so it can only lose access, never gain it), and counts against
+  moment (a tool it loses stays lost; a data source that cannot be authorized for one turn is
+  skipped for that turn and named in the result), and counts against
   `ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN` like a launch while it runs. A follow-up to a
   sub-conversation that is still working, or from a turn at a different compliance level, is
   refused. Sub-conversations stay reachable for follow-ups for 30 minutes after they finish.

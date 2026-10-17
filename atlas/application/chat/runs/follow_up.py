@@ -29,7 +29,7 @@ from atlas.application.chat.runs.launcher import (
     _start_child_run,
     resolve_model,
 )
-from atlas.application.chat.runs.registry import get_run_registry
+from atlas.application.chat.runs.registry import RunStatus, get_run_registry
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.messages.models import ToolResult
 from atlas.modules.mcp_tools.atlas_server import launch_tool_enabled
@@ -109,6 +109,15 @@ async def follow_up_sub_conversation(
 
     registry = get_run_registry()
     active = registry.active_for_conversation(target.conversation_id, user_email)
+    if active is not None and active.status is RunStatus.WAITING_FOR_INPUT:
+        # Polling would never end: the child is paused on the *user*, not on
+        # its own work.
+        raise LaunchRefused(
+            f"Sub-conversation {active.conversation_id} is waiting for the user "
+            f"({active.waiting_on or 'input'}) and cannot take a follow-up until "
+            "they answer it in that conversation. Tell the user, rather than "
+            "waiting for it."
+        )
     if active is not None:
         raise LaunchRefused(
             f"Sub-conversation {target.conversation_id} is still working (run "
@@ -146,7 +155,9 @@ async def follow_up_sub_conversation(
         model=model_name,
         prompt=message,
         selected_tools=list(spec.get("tools") or []),
-        data_sources=list(spec.get("data_sources") or []),
+        data_sources=list(
+            spec.get("requested_data_sources", spec.get("data_sources")) or []
+        ),
         workspace_id=spec.get("workspace_id"),
         workspace_name=spec.get("workspace_name"),
         # The conversation keeps the name its launch prompt gave it.
@@ -170,6 +181,14 @@ async def follow_up_sub_conversation(
         "model": model_name,
         "tools": new_spec["tools"],
         "data_sources": new_spec["data_sources"],
+        # Sources the sub-conversation was launched with that this turn could
+        # not authorize -- access lost, or discovery unavailable right now.
+        # Each later follow-up retries them.
+        "data_sources_unavailable": [
+            source
+            for source in new_spec["requested_data_sources"]
+            if source not in new_spec["data_sources"]
+        ],
         "depth": record.depth,
         "parent_run_id": record.parent_run_id,
         "tools_needing_approval": admin_gated,
@@ -216,6 +235,12 @@ async def execute_follow_up_tool(
             "It will pause for approval on these tools until the user opens "
             f"that conversation: {', '.join(handle['tools_needing_approval'])}.\n"
             if handle["tools_needing_approval"]
+            else ""
+        )
+        + (
+            "These data sources could not be authorized for this turn: "
+            f"{', '.join(handle['data_sources_unavailable'])}.\n"
+            if handle["data_sources_unavailable"]
             else ""
         )
         + json.dumps(handle)

@@ -487,8 +487,9 @@ async def _final_reply(chat_service: Any, session_id: Any) -> Optional[str]:
 
     Read from the run's own session rather than the stored conversation: once
     a sub-conversation has had follow-ups, its stored transcript's last reply
-    belongs to whichever run finished most recently. Best effort -- ``None``
-    leaves ``atlas_result`` to fall back to the stored transcript.
+    belongs to whichever run finished most recently. Returns ``""`` when the
+    turn ended without assistant text (step budget hit, or it ended on a tool
+    call) and ``None`` only when the session could not be read.
     """
     try:
         session = await chat_service.session_repository.get(session_id)
@@ -499,10 +500,10 @@ async def _final_reply(chat_service: Any, session_id: Any) -> Optional[str]:
     for message in reversed(messages):
         role = getattr(getattr(message, "role", None), "value", None)
         if role == "user":
-            return None
+            return ""
         if role == "assistant" and message.content:
             return _content_text(message.content)
-    return None
+    return ""
 
 
 async def _run_child(
@@ -729,9 +730,10 @@ async def _start_child_run(
     if not admin_gated and not _preapprove_child_tools(chat_service):
         logger.warning("Could not pre-approve tools for launched run")
     compliance_level = (context or {}).get("compliance_level")
+    requested_sources = list(data_sources)
     data_sources = await resolve_child_data_sources(
         factory,
-        data_sources,
+        requested_sources,
         user_email,
         compliance_level,
     )
@@ -761,6 +763,12 @@ async def _start_child_run(
         "model": model,
         "tools": tools,
         "data_sources": data_sources,
+        # Unlike tools, sources are re-authorized from the *launch-time* list
+        # on every follow-up rather than from the last narrowed one: a source
+        # is authorized again when the child queries it, so carrying the list
+        # forward widens nothing, and a RAG discovery outage during one
+        # follow-up must not strip the sources from every later turn.
+        "requested_data_sources": requested_sources,
         "workspace_id": workspace_id,
         "workspace_name": workspace_name,
         "compliance_level": compliance_level,
@@ -852,22 +860,28 @@ async def get_child_result(
     if not record.is_terminal or record.status is not RunStatus.COMPLETED:
         return result
 
+    if record.result == "":
+        # The run finished without a reply of its own; the transcript's last
+        # assistant message would be an earlier run's.
+        result["result_status"] = "empty"
+        return result
     if record.result is not None:
         _set_result(result, record.result)
         return result
     if any(
-        later.created_at > record.created_at
-        for later in get_run_registry().children_of_conversation(
+        other.run_id != record.run_id
+        for other in get_run_registry().children_of_conversation(
             record.parent_conversation_id, include_terminal=True
         )
-        if later.conversation_id == record.conversation_id
+        if other.conversation_id == record.conversation_id
     ):
-        # A follow-up has run since, so the stored transcript's last reply is
-        # not this run's. Saying "unavailable" beats returning another run's.
+        # The stored transcript's last reply answers for one run only, and
+        # with follow-ups in play there is no telling it is this one. Saying
+        # "unavailable" beats returning another run's answer.
         result["result_status"] = "unavailable"
         result["result_error"] = (
-            "A later follow-up has run in this sub-conversation; read the "
-            "latest run's result instead."
+            "This run's reply could not be read separately from the other "
+            "runs in this sub-conversation."
         )
         return result
 
