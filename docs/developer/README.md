@@ -1,6 +1,6 @@
 # Developer's Guide
 
-Last updated: 2026-06-22
+Last updated: 2026-10-16
 
 Technical reference for contributors to Atlas UI 3. These pages describe how
 the system works *today*. Point-in-time records of how individual features were
@@ -21,6 +21,7 @@ built live under [design-notes/](design-notes/README.md).
 - [Interactive Tool Elicitation](elicitation.md) - Tools that prompt the user mid-execution
 - [Progress Updates and Intermediate Results](progress-updates.md) - Streaming progress from long-running tools
 - [Adding Custom Canvas Renderers](canvas-renderers.md) - Extending the canvas with new viewers
+- [Docs Search MCP Example](docs-search-mcp.md) - Read-only stdio server for searching and reading the repo's `docs/` folder
 
 ## Files & Storage
 
