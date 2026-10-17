@@ -215,6 +215,21 @@ describe('Sidebar conversation tree (#1081)', () => {
       .toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('does not prune collapse state from a stale filtered list', () => {
+    const key = 'chatui-collapsed-conversation-ids:tester@example.com'
+    localStorage.setItem(key, JSON.stringify(['parent']))
+    h.history = baseHistory({
+      // Filter just cleared, but the unfiltered fetch has not landed yet: the
+      // only row on screen is the previous search result.
+      conversations: [conv('child-a', 'Child A', { parent_conversation_id: 'parent' })],
+      loading: true,
+    })
+    render(<Sidebar />)
+
+    // The effect must not treat the missing parent as a deleted conversation.
+    expect(JSON.parse(localStorage.getItem(key))).toEqual(['parent'])
+  })
+
   it('renders an orphaned child as a top-level conversation', () => {
     h.history = baseHistory({
       conversations: [

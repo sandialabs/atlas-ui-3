@@ -392,9 +392,11 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   )
 
   // Forget collapse state for rows that no longer exist, so the persisted set
-  // cannot grow forever. A filtered/paged list is skipped: its absent rows are
-  // not deleted conversations.
-  const visibleIdsKey = !filteringConversations
+  // cannot grow forever. Skip an in-flight or filtered list: its absent rows
+  // are not deleted conversations. `loading` matters on the render right after
+  // a filter is cleared -- the query is empty then, but the fetched list still
+  // holds the previous filtered results until the unfiltered request lands.
+  const visibleIdsKey = !filteringConversations && !history.loading
     ? displayConversations.map(conv => conv.id).join('\u0000')
     : ''
   useEffect(() => {
