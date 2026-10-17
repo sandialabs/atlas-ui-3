@@ -96,8 +96,10 @@ async def follow_up_sub_conversation(
     addressed = next((record for record in children if record.run_id == run_id), None)
     if addressed is None:
         raise LaunchRefused(
-            "That run is not a sub-conversation of this conversation. Use a "
-            "run_id from atlas_launch, atlas_get_runs or atlas_follow_up."
+            "That run is not a sub-conversation of this conversation, or it "
+            "has expired (sub-conversations are kept for about 30 minutes "
+            "after they finish). Use a current run_id from atlas_get_runs, or "
+            "launch a new sub-conversation."
         )
     # Continue from the sub-conversation's *latest* run, whichever of its run
     # ids was passed: the latest carries the narrowest spec, and an older run

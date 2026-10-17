@@ -351,8 +351,9 @@ RESULT_TOOL_SCHEMA = {
         "name": RESULT_TOOL_NAME,
             "description": (
             "Return the current status and final assistant result of a direct child "
-            "launched by this conversation. Pass the run_id from atlas_launch or "
-            "atlas_get_runs. This never waits; poll with atlas_sleep between checks. "
+            "launched by this conversation. Pass the run_id from atlas_launch, "
+            "atlas_get_runs or atlas_follow_up. This never waits; poll with "
+            "atlas_sleep between checks. "
             "Results are scoped to this conversation and user. result_status is "
             "pending, available, available_truncated, empty, unreadable or "
             "unavailable; only pending is normally worth polling again."
