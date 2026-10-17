@@ -292,6 +292,41 @@ async def test_a_follow_up_keeps_the_stored_parent_over_the_launch_argument(
 
 
 @pytest.mark.asyncio
+async def test_a_second_turn_without_the_argument_keeps_the_stored_parent(
+    chat_service, repo
+):
+    """The link is the conversation's, not each turn's argument."""
+    from unittest.mock import AsyncMock, patch
+
+    from atlas.domain.messages.models import Message, MessageRole
+
+    _save(repo, "parent-conv")
+    _save(repo, "child-conv", parent_id="parent-conv")
+
+    async def _execute(**_ignored):
+        session = await chat_service.session_repository.get(session_id)
+        session.history.add_message(Message(role=MessageRole.USER, content="next step"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="done"))
+        return {"type": "done"}
+
+    session_id = uuid4()
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(chat_service, "_get_orchestrator", return_value=orchestrator):
+        await chat_service.handle_chat_message(
+            session_id=session_id,
+            content="next step",
+            model="gpt-4",
+            user_email=USER,
+            conversation_id="child-conv",
+        )
+
+    saved = repo.get_conversation("child-conv", USER)
+    assert saved["metadata"][PARENT_CONVERSATION_METADATA_KEY] == "parent-conv"
+    assert saved["parent_conversation_id"] == "parent-conv"
+
+
+@pytest.mark.asyncio
 async def test_save_conversation_persists_the_parent_link(chat_service, repo):
     from atlas.domain.messages.models import Message, MessageRole
 

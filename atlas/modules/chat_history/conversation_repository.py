@@ -81,6 +81,33 @@ class ConversationRepository:
             if parent_id in owned
         }
 
+    def _lineage_fields_by_id(
+        self,
+        session: Session,
+        user_email: str,
+        metadata_by_id: Dict[str, Any],
+    ) -> Dict[str, Dict[str, Any]]:
+        """The exact lineage payload a listing may expose, keyed by child id.
+
+        Every list/search/get/export path goes through this one helper, so the
+        ownership rule is applied in one place and a new path cannot publish a
+        link that the others would withhold.
+        """
+        visible_parents = self._visible_parent_ids(
+            session,
+            user_email,
+            [
+                {"id": conversation_id, "metadata": metadata}
+                for conversation_id, metadata in metadata_by_id.items()
+            ],
+        )
+        return {
+            conversation_id: lineage_fields(
+                metadata, visible_parent_id=visible_parents.get(conversation_id)
+            )
+            for conversation_id, metadata in metadata_by_id.items()
+        }
+
     @staticmethod
     def _sanitize_lineage_metadata(
         metadata: Dict[str, Any], visible_parent_id: Optional[str]
@@ -269,10 +296,8 @@ class ConversationRepository:
             metadata_by_id = {
                 conv.id: _load_metadata(conv.metadata_json) for conv in conversations
             }
-            visible_parents = self._visible_parent_ids(
-                session,
-                user_email,
-                [{"id": conv_id, "metadata": metadata} for conv_id, metadata in metadata_by_id.items()],
+            lineage_by_id = self._lineage_fields_by_id(
+                session, user_email, metadata_by_id
             )
 
             results = []
@@ -300,10 +325,7 @@ class ConversationRepository:
                     "preview": preview,
                     "tags": tag_names,
                     **public_fields(metadata),
-                    **lineage_fields(
-                        metadata,
-                        visible_parent_id=visible_parents.get(conv.id),
-                    ),
+                    **lineage_by_id[conv.id],
                 })
 
             return results
@@ -355,17 +377,16 @@ class ConversationRepository:
                 except json.JSONDecodeError:
                     logger.warning("Corrupt metadata_json for conversation %s", conv.id)
 
-            visible_parents = self._visible_parent_ids(
-                session,
-                user_email,
-                [{"id": conv.id, "metadata": conv_metadata}],
-            )
-            visible_parent = visible_parents.get(conv.id)
+            lineage = self._lineage_fields_by_id(
+                session, user_email, {conv.id: conv_metadata}
+            )[conv.id]
             # A full record is only readable by its owner, but a corrupt or
             # legacy link can still name another user's conversation. Strip it
             # from both the metadata blob and the public field so the two views
             # never disagree.
-            self._sanitize_lineage_metadata(conv_metadata, visible_parent)
+            self._sanitize_lineage_metadata(
+                conv_metadata, lineage.get("parent_conversation_id")
+            )
 
             return {
                 "id": conv.id,
@@ -382,7 +403,7 @@ class ConversationRepository:
                 # still fails closed as "invalid"; ``conv_metadata`` has been
                 # normalized to a dict for the response payload.
                 **public_fields(_load_metadata(conv.metadata_json)),
-                **lineage_fields(conv_metadata, visible_parent_id=visible_parent),
+                **lineage,
             }
 
     def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
@@ -432,13 +453,13 @@ class ConversationRepository:
                 ConversationRecord.user_email == user_email,
             ).order_by(desc(ConversationRecord.updated_at)).all()
 
-            visible_parents = self._visible_parent_ids(
+            lineage_by_id = self._lineage_fields_by_id(
                 session,
                 user_email,
-                [
-                    {"id": conv.id, "metadata": _load_metadata(conv.metadata_json)}
+                {
+                    conv.id: _load_metadata(conv.metadata_json)
                     for conv in convs
-                ],
+                },
             )
 
             results = []
@@ -469,7 +490,8 @@ class ConversationRepository:
                     except json.JSONDecodeError:
                         pass
                 self._sanitize_lineage_metadata(
-                    conv_metadata, visible_parents.get(conv.id)
+                    conv_metadata,
+                    lineage_by_id[conv.id].get("parent_conversation_id"),
                 )
 
                 results.append({
@@ -482,7 +504,7 @@ class ConversationRepository:
                     "metadata": conv_metadata,
                     "tags": self._get_tag_names(session, conv.id),
                     "messages": messages,
-                    **lineage_fields(conv_metadata, visible_parent_id=visible_parents.get(conv.id)),
+                    **lineage_by_id[conv.id],
                 })
 
             return results
@@ -540,10 +562,8 @@ class ConversationRepository:
             metadata_by_id = {
                 conv.id: _load_metadata(conv.metadata_json) for conv in conversations
             }
-            visible_parents = self._visible_parent_ids(
-                session,
-                user_email,
-                [{"id": conv_id, "metadata": metadata} for conv_id, metadata in metadata_by_id.items()],
+            lineage_by_id = self._lineage_fields_by_id(
+                session, user_email, metadata_by_id
             )
 
             results = []
@@ -565,10 +585,7 @@ class ConversationRepository:
                     "preview": preview,
                     "tags": self._get_tag_names(session, conv.id),
                     **public_fields(metadata),
-                    **lineage_fields(
-                        metadata,
-                        visible_parent_id=visible_parents.get(conv.id),
-                    ),
+                    **lineage_by_id[conv.id],
                 })
 
             return results

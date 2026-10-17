@@ -37,21 +37,23 @@ function effectiveParentId(row, runsByConversation) {
 }
 
 /**
- * Whether `parentId` can really be an ancestor of `id` in this list.
+ * Whether following `id`'s parent chain revisits a row.
  *
- * A missing parent (deleted, filtered out, or not fetched) makes the child a
- * root. So does a cycle, which malformed or hand-edited metadata could produce:
- * the UI must render something rather than recurse forever.
+ * A cycle is the one case the UI must break: malformed or hand-edited metadata
+ * must render something rather than recurse forever. A *missing* ancestor is
+ * not a reason to split the tree -- only the direct parent has to be present,
+ * so a grandchild still nests under its own parent when the grandparent is
+ * filtered out of the result.
  */
-function hasValidParent(id, parentById, presentIds) {
+function hasParentCycle(id, parentById, presentIds) {
   let current = parentById.get(id)
   const seen = new Set([id])
-  while (current) {
-    if (!presentIds.has(current) || seen.has(current)) return false
+  while (current && presentIds.has(current)) {
+    if (seen.has(current)) return true
     seen.add(current)
     current = parentById.get(current)
   }
-  return true
+  return false
 }
 
 function aggregateRunFor(rowIndex, rows, runsByConversation) {
@@ -96,7 +98,11 @@ export function arrangeConversations(rows, runsByConversation) {
   const roots = []
   for (const [id, entry] of byId) {
     const parentId = parentById.get(id)
-    if (parentId && hasValidParent(id, parentById, presentIds)) {
+    if (
+      parentId
+      && presentIds.has(parentId)
+      && !hasParentCycle(id, parentById, presentIds)
+    ) {
       if (!childrenById.has(parentId)) childrenById.set(parentId, [])
       childrenById.get(parentId).push(entry)
     } else {

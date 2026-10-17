@@ -138,6 +138,8 @@ child as an unrelated entry:
   top-level. Search, tag filtering and the normal newest-first order are
   unchanged; a child whose parent is not in the current result (deleted,
   filtered out, or on another page) is shown top-level rather than dropped.
+  While a search or tag filter is active, groups render expanded so a row that
+  matches is never hidden by a collapse chosen earlier.
 - Opening a conversation inside a collapsed group expands that path
   automatically. Everyone else's collapsed groups are left as they were.
 
