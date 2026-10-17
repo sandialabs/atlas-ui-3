@@ -82,6 +82,37 @@ describe('useConversationRuns titles', () => {
     expect(result.current.runsByConversation.c.title).toBe('First prompt')
   })
 
+  it('keeps the launching conversation from run_started for the history tree', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => {
+      result.current.handleRunFrame({
+        type: 'run_started',
+        run_id: 'r-child',
+        conversation_id: 'child-conv',
+        title: 'Child task',
+        parent_run_id: 'r-parent',
+        parent_conversation_id: 'parent-conv',
+      })
+    })
+    expect(result.current.runsByConversation['child-conv']).toMatchObject({
+      parent_run_id: 'r-parent',
+      parent_conversation_id: 'parent-conv',
+    })
+
+    // A later status frame that omits the link must not drop it.
+    act(() => {
+      result.current.handleRunFrame({
+        type: 'run_status',
+        run: {
+          run_id: 'r-child',
+          conversation_id: 'child-conv',
+          status: 'running',
+        },
+      })
+    })
+    expect(result.current.runsByConversation['child-conv'].parent_conversation_id).toBe('parent-conv')
+  })
+
   it('prefers a title the server sends', () => {
     const { result } = renderHook(() => useConversationRuns())
     act(() => {

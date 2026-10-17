@@ -28,6 +28,12 @@ from atlas.domain.conversation_classification import (
     CLASSIFICATION_METADATA_KEY,
     public_fields,
 )
+from atlas.domain.conversation_lineage import (
+    PARENT_CONVERSATION_METADATA_KEY,
+    iter_recorded_links,
+    lineage_fields,
+    parent_conversation_id_from_metadata,
+)
 
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
 
@@ -42,6 +48,48 @@ class ConversationRepository:
 
     def _get_session(self) -> Session:
         return self._session_factory()
+
+    def _visible_parent_ids(
+        self,
+        session: Session,
+        user_email: str,
+        conversations: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        """Parent links the caller is allowed to see, keyed by child id.
+
+        A recorded parent is only published when the parent row exists *and*
+        belongs to the same user. A deleted parent, a filtered one, or an id
+        that belongs to someone else therefore reads exactly like a conversation
+        that never had a parent, and the child renders as a top-level entry.
+        The parent's title/model/classification are never consulted here, so no
+        information beyond the id the child already records can leak.
+        """
+        links = dict(iter_recorded_links(conversations))
+        if not links:
+            return {}
+        parent_ids = set(links.values())
+        owned = {
+            row[0]
+            for row in session.query(ConversationRecord.id).filter(
+                ConversationRecord.id.in_(parent_ids),
+                ConversationRecord.user_email == user_email,
+            ).all()
+        }
+        return {
+            child_id: parent_id
+            for child_id, parent_id in links.items()
+            if parent_id in owned
+        }
+
+    @staticmethod
+    def _sanitize_lineage_metadata(
+        metadata: Dict[str, Any], visible_parent_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """Drop a parent link the caller may not see from a full record."""
+        recorded = parent_conversation_id_from_metadata(metadata)
+        if recorded and recorded != visible_parent_id:
+            metadata.pop(PARENT_CONVERSATION_METADATA_KEY, None)
+        return metadata
 
     def save_conversation(
         self,
@@ -218,6 +266,15 @@ class ConversationRepository:
             query = query.order_by(desc(ConversationRecord.updated_at))
             conversations = query.offset(offset).limit(limit).all()
 
+            metadata_by_id = {
+                conv.id: _load_metadata(conv.metadata_json) for conv in conversations
+            }
+            visible_parents = self._visible_parent_ids(
+                session,
+                user_email,
+                [{"id": conv_id, "metadata": metadata} for conv_id, metadata in metadata_by_id.items()],
+            )
+
             results = []
             for conv in conversations:
                 # Get first assistant message as preview (title already shows user question)
@@ -231,6 +288,7 @@ class ConversationRepository:
                     preview = first_reply.content[:300]
 
                 tag_names = self._get_tag_names(session, conv.id)
+                metadata = metadata_by_id[conv.id]
 
                 results.append({
                     "id": conv.id,
@@ -241,7 +299,11 @@ class ConversationRepository:
                     "message_count": conv.message_count,
                     "preview": preview,
                     "tags": tag_names,
-                    **public_fields(_load_metadata(conv.metadata_json)),
+                    **public_fields(metadata),
+                    **lineage_fields(
+                        metadata,
+                        visible_parent_id=visible_parents.get(conv.id),
+                    ),
                 })
 
             return results
@@ -293,6 +355,18 @@ class ConversationRepository:
                 except json.JSONDecodeError:
                     logger.warning("Corrupt metadata_json for conversation %s", conv.id)
 
+            visible_parents = self._visible_parent_ids(
+                session,
+                user_email,
+                [{"id": conv.id, "metadata": conv_metadata}],
+            )
+            visible_parent = visible_parents.get(conv.id)
+            # A full record is only readable by its owner, but a corrupt or
+            # legacy link can still name another user's conversation. Strip it
+            # from both the metadata blob and the public field so the two views
+            # never disagree.
+            self._sanitize_lineage_metadata(conv_metadata, visible_parent)
+
             return {
                 "id": conv.id,
                 "user_email": conv.user_email,
@@ -304,7 +378,11 @@ class ConversationRepository:
                 "metadata": conv_metadata,
                 "messages": messages,
                 "tags": self._get_tag_names(session, conv.id),
+                # Classification reads the *raw* blob so an unreadable one
+                # still fails closed as "invalid"; ``conv_metadata`` has been
+                # normalized to a dict for the response payload.
                 **public_fields(_load_metadata(conv.metadata_json)),
+                **lineage_fields(conv_metadata, visible_parent_id=visible_parent),
             }
 
     def get_conversation_owner(self, conversation_id: str) -> Optional[str]:
@@ -354,6 +432,15 @@ class ConversationRepository:
                 ConversationRecord.user_email == user_email,
             ).order_by(desc(ConversationRecord.updated_at)).all()
 
+            visible_parents = self._visible_parent_ids(
+                session,
+                user_email,
+                [
+                    {"id": conv.id, "metadata": _load_metadata(conv.metadata_json)}
+                    for conv in convs
+                ],
+            )
+
             results = []
             for conv in convs:
                 msgs = session.query(MessageRecord).filter(
@@ -381,6 +468,9 @@ class ConversationRepository:
                         conv_metadata = json.loads(conv.metadata_json)
                     except json.JSONDecodeError:
                         pass
+                self._sanitize_lineage_metadata(
+                    conv_metadata, visible_parents.get(conv.id)
+                )
 
                 results.append({
                     "id": conv.id,
@@ -392,6 +482,7 @@ class ConversationRepository:
                     "metadata": conv_metadata,
                     "tags": self._get_tag_names(session, conv.id),
                     "messages": messages,
+                    **lineage_fields(conv_metadata, visible_parent_id=visible_parents.get(conv.id)),
                 })
 
             return results
@@ -446,6 +537,15 @@ class ConversationRepository:
                 ConversationRecord.id.in_(all_ids),
             ).order_by(desc(ConversationRecord.updated_at)).limit(limit).all()
 
+            metadata_by_id = {
+                conv.id: _load_metadata(conv.metadata_json) for conv in conversations
+            }
+            visible_parents = self._visible_parent_ids(
+                session,
+                user_email,
+                [{"id": conv_id, "metadata": metadata} for conv_id, metadata in metadata_by_id.items()],
+            )
+
             results = []
             for conv in conversations:
                 first_reply = session.query(MessageRecord).filter(
@@ -453,6 +553,7 @@ class ConversationRepository:
                     MessageRecord.role == "assistant",
                 ).order_by(MessageRecord.sequence_number).first()
                 preview = first_reply.content[:300] if first_reply and first_reply.content else ""
+                metadata = metadata_by_id[conv.id]
 
                 results.append({
                     "id": conv.id,
@@ -463,7 +564,11 @@ class ConversationRepository:
                     "message_count": conv.message_count,
                     "preview": preview,
                     "tags": self._get_tag_names(session, conv.id),
-                    **public_fields(_load_metadata(conv.metadata_json)),
+                    **public_fields(metadata),
+                    **lineage_fields(
+                        metadata,
+                        visible_parent_id=visible_parents.get(conv.id),
+                    ),
                 })
 
             return results

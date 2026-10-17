@@ -3,6 +3,7 @@ import { useChat } from '../contexts/ChatContext'
 import { useConversationHistory } from '../hooks/useConversationHistory'
 import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
+import { ConversationTreeRow } from './ConversationTreeRow'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
 import { applyRunEndRefresh } from '../utils/runEndRefresh'
 import { classificationLabel, classificationRefusal } from '../utils/conversationClassification'
@@ -48,32 +49,6 @@ const MIN_WIDTH = 200
 const MAX_WIDTH = 480
 const DEFAULT_WIDTH = 256
 
-// Per-conversation run indicator (issue #884). Background progress is never
-// gated on the user having the conversation open, so this is the only place a
-// run in another conversation becomes visible: without it, "your agent is
-// still working over there" is invisible state.
-const RUN_INDICATORS = {
-  queued: { label: 'Queued', dot: 'bg-blue-400', text: 'text-blue-400', pulse: true },
-  running: { label: 'Running', dot: 'bg-green-400', text: 'text-green-400', pulse: true },
-  waiting_for_input: { label: 'Needs approval', dot: 'bg-amber-400', text: 'text-amber-400', pulse: true },
-  failed: { label: 'Failed', dot: 'bg-red-400', text: 'text-red-400', pulse: false },
-  cancelled: { label: 'Stopped', dot: 'bg-gray-500', text: 'text-gray-500', pulse: false },
-}
-
-export function RunIndicator({ run }) {
-  // `completed` is deliberately absent: a finished run is just a conversation
-  // with new messages in it, and a permanent green tick on every row it ever
-  // touched would be noise.
-  const style = run && RUN_INDICATORS[run.status]
-  if (!style) return null
-  return (
-    <span className={`flex items-center gap-1 text-xs ${style.text}`} title={run.error || style.label}>
-      <span className={`h-1.5 w-1.5 rounded-full ${style.dot} ${style.pulse ? 'animate-pulse' : ''}`} />
-      {style.label}
-    </span>
-  )
-}
-
 const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const {
     features, activeConversationId, loadSavedConversation, refreshJoinedConversation, messages, saveMode, clearChat,
@@ -96,6 +71,11 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const chatHistoryEnabled = features?.chat_history
   const [sidebarWidth, setSidebarWidth] = usePersistentState('chatui-sidebar-width', DEFAULT_WIDTH)
   const [isCollapsed, setIsCollapsed] = usePersistentState('chatui-sidebar-collapsed', false)
+  // Parent rows whose children are hidden (issue #1081). Persisted as an array
+  // so a reload keeps the user's chosen shape of the tree.
+  const [collapsedConversationIds, setCollapsedConversationIds] = usePersistentState(
+    'chatui-collapsed-conversation-ids', []
+  )
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [isResizing, setIsResizing] = useState(false)
@@ -293,6 +273,12 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
 
   const handleLoadConversation = useCallback(async (conv) => {
     if (conv._optimistic) return
+    // Opening a nested conversation from search or a refresh must not leave it
+    // hidden under a collapsed parent: expand only its ancestors, leaving every
+    // other group exactly as the user left it.
+    if (conv._ancestorIds?.length) {
+      setCollapsedConversationIds(prev => prev.filter(id => !conv._ancestorIds.includes(id)))
+    }
     // Don't reload the conversation we're already viewing. Clicking it is
     // still a choice to stay here, so it cancels an open under way.
     if (activeConversationId && conv.id === activeConversationId) {
@@ -320,7 +306,16 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       loadSavedConversation(fullConv)
       onMobileClose?.()
     }
-  }, [history, loadSavedConversation, onMobileClose, activeConversationId, activeComplianceFilter, complianceEnabled, complianceLevels, toast])
+  }, [history, loadSavedConversation, onMobileClose, activeConversationId, activeComplianceFilter, complianceEnabled, complianceLevels, toast, setCollapsedConversationIds])
+
+  const handleToggleCollapsed = useCallback((e, conv) => {
+    // The chevron is a view control, not a navigation control: stop the click
+    // before the row's open handler sees it.
+    e.stopPropagation()
+    setCollapsedConversationIds(prev => (
+      prev.includes(conv.id) ? prev.filter(id => id !== conv.id) : [...prev, conv.id]
+    ))
+  }, [setCollapsedConversationIds])
 
   // The same rule the click applies, so a row that would be refused always
   // looks it -- with levels disabled too (a classified row cannot continue).
@@ -371,6 +366,29 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
         runsByConversation,
       })
     : []
+
+  // `displayConversations` is already in tree order. Collapsing hides rows by
+  // ancestor, not by deleting them: the hidden children keep their run state,
+  // so expanding again is instant and a collapse can never stop an execution.
+  const collapsedConversationSet = new Set(collapsedConversationIds)
+  const visibleConversations = displayConversations.filter(
+    conv => !(conv._ancestorIds || []).some(id => collapsedConversationSet.has(id))
+  )
+
+  // The open conversation must never be hidden by a collapsed group, however
+  // it was opened (a row click, a reconnect, another tab). Expand only the
+  // ancestors on its path; a no-op when they are already open.
+  const activeAncestorKey = (displayConversations.find(
+    conv => conv.id === activeConversationId
+  )?._ancestorIds || []).join(',')
+  useEffect(() => {
+    if (!activeAncestorKey) return
+    const ancestors = activeAncestorKey.split(',')
+    setCollapsedConversationIds(prev => {
+      const next = prev.filter(id => !ancestors.includes(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [activeConversationId, activeAncestorKey, setCollapsedConversationIds])
 
   const sidebarContent = (
     <>
@@ -444,57 +462,34 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                 {history.searchQuery ? 'No matching conversations' : 'No saved conversations'}
               </div>
             ) : (
-              <div className="py-1">
-                {displayConversations.map(conv => (
-                  <div
-                    key={conv.id}
-                    onClick={() => handleLoadConversation(conv)}
-                    onContextMenu={(e) => handleContextMenu(e, conv)}
-                    title={rowRefusal(conv) || undefined}
-                    className={`px-3 py-2 cursor-pointer border-l-2 border-b border-b-gray-700/50 transition-colors ${
-                      rowRefusal(conv) ? 'opacity-50 ' : ''
-                    }${
-                      conv._optimistic
-                        ? 'bg-gray-750 border-l-blue-400 opacity-80'
-                        : activeConversationId === conv.id
-                          ? 'bg-gray-700 border-l-blue-500'
-                          : 'border-l-transparent hover:bg-gray-750 hover:border-l-gray-600'
-                    }`}
-                  >
-                    <div className="min-w-0 overflow-hidden">
-                      <div className="text-sm text-gray-200 truncate" title={conv.title}>
-                        {conv.title || 'Untitled'}
-                      </div>
-                      {conv.preview && (
-                        <div className={`text-xs truncate mt-0.5 ${conv._optimistic ? 'text-blue-400' : 'text-gray-500'}`}>
-                          {conv.preview}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-600">{formatDate(conv.updated_at)}</span>
-                        <span className="text-xs text-gray-600">{conv.message_count} msgs</span>
-                        {(complianceEnabled || rowRefusal(conv)) && classificationLabel(conv) && (
-                          <span
-                            className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded"
-                            data-testid="conversation-classification"
-                          >
-                            {classificationLabel(conv)}
-                          </span>
-                        )}
-                        <RunIndicator run={(runsByConversation || {})[conv.id]} />
-                      </div>
-                      {conv.tags && conv.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {conv.tags.map(tag => (
-                            <span key={tag} className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <div className="py-1" role="tree" aria-label="Conversations">
+                {visibleConversations.map(conv => {
+                  const isGroupCollapsed = collapsedConversationSet.has(conv.id)
+                  const ownRun = (runsByConversation || {})[conv.id]
+                  // A collapsed parent summarizes its subtree, so a child that
+                  // needs approval or failed is not invisible. Expanded rows
+                  // show their own run only; the children are on screen.
+                  const shownRun = conv._hasChildren && isGroupCollapsed
+                    ? (conv._aggregateRun || ownRun)
+                    : ownRun
+                  const refusal = rowRefusal(conv)
+                  return (
+                    <ConversationTreeRow
+                      key={conv.id}
+                      conv={conv}
+                      isActive={activeConversationId === conv.id}
+                      isGroupCollapsed={isGroupCollapsed}
+                      shownRun={shownRun}
+                      refusal={refusal}
+                      classification={classificationLabel(conv)}
+                      showClassification={!!(complianceEnabled || refusal)}
+                      formatDate={formatDate}
+                      onOpen={() => handleLoadConversation(conv)}
+                      onContextMenu={(e) => handleContextMenu(e, conv)}
+                      onToggleCollapsed={(e) => handleToggleCollapsed(e, conv)}
+                    />
+                  )
+                })}
               </div>
             )}
           </div>

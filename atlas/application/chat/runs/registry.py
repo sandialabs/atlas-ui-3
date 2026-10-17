@@ -198,6 +198,10 @@ class RunRecord:
             "error": self.error,
             "detached": self.detached,
             "parent_run_id": self.parent_run_id,
+            # The conversation that launched this run (issue #1081). The sidebar
+            # draws the tree from conversation ids, so it needs this while the
+            # child is still only an in-memory run and has no stored record yet.
+            "parent_conversation_id": self.parent_conversation_id,
             "depth": self.depth,
             "title": self.title,
         }

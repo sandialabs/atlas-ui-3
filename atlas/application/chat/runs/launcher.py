@@ -551,6 +551,10 @@ async def _run_child(
             # the model cannot raise or drop it by choosing what to pass.
             compliance_level=compliance_level,
             incognito=False,
+            # Persist the parent link on the child's first save (issue #1081).
+            # The registry record carries it for the live tree; the stored
+            # metadata is what keeps the tree after a restart.
+            parent_conversation_id=record.parent_conversation_id,
         )
         if isinstance(response, dict) and response.get("type") == "error":
             outcome = RunStatus.FAILED

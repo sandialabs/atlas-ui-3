@@ -378,6 +378,30 @@ async def test_an_unauthenticated_call_cannot_launch():
 
 
 @pytest.mark.asyncio
+async def test_the_child_turn_is_told_which_conversation_launched_it():
+    """The durable sidebar link is written on the child's first save (#1081)."""
+    factory = _Factory(lambda c: _ChatService(c))
+    registry = _install_registry()
+    parent = registry.start(conversation_id="conv-parent", user_email="user@example.com")
+    registry.set_status(parent.run_id, RunStatus.RUNNING)
+    set_current_run(parent.run_id, parent.conversation_id)
+    try:
+        handle = await launch_sub_conversation(
+            {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+            {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
+            factory=factory,
+        )
+        service = factory.services[0]
+        await asyncio.wait_for(service.started.wait(), timeout=1)
+        assert service.calls[0]["parent_conversation_id"] == "conv-parent"
+        assert registry.get(handle["run_id"]).parent_conversation_id == "conv-parent"
+    finally:
+        clear_current_run()
+        for service in factory.services:
+            service.release.set()
+
+
+@pytest.mark.asyncio
 async def test_depth_is_capped():
     factory = _Factory(lambda c: _ChatService(c), settings=_settings(atlas_launch_max_depth=1))
     registry = _install_registry()
