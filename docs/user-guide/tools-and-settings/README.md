@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-10-11
+Last updated: 2026-10-16
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -158,6 +158,14 @@ Approving the launch approves the sub-conversation's own tool calls, so it can
 work without stopping to ask you again - except for tools your administrator has
 made always-approve, which still prompt inside the sub-conversation and pause it
 until you open that conversation and answer.
+
+The conversation that launched a sub-conversation can also talk back to it. Tick
+`atlas_follow_up` as well, and the model can send a finished sub-conversation its
+next message -- a correction, a clarifying question, the next step -- instead of
+starting a fresh one that has forgotten everything. The follow-up and its reply
+appear in the sub-conversation's own transcript, and it carries on with the same
+workspace and model it was launched with. Approving the `atlas_follow_up` call
+approves that turn's tool calls, the same way approving a launch does.
 
 A sub-conversation can never use a tool, model or data source you could not use
 yourself, and how deep they may nest and how many may run at once are limits

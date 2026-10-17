@@ -6,11 +6,8 @@ from typing import Any, List, Optional
 from atlas.core.auth import is_user_in_group
 from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
-    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
-    GET_RUNS_TOOL_NAME,
-    LAUNCH_TOOL_NAME,
-    RESULT_TOOL_NAME,
+    LAUNCH_GATED_TOOL_NAMES,
     SEARCH_TOOL_NAME,
     launch_tool_enabled,
     normalize_tool_name,
@@ -90,12 +87,7 @@ class ToolAuthorizationService:
                     if sleep_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue
-                if resolved in (
-                    DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
-                    LAUNCH_TOOL_NAME,
-                    GET_RUNS_TOOL_NAME,
-                    RESULT_TOOL_NAME,
-                ):
+                if resolved in LAUNCH_GATED_TOOL_NAMES:
                     if launch_tool_enabled(getattr(self.config_manager, "app_settings", None)):
                         filtered_tools.append(tool)
                     continue

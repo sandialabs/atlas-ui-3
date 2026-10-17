@@ -156,6 +156,11 @@ class RunRecord:
     # stored until the turn ends, so this is the only name the history list
     # can give it in the meantime -- in this tab and in every other one.
     title: Optional[str] = None
+    # What a launched run was started with -- model, tools, data sources,
+    # workspace, compliance level -- so ``atlas_follow_up`` can continue the
+    # sub-conversation on the same capability surface without the model
+    # re-choosing it. Server-side only: never part of the public dict.
+    launch_spec: Optional[Dict[str, Any]] = field(default=None, repr=False, compare=False)
     # The exact frames that asked for input, kept so they can be re-sent.
     # A request emitted while the user was looking at another conversation (or
     # had the browser closed) is otherwise gone: the client dropped it, and the

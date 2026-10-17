@@ -118,6 +118,37 @@ When the launch feature is enabled, the parent also receives two non-blocking to
 
 Statuses are `queued`, `running`, `waiting_for_input`, `completed`, `failed`, and `cancelled`. The tools share `FEATURE_ATLAS_LAUNCH_ENABLED` with `atlas_launch`, and are omitted from schemas and authorization when the feature is off.
 
+## Follow-ups
+
+`atlas_follow_up` (added 2026-10-16, same feature flag) lets the launching conversation send a
+finished sub-conversation its next message. It takes a `run_id` of the sub-conversation (the
+launch's, or any later follow-up's) and a `message`, and returns a handle to the new run as
+soon as it is admitted -- like `atlas_launch`, it never waits for the reply, which is read with
+`atlas_result` on the new `run_id`.
+
+- **Same conversation, new run.** The follow-up is a new registry run on the child's existing
+  `conversation_id`. The chat service hydrates that conversation's stored history before the
+  turn, so the child sees its whole transcript, and the reply is saved into it. The new run is
+  hung off the turn that sent it (`parent_run_id`), so stopping that turn stops the reply.
+- **The capability surface is not re-chosen.** Each launched run records its *launch spec* --
+  model, tools, data sources, workspace and compliance level -- on its `RunRecord` (server-side
+  only, never in the public dict). A follow-up reuses it, but re-checks every part against the
+  caller now: the model through `check_model_access`, the tools through tool authorization, the
+  data sources through RAG discovery. The follow-up then records the narrowed spec, so access
+  lost between turns stays lost for that sub-conversation even if it comes back later.
+- **Scoping** is `atlas_result`'s: only direct children of this conversation, owned by this
+  user; any other id gets the same "not a sub-conversation" refusal.
+- **Refusals.** A follow-up to a child that is still running is refused (rather than queued or
+  steered into its live loop) with a hint to wait with `atlas_sleep` and poll `atlas_result`. A
+  follow-up from an incognito turn, or from a turn whose compliance level differs from the one
+  the child was launched under, is refused for the same reasons a launch is.
+- **Limits and approval** go through the same `_start_child_run` helper as a launch, so the
+  follow-up counts against the per-run child cap while it runs, admission stays atomic, and
+  approving the `atlas_follow_up` call pre-approves the turn's user-level tools.
+- **Reach.** A sub-conversation is followable while its registry record is retained -- 30
+  minutes after its last run ends (`TERMINAL_RETENTION_SECONDS`), and it is lost on a server
+  restart. After that, launch a new sub-conversation.
+
 ## Known edges
 
 - A child paused on an admin-mandated approval is not reachable until its conversation is saved
@@ -135,6 +166,8 @@ Statuses are `queued`, `running`, `waiting_for_input`, `completed`, `failed`, an
 ## Where the code lives
 
 - `atlas/application/chat/runs/launcher.py` -- admission, authorization, limits, the child task.
-- `atlas/application/chat/runs/registry.py` -- `parent_run_id` / `depth`, `children_of`, cascade.
+- `atlas/application/chat/runs/follow_up.py` -- `atlas_follow_up`.
+- `atlas/application/chat/runs/registry.py` -- `parent_run_id` / `depth`, `children_of`, cascade,
+  `launch_spec`.
 - `atlas/modules/mcp_tools/atlas_server.py` -- the tool schema.
 - `atlas/tests/test_atlas_launch_tool.py` -- the boundaries above, pinned.

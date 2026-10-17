@@ -25,6 +25,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     CANVAS_TOOL_NAME,
     DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
     DISCOVER_TOOL_NAME,
+    FOLLOW_UP_TOOL_NAME,
     GET_RUNS_TOOL_NAME,
     LAUNCH_TOOL_NAME,
     RESULT_TOOL_NAME,
@@ -942,6 +943,24 @@ class ExecutionMixin:
                     error=error_msg,
                 )
             return await execute_launch_tool(tool_call, context)
+        if resolved_name == FOLLOW_UP_TOOL_NAME:
+            # Gated like atlas_launch: a follow-up starts a run, so it needs
+            # exactly the ground a launch does.
+            from atlas.application.chat.runs.follow_up import execute_follow_up_tool
+
+            app_settings = _client().config_manager.app_settings
+            if not launch_tool_enabled(app_settings):
+                error_msg = (
+                    f"Tool '{FOLLOW_UP_TOOL_NAME}' is disabled "
+                    "(sub-conversations, chat history or agent mode are turned off)"
+                )
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=error_msg,
+                    success=False,
+                    error=error_msg,
+                )
+            return await execute_follow_up_tool(tool_call, context)
         if resolved_name == ATLAS_SLEEP_TOOL_NAME:
             app_settings = _client().config_manager.app_settings
             if not sleep_tool_enabled(app_settings):

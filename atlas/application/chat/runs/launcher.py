@@ -599,30 +599,7 @@ async def launch_sub_conversation(
     workspace = resolve_workspace(repository, workspace_name, user_email)
     await resolve_model(config_manager, model_name, user_email)
 
-    registry = get_run_registry()
-    from atlas.application.chat.runs.context import get_current_run
-
-    run_context = get_current_run()
-    parent_run_id, parent_depth = _parent_run_identity(registry, run_context)
-
     workspace_config = workspace.get("config") or {}
-    conversation_id = str(uuid4())
-    connection = _ChildConnection(
-        (context or {}).get("update_callback"), "pending", conversation_id
-    )
-    chat_service = factory.create_chat_service(connection=connection)
-    tools = await resolve_child_tools(chat_service, workspace_config, user_email)
-    # Who answers the child's tool approvals? Nobody, unless somebody is
-    # looking at the child's conversation -- and it is not in the user's
-    # history until its first save, so a launched run would pause on its first
-    # tool call with no way to answer. The approval that covers the child is
-    # the one the user already gave (or auto-gave) for *this* ``atlas_launch``
-    # call, which named the workspace, the model and the task. Tools an admin
-    # has pinned to mandatory approval are exempt: those keep prompting inside
-    # the child, which pauses it until the user opens that conversation.
-    admin_gated = _admin_gated_tools(tools, config_manager)
-    if not admin_gated and not _preapprove_child_tools(chat_service):
-        logger.warning("Could not pre-approve tools for launched run")
     # RAG selections only travel when the workspace has RAG switched on; a
     # workspace that keeps a source list but has retrieval off means "not now".
     data_sources = (
@@ -630,11 +607,104 @@ async def launch_sub_conversation(
         if workspace_config.get("rag_enabled")
         else []
     )
+    record, spec, admin_gated = await _start_child_run(
+        factory=factory,
+        config_manager=config_manager,
+        context=context,
+        user_email=user_email,
+        conversation_id=str(uuid4()),
+        model=model_name,
+        prompt=prompt,
+        selected_tools=list(workspace_config.get("selected_tools") or []),
+        data_sources=data_sources,
+        workspace_id=workspace.get("id"),
+        workspace_name=workspace.get("name"),
+        # The child's transcript is unsaved until its turn ends, and the
+        # history list names an unsaved run by its title: without this
+        # every launched sub-conversation reads as "Conversation in
+        # progress" even though the prompt that defines it is at hand.
+        title=prompt,
+    )
+
+    logger.info(
+        "atlas_launch started run %s (conversation %s, depth %d, parent %s) for %s",
+        record.run_id,
+        sanitize_for_logging(record.conversation_id),
+        record.depth,
+        sanitize_for_logging(str(record.parent_run_id)),
+        sanitize_for_logging(user_email),
+    )
+
+    return {
+        "run_id": record.run_id,
+        "conversation_id": record.conversation_id,
+        "status": record.status.value,
+        "workspace": workspace.get("name"),
+        "model": model_name,
+        "tools": spec["tools"],
+        "data_sources": spec["data_sources"],
+        "depth": record.depth,
+        "parent_run_id": record.parent_run_id,
+        # Non-empty means the sub-conversation will stop and wait for the user
+        # on those tools; the model should say so rather than promise a result.
+        "tools_needing_approval": admin_gated,
+    }
+
+
+async def _start_child_run(
+    *,
+    factory: Any,
+    config_manager: Any,
+    context: Optional[Dict[str, Any]],
+    user_email: str,
+    conversation_id: str,
+    model: str,
+    prompt: str,
+    selected_tools: List[str],
+    data_sources: List[str],
+    workspace_id: Optional[str],
+    workspace_name: Optional[str],
+    title: Optional[str],
+) -> Tuple[Any, Dict[str, Any], List[str]]:
+    """Admit a child run on ``conversation_id`` and schedule its task.
+
+    Shared by ``atlas_launch`` (a new conversation) and ``atlas_follow_up``
+    (the next turn of an existing one), so both re-check the tools and data
+    sources against the caller's access *now*, apply the same approval rule,
+    and go through the same atomic admission. Returns the admitted record,
+    the launch spec it was given, and the tools that will still prompt.
+    """
+    app_settings = getattr(config_manager, "app_settings", None)
+    registry = get_run_registry()
+    from atlas.application.chat.runs.context import get_current_run
+
+    run_context = get_current_run()
+    parent_run_id, parent_depth = _parent_run_identity(registry, run_context)
+
+    connection = _ChildConnection(
+        (context or {}).get("update_callback"), "pending", conversation_id
+    )
+    chat_service = factory.create_chat_service(connection=connection)
+    tools = await resolve_child_tools(
+        chat_service, {"selected_tools": selected_tools}, user_email
+    )
+    # Who answers the child's tool approvals? Nobody, unless somebody is
+    # looking at the child's conversation -- and it is not in the user's
+    # history until its first save, so a launched run would pause on its first
+    # tool call with no way to answer. The approval that covers the child is
+    # the one the user already gave (or auto-gave) for *this* ``atlas_launch``
+    # (or ``atlas_follow_up``) call, which named the task. Tools an admin has
+    # pinned to mandatory approval are exempt: those keep prompting inside
+    # the child, which pauses it until the user opens that conversation.
+    admin_gated = _admin_gated_tools(tools, config_manager)
+    if not admin_gated and not _preapprove_child_tools(chat_service):
+        logger.warning("Could not pre-approve tools for launched run")
+    compliance_level = (context or {}).get("compliance_level")
     data_sources = await resolve_child_data_sources(
         factory,
         data_sources,
         user_email,
-        (context or {}).get("compliance_level"),
+        compliance_level,
     )
 
     # Admission is check-then-insert, and it must be atomic: several
@@ -651,58 +721,40 @@ async def launch_sub_conversation(
             parent_run_id=parent_run_id,
             parent_conversation_id=getattr(run_context, "conversation_id", None),
             depth=parent_depth + 1,
-            # The child's transcript is unsaved until its turn ends, and the
-            # history list names an unsaved run by its title: without this
-            # every launched sub-conversation reads as "Conversation in
-            # progress" even though the prompt that defines it is at hand.
-            title=prompt,
+            title=title,
         )
     except (ConcurrencyLimitError, ConversationBusyError) as e:
         raise LaunchRefused(str(e)) from e
     except RunRegistryError as e:  # pragma: no cover - defensive
         raise LaunchRefused(f"The sub-conversation could not be started: {e}") from e
 
+    spec = {
+        "model": model,
+        "tools": tools,
+        "data_sources": data_sources,
+        "workspace_id": workspace_id,
+        "workspace_name": workspace_name,
+        "compliance_level": compliance_level,
+    }
+    record.launch_spec = spec
     connection.bind_run(record.run_id)
 
     task = asyncio.create_task(
         _run_child(
             chat_service=chat_service,
             record=record,
-            model=model_name,
+            model=model,
             prompt=prompt,
             tools=tools,
             data_sources=data_sources,
-            workspace_id=workspace.get("id"),
+            workspace_id=workspace_id,
             user_email=user_email,
-            compliance_level=(context or {}).get("compliance_level"),
+            compliance_level=compliance_level,
             registry=registry,
         )
     )
     registry.attach_task(record.run_id, task)
-
-    logger.info(
-        "atlas_launch started run %s (conversation %s, depth %d, parent %s) for %s",
-        record.run_id,
-        sanitize_for_logging(conversation_id),
-        record.depth,
-        sanitize_for_logging(str(parent_run_id)),
-        sanitize_for_logging(user_email),
-    )
-
-    return {
-        "run_id": record.run_id,
-        "conversation_id": conversation_id,
-        "status": record.status.value,
-        "workspace": workspace.get("name"),
-        "model": model_name,
-        "tools": tools,
-        "data_sources": data_sources,
-        "depth": record.depth,
-        "parent_run_id": parent_run_id,
-        # Non-empty means the sub-conversation will stop and wait for the user
-        # on those tools; the model should say so rather than promise a result.
-        "tools_needing_approval": admin_gated,
-    }
+    return record, spec, admin_gated
 
 
 async def execute_launch_discovery_tool(
@@ -898,3 +950,4 @@ async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]])
         content=summary,
         success=True,
     )
+
