@@ -227,20 +227,24 @@ backoff (which cannot succeed).
 - Structured `error.type == "budget_exceeded"` wins regardless of HTTP code,
   read safely from `exc.body` (dict or JSON string) or `exc.response`.
 - When no structured type is present, the known phrases `budget exceeded`,
-  `exceeded budget`, and `crossed budget` are accepted under status 400, 422,
-  or 429. Every phrase requires the word "budget", so ordinary RPM/TPM 429
-  throttling never matches. The fallback is skipped for
-  `ContextWindowExceededError` and for token, context, thinking, and
-  `max_tokens` allowances, which are per-request limits, not money; a refusal
-  with no status at all is too ambiguous and keeps its normal classification.
+  `exceeded budget`, `ExceededBudget:`, `crossed budget`, and `over budget`
+  (including `over 30d budget`) are accepted under status 400, 422, or 429.
+  Every phrase requires the word "budget", so ordinary RPM/TPM 429 throttling
+  never matches. The fallback is skipped for `ContextWindowExceededError`,
+  timeouts, auth failures, and for token, context, thinking, and `max_tokens`
+  allowances, which are per-request limits, not money; a refusal with no status
+  at all is too ambiguous and keeps its normal classification.
 - `_is_retryable_error()` returns `False` for it before the transient 429 test,
   and the streaming generators log it once at warning level without a
   traceback instead of as a service ERROR.
 - The plain and RAG streaming helper (`stream_and_accumulate`) and the agent
-  final-answer helper re-raise it instead of running their non-streaming
-  fallback: that fallback is the same refused request, and its failure used to
-  be published as a successful chat reply. The domain error now reaches
-  `main.py`, which emits the `budget_exceeded` error frame and metric.
+  final-answer helper re-raise it when nothing has been streamed, instead of
+  running their non-streaming fallback: that fallback is the same refused
+  request, and its failure used to be published as a successful chat reply.
+  Text already streamed is kept. The domain error now reaches `main.py`, which
+  emits the `budget_exceeded` error frame and metric. Tools mode does the same
+  for its initial and continuation streams, so a doomed synthesis request is
+  not attempted.
 - The user message names no key, team, spend, or limit, and does not promise a
   reset (the scope is unknown and a fixed budget may never reset). The raw
   upstream text stays in the server log (newline-stripped) and the chained

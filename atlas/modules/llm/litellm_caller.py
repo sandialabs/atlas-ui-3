@@ -42,6 +42,7 @@ from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
+    LLM_BUDGET_EXCEEDED_MESSAGE,
     AuthenticationError,
     AuthorizationError,
     ContextWindowExceededError,
@@ -118,6 +119,8 @@ BUDGET_EXCEEDED_TYPE = "budget_exceeded"
 BUDGET_EXCEEDED_MARKERS = re.compile(
     r"budget\s+(?:has\s+been\s+|is\s+|was\s+|limit\s+)?(?:exceeded|exhausted|reached)"
     r"|exceeded\s+(?:the\s+|its\s+|your\s+)?budget"
+    r"|exceededbudget"
+    r"|over\s+(?:\d+[a-z]+\s+)?budget"
     r"|crossed\s+budget",
     re.IGNORECASE,
 )
@@ -479,10 +482,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 error_type,
                 sanitize_for_logging(error_str),
             )
-            raise LLMBudgetExceededError(
-                "The spending budget for this model or team has been used up. "
-                "Choose a different model or team, or contact your administrator."
-            ) from exc
+            raise LLMBudgetExceededError(LLM_BUDGET_EXCEEDED_MESSAGE) from exc
 
         # Concrete exception types are checked before any message keywords.
         # The keyword tests below match against the provider's text, and a

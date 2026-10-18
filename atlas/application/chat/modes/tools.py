@@ -8,7 +8,11 @@ from atlas.domain.chat.citation_register import (
     CitationRegister,
     new_register,
 )
-from atlas.domain.errors import DomainError, LLMMalformedToolCallError
+from atlas.domain.errors import (
+    DomainError,
+    LLMBudgetExceededError,
+    LLMMalformedToolCallError,
+)
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -142,12 +146,19 @@ class ToolsModeRunner:
                 elif isinstance(item, LLMResponse):
                     final_llm_response = item
         except Exception as exc:
-            logger.error("Streaming tools error: %s", exc)
+            if not isinstance(exc, LLMBudgetExceededError):
+                logger.error("Streaming tools error: %s", exc)
             streaming_error = exc
             # Always send stream-end to prevent stuck UI cursor
             await self.event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )
+            if isinstance(exc, LLMBudgetExceededError) and not accumulated_content:
+                # Nothing was streamed, so there is no partial answer to keep
+                # and no reason to handle the refusal inside the mode: let the
+                # transport record budget_exceeded (metric + turn failure)
+                # through the domain-error handler.
+                raise
             if self.raise_on_stream_error:
                 # CLI failure policy: an LLM stream failure is a process
                 # failure, not a synthesized in-chat error message. A DomainError
@@ -691,7 +702,13 @@ class ToolsModeRunner:
                 elif isinstance(item, LLMResponse):
                     response = item
         except Exception as exc:
-            logger.error("Streaming tools continuation error: %s", exc)
+            if not isinstance(exc, LLMBudgetExceededError):
+                logger.error("Streaming tools continuation error: %s", exc)
+            if isinstance(exc, LLMBudgetExceededError) and not accumulated:
+                # The caller's graceful synthesis is a separate request that an
+                # exhausted budget refuses too. Let the transport report the
+                # budget instead of spending it on another doomed call.
+                raise
             if accumulated:
                 await self.event_publisher.publish_token_stream(
                     token="", is_first=False, is_last=True,

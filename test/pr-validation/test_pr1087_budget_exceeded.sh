@@ -155,7 +155,11 @@ import sys
 import litellm
 
 from atlas.application.chat.utilities.error_handler import classify_llm_error
-from atlas.domain.errors import LLMBudgetExceededError, RateLimitError
+from atlas.domain.errors import (
+    LLM_BUDGET_EXCEEDED_MESSAGE,
+    LLMBudgetExceededError,
+    RateLimitError,
+)
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
 # litellm's own global `drop_params` handling retries a 422 with parameters
@@ -165,10 +169,7 @@ from atlas.modules.llm.litellm_caller import LiteLLMCaller
 litellm.drop_params = False
 
 port, counts_file = sys.argv[1], sys.argv[2]
-BUDGET_MESSAGE = (
-    "The spending budget for this model or team has been used up. "
-    "Choose a different model or team, or contact your administrator."
-)
+BUDGET_MESSAGE = LLM_BUDGET_EXCEEDED_MESSAGE
 SECRETS = ("lit-8229-exhausted", "sk-...X-rQ", "Current cost", "Max budget")
 
 failures = []

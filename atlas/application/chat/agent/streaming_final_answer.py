@@ -47,14 +47,16 @@ async def stream_final_answer(
                 model, messages, temperature=temperature, user_email=user_email,
             )
     except Exception as exc:
-        logger.exception("Error streaming final answer")
+        if not isinstance(exc, LLMBudgetExceededError):
+            logger.exception("Error streaming final answer")
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
-        if isinstance(exc, LLMBudgetExceededError):
+        if isinstance(exc, LLMBudgetExceededError) and not accumulated:
             # The non-streaming fallback would send the same refused request.
             # Surface the typed error so the caller emits a budget_exceeded
-            # frame instead of a simulated successful answer.
+            # frame instead of a simulated successful answer. Text already
+            # streamed is kept, as in the other streaming helpers.
             raise
         if not accumulated:
             try:

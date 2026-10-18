@@ -14,7 +14,7 @@ import asyncio
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import litellm
@@ -22,11 +22,13 @@ import pytest
 
 from atlas.application.chat.agent.streaming_final_answer import stream_final_answer
 from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
+from atlas.application.chat.modes.tools import ToolsModeRunner
 from atlas.application.chat.utilities.error_handler import (
     classify_llm_error,
     error_type_for,
 )
 from atlas.domain.errors import (
+    LLM_BUDGET_EXCEEDED_MESSAGE,
     ContextWindowExceededError,
     LLMBadRequestError,
     LLMBudgetExceededError,
@@ -37,10 +39,7 @@ from atlas.domain.errors import (
 from atlas.modules.llm import litellm_caller, litellm_streaming
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
-BUDGET_MESSAGE = (
-    "The spending budget for this model or team has been used up. "
-    "Choose a different model or team, or contact your administrator."
-)
+BUDGET_MESSAGE = LLM_BUDGET_EXCEEDED_MESSAGE
 
 KEY_BUDGET_BODY = {
     "error": {
@@ -183,6 +182,25 @@ class TestUnstructuredFallback:
 
     def test_plain_bad_request_with_budget_phrase(self):
         exc = _bad_request("Exceeded budget for this API key.")
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # LiteLLM's real auth-check templates (proxy/auth/auth_checks.py).
+            "ExceededBudget: User=user-1 over budget. Spend=2.5, Budget=2.0",
+            "ExceededBudget: Key over 30d budget. Spend=10.0, Budget=5.0",
+            "ExceededBudget: Team=team-1 over 30d budget.",
+            # Per-model virtual-key budget (proxy/hooks/model_max_budget_limiter.py).
+            "LiteLLM Virtual Key: sk-...abc, key_alias: test, exceeded budget for model=gpt-4o",
+            # Object budget enum wording (proxy/_types.py).
+            "Object was over budget",
+        ],
+    )
+    def test_litellm_budget_wording_is_recognised(self, message):
+        exc = _rate_limit(message)
 
         with pytest.raises(LLMBudgetExceededError):
             LiteLLMCaller._raise_llm_domain_error(exc)
@@ -493,3 +511,146 @@ class TestBudgetErrorBypassesTheNonStreamingFallback:
         assert result == "partial answer"
         fallback.assert_not_awaited()
         publisher.publish_chat_response.assert_not_awaited()
+
+
+TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {"name": "safety_docs_plan", "parameters": {"type": "object"}},
+    },
+]
+
+
+def _publisher():
+    publisher = AsyncMock()
+    publisher.publish_token_stream = AsyncMock()
+    publisher.publish_chat_response = AsyncMock()
+    publisher.publish_response_complete = AsyncMock()
+    publisher.send_json = AsyncMock()
+    return publisher
+
+
+def _error_frames(publisher):
+    return [
+        call.args[0]
+        for call in publisher.send_json.await_args_list
+        if call.args and call.args[0].get("type") == "error"
+    ]
+
+
+def _tools_runner(llm, publisher):
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema = MagicMock(return_value=TOOLS_SCHEMA)
+    return ToolsModeRunner(
+        llm=llm,
+        tool_manager=tool_manager,
+        event_publisher=publisher,
+        config_manager=SimpleNamespace(
+            app_settings=SimpleNamespace(
+                tools_mode_max_extra_rounds=3,
+                feature_agent_mode_available=False,
+            )
+        ),
+    )
+
+
+def _session():
+    session = MagicMock()
+    session.history = MagicMock()
+    session.history.messages = []
+    session.history.add_message = MagicMock()
+    session.session_id = "s1"
+    session.files = {}
+    return session
+
+
+class _BudgetFailingLLM:
+    async def stream_with_tools(self, *args, **kwargs):
+        raise LLMBudgetExceededError(BUDGET_MESSAGE)
+        yield  # pragma: no cover - makes this an async generator
+
+
+class _PartialBudgetLLM:
+    async def stream_with_tools(self, *args, **kwargs):
+        yield "partial answer"
+        raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+
+class TestToolsModeBudgetRefusal:
+    """Tools mode must not swallow the budget into a synthesized answer."""
+
+    @pytest.mark.asyncio
+    async def test_initial_stream_reraises_when_nothing_was_streamed(self):
+        publisher = _publisher()
+        runner = _tools_runner(_BudgetFailingLLM(), publisher)
+
+        with pytest.raises(LLMBudgetExceededError):
+            await runner.run_streaming(
+                session=_session(),
+                model="test-model",
+                messages=[{"role": "user", "content": "hi"}],
+                selected_tools=["safety_docs_plan"],
+            )
+
+        # The transport, not the mode, reports the budget; no local error frame.
+        assert _error_frames(publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_continuation_reraises_when_nothing_was_streamed(self):
+        publisher = _publisher()
+        runner = _tools_runner(_BudgetFailingLLM(), publisher)
+
+        with pytest.raises(LLMBudgetExceededError):
+            await runner._stream_tools_round(
+                "test-model",
+                [{"role": "user", "content": "hi"}],
+                TOOLS_SCHEMA,
+                None,
+                0.7,
+            )
+
+    @pytest.mark.asyncio
+    async def test_continuation_keeps_partial_text(self):
+        publisher = _publisher()
+        runner = _tools_runner(_PartialBudgetLLM(), publisher)
+
+        text, response, error = await runner._stream_tools_round(
+            "test-model",
+            [{"role": "user", "content": "hi"}],
+            TOOLS_SCHEMA,
+            None,
+            0.7,
+        )
+
+        assert text == "partial answer"
+        assert response is None
+        assert isinstance(error, LLMBudgetExceededError)
+
+
+class TestFinalAnswerBudgetRefusal:
+    @pytest.mark.asyncio
+    async def test_partial_text_is_kept_and_not_logged_as_an_error(self, caplog):
+        async def partial_stream(model, messages, temperature=None, user_email=None):
+            yield "partial answer"
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+        llm = SimpleNamespace(
+            stream_plain=partial_stream,
+            call_plain=AsyncMock(return_value="a simulated answer"),
+        )
+        publisher = _publisher()
+
+        with caplog.at_level(logging.WARNING):
+            result = await stream_final_answer(
+                llm, publisher, "test-model", [], 0.7, None
+            )
+
+        assert result == "partial answer"
+        llm.call_plain.assert_not_awaited()
+        budget_errors = [
+            record
+            for record in caplog.records
+            if record.name == "atlas.application.chat.agent.streaming_final_answer"
+            and record.levelno >= logging.ERROR
+        ]
+        assert budget_errors == []

@@ -117,6 +117,15 @@ class LLMTimeoutError(LLMError):
     pass
 
 
+# Shared user-facing copy for an exhausted spending budget. Deliberately names
+# no key, team, spend, limit, or reset time (the scope is unknown and a fixed
+# budget may never reset), and no gateway internals.
+LLM_BUDGET_EXCEEDED_MESSAGE = (
+    "The spending budget for this model or team has been used up. "
+    "Choose a different model or team, or contact your administrator."
+)
+
+
 class LLMBudgetExceededError(LLMError):
     """Raised when a LiteLLM spending budget refuses the request.
 
