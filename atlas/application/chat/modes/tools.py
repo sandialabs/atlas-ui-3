@@ -185,7 +185,12 @@ class ToolsModeRunner:
             error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
             )
-            logger.error("Streaming tools classified error: %s", log_msg)
+            if isinstance(streaming_error, LLMBudgetExceededError):
+                # Not a service fault: keep the budget path at WARNING, like
+                # the other streaming handlers.
+                logger.warning("Streaming tools budget refusal: %s", log_msg)
+            else:
+                logger.error("Streaming tools classified error: %s", log_msg)
             if accumulated_content:
                 # The user watched this text stream in. Returning without
                 # persisting it saves the turn with no assistant reply at all,
@@ -414,6 +419,14 @@ class ToolsModeRunner:
                     user_email, temperature,
                 )
                 if err is not None:
+                    if isinstance(err, LLMBudgetExceededError):
+                        # A budget refusal is deterministic: the graceful
+                        # synthesis below is another request that would be
+                        # refused too. The closing message carries this text;
+                        # persisting a narration row for it as well would
+                        # render the paragraph twice after a reload.
+                        budget_partial = next_text or ""
+                        break
                     # Provider error mid-continuation (e.g. the tool-choice
                     # rejection) -- fall back to a graceful final synthesis.
                     # Text the user watched stream in is still persisted:
@@ -429,13 +442,6 @@ class ToolsModeRunner:
                             canvas_narration_rows.append(row)
                     else:
                         self._persist_narration_row(session, next_text)
-                    if isinstance(err, LLMBudgetExceededError):
-                        # A budget refusal is deterministic: the graceful
-                        # synthesis below is another request that would be
-                        # refused too. Keep the partial narration (already
-                        # persisted) and close the turn as incomplete instead.
-                        budget_partial = next_text or ""
-                        break
                     if current_response is None:
                         current_response = LLMResponse(content="")
                     break

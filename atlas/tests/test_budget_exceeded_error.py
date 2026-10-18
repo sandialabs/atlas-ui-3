@@ -773,6 +773,14 @@ class TestToolsModeContinuationBudget:
         ]
         assert closing, "the closing assistant message must be marked incomplete"
         assert closing[-1].metadata["incomplete"] is True
+        # The closing message carries the partial text; a narration row would
+        # render the same paragraph twice after a reload.
+        partial_rows = [
+            call.args[0]
+            for call in session.history.add_message.call_args_list
+            if getattr(call.args[0], "content", None) == "partial continuation"
+        ]
+        assert len(partial_rows) == 1
 
     @pytest.mark.asyncio
     async def test_initial_stream_partial_budget_is_marked_incomplete(self):
