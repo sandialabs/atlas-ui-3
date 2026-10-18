@@ -37,7 +37,7 @@ export default function AgentRunStatus({
       className="mb-2 px-3 py-2 rounded-lg border border-blue-500/60 bg-blue-950/60 text-blue-100 flex items-center gap-3"
     >
       <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden="true">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+        <span className="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400" />
       </span>
       <Sparkles className="w-4 h-4 flex-shrink-0 text-blue-300" aria-hidden="true" />
