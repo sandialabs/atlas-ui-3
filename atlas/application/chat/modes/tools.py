@@ -422,6 +422,12 @@ class ToolsModeRunner:
                             canvas_narration_rows.append(row)
                     else:
                         self._persist_narration_row(session, next_text)
+                    if isinstance(err, LLMBudgetExceededError):
+                        # A budget refusal is deterministic: the graceful
+                        # synthesis below is another request that would be
+                        # refused too. The partial narration is already
+                        # persisted; let the transport report the budget.
+                        raise err
                     if current_response is None:
                         current_response = LLMResponse(content="")
                     break

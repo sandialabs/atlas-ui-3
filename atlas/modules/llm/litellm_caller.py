@@ -117,11 +117,11 @@ BUDGET_EXCEEDED_TYPE = "budget_exceeded"
 # word "budget", so ordinary RPM/TPM throttling -- "rate limit reached for
 # tokens per min" -- never matches.
 BUDGET_EXCEEDED_MARKERS = re.compile(
-    r"budget\s+(?:has\s+been\s+|is\s+|was\s+|limit\s+)?(?:exceeded|exhausted|reached)"
-    r"|exceeded\s+(?:the\s+|its\s+|your\s+)?budget"
-    r"|exceededbudget"
-    r"|over\s+(?:\d+[a-z]+\s+)?budget"
-    r"|crossed\s+budget",
+    r"budget\b\s+(?:has\s+been\s+|is\s+|was\s+|limit\s+)?(?:exceeded|exhausted|reached)"
+    r"|exceeded\s+(?:the\s+|its\s+|your\s+)?budget\b"
+    r"|exceededbudget\b"
+    r"|over\s+(?:\d+[a-z]+\s+)?budget\b"
+    r"|crossed\s+budget\b",
     re.IGNORECASE,
 )
 
@@ -129,7 +129,7 @@ BUDGET_EXCEEDED_MARKERS = re.compile(
 # inside one request, not money. Those messages must keep their own
 # classification (context window / bad request) even when they say "exceeded".
 BUDGET_ALLOWANCE_QUALIFIERS = re.compile(
-    r"\b(?:token|tokens|context|thinking|reasoning|completion|output|input|prompt)"
+    r"\b(?:token|tokens|max_tokens|budget_tokens|context|thinking|reasoning|completion|output|input|prompt)"
     r"\s+(?:window\s+)?budget\b",
     re.IGNORECASE,
 )

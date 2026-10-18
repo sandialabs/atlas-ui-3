@@ -14,7 +14,7 @@ import asyncio
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import litellm
@@ -36,6 +36,8 @@ from atlas.domain.errors import (
     LLMTimeoutError,
     RateLimitError,
 )
+from atlas.domain.messages.models import ToolResult
+from atlas.interfaces.llm import LLMResponse
 from atlas.modules.llm import litellm_caller, litellm_streaming
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
@@ -251,6 +253,19 @@ class TestOrdinaryErrorsKeepTheirMeaning:
     def test_thinking_budget_message_is_not_a_spending_budget(self):
         """Claude's extended-thinking budget is a per-request token allowance."""
         exc = _bad_request("Invalid request: thinking budget exceeded max_tokens.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_budget_tokens_limit_is_a_bad_request(self):
+        """`budget_tokens` is a request field, not money."""
+        exc = _bad_request("Request exceeded the budget_tokens limit.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_max_tokens_budget_is_not_a_spending_budget(self):
+        exc = _bad_request("The max_tokens budget was exceeded for this response.")
 
         with pytest.raises(LLMBadRequestError):
             LiteLLMCaller._raise_llm_domain_error(exc)
@@ -511,6 +526,13 @@ class TestBudgetErrorBypassesTheNonStreamingFallback:
         assert result == "partial answer"
         fallback.assert_not_awaited()
         publisher.publish_chat_response.assert_not_awaited()
+        # The kept text is truncated, so the client is told why.
+        publisher.send_json.assert_awaited()
+        assert publisher.send_json.await_args.args[0] == {
+            "type": "error",
+            "message": BUDGET_MESSAGE,
+            "error_type": "budget_exceeded",
+        }
 
 
 TOOLS_SCHEMA = [
@@ -647,6 +669,8 @@ class TestFinalAnswerBudgetRefusal:
 
         assert result == "partial answer"
         llm.call_plain.assert_not_awaited()
+        publisher.send_json.assert_awaited()
+        assert publisher.send_json.await_args.args[0]["error_type"] == "budget_exceeded"
         budget_errors = [
             record
             for record in caplog.records
@@ -654,3 +678,71 @@ class TestFinalAnswerBudgetRefusal:
             and record.levelno >= logging.ERROR
         ]
         assert budget_errors == []
+
+
+def _tool_call(call_id: str, name: str):
+    return SimpleNamespace(
+        id=call_id,
+        type="function",
+        function=SimpleNamespace(name=name, arguments="{}"),
+    )
+
+
+class _BudgetAfterToolLLM:
+    """First round calls a tool; the continuation round is refused by budget."""
+
+    def __init__(self, partial_text: str = ""):
+        self.partial_text = partial_text
+        self.stream_with_tools_calls = 0
+        self.synthesis_calls = 0
+
+    async def stream_with_tools(self, *args, **kwargs):
+        self.stream_with_tools_calls += 1
+        if self.stream_with_tools_calls == 1:
+            call = _tool_call("c1", "safety_docs_plan")
+            yield "computing"
+            yield LLMResponse(content="computing", tool_calls=[call])
+            return
+        if self.partial_text:
+            yield self.partial_text
+        raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+    async def stream_plain(self, *args, **kwargs):
+        self.synthesis_calls += 1
+        raise AssertionError("synthesis must not be requested from an exhausted budget")
+        yield  # pragma: no cover
+
+    async def call_plain(self, *args, **kwargs):
+        self.synthesis_calls += 1
+        raise AssertionError("fallback must not be requested from an exhausted budget")
+
+
+async def _execute_tools(tool_calls, *args, **kwargs):
+    return [
+        ToolResult(tool_call_id=call.id, content="ok", success=True)
+        for call in tool_calls
+    ]
+
+
+class TestToolsModeContinuationBudget:
+    """A refused continuation must not spend a doomed synthesis request."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("partial_text", ["", "partial continuation"])
+    async def test_continuation_budget_skips_synthesis(self, partial_text):
+        llm = _BudgetAfterToolLLM(partial_text=partial_text)
+        publisher = _publisher()
+        runner = _tools_runner(llm, publisher)
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.execute_multiple_tools = _execute_tools
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            with pytest.raises(LLMBudgetExceededError):
+                await runner.run_streaming(
+                    session=_session(),
+                    model="test-model",
+                    messages=[{"role": "user", "content": "hi"}],
+                    selected_tools=["safety_docs_plan"],
+                )
+
+        assert llm.synthesis_calls == 0

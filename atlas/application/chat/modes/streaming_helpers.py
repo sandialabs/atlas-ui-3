@@ -9,7 +9,11 @@ import asyncio
 import logging
 from typing import AsyncGenerator
 
-from atlas.domain.errors import DomainError, LLMBudgetExceededError
+from atlas.domain.errors import (
+    LLM_BUDGET_EXCEEDED_MESSAGE,
+    DomainError,
+    LLMBudgetExceededError,
+)
 from atlas.interfaces.events import EventPublisher
 
 from ..utilities.error_handler import classify_llm_error
@@ -93,13 +97,21 @@ async def stream_and_accumulate(
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
-        if isinstance(exc, LLMBudgetExceededError) and not accumulated:
-            # A spent budget refuses the identical request the fallback would
-            # send, and the user needs the typed ``budget_exceeded`` error
-            # frame -- not a synthesized chat reply that makes the turn look
-            # successful. Let the caller's handler emit it. Text already
-            # streamed is kept (the existing partial-output policy).
-            raise
+        if isinstance(exc, LLMBudgetExceededError):
+            if not accumulated:
+                # A spent budget refuses the identical request the fallback
+                # would send, and the user needs the typed ``budget_exceeded``
+                # error frame -- not a synthesized chat reply that makes the
+                # turn look successful. Let the caller's handler emit it.
+                raise
+            if not raise_on_stream_error:
+                # Text already streamed is kept (the existing partial-output
+                # policy), but the answer is truncated: say why.
+                await event_publisher.send_json({
+                    "type": "error",
+                    "message": LLM_BUDGET_EXCEEDED_MESSAGE,
+                    "error_type": "budget_exceeded",
+                })
         if raise_on_stream_error:
             if not accumulated and fallback_fn:
                 # A stream that failed before the first token still gets the

@@ -241,10 +241,11 @@ backoff (which cannot succeed).
   final-answer helper re-raise it when nothing has been streamed, instead of
   running their non-streaming fallback: that fallback is the same refused
   request, and its failure used to be published as a successful chat reply.
-  Text already streamed is kept. The domain error now reaches `main.py`, which
-  emits the `budget_exceeded` error frame and metric. Tools mode does the same
-  for its initial and continuation streams, so a doomed synthesis request is
-  not attempted.
+  Text already streamed is kept, and the client gets a `budget_exceeded` frame
+  noting that the answer is truncated. The domain error now reaches `main.py`,
+  which emits the same frame type and metric. Tools mode does the same for its
+  initial and continuation streams, even when the continuation already
+  streamed partial text, so a doomed synthesis request is not attempted.
 - The user message names no key, team, spend, or limit, and does not promise a
   reset (the scope is unknown and a fixed budget may never reset). The raw
   upstream text stays in the server log (newline-stripped) and the chained
