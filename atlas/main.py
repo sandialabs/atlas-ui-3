@@ -73,6 +73,7 @@ from atlas.domain.errors import (
     DomainError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMBudgetExceededError,
     LLMMalformedToolCallError,
     LLMTimeoutError,
     RateLimitError,
@@ -2160,6 +2161,18 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": "rate_limit"
+                        })
+                    except LLMBudgetExceededError as e:
+                        # Distinct from a rate limit: retrying before the budget
+                        # resets is pointless, and the frontend should not offer
+                        # a "try again" path for it.
+                        logger.warning(f"LLM budget exceeded in chat handler: {e}")
+                        turn_failure.append("budget_exceeded")
+                        log_metric("error", user_email, error_type="budget_exceeded")
+                        await turn_update_callback({
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, 'message') else e),
+                            "error_type": "budget_exceeded"
                         })
                     except LLMTimeoutError as e:
                         logger.warning(f"Timeout error in chat handler: {e}")

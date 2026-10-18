@@ -225,7 +225,17 @@ class LiteLLMStreamingMixin:
                     "retry_count": attempt,
                     "retry_wait_seconds": waited,
                 })
-                logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
+                if self._is_budget_exceeded(exc):
+                    # A spent budget is an expected refusal until it resets,
+                    # not a service fault: one warning without a traceback is
+                    # enough. The classifier below emits the user-safe error.
+                    logger.warning(
+                        "Streaming LLM call refused by an exhausted budget (%s): %s",
+                        type(exc).__name__,
+                        sanitize_for_logging(str(exc)),
+                    )
+                else:
+                    logger.error("Error in streaming LLM call: %s", exc, exc_info=True)
                 self._raise_llm_domain_error(exc)
 
     def _handle_malformed_tool_calls(
@@ -571,7 +581,16 @@ class LiteLLMStreamingMixin:
                     "retry_count": attempt,
                     "retry_wait_seconds": waited,
                 })
-                logger.error("Error in streaming LLM call with tools: %s", exc, exc_info=True)
+                if self._is_budget_exceeded(exc):
+                    # See the stream_plain note: a budget refusal is not a
+                    # service fault, so it is logged once at warning level.
+                    logger.warning(
+                        "Streaming LLM call with tools refused by an exhausted budget (%s): %s",
+                        type(exc).__name__,
+                        sanitize_for_logging(str(exc)),
+                    )
+                else:
+                    logger.error("Error in streaming LLM call with tools: %s", exc, exc_info=True)
                 self._raise_llm_domain_error(exc, tools_schema=tools_schema)
 
     async def stream_with_rag(

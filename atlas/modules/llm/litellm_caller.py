@@ -12,6 +12,7 @@ fallbacks, cost tracking, and provider-specific optimizations.
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -41,12 +42,14 @@ from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import (
     CONTEXT_WINDOW_KEYWORDS,
+    LLM_BUDGET_EXCEEDED_MESSAGE,
     AuthenticationError,
     AuthorizationError,
     ContextWindowExceededError,
     DataSourcePermissionError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMBudgetExceededError,
     LLMEmptyStreamError,
     LLMError,
     LLMServiceError,
@@ -101,6 +104,39 @@ MESSAGE_HISTORY_MARKERS = re.compile(
     r"\b(messages|tool_call_id|role)\b",
     re.IGNORECASE,
 )
+
+# LiteLLM's structured marker for an exhausted key/user/team/model/provider
+# budget (LiteLLM >= 1.104 sends HTTP 422; older builds and
+# `budget_exceeded_status_code: 429` send 429; per-model virtual-key budgets
+# send 400). The HTTP code alone cannot identify it -- 422 is otherwise a
+# rejected request and 429 is otherwise transient throttling.
+BUDGET_EXCEEDED_TYPE = "budget_exceeded"
+
+# Conservative fallback for deployments whose budget refusal has no structured
+# `type` (older LiteLLM, provider-budget routing). Every pattern requires the
+# word "budget", so ordinary RPM/TPM throttling -- "rate limit reached for
+# tokens per min" -- never matches.
+BUDGET_EXCEEDED_MARKERS = re.compile(
+    r"budget\b\s+(?:has\s+been\s+|is\s+|was\s+|limit\s+)?(?:exceeded|exhausted|reached)"
+    r"|exceeded\s+(?:the\s+|its\s+|your\s+)?budget\b"
+    r"|exceededbudget\b"
+    r"|over\s+(?:\d+[a-z]+\s+)?budget\b"
+    r"|crossed\s+budget\b",
+    re.IGNORECASE,
+)
+
+# A "token budget", "context budget", or "thinking budget" is an allowance
+# inside one request, not money. Those messages must keep their own
+# classification (context window / bad request) even when they say "exceeded".
+BUDGET_ALLOWANCE_QUALIFIERS = re.compile(
+    r"\b(?:token|tokens|max_tokens|budget_tokens|context|thinking|reasoning|completion|output|input|prompt)"
+    r"\s+(?:window\s+)?budget\b",
+    re.IGNORECASE,
+)
+
+# The only HTTP codes LiteLLM uses for a budget refusal. A fallback match under
+# any other code is treated as unrelated text.
+BUDGET_EXCEEDED_STATUS_CODES = frozenset({400, 422, 429})
 
 
 def _llm_response_attrs(response: Any, attempt: int) -> Dict[str, Any]:
@@ -310,6 +346,109 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         return []
 
     @staticmethod
+    def _exception_body(exc: Exception) -> Optional[Dict[str, Any]]:
+        """Return a litellm exception's parsed response body, when available.
+
+        litellm keeps the JSON error envelope on ``.body`` on current versions;
+        older ones only expose the ``httpx.Response``. Both are read
+        defensively: a missing, consumed, or non-JSON body must never turn a
+        budget refusal into an unrelated crash.
+        """
+        body = getattr(exc, "body", None)
+        if isinstance(body, str):
+            try:
+                body = json.loads(body)
+            except (TypeError, ValueError):
+                body = None
+        if isinstance(body, dict):
+            return body
+
+        response = getattr(exc, "response", None)
+        if response is None:
+            return None
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _exception_status(exc: Exception, body: Optional[Dict[str, Any]]) -> Optional[int]:
+        """Best-effort HTTP status for a litellm exception."""
+        candidates = [
+            getattr(exc, "status_code", None),
+            getattr(getattr(exc, "response", None), "status_code", None),
+        ]
+        for source in (body, (body or {}).get("error")):
+            if isinstance(source, dict):
+                candidates.append(source.get("code"))
+        for candidate in candidates:
+            if isinstance(candidate, bool):
+                continue
+            if isinstance(candidate, int):
+                return candidate
+            if isinstance(candidate, str) and candidate.strip().isdigit():
+                return int(candidate.strip())
+        return None
+
+    @classmethod
+    def _is_budget_exceeded(cls, exc: Exception) -> bool:
+        """Whether a litellm exception is a spending-budget refusal.
+
+        Structured ``error.type == "budget_exceeded"`` wins regardless of the
+        HTTP code, because LiteLLM uses 422, 429, and 400 depending on version
+        and budget scope. When no structured type is present, a known budget
+        phrase under a budget-refusal status is accepted for older builds and
+        provider-budget routing. Token/context/thinking "budgets" are not
+        money and are excluded from that fallback.
+        """
+        body = cls._exception_body(exc)
+        error_payload = body.get("error") if isinstance(body, dict) else None
+        if isinstance(error_payload, dict):
+            structured_type = error_payload.get("type")
+            if (
+                isinstance(structured_type, str)
+                and structured_type.strip().lower() == BUDGET_EXCEEDED_TYPE
+            ):
+                return True
+        # Some litellm versions copy the parsed fields onto the exception.
+        exception_type = getattr(exc, "type", None)
+        if (
+            isinstance(exception_type, str)
+            and exception_type.strip().lower() == BUDGET_EXCEEDED_TYPE
+        ):
+            return True
+
+        # A context-window overflow is a usage error whatever words it uses, and
+        # a timeout or auth failure has its own specific message. None of them
+        # can become a spending-budget refusal by wording alone.
+        if isinstance(
+            exc,
+            (litellm.ContextWindowExceededError, litellm.Timeout, litellm.AuthenticationError),
+        ):
+            return False
+
+        text_parts = [str(exc)]
+        for source in (error_payload, body):
+            if isinstance(source, dict):
+                message = source.get("message")
+                if isinstance(message, str):
+                    text_parts.append(message)
+        text = "\n".join(text_parts)
+        if not BUDGET_EXCEEDED_MARKERS.search(text):
+            return False
+        if BUDGET_ALLOWANCE_QUALIFIERS.search(text):
+            return False
+        if any(kw in text.lower() for kw in CONTEXT_WINDOW_KEYWORDS):
+            return False
+
+        # Only the codes LiteLLM uses for a budget refusal. An error with no
+        # status is too ambiguous for the phrase fallback; the structured type
+        # above is the reliable signal for those.
+        status = cls._exception_status(exc, body)
+        return status in BUDGET_EXCEEDED_STATUS_CODES
+
+    @staticmethod
     def _raise_llm_domain_error(exc: Exception, tools_schema: Optional[List[Dict]] = None) -> NoReturn:
         """Classify a litellm exception and raise the corresponding domain error.
 
@@ -327,6 +466,23 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         error_str = str(exc)
         error_type = type(exc).__name__
         lowered = error_str.lower()
+
+        # A spending budget is checked before the HTTP-code mappings. LiteLLM
+        # reports exhaustion as 422 (>= 1.104), 429 (older builds or
+        # `budget_exceeded_status_code: 429`), or 400 (per-model virtual-key
+        # budgets). Without this, 422 reads as a rejected request and 429 as
+        # transient throttling, so the user is told to retry a request that
+        # cannot succeed until the budget is raised.
+        if LiteLLMCaller._is_budget_exceeded(exc):
+            # Raw text can name the key/team and show spend and limit; it stays
+            # in the server log (newlines stripped) and the chained cause, never
+            # in the user-facing message.
+            logger.warning(
+                "LLM budget exhausted (%s): %s",
+                error_type,
+                sanitize_for_logging(error_str),
+            )
+            raise LLMBudgetExceededError(LLM_BUDGET_EXCEEDED_MESSAGE) from exc
 
         # Concrete exception types are checked before any message keywords.
         # The keyword tests below match against the provider's text, and a
@@ -421,6 +577,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         """
         if isinstance(exc, LLMEmptyStreamError):
             return True
+
+        # A spent budget refuses the identical request until it is raised.
+        # LiteLLM reports it as 429 on older builds and with
+        # `budget_exceeded_status_code: 429`, so it must be excluded before the
+        # transient 429 test below.
+        if isinstance(exc, LLMBudgetExceededError) or LiteLLMCaller._is_budget_exceeded(exc):
+            return False
 
         error_str = str(exc).lower()
 

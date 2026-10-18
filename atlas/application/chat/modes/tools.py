@@ -8,7 +8,12 @@ from atlas.domain.chat.citation_register import (
     CitationRegister,
     new_register,
 )
-from atlas.domain.errors import DomainError, LLMMalformedToolCallError
+from atlas.domain.errors import (
+    LLM_BUDGET_EXCEEDED_MESSAGE,
+    DomainError,
+    LLMBudgetExceededError,
+    LLMMalformedToolCallError,
+)
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     Message,
@@ -142,12 +147,19 @@ class ToolsModeRunner:
                 elif isinstance(item, LLMResponse):
                     final_llm_response = item
         except Exception as exc:
-            logger.error("Streaming tools error: %s", exc)
+            if not isinstance(exc, LLMBudgetExceededError):
+                logger.error("Streaming tools error: %s", exc)
             streaming_error = exc
             # Always send stream-end to prevent stuck UI cursor
             await self.event_publisher.publish_token_stream(
                 token="", is_first=False, is_last=True,
             )
+            if isinstance(exc, LLMBudgetExceededError) and not accumulated_content:
+                # Nothing was streamed, so there is no partial answer to keep
+                # and no reason to handle the refusal inside the mode: let the
+                # transport record budget_exceeded (metric + turn failure)
+                # through the domain-error handler.
+                raise
             if self.raise_on_stream_error:
                 # CLI failure policy: an LLM stream failure is a process
                 # failure, not a synthesized in-chat error message. A DomainError
@@ -166,12 +178,19 @@ class ToolsModeRunner:
         # presenting that narration as a finished answer would hide the gap.
         if streaming_error and (
             not accumulated_content
-            or isinstance(streaming_error, LLMMalformedToolCallError)
+            or isinstance(
+                streaming_error, (LLMMalformedToolCallError, LLMBudgetExceededError)
+            )
         ):
             error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
             )
-            logger.error("Streaming tools classified error: %s", log_msg)
+            if isinstance(streaming_error, LLMBudgetExceededError):
+                # Not a service fault: keep the budget path at WARNING, like
+                # the other streaming handlers.
+                logger.warning("Streaming tools budget refusal: %s", log_msg)
+            else:
+                logger.error("Streaming tools classified error: %s", log_msg)
             if accumulated_content:
                 # The user watched this text stream in. Returning without
                 # persisting it saves the turn with no assistant reply at all,
@@ -264,6 +283,10 @@ class ToolsModeRunner:
         executed_signatures: set = set()
         exempted_discovery_retries: set = set()
         extra_round = 0
+        # Partial text from a continuation refused by an exhausted budget. A
+        # budget is deterministic, so the closing synthesis would be refused
+        # too; the turn closes with this text and an incomplete marker instead.
+        budget_partial: Optional[str] = None
         # Issue #909: one injector per turn tracks the rolling most-recent-N
         # cap across continuation rounds.
         image_injector = ToolImageInjector(
@@ -396,6 +419,14 @@ class ToolsModeRunner:
                     user_email, temperature,
                 )
                 if err is not None:
+                    if isinstance(err, LLMBudgetExceededError):
+                        # A budget refusal is deterministic: the graceful
+                        # synthesis below is another request that would be
+                        # refused too. The closing message carries this text;
+                        # persisting a narration row for it as well would
+                        # render the paragraph twice after a reload.
+                        budget_partial = next_text or ""
+                        break
                     # Provider error mid-continuation (e.g. the tool-choice
                     # rejection) -- fall back to a graceful final synthesis.
                     # Text the user watched stream in is still persisted:
@@ -445,7 +476,17 @@ class ToolsModeRunner:
             # or, when the provider put no text on the final response, with the
             # narration this round streamed (deferred above), falling back to the
             # placeholder only when neither exists.
-            if self._is_canvas_only_response(current_response):
+            if budget_partial is not None:
+                # The continuation was refused by an exhausted budget. Closing
+                # synthesis would be refused too; keep the partial text and tell
+                # the client the answer is truncated.
+                synthesis_content = budget_partial or LLM_BUDGET_EXCEEDED_MESSAGE
+                await self.event_publisher.send_json({
+                    "type": "error",
+                    "message": LLM_BUDGET_EXCEEDED_MESSAGE,
+                    "error_type": "budget_exceeded",
+                })
+            elif self._is_canvas_only_response(current_response):
                 content = (current_response.content or "").strip()
                 synthesis_content = (
                     content
@@ -477,6 +518,11 @@ class ToolsModeRunner:
                 metadata={
                     "tools": selected_tools,
                     **({"data_sources": selected_data_sources} if selected_data_sources else {}),
+                    **(
+                        {"incomplete": True, "error_type": "budget_exceeded"}
+                        if budget_partial is not None
+                        else {}
+                    ),
                 },
                 citation_register=citation_register,
             )
@@ -691,7 +737,13 @@ class ToolsModeRunner:
                 elif isinstance(item, LLMResponse):
                     response = item
         except Exception as exc:
-            logger.error("Streaming tools continuation error: %s", exc)
+            if not isinstance(exc, LLMBudgetExceededError):
+                logger.error("Streaming tools continuation error: %s", exc)
+            if isinstance(exc, LLMBudgetExceededError) and not accumulated:
+                # The caller's graceful synthesis is a separate request that an
+                # exhausted budget refuses too. Let the transport report the
+                # budget instead of spending it on another doomed call.
+                raise
             if accumulated:
                 await self.event_publisher.publish_token_stream(
                     token="", is_first=False, is_last=True,

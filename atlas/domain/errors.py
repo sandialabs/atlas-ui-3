@@ -117,6 +117,28 @@ class LLMTimeoutError(LLMError):
     pass
 
 
+# Shared user-facing copy for an exhausted spending budget. Deliberately names
+# no key, team, spend, limit, or reset time (the scope is unknown and a fixed
+# budget may never reset), and no gateway internals.
+LLM_BUDGET_EXCEEDED_MESSAGE = (
+    "The spending budget for this model or team has been used up. "
+    "Choose a different model or team, or contact your administrator."
+)
+
+
+class LLMBudgetExceededError(LLMError):
+    """Raised when a LiteLLM spending budget refuses the request.
+
+    The limit may be scoped to a key, user, team, model, or provider route, so
+    the message must not name a reset time. The raw upstream detail (key
+    fragments, team ids, spend figures) is deliberately not carried into the
+    user-facing message; the original exception is chained as ``__cause__`` for
+    server-side diagnosis. Deterministic until the budget is raised: never
+    retried.
+    """
+    pass
+
+
 class LLMMalformedToolCallError(LLMError):
     """Raised when the model returned a tool call whose arguments are not valid JSON.
 

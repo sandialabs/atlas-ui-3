@@ -1,0 +1,806 @@
+"""LiteLLM budget refusals must be reported as a spent budget, not as an invalid
+request or transient throttling.
+
+Since LiteLLM 1.104 an exhausted key/user/team budget is a 422 with
+``error.type: "budget_exceeded"``; older builds and
+``budget_exceeded_status_code: 429`` use 429, and per-model virtual-key budgets
+use 400. Before this, 422 became "the provider rejected this request as
+invalid" (with advice to start a new conversation) and 429 became "high
+traffic" and was retried with backoff -- both wrong, because every retry is
+refused the same way until the budget is raised.
+"""
+
+import asyncio
+import json
+import logging
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import litellm
+import pytest
+
+from atlas.application.chat.agent.streaming_final_answer import stream_final_answer
+from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
+from atlas.application.chat.modes.tools import ToolsModeRunner
+from atlas.application.chat.utilities.error_handler import (
+    classify_llm_error,
+    error_type_for,
+)
+from atlas.domain.errors import (
+    LLM_BUDGET_EXCEEDED_MESSAGE,
+    ContextWindowExceededError,
+    LLMBadRequestError,
+    LLMBudgetExceededError,
+    LLMServiceError,
+    LLMTimeoutError,
+    RateLimitError,
+)
+from atlas.domain.messages.models import ToolResult
+from atlas.interfaces.llm import LLMResponse
+from atlas.modules.llm import litellm_caller, litellm_streaming
+from atlas.modules.llm.litellm_caller import LiteLLMCaller
+
+BUDGET_MESSAGE = LLM_BUDGET_EXCEEDED_MESSAGE
+
+KEY_BUDGET_BODY = {
+    "error": {
+        "message": (
+            "Budget has been exceeded! Key=lit-8229-exhausted (sk-...X-rQ) "
+            "Current cost: 0.0, Max budget: 0.0"
+        ),
+        "type": "budget_exceeded",
+        "param": None,
+        "code": "422",
+    }
+}
+
+TEAM_BUDGET_BODY = {
+    "error": {
+        "message": (
+            "Budget has been exceeded! Team=de35b29e-6ca8-4f47-b804-2b79d07aa99a "
+            "Current cost: 3.5e-06, Max budget: 1e-09"
+        ),
+        "type": "budget_exceeded",
+        "param": None,
+        "code": "422",
+    }
+}
+
+
+def _bad_request(message: str, body=None) -> litellm.BadRequestError:
+    return litellm.BadRequestError(
+        message=message, model="test-model", llm_provider="openai", body=body
+    )
+
+
+def _rate_limit(message: str, body=None, status: int = 429) -> litellm.RateLimitError:
+    response = httpx.Response(status, json=body) if body is not None else None
+    return litellm.RateLimitError(
+        message=message,
+        model="test-model",
+        llm_provider="openai",
+        response=response,
+    )
+
+
+class TestStructuredBudgetType:
+    """`error.type == "budget_exceeded"` wins regardless of HTTP code."""
+
+    def test_422_key_budget(self):
+        exc = _bad_request("Budget has been exceeded!", body=KEY_BUDGET_BODY)
+
+        with pytest.raises(LLMBudgetExceededError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+        assert info.value.message == BUDGET_MESSAGE
+
+    def test_429_older_version_or_status_override(self):
+        body = {
+            "error": {
+                "message": "Budget has been exceeded! Key=sk-...X-rQ",
+                "type": "budget_exceeded",
+                "param": None,
+                "code": "429",
+            }
+        }
+        exc = _rate_limit("Budget has been exceeded!", body=body, status=429)
+
+        with pytest.raises(LLMBudgetExceededError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+        assert info.value.message == BUDGET_MESSAGE
+
+    def test_400_per_model_key_budget(self):
+        body = {
+            "error": {
+                "message": "Budget has been exceeded for model gpt-4o.",
+                "type": "budget_exceeded",
+                "param": None,
+                "code": "400",
+            }
+        }
+        exc = _bad_request("Budget has been exceeded for model gpt-4o.", body=body)
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_body_may_be_a_json_string(self):
+        exc = _bad_request("Budget has been exceeded!", body=json.dumps(KEY_BUDGET_BODY))
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_numeric_code_in_the_envelope_is_normalised(self):
+        body = {
+            "error": {
+                "message": "Budget has been exceeded!",
+                "type": "budget_exceeded",
+                "code": 422,
+            }
+        }
+        exc = _bad_request("Budget has been exceeded!", body=body)
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_structured_type_on_the_exception_is_honoured(self):
+        """Some litellm versions copy the parsed fields onto the exception."""
+        exc = _rate_limit("Budget has been exceeded!")
+        exc.type = "budget_exceeded"
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_team_budget_body_is_recognised(self):
+        exc = _bad_request("Budget has been exceeded!", body=TEAM_BUDGET_BODY)
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+
+class TestUnstructuredFallback:
+    """Legacy and provider-routing refusals carry no structured type."""
+
+    def test_routing_budget_429_without_a_type(self):
+        body = {
+            "error": {
+                "message": "Deployment crossed budget for provider azure; refusing request.",
+                "type": None,
+                "param": None,
+                "code": "429",
+            }
+        }
+        exc = _rate_limit("Deployment crossed budget for provider azure.", body=body)
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_legacy_budget_phrase_without_a_body(self):
+        exc = _rate_limit("Budget exceeded for this team.")
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_plain_bad_request_with_budget_phrase(self):
+        exc = _bad_request("Exceeded budget for this API key.")
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # LiteLLM's real auth-check templates (proxy/auth/auth_checks.py).
+            "ExceededBudget: User=user-1 over budget. Spend=2.5, Budget=2.0",
+            "ExceededBudget: Key over 30d budget. Spend=10.0, Budget=5.0",
+            "ExceededBudget: Team=team-1 over 30d budget.",
+            # Per-model virtual-key budget (proxy/hooks/model_max_budget_limiter.py).
+            "LiteLLM Virtual Key: sk-...abc, key_alias: test, exceeded budget for model=gpt-4o",
+            # Object budget enum wording (proxy/_types.py).
+            "Object was over budget",
+        ],
+    )
+    def test_litellm_budget_wording_is_recognised(self, message):
+        exc = _rate_limit(message)
+
+        with pytest.raises(LLMBudgetExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_budget_phrase_under_an_unrelated_status_is_not_a_budget_error(self):
+        """Only 400/422/429 are budget-refusal statuses; 500 text is unrelated."""
+        exc = litellm.APIError(
+            status_code=500,
+            message="Exceeded budget while rendering the usage report.",
+            model="test-model",
+            llm_provider="openai",
+        )
+
+        with pytest.raises(Exception) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+        assert not isinstance(info.value, LLMBudgetExceededError)
+
+    def test_budget_phrase_without_a_status_is_too_ambiguous(self):
+        """Without a structured type or a refusal code, do not guess."""
+        with pytest.raises(LLMServiceError) as info:
+            LiteLLMCaller._raise_llm_domain_error(Exception("Budget exceeded"))
+
+        assert not isinstance(info.value, LLMBudgetExceededError)
+
+
+class TestOrdinaryErrorsKeepTheirMeaning:
+    def test_token_budget_overflow_is_still_a_context_window_error(self):
+        """A token/context allowance is not a spending budget."""
+        exc = litellm.ContextWindowExceededError(
+            message=(
+                "This model's token budget was exceeded: maximum context "
+                "length is 8192 tokens."
+            ),
+            model="test-model",
+            llm_provider="openai",
+        )
+
+        with pytest.raises(ContextWindowExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_token_budget_message_in_a_400_is_not_a_spending_budget(self):
+        exc = _bad_request("Invalid request: token budget exceeded for this response.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_thinking_budget_message_is_not_a_spending_budget(self):
+        """Claude's extended-thinking budget is a per-request token allowance."""
+        exc = _bad_request("Invalid request: thinking budget exceeded max_tokens.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_budget_tokens_limit_is_a_bad_request(self):
+        """`budget_tokens` is a request field, not money."""
+        exc = _bad_request("Request exceeded the budget_tokens limit.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_max_tokens_budget_is_not_a_spending_budget(self):
+        exc = _bad_request("The max_tokens budget was exceeded for this response.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_timeout_mentioning_a_budget_is_still_a_timeout(self):
+        exc = litellm.Timeout(
+            message="Budget exceeded check timed out after 30s.",
+            model="test-model",
+            llm_provider="openai",
+        )
+
+        with pytest.raises(LLMTimeoutError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_rpm_tpm_429_is_still_a_rate_limit(self):
+        exc = litellm.RateLimitError(
+            message=(
+                "Rate limit reached for gpt-4o on tokens per min (TPM): "
+                "Limit 30000, Used 30000."
+            ),
+            model="test-model",
+            llm_provider="openai",
+        )
+
+        with pytest.raises(RateLimitError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+        assert "high traffic" in info.value.message
+
+    def test_unrelated_422_is_still_a_bad_request(self):
+        exc = _bad_request(
+            "Invalid value for 'temperature': must be <= 2.",
+            body={"error": {"message": "Invalid value", "type": "invalid_request_error", "code": "422"}},
+        )
+
+        with pytest.raises(LLMBadRequestError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+        assert "rejected this request as invalid" in info.value.message
+
+
+class TestNoRetryAndNoLeak:
+    def test_budget_error_is_not_retryable(self):
+        exc = _bad_request("Budget has been exceeded!", body=KEY_BUDGET_BODY)
+
+        assert LiteLLMCaller._is_retryable_error(exc) is False
+        assert LiteLLMCaller._is_retryable_error(LLMBudgetExceededError(BUDGET_MESSAGE)) is False
+
+    def test_budget_429_is_not_retried_by_the_call_loop(self, monkeypatch):
+        attempts = 0
+
+        async def fail(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise _rate_limit("Budget has been exceeded!", body=KEY_BUDGET_BODY)
+
+        monkeypatch.setattr(litellm_caller, "acompletion", fail)
+        caller = object.__new__(LiteLLMCaller)
+
+        with pytest.raises(litellm.RateLimitError):
+            asyncio.run(caller._acompletion_with_retry(model="openai/gpt-4o", messages=[]))
+
+        assert attempts == 1
+
+    def test_user_message_omits_key_team_and_spend(self):
+        exc = _bad_request("Budget has been exceeded!", body=KEY_BUDGET_BODY)
+
+        with pytest.raises(LLMBudgetExceededError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+        message = info.value.message
+        for secret in ("lit-8229-exhausted", "sk-...X-rQ", "Current cost", "Max budget"):
+            assert secret not in message
+
+    def test_original_exception_is_chained_for_diagnosis(self):
+        exc = _bad_request("Budget has been exceeded!", body=KEY_BUDGET_BODY)
+
+        with pytest.raises(LLMBudgetExceededError) as info:
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+        assert info.value.__cause__ is exc
+
+    def test_classify_preserves_the_budget_message(self):
+        err = LLMBudgetExceededError(BUDGET_MESSAGE)
+
+        error_class, user_msg, log_msg = classify_llm_error(err)
+
+        assert error_class is LLMBudgetExceededError
+        assert user_msg == BUDGET_MESSAGE
+        assert "budget" in log_msg.lower()
+
+    def test_error_type_maps_to_budget_exceeded(self):
+        assert error_type_for(LLMBudgetExceededError) == "budget_exceeded"
+
+
+BUDGET_429_BODY = {
+    "error": {
+        "message": "Budget has been exceeded! Key=lit-8229-exhausted (sk-...X-rQ)",
+        "type": "budget_exceeded",
+        "param": None,
+        "code": "429",
+    }
+}
+
+
+def _streaming_caller() -> LiteLLMCaller:
+    """A caller with just the collaborators the streaming mixin needs."""
+    caller = object.__new__(LiteLLMCaller)
+
+    async def resolve(model_name, temperature, user_email):
+        return "openai/gpt-4o", {"api_base": "http://test", "api_key": "test"}
+
+    caller._resolve_call_target = resolve
+    caller._prepare_messages = lambda model_name, messages: messages
+    caller._fire_pre_llm_hook = AsyncMock(return_value=None)
+    return caller
+
+
+class TestStreamingBudgetRefusal:
+    """The streaming paths share the retry policy and the log noise fix."""
+
+    @pytest.mark.asyncio
+    async def test_stream_plain_attempts_a_budget_429_once(self, monkeypatch, caplog):
+        attempts = 0
+
+        async def fail(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise _rate_limit("Budget has been exceeded!", body=BUDGET_429_BODY)
+
+        monkeypatch.setattr(litellm_streaming, "acompletion", fail)
+        monkeypatch.setenv("LLM_MAX_RETRIES", "2")
+        caller = _streaming_caller()
+
+        with caplog.at_level(logging.WARNING), pytest.raises(LLMBudgetExceededError):
+            async for _ in caller.stream_plain("test-model", [{"role": "user", "content": "hi"}]):
+                pass
+
+        assert attempts == 1
+        streaming_errors = [
+            record
+            for record in caplog.records
+            if record.name == "atlas.modules.llm.litellm_streaming"
+            and record.levelno >= logging.ERROR
+        ]
+        assert streaming_errors == [], "a budget refusal must not log an ERROR traceback"
+
+    @pytest.mark.asyncio
+    async def test_stream_with_tools_attempts_a_budget_429_once(self, monkeypatch):
+        attempts = 0
+
+        async def fail(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise _rate_limit("Budget has been exceeded!", body=BUDGET_429_BODY)
+
+        monkeypatch.setattr(litellm_streaming, "acompletion", fail)
+        monkeypatch.setenv("LLM_MAX_RETRIES", "2")
+        caller = _streaming_caller()
+        tools_schema = [
+            {"type": "function", "function": {"name": "calculator", "parameters": {}}}
+        ]
+
+        with pytest.raises(LLMBudgetExceededError):
+            async for _ in caller.stream_with_tools(
+                "test-model", [{"role": "user", "content": "hi"}], tools_schema
+            ):
+                pass
+
+        assert attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_plain_still_retries_a_real_rpm_429(self, monkeypatch):
+        attempts = 0
+
+        async def fail(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise litellm.RateLimitError(
+                message="Rate limit reached for gpt-4o on tokens per min (TPM).",
+                model="test-model",
+                llm_provider="openai",
+            )
+
+        monkeypatch.setattr(litellm_streaming, "acompletion", fail)
+        monkeypatch.setenv("LLM_MAX_RETRIES", "1")
+        caller = _streaming_caller()
+
+        with pytest.raises(RateLimitError):
+            async for _ in caller.stream_plain("test-model", [{"role": "user", "content": "hi"}]):
+                pass
+
+        assert attempts == 2
+
+
+class TestBudgetErrorBypassesTheNonStreamingFallback:
+    """A fallback would send the identical refused request and fake success."""
+
+    @staticmethod
+    def _publisher():
+        publisher = AsyncMock()
+        publisher.publish_token_stream = AsyncMock()
+        publisher.publish_chat_response = AsyncMock()
+        return publisher
+
+    @pytest.mark.asyncio
+    async def test_stream_and_accumulate_propagates_instead_of_falling_back(self):
+        async def failing_stream():
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+            yield  # pragma: no cover - makes this an async generator
+
+        publisher = self._publisher()
+        fallback = AsyncMock(return_value="a simulated answer")
+
+        with pytest.raises(LLMBudgetExceededError):
+            await stream_and_accumulate(
+                failing_stream(),
+                publisher,
+                fallback_fn=fallback,
+                context_label="plain",
+            )
+
+        fallback.assert_not_awaited()
+        publisher.publish_chat_response.assert_not_awaited()
+        # The open token bubble is still closed before the error propagates.
+        publisher.publish_token_stream.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stream_final_answer_propagates_instead_of_falling_back(self):
+        async def failing_stream(model, messages, temperature=None, user_email=None):
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+            yield  # pragma: no cover - makes this an async generator
+
+        llm = SimpleNamespace(stream_plain=failing_stream, call_plain=AsyncMock(return_value="x"))
+        publisher = self._publisher()
+
+        with pytest.raises(LLMBudgetExceededError):
+            await stream_final_answer(llm, publisher, "test-model", [], 0.7, None)
+
+        llm.call_plain.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stream_and_accumulate_keeps_text_already_streamed(self):
+        async def partial_stream():
+            yield "partial answer"
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+        publisher = self._publisher()
+        fallback = AsyncMock(return_value="a simulated answer")
+
+        result = await stream_and_accumulate(
+            partial_stream(),
+            publisher,
+            fallback_fn=fallback,
+            context_label="plain",
+        )
+
+        assert result == "partial answer"
+        fallback.assert_not_awaited()
+        publisher.publish_chat_response.assert_not_awaited()
+        # The kept text is truncated, so the client is told why.
+        publisher.send_json.assert_awaited()
+        assert publisher.send_json.await_args.args[0] == {
+            "type": "error",
+            "message": BUDGET_MESSAGE,
+            "error_type": "budget_exceeded",
+        }
+
+
+TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {"name": "safety_docs_plan", "parameters": {"type": "object"}},
+    },
+]
+
+
+def _publisher():
+    publisher = AsyncMock()
+    publisher.publish_token_stream = AsyncMock()
+    publisher.publish_chat_response = AsyncMock()
+    publisher.publish_response_complete = AsyncMock()
+    publisher.send_json = AsyncMock()
+    return publisher
+
+
+def _error_frames(publisher):
+    return [
+        call.args[0]
+        for call in publisher.send_json.await_args_list
+        if call.args and call.args[0].get("type") == "error"
+    ]
+
+
+def _tools_runner(llm, publisher):
+    tool_manager = MagicMock()
+    tool_manager.get_tools_schema = MagicMock(return_value=TOOLS_SCHEMA)
+    return ToolsModeRunner(
+        llm=llm,
+        tool_manager=tool_manager,
+        event_publisher=publisher,
+        config_manager=SimpleNamespace(
+            app_settings=SimpleNamespace(
+                tools_mode_max_extra_rounds=3,
+                feature_agent_mode_available=False,
+            )
+        ),
+    )
+
+
+def _session():
+    session = MagicMock()
+    session.history = MagicMock()
+    session.history.messages = []
+    session.history.add_message = MagicMock()
+    session.session_id = "s1"
+    session.files = {}
+    return session
+
+
+class _BudgetFailingLLM:
+    async def stream_with_tools(self, *args, **kwargs):
+        raise LLMBudgetExceededError(BUDGET_MESSAGE)
+        yield  # pragma: no cover - makes this an async generator
+
+
+class _PartialBudgetLLM:
+    async def stream_with_tools(self, *args, **kwargs):
+        yield "partial answer"
+        raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+
+class TestToolsModeBudgetRefusal:
+    """Tools mode must not swallow the budget into a synthesized answer."""
+
+    @pytest.mark.asyncio
+    async def test_initial_stream_reraises_when_nothing_was_streamed(self):
+        publisher = _publisher()
+        runner = _tools_runner(_BudgetFailingLLM(), publisher)
+
+        with pytest.raises(LLMBudgetExceededError):
+            await runner.run_streaming(
+                session=_session(),
+                model="test-model",
+                messages=[{"role": "user", "content": "hi"}],
+                selected_tools=["safety_docs_plan"],
+            )
+
+        # The transport, not the mode, reports the budget; no local error frame.
+        assert _error_frames(publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_continuation_reraises_when_nothing_was_streamed(self):
+        publisher = _publisher()
+        runner = _tools_runner(_BudgetFailingLLM(), publisher)
+
+        with pytest.raises(LLMBudgetExceededError):
+            await runner._stream_tools_round(
+                "test-model",
+                [{"role": "user", "content": "hi"}],
+                TOOLS_SCHEMA,
+                None,
+                0.7,
+            )
+
+    @pytest.mark.asyncio
+    async def test_continuation_keeps_partial_text(self):
+        publisher = _publisher()
+        runner = _tools_runner(_PartialBudgetLLM(), publisher)
+
+        text, response, error = await runner._stream_tools_round(
+            "test-model",
+            [{"role": "user", "content": "hi"}],
+            TOOLS_SCHEMA,
+            None,
+            0.7,
+        )
+
+        assert text == "partial answer"
+        assert response is None
+        assert isinstance(error, LLMBudgetExceededError)
+
+
+class TestFinalAnswerBudgetRefusal:
+    @pytest.mark.asyncio
+    async def test_partial_text_is_kept_and_not_logged_as_an_error(self, caplog):
+        async def partial_stream(model, messages, temperature=None, user_email=None):
+            yield "partial answer"
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+        llm = SimpleNamespace(
+            stream_plain=partial_stream,
+            call_plain=AsyncMock(return_value="a simulated answer"),
+        )
+        publisher = _publisher()
+
+        with caplog.at_level(logging.WARNING):
+            result = await stream_final_answer(
+                llm, publisher, "test-model", [], 0.7, None
+            )
+
+        assert result == "partial answer"
+        llm.call_plain.assert_not_awaited()
+        publisher.send_json.assert_awaited()
+        assert publisher.send_json.await_args.args[0]["error_type"] == "budget_exceeded"
+        budget_errors = [
+            record
+            for record in caplog.records
+            if record.name == "atlas.application.chat.agent.streaming_final_answer"
+            and record.levelno >= logging.ERROR
+        ]
+        assert budget_errors == []
+
+
+def _tool_call(call_id: str, name: str):
+    return SimpleNamespace(
+        id=call_id,
+        type="function",
+        function=SimpleNamespace(name=name, arguments="{}"),
+    )
+
+
+class _BudgetAfterToolLLM:
+    """First round calls a tool; the continuation round is refused by budget."""
+
+    def __init__(self, partial_text: str = ""):
+        self.partial_text = partial_text
+        self.stream_with_tools_calls = 0
+        self.synthesis_calls = 0
+
+    async def stream_with_tools(self, *args, **kwargs):
+        self.stream_with_tools_calls += 1
+        if self.stream_with_tools_calls == 1:
+            call = _tool_call("c1", "safety_docs_plan")
+            yield "computing"
+            yield LLMResponse(content="computing", tool_calls=[call])
+            return
+        if self.partial_text:
+            yield self.partial_text
+        raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+    async def stream_plain(self, *args, **kwargs):
+        self.synthesis_calls += 1
+        raise AssertionError("synthesis must not be requested from an exhausted budget")
+        yield  # pragma: no cover
+
+    async def call_plain(self, *args, **kwargs):
+        self.synthesis_calls += 1
+        raise AssertionError("fallback must not be requested from an exhausted budget")
+
+
+async def _execute_tools(tool_calls, *args, **kwargs):
+    return [
+        ToolResult(tool_call_id=call.id, content="ok", success=True)
+        for call in tool_calls
+    ]
+
+
+class TestToolsModeContinuationBudget:
+    """A refused continuation must not spend a doomed synthesis request."""
+
+    @pytest.mark.asyncio
+    async def test_continuation_budget_without_text_reraises(self):
+        llm = _BudgetAfterToolLLM(partial_text="")
+        runner = _tools_runner(llm, _publisher())
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.execute_multiple_tools = _execute_tools
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            with pytest.raises(LLMBudgetExceededError):
+                await runner.run_streaming(
+                    session=_session(),
+                    model="test-model",
+                    messages=[{"role": "user", "content": "hi"}],
+                    selected_tools=["safety_docs_plan"],
+                )
+
+        assert llm.synthesis_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_continuation_budget_with_partial_text_closes_the_turn(self):
+        llm = _BudgetAfterToolLLM(partial_text="partial continuation")
+        publisher = _publisher()
+        session = _session()
+        runner = _tools_runner(llm, publisher)
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.execute_multiple_tools = _execute_tools
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            response = await runner.run_streaming(
+                session=session,
+                model="test-model",
+                messages=[{"role": "user", "content": "hi"}],
+                selected_tools=["safety_docs_plan"],
+            )
+
+        assert llm.synthesis_calls == 0
+        assert response["message"] == "partial continuation"
+        frames = _error_frames(publisher)
+        assert any(frame["error_type"] == "budget_exceeded" for frame in frames)
+        closing = [
+            call.args[0]
+            for call in session.history.add_message.call_args_list
+            if getattr(call.args[0], "metadata", {}).get("error_type") == "budget_exceeded"
+        ]
+        assert closing, "the closing assistant message must be marked incomplete"
+        assert closing[-1].metadata["incomplete"] is True
+        # The closing message carries the partial text; a narration row would
+        # render the same paragraph twice after a reload.
+        partial_rows = [
+            call.args[0]
+            for call in session.history.add_message.call_args_list
+            if getattr(call.args[0], "content", None) == "partial continuation"
+        ]
+        assert len(partial_rows) == 1
+
+    @pytest.mark.asyncio
+    async def test_initial_stream_partial_budget_is_marked_incomplete(self):
+        publisher = _publisher()
+        session = _session()
+        runner = _tools_runner(_PartialBudgetLLM(), publisher)
+
+        response = await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            selected_tools=["safety_docs_plan"],
+        )
+
+        assert response["message"]
+        frames = _error_frames(publisher)
+        assert any(frame["error_type"] == "budget_exceeded" for frame in frames)
+        persisted = [
+            call.args[0]
+            for call in session.history.add_message.call_args_list
+            if getattr(call.args[0], "metadata", {}).get("error_type") == "budget_exceeded"
+        ]
+        assert persisted and persisted[-1].metadata["incomplete"] is True
