@@ -117,6 +117,19 @@ class LLMTimeoutError(LLMError):
     pass
 
 
+class LLMBudgetExceededError(LLMError):
+    """Raised when a LiteLLM spending budget refuses the request.
+
+    The limit may be scoped to a key, user, team, model, or provider route, so
+    the message must not name a reset time. The raw upstream detail (key
+    fragments, team ids, spend figures) is deliberately not carried into the
+    user-facing message; the original exception is chained as ``__cause__`` for
+    server-side diagnosis. Deterministic until the budget resets: never
+    retried.
+    """
+    pass
+
+
 class LLMMalformedToolCallError(LLMError):
     """Raised when the model returned a tool call whose arguments are not valid JSON.
 

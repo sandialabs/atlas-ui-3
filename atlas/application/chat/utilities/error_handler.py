@@ -15,6 +15,7 @@ from atlas.domain.errors import (
     ContextWindowExceededError,
     LLMAuthenticationError,
     LLMBadRequestError,
+    LLMBudgetExceededError,
     LLMMalformedToolCallError,
     LLMServiceError,
     LLMTimeoutError,
@@ -53,6 +54,7 @@ async def safe_get_tools_schema(
 # nearest listed ancestor rather than falling through to "unexpected".
 _ERROR_TYPE_BY_CLASS = (
     (RateLimitError, "rate_limit"),
+    (LLMBudgetExceededError, "budget_exceeded"),
     (LLMTimeoutError, "timeout"),
     (LLMAuthenticationError, "authentication"),
     (AuthenticationError, "authentication"),
@@ -89,6 +91,10 @@ def classify_llm_error(error: Exception) -> Tuple[type, str, str]:
     # below would classify the message rather than the original failure.
     if isinstance(error, LLMBadRequestError):
         return (LLMBadRequestError, error.message, f"LLM rejected the request: {error.message}")
+    if isinstance(error, LLMBudgetExceededError):
+        # Already budget-specific and user-safe. Checked before the rate-limit
+        # keyword test, which would otherwise re-label it "high traffic".
+        return (LLMBudgetExceededError, error.message, f"LLM budget exceeded: {error.message}")
     if isinstance(error, (AuthenticationError, AuthorizationError)):
         # E.g. "not a member of the selected LiteLLM team" or "please sign in
         # again": raised by Atlas itself with a message meant for the user.

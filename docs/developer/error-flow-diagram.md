@@ -1,6 +1,6 @@
 # Error Flow Diagram
 
-Last updated: 2026-10-04
+Last updated: 2026-10-18
 
 ## Complete Error Handling Flow
 
@@ -209,6 +209,34 @@ error cannot be silently downgraded into that fallback.
 `LLMError` hierarchy and stay listed explicitly. Tools and agent mode have no
 such fallback to protect: they make a plain tools call, and a failing search is
 one failing tool result.
+
+## Exhausted spending budget (`budget_exceeded`)
+
+An exhausted LiteLLM key, user, team, model, or provider budget refuses every
+identical request until the budget resets. LiteLLM's HTTP code for it depends
+on version and scope: 422 since 1.104 (`error.type: "budget_exceeded"`), 429 on
+older builds or with `budget_exceeded_status_code: 429`, and 400 for per-model
+virtual-key budgets. Mapping by code alone is wrong in both directions: 422
+becomes "the provider rejected this request as invalid" (advice to start a new
+conversation does not help) and 429 becomes "high traffic" and is retried with
+backoff (which cannot succeed).
+
+`_is_budget_exceeded()` therefore runs before the `RateLimitError` and
+`BadRequestError` branches and raises `LLMBudgetExceededError`:
+
+- Structured `error.type == "budget_exceeded"` wins regardless of HTTP code,
+  read safely from `exc.body` (dict or JSON string) or `exc.response`.
+- When no structured type is present, the known phrases `budget exceeded`,
+  `exceeded budget`, and `crossed budget` are accepted under status 400, 422,
+  or 429. Every phrase requires the word "budget", so ordinary RPM/TPM 429
+  throttling never matches.
+- `_is_retryable_error()` returns `False` for it before the transient 429 test.
+- The user message names no key, team, spend, or limit, and does not promise a
+  reset time (the scope is unknown). The raw upstream text stays in the server
+  log (newline-stripped) and the chained `__cause__`.
+- `classify_llm_error()` short-circuits on the class like
+  `LLMBadRequestError`, so the message is not re-labelled "high traffic", and
+  `error_type_for()` reports `budget_exceeded`.
 
 ## Malformed tool calls (`malformed_tool_call`)
 
