@@ -146,10 +146,14 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     useChat.mockReturnValue(chatContext())
     renderChat()
 
-    const banner = screen.getByTestId('agent-mode-no-tools-banner')
-    expect(banner).toHaveClass('max-h-48')
-    expect(banner).toHaveClass('overflow-y-auto')
-    expect(banner).toHaveClass('sm:max-h-none')
+    const detail = screen.getByTestId('agent-mode-no-tools-detail')
+    expect(detail).toHaveClass('max-h-24')
+    expect(detail).toHaveClass('overflow-y-auto')
+    expect(detail).toHaveClass('sm:max-h-none')
+    // The title and actions sit outside the scrolling region.
+    expect(screen.getByTestId('agent-mode-no-tools-banner')).toContainElement(
+      screen.getByRole('button', { name: /choose tools/i })
+    )
   })
 
   it('does not offer the tools picker when the deployment disables tools', () => {

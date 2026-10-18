@@ -1041,7 +1041,7 @@ const ChatArea = () => {
               both actions. */}
           {agentModeAvailable && agentModeEnabled && selectedTools.size === 0 && (
             <div
-              className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100 max-h-48 overflow-y-auto custom-scrollbar sm:max-h-none sm:overflow-visible"
+              className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100"
               role="status"
               data-testid="agent-mode-no-tools-banner"
             >
@@ -1051,30 +1051,38 @@ const ChatArea = () => {
                   <p className="text-sm font-semibold text-amber-200">
                     Agent Mode is on, but no tools are selected
                   </p>
-                  {reduceHelpText ? (
-                    <p className="mt-1 text-sm text-amber-100/90">
-                      Select at least one tool to let the assistant take multiple steps.
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-sm text-amber-100/90">
-                      Agent Mode lets the assistant take multiple steps: it calls the tools you
-                      select, inspects the results, and continues until the task is done. With no
-                      tools selected, this chat behaves like normal chat.
-                    </p>
-                  )}
-                  <p className={reduceHelpText ? 'mt-1 text-sm text-amber-100/90' : 'mt-1.5 text-sm text-amber-100/90'}>
-                    {currentModelSupportsTools ? (
-                      <>
-                        You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
-                        supports tools.
-                      </>
+                  {/* The title and actions stay put on short viewports; only the
+                      explanation scrolls, so the composer never gets pushed
+                      off screen and the tools action stays reachable. */}
+                  <div
+                    data-testid="agent-mode-no-tools-detail"
+                    className="max-h-24 overflow-y-auto custom-scrollbar sm:max-h-none sm:overflow-visible"
+                  >
+                    {reduceHelpText ? (
+                      <p className="mt-1 text-sm text-amber-100/90">
+                        Select at least one tool to let the assistant take multiple steps.
+                      </p>
                     ) : (
-                      <>
-                        You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
-                        does not support tools, so switch to a tool-capable model to use Agent Mode.
-                      </>
+                      <p className="mt-1 text-sm text-amber-100/90">
+                        Agent Mode lets the assistant take multiple steps: it calls the tools you
+                        select, inspects the results, and continues until the task is done. With no
+                        tools selected, this chat behaves like normal chat.
+                      </p>
                     )}
-                  </p>
+                    <p className={reduceHelpText ? 'mt-1 text-sm text-amber-100/90' : 'mt-1.5 text-sm text-amber-100/90'}>
+                      {currentModelSupportsTools ? (
+                        <>
+                          You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
+                          supports tools.
+                        </>
+                      ) : (
+                        <>
+                          You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
+                          does not support tools, so switch to a tool-capable model to use Agent Mode.
+                        </>
+                      )}
+                    </p>
+                  </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {features?.tools ? (
                       <button
