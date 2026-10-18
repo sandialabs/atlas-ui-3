@@ -39,7 +39,7 @@ const setChat = (over = {}) => {
     openChatAsText: vi.fn(),
     messages: [],
     clearChat: vi.fn(),
-    features: {},
+    features: { tools: true },
     settings: {},
     complianceLevelFilter: null,
     setComplianceLevelFilter: vi.fn(),

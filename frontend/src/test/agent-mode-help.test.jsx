@@ -35,6 +35,17 @@ describe('AgentModeHelpButton', () => {
     expect(dialog).toHaveTextContent(/model that supports tool calling/i)
   })
 
+  it('does not offer the tools picker when tools are disabled', () => {
+    render(<AgentModeHelpButton toolsEnabled={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'What Agent Mode does' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'What Agent Mode does' })
+    expect(screen.queryByRole('button', { name: /choose tools/i })).not.toBeInTheDocument()
+    expect(dialog).toHaveTextContent(/tools are disabled/i)
+    expect(dialog).toHaveTextContent(/multiple steps/i)
+  })
+
   it('opens the tools picker from the explanation', () => {
     const listener = vi.fn()
     window.addEventListener(OPEN_SETTINGS_EVENT, listener)

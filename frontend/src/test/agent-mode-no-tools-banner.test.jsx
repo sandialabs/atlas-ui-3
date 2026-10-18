@@ -49,6 +49,7 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     followUpSuggestions: [],
     setFollowUpSuggestions: vi.fn(),
     settings: {},
+    features: { tools: true },
     ...overrides,
   })
 
@@ -139,6 +140,27 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     expect(screen.getByRole('button', { name: /choose tools/i })).toBeInTheDocument()
     // The long onboarding paragraph is the optional part.
     expect(banner).not.toHaveTextContent(/inspects the results/i)
+  })
+
+  it('keeps the callout scrollable on short viewports so the composer stays reachable', () => {
+    useChat.mockReturnValue(chatContext())
+    renderChat()
+
+    const banner = screen.getByTestId('agent-mode-no-tools-banner')
+    expect(banner).toHaveClass('max-h-48')
+    expect(banner).toHaveClass('overflow-y-auto')
+    expect(banner).toHaveClass('sm:max-h-none')
+  })
+
+  it('does not offer the tools picker when the deployment disables tools', () => {
+    useChat.mockReturnValue(chatContext({ features: { tools: false } }))
+    renderChat()
+
+    const banner = screen.getByTestId('agent-mode-no-tools-banner')
+    expect(screen.queryByRole('button', { name: /choose tools/i })).not.toBeInTheDocument()
+    expect(banner).toHaveTextContent(/tools are disabled/i)
+    // Turning Agent Mode off still works, and the explanation stays.
+    expect(screen.getByRole('button', { name: /turn off agent mode/i })).toBeInTheDocument()
   })
 
   it('stays quiet once a tool is selected', () => {

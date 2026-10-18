@@ -1041,7 +1041,7 @@ const ChatArea = () => {
               both actions. */}
           {agentModeAvailable && agentModeEnabled && selectedTools.size === 0 && (
             <div
-              className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100"
+              className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100 max-h-48 overflow-y-auto custom-scrollbar sm:max-h-none sm:overflow-visible"
               role="status"
               data-testid="agent-mode-no-tools-banner"
             >
@@ -1076,14 +1076,20 @@ const ChatArea = () => {
                     )}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openSettingsPanel({ tab: 'tools' })}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-semibold transition-colors"
-                    >
-                      <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
-                      Choose tools
-                    </button>
+                    {features?.tools ? (
+                      <button
+                        type="button"
+                        onClick={() => openSettingsPanel({ tab: 'tools' })}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-semibold transition-colors"
+                      >
+                        <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
+                        Choose tools
+                      </button>
+                    ) : (
+                      <span className="text-xs text-amber-200">
+                        Tools are disabled for this deployment.
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => setAgentModeEnabled(false)}

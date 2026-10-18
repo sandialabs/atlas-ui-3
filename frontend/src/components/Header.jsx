@@ -323,7 +323,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
               >
                 <Bot className="w-5 h-5" />
               </button>
-              <AgentModeHelpButton quiet={reduceHelpText} />
+              <AgentModeHelpButton quiet={reduceHelpText} toolsEnabled={!!features?.tools} />
             </div>
           )}
 

@@ -28,7 +28,7 @@ export function AgentModeExplanation({ className = '' }) {
   )
 }
 
-export function AgentModeHelpButton({ quiet = false }) {
+export function AgentModeHelpButton({ quiet = false, toolsEnabled = true }) {
   const [open, setOpen] = useState(false)
   const panelId = useId()
   const buttonRef = useRef(null)
@@ -66,17 +66,21 @@ export function AgentModeHelpButton({ quiet = false }) {
             <p className="text-sm font-semibold text-gray-100">Agent Mode</p>
             <AgentModeExplanation className="mt-1" />
             <div className="mt-3 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false)
-                  openSettingsPanel({ tab: 'tools' })
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors"
-              >
-                <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
-                Choose tools
-              </button>
+              {toolsEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    openSettingsPanel({ tab: 'tools' })
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors"
+                >
+                  <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
+                  Choose tools
+                </button>
+              ) : (
+                <span className="text-xs text-gray-400">Tools are disabled for this deployment.</span>
+              )}
               <button
                 type="button"
                 onClick={() => setOpen(false)}
