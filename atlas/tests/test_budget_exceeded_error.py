@@ -31,6 +31,7 @@ from atlas.domain.errors import (
     LLMBadRequestError,
     LLMBudgetExceededError,
     LLMServiceError,
+    LLMTimeoutError,
     RateLimitError,
 )
 from atlas.modules.llm import litellm_caller, litellm_streaming
@@ -234,6 +235,16 @@ class TestOrdinaryErrorsKeepTheirMeaning:
         exc = _bad_request("Invalid request: thinking budget exceeded max_tokens.")
 
         with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_timeout_mentioning_a_budget_is_still_a_timeout(self):
+        exc = litellm.Timeout(
+            message="Budget exceeded check timed out after 30s.",
+            model="test-model",
+            llm_provider="openai",
+        )
+
+        with pytest.raises(LLMTimeoutError):
             LiteLLMCaller._raise_llm_domain_error(exc)
 
     def test_rpm_tpm_429_is_still_a_rate_limit(self):

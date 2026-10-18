@@ -416,8 +416,13 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         ):
             return True
 
-        # A context-window overflow is a usage error whatever words it uses.
-        if isinstance(exc, litellm.ContextWindowExceededError):
+        # A context-window overflow is a usage error whatever words it uses, and
+        # a timeout or auth failure has its own specific message. None of them
+        # can become a spending-budget refusal by wording alone.
+        if isinstance(
+            exc,
+            (litellm.ContextWindowExceededError, litellm.Timeout, litellm.AuthenticationError),
+        ):
             return False
 
         text_parts = [str(exc)]
