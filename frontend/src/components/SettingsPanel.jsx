@@ -729,13 +729,13 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 />
               </button>
             </div>
-            {!reduceHelpText && (
-              <p className="text-sm text-gray-400">
-                When enabled, tools that don't require admin approval will execute automatically without prompting --
-                including tool calls in conversations you are not currently viewing.
-                Tools that require admin approval will still prompt for confirmation.
-              </p>
-            )}
+            {/* Scope disclosure, not onboarding copy: keep it visible even
+                when the user has turned off helper text. */}
+            <p className="text-sm text-gray-400">
+              When enabled, tools that don't require admin approval will execute automatically without prompting --
+              including tool calls in conversations you are not currently viewing.
+              Tools that require admin approval will still prompt for confirmation.
+            </p>
             {!ctxSettings?.autoApproveTools && (
               <p className="text-sm approval-warning-text mt-2">
                 <strong><span aria-hidden="true">⚠</span> Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
@@ -818,8 +818,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               <button
                 onClick={() => {
                   const newVal = !settings.debugMode
-                  handleSettingChange('debugMode', newVal)
-                  saveSettings({ ...settings, debugMode: newVal })
+                  // Immediate, like the other context-owned switches. Do not
+                  // run saveSettings here: that would also persist unrelated
+                  // unsaved General edits and Cancel could not undo them.
+                  updateCtxSettings({ debugMode: newVal })
+                  setSettings(previous => ({ ...previous, debugMode: newVal }))
                 }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   settings.debugMode ? 'bg-green-600' : 'bg-gray-600'

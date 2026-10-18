@@ -175,6 +175,26 @@ describe('SettingsPanel agent mode settings', () => {
     })
   })
 
+  it('Debug Mode only writes its own key, not unsaved General edits', async () => {
+    localStorage.setItem('chatui-settings', JSON.stringify({
+      llmTemperature: 0.7,
+      maxIterations: 10,
+      debugMode: false,
+    }))
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: { debugMode: false }, updateSettings })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    const [temperature] = await screen.findAllByRole('slider')
+    fireEvent.change(temperature, { target: { value: '0.9' } })
+
+    const debugLabel = await screen.findByText('Debug Mode')
+    fireEvent.click(debugLabel.parentElement.querySelector('button'))
+
+    expect(updateSettings).toHaveBeenCalledWith({ debugMode: true })
+    expect(JSON.parse(localStorage.getItem('chatui-settings')).llmTemperature).toBe(0.7)
+  })
+
   it('hides optional explanatory copy when reduce helper text is on', async () => {
     renderSettingsPanel({ settings: { reduceHelpText: true } })
 

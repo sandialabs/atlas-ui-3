@@ -272,7 +272,14 @@ The **Header** groups conversation setup together, with security level first:
 Optional explanations appear behind the small help button next to the
 cluster and inside the save menu. Users who already know the interface can
 turn on **Reduce helper text** in **Tools and Settings > General** to hide
-that copy and hover guidance; labels, selected values, and warnings remain.
+that copy and hover guidance; labels, selected values, scope disclosures, and
+warnings remain.
+
+The transcript menu offers **Open as plain text** first, followed by
+**Print / Save as PDF**. The header no longer offers a JSON transcript
+download; for a machine-readable copy of stored conversations use
+`GET /api/conversations/export`, or the sidebar's **Download All
+Conversations** action when chat history is enabled.
 
 Loading a saved conversation replaces the current chat view with the saved messages.
 
