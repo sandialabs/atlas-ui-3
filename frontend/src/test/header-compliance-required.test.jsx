@@ -70,7 +70,7 @@ const openSelectors = () => {
     />
   )
   fireEvent.click(screen.getByTitle('Menu'))
-  const selects = screen.getAllByLabelText('Compliance level')
+  const selects = screen.getAllByLabelText('Security level')
   expect(selects).toHaveLength(2)
   return selects
 }
@@ -138,15 +138,19 @@ describe('header compliance selector lock (issue #1044)', () => {
       activeConversationClassification: { state: 'classified', level: 'Internal' },
       conversationAccepted: true,
     })
-    for (const select of openSelectors()) {
+    openSelectors()
+    const selects = screen.getAllByLabelText('Security level')
+    for (const select of selects) {
       expect(select.disabled).toBe(true)
       expect(select.dataset.locked).toBe('true')
       expect(select.value).toBe('Internal')
-      expect(select.title).toMatch(/classified Internal/)
-      expect(select.title).toMatch(/Start a new conversation/)
+      // Lock state is visible inline, not hover-only.
+      expect(select.getAttribute('aria-describedby')).toBeTruthy()
       // The recorded level is displayed even though the global filter differs.
       expect(optionLabels(select)).toEqual(['Public', 'Internal'])
     }
+    expect(screen.getAllByText('Locked for this chat')).toHaveLength(2)
+    expect(screen.getAllByText(/Start a new chat to change security level/)).toHaveLength(2)
   })
 
   it('stays unlocked after a first turn the server has not accepted', () => {
@@ -171,7 +175,7 @@ describe('header compliance selector lock (issue #1044)', () => {
       expect(select.disabled).toBe(true)
       expect(select.value).toBe('')
       expect(optionLabels(select)[0]).toBe('Unclassified')
-      expect(select.title).toMatch(/Start a new conversation/)
+      expect(select.getAttribute('aria-describedby')).toBeTruthy()
     }
   })
 

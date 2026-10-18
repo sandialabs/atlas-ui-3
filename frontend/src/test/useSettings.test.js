@@ -15,6 +15,7 @@ const DEFAULTS = {
   autoApproveTools: false,
   debugMode: false,
   compactMessages: true,
+  reduceHelpText: false,
 }
 
 // Mock localStorage

@@ -64,6 +64,9 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
   // Also get live settings from ChatContext for always-in-sync fields
   const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable, isInAdminGroup, agentMaxStepsLimit, agentCeilingConfirmed } = useChat()
+  // Optional explanatory copy and hover hints can be turned off by people who
+  // already know the interface. Labels, state, and warnings always stay.
+  const reduceHelpText = !!ctxSettings?.reduceHelpText
   // Admin-configured ceiling for the agent loop (issue #849); keeps the
   // slider's upper bound aligned with what the backend will actually honor.
   // Server default (10) until config lands.
@@ -599,15 +602,17 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               <button
                 onClick={toggleTheme}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors text-sm font-medium"
-                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={reduceHelpText ? undefined : (theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode')}
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 {theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               </button>
             </div>
-            <p className="text-sm text-gray-400">
-              Currently using {theme === 'dark' ? 'dark' : 'light'} mode.
-            </p>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                Currently using {theme === 'dark' ? 'dark' : 'light'} mode.
+              </p>
+            )}
           </div>
 
           {/* LLM Temperature Setting */}
@@ -633,10 +638,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 <span>0.5 (Balanced)</span>
                 <span>1 (Creative)</span>
               </div>
-              <p className="text-sm text-gray-400">
-                Controls randomness in AI responses. Lower values are more focused and deterministic, 
-                higher values are more creative and varied.
-              </p>
+              {!reduceHelpText && (
+                <p className="text-sm text-gray-400">
+                  Controls randomness in AI responses. Lower values are more focused and deterministic,
+                  higher values are more creative and varied.
+                </p>
+              )}
             </div>
           </div>
 
@@ -677,10 +684,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                     </div>
                   </div>
                 )}
-                <p className="text-sm text-gray-400">
-                  Maximum number of iterations an agent can perform when solving complex tasks.
-                  Higher values allow for more thorough problem solving but may take longer.
-                </p>
+                {!reduceHelpText && (
+                  <p className="text-sm text-gray-400">
+                    Maximum number of iterations an agent can perform when solving complex tasks.
+                    Higher values allow for more thorough problem solving but may take longer.
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -702,11 +711,13 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 />
               </button>
             </div>
-            <p className="text-sm text-gray-400">
-              When enabled, tools that don't require admin approval will execute automatically without prompting --
-              including tool calls in conversations you are not currently viewing.
-              Tools that require admin approval will still prompt for confirmation.
-            </p>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                When enabled, tools that don't require admin approval will execute automatically without prompting --
+                including tool calls in conversations you are not currently viewing.
+                Tools that require admin approval will still prompt for confirmation.
+              </p>
+            )}
             {!ctxSettings?.autoApproveTools && (
               <p className="text-sm approval-warning-text mt-2">
                 <strong><span aria-hidden="true">⚠</span> Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
@@ -731,11 +742,44 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 />
               </button>
             </div>
-            <p className="text-sm text-gray-400">
-              When enabled (default), tool calls, approval prompts, and system notices render as dense,
-              single-line rows. Turn it off to use the classic layout with avatars, author headers, and
-              expanded message bubbles.
-            </p>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                When enabled (default), tool calls, approval prompts, and system notices render as dense,
+                single-line rows. Turn it off to use the classic layout with avatars, author headers, and
+                expanded message bubbles.
+              </p>
+            )}
+          </div>
+
+          {/* Helper text preference. On by default so first-time and occasional
+              users still get the onboarding copy; experienced users can quiet
+              the interface without losing labels, state, or warnings. */}
+          <div className="bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-gray-50 font-medium" htmlFor="reduce-help-text">Reduce helper text</label>
+              <button
+                id="reduce-help-text"
+                role="switch"
+                aria-checked={reduceHelpText}
+                aria-label="Reduce helper text"
+                onClick={() => updateCtxSettings({ reduceHelpText: !reduceHelpText })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  reduceHelpText ? 'bg-green-600' : 'bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    reduceHelpText ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                Hides optional explanations, help links, and hover hints across the interface.
+                Labels, selected values, and safety warnings stay visible.
+              </p>
+            )}
           </div>
 
           {/* Debug Mode Setting */}
@@ -759,10 +803,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 />
               </button>
             </div>
-            <p className="text-sm text-gray-400">
-              When enabled, tool call messages will show raw input arguments and output results expanded by default,
-              making it easier to debug tool interactions.
-            </p>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                When enabled, tool call messages will show raw input arguments and output results expanded by default,
+                making it easier to debug tool interactions.
+              </p>
+            )}
           </div>
 
           {/* Globus Authentication Section (only shown when feature is enabled) */}

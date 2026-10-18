@@ -5,7 +5,8 @@ const DEFAULT_SETTINGS = {
   maxIterations: 10,
   autoApproveTools: false,  // User-level auto-approval for non-admin-required tools
   debugMode: false,  // Show raw tool call input/output in chat (#135)
-  compactMessages: true  // Compact tool/approval/system rows vs. classic avatar+header bubbles (#673)
+  compactMessages: true,  // Compact tool/approval/system rows vs. classic avatar+header bubbles (#673)
+  reduceHelpText: false  // Hide optional onboarding copy, explanatory links, and hover hints
 }
 
 export function useSettings() {

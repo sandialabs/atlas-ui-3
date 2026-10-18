@@ -229,15 +229,29 @@ All endpoints are at `/api/conversations` and scoped to the authenticated user.
 
 When the feature is disabled, all endpoints return empty results gracefully.
 
-## Incognito Mode
+## Save Modes (Not Saved / Browser / Server)
 
-Users can toggle incognito mode in the sidebar. When enabled:
-- Conversations are **not saved** to the database
-- A clear visual indicator (red background) appears in the sidebar
-- The `incognito` flag is sent via WebSocket to the backend
-- The backend tracks incognito session IDs and skips persistence
+Each conversation has one of three persistence states, chosen from the
+**Save this chat** control in the header's conversation-setup cluster:
 
-This is designed for national lab environments where users may need to discuss sensitive topics without creating a record.
+- **Not saved** -- nothing is written to the browser or the server. The
+  current conversation is gone when the user leaves it.
+- **Saved in this browser** -- the conversation is stored in IndexedDB on
+  that device, under that account.
+- **Saved to server** -- the conversation is stored in the backend database
+  and appears in server-side history.
+
+The control is a three-choice menu, not a cycling toggle, and its wording
+describes how *this conversation* is persisted. It does not hide or delete
+conversations that are already in history. The choice persists across
+refreshes in the `chatui-save-mode` browser-local preference.
+
+The selected mode is sent over WebSocket as `save_mode`; the legacy
+`incognito` boolean (`save_mode !== "server"`) is still sent for older
+clients. The backend tracks the session's save floor and skips persistence for
+turns taken while the conversation was not being saved. This is designed for
+national lab environments where users may need to discuss sensitive topics
+without creating a server record.
 
 ## Frontend
 
@@ -247,8 +261,18 @@ The sidebar shows:
 - **Tag filter** buttons for quick filtering
 - **Delete All** button in the footer
 
-The **Header** includes:
-- **Incognito toggle** with clear visual indicator (Saving/Incognito)
+The **Header** groups conversation setup together, with security level first:
+- **Security level** -- an explicitly labelled selector. It locks once a
+  conversation starts and then shows a lock icon, "Locked for this chat", and
+  the next step ("Start a new chat to change security level") inline.
+- **Save this chat** -- the three persistence states above, with a short
+  explanation of what each one means.
+- **New Chat** -- starts a fresh conversation and unlocks security level.
+
+Optional explanations appear behind the small help button next to the
+cluster and inside the save menu. Users who already know the interface can
+turn on **Reduce helper text** in **Tools and Settings > General** to hide
+that copy and hover guidance; labels, selected values, and warnings remain.
 
 Loading a saved conversation replaces the current chat view with the saved messages.
 
@@ -261,7 +285,7 @@ Each `tool_call` row is stored with its detail in the message `metadata_json`
 column (tool name, server, arguments, result, status) and is **excluded from the
 LLM context** on a subsequent turn — these rows exist purely to re-render the
 transcript and are never replayed to the model. They are also included in the
-`.txt` and `.json` chat exports. The canvas tool is intentionally not recorded
+plain-text chat export. The canvas tool is intentionally not recorded
 as a transcript row (it renders into the canvas panel). This applies to both
 regular (tools-mode) chat and agent-mode runs: the agentic loop records the
 same `tool_start`/`tool_complete`/`tool_error` events its tool calls stream to

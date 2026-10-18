@@ -5,12 +5,13 @@
 # - The transcript helper opens the export blob in a new browser tab and falls
 #   back to the old file download when the popup is blocked (or window.open
 #   throws), revoking the blob URL only after the tab has had time to load.
-# - The header offers "Open as JSON" / "Open as Text" (no download labels) in
-#   both the desktop dropdown and the mobile menu, routes the items to the
-#   context openers, marks them with the new-tab hint, and exposes menu ARIA
-#   semantics.
+# - The header offers "Open as plain text" (primary) followed by
+#   "Print / Save as PDF" in both the desktop dropdown and the mobile menu,
+#   routes the items to the context openers, marks the text item with the
+#   new-tab hint, and exposes menu ARIA semantics. JSON export is no longer
+#   offered in this UI.
 # - A production build carries the new labels and no longer carries the old
-#   "Download as JSON/Text" transcript labels.
+#   "Download as JSON/Text" or "Open as JSON" transcript labels.
 #
 # The behavioral checks run the component/helper vitest suites (real renders
 # and clicks in jsdom); the screenshots referenced in the PR description are
@@ -65,11 +66,12 @@ print_result $BUILD "frontend production build succeeds"
 if [ $BUILD -eq 0 ]; then
     BUNDLE=$(ls -t dist/assets/index-*.js 2>/dev/null | head -1)
     if [ -n "$BUNDLE" ] \
-        && grep -q "Open as JSON" "$BUNDLE" && grep -q "Open as Text" "$BUNDLE" \
-        && ! grep -q "Download as JSON\|Download as Text" "$BUNDLE"; then
-        print_result 0 "bundle contains 'Open as JSON'/'Open as Text', not the download labels"
+        && grep -q "Open as plain text" "$BUNDLE" \
+        && grep -q "Print / Save as PDF" "$BUNDLE" \
+        && ! grep -q "Open as JSON\|Download as JSON\|Download as Text" "$BUNDLE"; then
+        print_result 0 "bundle contains 'Open as plain text'/'Print / Save as PDF', not the JSON or download labels"
     else
-        print_result 1 "bundle contains 'Open as JSON'/'Open as Text', not the download labels"
+        print_result 1 "bundle contains 'Open as plain text'/'Print / Save as PDF', not the JSON or download labels"
     fi
 fi
 

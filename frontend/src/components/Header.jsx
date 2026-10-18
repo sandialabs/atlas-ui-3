@@ -1,46 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import WorkspaceSelector from './WorkspaceSelector'
-import { Database, Wrench, Bot, ExternalLink, FileText, Plus, CircleHelp, Shield, FolderOpen, Monitor, Menu, X, PanelLeft, HardDrive, Cloud, Printer } from 'lucide-react'
-import { nextSaveMode } from '../utils/saveModeConfig'
+import ConversationSetupCluster, { NewChatButton } from './ConversationSetupControls'
+import { Database, Wrench, Bot, ExternalLink, FileText, CircleHelp, FolderOpen, Monitor, Menu, X, PanelLeft, Printer } from 'lucide-react'
 import { classificationLock } from '../utils/conversationClassification'
 import { useElementWidth } from '../hooks/useElementWidth'
 import { useToast } from './ui/toastContext'
 
-// Save mode display config: label, icon component, button classes, title text
-const SAVE_MODE_CONFIG = {
-  none: {
-    label: 'Incognito',
-    Icon: Database,
-    strikethrough: true,
-    btnClass: 'bg-red-700 hover:bg-red-600 text-white',
-    title: 'Incognito -- conversations not saved anywhere (click to cycle)',
-  },
-  local: {
-    label: 'Saved Locally',
-    Icon: HardDrive,
-    strikethrough: false,
-    btnClass: 'bg-gray-700 hover:bg-gray-600 text-blue-300',
-    title: 'Conversations saved in your browser (click to cycle)',
-  },
-  server: {
-    label: 'Saved to Server',
-    Icon: Cloud,
-    strikethrough: false,
-    btnClass: 'bg-gray-700 hover:bg-gray-600 text-green-400',
-    title: 'Conversations saved to server (click to cycle)',
-  },
-}
-
 // Header width (not viewport width) at which the full desktop button cluster
-// fits. Below it the cluster collapses into the hamburger menu. The cluster is
-// smaller since issue #839 -- the model picker moved to the chat bar and the
-// admin shield and Help label are gone -- so the threshold came
-// down with it, and still carries headroom for locale-dependent label widths.
-export const DESKTOP_ACTIONS_MIN_WIDTH = 1080
+// fits. Below it the cluster collapses into the hamburger menu. The
+// conversation-setup group (security level, save mode, New Chat, help) joined
+// the left side, so this threshold sits above the width at which the two sides
+// would otherwise meet; it still carries headroom for locale-dependent label
+// widths.
+export const DESKTOP_ACTIONS_MIN_WIDTH = 1160
 
 // Below this the left-hand buttons drop their text labels and show icons only.
 // This is the header's own width rather than a Tailwind viewport breakpoint
@@ -59,11 +35,11 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
     setAgentModeEnabled,
     saveMode,
     setSaveMode,
-    openChat,
     openChatAsText,
     messages,
     clearChat,
     features,
+    settings,
     complianceLevelFilter,
     setComplianceLevelFilter,
     complianceRequired,
@@ -90,6 +66,10 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
   const complianceOptions = displayLevel && !complianceLevels.some(l => l.name === displayLevel)
     ? [...complianceLevels, { name: displayLevel, description: lock.locked ? 'Recorded classification' : 'Not defined by this deployment' }]
     : complianceLevels
+  // Power users can turn off onboarding copy, hover hints, and the explanatory
+  // link in the conversation-setup cluster. Core labels, selected values, and
+  // the locked-state guidance never depend on this.
+  const reduceHelpText = settings?.reduceHelpText === true
   const { connectionStatus, isConnected } = useWS()
   const toast = useToast()
   const [transcriptDropdownOpen, setTranscriptDropdownOpen] = useState(false)
@@ -128,27 +108,33 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
     }
   }, [mobileMenuOpen])
 
+  // One New Chat path for the cluster, the compact menu, and the hotkey, so all
+  // three do the same cleanup and focus the composer afterwards.
+  const startNewChat = useCallback(() => {
+    clearChat()
+    onCloseCanvas()
+    setMobileMenuOpen(false)
+    setTimeout(() => {
+      const messageInput = document.querySelector('textarea[placeholder*="message"]')
+      if (messageInput) {
+        messageInput.focus()
+      }
+    }, 100)
+  }, [clearChat, onCloseCanvas])
+
   // Handle hotkey for new chat (Ctrl+Alt+N)
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.ctrlKey && event.altKey && (event.key === 'N' || event.key === 'n')) {
         event.preventDefault()
         event.stopPropagation()
-        clearChat()
-        onCloseCanvas()
-        setTimeout(() => {
-          const messageInput = document.querySelector('textarea[placeholder*="message"]')
-          if (messageInput) {
-            messageInput.focus()
-          }
-        }, 100)
+        startNewChat()
       }
     }
 
     document.addEventListener('keydown', handleKeyDown, true) // Use capture phase
     return () => document.removeEventListener('keydown', handleKeyDown, true)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clearChat])
+  }, [startNewChat])
 
   // Handle hotkey for toggling agent mode (Ctrl+Alt+A). Mirrors the Ctrl+Alt+N
   // new-chat shortcut. Ctrl+Alt avoids the Ctrl+A "select all" collision, and
@@ -186,6 +172,31 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           </button>
         )}
 
+        {/* Conversation setup: security level, save mode, then New Chat. The
+            full cluster is desktop-only; the compact header carries New Chat
+            and puts the rest of the group in the overflow menu below. */}
+        <div className={`${showDesktopActions ? 'flex' : 'hidden'} items-center`}>
+          <ConversationSetupCluster
+            complianceOptions={complianceOptions}
+            complianceRequired={complianceRequired}
+            securityValue={complianceLevelFilter}
+            onSecurityChange={setComplianceLevelFilter}
+            lock={lock}
+            saveMode={saveMode}
+            onSaveModeChange={setSaveMode}
+            onNewChat={startNewChat}
+            showNewChatLabel={showActionLabels}
+            showSaveMode={!!features?.chat_history}
+            quiet={reduceHelpText}
+          />
+        </div>
+
+        {/* Compact header: keep New Chat one tap away while security level and
+            save mode live in the grouped overflow menu. */}
+        {!showDesktopActions && (
+          <NewChatButton onClick={startNewChat} showLabel={showActionLabels} quiet={reduceHelpText} />
+        )}
+
         {features?.rag && (
           <button
             onClick={onToggleRag}
@@ -213,27 +224,6 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
         
         {/* Workspace switcher: prompt + data sources + tools as one context */}
         {features?.workspaces && <WorkspaceSelector />}
-
-        {/* New Chat Button */}
-        <button
-          onClick={() => {
-            clearChat()
-            onCloseCanvas()
-            setTimeout(() => {
-              const messageInput = document.querySelector('textarea[placeholder*="message"]')
-              if (messageInput) {
-                messageInput.focus()
-              }
-            }, 100)
-          }}
-          className="flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-gray-200"
-          title="Start New Chat (Ctrl+Alt+N)"
-        >
-          <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-          {showActionLabels && (
-            <span className="text-sm font-medium whitespace-nowrap">New Chat</span>
-          )}
-        </button>
       </div>
 
       {/* Right section */}
@@ -247,29 +237,6 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
           <span className="text-gray-400 hidden sm:inline">{connectionStatus}</span>
         </div>
-
-        {/* Save Mode Toggle - cycles: Incognito -> Saved Locally -> Saved to Server */}
-        {features?.chat_history && (() => {
-          const cfg = SAVE_MODE_CONFIG[saveMode] || SAVE_MODE_CONFIG.server
-          const { Icon } = cfg
-          return (
-            <button
-              onClick={() => setSaveMode(nextSaveMode(saveMode))}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-colors ${cfg.btnClass}`}
-              title={cfg.title}
-            >
-              <span className="relative inline-flex items-center justify-center w-4 h-4">
-                <Icon className="w-4 h-4" />
-                {cfg.strikethrough && (
-                  <span className="absolute inset-0 flex items-center justify-center">
-                    <span className="block w-5 h-0.5 bg-current rotate-45 rounded" />
-                  </span>
-                )}
-              </span>
-              <span className="hidden sm:inline whitespace-nowrap">{cfg.label}</span>
-            </button>
-          )
-        })()}
 
         {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
         <div className={`${showDesktopActions ? 'flex' : 'hidden'} items-center gap-2`}>
@@ -296,30 +263,21 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
             </button>
             
             {transcriptDropdownOpen && messages.length > 0 && (
-              <div role="menu" className="absolute right-0 top-full mt-1 w-48 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    openChat()
-                    setTranscriptDropdownOpen(false)
-                  }}
-                  title="Opens in a new browser tab"
-                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 first:rounded-t-lg flex items-center gap-2"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  Open as JSON
-                </button>
+              <div role="menu" className="absolute right-0 top-full mt-1 w-56 bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50">
+                {/* Plain text is the primary export: it is readable everywhere
+                    and needs no extra tooling. Print / Save as PDF is the only
+                    other choice offered here. */}
                 <button
                   role="menuitem"
                   onClick={() => {
                     openChatAsText()
                     setTranscriptDropdownOpen(false)
                   }}
-                  title="Opens in a new browser tab"
-                  className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
+                  title="Opens a plain-text transcript in a new browser tab"
+                  className="w-full text-left px-4 py-2 text-sm font-medium text-blue-300 hover:bg-gray-700 first:rounded-t-lg flex items-center gap-2"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  Open as Text
+                  Open as plain text
                 </button>
                 <button
                   role="menuitem"
@@ -335,34 +293,6 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
               </div>
             )}
           </div>
-
-          {/* Compliance Level Dropdown */}
-          {features?.compliance_levels && complianceOptions.length > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 border border-gray-600">
-              <Shield className="w-4 h-4 text-blue-400" />
-              <select
-                value={lock.locked ? (lock.level || '') : (complianceLevelFilter || '')}
-                onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
-                disabled={lock.locked}
-                className={`bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${lock.locked ? 'opacity-70 cursor-not-allowed' : ''}`}
-                title={lock.locked ? lock.guidance : 'Select compliance level for this session'}
-                aria-label="Compliance level"
-                aria-disabled={lock.locked || undefined}
-                data-locked={lock.locked ? 'true' : 'false'}
-              >
-                {lock.locked
-                  ? (lock.level
-                    ? null
-                    : <option value="">{lock.placeholder}</option>)
-                  : complianceRequired
-                    ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
-                    : <option value="">All Levels</option>}
-                {complianceOptions.map(level => (
-                  <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Agent Mode Toggle Button */}
           {agentModeAvailable && (
@@ -461,39 +391,39 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                 User: {user}
               </div>
 
-              {/* Open Chat Transcript */}
-              <button
-                onClick={() => {
-                  openChat()
-                  setMobileMenuOpen(false)
-                }}
-                disabled={messages.length === 0}
-                title="Opens in a new browser tab"
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  messages.length === 0
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                }`}
-              >
-                <ExternalLink className="w-5 h-5" />
-                <span>Open as JSON</span>
-              </button>
+              {/* Conversation setup comes first in the compact menu too:
+                  security level, save mode, New Chat, in that order. */}
+              <ConversationSetupCluster
+                variant="menu"
+                complianceOptions={complianceOptions}
+                complianceRequired={complianceRequired}
+                securityValue={complianceLevelFilter}
+                onSecurityChange={setComplianceLevelFilter}
+                lock={lock}
+                saveMode={saveMode}
+                onSaveModeChange={setSaveMode}
+                onNewChat={startNewChat}
+                showSaveMode={!!features?.chat_history}
+                quiet={reduceHelpText}
+              />
 
+              {/* Open Chat Transcript. Plain text is primary; Print / Save as
+                  PDF follows. JSON export is intentionally not offered here. */}
               <button
                 onClick={() => {
                   openChatAsText()
                   setMobileMenuOpen(false)
                 }}
                 disabled={messages.length === 0}
-                title="Opens in a new browser tab"
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                title="Opens a plain-text transcript in a new browser tab"
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   messages.length === 0
                     ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                    : 'bg-gray-700 hover:bg-gray-600 text-blue-300'
                 }`}
               >
                 <ExternalLink className="w-5 h-5" />
-                <span>Open as Text</span>
+                <span>Open as plain text</span>
               </button>
 
               <button
@@ -511,62 +441,6 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                 <Printer className="w-5 h-5" />
                 <span>Print / Save as PDF</span>
               </button>
-
-              {/* Compliance Level */}
-              {features?.compliance_levels && complianceOptions.length > 0 && (
-                <div className="px-3 py-2 bg-gray-700 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Shield className="w-4 h-4 text-blue-400" />
-                    <span className="text-sm text-gray-200">Compliance Level</span>
-                  </div>
-                  <select
-                    value={lock.locked ? (lock.level || '') : (complianceLevelFilter || '')}
-                    onChange={(e) => setComplianceLevelFilter(e.target.value || null)}
-                    disabled={lock.locked}
-                    className={`w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${lock.locked ? 'opacity-70 cursor-not-allowed' : ''}`}
-                    title={lock.locked ? lock.guidance : undefined}
-                    aria-label="Compliance level"
-                    aria-disabled={lock.locked || undefined}
-                    data-locked={lock.locked ? 'true' : 'false'}
-                  >
-                    {lock.locked
-                      ? (lock.level
-                        ? null
-                        : <option value="">{lock.placeholder}</option>)
-                      : complianceRequired
-                        ? !complianceLevelFilter && <option value="" disabled>Select a level</option>
-                        : <option value="">All Levels</option>}
-                    {complianceOptions.map(level => (
-                      <option key={level.name} value={level.name} title={level.description || undefined}>{level.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Save Mode Toggle (Mobile) */}
-              {features?.chat_history && (() => {
-                const cfg = SAVE_MODE_CONFIG[saveMode] || SAVE_MODE_CONFIG.server
-                const { Icon } = cfg
-                return (
-                  <button
-                    onClick={() => {
-                      setSaveMode(nextSaveMode(saveMode))
-                      setMobileMenuOpen(false)
-                    }}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${cfg.btnClass}`}
-                  >
-                    <span className="relative inline-flex items-center justify-center w-5 h-5">
-                      <Icon className="w-5 h-5" />
-                      {cfg.strikethrough && (
-                        <span className="absolute inset-0 flex items-center justify-center">
-                          <span className="block w-6 h-0.5 bg-current rotate-45 rounded" />
-                        </span>
-                      )}
-                    </span>
-                    <span>{cfg.label}</span>
-                  </button>
-                )
-              })()}
 
               {/* Agent Mode Toggle */}
               {agentModeAvailable && (

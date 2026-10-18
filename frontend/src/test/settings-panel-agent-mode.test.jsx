@@ -107,6 +107,27 @@ describe('SettingsPanel agent mode settings', () => {
     expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
   })
 
+  it('offers a reduce-helper-text switch that persists through the context', async () => {
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: {}, updateSettings })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    const toggle = await screen.findByRole('switch', { name: 'Reduce helper text' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+
+    expect(updateSettings).toHaveBeenCalledWith({ reduceHelpText: true })
+  })
+
+  it('hides optional explanatory copy when reduce helper text is on', async () => {
+    renderSettingsPanel({ settings: { reduceHelpText: true } })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    expect(await screen.findByText('LLM Temperature')).toBeInTheDocument()
+    expect(screen.queryByText(/Controls randomness in AI responses/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Currently using dark mode/)).not.toBeInTheDocument()
+  })
+
   it('bounds the Max Agent Iterations slider by the admin-configured ceiling (issue #849)', async () => {
     renderSettingsPanel({ agentMaxStepsLimit: 30 })
 
