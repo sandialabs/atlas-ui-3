@@ -131,6 +131,18 @@ describe('save-this-chat control', () => {
     expect(document.activeElement).toBe(button)
   })
 
+  it('warns that switching to server mid-chat does not upload earlier turns', () => {
+    const { rerender } = render(
+      <SaveChatControl saveMode="none" onChange={vi.fn()} hasMessages />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Save this chat: Not saved/ }))
+    expect(screen.getByText('Earlier turns in this chat are not uploaded.')).toBeTruthy()
+
+    rerender(<SaveChatControl saveMode="none" onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Save this chat: Not saved/ }))
+    expect(screen.queryByText('Earlier turns in this chat are not uploaded.')).toBeNull()
+  })
+
   it('uses a native radio group in the compact menu layout', () => {
     const onChange = vi.fn()
     render(<SaveChatControl saveMode="local" onChange={onChange} variant="menu" />)

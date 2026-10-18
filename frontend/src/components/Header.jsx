@@ -192,6 +192,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
             onNewChat={startNewChat}
             showNewChatLabel={showActionLabels}
             showSaveMode={!!features?.chat_history}
+            hasMessages={messages.length > 0}
             quiet={reduceHelpText}
           />
         </div>
@@ -409,6 +410,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                 onSaveModeChange={setSaveMode}
                 onNewChat={startNewChat}
                 showSaveMode={!!features?.chat_history}
+                hasMessages={messages.length > 0}
                 quiet={reduceHelpText}
               />
 

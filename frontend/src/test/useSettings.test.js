@@ -278,6 +278,26 @@ describe('useSettings', () => {
       expect(result.current.settings.llmTemperature).toBe(0.8)
     })
 
+    it('keeps an in-memory change when a failed write is followed by another update', () => {
+      localStorageMock.setItem.mockImplementation(() => {
+        throw new Error('localStorage quota exceeded')
+      })
+
+      const { result } = renderHook(() => useSettings())
+
+      act(() => {
+        result.current.updateSettings({ llmTemperature: 0.8 })
+      })
+      act(() => {
+        result.current.updateSettings({ maxIterations: 15 })
+      })
+
+      // The second call read the old stored snapshot, but the in-memory
+      // change must still win.
+      expect(result.current.settings.llmTemperature).toBe(0.8)
+      expect(result.current.settings.maxIterations).toBe(15)
+    })
+
     it('should handle complex nested objects in settings', () => {
       const complexSettings = {
         ...DEFAULTS,

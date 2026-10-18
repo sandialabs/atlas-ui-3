@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const DEFAULT_SETTINGS = {
   llmTemperature: 0.7,
@@ -12,6 +12,10 @@ const DEFAULT_SETTINGS = {
 export function useSettings() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [isLoaded, setIsLoaded] = useState(false)
+  // Values changed through this hook, kept separately from `settings` so a
+  // failed storage write can still win over a stale stored snapshot on the
+  // next update.
+  const inMemoryRef = useRef({})
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -36,16 +40,19 @@ export function useSettings() {
   // Function to update settings. Merge onto the latest persisted snapshot,
   // not just this hook's in-memory copy: the Settings panel keeps its own
   // draft and may have saved other fields in the same session, and a
-  // context-only update must not write those older values back.
+  // context-only update must not write those older values back. Values
+  // updated through this hook are applied last so a failed write cannot be
+  // undone by the next call reading the older stored snapshot.
   const updateSettings = (newSettings) => {
-    let latest = settings
+    let latest = { ...DEFAULT_SETTINGS }
     try {
       const saved = localStorage.getItem('chatui-settings')
       if (saved) latest = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) }
     } catch (error) {
       console.error('Failed to read settings from localStorage:', error)
     }
-    const updatedSettings = { ...latest, ...newSettings }
+    const updatedSettings = { ...latest, ...inMemoryRef.current, ...newSettings }
+    inMemoryRef.current = updatedSettings
     setSettings(updatedSettings)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(updatedSettings))
@@ -57,6 +64,7 @@ export function useSettings() {
 
   // Function to reset settings to defaults
   const resetSettings = () => {
+    inMemoryRef.current = { ...DEFAULT_SETTINGS }
     setSettings(DEFAULT_SETTINGS)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(DEFAULT_SETTINGS))

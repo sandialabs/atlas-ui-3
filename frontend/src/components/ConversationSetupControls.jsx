@@ -127,11 +127,16 @@ export function SecurityLevelControl({
  * variant (the compact header menu): the three radio choices are laid out
  * directly, so nothing has to be cycled through.
  */
-export function SaveChatControl({ saveMode, onChange, quiet = false, variant = 'bar' }) {
+export function SaveChatControl({ saveMode, onChange, quiet = false, variant = 'bar', hasMessages = false }) {
   const current = saveModeChoice(saveMode)
   // "Not saved" is the default, and it means the conversation will disappear.
   // Give it a red accent so it is not mistaken for a neutral setting.
   const isNotSaved = current.value === 'none'
+  // Switching to server mid-chat does not upload turns that already ran while
+  // the chat was withheld from server persistence.
+  const serverNote = hasMessages && current.value !== 'server'
+    ? 'Earlier turns in this chat are not uploaded.'
+    : null
   const [open, setOpen] = useState(false)
   const buttonRef = useRef(null)
   const menuRef = useRef(null)
@@ -215,6 +220,9 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                   <span className="block text-sm font-medium">{choice.label}</span>
                   {!quiet && (
                     <span className="block text-xs text-gray-400">{choice.description}</span>
+                  )}
+                  {!quiet && serverNote && choice.value === 'server' && (
+                    <span className="block text-xs text-gray-400">{serverNote}</span>
                   )}
                 </span>
               </label>
@@ -324,6 +332,9 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                       <span className="block text-sm font-medium">{choice.label}</span>
                       {!quiet && (
                         <span className="block text-xs text-gray-400">{choice.description}</span>
+                      )}
+                      {!quiet && serverNote && choice.value === 'server' && (
+                        <span className="block text-xs text-gray-400">{serverNote}</span>
                       )}
                     </span>
                     {checked && <Check className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" aria-hidden="true" />}
@@ -447,6 +458,7 @@ export default function ConversationSetupCluster({
   onNewChat,
   showNewChatLabel = true,
   showSaveMode = true,
+  hasMessages = false,
   quiet = false,
   variant = 'bar',
 }) {
@@ -474,6 +486,7 @@ export default function ConversationSetupCluster({
             variant="menu"
             saveMode={saveMode}
             onChange={onSaveModeChange}
+            hasMessages={hasMessages}
             quiet={quiet}
           />
         )}
@@ -504,6 +517,7 @@ export default function ConversationSetupCluster({
           <SaveChatControl
             saveMode={saveMode}
             onChange={onSaveModeChange}
+            hasMessages={hasMessages}
             quiet={quiet}
           />
         )}

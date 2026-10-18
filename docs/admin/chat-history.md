@@ -245,7 +245,10 @@ Each conversation has one of three persistence states, chosen from the
 The control is a three-choice menu, not a cycling toggle, and its wording
 describes how *this conversation* is persisted. It does not hide or delete
 conversations that are already in history. The choice persists across
-refreshes in the `chatui-save-mode` browser-local preference.
+refreshes in the `chatui-save-mode` browser-local preference. Switching to
+**Saved to server** after a chat has started applies from the next turn:
+turns already withheld from server persistence are not uploaded
+retroactively, and the save menu says so.
 
 The selected mode is sent over WebSocket as `save_mode`; the legacy
 `incognito` boolean (`save_mode !== "server"`) is still sent for older
