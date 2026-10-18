@@ -169,11 +169,33 @@ describe('conversation setup cluster', () => {
         onNewChat={vi.fn()}
       />
     )
-    const cluster = getByTestId('conversation-setup-cluster')
-    const controls = [...cluster.children].map(child => child.dataset.testid || child.getAttribute('aria-label') || child.textContent)
+    const row = getByTestId('conversation-setup-row')
+    const controls = [...row.children].map(child => child.dataset.testid || child.getAttribute('aria-label') || child.textContent)
     expect(controls[0]).toBe('security-level-control')
     expect(controls[1]).toBe('save-chat-control')
     expect(controls[2]).toBe('New Chat')
+  })
+
+  it('shows locked guidance on one line below the bar controls', () => {
+    render(
+      <ConversationSetupCluster
+        complianceOptions={LEVELS}
+        complianceRequired={false}
+        securityValue="Internal"
+        onSecurityChange={vi.fn()}
+        lock={lockedInternal}
+        saveMode="none"
+        onSaveModeChange={vi.fn()}
+        onNewChat={vi.fn()}
+      />
+    )
+
+    const guidance = screen.getByText(/Start a new chat to change security level/).closest('p')
+    expect(guidance).toBeTruthy()
+    expect(guidance.className).toContain('whitespace-nowrap')
+    const select = screen.getByLabelText('Security level')
+    expect(select.getAttribute('aria-describedby')).toBe(guidance.id)
+    expect(screen.getByText('Locked for this chat')).toBeTruthy()
   })
 
   it('offers an opt-in help panel for first-time users', () => {

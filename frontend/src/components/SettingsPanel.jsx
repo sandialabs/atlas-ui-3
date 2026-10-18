@@ -56,8 +56,17 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   const defaultSettings = {
     llmTemperature: 0.7,
     maxIterations: 10,
+    debugMode: false,
     reduceHelpText: false
   }
+  // Only these keys belong to the General draft. Context-owned switches
+  // (auto-approve, compact messages) are written immediately and must not be
+  // copied back from a draft that was loaded when the panel opened.
+  const generalDraft = (draft) => Object.fromEntries(
+    ['llmTemperature', 'maxIterations', 'debugMode', 'reduceHelpText']
+      .filter(key => key in draft)
+      .map(key => [key, draft[key]])
+  )
 
   // State for settings
   const [settings, setSettings] = useState(defaultSettings)
@@ -306,7 +315,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // `chatui-settings`. Saving the draft through it keeps the hook's copy and
   // storage in step instead of letting two owners overwrite each other.
   const saveSettings = (newSettings) => {
-    updateCtxSettings(newSettings)
+    updateCtxSettings(generalDraft(newSettings))
     setSettings(newSettings)
     setHasChanges(false)
   }

@@ -164,6 +164,26 @@ describe('useSettings', () => {
 
       expect(result.current.settings.llmTemperature).toBeNull()
     })
+
+    it('merges a context-only update onto settings written behind the hook', () => {
+      const { result } = renderHook(() => useSettings())
+
+      // Simulate the Settings panel saving a draft directly to storage after
+      // this hook instance was created.
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({
+        ...DEFAULTS,
+        llmTemperature: 0.9,
+        maxIterations: 20,
+      }))
+
+      act(() => {
+        result.current.updateSettings({ reduceHelpText: true })
+      })
+
+      expect(result.current.settings.llmTemperature).toBe(0.9)
+      expect(result.current.settings.maxIterations).toBe(20)
+      expect(result.current.settings.reduceHelpText).toBe(true)
+    })
   })
 
   describe('resetSettings', () => {

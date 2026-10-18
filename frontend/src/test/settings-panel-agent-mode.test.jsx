@@ -145,6 +145,36 @@ describe('SettingsPanel agent mode settings', () => {
     )
   })
 
+  it('does not write a stale context-owned switch back on Save', async () => {
+    localStorage.setItem('chatui-settings', JSON.stringify({
+      autoApproveTools: true,
+      llmTemperature: 0.7,
+      maxIterations: 10,
+    }))
+    const updateSettings = vi.fn()
+    renderSettingsPanel({
+      settings: { autoApproveTools: false },
+      updateSettings,
+    })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    const [temperature] = await screen.findAllByRole('slider')
+    fireEvent.change(temperature, { target: { value: '0.9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    expect(updateSettings).toHaveBeenCalledTimes(1)
+    const payload = updateSettings.mock.calls[0][0]
+    // Auto-approve is owned by ChatContext and was toggled after this draft
+    // loaded; the stale draft value must not come back through Save.
+    expect(payload).not.toHaveProperty('autoApproveTools')
+    expect(payload).toMatchObject({
+      llmTemperature: 0.9,
+      maxIterations: 10,
+      debugMode: false,
+      reduceHelpText: false,
+    })
+  })
+
   it('hides optional explanatory copy when reduce helper text is on', async () => {
     renderSettingsPanel({ settings: { reduceHelpText: true } })
 

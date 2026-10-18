@@ -14,5 +14,10 @@
 
 export const SAVE_MODES = ['none', 'local', 'server']
 
+// A value from local storage or an old client may not be one of ours. Coerce
+// it before it reaches the UI or the WebSocket payload.
+export const normalizeSaveMode = (mode) =>
+  SAVE_MODES.includes(mode) ? mode : 'none'
+
 export const nextSaveMode = (mode) =>
   SAVE_MODES[(SAVE_MODES.indexOf(mode) + 1) % SAVE_MODES.length]

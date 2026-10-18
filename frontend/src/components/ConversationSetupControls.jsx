@@ -46,9 +46,11 @@ export function SecurityLevelControl({
   onChange,
   lock,
   variant = 'bar',
+  guidanceId: externalGuidanceId = null,
 }) {
   const selectId = useId()
-  const guidanceId = `${selectId}-guidance`
+  const internalGuidanceId = `${selectId}-guidance`
+  const guidanceId = externalGuidanceId || internalGuidanceId
   const isMenu = variant === 'menu'
 
   const select = (
@@ -99,9 +101,12 @@ export function SecurityLevelControl({
         >
           Security level
         </label>
+        {lock.locked && (
+          <Lock className="w-3.5 h-3.5 text-amber-300 flex-shrink-0" aria-hidden="true" />
+        )}
       </div>
       {select}
-      {lock.locked && (
+      {lock.locked && !externalGuidanceId && (
         <p
           id={guidanceId}
           className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-amber-300"
@@ -446,6 +451,7 @@ export default function ConversationSetupCluster({
   variant = 'bar',
 }) {
   const hasSecurity = complianceOptions.length > 0
+  const guidanceId = useId()
 
   if (variant === 'menu') {
     return (
@@ -482,25 +488,38 @@ export default function ConversationSetupCluster({
   }
 
   return (
-    <div className="flex items-center gap-2" data-testid="conversation-setup-cluster">
-      {hasSecurity && (
-        <SecurityLevelControl
-          complianceOptions={complianceOptions}
-          complianceRequired={complianceRequired}
-          value={securityValue}
-          onChange={onSecurityChange}
-          lock={lock}
-        />
+    <div className="flex flex-col gap-1" data-testid="conversation-setup-cluster">
+      <div className="flex items-center gap-2" data-testid="conversation-setup-row">
+        {hasSecurity && (
+          <SecurityLevelControl
+            complianceOptions={complianceOptions}
+            complianceRequired={complianceRequired}
+            value={securityValue}
+            onChange={onSecurityChange}
+            lock={lock}
+            guidanceId={guidanceId}
+          />
+        )}
+        {showSaveMode && (
+          <SaveChatControl
+            saveMode={saveMode}
+            onChange={onSaveModeChange}
+            quiet={quiet}
+          />
+        )}
+        <NewChatButton onClick={onNewChat} showLabel={showNewChatLabel} quiet={quiet} />
+        <SetupHelp quiet={quiet} />
+      </div>
+      {hasSecurity && lock.locked && (
+        <p
+          id={guidanceId}
+          className="flex items-center gap-1.5 pl-1 text-[10px] leading-tight text-amber-300 whitespace-nowrap"
+        >
+          <Lock className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+          <span className="font-semibold">Locked for this chat</span>
+          <span className="text-amber-200/90">Start a new chat to change security level.</span>
+        </p>
       )}
-      {showSaveMode && (
-        <SaveChatControl
-          saveMode={saveMode}
-          onChange={onSaveModeChange}
-          quiet={quiet}
-        />
-      )}
-      <NewChatButton onClick={onNewChat} showLabel={showNewChatLabel} quiet={quiet} />
-      <SetupHelp quiet={quiet} />
     </div>
   )
 }
