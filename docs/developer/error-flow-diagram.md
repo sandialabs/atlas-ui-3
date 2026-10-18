@@ -236,6 +236,11 @@ backoff (which cannot succeed).
 - `_is_retryable_error()` returns `False` for it before the transient 429 test,
   and the streaming generators log it once at warning level without a
   traceback instead of as a service ERROR.
+- The plain and RAG streaming helper (`stream_and_accumulate`) and the agent
+  final-answer helper re-raise it instead of running their non-streaming
+  fallback: that fallback is the same refused request, and its failure used to
+  be published as a successful chat reply. The domain error now reaches
+  `main.py`, which emits the `budget_exceeded` error frame and metric.
 - The user message names no key, team, spend, or limit, and does not promise a
   reset (the scope is unknown and a fixed budget may never reset). The raw
   upstream text stays in the server log (newline-stripped) and the chained

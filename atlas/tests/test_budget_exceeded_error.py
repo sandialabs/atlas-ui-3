@@ -13,12 +13,15 @@ refused the same way until the budget is raised.
 import asyncio
 import json
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import litellm
 import pytest
 
+from atlas.application.chat.agent.streaming_final_answer import stream_final_answer
+from atlas.application.chat.modes.streaming_helpers import stream_and_accumulate
 from atlas.application.chat.utilities.error_handler import (
     classify_llm_error,
     error_type_for,
@@ -412,3 +415,50 @@ class TestStreamingBudgetRefusal:
                 pass
 
         assert attempts == 2
+
+
+class TestBudgetErrorBypassesTheNonStreamingFallback:
+    """A fallback would send the identical refused request and fake success."""
+
+    @staticmethod
+    def _publisher():
+        publisher = AsyncMock()
+        publisher.publish_token_stream = AsyncMock()
+        publisher.publish_chat_response = AsyncMock()
+        return publisher
+
+    @pytest.mark.asyncio
+    async def test_stream_and_accumulate_propagates_instead_of_falling_back(self):
+        async def failing_stream():
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+            yield  # pragma: no cover - makes this an async generator
+
+        publisher = self._publisher()
+        fallback = AsyncMock(return_value="a simulated answer")
+
+        with pytest.raises(LLMBudgetExceededError):
+            await stream_and_accumulate(
+                failing_stream(),
+                publisher,
+                fallback_fn=fallback,
+                context_label="plain",
+            )
+
+        fallback.assert_not_awaited()
+        publisher.publish_chat_response.assert_not_awaited()
+        # The open token bubble is still closed before the error propagates.
+        publisher.publish_token_stream.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stream_final_answer_propagates_instead_of_falling_back(self):
+        async def failing_stream(model, messages, temperature=None, user_email=None):
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+            yield  # pragma: no cover - makes this an async generator
+
+        llm = SimpleNamespace(stream_plain=failing_stream, call_plain=AsyncMock(return_value="x"))
+        publisher = self._publisher()
+
+        with pytest.raises(LLMBudgetExceededError):
+            await stream_final_answer(llm, publisher, "test-model", [], 0.7, None)
+
+        llm.call_plain.assert_not_awaited()

@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import AsyncGenerator
 
-from atlas.domain.errors import DomainError
+from atlas.domain.errors import DomainError, LLMBudgetExceededError
 from atlas.interfaces.events import EventPublisher
 
 from ..utilities.error_handler import classify_llm_error
@@ -88,10 +88,17 @@ async def stream_and_accumulate(
         )
         raise
     except Exception as exc:
-        logger.error("%s streaming error, sending partial content: %s", context_label, exc)
+        if not isinstance(exc, LLMBudgetExceededError):
+            logger.error("%s streaming error, sending partial content: %s", context_label, exc)
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
+        if isinstance(exc, LLMBudgetExceededError):
+            # A spent budget refuses the identical request the fallback would
+            # send, and the user needs the typed ``budget_exceeded`` error
+            # frame -- not a synthesized chat reply that makes the turn look
+            # successful. Let the caller's handler emit it.
+            raise
         if raise_on_stream_error:
             if not accumulated and fallback_fn:
                 # A stream that failed before the first token still gets the

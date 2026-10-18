@@ -3,7 +3,7 @@
 import logging
 
 from atlas.application.chat.utilities.error_handler import classify_llm_error
-from atlas.domain.errors import DomainError
+from atlas.domain.errors import DomainError, LLMBudgetExceededError
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
 
@@ -51,6 +51,11 @@ async def stream_final_answer(
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
+        if isinstance(exc, LLMBudgetExceededError):
+            # The non-streaming fallback would send the same refused request.
+            # Surface the typed error so the caller emits a budget_exceeded
+            # frame instead of a simulated successful answer.
+            raise
         if not accumulated:
             try:
                 accumulated = await llm.call_plain(
