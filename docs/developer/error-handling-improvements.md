@@ -58,7 +58,7 @@ User: Knows to wait and try again
 | Error Type | User Message | When It Happens |
 |------------|--------------|-----------------|
 | **RateLimitError** | "The LLM service is experiencing high traffic. Please try again in a moment." | API rate limits exceeded |
-| **LLMBudgetExceededError** | "The LiteLLM spending budget for this request has been reached. Please contact your administrator or try again after the budget resets." | A LiteLLM key, user, team, model, or provider budget is exhausted (422/429/400 with `budget_exceeded`); never retried |
+| **LLMBudgetExceededError** | "The spending budget for this model or team has been used up. Choose a different model or team, or contact your administrator." | A LiteLLM key, user, team, model, or provider budget is exhausted (422/429/400 with `budget_exceeded`); never retried |
 | **LLMTimeoutError** | "The LLM service request timed out. Please try again." | Request takes too long |
 | **LLMAuthenticationError** | "There was an authentication issue with the LLM service. Please contact your administrator." | Invalid API keys, auth failures |
 | **LLMServiceError** | "The LLM service encountered an error. Please try again or contact support if the issue persists." | Generic LLM service errors |

@@ -166,8 +166,8 @@ litellm.drop_params = False
 
 port, counts_file = sys.argv[1], sys.argv[2]
 BUDGET_MESSAGE = (
-    "The LiteLLM spending budget for this request has been reached. "
-    "Please contact your administrator or try again after the budget resets."
+    "The spending budget for this model or team has been used up. "
+    "Choose a different model or team, or contact your administrator."
 )
 SECRETS = ("lit-8229-exhausted", "sk-...X-rQ", "Current cost", "Max budget")
 

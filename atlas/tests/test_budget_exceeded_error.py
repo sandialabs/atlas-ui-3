@@ -7,11 +7,13 @@ Since LiteLLM 1.104 an exhausted key/user/team budget is a 422 with
 use 400. Before this, 422 became "the provider rejected this request as
 invalid" (with advice to start a new conversation) and 429 became "high
 traffic" and was retried with backoff -- both wrong, because every retry is
-refused the same way until the budget resets.
+refused the same way until the budget is raised.
 """
 
 import asyncio
 import json
+import logging
+from unittest.mock import AsyncMock
 
 import httpx
 import litellm
@@ -22,16 +24,18 @@ from atlas.application.chat.utilities.error_handler import (
     error_type_for,
 )
 from atlas.domain.errors import (
+    ContextWindowExceededError,
     LLMBadRequestError,
     LLMBudgetExceededError,
+    LLMServiceError,
     RateLimitError,
 )
-from atlas.modules.llm import litellm_caller
+from atlas.modules.llm import litellm_caller, litellm_streaming
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
 
 BUDGET_MESSAGE = (
-    "The LiteLLM spending budget for this request has been reached. "
-    "Please contact your administrator or try again after the budget resets."
+    "The spending budget for this model or team has been used up. "
+    "Choose a different model or team, or contact your administrator."
 )
 
 KEY_BUDGET_BODY = {
@@ -193,8 +197,42 @@ class TestUnstructuredFallback:
 
         assert not isinstance(info.value, LLMBudgetExceededError)
 
+    def test_budget_phrase_without_a_status_is_too_ambiguous(self):
+        """Without a structured type or a refusal code, do not guess."""
+        with pytest.raises(LLMServiceError) as info:
+            LiteLLMCaller._raise_llm_domain_error(Exception("Budget exceeded"))
+
+        assert not isinstance(info.value, LLMBudgetExceededError)
+
 
 class TestOrdinaryErrorsKeepTheirMeaning:
+    def test_token_budget_overflow_is_still_a_context_window_error(self):
+        """A token/context allowance is not a spending budget."""
+        exc = litellm.ContextWindowExceededError(
+            message=(
+                "This model's token budget was exceeded: maximum context "
+                "length is 8192 tokens."
+            ),
+            model="test-model",
+            llm_provider="openai",
+        )
+
+        with pytest.raises(ContextWindowExceededError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_token_budget_message_in_a_400_is_not_a_spending_budget(self):
+        exc = _bad_request("Invalid request: token budget exceeded for this response.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
+    def test_thinking_budget_message_is_not_a_spending_budget(self):
+        """Claude's extended-thinking budget is a per-request token allowance."""
+        exc = _bad_request("Invalid request: thinking budget exceeded max_tokens.")
+
+        with pytest.raises(LLMBadRequestError):
+            LiteLLMCaller._raise_llm_domain_error(exc)
+
     def test_rpm_tpm_429_is_still_a_rate_limit(self):
         exc = litellm.RateLimitError(
             message=(
@@ -274,3 +312,103 @@ class TestNoRetryAndNoLeak:
 
     def test_error_type_maps_to_budget_exceeded(self):
         assert error_type_for(LLMBudgetExceededError) == "budget_exceeded"
+
+
+BUDGET_429_BODY = {
+    "error": {
+        "message": "Budget has been exceeded! Key=lit-8229-exhausted (sk-...X-rQ)",
+        "type": "budget_exceeded",
+        "param": None,
+        "code": "429",
+    }
+}
+
+
+def _streaming_caller() -> LiteLLMCaller:
+    """A caller with just the collaborators the streaming mixin needs."""
+    caller = object.__new__(LiteLLMCaller)
+
+    async def resolve(model_name, temperature, user_email):
+        return "openai/gpt-4o", {"api_base": "http://test", "api_key": "test"}
+
+    caller._resolve_call_target = resolve
+    caller._prepare_messages = lambda model_name, messages: messages
+    caller._fire_pre_llm_hook = AsyncMock(return_value=None)
+    return caller
+
+
+class TestStreamingBudgetRefusal:
+    """The streaming paths share the retry policy and the log noise fix."""
+
+    @pytest.mark.asyncio
+    async def test_stream_plain_attempts_a_budget_429_once(self, monkeypatch, caplog):
+        attempts = 0
+
+        async def fail(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise _rate_limit("Budget has been exceeded!", body=BUDGET_429_BODY)
+
+        monkeypatch.setattr(litellm_streaming, "acompletion", fail)
+        monkeypatch.setenv("LLM_MAX_RETRIES", "2")
+        caller = _streaming_caller()
+
+        with caplog.at_level(logging.WARNING), pytest.raises(LLMBudgetExceededError):
+            async for _ in caller.stream_plain("test-model", [{"role": "user", "content": "hi"}]):
+                pass
+
+        assert attempts == 1
+        streaming_errors = [
+            record
+            for record in caplog.records
+            if record.name == "atlas.modules.llm.litellm_streaming"
+            and record.levelno >= logging.ERROR
+        ]
+        assert streaming_errors == [], "a budget refusal must not log an ERROR traceback"
+
+    @pytest.mark.asyncio
+    async def test_stream_with_tools_attempts_a_budget_429_once(self, monkeypatch):
+        attempts = 0
+
+        async def fail(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise _rate_limit("Budget has been exceeded!", body=BUDGET_429_BODY)
+
+        monkeypatch.setattr(litellm_streaming, "acompletion", fail)
+        monkeypatch.setenv("LLM_MAX_RETRIES", "2")
+        caller = _streaming_caller()
+        tools_schema = [
+            {"type": "function", "function": {"name": "calculator", "parameters": {}}}
+        ]
+
+        with pytest.raises(LLMBudgetExceededError):
+            async for _ in caller.stream_with_tools(
+                "test-model", [{"role": "user", "content": "hi"}], tools_schema
+            ):
+                pass
+
+        assert attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_plain_still_retries_a_real_rpm_429(self, monkeypatch):
+        attempts = 0
+
+        async def fail(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            raise litellm.RateLimitError(
+                message="Rate limit reached for gpt-4o on tokens per min (TPM).",
+                model="test-model",
+                llm_provider="openai",
+            )
+
+        monkeypatch.setattr(litellm_streaming, "acompletion", fail)
+        monkeypatch.setenv("LLM_MAX_RETRIES", "1")
+        caller = _streaming_caller()
+
+        with pytest.raises(RateLimitError):
+            async for _ in caller.stream_plain("test-model", [{"role": "user", "content": "hi"}]):
+                pass
+
+        assert attempts == 2

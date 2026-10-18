@@ -124,7 +124,7 @@ class LLMBudgetExceededError(LLMError):
     the message must not name a reset time. The raw upstream detail (key
     fragments, team ids, spend figures) is deliberately not carried into the
     user-facing message; the original exception is chained as ``__cause__`` for
-    server-side diagnosis. Deterministic until the budget resets: never
+    server-side diagnosis. Deterministic until the budget is raised: never
     retried.
     """
     pass

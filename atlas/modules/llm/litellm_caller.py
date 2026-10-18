@@ -122,6 +122,15 @@ BUDGET_EXCEEDED_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
+# A "token budget", "context budget", or "thinking budget" is an allowance
+# inside one request, not money. Those messages must keep their own
+# classification (context window / bad request) even when they say "exceeded".
+BUDGET_ALLOWANCE_QUALIFIERS = re.compile(
+    r"\b(?:token|tokens|context|thinking|reasoning|completion|output|input|prompt)"
+    r"\s+(?:window\s+)?budget\b",
+    re.IGNORECASE,
+)
+
 # The only HTTP codes LiteLLM uses for a budget refusal. A fallback match under
 # any other code is treated as unrelated text.
 BUDGET_EXCEEDED_STATUS_CODES = frozenset({400, 422, 429})
@@ -387,7 +396,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         HTTP code, because LiteLLM uses 422, 429, and 400 depending on version
         and budget scope. When no structured type is present, a known budget
         phrase under a budget-refusal status is accepted for older builds and
-        provider-budget routing.
+        provider-budget routing. Token/context/thinking "budgets" are not
+        money and are excluded from that fallback.
         """
         body = cls._exception_body(exc)
         error_payload = body.get("error") if isinstance(body, dict) else None
@@ -406,17 +416,29 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         ):
             return True
 
+        # A context-window overflow is a usage error whatever words it uses.
+        if isinstance(exc, litellm.ContextWindowExceededError):
+            return False
+
         text_parts = [str(exc)]
         for source in (error_payload, body):
             if isinstance(source, dict):
                 message = source.get("message")
                 if isinstance(message, str):
                     text_parts.append(message)
-        if not BUDGET_EXCEEDED_MARKERS.search("\n".join(text_parts)):
+        text = "\n".join(text_parts)
+        if not BUDGET_EXCEEDED_MARKERS.search(text):
+            return False
+        if BUDGET_ALLOWANCE_QUALIFIERS.search(text):
+            return False
+        if any(kw in text.lower() for kw in CONTEXT_WINDOW_KEYWORDS):
             return False
 
+        # Only the codes LiteLLM uses for a budget refusal. An error with no
+        # status is too ambiguous for the phrase fallback; the structured type
+        # above is the reliable signal for those.
         status = cls._exception_status(exc, body)
-        return status is None or status in BUDGET_EXCEEDED_STATUS_CODES
+        return status in BUDGET_EXCEEDED_STATUS_CODES
 
     @staticmethod
     def _raise_llm_domain_error(exc: Exception, tools_schema: Optional[List[Dict]] = None) -> NoReturn:
@@ -442,7 +464,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         # `budget_exceeded_status_code: 429`), or 400 (per-model virtual-key
         # budgets). Without this, 422 reads as a rejected request and 429 as
         # transient throttling, so the user is told to retry a request that
-        # cannot succeed until the budget resets.
+        # cannot succeed until the budget is raised.
         if LiteLLMCaller._is_budget_exceeded(exc):
             # Raw text can name the key/team and show spend and limit; it stays
             # in the server log (newlines stripped) and the chained cause, never
@@ -453,8 +475,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 sanitize_for_logging(error_str),
             )
             raise LLMBudgetExceededError(
-                "The LiteLLM spending budget for this request has been reached. "
-                "Please contact your administrator or try again after the budget resets."
+                "The spending budget for this model or team has been used up. "
+                "Choose a different model or team, or contact your administrator."
             ) from exc
 
         # Concrete exception types are checked before any message keywords.
@@ -551,8 +573,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         if isinstance(exc, LLMEmptyStreamError):
             return True
 
-        # A spent budget refuses the identical request until it resets. LiteLLM
-        # reports it as 429 on older builds and with
+        # A spent budget refuses the identical request until it is raised.
+        # LiteLLM reports it as 429 on older builds and with
         # `budget_exceeded_status_code: 429`, so it must be excluded before the
         # transient 429 test below.
         if isinstance(exc, LLMBudgetExceededError) or LiteLLMCaller._is_budget_exceeded(exc):
