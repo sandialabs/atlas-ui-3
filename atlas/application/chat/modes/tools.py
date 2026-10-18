@@ -9,6 +9,7 @@ from atlas.domain.chat.citation_register import (
     new_register,
 )
 from atlas.domain.errors import (
+    LLM_BUDGET_EXCEEDED_MESSAGE,
     DomainError,
     LLMBudgetExceededError,
     LLMMalformedToolCallError,
@@ -177,7 +178,9 @@ class ToolsModeRunner:
         # presenting that narration as a finished answer would hide the gap.
         if streaming_error and (
             not accumulated_content
-            or isinstance(streaming_error, LLMMalformedToolCallError)
+            or isinstance(
+                streaming_error, (LLMMalformedToolCallError, LLMBudgetExceededError)
+            )
         ):
             error_class, user_msg, log_msg = error_handler.classify_llm_error(
                 streaming_error,
@@ -275,6 +278,10 @@ class ToolsModeRunner:
         executed_signatures: set = set()
         exempted_discovery_retries: set = set()
         extra_round = 0
+        # Partial text from a continuation refused by an exhausted budget. A
+        # budget is deterministic, so the closing synthesis would be refused
+        # too; the turn closes with this text and an incomplete marker instead.
+        budget_partial: Optional[str] = None
         # Issue #909: one injector per turn tracks the rolling most-recent-N
         # cap across continuation rounds.
         image_injector = ToolImageInjector(
@@ -425,9 +432,10 @@ class ToolsModeRunner:
                     if isinstance(err, LLMBudgetExceededError):
                         # A budget refusal is deterministic: the graceful
                         # synthesis below is another request that would be
-                        # refused too. The partial narration is already
-                        # persisted; let the transport report the budget.
-                        raise err
+                        # refused too. Keep the partial narration (already
+                        # persisted) and close the turn as incomplete instead.
+                        budget_partial = next_text or ""
+                        break
                     if current_response is None:
                         current_response = LLMResponse(content="")
                     break
@@ -462,7 +470,17 @@ class ToolsModeRunner:
             # or, when the provider put no text on the final response, with the
             # narration this round streamed (deferred above), falling back to the
             # placeholder only when neither exists.
-            if self._is_canvas_only_response(current_response):
+            if budget_partial is not None:
+                # The continuation was refused by an exhausted budget. Closing
+                # synthesis would be refused too; keep the partial text and tell
+                # the client the answer is truncated.
+                synthesis_content = budget_partial or LLM_BUDGET_EXCEEDED_MESSAGE
+                await self.event_publisher.send_json({
+                    "type": "error",
+                    "message": LLM_BUDGET_EXCEEDED_MESSAGE,
+                    "error_type": "budget_exceeded",
+                })
+            elif self._is_canvas_only_response(current_response):
                 content = (current_response.content or "").strip()
                 synthesis_content = (
                     content
@@ -494,6 +512,11 @@ class ToolsModeRunner:
                 metadata={
                     "tools": selected_tools,
                     **({"data_sources": selected_data_sources} if selected_data_sources else {}),
+                    **(
+                        {"incomplete": True, "error_type": "budget_exceeded"}
+                        if budget_partial is not None
+                        else {}
+                    ),
                 },
                 citation_register=citation_register,
             )

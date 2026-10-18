@@ -728,11 +728,9 @@ class TestToolsModeContinuationBudget:
     """A refused continuation must not spend a doomed synthesis request."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("partial_text", ["", "partial continuation"])
-    async def test_continuation_budget_skips_synthesis(self, partial_text):
-        llm = _BudgetAfterToolLLM(partial_text=partial_text)
-        publisher = _publisher()
-        runner = _tools_runner(llm, publisher)
+    async def test_continuation_budget_without_text_reraises(self):
+        llm = _BudgetAfterToolLLM(partial_text="")
+        runner = _tools_runner(llm, _publisher())
 
         with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
             mock_te.execute_multiple_tools = _execute_tools
@@ -746,3 +744,55 @@ class TestToolsModeContinuationBudget:
                 )
 
         assert llm.synthesis_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_continuation_budget_with_partial_text_closes_the_turn(self):
+        llm = _BudgetAfterToolLLM(partial_text="partial continuation")
+        publisher = _publisher()
+        session = _session()
+        runner = _tools_runner(llm, publisher)
+
+        with patch("atlas.application.chat.modes.tools.tool_executor") as mock_te:
+            mock_te.execute_multiple_tools = _execute_tools
+            mock_te.build_files_manifest = MagicMock(return_value=None)
+            response = await runner.run_streaming(
+                session=session,
+                model="test-model",
+                messages=[{"role": "user", "content": "hi"}],
+                selected_tools=["safety_docs_plan"],
+            )
+
+        assert llm.synthesis_calls == 0
+        assert response["message"] == "partial continuation"
+        frames = _error_frames(publisher)
+        assert any(frame["error_type"] == "budget_exceeded" for frame in frames)
+        closing = [
+            call.args[0]
+            for call in session.history.add_message.call_args_list
+            if getattr(call.args[0], "metadata", {}).get("error_type") == "budget_exceeded"
+        ]
+        assert closing, "the closing assistant message must be marked incomplete"
+        assert closing[-1].metadata["incomplete"] is True
+
+    @pytest.mark.asyncio
+    async def test_initial_stream_partial_budget_is_marked_incomplete(self):
+        publisher = _publisher()
+        session = _session()
+        runner = _tools_runner(_PartialBudgetLLM(), publisher)
+
+        response = await runner.run_streaming(
+            session=session,
+            model="test-model",
+            messages=[{"role": "user", "content": "hi"}],
+            selected_tools=["safety_docs_plan"],
+        )
+
+        assert response["message"]
+        frames = _error_frames(publisher)
+        assert any(frame["error_type"] == "budget_exceeded" for frame in frames)
+        persisted = [
+            call.args[0]
+            for call in session.history.add_message.call_args_list
+            if getattr(call.args[0], "metadata", {}).get("error_type") == "budget_exceeded"
+        ]
+        assert persisted and persisted[-1].metadata["incomplete"] is True
