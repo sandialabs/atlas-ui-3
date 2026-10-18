@@ -473,3 +473,23 @@ class TestBudgetErrorBypassesTheNonStreamingFallback:
             await stream_final_answer(llm, publisher, "test-model", [], 0.7, None)
 
         llm.call_plain.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stream_and_accumulate_keeps_text_already_streamed(self):
+        async def partial_stream():
+            yield "partial answer"
+            raise LLMBudgetExceededError(BUDGET_MESSAGE)
+
+        publisher = self._publisher()
+        fallback = AsyncMock(return_value="a simulated answer")
+
+        result = await stream_and_accumulate(
+            partial_stream(),
+            publisher,
+            fallback_fn=fallback,
+            context_label="plain",
+        )
+
+        assert result == "partial answer"
+        fallback.assert_not_awaited()
+        publisher.publish_chat_response.assert_not_awaited()

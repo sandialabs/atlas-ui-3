@@ -93,11 +93,12 @@ async def stream_and_accumulate(
         await event_publisher.publish_token_stream(
             token="", is_first=False, is_last=True,
         )
-        if isinstance(exc, LLMBudgetExceededError):
+        if isinstance(exc, LLMBudgetExceededError) and not accumulated:
             # A spent budget refuses the identical request the fallback would
             # send, and the user needs the typed ``budget_exceeded`` error
             # frame -- not a synthesized chat reply that makes the turn look
-            # successful. Let the caller's handler emit it.
+            # successful. Let the caller's handler emit it. Text already
+            # streamed is kept (the existing partial-output policy).
             raise
         if raise_on_stream_error:
             if not accumulated and fallback_fn:
