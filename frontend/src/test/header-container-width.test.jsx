@@ -17,7 +17,7 @@ import React from 'react'
 import { render, act } from '@testing-library/react'
 import { useElementWidth } from '../hooks/useElementWidth'
 // Imported, never re-declared: a local copy of the thresholds drifted from the
-// component's (1320 here vs 1080 shipped) and left these cases asserting
+// component's (1320 here vs the shipped value) and left these cases asserting
 // nothing (PR #839 review).
 import { DESKTOP_ACTIONS_MIN_WIDTH, ACTION_LABELS_MIN_WIDTH } from '../components/Header'
 
@@ -107,7 +107,7 @@ describe('useElementWidth', () => {
   it('uses the thresholds the header actually ships', () => {
     // Pins the imported values themselves. The point of importing rather than
     // re-declaring is that a change to Header.jsx has to come here too.
-    expect(DESKTOP_ACTIONS_MIN_WIDTH).toBe(1080)
+    expect(DESKTOP_ACTIONS_MIN_WIDTH).toBe(1160)
     expect(ACTION_LABELS_MIN_WIDTH).toBe(760)
     expect(ACTION_LABELS_MIN_WIDTH).toBeLessThan(DESKTOP_ACTIONS_MIN_WIDTH)
   })

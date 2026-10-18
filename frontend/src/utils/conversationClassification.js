@@ -100,7 +100,7 @@ export function classificationLock({ complianceEnabled, activeConversationClassi
       locked: true,
       level,
       placeholder: level,
-      guidance: `This conversation is classified ${level}. Start a new conversation to use a different security level.`,
+      guidance: 'Start a new chat to change security level.',
     }
   }
   const placeholder = state === 'legacy' ? 'Unrecorded level'
@@ -111,6 +111,6 @@ export function classificationLock({ complianceEnabled, activeConversationClassi
     locked: true,
     level: null,
     placeholder,
-    guidance: `This conversation is locked to ${placeholder} and cannot be changed. Start a new conversation to use a different security level.`,
+    guidance: 'Start a new chat to change security level.',
   }
 }

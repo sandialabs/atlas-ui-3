@@ -15,6 +15,7 @@ const DEFAULTS = {
   autoApproveTools: false,
   debugMode: false,
   compactMessages: true,
+  reduceHelpText: false,
 }
 
 // Mock localStorage
@@ -163,6 +164,51 @@ describe('useSettings', () => {
 
       expect(result.current.settings.llmTemperature).toBeNull()
     })
+
+    it('merges a context-only update onto settings written behind the hook', () => {
+      const { result } = renderHook(() => useSettings())
+
+      // Simulate the Settings panel saving a draft directly to storage after
+      // this hook instance was created.
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({
+        ...DEFAULTS,
+        llmTemperature: 0.9,
+        maxIterations: 20,
+      }))
+
+      act(() => {
+        result.current.updateSettings({ reduceHelpText: true })
+      })
+
+      expect(result.current.settings.llmTemperature).toBe(0.9)
+      expect(result.current.settings.maxIterations).toBe(20)
+      expect(result.current.settings.reduceHelpText).toBe(true)
+    })
+
+    it('keeps following stored changes for keys this hook has not changed', () => {
+      const { result } = renderHook(() => useSettings())
+
+      act(() => {
+        result.current.updateSettings({ reduceHelpText: true })
+      })
+
+      // Another tab writes an unrelated switch and a draft value.
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({
+        ...DEFAULTS,
+        reduceHelpText: true,
+        autoApproveTools: true,
+        maxIterations: 20,
+      }))
+
+      act(() => {
+        result.current.updateSettings({ llmTemperature: 0.8 })
+      })
+
+      expect(result.current.settings.reduceHelpText).toBe(true)
+      expect(result.current.settings.llmTemperature).toBe(0.8)
+      expect(result.current.settings.autoApproveTools).toBe(true)
+      expect(result.current.settings.maxIterations).toBe(20)
+    })
   })
 
   describe('resetSettings', () => {
@@ -255,6 +301,26 @@ describe('useSettings', () => {
       })
 
       expect(result.current.settings.llmTemperature).toBe(0.8)
+    })
+
+    it('keeps an in-memory change when a failed write is followed by another update', () => {
+      localStorageMock.setItem.mockImplementation(() => {
+        throw new Error('localStorage quota exceeded')
+      })
+
+      const { result } = renderHook(() => useSettings())
+
+      act(() => {
+        result.current.updateSettings({ llmTemperature: 0.8 })
+      })
+      act(() => {
+        result.current.updateSettings({ maxIterations: 15 })
+      })
+
+      // The second call read the old stored snapshot, but the in-memory
+      // change must still win.
+      expect(result.current.settings.llmTemperature).toBe(0.8)
+      expect(result.current.settings.maxIterations).toBe(15)
     })
 
     it('should handle complex nested objects in settings', () => {

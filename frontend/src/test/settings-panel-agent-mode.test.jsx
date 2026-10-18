@@ -24,11 +24,20 @@ vi.mock('../components/PromptManager', () => ({
   default: () => <div>Prompt manager</div>
 }))
 
+// Default context writer mirrors useSettings' persistence so Reset/Save tests
+// can inspect localStorage without reaching into the real hook.
+const persistSettings = (next) => {
+  const current = JSON.parse(localStorage.getItem('chatui-settings') || '{}')
+  const updated = { ...current, ...next }
+  localStorage.setItem('chatui-settings', JSON.stringify(updated))
+  return updated
+}
+
 const baseChatContext = {
   settings: {
     autoApproveTools: false,
   },
-  updateSettings: vi.fn(),
+  updateSettings: vi.fn(persistSettings),
   features: {
     custom_prompts: false,
     globus_auth: false,
@@ -90,7 +99,7 @@ describe('SettingsPanel agent mode settings', () => {
     const label = await screen.findByText('Compact Tool Messages')
     // The toggle button is the sibling control in the same row as the label.
     const toggle = label.parentElement.querySelector('button')
-    toggle.click()
+    fireEvent.click(toggle)
 
     expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
   })
@@ -101,10 +110,119 @@ describe('SettingsPanel agent mode settings', () => {
 
     const label = await screen.findByText('Compact Tool Messages')
     const toggle = label.parentElement.querySelector('button')
-    toggle.click()
+    fireEvent.click(toggle)
 
     // Undefined is treated as "on", so the first click turns it off.
     expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
+  })
+
+  it('offers a reduce-helper-text switch that persists through the context', async () => {
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: {}, updateSettings })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    const toggle = await screen.findByRole('switch', { name: 'Reduce helper text' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+
+    expect(updateSettings).toHaveBeenCalledWith({ reduceHelpText: true })
+  })
+
+  it('keeps the reduce-helper-text preference in the General draft on save', async () => {
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: {}, updateSettings })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    fireEvent.click(await screen.findByRole('switch', { name: 'Reduce helper text' }))
+
+    // Touch another draft-backed setting so Save Changes is enabled, then save.
+    const [temperature] = await screen.findAllByRole('slider')
+    fireEvent.change(temperature, { target: { value: '0.9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    expect(updateSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reduceHelpText: true, llmTemperature: 0.9 })
+    )
+  })
+
+  it('does not write a stale context-owned switch back on Save', async () => {
+    localStorage.setItem('chatui-settings', JSON.stringify({
+      autoApproveTools: true,
+      llmTemperature: 0.7,
+      maxIterations: 10,
+    }))
+    const updateSettings = vi.fn()
+    renderSettingsPanel({
+      settings: { autoApproveTools: false },
+      updateSettings,
+    })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    const [temperature] = await screen.findAllByRole('slider')
+    fireEvent.change(temperature, { target: { value: '0.9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    expect(updateSettings).toHaveBeenCalledTimes(1)
+    const payload = updateSettings.mock.calls[0][0]
+    // Auto-approve is owned by ChatContext and was toggled after this draft
+    // loaded; the stale draft value must not come back through Save.
+    expect(payload).not.toHaveProperty('autoApproveTools')
+    expect(payload).toMatchObject({
+      llmTemperature: 0.9,
+      maxIterations: 10,
+      debugMode: false,
+      reduceHelpText: false,
+    })
+  })
+
+  it('Debug Mode only writes its own key, not unsaved General edits', async () => {
+    localStorage.setItem('chatui-settings', JSON.stringify({
+      llmTemperature: 0.7,
+      maxIterations: 10,
+      debugMode: false,
+    }))
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: { debugMode: false }, updateSettings })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    const [temperature] = await screen.findAllByRole('slider')
+    fireEvent.change(temperature, { target: { value: '0.9' } })
+
+    const debugLabel = await screen.findByText('Debug Mode')
+    fireEvent.click(debugLabel.parentElement.querySelector('button'))
+
+    expect(updateSettings).toHaveBeenCalledWith({ debugMode: true })
+    expect(JSON.parse(localStorage.getItem('chatui-settings')).llmTemperature).toBe(0.7)
+  })
+
+  it('hides optional explanatory copy when reduce helper text is on', async () => {
+    renderSettingsPanel({ settings: { reduceHelpText: true } })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    expect(await screen.findByText('LLM Temperature')).toBeInTheDocument()
+    expect(screen.queryByText(/Controls randomness in AI responses/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Currently using dark mode/)).not.toBeInTheDocument()
+  })
+
+  it('Reset restores the context-owned switches as well as General defaults', async () => {
+    localStorage.setItem('chatui-settings', JSON.stringify({
+      autoApproveTools: true,
+      compactMessages: false,
+      llmTemperature: 0.9,
+      maxIterations: 20,
+    }))
+    renderSettingsPanel({
+      settings: { autoApproveTools: true, compactMessages: false },
+    })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Reset to Defaults/i }))
+
+    const stored = JSON.parse(localStorage.getItem('chatui-settings'))
+    expect(stored.autoApproveTools).toBe(false)
+    expect(stored.compactMessages).toBe(true)
+    expect(stored.llmTemperature).toBe(0.7)
+    expect(stored.maxIterations).toBe(10)
   })
 
   it('bounds the Max Agent Iterations slider by the admin-configured ceiling (issue #849)', async () => {

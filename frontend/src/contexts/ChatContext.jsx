@@ -25,6 +25,7 @@ import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 import { isKnownUser } from '../utils/userStorage'
+import { normalizeSaveMode } from '../utils/saveModeConfig'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -224,8 +225,15 @@ export const ChatProvider = ({ children }) => {
 	const [followUpSuggestions, setFollowUpSuggestions] = useState([])
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
-	// 'none' = incognito (nothing saved), 'local' = browser IndexedDB, 'server' = backend DB
-	const [saveMode, setSaveMode] = usePersistentState('chatui-save-mode', 'none')
+	// 'none' = not saved, 'local' = browser IndexedDB, 'server' = backend DB.
+	// Coerce stored values before they reach the UI or the WebSocket payload.
+	const [storedSaveMode, setStoredSaveMode] = usePersistentState('chatui-save-mode', 'none')
+	const saveMode = normalizeSaveMode(storedSaveMode)
+	const setSaveMode = useCallback((next) => {
+		setStoredSaveMode(previous => normalizeSaveMode(
+			typeof next === 'function' ? next(previous) : next
+		))
+	}, [setStoredSaveMode])
 	const [activeConversationId, setActiveConversationId] = useState(null)
 
 	// Parallel conversation runs (issue #884). Keyed by conversation so a run in

@@ -95,8 +95,7 @@ describe('classificationLock (issue #1044)', () => {
     })
     expect(lock.locked).toBe(true)
     expect(lock.level).toBe('CUI')
-    expect(lock.guidance).toMatch(/classified CUI/)
-    expect(lock.guidance).toMatch(/Start a new conversation/)
+    expect(lock.guidance).toBe('Start a new chat to change security level.')
   })
 
   it('locks records with no usable level behind a placeholder', () => {
@@ -113,7 +112,7 @@ describe('classificationLock (issue #1044)', () => {
       expect(lock.locked).toBe(true)
       expect(lock.level).toBeNull()
       expect(lock.placeholder).toBe(placeholder)
-      expect(lock.guidance).toMatch(/Start a new conversation/)
+      expect(lock.guidance).toBe('Start a new chat to change security level.')
     }
   })
 })

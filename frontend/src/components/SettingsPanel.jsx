@@ -55,8 +55,18 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
-    maxIterations: 10
+    maxIterations: 10,
+    debugMode: false,
+    reduceHelpText: false
   }
+  // Only these keys belong to the General draft. Context-owned switches
+  // (auto-approve, compact messages) are written immediately and must not be
+  // copied back from a draft that was loaded when the panel opened.
+  const generalDraft = (draft) => Object.fromEntries(
+    ['llmTemperature', 'maxIterations', 'debugMode', 'reduceHelpText']
+      .filter(key => key in draft)
+      .map(key => [key, draft[key]])
+  )
 
   // State for settings
   const [settings, setSettings] = useState(defaultSettings)
@@ -64,6 +74,9 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
   // Also get live settings from ChatContext for always-in-sync fields
   const { settings: ctxSettings, updateSettings: updateCtxSettings, features, agentModeAvailable, isInAdminGroup, agentMaxStepsLimit, agentCeilingConfirmed } = useChat()
+  // Optional explanatory copy and hover hints can be turned off by people who
+  // already know the interface. Labels, state, and warnings always stay.
+  const reduceHelpText = !!ctxSettings?.reduceHelpText
   // Admin-configured ceiling for the agent loop (issue #849); keeps the
   // slider's upper bound aligned with what the backend will actually honor.
   // Server default (10) until config lands.
@@ -298,9 +311,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // never persist a config-derived rewrite of the saved number, and the
   // server clamps the payload authoritatively anyway.
 
-  // Save settings to localStorage whenever they change
+  // ChatContext's useSettings hook is the single writer for
+  // `chatui-settings`. Saving the draft through it keeps the hook's copy and
+  // storage in step instead of letting two owners overwrite each other.
   const saveSettings = (newSettings) => {
-    localStorage.setItem('chatui-settings', JSON.stringify(newSettings))
+    updateCtxSettings(generalDraft(newSettings))
     setSettings(newSettings)
     setHasChanges(false)
   }
@@ -323,8 +338,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     const defaults = agentCeilingConfirmed
       ? { ...defaultSettings, maxIterations: Math.min(defaultSettings.maxIterations, maxStepsLimit) }
       : { ...defaultSettings }
+    // Reset every default-backed preference, including the immediate
+    // context-owned switches. updateSettings merges over the latest stored
+    // snapshot, so the payload must name them explicitly.
+    updateCtxSettings({ ...defaults, autoApproveTools: false, compactMessages: true })
     setSettings(defaults)
-    saveSettings(defaults)
+    setHasChanges(false)
   }
 
   // Reverting General is deferred behind the close: a later guard can abort the
@@ -599,15 +618,17 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               <button
                 onClick={toggleTheme}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors text-sm font-medium"
-                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={reduceHelpText ? undefined : (theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode')}
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 {theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               </button>
             </div>
-            <p className="text-sm text-gray-400">
-              Currently using {theme === 'dark' ? 'dark' : 'light'} mode.
-            </p>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                Currently using {theme === 'dark' ? 'dark' : 'light'} mode.
+              </p>
+            )}
           </div>
 
           {/* LLM Temperature Setting */}
@@ -633,10 +654,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 <span>0.5 (Balanced)</span>
                 <span>1 (Creative)</span>
               </div>
-              <p className="text-sm text-gray-400">
-                Controls randomness in AI responses. Lower values are more focused and deterministic, 
-                higher values are more creative and varied.
-              </p>
+              {!reduceHelpText && (
+                <p className="text-sm text-gray-400">
+                  Controls randomness in AI responses. Lower values are more focused and deterministic,
+                  higher values are more creative and varied.
+                </p>
+              )}
             </div>
           </div>
 
@@ -677,10 +700,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                     </div>
                   </div>
                 )}
-                <p className="text-sm text-gray-400">
-                  Maximum number of iterations an agent can perform when solving complex tasks.
-                  Higher values allow for more thorough problem solving but may take longer.
-                </p>
+                {!reduceHelpText && (
+                  <p className="text-sm text-gray-400">
+                    Maximum number of iterations an agent can perform when solving complex tasks.
+                    Higher values allow for more thorough problem solving but may take longer.
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -690,7 +715,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             <div className="flex items-center justify-between mb-2">
               <label className="text-gray-50 font-medium">Auto-Approve Tool Calls</label>
               <button
-                onClick={() => updateCtxSettings({ autoApproveTools: !ctxSettings?.autoApproveTools })}
+                onClick={() => {
+                  const next = !ctxSettings?.autoApproveTools
+                  updateCtxSettings({ autoApproveTools: next })
+                  setSettings(previous => ({ ...previous, autoApproveTools: next }))
+                }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   ctxSettings?.autoApproveTools ? 'bg-green-600' : 'bg-gray-600'
                 }`}
@@ -702,6 +731,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 />
               </button>
             </div>
+            {/* Scope disclosure, not onboarding copy: keep it visible even
+                when the user has turned off helper text. */}
             <p className="text-sm text-gray-400">
               When enabled, tools that don't require admin approval will execute automatically without prompting --
               including tool calls in conversations you are not currently viewing.
@@ -719,7 +750,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             <div className="flex items-center justify-between mb-2">
               <label className="text-gray-50 font-medium">Compact Tool Messages</label>
               <button
-                onClick={() => updateCtxSettings({ compactMessages: !(ctxSettings?.compactMessages !== false) })}
+                onClick={() => {
+                  const next = !(ctxSettings?.compactMessages !== false)
+                  updateCtxSettings({ compactMessages: next })
+                  setSettings(previous => ({ ...previous, compactMessages: next }))
+                }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   ctxSettings?.compactMessages !== false ? 'bg-green-600' : 'bg-gray-600'
                 }`}
@@ -731,11 +766,51 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 />
               </button>
             </div>
-            <p className="text-sm text-gray-400">
-              When enabled (default), tool calls, approval prompts, and system notices render as dense,
-              single-line rows. Turn it off to use the classic layout with avatars, author headers, and
-              expanded message bubbles.
-            </p>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                When enabled (default), tool calls, approval prompts, and system notices render as dense,
+                single-line rows. Turn it off to use the classic layout with avatars, author headers, and
+                expanded message bubbles.
+              </p>
+            )}
+          </div>
+
+          {/* Helper text preference. On by default so first-time and occasional
+              users still get the onboarding copy; experienced users can quiet
+              the interface without losing labels, state, or warnings. */}
+          <div className="bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-gray-50 font-medium" htmlFor="reduce-help-text">Reduce helper text</label>
+              <button
+                id="reduce-help-text"
+                role="switch"
+                aria-checked={reduceHelpText}
+                aria-label="Reduce helper text"
+                onClick={() => {
+                  const next = !reduceHelpText
+                  // Keep the panel draft in step with the context: a later
+                  // Save Changes must not overwrite the preference with the
+                  // stale draft value.
+                  updateCtxSettings({ reduceHelpText: next })
+                  setSettings(previous => ({ ...previous, reduceHelpText: next }))
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  reduceHelpText ? 'bg-green-600' : 'bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    reduceHelpText ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                Hides optional explanations, help links, and hover hints in conversation setup
+                and settings. Labels, selected values, and safety warnings stay visible.
+              </p>
+            )}
           </div>
 
           {/* Debug Mode Setting */}
@@ -745,8 +820,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               <button
                 onClick={() => {
                   const newVal = !settings.debugMode
-                  handleSettingChange('debugMode', newVal)
-                  saveSettings({ ...settings, debugMode: newVal })
+                  // Immediate, like the other context-owned switches. Do not
+                  // run saveSettings here: that would also persist unrelated
+                  // unsaved General edits and Cancel could not undo them.
+                  updateCtxSettings({ debugMode: newVal })
+                  setSettings(previous => ({ ...previous, debugMode: newVal }))
                 }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   settings.debugMode ? 'bg-green-600' : 'bg-gray-600'
@@ -759,10 +837,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 />
               </button>
             </div>
-            <p className="text-sm text-gray-400">
-              When enabled, tool call messages will show raw input arguments and output results expanded by default,
-              making it easier to debug tool interactions.
-            </p>
+            {!reduceHelpText && (
+              <p className="text-sm text-gray-400">
+                When enabled, tool call messages will show raw input arguments and output results expanded by default,
+                making it easier to debug tool interactions.
+              </p>
+            )}
           </div>
 
           {/* Globus Authentication Section (only shown when feature is enabled) */}

@@ -1,12 +1,10 @@
 /**
- * Regression cover for issue #908: the transcript .json / .txt exports open in
- * a new browser tab by default instead of forcing a file download.
+ * Regression cover for the transcript export/open controls.
  *
- * These pin the header wiring for that behavior: the transcript dropdown offers
- * "Open as JSON" / "Open as Text" (not the old download labels) in both the
- * desktop dropdown and the mobile menu, and each item calls its context
- * opener. The open-in-new-tab mechanics themselves are unit tested in
- * chatExport.test.js (openBlobInNewTab).
+ * Plain text is the primary export, followed by Print / Save as PDF. The JSON
+ * export was removed from this UI; the context still has its JSON exporter for
+ * other callers, but the header must not offer it. These pin both the desktop
+ * dropdown and the compact menu, and keep the menu semantics intact.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -40,7 +38,6 @@ const setChat = (over = {}) => {
     setAgentModeEnabled: vi.fn(),
     saveMode: 'server',
     setSaveMode: vi.fn(),
-    openChat: vi.fn(),
     openChatAsText: vi.fn(),
     // Non-empty: the transcript controls are disabled while the chat is empty.
     messages: [{ role: 'user', content: 'hello', timestamp: '2026-09-13T00:00:00Z' }],
@@ -76,63 +73,49 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-describe('header transcript actions (#908)', () => {
-  it('offers open-as items instead of the old download labels', () => {
+describe('header transcript actions', () => {
+  it('offers plain text first, then Print / Save as PDF, and no JSON export', () => {
     renderHeader()
     fireEvent.click(screen.getByTitle('Open Chat Transcript'))
-    expect(screen.getByText('Open as JSON')).toBeTruthy()
-    expect(screen.getByText('Open as Text')).toBeTruthy()
-    expect(screen.queryByText('Download as JSON')).toBeNull()
-    expect(screen.queryByText('Download as Text')).toBeNull()
-    // The print option stays in the dropdown untouched.
-    expect(screen.getByText('Print / Save as PDF')).toBeTruthy()
+
+    const items = screen.getAllByRole('menuitem')
+    expect(items.map(item => item.textContent.trim())).toEqual([
+      'Open as plain text',
+      'Print / Save as PDF',
+    ])
+    expect(screen.queryByText(/Open as JSON/i)).toBeNull()
+    expect(screen.queryByText(/Download as JSON/i)).toBeNull()
   })
 
-  it('routes the desktop dropdown items to the context openers', () => {
-    const openChat = vi.fn()
+  it('routes the desktop plain-text item to the text opener', () => {
     const openChatAsText = vi.fn()
-    setChat({ openChat, openChatAsText })
+    setChat({ openChatAsText })
     renderHeader()
 
     fireEvent.click(screen.getByTitle('Open Chat Transcript'))
-    fireEvent.click(screen.getByText('Open as JSON'))
-    expect(openChat).toHaveBeenCalledTimes(1)
-    expect(openChatAsText).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByTitle('Open Chat Transcript'))
-    fireEvent.click(screen.getByText('Open as Text'))
+    fireEvent.click(screen.getByText('Open as plain text'))
     expect(openChatAsText).toHaveBeenCalledTimes(1)
-    expect(openChat).toHaveBeenCalledTimes(1)
   })
 
-  it('routes the mobile menu items to the context openers', () => {
-    const openChat = vi.fn()
+  it('routes the compact menu plain-text item to the text opener', () => {
     const openChatAsText = vi.fn()
-    setChat({ openChat, openChatAsText })
+    setChat({ openChatAsText })
     renderHeader()
 
     // jsdom reports header width 0, so the hamburger (compact) path is live.
     fireEvent.click(screen.getByTitle('Menu'))
-    fireEvent.click(screen.getByText('Open as JSON'))
-    expect(openChat).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByTitle('Menu'))
-    fireEvent.click(screen.getByText('Open as Text'))
+    fireEvent.click(screen.getByText('Open as plain text'))
     expect(openChatAsText).toHaveBeenCalledTimes(1)
   })
 
-  it('marks the items as opening in a new browser tab', () => {
+  it('marks the plain-text item as opening in a new browser tab', () => {
     renderHeader()
     fireEvent.click(screen.getByTitle('Open Chat Transcript'))
-    const jsonItem = screen.getByText('Open as JSON')
-    expect(jsonItem.title).toBe('Opens in a new browser tab')
-    expect(screen.getByText('Open as Text').title).toBe('Opens in a new browser tab')
+    expect(screen.getByText('Open as plain text').title)
+      .toBe('Opens a plain-text transcript in a new browser tab')
   })
 
   it('exposes the dropdown to assistive tech as a menu', () => {
-    // Review note on #933: the toggle announced nothing about the popup and the
-    // items were opaque buttons. Pin the menu semantics so a refactor does not
-    // silently drop them.
     renderHeader()
     const toggle = screen.getByTitle('Open Chat Transcript')
     expect(toggle.getAttribute('aria-haspopup')).toBe('menu')
@@ -140,8 +123,9 @@ describe('header transcript actions (#908)', () => {
 
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByText('Open as JSON').closest('[role="menu"]')).toBeTruthy()
-    expect(screen.getByText('Open as JSON').getAttribute('role')).toBe('menuitem')
-    expect(screen.getByText('Open as Text').getAttribute('role')).toBe('menuitem')
+    const textItem = screen.getByText('Open as plain text')
+    expect(textItem.closest('[role="menu"]')).toBeTruthy()
+    expect(textItem.getAttribute('role')).toBe('menuitem')
+    expect(screen.getByText('Print / Save as PDF').getAttribute('role')).toBe('menuitem')
   })
 })

@@ -264,6 +264,40 @@
     @apply text-yellow-400;
   }
 
+  /* Conversation-setup status colours. Base values target the dark theme;
+     light-mode overrides live with the other top-level theme overrides. */
+  .conversation-lock-text {
+    @apply text-amber-300;
+  }
+
+  .conversation-lock-guidance {
+    @apply text-amber-200/90;
+  }
+
+  .conversation-security-locked {
+    @apply bg-amber-950/30 border-amber-600/60;
+  }
+
+  .conversation-save-not-saved {
+    @apply border-red-600/60 bg-red-950/30 text-red-100;
+  }
+
+  .conversation-save-not-saved:hover {
+    @apply bg-red-950/50;
+  }
+
+  .conversation-not-saved-accent {
+    @apply text-red-300;
+  }
+
+  .conversation-not-saved-label {
+    @apply text-red-200;
+  }
+
+  .conversation-not-saved-item {
+    @apply bg-red-950/40 text-red-100;
+  }
+
   .status-dot {
     @apply w-2 h-2 rounded-full;
   }
@@ -432,6 +466,39 @@
    in @layer components; kept here with the other top-level theme overrides). */
 [data-theme="light"] .approval-warning-text {
   @apply text-amber-800;
+}
+
+/* Conversation-setup status colours on the light header. */
+[data-theme="light"] .conversation-lock-text {
+  @apply text-amber-800;
+}
+
+[data-theme="light"] .conversation-lock-guidance {
+  @apply text-amber-700;
+}
+
+[data-theme="light"] .conversation-security-locked {
+  @apply bg-amber-50 border-amber-300;
+}
+
+[data-theme="light"] .conversation-save-not-saved {
+  @apply border-red-300 bg-red-50 text-red-800;
+}
+
+[data-theme="light"] .conversation-save-not-saved:hover {
+  @apply bg-red-100;
+}
+
+[data-theme="light"] .conversation-not-saved-accent {
+  @apply text-red-700;
+}
+
+[data-theme="light"] .conversation-not-saved-label {
+  @apply text-red-800;
+}
+
+[data-theme="light"] .conversation-not-saved-item {
+  @apply bg-red-50 text-red-800;
 }
 
 
