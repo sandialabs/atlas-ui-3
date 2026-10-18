@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-10-16
+Last updated: 2026-10-18
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -39,15 +39,37 @@ choice is still saved per browser.
 ## Agent mode
 
 Agent mode lets the model chain tool calls on its own until it decides the
-task is done. It is **on by default** (issue #849): a browser that has never
-made a choice starts with it enabled, an explicit "off" choice you made
+task is done. In plain terms, it can take multiple steps: call the tools you
+have selected, inspect the results, and continue until it can answer. With no
+tools selected it behaves like normal chat, and it always needs a model that
+supports tool calling. It is **on by default** (issue #849): a browser that has
+never made a choice starts with it enabled, an explicit "off" choice you made
 earlier is kept, and the header toggle (or Ctrl+Alt+A) still switches it any
 time.
+
+The header toggle is icon-only. Next to it, a question-mark button opens a
+short explanation of what Agent Mode does and offers a **Choose tools** action.
+When Agent Mode is on with no tools selected, the composer shows a persistent
+callout with the same explanation, the model requirement for your current
+model, a **Choose tools** action, and a shortcut to turn Agent Mode back off.
+
+While a run is active, a high-visibility status stays above the message box --
+visible even if you have scrolled up to read earlier output -- with the current
+step and a **Stop** action. It reads the same run state as the composer, so the
+two can never disagree.
 
 **General → Max Agent Iterations** bounds how many tool steps one agent turn
 may take. The slider's upper end is the ceiling your ATLAS administrator
 configured (`AGENT_MAX_STEPS`), and a saved value above that ceiling is
 clamped to it.
+
+### Reduce helper text
+
+**General → Reduce helper text** hides optional onboarding copy, help buttons,
+and hover hints, including the Agent Mode explanation and the long form of the
+no-tools callout. Core labels, selected values, run status, warnings, and
+actions stay visible. It is off by default, so first-time and occasional users
+still get the explanations.
 
 ## Admin tab
 

@@ -665,6 +665,23 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
           {agentModeAvailable && (
             <>
+              {/* Plain-language framing for Agent Mode itself. The Max
+                  Iterations slider only makes sense once the loop is
+                  understood, and this is also where someone looks when they
+                  want to know what the header toggle does. */}
+              {!reduceHelpText && (
+                <div className="bg-gray-700 rounded-lg p-4">
+                  <h3 className="text-gray-50 font-medium">Agent Mode</h3>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Agent Mode lets the assistant take multiple steps: it calls the tools you
+                    select, inspects the results, and continues until the task is done. With no
+                    tools selected it behaves like normal chat, and it always needs a model that
+                    supports tool calling. Turn it on or off from the bot button in the header
+                    (Ctrl+Alt+A).
+                  </p>
+                </div>
+              )}
+
               {/* Max Iterations Setting */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -807,8 +824,9 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             </div>
             {!reduceHelpText && (
               <p className="text-sm text-gray-400">
-                Hides optional explanations, help links, and hover hints in conversation setup
-                and settings. Labels, selected values, and safety warnings stay visible.
+                Hides optional explanations, help links, and hover hints in Agent Mode,
+                conversation setup, and settings. Labels, selected values, and safety
+                warnings stay visible.
               </p>
             )}
           </div>

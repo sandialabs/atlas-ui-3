@@ -18,6 +18,8 @@ import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureC
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
 import CorrectTurnModal from './CorrectTurnModal'
 import AgentBusyIndicator from './AgentBusyIndicator'
+import AgentRunStatus from './AgentRunStatus'
+import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useToast } from './ui/toastContext'
 import { computeMessageChangeScroll } from '../utils/scrollDecision'
 
@@ -75,6 +77,7 @@ const ChatArea = () => {
     sessionFiles,
     agentModeAvailable,
     agentModeEnabled,
+    setAgentModeEnabled,
     currentAgentStep,
     agentPendingQuestion,
     setAgentPendingQuestion,
@@ -90,9 +93,13 @@ const ChatArea = () => {
     user,
     followUpSuggestions,
     setFollowUpSuggestions,
+    settings,
   } = useChat()
   const { isConnected, connectionStatus, sessionEnded } = useWS()
   const toast = useToast()
+  // Optional onboarding copy can be switched off in Tools and Settings.
+  // Warnings, state, and actions never depend on it.
+  const reduceHelpText = settings?.reduceHelpText === true
   const maxFileSizeBytes = fileUpload?.max_file_size_bytes || DEFAULT_MAX_FILE_SIZE_BYTES
 
   // Pair each message with its rewind ordinal once per messages change, rather
@@ -967,6 +974,17 @@ const ChatArea = () => {
         className="p-4 border-t border-gray-700 flex-shrink-0"
       >
         <div className="max-w-4xl mx-auto">
+          {/* A running agent is easy to lose once the transcript is scrolled
+              away from its newest row. This sits in the footer, which is
+              always visible, and reuses the same run state and Stop handler as
+              the composer controls. */}
+          <AgentRunStatus
+            isAgentRunning={isAgentRunning}
+            currentAgentStep={currentAgentStep}
+            onStop={stopAgent}
+            waitingForAnswer={!!agentPendingQuestion}
+          />
+
           {/* Enabled Tools Indicator */}
           <EnabledToolsIndicator />
 
@@ -1011,21 +1029,71 @@ const ChatArea = () => {
             </div>
           )}
 
-          {/* Warning: agent mode on but nothing for the loop to act on. Sending
-              is still allowed -- the backend downgrades the turn to a normal
+          {/* Agent Mode on with nothing for the loop to act on. Sending is
+              still allowed -- the backend downgrades the turn to a normal
               chat and says so in the transcript (#921 follow-up). Gated on
               availability too: the enabled flag is persisted and can outlive
-              a config where the feature is off. */}
+              a config where the feature is off.
+
+              The plain-language explanation is the point of this callout, so
+              it is stronger than a passing warning row. "Reduce helper text"
+              shortens the copy but keeps the state, the model requirement, and
+              both actions. */}
           {agentModeAvailable && agentModeEnabled && selectedTools.size === 0 && (
             <div
-              className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm"
+              className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100"
               role="status"
               data-testid="agent-mode-no-tools-banner"
             >
-              <Sparkles className="w-4 h-4 flex-shrink-0" />
-              <span>
-                Agent Mode is on, but no tools are selected. Messages will run as normal chat until you select a tool.
-              </span>
+              <div className="flex items-start gap-3">
+                <Sparkles className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-300" aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-200">
+                    Agent Mode is on, but no tools are selected
+                  </p>
+                  {reduceHelpText ? (
+                    <p className="mt-1 text-sm text-amber-100/90">
+                      Select at least one tool to let the assistant take multiple steps.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-amber-100/90">
+                      Agent Mode lets the assistant take multiple steps: it calls the tools you
+                      select, inspects the results, and continues until the task is done. With no
+                      tools selected, this chat behaves like normal chat.
+                    </p>
+                  )}
+                  <p className={reduceHelpText ? 'mt-1 text-sm text-amber-100/90' : 'mt-1.5 text-sm text-amber-100/90'}>
+                    {currentModelSupportsTools ? (
+                      <>
+                        You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
+                        supports tools.
+                      </>
+                    ) : (
+                      <>
+                        You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
+                        does not support tools, so switch to a tool-capable model to use Agent Mode.
+                      </>
+                    )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openSettingsPanel({ tab: 'tools' })}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-semibold transition-colors"
+                    >
+                      <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
+                      Choose tools
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAgentModeEnabled(false)}
+                      className="px-1.5 py-1 text-xs text-amber-200 underline decoration-dotted hover:text-amber-100 transition-colors"
+                    >
+                      Turn off Agent Mode
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
