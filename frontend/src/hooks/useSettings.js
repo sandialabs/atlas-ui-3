@@ -51,8 +51,10 @@ export function useSettings() {
     } catch (error) {
       console.error('Failed to read settings from localStorage:', error)
     }
-    const updatedSettings = { ...latest, ...inMemoryRef.current, ...newSettings }
-    inMemoryRef.current = updatedSettings
+    // Keep only keys this hook changed: untouched keys must keep following
+    // later writes from the Settings panel or another tab.
+    inMemoryRef.current = { ...inMemoryRef.current, ...newSettings }
+    const updatedSettings = { ...latest, ...inMemoryRef.current }
     setSettings(updatedSettings)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(updatedSettings))

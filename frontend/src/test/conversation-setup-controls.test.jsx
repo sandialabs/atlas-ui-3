@@ -106,10 +106,12 @@ describe('save-this-chat control', () => {
 
   it('closes the menu when keyboard focus moves on', () => {
     render(<SaveChatControl saveMode="none" onChange={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: /Save this chat: Not saved/ }))
+    const button = screen.getByRole('button', { name: /Save this chat: Not saved/ })
+    fireEvent.click(button)
     const menu = screen.getByRole('menu', { name: 'Save this chat' })
     fireEvent.keyDown(menu, { key: 'Tab' })
     expect(screen.queryByRole('menu', { name: 'Save this chat' })).toBeNull()
+    expect(document.activeElement).toBe(button)
   })
 
   it('moves focus with arrow keys and returns it to the button on Escape', () => {

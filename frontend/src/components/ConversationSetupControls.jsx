@@ -221,7 +221,7 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                   {!quiet && (
                     <span className="block text-xs text-gray-400">{choice.description}</span>
                   )}
-                  {!quiet && serverNote && choice.value === 'server' && (
+                  {serverNote && choice.value === 'server' && (
                     <span className="block text-xs text-gray-400">{serverNote}</span>
                   )}
                 </span>
@@ -290,8 +290,9 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                 const items = itemRefs.current.filter(Boolean)
                 items[items.length - 1]?.focus()
               } else if (event.key === 'Tab') {
-                // Let focus continue naturally, but do not leave a popup menu
-                // stranded open behind it.
+                // The menu unmounts before the browser moves focus, so put it
+                // back on the trigger rather than dropping it to <body>.
+                buttonRef.current?.focus()
                 setOpen(false)
               }
             }}
@@ -333,7 +334,7 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                       {!quiet && (
                         <span className="block text-xs text-gray-400">{choice.description}</span>
                       )}
-                      {!quiet && serverNote && choice.value === 'server' && (
+                      {serverNote && choice.value === 'server' && (
                         <span className="block text-xs text-gray-400">{serverNote}</span>
                       )}
                     </span>

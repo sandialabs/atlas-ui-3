@@ -184,6 +184,31 @@ describe('useSettings', () => {
       expect(result.current.settings.maxIterations).toBe(20)
       expect(result.current.settings.reduceHelpText).toBe(true)
     })
+
+    it('keeps following stored changes for keys this hook has not changed', () => {
+      const { result } = renderHook(() => useSettings())
+
+      act(() => {
+        result.current.updateSettings({ reduceHelpText: true })
+      })
+
+      // Another tab writes an unrelated switch and a draft value.
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({
+        ...DEFAULTS,
+        reduceHelpText: true,
+        autoApproveTools: true,
+        maxIterations: 20,
+      }))
+
+      act(() => {
+        result.current.updateSettings({ llmTemperature: 0.8 })
+      })
+
+      expect(result.current.settings.reduceHelpText).toBe(true)
+      expect(result.current.settings.llmTemperature).toBe(0.8)
+      expect(result.current.settings.autoApproveTools).toBe(true)
+      expect(result.current.settings.maxIterations).toBe(20)
+    })
   })
 
   describe('resetSettings', () => {
