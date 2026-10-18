@@ -124,4 +124,16 @@ describe('ChatArea - agent run status is pinned to the composer', () => {
     renderChat()
     expect(screen.queryByTestId('agent-run-status')).not.toBeInTheDocument()
   })
+
+  it('keeps the run status when helper text is reduced', () => {
+    useChat.mockReturnValue(chatContext({
+      isAgentRunning: true,
+      currentAgentStep: 1,
+      settings: { reduceHelpText: true },
+    }))
+    renderChat()
+
+    // Run state is not optional onboarding copy.
+    expect(screen.getByTestId('agent-run-status')).toHaveTextContent(/agent is running/i)
+  })
 })
