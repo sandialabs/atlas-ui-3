@@ -787,8 +787,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             </div>
             {!reduceHelpText && (
               <p className="text-sm text-gray-400">
-                Hides optional explanations, help links, and hover hints across the interface.
-                Labels, selected values, and safety warnings stay visible.
+                Hides optional explanations, help links, and hover hints in conversation setup
+                and settings. Labels, selected values, and safety warnings stay visible.
               </p>
             )}
           </div>

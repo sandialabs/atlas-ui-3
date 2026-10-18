@@ -259,6 +259,10 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                 event.preventDefault()
                 const items = itemRefs.current.filter(Boolean)
                 items[items.length - 1]?.focus()
+              } else if (event.key === 'Tab') {
+                // Let focus continue naturally, but do not leave a popup menu
+                // stranded open behind it.
+                setOpen(false)
               }
             }}
           >
