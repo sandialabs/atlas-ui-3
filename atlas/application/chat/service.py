@@ -599,6 +599,7 @@ class ChatService:
                     conversation_id,
                     user_email,
                     is_incognito=turn_is_incognito,
+                    previous_conversation_id=previous_conversation_id,
                 )
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
@@ -1587,6 +1588,7 @@ class ChatService:
         conversation_id: str,
         user_email: Optional[str],
         is_incognito: bool,
+        previous_conversation_id: Optional[str] = None,
     ) -> int:
         """Load a stored conversation into ``session`` before its turn runs.
 
@@ -1660,10 +1662,17 @@ class ChatService:
                 session.context.pop("workspace_id", None)
             else:
                 session.context["workspace_id"] = previous_workspace_id
-            if previous_parent_id is UNSET:
-                session.context.pop("parent_conversation_id", None)
-            else:
+            # Restore the old lineage only when the failed load was for the
+            # same conversation the session was already carrying. Restoring it
+            # after a failed switch would stamp conversation X's parent onto Y
+            # on the next save, permanently.
+            if (
+                previous_parent_id is not UNSET
+                and previous_conversation_id == conversation_id
+            ):
                 session.context["parent_conversation_id"] = previous_parent_id
+            else:
+                session.context.pop("parent_conversation_id", None)
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),

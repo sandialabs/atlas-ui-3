@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useConversationHistory } from '../hooks/useConversationHistory'
 import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
@@ -71,10 +71,10 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const chatHistoryEnabled = features?.chat_history
   const [sidebarWidth, setSidebarWidth] = usePersistentState('chatui-sidebar-width', DEFAULT_WIDTH)
   const [isCollapsed, setIsCollapsed] = usePersistentState('chatui-sidebar-collapsed', false)
-  // Parent rows whose children are hidden (issue #1081). Persisted as an array
-  // so a reload keeps the user's chosen shape of the tree.
+  // Parent rows whose children are hidden (issue #1081). Persisted per user as
+  // an array so a reload keeps that user's chosen shape of the tree.
   const [collapsedConversationIds, setCollapsedConversationIds] = usePersistentState(
-    'chatui-collapsed-conversation-ids', []
+    `chatui-collapsed-conversation-ids:${user || 'anonymous'}`, []
   )
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
@@ -356,24 +356,57 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   }
 
   // --- Shared sidebar content ---
-  const displayConversations = chatHistoryEnabled
-    ? getDisplayConversations({
-        conversations: history.conversations,
-        messages,
-        activeConversationId,
-        chatHistoryEnabled,
-        saveMode,
-        runsByConversation,
-      })
-    : []
+  const displayConversations = useMemo(
+    () => (chatHistoryEnabled
+      ? getDisplayConversations({
+          conversations: history.conversations,
+          messages,
+          activeConversationId,
+          chatHistoryEnabled,
+          saveMode,
+          runsByConversation,
+        })
+      : []),
+    [
+      chatHistoryEnabled,
+      history.conversations,
+      messages,
+      activeConversationId,
+      saveMode,
+      runsByConversation,
+    ]
+  )
 
+  // A search result or tag filter is the user's current frame of reference: a
+  // group collapsed earlier must not hide a row that matches it, with no hint
+  // why the list looks empty. While filtering, every group renders expanded.
+  const filteringConversations = !!(history.searchQuery || history.activeTag)
+  const collapsedConversationSet = new Set(
+    filteringConversations ? [] : collapsedConversationIds
+  )
   // `displayConversations` is already in tree order. Collapsing hides rows by
   // ancestor, not by deleting them: the hidden children keep their run state,
   // so expanding again is instant and a collapse can never stop an execution.
-  const collapsedConversationSet = new Set(collapsedConversationIds)
   const visibleConversations = displayConversations.filter(
     conv => !(conv._ancestorIds || []).some(id => collapsedConversationSet.has(id))
   )
+
+  // Forget collapse state for rows that no longer exist, so the persisted set
+  // cannot grow forever. Skip an in-flight or filtered list: its absent rows
+  // are not deleted conversations. `loading` matters on the render right after
+  // a filter is cleared -- the query is empty then, but the fetched list still
+  // holds the previous filtered results until the unfiltered request lands.
+  const visibleIdsKey = !filteringConversations && !history.loading
+    ? displayConversations.map(conv => conv.id).join('\u0000')
+    : ''
+  useEffect(() => {
+    if (!visibleIdsKey) return
+    const present = new Set(visibleIdsKey.split('\u0000'))
+    setCollapsedConversationIds(prev => {
+      const next = prev.filter(id => present.has(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [visibleIdsKey, setCollapsedConversationIds])
 
   // The open conversation must never be hidden by a collapsed group, however
   // it was opened (a row click, a reconnect, another tab). Expand only the
@@ -462,7 +495,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                 {history.searchQuery ? 'No matching conversations' : 'No saved conversations'}
               </div>
             ) : (
-              <div className="py-1" role="tree" aria-label="Conversations">
+              <div className="py-1" role="list" aria-label="Conversations">
                 {visibleConversations.map(conv => {
                   const isGroupCollapsed = collapsedConversationSet.has(conv.id)
                   const ownRun = (runsByConversation || {})[conv.id]

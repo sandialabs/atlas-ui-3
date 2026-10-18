@@ -72,6 +72,21 @@ describe('arrangeConversations', () => {
     expect(rows[0]._hasChildren).toBe(false)
   })
 
+  it('keeps a grandchild nested under its present parent when the grandparent is absent', () => {
+    // Search or pagination can return both rows without the root. The child is
+    // a root in this result, but its grandchild must still sit under it rather
+    // than appearing as an unrelated second root.
+    const rows = arrangeConversations([
+      conv('child', { parent_conversation_id: 'missing-root' }),
+      conv('grandchild', { parent_conversation_id: 'child' }),
+    ], {})
+
+    expect(rows.map(r => [r.id, r._depth])).toEqual([
+      ['child', 0],
+      ['grandchild', 1],
+    ])
+  })
+
   it('breaks a cycle instead of recursing forever', () => {
     const rows = arrangeConversations([
       conv('a', { parent_conversation_id: 'b' }),

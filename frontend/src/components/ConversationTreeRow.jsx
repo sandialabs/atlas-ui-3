@@ -25,7 +25,7 @@ export function RunIndicator({ run, count = 0 }) {
   // conversation has at most one non-terminal run.
   const label = count > 1 ? `${style.label} (${count})` : style.label
   return (
-    <span className={`flex items-center gap-1 text-xs ${style.text}`} title={run.error || label}>
+    <span className={`flex items-center gap-1 text-xs whitespace-nowrap ${style.text}`} title={run.error || label}>
       <span className={`h-1.5 w-1.5 rounded-full ${style.dot} ${style.pulse ? 'animate-pulse' : ''}`} />
       {label}
     </span>
@@ -47,10 +47,11 @@ export function ConversationTreeRow({
 }) {
   const childLabel = `${conv._childCount} sub-conversation${conv._childCount === 1 ? '' : 's'}`
   return (
+    // Plain list semantics: the chevron is a real button with aria-expanded,
+    // and indentation shows depth. A full ARIA tree pattern would promise
+    // roving focus and arrow-key navigation this row does not implement.
     <div
-      role="treeitem"
-      aria-level={conv._depth + 1}
-      aria-expanded={conv._hasChildren ? !isGroupCollapsed : undefined}
+      role="listitem"
       onClick={onOpen}
       onContextMenu={onContextMenu}
       title={refusal || undefined}
@@ -115,9 +116,9 @@ export function ConversationTreeRow({
             {conv.preview}
           </div>
         )}
-        <div className="flex items-center gap-2 mt-1">
-          <span className="text-xs text-gray-600">{formatDate(conv.updated_at)}</span>
-          <span className="text-xs text-gray-600">{conv.message_count} msgs</span>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+          <span className="text-xs text-gray-600 whitespace-nowrap">{formatDate(conv.updated_at)}</span>
+          <span className="text-xs text-gray-600 whitespace-nowrap">{conv.message_count} msgs</span>
           {showClassification && classification && (
             <span
               className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded"

@@ -85,9 +85,16 @@ panel need no tree-specific branches.
 
 Collapse is a render-time filter on `_ancestorIds`. Rows and their run records
 stay in place, so expanding is instant and a collapse can never interact with
-an execution. The collapsed set is stored in `localStorage`; when the open
-conversation is inside a collapsed group, its ancestors are expanded
-automatically.
+an execution. The collapsed set is stored in `localStorage` per user and pruned
+to the rows the current list still has. While a search or tag filter is active
+the persisted set is ignored: a row that matches the filter must never be
+hidden by a group the user collapsed earlier. When the open conversation is
+inside a collapsed group, its ancestors are expanded automatically.
+
+The rows are rendered as a plain `list`/`listitem` pairing rather than an ARIA
+`tree`. The chevron is a real button with `aria-expanded`, and indentation
+communicates depth; claiming the tree role would promise roving focus and
+arrow-key navigation this implementation does not provide.
 
 Cycles and missing parents are resolved to roots before traversal, so malformed
 metadata cannot produce infinite recursion or a hidden row.
@@ -108,6 +115,16 @@ Collapsed: only the parent row remains, with the chevron pointing right. Its
 children keep running; expanding restores them unchanged.
 
 ![Collapsed conversation tree](../images/issue1081-conversation-tree-collapsed.png)
+
+Collapsed with a running subtree: a real child run paused on tool approval
+while hidden. The parent folds the subtree into one marker, and "Needs
+approval" outranks a merely running sibling.
+
+![Collapsed tree with folded run status](../images/issue1081-conversation-tree-folded-status.png)
+
+Narrow sidebar: indentation, truncation and the metadata row still fit.
+
+![Narrow conversation tree](../images/issue1081-conversation-tree-narrow.png)
 
 ## Tests
 
