@@ -33,9 +33,19 @@ export function useSettings() {
     setIsLoaded(true)
   }, [])
 
-  // Function to update settings
+  // Function to update settings. Merge onto the latest persisted snapshot,
+  // not just this hook's in-memory copy: the Settings panel keeps its own
+  // draft and may have saved other fields in the same session, and a
+  // context-only update must not write those older values back.
   const updateSettings = (newSettings) => {
-    const updatedSettings = { ...settings, ...newSettings }
+    let latest = settings
+    try {
+      const saved = localStorage.getItem('chatui-settings')
+      if (saved) latest = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) }
+    } catch (error) {
+      console.error('Failed to read settings from localStorage:', error)
+    }
+    const updatedSettings = { ...latest, ...newSettings }
     setSettings(updatedSettings)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(updatedSettings))

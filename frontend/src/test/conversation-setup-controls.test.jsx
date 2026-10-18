@@ -112,6 +112,25 @@ describe('save-this-chat control', () => {
     expect(screen.queryByRole('menu', { name: 'Save this chat' })).toBeNull()
   })
 
+  it('moves focus with arrow keys and returns it to the button on Escape', () => {
+    render(<SaveChatControl saveMode="none" onChange={vi.fn()} />)
+    const button = screen.getByRole('button', { name: /Save this chat: Not saved/ })
+    fireEvent.click(button)
+
+    const menu = screen.getByRole('menu', { name: 'Save this chat' })
+    const items = within(menu).getAllByRole('menuitemradio')
+    expect(document.activeElement).toBe(items[0])
+
+    fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(items[1])
+    fireEvent.keyDown(menu, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(items[0])
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu', { name: 'Save this chat' })).toBeNull()
+    expect(document.activeElement).toBe(button)
+  })
+
   it('uses a native radio group in the compact menu layout', () => {
     const onChange = vi.fn()
     render(<SaveChatControl saveMode="local" onChange={onChange} variant="menu" />)

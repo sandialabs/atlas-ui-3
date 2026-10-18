@@ -302,9 +302,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // never persist a config-derived rewrite of the saved number, and the
   // server clamps the payload authoritatively anyway.
 
-  // Save settings to localStorage whenever they change
+  // ChatContext's useSettings hook is the single writer for
+  // `chatui-settings`. Saving the draft through it keeps the hook's copy and
+  // storage in step instead of letting two owners overwrite each other.
   const saveSettings = (newSettings) => {
-    localStorage.setItem('chatui-settings', JSON.stringify(newSettings))
+    updateCtxSettings(newSettings)
     setSettings(newSettings)
     setHasChanges(false)
   }
@@ -327,9 +329,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     const defaults = agentCeilingConfirmed
       ? { ...defaultSettings, maxIterations: Math.min(defaultSettings.maxIterations, maxStepsLimit) }
       : { ...defaultSettings }
-    // Context-backed preferences are also reset in memory; saveSettings below
-    // writes the full draft (including them at their defaults).
-    updateCtxSettings({ reduceHelpText: false })
+    // Push the full defaults, not one key: useSettings merges this over the
+    // latest stored snapshot, so every default-backed field resets together.
     setSettings(defaults)
     saveSettings(defaults)
   }
@@ -703,7 +704,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             <div className="flex items-center justify-between mb-2">
               <label className="text-gray-50 font-medium">Auto-Approve Tool Calls</label>
               <button
-                onClick={() => updateCtxSettings({ autoApproveTools: !ctxSettings?.autoApproveTools })}
+                onClick={() => {
+                  const next = !ctxSettings?.autoApproveTools
+                  updateCtxSettings({ autoApproveTools: next })
+                  setSettings(previous => ({ ...previous, autoApproveTools: next }))
+                }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   ctxSettings?.autoApproveTools ? 'bg-green-600' : 'bg-gray-600'
                 }`}
@@ -734,7 +739,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             <div className="flex items-center justify-between mb-2">
               <label className="text-gray-50 font-medium">Compact Tool Messages</label>
               <button
-                onClick={() => updateCtxSettings({ compactMessages: !(ctxSettings?.compactMessages !== false) })}
+                onClick={() => {
+                  const next = !(ctxSettings?.compactMessages !== false)
+                  updateCtxSettings({ compactMessages: next })
+                  setSettings(previous => ({ ...previous, compactMessages: next }))
+                }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   ctxSettings?.compactMessages !== false ? 'bg-green-600' : 'bg-gray-600'
                 }`}

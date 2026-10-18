@@ -24,11 +24,20 @@ vi.mock('../components/PromptManager', () => ({
   default: () => <div>Prompt manager</div>
 }))
 
+// Default context writer mirrors useSettings' persistence so Reset/Save tests
+// can inspect localStorage without reaching into the real hook.
+const persistSettings = (next) => {
+  const current = JSON.parse(localStorage.getItem('chatui-settings') || '{}')
+  const updated = { ...current, ...next }
+  localStorage.setItem('chatui-settings', JSON.stringify(updated))
+  return updated
+}
+
 const baseChatContext = {
   settings: {
     autoApproveTools: false,
   },
-  updateSettings: vi.fn(),
+  updateSettings: vi.fn(persistSettings),
   features: {
     custom_prompts: false,
     globus_auth: false,
@@ -90,7 +99,7 @@ describe('SettingsPanel agent mode settings', () => {
     const label = await screen.findByText('Compact Tool Messages')
     // The toggle button is the sibling control in the same row as the label.
     const toggle = label.parentElement.querySelector('button')
-    toggle.click()
+    fireEvent.click(toggle)
 
     expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
   })
@@ -101,7 +110,7 @@ describe('SettingsPanel agent mode settings', () => {
 
     const label = await screen.findByText('Compact Tool Messages')
     const toggle = label.parentElement.querySelector('button')
-    toggle.click()
+    fireEvent.click(toggle)
 
     // Undefined is treated as "on", so the first click turns it off.
     expect(updateSettings).toHaveBeenCalledWith({ compactMessages: false })
@@ -131,9 +140,9 @@ describe('SettingsPanel agent mode settings', () => {
     fireEvent.change(temperature, { target: { value: '0.9' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
-    const stored = JSON.parse(localStorage.getItem('chatui-settings'))
-    expect(stored.reduceHelpText).toBe(true)
-    expect(stored.llmTemperature).toBe(0.9)
+    expect(updateSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reduceHelpText: true, llmTemperature: 0.9 })
+    )
   })
 
   it('hides optional explanatory copy when reduce helper text is on', async () => {
