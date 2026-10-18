@@ -63,9 +63,14 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
   // A saved level stays selectable even if the definitions failed to load or
   // no longer list it, so the user can always clear a filter that is hiding
   // everything; otherwise the selector would vanish with the filter active.
-  const complianceOptions = displayLevel && !complianceLevels.some(l => l.name === displayLevel)
-    ? [...complianceLevels, { name: displayLevel, description: lock.locked ? 'Recorded classification' : 'Not defined by this deployment' }]
-    : complianceLevels
+  // Gate on the feature flag, not just the option list: a persisted level can
+  // synthesize an option after an operator disables compliance levels, and the
+  // selector must not expose an inactive setting.
+  const complianceOptions = !features?.compliance_levels
+    ? []
+    : displayLevel && !complianceLevels.some(l => l.name === displayLevel)
+      ? [...complianceLevels, { name: displayLevel, description: lock.locked ? 'Recorded classification' : 'Not defined by this deployment' }]
+      : complianceLevels
   // Power users can turn off onboarding copy, hover hints, and the explanatory
   // link in the conversation-setup cluster. Core labels, selected values, and
   // the locked-state guidance never depend on this.

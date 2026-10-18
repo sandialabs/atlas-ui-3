@@ -55,7 +55,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
-    maxIterations: 10
+    maxIterations: 10,
+    reduceHelpText: false
   }
 
   // State for settings
@@ -326,6 +327,9 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     const defaults = agentCeilingConfirmed
       ? { ...defaultSettings, maxIterations: Math.min(defaultSettings.maxIterations, maxStepsLimit) }
       : { ...defaultSettings }
+    // Context-backed preferences are also reset in memory; saveSettings below
+    // writes the full draft (including them at their defaults).
+    updateCtxSettings({ reduceHelpText: false })
     setSettings(defaults)
     saveSettings(defaults)
   }
@@ -762,7 +766,14 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                 role="switch"
                 aria-checked={reduceHelpText}
                 aria-label="Reduce helper text"
-                onClick={() => updateCtxSettings({ reduceHelpText: !reduceHelpText })}
+                onClick={() => {
+                  const next = !reduceHelpText
+                  // Keep the panel draft in step with the context: a later
+                  // Save Changes must not overwrite the preference with the
+                  // stale draft value.
+                  updateCtxSettings({ reduceHelpText: next })
+                  setSettings(previous => ({ ...previous, reduceHelpText: next }))
+                }}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   reduceHelpText ? 'bg-green-600' : 'bg-gray-600'
                 }`}

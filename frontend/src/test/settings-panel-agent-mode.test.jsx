@@ -119,6 +119,23 @@ describe('SettingsPanel agent mode settings', () => {
     expect(updateSettings).toHaveBeenCalledWith({ reduceHelpText: true })
   })
 
+  it('keeps the reduce-helper-text preference in the General draft on save', async () => {
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: {}, updateSettings })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    fireEvent.click(await screen.findByRole('switch', { name: 'Reduce helper text' }))
+
+    // Touch another draft-backed setting so Save Changes is enabled, then save.
+    const [temperature] = await screen.findAllByRole('slider')
+    fireEvent.change(temperature, { target: { value: '0.9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const stored = JSON.parse(localStorage.getItem('chatui-settings'))
+    expect(stored.reduceHelpText).toBe(true)
+    expect(stored.llmTemperature).toBe(0.9)
+  })
+
   it('hides optional explanatory copy when reduce helper text is on', async () => {
     renderSettingsPanel({ settings: { reduceHelpText: true } })
 

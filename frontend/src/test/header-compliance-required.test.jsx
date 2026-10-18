@@ -87,6 +87,23 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('header compliance selector', () => {
+  it('does not render the security selector when compliance levels are disabled', () => {
+    setChat({ features: {}, complianceLevelFilter: 'Internal' })
+    render(
+      <Header
+        onToggleSidebar={vi.fn()}
+        onToggleRag={vi.fn()}
+        onToggleFiles={vi.fn()}
+        onToggleCanvas={vi.fn()}
+        onCloseCanvas={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByTitle('Menu'))
+    // A persisted level must not synthesize a selector for an inactive feature.
+    expect(screen.queryByLabelText('Security level')).toBeNull()
+  })
+
   it('offers "All Levels" when a level is not required', () => {
     setChat()
     for (const select of openSelectors()) {
