@@ -204,6 +204,27 @@ describe('SettingsPanel agent mode settings', () => {
     expect(screen.queryByText(/Currently using dark mode/)).not.toBeInTheDocument()
   })
 
+  it('Reset restores the context-owned switches as well as General defaults', async () => {
+    localStorage.setItem('chatui-settings', JSON.stringify({
+      autoApproveTools: true,
+      compactMessages: false,
+      llmTemperature: 0.9,
+      maxIterations: 20,
+    }))
+    renderSettingsPanel({
+      settings: { autoApproveTools: true, compactMessages: false },
+    })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Reset to Defaults/i }))
+
+    const stored = JSON.parse(localStorage.getItem('chatui-settings'))
+    expect(stored.autoApproveTools).toBe(false)
+    expect(stored.compactMessages).toBe(true)
+    expect(stored.llmTemperature).toBe(0.7)
+    expect(stored.maxIterations).toBe(10)
+  })
+
   it('bounds the Max Agent Iterations slider by the admin-configured ceiling (issue #849)', async () => {
     renderSettingsPanel({ agentMaxStepsLimit: 30 })
 

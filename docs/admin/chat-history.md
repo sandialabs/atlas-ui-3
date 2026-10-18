@@ -234,8 +234,9 @@ When the feature is disabled, all endpoints return empty results gracefully.
 Each conversation has one of three persistence states, chosen from the
 **Save this chat** control in the header's conversation-setup cluster:
 
-- **Not saved** -- nothing is written to the browser or the server. The
-  current conversation is gone when the user leaves it.
+- **Not saved** -- the conversation transcript is not written to the browser
+  or the server. Uploaded files and browser preferences can still be stored;
+  the conversation itself is gone when the user leaves it.
 - **Saved in this browser** -- the conversation is stored in IndexedDB on
   that device, under that account.
 - **Saved to server** -- the conversation is stored in the backend database

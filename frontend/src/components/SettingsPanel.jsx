@@ -338,10 +338,12 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     const defaults = agentCeilingConfirmed
       ? { ...defaultSettings, maxIterations: Math.min(defaultSettings.maxIterations, maxStepsLimit) }
       : { ...defaultSettings }
-    // Push the full defaults, not one key: useSettings merges this over the
-    // latest stored snapshot, so every default-backed field resets together.
+    // Reset every default-backed preference, including the immediate
+    // context-owned switches. updateSettings merges over the latest stored
+    // snapshot, so the payload must name them explicitly.
+    updateCtxSettings({ ...defaults, autoApproveTools: false, compactMessages: true })
     setSettings(defaults)
-    saveSettings(defaults)
+    setHasChanges(false)
   }
 
   // Reverting General is deferred behind the close: a later guard can abort the

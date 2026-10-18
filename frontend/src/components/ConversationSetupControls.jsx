@@ -86,7 +86,7 @@ export function SecurityLevelControl({
           ? 'px-3 py-2 bg-gray-700 rounded-lg'
           : `w-40 rounded-lg border px-2 py-1 ${
               lock.locked
-                ? 'bg-amber-950/30 border-amber-600/60'
+                ? 'conversation-security-locked'
                 : 'bg-gray-700/40 border-gray-600'
             }`
       }
@@ -102,18 +102,18 @@ export function SecurityLevelControl({
           Security level
         </label>
         {lock.locked && (
-          <Lock className="w-3.5 h-3.5 text-amber-300 flex-shrink-0" aria-hidden="true" />
+          <Lock className="w-3.5 h-3.5 conversation-lock-text flex-shrink-0" aria-hidden="true" />
         )}
       </div>
       {select}
       {lock.locked && !externalGuidanceId && (
         <p
           id={guidanceId}
-          className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-amber-300"
+          className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs conversation-lock-text"
         >
           <Lock className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
           <span className="font-semibold">Locked for this chat</span>
-          <span className="text-amber-200/90">Start a new chat to change security level.</span>
+          <span className="conversation-lock-guidance">Start a new chat to change security level.</span>
         </p>
       )}
     </div>
@@ -175,7 +175,7 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
         <div className="flex items-center gap-2">
           <SaveModeIcon
             choice={current}
-            className={`w-4 h-4 ${isNotSaved ? 'text-red-300' : ''}`}
+            className={`w-4 h-4 ${isNotSaved ? 'conversation-not-saved-accent' : ''}`}
           />
           <span className="text-sm font-medium text-gray-100">Save this chat</span>
         </div>
@@ -194,7 +194,7 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                 className={`flex items-start gap-3 px-2 py-1.5 rounded-md cursor-pointer transition-colors ${
                   checked
                     ? (choice.value === 'none'
-                      ? 'bg-red-950/40 text-red-100'
+                      ? 'conversation-not-saved-item'
                       : 'bg-gray-600 text-gray-50')
                     : 'text-gray-200 hover:bg-gray-600/70'
                 }`}
@@ -209,7 +209,7 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                 />
                 <SaveModeIcon
                   choice={choice}
-                  className={`w-4 h-4 mt-0.5 ${checked && choice.value === 'none' ? 'text-red-300' : ''}`}
+                  className={`w-4 h-4 mt-0.5 ${checked && choice.value === 'none' ? 'conversation-not-saved-accent' : ''}`}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium">{choice.label}</span>
@@ -238,16 +238,16 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
         title={quiet ? undefined : 'Choose how this conversation is stored'}
         className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-colors ${
           isNotSaved
-            ? 'border-red-600/60 bg-red-950/30 hover:bg-red-950/50 text-red-100'
+            ? 'conversation-save-not-saved'
             : 'border-gray-600 bg-gray-700/40 hover:bg-gray-700 text-gray-200'
         }`}
       >
-        <SaveModeIcon choice={current} className={`w-4 h-4 ${isNotSaved ? 'text-red-300' : ''}`} />
+        <SaveModeIcon choice={current} className={`w-4 h-4 ${isNotSaved ? 'conversation-not-saved-accent' : ''}`} />
         <span className="flex flex-col items-start leading-tight">
           <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 whitespace-nowrap">
             Save this chat
           </span>
-          <span className={`text-sm font-semibold whitespace-nowrap ${isNotSaved ? 'text-red-200' : 'text-gray-100'}`}>
+          <span className={`text-sm font-semibold whitespace-nowrap ${isNotSaved ? 'conversation-not-saved-label' : 'text-gray-100'}`}>
             {current.label}
           </span>
         </span>
@@ -311,14 +311,14 @@ export function SaveChatControl({ saveMode, onChange, quiet = false, variant = '
                     className={`w-full flex items-start gap-3 px-3 py-2 rounded-md text-left transition-colors ${
                       checked
                         ? (choice.value === 'none'
-                          ? 'bg-red-950/40 text-red-100'
+                          ? 'conversation-not-saved-item'
                           : 'bg-gray-700 text-gray-50')
                         : 'text-gray-200 hover:bg-gray-700'
                     }`}
                   >
                     <SaveModeIcon
                       choice={choice}
-                      className={`w-4 h-4 mt-0.5 ${checked && choice.value === 'none' ? 'text-red-300' : ''}`}
+                      className={`w-4 h-4 mt-0.5 ${checked && choice.value === 'none' ? 'conversation-not-saved-accent' : ''}`}
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium">{choice.label}</span>
@@ -513,11 +513,11 @@ export default function ConversationSetupCluster({
       {hasSecurity && lock.locked && (
         <p
           id={guidanceId}
-          className="flex items-center gap-1.5 pl-1 text-[10px] leading-tight text-amber-300 whitespace-nowrap"
+          className="flex items-center gap-1.5 pl-1 text-[10px] leading-tight conversation-lock-text whitespace-nowrap"
         >
           <Lock className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
           <span className="font-semibold">Locked for this chat</span>
-          <span className="text-amber-200/90">Start a new chat to change security level.</span>
+          <span className="conversation-lock-guidance">Start a new chat to change security level.</span>
         </p>
       )}
     </div>
