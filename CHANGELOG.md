@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-19
+
+### Breaking Changes
+- **#1052:** Docker Compose no longer requires credentials for storage backends you do not use: bundled MinIO and PostgreSQL moved to opt-in Compose files (`docker-compose.minio.yml`, `docker-compose.postgres.yml`), external S3 needs no `MINIO_ROOT_PASSWORD`, DuckDB needs no `POSTGRES_PASSWORD`, and the bundled MinIO reuses `S3_ACCESS_KEY`/`S3_SECRET_KEY` as its root credentials. The bundled MinIO also became startable at all: it now mounts the image-declared `/bitnami/minio/data` path and uses a working readiness probe.
+
+    The host-run launchers also changed: with USE_MOCK_S3 unset (now defaulting to false, matching the application) they no longer start bundled MinIO unless S3_ENDPOINT is explicitly a loopback endpoint, and warn when real storage is configured ambiguously. Operators upgrading a Compose stack: the old variables are no longer read and Compose fails configuration until the new ones are set — add `-f docker-compose.minio.yml` and/or `-f docker-compose.postgres.yml`, set `S3_ENDPOINT=http://minio:9000` plus freshly generated `S3_ACCESS_KEY`/`S3_SECRET_KEY` (object data is independent of the root credential, so the old `minioadmin` pair is not needed). Files from pre-v0.8.0 stacks live in the `./data/minio` bind mount and must be copied into the `minio-data` volume with uid 1001 ownership (procedure in the installation guide); a v0.8.0-era `minio-data` volume is empty and can be removed with `docker volume rm <project>_minio-data` — never `compose down -v`, which also deletes chat history and MCP tokens.
+
+### Features
+- **#1062:** Markdown personas now accept `allowed_data_classifications`, an explicit allowlist of the compliance levels a persona may be used at, matching models, MCP servers and RAG sources. The legacy `compliance_level` still works and is read as a one-element list; the new field wins when both are present.
+- **#1067:** Models in `llmconfig.yml` can set `litellm_tags` to send a comma-separated `x-litellm-tags` header on every request, letting a LiteLLM proxy attribute ATLAS traffic in its spend logs.
+- **#1072:** The welcome screen's instructional text can now be customized per deployment with the `VITE_WELCOME_MESSAGE` frontend build-time variable (also a Docker build argument). When unset or empty, the existing message is shown unchanged, and the value is always rendered as plain text.
+- **#1077:** Added a `docs_search` stdio MCP example server that searches and reads the repository's `docs/` folder (`search_docs`, `read_doc`, `list_docs`); enable it from the admin MCP catalog.
+- **#1078:** Added the built-in `atlas_follow_up` tool (behind `FEATURE_ATLAS_LAUNCH_ENABLED`): a conversation can send a finished sub-conversation it launched a follow-up message, which that sub-conversation answers with its earlier transcript in context, on the same model, tools and data sources, re-checked against the user's current access.
+- **#1081:** Launched sub-conversations now appear nested under the conversation that started them in the history sidebar, with expand/collapse, child counts, and folded run status. The relationship is stored with the child conversation, so it survives reloads and backend restarts.
+- **#1084:** Grouped security level, save mode, and New Chat into one conversation-setup cluster with an explicit "Security level" label, a visible locked-state explanation, and a three-choice save menu instead of a cycling toggle. Plain text is now the primary transcript export (JSON export was removed from that menu), and a new "Reduce helper text" setting lets experienced users hide optional explanations and hover guidance.
+
+### Fixes
+- **#1014:** Parallel conversation runs now record their own outcome: a run that failed (rate limit, timeout, provider error) after another chat was started no longer shows as finished, and a clean run no longer shows as "Failed" with another run's error. A failed run's conversation is now saved with its prompt and completed tool calls instead of disappearing from the history list, and clicking two conversations in quick succession always opens the one clicked last.
+- **#1050:** Browser-stored state is now kept per signed-in user, so on a shared browser the next account no longer sees earlier accounts' locally saved conversations or starts on their selected model, compliance filter or splash-screen acceptance; a saved team-gateway model is also dropped on load when the user is no longer in that team. Conversations saved locally before this change have no recorded owner and are no longer listed (they stay in the browser's storage), and each user picks their model and accepts the splash screen once more after upgrading.
+- **#1055:** Model names are no longer hidden by data classification badges in the model picker and the Enterprise LiteLLM team/model picker. Names wrap at full width, and classifications appear below them as a compact badge (for example `UUR +2`); hovering a row or focusing it with the keyboard shows the full list, which is also included in the tooltip and accessible name.
+- **#1066:** Persona markdown misconfiguration is now reported at startup as one clear line per persona for each detected problem -- a bad frontmatter block, an unknown `allowed_data_classifications` entry (named explicitly), or a malformed value -- instead of a persona being skipped or narrowed silently.
+- **#1068:** Dependabot pull requests no longer fail the changelog guard, and the runtime image removes pip from whichever Python version the base image ships.
+- **#1083:** Fixed conversation-tree edge cases: filtered results are no longer hidden by a previously collapsed group, partial hierarchies stay connected, and a failed history load cannot re-parent a conversation.
+- **#1086:** An exhausted LiteLLM key, user, team, model, or provider budget now reports that the spending budget has been reached and is not retried, instead of being shown as an invalid request or transient high traffic.
+
+### Security
+- **#1044:** Locked the header compliance selector once a conversation begins, so a conversation's security classification can no longer be changed from the UI mid-conversation. The selector is disabled and shows the conversation's recorded level, with guidance to start a new conversation for a different level; the server-side classification rule remains the enforcement boundary.
+
+### Internal
+- **#1057:** Made the Python test suite compatible with `pytest-xdist`: parametrization is
+  now deterministically ordered and the two tests that mutated the shared app's
+  proxy middleware no longer do, so the suite collects and runs identically with
+  `-n 2` and `-n auto`. CI now runs the production-mode backend pass under
+  pytest-xdist on every PR, and `docs/developer/test-isolation.md` documents the
+  supported parallel commands and the underlying isolation rules.
+- **#1060:** The published image now runs Python 3.14. Rebuild any derived image or copied virtualenv so native wheels match the cp314 ABI.
+
 ## [0.8.0] - 2026-10-12
 
 ### Breaking Changes
