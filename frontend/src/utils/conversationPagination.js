@@ -30,10 +30,20 @@ export function appendUnique(existing, incoming) {
  *
  * A plain replace would throw the older rows away and send the user back to
  * the top of the history every time the list is refreshed.
+ *
+ * `total` is how many conversations the listing holds now. Rows past it are
+ * ones the server no longer has -- a conversation deleted in another tab, or
+ * the whole list deleted there -- so they are dropped instead of being kept
+ * for ever.
  */
-export function mergeFreshFirst(fresh, existing) {
-  if (!fresh?.length) return existing
-  const seen = new Set(fresh.map(c => c.id))
-  const tail = existing.filter(c => !seen.has(c.id))
-  return [...fresh, ...tail]
+export function mergeFreshFirst(fresh, existing, total) {
+  const head = Array.isArray(fresh) ? fresh : []
+  const tail = Array.isArray(existing) ? existing : []
+  if (!head.length && !tail.length) return []
+  const seen = new Set(head.map(c => c.id))
+  const merged = [...head, ...tail.filter(c => !seen.has(c.id))]
+  if (typeof total === 'number' && merged.length > total) {
+    return merged.slice(0, total)
+  }
+  return merged
 }

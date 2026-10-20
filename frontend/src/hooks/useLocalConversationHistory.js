@@ -40,8 +40,9 @@ export function useLocalConversationHistory(user) {
   const ownerRef = useRef(owner)
   ownerRef.current = owner
 
-  // The rows the list holds, and where the next page starts. Kept beside
-  // the state so a request always uses the current values (issue #1085).
+  // The rows the list holds, and the position the next page starts at.
+  // Kept beside the state so a request always uses the current values
+  // (issue #1085).
   const conversationsRef = useRef([])
   const offsetRef = useRef(0)
   const totalRef = useRef(0)
@@ -61,21 +62,38 @@ export function useLocalConversationHistory(user) {
     setHasMore(false)
   }, [owner])
 
-  // Store a new list and re-derive the paging state from it. A total of
-  // `null` means the count is not known; a full page then still suggests
-  // there is more behind it.
-  const applyList = useCallback((next, total) => {
+  // Store a new list and re-derive the paging state from it. The list is a
+  // prefix of the stored order, so the next page starts after the rows it
+  // holds. A total of `null` means the count is not known; a full page then
+  // still suggests there is more behind it.
+  const applyList = useCallback((next, total, hasMore) => {
     const rows = Array.isArray(next) ? next : []
     conversationsRef.current = rows
     offsetRef.current = rows.length
-    if (typeof total === 'number') {
-      totalRef.current = total
-      setHasMore(total > rows.length)
-    } else if (total === null) {
-      setHasMore(rows.length >= CONVERSATION_PAGE_SIZE)
-    } else {
-      setHasMore(totalRef.current > rows.length)
-    }
+    if (typeof total === 'number') totalRef.current = total
+    setConversations(rows)
+    if (typeof hasMore === 'boolean') setHasMore(hasMore)
+    else if (typeof total === 'number') setHasMore(total > rows.length)
+    else if (total === null) setHasMore(rows.length >= CONVERSATION_PAGE_SIZE)
+    else setHasMore(totalRef.current > rows.length)
+  }, [])
+
+  // Change the rows on screen without moving the paging state: a rename
+  // does not change how much of the history is left.
+  const replaceRows = useCallback((rows) => {
+    conversationsRef.current = rows
+    setConversations(rows)
+  }, [])
+
+  // Take conversations out of the list. The stored history is that much
+  // shorter now, so the next page starts that much earlier.
+  const removeRows = useCallback((ids) => {
+    const removed = new Set(ids)
+    const rows = conversationsRef.current.filter(c => !removed.has(c.id))
+    const count = conversationsRef.current.length - rows.length
+    conversationsRef.current = rows
+    offsetRef.current = Math.max(0, offsetRef.current - count)
+    totalRef.current = Math.max(0, totalRef.current - count)
     setConversations(rows)
   }, [])
 
@@ -98,10 +116,14 @@ export function useLocalConversationHistory(user) {
     setLoading(true)
     setLoadMoreError(null)
     try {
+      // Both reads finish before anything is applied, so an account that
+      // signed in while they were running cannot have its list replaced by
+      // the previous account's.
       const list = await db.listConversations(requestedOwner, CONVERSATION_PAGE_SIZE, 0)
+      const total = await countOwned(requestedOwner)
       if (ownerRef.current !== requestedOwner) return
       if (generationRef.current !== generation) return
-      applyList(list, await countOwned(requestedOwner))
+      applyList(list, total)
     } catch (e) {
       console.error('Failed to fetch local conversations:', e)
     } finally {
@@ -115,9 +137,10 @@ export function useLocalConversationHistory(user) {
     const generation = generationRef.current
     try {
       const list = await db.listConversations(requestedOwner, CONVERSATION_PAGE_SIZE, 0)
+      const total = await countOwned(requestedOwner)
       if (ownerRef.current !== requestedOwner) return
       if (generationRef.current !== generation) return
-      applyList(mergeFreshFirst(list, conversationsRef.current), await countOwned(requestedOwner))
+      applyList(mergeFreshFirst(list, conversationsRef.current, total), total)
     } catch (e) {
       console.error('Failed to refresh local conversations:', e)
     }
@@ -137,11 +160,20 @@ export function useLocalConversationHistory(user) {
         CONVERSATION_PAGE_SIZE,
         offsetRef.current
       )
+      const total = await countOwned(requestedOwner)
       if (ownerRef.current !== requestedOwner) return
       if (generationRef.current !== generation) return
-      applyList(
-        appendUnique(conversationsRef.current, page),
-        await countOwned(requestedOwner)
+      const merged = appendUnique(conversationsRef.current, page)
+      conversationsRef.current = merged
+      // The stored position moved on by the whole page, even when a row of
+      // it was already on screen.
+      offsetRef.current += page.length
+      if (typeof total === 'number') totalRef.current = total
+      setConversations(merged)
+      setHasMore(
+        typeof total === 'number'
+          ? total > offsetRef.current
+          : merged.length >= CONVERSATION_PAGE_SIZE
       )
     } catch (e) {
       console.error('Failed to load more local conversations:', e)
@@ -150,7 +182,7 @@ export function useLocalConversationHistory(user) {
       loadingMoreRef.current = false
       setLoadingMore(false)
     }
-  }, [owner, applyList, countOwned])
+  }, [owner, countOwned])
 
   const searchConversations = useCallback(async (query) => {
     if (!query || !query.trim()) {
@@ -194,24 +226,21 @@ export function useLocalConversationHistory(user) {
     try {
       const deleted = await db.deleteConversation(conversationId, requestedOwner)
       if (deleted && ownerRef.current === requestedOwner) {
-        applyList(
-          conversationsRef.current.filter((c) => c.id !== conversationId),
-          Math.max(0, totalRef.current - 1)
-        )
+        removeRows([conversationId])
       }
       return deleted
     } catch (e) {
       console.error('Failed to delete local conversation:', e)
       return false
     }
-  }, [owner, applyList])
+  }, [owner, removeRows])
 
   const deleteAll = useCallback(async () => {
     const requestedOwner = owner
     try {
       const count = await db.deleteAllConversations(requestedOwner)
       if (ownerRef.current === requestedOwner) {
-        applyList([], 0)
+        applyList([], 0, false)
       }
       return count
     } catch (e) {
@@ -262,7 +291,7 @@ export function useLocalConversationHistory(user) {
       conv.title = title
       await db.saveConversation(conv, requestedOwner)
       if (ownerRef.current !== requestedOwner) return false
-      applyList(
+      replaceRows(
         conversationsRef.current.map((c) => (c.id === conversationId ? { ...c, title } : c))
       )
       return true
@@ -270,7 +299,7 @@ export function useLocalConversationHistory(user) {
       console.error('Failed to update local title:', e)
       return false
     }
-  }, [owner, applyList])
+  }, [owner, replaceRows])
 
   return {
     conversations,

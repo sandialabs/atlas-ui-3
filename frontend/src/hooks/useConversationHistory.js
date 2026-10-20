@@ -26,7 +26,10 @@ export function useConversationHistory() {
   // but the paging bookkeeping needs the value at request time rather than
   // the one captured when a callback was created.
   const conversationsRef = useRef([])
-  // Where the next page starts, counted in rows the server has handed over.
+  // The position in the server's order the next page starts at. It counts
+  // the rows the server has handed over, which is not always the number of
+  // rows on screen: a page can repeat a row when the order shifts between
+  // two requests, and the server's position still moved on.
   const offsetRef = useRef(0)
   // How many conversations the current listing holds in total, so the client
   // can tell "there is an older page" from "that is all of them".
@@ -38,23 +41,39 @@ export function useConversationHistory() {
   // Guards against a second "load more" while one is in flight.
   const loadingMoreRef = useRef(false)
 
-  // Store a new list and re-derive the paging state from it. The offset
-  // follows the rows the list holds: the server's ordering shifts by one
-  // whenever a conversation is deleted, so the next page has to shift too.
-  // A total of `null` means the count is not known; a full page then still
-  // suggests there is more behind it.
-  const applyList = useCallback((next, total) => {
+  // Store a new list and re-derive the paging state from it. The list is a
+  // prefix of the server's order, so the next page starts after the rows it
+  // holds. A total of `null` means the count is not known; a full page then
+  // still suggests there is more behind it.
+  const applyList = useCallback((next, total, hasMore) => {
     const rows = Array.isArray(next) ? next : []
     conversationsRef.current = rows
     offsetRef.current = rows.length
-    if (typeof total === 'number') {
-      totalRef.current = total
-      setHasMore(total > rows.length)
-    } else if (total === null) {
-      setHasMore(rows.length >= CONVERSATION_PAGE_SIZE)
-    } else {
-      setHasMore(totalRef.current > rows.length)
-    }
+    if (typeof total === 'number') totalRef.current = total
+    setConversations(rows)
+    if (typeof hasMore === 'boolean') setHasMore(hasMore)
+    else if (typeof total === 'number') setHasMore(total > rows.length)
+    else if (total === null) setHasMore(rows.length >= CONVERSATION_PAGE_SIZE)
+    else setHasMore(totalRef.current > rows.length)
+  }, [])
+
+  // Change the rows on screen without moving the paging state: a rename or a
+  // new tag does not change how much of the history is left.
+  const replaceRows = useCallback((rows) => {
+    conversationsRef.current = rows
+    setConversations(rows)
+  }, [])
+
+  // Take conversations out of the list. The server's history is that much
+  // shorter now, so the next page starts that much earlier and the count of
+  // what is left drops with it.
+  const removeRows = useCallback((ids) => {
+    const removed = new Set(ids)
+    const rows = conversationsRef.current.filter(c => !removed.has(c.id))
+    const count = conversationsRef.current.length - rows.length
+    conversationsRef.current = rows
+    offsetRef.current = Math.max(0, offsetRef.current - count)
+    totalRef.current = Math.max(0, totalRef.current - count)
     setConversations(rows)
   }, [])
 
@@ -72,7 +91,7 @@ export function useConversationHistory() {
       if (!res.ok) return
       const data = await res.json()
       if (generationRef.current !== generation) return
-      applyList(data.conversations || [], data.total)
+      applyList(data.conversations || [], data.total, data.has_more)
     } catch (e) {
       console.error('Failed to fetch conversations:', e)
     } finally {
@@ -94,7 +113,12 @@ export function useConversationHistory() {
       const data = await res.json()
       if (generationRef.current !== generation) return
       const fresh = data.conversations || []
-      applyList(mergeFreshFirst(fresh, conversationsRef.current), data.total)
+      // The page's own "more remain" flag describes the window it covers,
+      // not the merged one, so the count decides here.
+      applyList(
+        mergeFreshFirst(fresh, conversationsRef.current, data.total),
+        data.total
+      )
     } catch (e) {
       console.error('Failed to refresh conversations:', e)
     }
@@ -119,10 +143,18 @@ export function useConversationHistory() {
       if (!res.ok) throw new Error(`Failed to load older conversations (${res.status})`)
       const data = await res.json()
       if (generationRef.current !== generation) return
-      applyList(
-        appendUnique(conversationsRef.current, data.conversations || []),
-        data.total
-      )
+      const page = data.conversations || []
+      const merged = appendUnique(conversationsRef.current, page)
+      conversationsRef.current = merged
+      // The server's position moved on by the whole page, even when a row
+      // of it was already on screen: the next page starts after the page
+      // the server just sent.
+      offsetRef.current += page.length
+      if (typeof data.total === 'number') totalRef.current = data.total
+      setConversations(merged)
+      // The server knows whether the history continues past this page.
+      if (typeof data.has_more === 'boolean') setHasMore(data.has_more)
+      else setHasMore(totalRef.current > offsetRef.current)
     } catch (e) {
       console.error('Failed to load more conversations:', e)
       setLoadMoreError('Could not load older conversations. Try again.')
@@ -130,7 +162,7 @@ export function useConversationHistory() {
       loadingMoreRef.current = false
       setLoadingMore(false)
     }
-  }, [activeTag, applyList])
+  }, [activeTag])
 
   const searchConversations = useCallback(async (query) => {
     if (!query || !query.trim()) {
@@ -187,15 +219,13 @@ export function useConversationHistory() {
     try {
       const res = await fetch(`/api/conversations/${conversationId}`, { method: 'DELETE' })
       if (!res.ok) return false
-      const rows = conversationsRef.current.filter(c => c.id !== conversationId)
-      // The server's history is one row shorter now, so the total is too.
-      applyList(rows, Math.max(0, totalRef.current - 1))
+      removeRows([conversationId])
       return true
     } catch (e) {
       console.error('Failed to delete conversation:', e)
       return false
     }
-  }, [applyList])
+  }, [removeRows])
 
   const deleteMultiple = useCallback(async (ids) => {
     try {
@@ -206,22 +236,20 @@ export function useConversationHistory() {
       })
       if (!res.ok) return 0
       const data = await res.json()
-      const removed = new Set(ids)
-      const rows = conversationsRef.current.filter(c => !removed.has(c.id))
-      applyList(rows, Math.max(0, totalRef.current - removed.size))
+      removeRows(ids)
       return data.deleted_count || 0
     } catch (e) {
       console.error('Failed to delete conversations:', e)
       return 0
     }
-  }, [applyList])
+  }, [removeRows])
 
   const deleteAll = useCallback(async () => {
     try {
       const res = await fetch('/api/conversations', { method: 'DELETE' })
       if (!res.ok) return 0
       const data = await res.json()
-      applyList([], 0)
+      applyList([], 0, false)
       return data.deleted_count || 0
     } catch (e) {
       console.error('Failed to delete all conversations:', e)
@@ -261,7 +289,7 @@ export function useConversationHistory() {
       if (!res.ok) return null
       const data = await res.json()
       // Update local state to reflect new tag (deduplicate)
-      applyList(conversationsRef.current.map(c =>
+      replaceRows(conversationsRef.current.map(c =>
         c.id === conversationId
           ? { ...c, tags: [...new Set([...(c.tags || []), tagName])] }
           : c
@@ -271,7 +299,7 @@ export function useConversationHistory() {
       console.error('Failed to add tag:', e)
       return null
     }
-  }, [applyList])
+  }, [replaceRows])
 
   const removeTag = useCallback(async (conversationId, tagId) => {
     try {
@@ -291,7 +319,7 @@ export function useConversationHistory() {
         body: JSON.stringify({ title }),
       })
       if (!res.ok) return false
-      applyList(conversationsRef.current.map(c =>
+      replaceRows(conversationsRef.current.map(c =>
         c.id === conversationId ? { ...c, title } : c
       ))
       return true
@@ -299,7 +327,7 @@ export function useConversationHistory() {
       console.error('Failed to update title:', e)
       return false
     }
-  }, [applyList])
+  }, [replaceRows])
 
   const fetchTags = useCallback(async () => {
     try {

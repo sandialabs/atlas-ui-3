@@ -403,4 +403,34 @@ describe('useLocalConversationHistory across accounts', () => {
     await act(async () => { resolveAlice(); await pending })
     expect(result.current.conversations).toEqual([])
   })
+
+  it('drops a list whose count finishes after the account changed', async () => {
+    // The list itself arrives, but the count that follows it is still
+    // running when another account signs in.
+    vi.spyOn(db, 'listConversations').mockImplementation((owner) => (
+      owner === ALICE
+        ? Promise.resolve([{ id: 'a1', title: 'Alice chat' }])
+        : Promise.resolve([])
+    ))
+    let countStarted = false
+    let resolveCount
+    vi.spyOn(db, 'countConversations').mockImplementation((owner) => {
+      countStarted = true
+      expect(owner).toBe(ALICE)
+      return new Promise(resolve => { resolveCount = () => resolve(1) })
+    })
+
+    const { result, rerender } = renderHook(
+      ({ u }) => useLocalConversationHistory(u),
+      { initialProps: { u: ALICE } },
+    )
+    let pending
+    act(() => { pending = result.current.fetchConversations() })
+    // The list has arrived and the count is under way.
+    await act(async () => { while (!countStarted) await Promise.resolve() })
+    // Another account signs in before the count comes back.
+    rerender({ u: BOB })
+    await act(async () => { resolveCount(); await pending })
+    expect(result.current.conversations).toEqual([])
+  })
 })

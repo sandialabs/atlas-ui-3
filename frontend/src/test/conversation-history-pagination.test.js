@@ -14,10 +14,13 @@ import { useConversationHistory } from '../hooks/useConversationHistory'
 
 const conv = (id) => ({ id, title: id, updated_at: '2026-01-01T00:00:00Z' })
 
-const page = (ids, total) => ({
+// One page of the listing, as the server returns it: the rows, how many
+// conversations the listing holds, and whether the history continues past
+// this page.
+const page = (ids, total, offset = 0) => ({
   conversations: ids.map(conv),
   total: total ?? ids.length,
-  has_more: total !== undefined && total > ids.length,
+  has_more: total !== undefined && offset + ids.length < total,
 })
 
 const jsonResponse = (body, ok = true) => ({
@@ -42,8 +45,8 @@ describe('useConversationHistory paging', () => {
   })
 
   it('appends the next page without replacing or duplicating what is on screen', async () => {
-    const first = page(['a', 'b'], 4)
-    const second = page(['b', 'c'], 4)
+    const first = page(['a', 'b'], 5)
+    const second = page(['b', 'c'], 5, 2)
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(first))
       .mockResolvedValueOnce(jsonResponse(second))
@@ -58,6 +61,46 @@ describe('useConversationHistory paging', () => {
     // "b" came back a second time and is not shown twice.
     expect(result.current.conversations.map(c => c.id)).toEqual(['a', 'b', 'c'])
     expect(result.current.hasMore).toBe(true)
+  })
+
+  it('follows the server past a row that comes back twice', async () => {
+    // The order shifted between the two requests, so the page starts with a
+    // row that is already on screen.
+    const first = page(['a', 'b'], 5)
+    const second = page(['b', 'c', 'd'], 5, 2)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(first))
+      .mockResolvedValueOnce(jsonResponse(second))
+      .mockResolvedValueOnce(jsonResponse(page([], 5, 5)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useConversationHistory())
+    await act(async () => { await result.current.fetchConversations() })
+    await act(async () => { await result.current.loadMore() })
+
+    expect(result.current.conversations.map(c => c.id)).toEqual(['a', 'b', 'c', 'd'])
+
+    // The server's position moved on by the whole page, so the next one
+    // starts after it rather than repeating the boundary row for ever.
+    await act(async () => { await result.current.loadMore() })
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/conversations?limit=50&offset=5')
+  })
+
+  it('stops at the end of the history even when a row was repeated', async () => {
+    const first = page(['a', 'b'], 5)
+    const second = page(['b', 'c'], 4, 2)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(first))
+      .mockResolvedValueOnce(jsonResponse(second))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useConversationHistory())
+    await act(async () => { await result.current.fetchConversations() })
+    await act(async () => { await result.current.loadMore() })
+
+    // The server says the history ends here, so no page is offered even
+    // though the repeated row leaves one row uncounted.
+    expect(result.current.hasMore).toBe(false)
   })
 
   it('keeps the next page in the same tag as the listing', async () => {
@@ -75,7 +118,7 @@ describe('useConversationHistory paging', () => {
   it('reports the end of the history and stops offering a page', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page(['a'], 3)))
-      .mockResolvedValueOnce(jsonResponse(page(['b', 'c'], 3)))
+      .mockResolvedValueOnce(jsonResponse(page(['b', 'c'], 3, 1)))
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useConversationHistory())
@@ -90,7 +133,7 @@ describe('useConversationHistory paging', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page(['a'], 2)))
       .mockRejectedValueOnce(new Error('network down'))
-      .mockResolvedValueOnce(jsonResponse(page(['b'], 2)))
+      .mockResolvedValueOnce(jsonResponse(page(['b'], 2, 1)))
     vi.stubGlobal('fetch', fetchMock)
 
     const { result } = renderHook(() => useConversationHistory())
@@ -109,7 +152,7 @@ describe('useConversationHistory paging', () => {
   it('keeps the older rows a refresh would otherwise throw away', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(page(['a'], 3)))
-      .mockResolvedValueOnce(jsonResponse(page(['b'], 3)))
+      .mockResolvedValueOnce(jsonResponse(page(['b'], 3, 1)))
       .mockResolvedValueOnce(jsonResponse(page(['a', 'b'], 3)))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -120,6 +163,21 @@ describe('useConversationHistory paging', () => {
 
     // The older row survives the refresh, and the newest page stays in front.
     expect(result.current.conversations.map(c => c.id)).toEqual(['a', 'b'])
+  })
+
+  it('drops rows the server no longer has when it refreshes', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(page(['a', 'b'], 3)))
+      .mockResolvedValueOnce(jsonResponse(page(['a'], 1)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useConversationHistory())
+    await act(async () => { await result.current.fetchConversations() })
+    // Another tab deleted one of the conversations.
+    await act(async () => { await result.current.refreshConversations() })
+
+    expect(result.current.conversations.map(c => c.id)).toEqual(['a'])
+    expect(result.current.hasMore).toBe(false)
   })
 
   it('follows the history of the server when a conversation is deleted', async () => {
