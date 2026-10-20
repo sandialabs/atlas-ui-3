@@ -96,6 +96,15 @@ describe('SettingsPanel agent mode settings', () => {
     expect(screen.getByText('Currently off.').closest('p')).not.toHaveClass('approval-warning-text')
   })
 
+  // The visible heading is the switch's <label>, so clicking it toggles the
+  // switch: a deliberate, larger hit target, same as Reduce helper text.
+  it('toggles auto-approve from its label', async () => {
+    const updateSettings = vi.fn()
+    renderSettingsPanel({ settings: { autoApproveTools: false }, updateSettings })
+    fireEvent.click(await screen.findByText('Auto-Approve Tool Calls', { selector: 'label' }))
+    expect(updateSettings).toHaveBeenCalledWith({ autoApproveTools: true })
+  })
+
   it('uses the high-contrast approval warning style when auto-approve is on', async () => {
     renderSettingsPanel({ settings: { autoApproveTools: true } })
 

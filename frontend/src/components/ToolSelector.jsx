@@ -54,8 +54,11 @@ const ToolSelector = () => {
 
   // Opening the menu puts focus in the search box, so keyboard users land
   // inside it instead of having to Tab past the composer to reach the rows.
+  // Not on a touch open: focusing a text field raises the on-screen keyboard,
+  // which covers most of the popover's rows.
+  const openedByTouchRef = useRef(false)
   useEffect(() => {
-    if (isOpen) searchRef.current?.focus()
+    if (isOpen && !openedByTouchRef.current) searchRef.current?.focus()
   }, [isOpen])
 
   // Escape closes the menu and puts focus back on the button that opened it,
@@ -104,6 +107,8 @@ const ToolSelector = () => {
       <button
         type="button"
         ref={triggerRef}
+        onPointerDown={(e) => { openedByTouchRef.current = e.pointerType === 'touch' }}
+        onKeyDown={() => { openedByTouchRef.current = false }}
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-1 text-xs rounded transition-colors ${FOCUS_RING} ${
           isOpen || selectedCount > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-gray-400 hover:text-blue-400'

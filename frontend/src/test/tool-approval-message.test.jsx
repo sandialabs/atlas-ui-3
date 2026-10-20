@@ -239,16 +239,23 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
 
     setChat({ settings: { autoApproveTools: true } })
     render(<ToolApprovalMessage message={{ ...baseMessage, admin_required: true }} compact={compact} />)
-    expect(screen.getByText(/administrator requires approval for this tool, even with auto-approve on/)).toBeInTheDocument()
+    expect(screen.getByText(/administrator requires approval for this tool\. It always asks/)).toBeInTheDocument()
   })
 
   // Auto-approve on, but the automatic send failed (socket closed): the row
   // falls back to manual and must not claim the setting is off.
-  it('does not say auto-approve is off when an auto-approval could not be sent', () => {
+  it.each([true, false])('does not say auto-approve is off when an auto-approval could not be sent (compact=%s)', (compact) => {
     setChat({ settings: { autoApproveTools: true } })
-    render(<ToolApprovalMessage message={{ ...baseMessage, auto_approved: false }} compact={true} />)
+    render(<ToolApprovalMessage message={{ ...baseMessage, auto_approved: false }} compact={compact} />)
     expect(screen.getByText(/Auto-approve is on, but this call could not be approved automatically/)).toBeInTheDocument()
     expect(screen.queryByText(/Auto-Approve Tool Calls is off/)).not.toBeInTheDocument()
+  })
+
+  // Keyed on the row's recorded auto_approved, not the live setting alone.
+  it('keeps the plain reason for a row whose auto-approval was never attempted', () => {
+    setChat({ settings: { autoApproveTools: false } })
+    render(<ToolApprovalMessage message={{ ...baseMessage, auto_approved: false }} compact={true} />)
+    expect(screen.getByText(/Asking because Auto-Approve Tool Calls is off/)).toBeInTheDocument()
   })
 
   it('gives its controls button semantics and the reason box a label', () => {

@@ -20,14 +20,15 @@ export const AUTO_APPROVE_ON_TEXT =
   'Tool calls run without asking, except tools an administrator requires approval for, which always ask.'
 export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APPROVE_OFF_TEXT)
 
-// Why a pending approval row is asking at all. With auto-approve on, a
-// non-admin row only renders when the automatic send failed (socket closed),
-// so it must not claim the setting is off.
+// Why a pending approval row is asking at all. A pending row whose
+// `auto_approved` is recorded as false is one the automatic send already
+// tried and failed (socket closed); keyed on the row, not just the live
+// setting, so a row is never mislabelled by a later toggle.
 export const approvalReason = (message, settings) => {
   if (message?.admin_required) {
-    return 'An administrator requires approval for this tool, even with auto-approve on.'
+    return 'An administrator requires approval for this tool. It always asks, even with auto-approve on.'
   }
-  if (settings?.autoApproveTools) {
+  if (message?.auto_approved === false && settings?.autoApproveTools) {
     return 'Auto-approve is on, but this call could not be approved automatically. Approve or reject it here.'
   }
   return 'Asking because Auto-Approve Tool Calls is off. You can turn it on from the Active Tools bar or in Tools and Settings > General.'

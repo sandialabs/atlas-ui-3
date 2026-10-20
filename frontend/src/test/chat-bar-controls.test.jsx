@@ -6,7 +6,7 @@
  * names, enabled datasets visible as pills, and quick access to data source
  * selection.
  */
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, createEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
@@ -136,6 +136,19 @@ describe('ToolSelector in the chat bar', () => {
     expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
     const footer = screen.getByText(/Open Tools and Settings/)
     expect(footer.querySelector('.lucide-settings')).not.toBeNull()
+  })
+
+  // A touch open must not focus the search box: that raises the on-screen
+  // keyboard over the popover's rows.
+  it('does not focus the search box when opened by touch', () => {
+    render(<ToolSelector />)
+    const trigger = screen.getByRole('button', { name: /1 tool/ })
+    // jsdom has no PointerEvent, so set pointerType on the event by hand.
+    const touch = createEvent.pointerDown(trigger)
+    Object.defineProperty(touch, 'pointerType', { value: 'touch' })
+    fireEvent(trigger, touch)
+    fireEvent.click(trigger)
+    expect(screen.getByRole('searchbox', { name: 'Search tools' })).not.toHaveFocus()
   })
 
   // Parity with ToolsPanel (PR #839 review). The menu used to read the raw
