@@ -100,10 +100,13 @@ const ChatArea = () => {
   // Optional onboarding copy can be switched off in Tools and Settings.
   // Warnings, state, and actions never depend on it.
   const reduceHelpText = settings?.reduceHelpText === true
-  // A run is active while it is working or waiting on the user's answer.
-  // agent_error / agent_max_steps clear isAgentRunning but can leave a
-  // pending question, so both the footer status and the composer Stop use
-  // this one gate.
+  // The question card and the footer's "waiting for your answer" row share
+  // one condition, so the row never points at a card that is not shown.
+  // agent_error / agent_max_steps clear isAgentRunning but can leave the
+  // question pending, which is why the row checks it separately.
+  const showAgentQuestion = agentModeEnabled && !!agentPendingQuestion
+  // Stop stays reachable for any leftover question, even with Agent Mode
+  // toggled off, so hidden run state can always be cleared.
   const agentRunActive = isAgentRunning || !!agentPendingQuestion
   const maxFileSizeBytes = fileUpload?.max_file_size_bytes || DEFAULT_MAX_FILE_SIZE_BYTES
 
@@ -162,17 +165,17 @@ const ChatArea = () => {
 
   // Whether the currently selected model supports tool/function calling
   // Gateway model keys are opaque; name the model and its team instead.
-  const currentModelLabel = models?.find(m => m?.name === currentModel)?.display_name || currentModel
-  const currentModelSupportsTools = models?.some(
-    m => m.name === currentModel && m.supports_tools !== false
-  ) ?? true
+  const currentModelEntry = models?.find(m => m?.name === currentModel)
+  const currentModelLabel = currentModelEntry?.display_name || currentModel
   // Tri-state for the Agent Mode callout: null while the model list is still
   // loading or the stored model is not in it, so the callout never claims a
   // model "does not support tools" when that is only unknown.
-  const currentModelEntry = models?.find(m => m?.name === currentModel)
   const currentModelToolSupport = currentModelEntry
     ? currentModelEntry.supports_tools !== false
     : null
+  // The selected-tools warning keeps its existing rule: no model list yet
+  // means "assume yes"; a list without the model means "no".
+  const currentModelSupportsTools = models ? currentModelToolSupport === true : true
 
   // Auto-resize textarea. Delegated so the measurement cannot displace the
   // transcript's scroll position while the user types (#866).
@@ -894,7 +897,7 @@ const ChatArea = () => {
             onCorrect={correctionHandlers[index] || null}
           />
         ))}
-        {agentModeEnabled && agentPendingQuestion && (
+        {showAgentQuestion && (
           <div className="flex items-start gap-0 sm:gap-3 w-full">
             <div className="w-8 h-8 rounded-full bg-purple-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
               A
@@ -991,10 +994,10 @@ const ChatArea = () => {
               always visible, and reuses the same run state and Stop handler as
               the composer controls. */}
           <AgentRunStatus
-            isAgentRunning={agentRunActive}
+            isAgentRunning={isAgentRunning || showAgentQuestion}
             currentAgentStep={currentAgentStep}
             onStop={stopAgent}
-            waitingForAnswer={!!agentPendingQuestion}
+            waitingForAnswer={showAgentQuestion}
           />
 
           {/* Enabled Tools Indicator */}

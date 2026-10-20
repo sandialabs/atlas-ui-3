@@ -52,7 +52,8 @@ describe('AgentRunStatus', () => {
     )
     const status = screen.getByTestId('agent-run-status')
     expect(status).toHaveTextContent(/waiting for your answer/i)
-    expect(status).toHaveTextContent(/answer below/i)
+    expect(status).toHaveTextContent(/answer the agent's question/i)
+    expect(status).not.toHaveTextContent(/below|above/i)
   })
 })
 
@@ -126,6 +127,20 @@ describe('ChatArea - agent run status is pinned to the composer', () => {
     renderChat()
 
     expect(screen.getByTestId('agent-run-status')).toHaveTextContent(/waiting for your answer/i)
+    expect(screen.getByRole('button', { name: 'Stop agent' })).toBeInTheDocument()
+  })
+
+  it('drops the waiting row when Agent Mode is off and the question card is hidden', () => {
+    useChat.mockReturnValue(chatContext({
+      agentModeEnabled: false,
+      isAgentRunning: false,
+      agentPendingQuestion: 'Which file?',
+    }))
+    renderChat()
+
+    expect(screen.queryByTestId('agent-run-status')).not.toBeInTheDocument()
+    expect(screen.queryByText('Which file?')).not.toBeInTheDocument()
+    // The leftover question can still be cleared.
     expect(screen.getByRole('button', { name: 'Stop agent' })).toBeInTheDocument()
   })
 

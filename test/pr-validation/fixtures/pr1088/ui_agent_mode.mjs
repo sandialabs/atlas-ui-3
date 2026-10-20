@@ -101,6 +101,17 @@ const startBackend = async (name, port, mockPort, toolsEnabled) => {
   if (!(await waitFor(`http://127.0.0.1:${port}/api/health`))) throw new Error(`${name} backend did not come up`)
 }
 
+// Focus moves land a frame or two after a click/key, so poll briefly, and
+// name what holds focus if it is not the expected element.
+const expectFocused = async (locator, msg) => {
+  for (let i = 0; i < 20; i++) {
+    if (await locator.evaluate(el => el === document.activeElement)) return
+    await locator.page().waitForTimeout(100)
+  }
+  const actual = await locator.page().evaluate(() => document.activeElement?.outerHTML?.slice(0, 160))
+  throw new Error(`FAIL: ${msg} (focused: ${actual})`)
+}
+
 // Seed browser state before the app reads it, then reload so it takes effect.
 const seed = async (page, base, { tools, settings = {} }) => {
   await page.goto(base)
@@ -110,7 +121,11 @@ const seed = async (page, base, { tools, settings = {} }) => {
     localStorage.setItem('chatui-settings', JSON.stringify({ autoApproveTools: true, ...settings }))
   }, { tools, settings })
   await page.reload()
-  await page.getByRole('textbox', { name: /Type a message/ }).waitFor()
+  const textbox = page.getByRole('textbox', { name: /Type a message/ })
+  await textbox.waitFor()
+  // ChatArea focuses the composer ~200 ms after mount on desktop; let that
+  // land first or it steals focus from whatever the test opens next.
+  await expectFocused(textbox, 'composer auto-focus after load')
 }
 
 const inViewport = async (locator) => {
@@ -120,6 +135,7 @@ const inViewport = async (locator) => {
 }
 
 let page = null
+let browser = null
 try {
   const MOCK_PORT = await freePort()
   const ATLAS_PORT = await freePort()
@@ -130,7 +146,7 @@ try {
   await startBackend('notools', NO_TOOLS_PORT, MOCK_PORT, false)
   console.log('mock model and both backends are up')
 
-  const browser = await chromium.launch()
+  browser = await chromium.launch()
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } })
   page = await ctx.newPage()
   const base = `http://127.0.0.1:${ATLAS_PORT}`
@@ -165,14 +181,14 @@ try {
   await shot(page, '2-help-popover')
   await page.keyboard.press('Escape')
   await helpDialog.waitFor({ state: 'detached', timeout: 5000 })
-  check(await helpButton.evaluate(el => el === document.activeElement), 'focus returns to the help button')
+  await expectFocused(helpButton, 'focus returns to the help button')
   // Keyboard path through the Close button returns focus too.
   await helpButton.press('Enter')
   await helpDialog.waitFor()
   await helpDialog.getByRole('button', { name: 'Close' }).focus()
   await page.keyboard.press('Enter')
   await helpDialog.waitFor({ state: 'detached', timeout: 5000 })
-  check(await helpButton.evaluate(el => el === document.activeElement), 'Close returns focus to the help button')
+  await expectFocused(helpButton, 'Close returns focus to the help button')
   pass('Help popover opens, explains Agent Mode, closes on Escape or Close, and returns focus')
 
   // 3. Short phone viewport keeps the composer reachable.
@@ -216,7 +232,9 @@ try {
   await textbox2.fill('words=400 stream_ms=0 steps=0 label=PRE')
   await page.getByTestId('send-button').click()
   await page.getByText('END[PRE]').waitFor({ timeout: 30000 })
-  await textbox2.fill('sleep=6 steps=4 label=RUN1088')
+  // About 60 s of tool steps, well past the Stop window below, so the
+  // row going away can only mean Stop worked.
+  await textbox2.fill('sleep=6 steps=10 label=RUN1088')
   await page.getByTestId('send-button').click()
   const status = page.getByTestId('agent-run-status')
   await status.waitFor({ timeout: 15000 })
@@ -238,9 +256,13 @@ try {
   await shot(page, '6-agent-running-scrolled-up')
   pass('Agent run status shows "Agent is running" with a step count and stays visible when scrolled to the top')
 
+  const stoppedAt = Date.now()
   await status.getByRole('button', { name: 'Stop agent run' }).click()
-  await status.waitFor({ state: 'detached', timeout: 20000 })
-  check((await page.getByText('END[RUN1088]').count()) === 0, 'stopped run did not finish its answer')
+  await status.waitFor({ state: 'detached', timeout: 15000 })
+  check(Date.now() - stoppedAt < 15000, 'run status cleared promptly after Stop')
+  await page.waitForTimeout(8000)
+  check((await page.getByText('END[RUN1088]').count()) === 0, 'stopped run never produced its final answer')
+  check((await status.count()) === 0, 'run status did not come back after Stop')
   pass('Stop in the run status ends the run and the status row goes away')
 
   // 7. Tools disabled for the deployment.
@@ -259,12 +281,21 @@ try {
   await shot(page, '7-tools-disabled')
   pass('With tools disabled, callout and help say so and offer no Choose tools')
 
-  await browser.close()
   console.log('ALL PASSED')
 } catch (err) {
   try { if (page && SHOTS) await page.screenshot({ path: join(SHOTS, 'debug-failure.png') }) } catch { /* best effort */ }
   console.error(err)
   process.exitCode = 1
 } finally {
-  for (const p of procs) p.kill()
+  // An open browser keeps node alive, so close it on failure too.
+  if (browser) await browser.close().catch(() => {})
+  // Wait for the servers to exit (SIGKILL after a grace period): a backend
+  // still shutting down keeps the inherited stdout open, and a caller that
+  // captures this script's output would block on it.
+  await Promise.all(procs.map(p => new Promise((resolve) => {
+    if (p.exitCode !== null || p.signalCode !== null) return resolve()
+    const force = setTimeout(() => p.kill('SIGKILL'), 5000)
+    p.once('exit', () => { clearTimeout(force); resolve() })
+    p.kill()
+  })))
 }

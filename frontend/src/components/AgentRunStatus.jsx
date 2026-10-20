@@ -26,7 +26,7 @@ export default function AgentRunStatus({
   const hasStep = Number.isFinite(step) && step > 0
   const title = waitingForAnswer ? 'Agent is waiting for your answer' : 'Agent is running'
   const subtitle = waitingForAnswer
-    ? 'Answer below to continue this run.'
+    ? "Answer the agent's question to continue this run."
     : 'Using tools as needed; it will keep going until the task is done.'
 
   return (
