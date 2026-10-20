@@ -209,6 +209,8 @@ export function createWebSocketHandler(deps) {
           addMessage({ role: 'system', content: `Agent Error (Step ${data.turn}): ${data.message}`, type: 'agent_error', timestamp: new Date().toISOString() })
           setIsThinking(false)
           clearAgentRunning()
+          // The run is over, so a question it asked can no longer be answered.
+          if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           setCurrentAgentStep(0)
           break
@@ -216,6 +218,7 @@ export function createWebSocketHandler(deps) {
           addMessage({ role: 'system', content: `Agent Max Steps Reached - ${data.message}`, type: 'agent_status', timestamp: new Date().toISOString() })
           setIsThinking(false)
           clearAgentRunning()
+          if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
           setCurrentAgentStep(0)
           break

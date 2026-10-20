@@ -92,6 +92,25 @@ describe('SettingsPanel agent mode settings', () => {
     expect(screen.getByText(/Currently:/)).toBeInTheDocument()
   })
 
+  it('shows a plain-language Agent Mode explanation by default', async () => {
+    renderSettingsPanel()
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    expect(await screen.findByRole('heading', { name: 'Agent Mode' })).toBeInTheDocument()
+    expect(screen.getByText(/take multiple steps/i)).toBeInTheDocument()
+    expect(screen.getByText(/behaves like normal chat/i)).toBeInTheDocument()
+    expect(screen.getByText(/model that supports tool calling/i)).toBeInTheDocument()
+  })
+
+  it('hides the Agent Mode explanation when helper text is reduced', async () => {
+    renderSettingsPanel({ settings: { reduceHelpText: true } })
+
+    fireEvent.click(await screen.findByRole('tab', { name: /General/ }))
+    expect(await screen.findByText('Max Agent Iterations')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Agent Mode' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/take multiple steps/i)).not.toBeInTheDocument()
+  })
+
   it('exposes the Compact Tool Messages toggle and updates the setting when clicked', async () => {
     const updateSettings = vi.fn()
     renderSettingsPanel({ settings: { compactMessages: true }, updateSettings })

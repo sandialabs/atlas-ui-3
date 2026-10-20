@@ -5,6 +5,7 @@ import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import WorkspaceSelector from './WorkspaceSelector'
 import ConversationSetupCluster, { NewChatButton } from './ConversationSetupControls'
+import { AgentModeHelpButton, AgentModeMenuHint } from './AgentModeHelp'
 import { Database, Wrench, Bot, ExternalLink, FileText, CircleHelp, FolderOpen, Monitor, Menu, X, PanelLeft, Printer } from 'lucide-react'
 import { classificationLock } from '../utils/conversationClassification'
 import { useElementWidth } from '../hooks/useElementWidth'
@@ -300,19 +301,30 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
             )}
           </div>
 
-          {/* Agent Mode Toggle Button */}
+          {/* Agent Mode Toggle Button. The explanation is progressive
+              disclosure behind the adjacent help button, so the toolbar keeps
+              its icon-only density for people who already know the feature. */}
           {agentModeAvailable && (
-            <button
-              onClick={() => setAgentModeEnabled(!agentModeEnabled)}
-              className={`p-2 rounded-lg transition-colors ${
-                agentModeEnabled 
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                  : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-              }`}
-              title={agentModeEnabled ? "Agent Mode: ON (click or Ctrl+Alt+A to disable)" : "Agent Mode: OFF (click or Ctrl+Alt+A to enable)"}
-            >
-              <Bot className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => setAgentModeEnabled(!agentModeEnabled)}
+                className={`p-2 rounded-lg transition-colors ${
+                  agentModeEnabled 
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                    : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                }`}
+                title={reduceHelpText
+                  ? `Agent Mode: ${agentModeEnabled ? 'ON' : 'OFF'} (Ctrl+Alt+A)`
+                  : (agentModeEnabled
+                    ? 'Agent Mode: ON -- the assistant can take multiple steps with your selected tools (click or Ctrl+Alt+A to disable)'
+                    : 'Agent Mode: OFF -- turn on to let the assistant take multiple steps with your selected tools (click or Ctrl+Alt+A)')}
+                aria-label={`Agent Mode: ${agentModeEnabled ? 'on' : 'off'}`}
+                aria-pressed={agentModeEnabled}
+              >
+                <Bot className="w-5 h-5" />
+              </button>
+              <AgentModeHelpButton quiet={reduceHelpText} toolsEnabled={!!features?.tools} />
+            </div>
           )}
 
           {/* The admin shield is gone from the toolbar (issue #839 review):
@@ -463,7 +475,10 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                   }`}
                 >
                   <Bot className="w-5 h-5" />
-                  <span>Agent Mode: {agentModeEnabled ? 'ON' : 'OFF'}</span>
+                  <span className="flex flex-col items-start text-left">
+                    <span>Agent Mode: {agentModeEnabled ? 'ON' : 'OFF'}</span>
+                    {!reduceHelpText && <AgentModeMenuHint />}
+                  </span>
                   <span className="ml-auto text-xs opacity-60">Ctrl+Alt+A</span>
                 </button>
               )}

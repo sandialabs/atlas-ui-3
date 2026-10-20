@@ -22,6 +22,7 @@ const h = vi.hoisted(() => ({
   toastInfo: vi.fn(),
   selectedTools: new Set(),
   ragEnabled: false,
+  setAgentPendingQuestion: vi.fn(),
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -77,7 +78,7 @@ vi.mock('../hooks/chat/useAgentMode', () => ({
     agentModeAvailable: true,
     agentMaxSteps: 10,
     setCurrentAgentStep: vi.fn(),
-    setAgentPendingQuestion: vi.fn(),
+    setAgentPendingQuestion: h.setAgentPendingQuestion,
     agentPendingQuestion: null,
   }),
 }))
@@ -155,5 +156,20 @@ describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.agent_mode).toBe(true)
     expect(payload.selected_tools).toEqual(['server_tool1'])
+  })
+})
+
+describe('stopAgent (real ChatProvider)', () => {
+  it('clears a pending agent question along with the run', () => {
+    // Otherwise the footer's "waiting for your answer" row and both Stop
+    // buttons stay up after Stop with nothing left to answer.
+    const { result } = renderChat()
+    h.setAgentPendingQuestion.mockClear()
+    h.sendMessage.mockClear()
+
+    act(() => { result.current.stopAgent() })
+
+    expect(h.setAgentPendingQuestion).toHaveBeenCalledWith(null)
+    expect(h.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'agent_control', action: 'stop' }))
   })
 })
