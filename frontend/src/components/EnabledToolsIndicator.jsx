@@ -127,7 +127,7 @@ const EnabledToolsIndicator = () => {
             ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
             : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
         }`}
-        title={`Auto-approve tool calls. ${describeAutoApprove(autoApproveOn)} Click to turn it ${autoApproveOn ? 'off' : 'on'}.`}
+        title={`Auto-approve tool calls is ${autoApproveOn ? 'on' : 'off'}. ${describeAutoApprove(autoApproveOn)} Click to turn it ${autoApproveOn ? 'off' : 'on'}.`}
       >
         {autoApproveOn ? 'Auto-approve: On' : 'Auto-approve: Off'}
       </button>

@@ -208,7 +208,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           </span>
           <span className="font-medium">{message.tool_name}</span>
         </div>
-        <p className="text-xs text-gray-400 -mt-2 mb-3">{approvalReason(message)}</p>
+        <p className="text-xs text-gray-400 -mt-2 mb-3">{approvalReason(message, settings)}</p>
 
         {/* Arguments Section */}
         <div className="mb-4">
@@ -331,7 +331,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       {/* Why this call is waiting on the user: the setting is off, or an
           admin gate overrides it. Without this the row never said the user
           could stop being asked. */}
-      <p className="mt-1 ml-5 text-xs text-gray-400">{approvalReason(message)}</p>
+      <p className="mt-1 ml-5 text-xs text-gray-400">{approvalReason(message, settings)}</p>
 
       {/* Expanded arguments (view / edit) */}
       {isExpanded && (

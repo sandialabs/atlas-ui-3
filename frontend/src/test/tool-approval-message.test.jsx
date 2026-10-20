@@ -242,6 +242,15 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(screen.getByText(/administrator requires approval for this tool, even with auto-approve on/)).toBeInTheDocument()
   })
 
+  // Auto-approve on, but the automatic send failed (socket closed): the row
+  // falls back to manual and must not claim the setting is off.
+  it('does not say auto-approve is off when an auto-approval could not be sent', () => {
+    setChat({ settings: { autoApproveTools: true } })
+    render(<ToolApprovalMessage message={{ ...baseMessage, auto_approved: false }} compact={true} />)
+    expect(screen.getByText(/Auto-approve is on, but this call could not be approved automatically/)).toBeInTheDocument()
+    expect(screen.queryByText(/Auto-Approve Tool Calls is off/)).not.toBeInTheDocument()
+  })
+
   it('gives its controls button semantics and the reason box a label', () => {
     setChat()
     render(<ToolApprovalMessage message={baseMessage} compact={true} />)

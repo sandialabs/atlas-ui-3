@@ -13,14 +13,22 @@ export const resolveAutoApproved = (message, settings) => {
 
 // One wording for what Auto-Approve Tool Calls does, shared by the settings
 // toggle, the Active Tools strip and the approval row, so the three never
-// disagree about what "off" means.
+// disagree about what "off" means. No app name: deployments rename the app.
 export const AUTO_APPROVE_OFF_TEXT =
-  'Off (default): Atlas asks you to approve each tool call before it runs.'
+  'You are asked to approve each tool call before it runs. This is the default.'
 export const AUTO_APPROVE_ON_TEXT =
-  'On: tool calls run without asking, except tools an administrator requires approval for. Those always ask.'
+  'Tool calls run without asking, except tools an administrator requires approval for, which always ask.'
 export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APPROVE_OFF_TEXT)
 
-// Why a pending approval row is asking at all.
-export const approvalReason = (message) => (message?.admin_required
-  ? 'An administrator requires approval for this tool, even with auto-approve on.'
-  : 'Asking because Auto-Approve Tool Calls is off. You can turn it on from the Active Tools bar or in Tools and Settings > General.')
+// Why a pending approval row is asking at all. With auto-approve on, a
+// non-admin row only renders when the automatic send failed (socket closed),
+// so it must not claim the setting is off.
+export const approvalReason = (message, settings) => {
+  if (message?.admin_required) {
+    return 'An administrator requires approval for this tool, even with auto-approve on.'
+  }
+  if (settings?.autoApproveTools) {
+    return 'Auto-approve is on, but this call could not be approved automatically. Approve or reject it here.'
+  }
+  return 'Asking because Auto-Approve Tool Calls is off. You can turn it on from the Active Tools bar or in Tools and Settings > General.'
+}
