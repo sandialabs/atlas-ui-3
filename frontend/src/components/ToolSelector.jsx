@@ -56,9 +56,23 @@ const ToolSelector = () => {
   // inside it instead of having to Tab past the composer to reach the rows.
   // Not on a touch or pen open: focusing a text field raises the on-screen
   // keyboard, which covers most of the popover's rows.
+  //
+  // The pointer type is noted at pointerdown but only acted on by the click
+  // it produces: a pointerdown that never becomes a click (a cancelled tap, a
+  // drag off the button) is dropped on pointercancel or by age, and every
+  // click consumes it, so a later screen-reader or keyboard open -- no
+  // pointerdown at all -- still focuses the search box.
+  const lastPointerRef = useRef(null)
   const skipSearchFocusRef = useRef(false)
-  // The flag is consumed on read, so a later open with no pointerdown (a
-  // screen reader's synthetic click) is not stuck with a stale touch value.
+  const POINTER_CLICK_WINDOW_MS = 1500
+  const handleTriggerClick = () => {
+    const pointer = lastPointerRef.current
+    lastPointerRef.current = null
+    skipSearchFocusRef.current = Boolean(
+      pointer && pointer.type !== 'mouse' && Date.now() - pointer.at < POINTER_CLICK_WINDOW_MS
+    )
+    setIsOpen(!isOpen)
+  }
   useEffect(() => {
     const skip = skipSearchFocusRef.current
     skipSearchFocusRef.current = false
@@ -111,9 +125,9 @@ const ToolSelector = () => {
       <button
         type="button"
         ref={triggerRef}
-        onPointerDown={(e) => { skipSearchFocusRef.current = e.pointerType !== 'mouse' }}
-        onKeyDown={() => { skipSearchFocusRef.current = false }}
-        onClick={() => setIsOpen(!isOpen)}
+        onPointerDown={(e) => { lastPointerRef.current = { type: e.pointerType, at: Date.now() } }}
+        onPointerCancel={() => { lastPointerRef.current = null }}
+        onClick={handleTriggerClick}
         className={`flex items-center gap-1 text-xs rounded transition-colors ${FOCUS_RING} ${
           isOpen || selectedCount > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-gray-400 hover:text-blue-400'
         }`}

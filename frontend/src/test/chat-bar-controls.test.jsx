@@ -164,6 +164,27 @@ describe('ToolSelector in the chat bar', () => {
     expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
   })
 
+  // A touch pointerdown that never becomes a click (cancelled tap, drag off)
+  // must not leak into the next, pointer-less open.
+  it.each([
+    ['cancelled', (trigger) => fireEvent(trigger, createEvent.pointerCancel(trigger))],
+    ['stale', () => vi.advanceTimersByTime(5000)],
+  ])('ignores a %s touch pointerdown on the next synthetic-click open', (_label, settle) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      render(<ToolSelector />)
+      const trigger = screen.getByRole('button', { name: /1 tool/ })
+      const down = createEvent.pointerDown(trigger)
+      Object.defineProperty(down, 'pointerType', { value: 'touch' })
+      fireEvent(trigger, down)
+      settle(trigger)
+      fireEvent.click(trigger)
+      expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('still focuses the search box when opened with a mouse', () => {
     render(<ToolSelector />)
     const trigger = screen.getByRole('button', { name: /1 tool/ })
