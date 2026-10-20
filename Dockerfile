@@ -23,7 +23,7 @@ ARG APP_VERSION="unknown"
 ENV GIT_HASH=${GIT_HASH} APP_VERSION=${APP_VERSION}
 RUN npm run build
 
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.3@sha256:bee0a2a458fd956c5df7b8b4c5fed2257b0af34866e3da7b51db0be3acb375d1 AS uv
 
 FROM python-base AS python-build
 COPY --from=uv /uv /usr/local/bin/uv
