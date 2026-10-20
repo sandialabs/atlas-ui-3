@@ -61,8 +61,8 @@ describe('ModelSelector - compliance filter', () => {
   it('flags a selected model outside the active level', () => {
     setup({ currentModel: 'public-model', complianceLevelFilter: 'HIPAA' })
     const button = screen.getByRole('button', { name: /Select chat model/ })
-    expect(button).toHaveAttribute('aria-label', expect.stringContaining('outside the HIPAA compliance level'))
-    expect(button.title).toMatch(/outside the HIPAA compliance level/)
+    expect(button).toHaveAttribute('aria-label', expect.stringContaining('outside the HIPAA security level'))
+    expect(button.title).toMatch(/outside the HIPAA security level/)
   })
 
   it('does not flag a model whose classifications include the level', () => {
@@ -74,7 +74,7 @@ describe('ModelSelector - compliance filter', () => {
   it('flags a SOC2-only model under HIPAA despite allowed_with', () => {
     setup({ currentModel: 'soc2-model', complianceLevelFilter: 'HIPAA' })
     const button = screen.getByRole('button', { name: /Select chat model/ })
-    expect(button).toHaveAttribute('aria-label', expect.stringContaining('outside the HIPAA compliance level'))
+    expect(button).toHaveAttribute('aria-label', expect.stringContaining('outside the HIPAA security level'))
   })
 
   it('lists only the models approved for the level', () => {
@@ -89,6 +89,6 @@ describe('ModelSelector - compliance filter', () => {
   it('explains an empty list instead of rendering nothing', () => {
     setup({ currentModel: 'public-model', complianceLevelFilter: 'Internal' })
     fireEvent.click(screen.getByRole('button', { name: /Select chat model/ }))
-    expect(screen.getByText(/No models match the Internal compliance level/)).toBeInTheDocument()
+    expect(screen.getByText(/No models match the Internal security level/)).toBeInTheDocument()
   })
 })

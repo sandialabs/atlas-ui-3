@@ -83,7 +83,7 @@ const ModelSelector = () => {
     !isComplianceAccessible(complianceLevelFilter, classificationsOf(currentObj))
   const buttonTitle = currentModel
     ? (currentOutsideFilter
-      ? `Model: ${currentLabel} is outside the ${complianceLevelFilter} compliance level; choose a compliant model`
+      ? `Model: ${currentLabel} is outside the ${complianceLevelFilter} security level; choose a compliant model`
       : `Model: ${currentLabel}`)
     : 'Select a model'
 
@@ -100,7 +100,7 @@ const ModelSelector = () => {
         }`}
         title={buttonTitle}
         aria-label={currentModel
-          ? `Select chat model, currently ${currentLabel}${currentOutsideFilter ? `, outside the ${complianceLevelFilter} compliance level` : ''}`
+          ? `Select chat model, currently ${currentLabel}${currentOutsideFilter ? `, outside the ${complianceLevelFilter} security level` : ''}`
           : 'Select chat model'}
         aria-expanded={dropdownOpen}
         aria-haspopup="true"
@@ -125,7 +125,7 @@ const ModelSelector = () => {
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
             ) : visibleListedModels.length === 0 && visibleGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">
-                No models match the {complianceLevelFilter} compliance level
+                No models match the {complianceLevelFilter} security level
               </div>
             ) : (
               visibleListedModels.map(m => {

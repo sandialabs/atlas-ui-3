@@ -113,7 +113,9 @@ The script only touches conversations with no record and never rewrites one.
 
 ## Enabling the Compliance Selector
 
-Set `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`. The header then shows a compliance level selector (in the overflow menu on narrow screens) listing every defined level, plus "All Levels" for no filter.
+Set `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`. The header then shows a compliance level selector, labelled **Security level** (in the overflow menu on narrow screens), listing every defined level, plus "All Levels" for no filter.
+
+The UI uses "security level" in its own messages (model picker, data sources, conversation refusals) to match that label; its help popover explains that the security level is the deployment's compliance level. Messages that come from the server, and the API's `compliance_level` field, keep the "compliance level" name.
 
 ## Classification Banner (optional)
 

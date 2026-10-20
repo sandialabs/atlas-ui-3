@@ -89,7 +89,7 @@ function setup({
   render(<RagPanel isOpen={true} onClose={vi.fn()} />)
 }
 
-const BOUNDARY_HINT = /Not approved for the selected compliance level/
+const BOUNDARY_HINT = /Not approved for the selected security level/
 
 describe('RagPanel - header compliance filter vs. server classifications', () => {
   beforeEach(() => {
