@@ -947,9 +947,18 @@ class ChatService:
         # Mirrored onto the session so a connection that resumes it -- on any
         # replica -- keeps the incognito prefix out of the saved conversation
         # (see restore_connection_state).
+        #
+        # Built from this turn's own snapshot as a fallback: a cancelled turn
+        # can commit after end_session() discarded this service's floor, and
+        # reading the torn-down state there would mirror a floor of 0 and
+        # publish the incognito prefix.
+        if is_incognito and session_id not in self._save_floor_locked:
+            floor_value = len(session.history.messages)
+        else:
+            floor_value = max(save_floor, self._incognito_save_floor.get(session_id, 0))
         session.context[_SAVE_FLOOR_KEY] = {
-            "floor": self._incognito_save_floor.get(session_id, 0),
-            "locked": session_id in self._save_floor_locked,
+            "floor": floor_value,
+            "locked": (not is_incognito) or session_id in self._save_floor_locked,
         }
 
         # Persist conversation (if not incognito and feature enabled)

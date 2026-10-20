@@ -403,3 +403,27 @@ async def test_run_files_merged_after_disconnect_survive_a_later_resume(server):
     replica_b = _service(_redis_repo(server), "conn-b")
     resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
     assert resumed.context["files"]["out.csv"]["key"] == "u/out.csv"
+
+
+@pytest.mark.asyncio
+async def test_commit_after_teardown_keeps_the_incognito_prefix_out(server):
+    """A cancelled turn committing after end_session still honours its floor."""
+    repo = _redis_repo(server)
+    replica = _service(repo, "conn-a")
+    session_id = uuid4()
+    with patch.object(replica, "_get_orchestrator", return_value=_orchestrator([])):
+        await replica.handle_chat_message(
+            session_id=session_id, content="secret", model="m", user_email=USER, incognito=True,
+        )
+    session = await repo.get(session_id)
+    session.context["incognito"] = False  # the cancelled turn was a saved one
+    session.history.add_message(Message(role=MessageRole.USER, content="public"))
+    # The torn-down service state the late commit would otherwise read.
+    replica._incognito_save_floor.clear()
+    replica._save_floor_locked.clear()
+    replica._incognito_sessions.clear()
+    await replica._commit_turn(
+        session, session_id, USER, "m", None, is_incognito=False, save_floor=2,
+    )
+    raw = await repo._redis.client.hget(repo._key(session_id), "data")
+    assert b"secret" not in raw and b"public" in raw

@@ -2736,21 +2736,27 @@ async def websocket_endpoint(websocket: WebSocket):
                 # A tracked run may own the conversation this session is
                 # currently pointing at; handle_reset_session would otherwise
                 # release its MCP sessions on the way to a fresh conversation.
-                reset_session_record = await chat_service.session_repository.get(session_id)
-                reset_conv_id = (
-                    reset_session_record.context.get("conversation_id")
-                    if reset_session_record
-                    else None
-                )
-                preserve_resources = (
-                    run_registry.active_for_conversation(reset_conv_id, user_email)
-                    is not None
-                )
-                response = await chat_service.handle_reset_session(
-                    session_id=session_id,
-                    user_email=user_email,
-                    preserve_conversation_resources=preserve_resources,
-                )
+                try:
+                    reset_session_record = await chat_service.session_repository.get(session_id)
+                    reset_conv_id = (
+                        reset_session_record.context.get("conversation_id")
+                        if reset_session_record
+                        else None
+                    )
+                    preserve_resources = (
+                        run_registry.active_for_conversation(reset_conv_id, user_email)
+                        is not None
+                    )
+                    response = await chat_service.handle_reset_session(
+                        session_id=session_id,
+                        user_email=user_email,
+                        preserve_conversation_resources=preserve_resources,
+                    )
+                except DomainError as e:
+                    # Session store unavailable, or the session was resumed
+                    # by another connection (issue #1091): tell the client
+                    # rather than dropping the socket.
+                    response = {"type": "error", "message": e.message, "error_type": "domain"}
                 await websocket.send_json(response)
 
             elif message_type == "attach_file":
@@ -2897,10 +2903,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        await cleanup_disconnected_session(
-            chat_service, session_id, user_email, active_chat_task, connection_run_ids
-        )
+        pass
     finally:
+        # Tear down on every exit, not only a clean disconnect: a handler
+        # error that ends the socket must still end its session, or a shared
+        # store keeps it marked active and owned by a dead connection, and
+        # every reconnect is refused until the TTL expires (issue #1091).
+        try:
+            await cleanup_disconnected_session(
+                chat_service, session_id, user_email, active_chat_task, connection_run_ids
+            )
+        except Exception as e:  # pragma: no cover - teardown must not mask the exit
+            logger.warning("Error tearing down session on socket exit: %s", type(e).__name__)
         # Stop feeding run-status frames to a socket that is gone; the runs
         # themselves keep going.
         unsubscribe_run_status()
