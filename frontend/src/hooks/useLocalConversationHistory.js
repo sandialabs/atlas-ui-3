@@ -56,14 +56,22 @@ export function useLocalConversationHistory(user) {
     setHasMore(false)
   }, [owner])
 
-  // Store a new list and re-derive the paging state from it.
+  // Store a new list and re-derive the paging state from it. A total of
+  // `null` means the count is not known; a full page then still suggests
+  // there is more behind it.
   const applyList = useCallback((next, total) => {
     const rows = Array.isArray(next) ? next : []
     conversationsRef.current = rows
     offsetRef.current = rows.length
-    if (typeof total === 'number') totalRef.current = total
+    if (typeof total === 'number') {
+      totalRef.current = total
+      setHasMore(total > rows.length)
+    } else if (total === null) {
+      setHasMore(rows.length >= CONVERSATION_PAGE_SIZE)
+    } else {
+      setHasMore(totalRef.current > rows.length)
+    }
     setConversations(rows)
-    setHasMore(totalRef.current > rows.length)
   }, [])
 
   // How many conversations the account has stored. A storage backend that
