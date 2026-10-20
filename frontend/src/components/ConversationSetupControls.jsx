@@ -38,6 +38,11 @@ function SaveModeIcon({ choice, className = 'w-4 h-4' }) {
  * When the conversation has started, a lock icon, "Locked for this chat", and
  * the next step ("Start a new chat...") are all rendered inline -- never left
  * to a hover title.
+ *
+ * `density="compact"` is the narrow form the bar uses once it is too tight
+ * for the full group: the select keeps the shield and the lock, and drops the
+ * label and the surrounding box so the level stays visible (and changeable)
+ * in a bar that has no room for the full control.
  */
 export function SecurityLevelControl({
   complianceOptions,
@@ -46,12 +51,14 @@ export function SecurityLevelControl({
   onChange,
   lock,
   variant = 'bar',
+  density = 'full',
   guidanceId: externalGuidanceId = null,
 }) {
   const selectId = useId()
   const internalGuidanceId = `${selectId}-guidance`
   const guidanceId = externalGuidanceId || internalGuidanceId
   const isMenu = variant === 'menu'
+  const isCompact = density === 'compact'
 
   const select = (
     <select
@@ -62,8 +69,13 @@ export function SecurityLevelControl({
       aria-label="Security level"
       aria-describedby={lock.locked ? guidanceId : undefined}
       data-locked={lock.locked ? 'true' : 'false'}
-      className={`w-full bg-gray-600 border border-gray-500 rounded px-2 py-0.5 text-gray-100 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-        isMenu ? 'mt-2' : 'mt-0.5'
+      title={isCompact ? 'Security level' : undefined}
+      className={`${
+        isCompact
+          ? 'w-24 bg-gray-600 border border-gray-500 rounded px-1.5 py-0.5 text-gray-100 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500'
+          : `w-full bg-gray-600 border border-gray-500 rounded px-2 py-0.5 text-gray-100 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              isMenu ? 'mt-2' : 'mt-0.5'
+            }`
       } ${lock.locked ? 'opacity-80 cursor-not-allowed' : ''}`}
     >
       {lock.locked
@@ -78,6 +90,30 @@ export function SecurityLevelControl({
       ))}
     </select>
   )
+
+  if (isCompact) {
+    return (
+      <div
+        className="flex items-center gap-1.5"
+        data-testid="security-level-control"
+        data-locked={lock.locked ? 'true' : 'false'}
+        data-density="compact"
+      >
+        <Shield className="w-4 h-4 text-blue-400 flex-shrink-0" aria-hidden="true" />
+        {lock.locked && (
+          <Lock className="w-3.5 h-3.5 conversation-lock-text flex-shrink-0" aria-hidden="true" />
+        )}
+        {select}
+        {lock.locked && (
+          // The guidance stays in the accessibility tree (the select points at
+          // it) but takes no room: the compact bar has none to spare.
+          <p id={guidanceId} className="sr-only">
+            Locked for this chat. Start a new chat to change security level.
+          </p>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div
