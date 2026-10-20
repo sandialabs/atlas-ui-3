@@ -826,6 +826,52 @@ class AppSettings(BaseSettings):
     db_name: Optional[str] = Field(default=None, validation_alias="DB_NAME")
     db_user: Optional[str] = Field(default=None, validation_alias="DB_USER")
     db_password: Optional[str] = Field(default=None, validation_alias="DB_PASSWORD")
+    # PostgreSQL connection pool. Every API process owns its own pool, so a
+    # deployment can open up to replicas x workers x (pool_size + max_overflow)
+    # connections; these settings keep that budget explicit (issue #1091).
+    # Ignored for DuckDB.
+    chat_history_db_pool_size: int = Field(
+        default=5,
+        ge=1,
+        description="Connections each process keeps open in its PostgreSQL pool",
+        validation_alias="CHAT_HISTORY_DB_POOL_SIZE",
+    )
+    chat_history_db_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        description="Extra PostgreSQL connections a process may open beyond the pool size under load",
+        validation_alias="CHAT_HISTORY_DB_MAX_OVERFLOW",
+    )
+    chat_history_db_pool_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="Seconds a request waits for a free pooled connection before failing",
+        validation_alias="CHAT_HISTORY_DB_POOL_TIMEOUT",
+    )
+    chat_history_db_pool_recycle: int = Field(
+        default=1800,
+        ge=-1,
+        description="Seconds after which a pooled connection is replaced (-1 disables); "
+                    "keep it below any proxy or load-balancer idle timeout",
+        validation_alias="CHAT_HISTORY_DB_POOL_RECYCLE",
+    )
+    chat_history_db_pool_pre_ping: bool = Field(
+        default=True,
+        description="Check each pooled connection is alive before handing it out",
+        validation_alias="CHAT_HISTORY_DB_POOL_PRE_PING",
+    )
+    chat_history_db_connect_timeout: int = Field(
+        default=10,
+        ge=1,
+        description="Seconds to wait when opening a new PostgreSQL connection",
+        validation_alias="CHAT_HISTORY_DB_CONNECT_TIMEOUT",
+    )
+    chat_history_db_disable_pooling: bool = Field(
+        default=False,
+        description="Open a fresh connection per use instead of pooling (NullPool); "
+                    "for deployments that pool externally, e.g. through PgBouncer",
+        validation_alias="CHAT_HISTORY_DB_DISABLE_POOLING",
+    )
     # Compliance level filtering feature gate
     feature_compliance_levels_enabled: bool = Field(
         False,

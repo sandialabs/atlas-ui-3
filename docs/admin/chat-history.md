@@ -69,6 +69,47 @@ least-privilege credentials. Compose also persists DuckDB history in the
 
 Atlas installs both PostgreSQL drivers: `psycopg` (v3), which SQLAlchemy 2.1 and later use for `postgresql://` URLs, and `psycopg2`, which SQLAlchemy 2.0 used. To pick one explicitly, use `postgresql+psycopg://` or `postgresql+psycopg2://` (or set `DB_DRIVER` to the same scheme).
 
+#### PostgreSQL connection pool
+
+Each Atlas process (every replica, and every uvicorn worker inside it) keeps
+its own SQLAlchemy connection pool. A deployment can therefore hold up to
+
+```text
+replicas x workers per replica x (CHAT_HISTORY_DB_POOL_SIZE + CHAT_HISTORY_DB_MAX_OVERFLOW)
+```
+
+connections at once. Keep that total below the server's `max_connections`,
+leaving room for migrations, admin sessions and any other clients. The
+defaults (5 + 10 = 15 per process) suit a single instance; 4 replicas with 2
+workers each would already need 120. Startup logs the per-process bound, for
+example `Chat history PostgreSQL pool: pool_size=5 max_overflow=10 (up to 15
+connections per process)`.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CHAT_HISTORY_DB_POOL_SIZE` | `5` | Connections each process keeps open (at least 1). |
+| `CHAT_HISTORY_DB_MAX_OVERFLOW` | `10` | Extra connections a process may open beyond the pool under load (`0` for a hard cap at the pool size). |
+| `CHAT_HISTORY_DB_POOL_TIMEOUT` | `30` | Seconds a request waits for a free pooled connection before failing with an error. |
+| `CHAT_HISTORY_DB_POOL_RECYCLE` | `1800` | Seconds after which a pooled connection is replaced (`-1` disables). Keep it below any proxy, firewall or load-balancer idle timeout. |
+| `CHAT_HISTORY_DB_POOL_PRE_PING` | `true` | Check each connection is alive before handing it out, so a database restart does not surface as failed requests. |
+| `CHAT_HISTORY_DB_CONNECT_TIMEOUT` | `10` | Seconds to wait when opening a connection, so an unreachable database fails fast instead of hanging. A `connect_timeout` in the URL query wins. |
+| `CHAT_HISTORY_DB_DISABLE_POOLING` | `false` | Open a fresh connection per use (SQLAlchemy `NullPool`). Use it when an external pooler such as PgBouncer does the pooling. |
+
+Out-of-range values (for example a pool size of `0`) fail at startup. These
+settings apply to PostgreSQL only; DuckDB ignores them.
+
+For many replicas, an external pooler keeps the server-side connection count
+flat as replicas scale. With PgBouncer in `transaction` mode, either keep a
+small Atlas pool (bounded by PgBouncer's `default_pool_size`) or set
+`CHAT_HISTORY_DB_DISABLE_POOLING=true` and let PgBouncer pool. Use PgBouncer
+1.21 or later (`max_prepared_statements` set) or `session` mode, since the
+psycopg driver can use server-side prepared statements.
+
+Run schema migrations once per deployment (for example a Kubernetes Job or
+init step that runs `alembic upgrade head`), not from every replica at start.
+DuckDB remains the default for local development; multi-replica deployments
+need PostgreSQL, since DuckDB is a single-process file database.
+
 ### Startup Behavior
 
 When using `agent_start.sh`, the script automatically:

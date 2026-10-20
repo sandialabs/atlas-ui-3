@@ -5,12 +5,14 @@ Supports DuckDB (local/dev) and PostgreSQL (production) via SQLAlchemy.
 
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from atlas.core.duckdb_indexes import drop_duckdb_secondary_indexes
 
@@ -37,12 +39,72 @@ def _resolve_db_url(db_url: str) -> str:
     return db_url
 
 
-def get_engine(db_url: Optional[str] = None) -> Engine:
+@dataclass(frozen=True)
+class PoolSettings:
+    """PostgreSQL connection pool settings for the chat-history engine.
+
+    Each API process builds its own engine, so the connections a deployment
+    can hold open is replicas x workers x ``max_connections_per_process``.
+    The defaults match the values Atlas used before they were configurable,
+    plus a connection recycle and a connect timeout (issue #1091).
+    """
+
+    pool_size: int = 5
+    max_overflow: int = 10
+    pool_timeout: float = 30.0
+    pool_recycle: int = 1800
+    pool_pre_ping: bool = True
+    connect_timeout: int = 10
+    disable_pooling: bool = False
+
+    @classmethod
+    def from_app_settings(cls, app_settings: Any) -> "PoolSettings":
+        """Read the ``CHAT_HISTORY_DB_*`` pool settings from ``AppSettings``."""
+        return cls(
+            pool_size=app_settings.chat_history_db_pool_size,
+            max_overflow=app_settings.chat_history_db_max_overflow,
+            pool_timeout=app_settings.chat_history_db_pool_timeout,
+            pool_recycle=app_settings.chat_history_db_pool_recycle,
+            pool_pre_ping=app_settings.chat_history_db_pool_pre_ping,
+            connect_timeout=app_settings.chat_history_db_connect_timeout,
+            disable_pooling=app_settings.chat_history_db_disable_pooling,
+        )
+
+    @property
+    def max_connections_per_process(self) -> Optional[int]:
+        """Upper bound on connections one process holds; None when unpooled."""
+        if self.disable_pooling:
+            return None
+        return self.pool_size + self.max_overflow
+
+
+def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> Dict[str, Any]:
+    """Build ``create_engine`` keyword arguments for a PostgreSQL URL."""
+    kwargs: Dict[str, Any] = {"pool_pre_ping": pool.pool_pre_ping, "echo": False}
+    # A connect_timeout already in the URL query wins over the setting, since
+    # the driver would otherwise receive the setting's value instead.
+    if "connect_timeout" not in make_url(db_url).query:
+        kwargs["connect_args"] = {"connect_timeout": pool.connect_timeout}
+    if pool.disable_pooling:
+        kwargs["poolclass"] = NullPool
+    else:
+        kwargs.update(
+            pool_size=pool.pool_size,
+            max_overflow=pool.max_overflow,
+            pool_timeout=pool.pool_timeout,
+            pool_recycle=pool.pool_recycle,
+        )
+    return kwargs
+
+
+def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None) -> Engine:
     """Get or create the SQLAlchemy engine.
 
     Args:
         db_url: Database URL. If None, uses CHAT_HISTORY_DB_URL env var
                 or defaults to DuckDB.
+        pool: PostgreSQL pool settings. If None, the ``PoolSettings``
+              defaults are used. Ignored for other databases.
     """
     global _engine
     if _engine is not None:
@@ -53,16 +115,21 @@ def get_engine(db_url: Optional[str] = None) -> Engine:
 
     db_url = _resolve_db_url(db_url)
 
-    if db_url.startswith("duckdb"):
-        _engine = create_engine(db_url, echo=False)
-    elif db_url.startswith("postgresql"):
-        _engine = create_engine(
-            db_url,
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
-            echo=False,
-        )
+    if db_url.startswith("postgresql"):
+        pool = pool or PoolSettings()
+        _engine = create_engine(db_url, **_postgres_engine_kwargs(db_url, pool))
+        if pool.disable_pooling:
+            logger.info("Chat history PostgreSQL pooling disabled (NullPool); pool externally, e.g. PgBouncer")
+        else:
+            logger.info(
+                "Chat history PostgreSQL pool: pool_size=%d max_overflow=%d (up to %d connections per process), "
+                "pool_timeout=%ss pool_recycle=%ss",
+                pool.pool_size,
+                pool.max_overflow,
+                pool.max_connections_per_process,
+                pool.pool_timeout,
+                pool.pool_recycle,
+            )
     else:
         _engine = create_engine(db_url, echo=False)
 
@@ -83,13 +150,13 @@ def get_session_factory(engine: Optional[Engine] = None) -> sessionmaker:
     return _session_factory
 
 
-def init_database(db_url: Optional[str] = None) -> Engine:
+def init_database(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None) -> Engine:
     """Initialize the database, creating tables if they don't exist.
 
     For production, use Alembic migrations instead of this function.
     This is a convenience for development/testing.
     """
-    engine = get_engine(db_url)
+    engine = get_engine(db_url, pool)
     Base.metadata.create_all(engine)
     drop_duckdb_secondary_indexes(engine, Base.metadata)
     logger.info("Chat history database tables created/verified")
