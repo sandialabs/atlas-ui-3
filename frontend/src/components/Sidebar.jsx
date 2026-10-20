@@ -80,6 +80,9 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [isResizing, setIsResizing] = useState(false)
+  // The text in the search box. It is kept here so a tag filter can clear
+  // it: the search on screen does not describe the tagged list.
+  const [searchText, setSearchText] = useState('')
   const searchTimerRef = useRef(null)
   const prevMessageCountRef = useRef(0)
   const refreshTimerRef = useRef(null)
@@ -253,10 +256,23 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   // --- Handlers ---
   const handleSearch = useCallback((e) => {
     const query = e.target.value
+    setSearchText(query)
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
     searchTimerRef.current = setTimeout(() => {
       history.searchConversations(query)
     }, 300)
+  }, [history])
+
+  // A tag is a different listing: the search on screen no longer describes
+  // it. The text in the search box and the request it has not made yet go
+  // with it, so the list is not replaced by a search for the old text.
+  const handleFilterByTag = useCallback((tagName) => {
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current)
+      searchTimerRef.current = null
+    }
+    setSearchText('')
+    history.filterByTag(tagName)
   }, [history])
 
   // Every click on a row is the user's latest intent, and so is New Chat.
@@ -468,6 +484,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
             <input
               type="text"
               placeholder="Search conversations..."
+              value={searchText}
               onChange={handleSearch}
               className="w-full px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
             />
@@ -477,7 +494,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
           {history.tags.length > 0 && (
             <div className="px-3 py-2 border-b border-gray-700 flex flex-wrap gap-1 flex-shrink-0">
               <button
-                onClick={() => history.filterByTag(null)}
+                onClick={() => handleFilterByTag(null)}
                 className={`text-xs px-2 py-0.5 rounded ${!history.activeTag ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
               >
                 All
@@ -485,7 +502,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
               {history.tags.map(tag => (
                 <button
                   key={tag.id}
-                  onClick={() => history.filterByTag(tag.name)}
+                  onClick={() => handleFilterByTag(tag.name)}
                   className={`text-xs px-2 py-0.5 rounded ${history.activeTag === tag.name ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
                 >
                   {tag.name} ({tag.conversation_count})

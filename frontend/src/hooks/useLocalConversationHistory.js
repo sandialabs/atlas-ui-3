@@ -64,8 +64,8 @@ export function useLocalConversationHistory(user) {
 
   // Store a new list and re-derive the paging state from it. The list is a
   // prefix of the stored order, so the next page starts after the rows it
-  // holds. A total of `null` means the count is not known; a full page then
-  // still suggests there is more behind it.
+  // holds. When the count is not known, the page that came back decides: a
+  // full page suggests there is more behind it, a short one means the end.
   const applyList = useCallback((next, total, hasMore) => {
     const rows = Array.isArray(next) ? next : []
     conversationsRef.current = rows
@@ -74,7 +74,6 @@ export function useLocalConversationHistory(user) {
     setConversations(rows)
     if (typeof hasMore === 'boolean') setHasMore(hasMore)
     else if (typeof total === 'number') setHasMore(total > rows.length)
-    else if (total === null) setHasMore(rows.length >= CONVERSATION_PAGE_SIZE)
     else setHasMore(totalRef.current > rows.length)
   }, [])
 
@@ -123,7 +122,12 @@ export function useLocalConversationHistory(user) {
       const total = await countOwned(requestedOwner)
       if (ownerRef.current !== requestedOwner) return
       if (generationRef.current !== generation) return
-      applyList(list, total)
+      // Without a count, the page itself says whether more may follow.
+      applyList(
+        list,
+        total,
+        total === null ? list.length >= CONVERSATION_PAGE_SIZE : undefined
+      )
     } catch (e) {
       console.error('Failed to fetch local conversations:', e)
     } finally {
@@ -140,7 +144,11 @@ export function useLocalConversationHistory(user) {
       const total = await countOwned(requestedOwner)
       if (ownerRef.current !== requestedOwner) return
       if (generationRef.current !== generation) return
-      applyList(mergeFreshFirst(list, conversationsRef.current, total), total)
+      applyList(
+        mergeFreshFirst(list, conversationsRef.current, total),
+        total,
+        total === null ? list.length >= CONVERSATION_PAGE_SIZE : undefined
+      )
     } catch (e) {
       console.error('Failed to refresh local conversations:', e)
     }
@@ -170,10 +178,13 @@ export function useLocalConversationHistory(user) {
       offsetRef.current += page.length
       if (typeof total === 'number') totalRef.current = total
       setConversations(merged)
+      // The count says whether the stored history continues. Without one,
+      // the page that just came back does: a full page may have more
+      // behind it, a short one is the end.
       setHasMore(
         typeof total === 'number'
           ? total > offsetRef.current
-          : merged.length >= CONVERSATION_PAGE_SIZE
+          : page.length >= CONVERSATION_PAGE_SIZE
       )
     } catch (e) {
       console.error('Failed to load more local conversations:', e)
@@ -280,7 +291,11 @@ export function useLocalConversationHistory(user) {
 
   // Stubs for tag operations (not supported for browser-local storage)
   const fetchTags = useCallback(async () => {}, [])
-  const filterByTag = useCallback(() => {}, [])
+  const filterByTag = useCallback(() => {
+    // Tags do not exist in browser-local storage, but a search that was on
+    // screen still has to go when the listing is replaced.
+    setSearchQuery('')
+  }, [])
   const addTag = useCallback(async () => null, [])
   const removeTag = useCallback(async () => false, [])
   const updateTitle = useCallback(async (conversationId, title) => {

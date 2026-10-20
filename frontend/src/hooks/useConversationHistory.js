@@ -43,8 +43,8 @@ export function useConversationHistory() {
 
   // Store a new list and re-derive the paging state from it. The list is a
   // prefix of the server's order, so the next page starts after the rows it
-  // holds. A total of `null` means the count is not known; a full page then
-  // still suggests there is more behind it.
+  // holds. The count decides whether the history continues; when the server
+  // does not send one, its own answer for the page is used.
   const applyList = useCallback((next, total, hasMore) => {
     const rows = Array.isArray(next) ? next : []
     conversationsRef.current = rows
@@ -53,7 +53,6 @@ export function useConversationHistory() {
     setConversations(rows)
     if (typeof hasMore === 'boolean') setHasMore(hasMore)
     else if (typeof total === 'number') setHasMore(total > rows.length)
-    else if (total === null) setHasMore(rows.length >= CONVERSATION_PAGE_SIZE)
     else setHasMore(totalRef.current > rows.length)
   }, [])
 
@@ -342,7 +341,9 @@ export function useConversationHistory() {
 
   const filterByTag = useCallback((tagName) => {
     setActiveTag(tagName)
-    // A different tag is a different list, so the paging state starts over.
+    // A tag is a different listing: the search that was on screen no longer
+    // describes it, and the text in the search box would keep it there.
+    setSearchQuery('')
     if (tagName) {
       fetchConversations({ tag: tagName })
     } else {

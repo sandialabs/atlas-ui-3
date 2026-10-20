@@ -45,6 +45,8 @@ const jsonResponse = (body, ok = true) => ({
 
 // Lets a test fail or hold the next page request.
 let nextPageBehaviour = 'ok'
+// Whether the deployment has any tags to filter by.
+let tagsEnabled = false
 
 const fetchMock = vi.fn(async (url) => {
   if (url.startsWith('/api/conversations?')) {
@@ -66,7 +68,12 @@ const fetchMock = vi.fn(async (url) => {
       has_more: offset + page.length < ALL.length,
     })
   }
-  if (url === '/api/conversations/tags/list') return jsonResponse({ tags: [] })
+  if (url === '/api/conversations/tags/list') {
+    return jsonResponse({ tags: tagsEnabled ? [{ id: 't1', name: 'important', conversation_count: 3 }] : [] })
+  }
+  if (url.startsWith('/api/conversations/search?')) {
+    return jsonResponse({ conversations: [conv('hit')], total: 1 })
+  }
   return { ok: false, status: 404, json: async () => ({}) }
 })
 
@@ -100,6 +107,7 @@ describe('Sidebar load more (#1085)', () => {
     h.chat = baseChat()
     fetchMock.mockClear()
     nextPageBehaviour = 'ok'
+    tagsEnabled = false
     vi.stubGlobal('fetch', fetchMock)
   })
 
@@ -203,5 +211,22 @@ describe('Sidebar load more (#1085)', () => {
     nextPageBehaviour = 'ok'
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(screen.getByText('Chat 60')).toBeTruthy())
+  })
+
+  it('leaves the search behind when a tag is chosen', async () => {
+    tagsEnabled = true
+    render(<Sidebar />)
+    await waitFor(() => expect(screen.getByText('Chat 1')).toBeTruthy())
+
+    const searchBox = screen.getByPlaceholderText('Search conversations...')
+    fireEvent.change(searchBox, { target: { value: 'Chat' } })
+    await waitFor(() => expect(screen.getByText('Chat hit')).toBeTruthy())
+
+    // The search on screen does not describe the tagged list, so it goes.
+    fireEvent.click(screen.getByRole('button', { name: /important/ }))
+    await waitFor(() => expect(searchBox.value).toBe(''))
+    await waitFor(() => expect(screen.getByText('Chat 1')).toBeTruthy())
+    // The tagged list can be walked back through as well.
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy()
   })
 })

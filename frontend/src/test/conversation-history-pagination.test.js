@@ -237,4 +237,22 @@ describe('useConversationHistory paging', () => {
     // The page belonged to the previous listing, so it is not appended.
     expect(result.current.conversations.map(c => c.id)).not.toContain('old')
   })
+
+  it('leaves the search behind when the tag changes', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('/search?')) return Promise.resolve(jsonResponse(page(['hit'], 1)))
+      return Promise.resolve(jsonResponse(page(['a'], 3)))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useConversationHistory())
+    await act(async () => { await result.current.searchConversations('hit') })
+    expect(result.current.searchQuery).toBe('hit')
+
+    await act(async () => { await result.current.filterByTag('important') })
+
+    // A tag is a different listing, so the search no longer describes it.
+    expect(result.current.searchQuery).toBe('')
+    expect(result.current.activeTag).toBe('important')
+  })
 })
