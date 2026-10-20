@@ -135,17 +135,18 @@ describe('ChatArea - agent run status is pinned to the composer', () => {
     expect(screen.getByRole('button', { name: 'Stop agent' })).toBeInTheDocument()
   })
 
-  it('drops the waiting row when Agent Mode is off and the question card is hidden', () => {
+  it('keeps a live question and its waiting row when Agent Mode is toggled off mid-run', () => {
+    // The toggle governs future sends; it must not strand a running agent's
+    // question with no way to answer it.
     useChat.mockReturnValue(chatContext({
       agentModeEnabled: false,
-      isAgentRunning: false,
+      isAgentRunning: true,
       agentPendingQuestion: 'Which file?',
     }))
     renderChat()
 
-    expect(screen.queryByTestId('agent-run-status')).not.toBeInTheDocument()
-    expect(screen.queryByText('Which file?')).not.toBeInTheDocument()
-    // The leftover question can still be cleared.
+    expect(screen.getByText('Which file?')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-run-status')).toHaveTextContent(/waiting for your answer/i)
     expect(screen.getByRole('button', { name: 'Stop agent' })).toBeInTheDocument()
   })
 

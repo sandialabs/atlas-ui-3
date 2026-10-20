@@ -101,13 +101,13 @@ const ChatArea = () => {
   // Warnings, state, and actions never depend on it.
   const reduceHelpText = settings?.reduceHelpText === true
   // The question card and the footer's "waiting for your answer" row share
-  // one condition, so the row never points at a card that is not shown.
-  // agent_error / agent_max_steps clear isAgentRunning but can leave the
-  // question pending, which is why the row checks it separately.
-  const showAgentQuestion = agentModeEnabled && !!agentPendingQuestion
-  // Stop stays reachable for any leftover question, even with Agent Mode
-  // toggled off, so hidden run state can always be cleared.
-  const agentRunActive = isAgentRunning || !!agentPendingQuestion
+  // one condition, so the row never points at a card that is not shown. It
+  // does not depend on the Agent Mode toggle: that governs future sends, and
+  // turning it off mid-run must not hide a live run's question. Stop, error,
+  // max-steps, and completion all clear the question, so it never outlives
+  // its run.
+  const showAgentQuestion = !!agentPendingQuestion
+  const agentRunActive = isAgentRunning || showAgentQuestion
   const maxFileSizeBytes = fileUpload?.max_file_size_bytes || DEFAULT_MAX_FILE_SIZE_BYTES
 
   // Pair each message with its rewind ordinal once per messages change, rather
@@ -994,7 +994,7 @@ const ChatArea = () => {
               always visible, and reuses the same run state and Stop handler as
               the composer controls. */}
           <AgentRunStatus
-            isAgentRunning={isAgentRunning || showAgentQuestion}
+            isAgentRunning={agentRunActive}
             currentAgentStep={currentAgentStep}
             onStop={stopAgent}
             waitingForAnswer={showAgentQuestion}
@@ -1057,13 +1057,14 @@ const ChatArea = () => {
           {agentModeAvailable && agentModeEnabled && selectedTools.size === 0 && (
             <div
               className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100"
-              role="status"
               data-testid="agent-mode-no-tools-banner"
             >
               <div className="flex items-start gap-3">
                 <Sparkles className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-300" aria-hidden="true" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-amber-200">
+                  {/* Only the title is announced; the explanation and buttons
+                      are reachable but not re-read on every change. */}
+                  <p className="text-sm font-semibold text-amber-200" role="status">
                     {features?.tools
                       ? 'Agent Mode is on, but no tools are selected'
                       : 'Agent Mode is on, but tools are disabled'}

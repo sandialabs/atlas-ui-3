@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
 import { useChat } from '../contexts/ChatContext'
@@ -73,6 +73,17 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     expect(banner).toBeInTheDocument()
     expect(banner).toHaveTextContent(/agent mode is on/i)
     expect(banner).toHaveTextContent(/normal chat/i)
+  })
+
+  it('announces only the title, not the whole callout and its buttons', () => {
+    useChat.mockReturnValue(chatContext())
+    renderChat()
+
+    const banner = screen.getByTestId('agent-mode-no-tools-banner')
+    expect(banner).not.toHaveAttribute('role')
+    const live = within(banner).getByRole('status')
+    expect(live).toHaveTextContent('Agent Mode is on, but no tools are selected')
+    expect(live).not.toContainElement(screen.getByRole('button', { name: /choose tools/i }))
   })
 
   it('explains multi-step tool use in plain language', () => {
