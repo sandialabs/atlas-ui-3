@@ -339,7 +339,7 @@ describe('compliance filter: persona, active prompt and model', () => {
     expect(h.setCurrentModel).not.toHaveBeenCalled()
     expect(sent).toBe(false)
     expect(h.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'chat' }))
-    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/outside the Internal compliance level/))
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/outside the Internal security level/))
   })
 
   it('does nothing to the persona or model without a filter', () => {
@@ -419,7 +419,7 @@ describe('required compliance level (FEATURE_COMPLIANCE_LEVEL_REQUIRED)', () => 
     act(() => { sent = result.current.sendChatMessage('hi') })
     expect(sent).toBe(false)
     expect(h.sendMessage).not.toHaveBeenCalled()
-    expect(h.toastError).toHaveBeenCalledWith('A compliance level is required. Select a compliance level before sending.')
+    expect(h.toastError).toHaveBeenCalledWith('A security level is required. Select a security level before sending.')
   })
 
   it('sends the selected level with the turn', () => {

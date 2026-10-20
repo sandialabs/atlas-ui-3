@@ -44,6 +44,8 @@ describe('classificationRefusal', () => {
   it('allows only the recorded level', () => {
     expect(classificationRefusal(cui, enforced('CUI'))).toBeNull()
     expect(classificationRefusal(cui, enforced('UUR'))).toMatch(/saved under CUI/)
+    // The next step names the header control by its visible label.
+    expect(classificationRefusal(cui, enforced('UUR'))).toMatch(/Switch the security level to CUI/)
     expect(classificationRefusal(cui, enforced(null))).toBeTruthy()
     expect(classificationRefusal(cui, disabled)).toBeTruthy()
   })

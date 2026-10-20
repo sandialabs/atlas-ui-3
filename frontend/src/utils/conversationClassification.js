@@ -4,7 +4,8 @@
 // conversation may only be continued under the classification it was created
 // under. The server is the authority -- it refuses the restore, the REST fetch
 // and every chat turn on its own -- so this only lets the sidebar mark rows and
-// explain a refusal before a round-trip.
+// explain a refusal before a round-trip. Its messages name the header control
+// as the UI labels it ("security level"); the server's say "compliance level".
 
 export const CLASSIFICATION_ERROR_TYPE = 'conversation_classification'
 
@@ -42,27 +43,27 @@ function canonicalLevel(name, levels) {
 export function classificationRefusal(conv, { complianceEnabled, activeLevel, levels = [] }) {
   const { state, level } = classificationOf(conv)
   const active = complianceEnabled ? canonicalLevel(activeLevel || null, levels) : null
-  const activeLabel = active || 'no compliance level'
+  const activeLabel = active || 'no security level'
   switch (state) {
     case 'unknown':
       return null
     case 'legacy':
       return complianceEnabled
-        ? 'This conversation was saved before compliance levels were recorded for conversations, so it cannot be continued while compliance levels are enforced. It stays in your history and in conversation exports; start a new conversation to keep working.'
+        ? 'This conversation was saved before security levels were recorded for conversations, so it cannot be continued while security levels are enforced. It stays in your history and in conversation exports; start a new conversation to keep working.'
         : null
     case 'unclassified':
       return active
-        ? `This conversation was saved with no compliance level and cannot be continued under ${activeLabel}. Start a new conversation at ${activeLabel}.`
+        ? `This conversation was saved with no security level and cannot be continued under ${activeLabel}. Start a new conversation at ${activeLabel}.`
         : null
     case 'classified':
       if (!complianceEnabled) {
-        return `This conversation was saved under ${level}, and compliance levels are not enabled, so it cannot be continued.`
+        return `This conversation was saved under ${level}, and security levels are not enabled, so it cannot be continued.`
       }
       return canonicalLevel(level, levels) === active
         ? null
-        : `This conversation was saved under ${canonicalLevel(level, levels)} and cannot be continued under ${activeLabel}. Switch the compliance level to ${canonicalLevel(level, levels)} to continue it, or start a new conversation.`
+        : `This conversation was saved under ${canonicalLevel(level, levels)} and cannot be continued under ${activeLabel}. Switch the security level to ${canonicalLevel(level, levels)} to continue it, or start a new conversation.`
     default:
-      return "This conversation's recorded compliance level could not be read, so it cannot be continued. Start a new conversation."
+      return "This conversation's recorded security level could not be read, so it cannot be continued. Start a new conversation."
   }
 }
 

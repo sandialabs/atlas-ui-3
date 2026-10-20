@@ -427,9 +427,9 @@ export function SetupHelp({ quiet = false }) {
             <p className="font-semibold text-gray-100">Conversation setup</p>
             <div className="mt-2 space-y-2 text-xs text-gray-300">
               <p>
-                <span className="font-semibold text-gray-200">Security level</span> sets what
-                information this chat may use. It locks after the conversation starts, so start a
-                new chat to change it.
+                <span className="font-semibold text-gray-200">Security level</span> is this
+                deployment&apos;s compliance level: it sets what models, tools, and data this chat
+                may use. It locks after the conversation starts, so start a new chat to change it.
               </p>
               <p>
                 <span className="font-semibold text-gray-200">Save this chat</span> controls whether

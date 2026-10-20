@@ -64,7 +64,7 @@ export function useConversationHistory() {
       const res = await fetch(`/api/conversations/${conversationId}${query}`)
       if (res.status === 409) {
         const body = await res.json().catch(() => ({}))
-        return { classificationRefused: true, message: body.detail || 'This conversation cannot be opened under the selected compliance level.' }
+        return { classificationRefused: true, message: body.detail || 'This conversation cannot be opened under the selected security level.' }
       }
       if (!res.ok) return null
       return await res.json()

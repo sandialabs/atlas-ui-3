@@ -940,8 +940,8 @@ export const ChatProvider = ({ children }) => {
 		if (complianceRequired && !activeComplianceFilter) {
 			// With no definitions the header has no selector to point at.
 			toast.error(complianceLevels.length === 0
-				? 'A compliance level is required, but the compliance levels could not be loaded. Reload the page or contact an administrator.'
-				: 'A compliance level is required. Select a compliance level before sending.')
+				? 'A security level is required, but the security levels could not be loaded. Reload the page or contact an administrator.'
+				: 'A security level is required. Select a security level before sending.')
 			return false
 		}
 		// The open conversation keeps the level it was recorded at (issue
@@ -982,7 +982,7 @@ export const ChatProvider = ({ children }) => {
 		// flags it; this is reached only when no allowed model exists to
 		// switch to (the prune effect moves off it otherwise).
 		if (levelsReady && !isModelComplianceAccessible(config.models, complianceLevels, activeComplianceFilter, currentModel)) {
-			toast.error(`${currentModel} is outside the ${activeComplianceFilter} compliance level. Choose an allowed model or change the compliance level.`)
+			toast.error(`${currentModel} is outside the ${activeComplianceFilter} security level. Choose an allowed model or change the security level.`)
 			return false
 		}
 		const toolsToSend = dropExcluded(
@@ -2048,7 +2048,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			const replacement = firstCompliantModel(configModels, complianceLevels, activeComplianceFilter)
 			if (replacement) {
 				configSetCurrentModel(replacement)
-				toast.info(`Switched model to ${replacement} for the ${activeComplianceFilter} compliance level`)
+				toast.info(`Switched model to ${replacement} for the ${activeComplianceFilter} security level`)
 			}
 		}
 	}, [activeComplianceFilter, complianceLevels, config.tools, config.prompts, selectedTools, selectedPrompts, selectedDataSources, mcpKeyLevel, ragKeyLevel, pruneTools, prunePrompts, pruneDataSources, activePromptKey, personas.personas, clearActivePrompt, configModels, configSetCurrentModel, currentModel, toast])

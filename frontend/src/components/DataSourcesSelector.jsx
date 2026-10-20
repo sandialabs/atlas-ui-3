@@ -189,8 +189,8 @@ const DataSourcesSelector = () => {
                   onClick={clickable ? () => toggleDataSource(selectionKey) : undefined}
                   title={outOfBoundary
                     ? (isSelected
-                      ? 'Not approved for the selected compliance level; the server will not query it. Click to deselect.'
-                      : 'Not approved for the selected compliance level; the server will not query it')
+                      ? 'Not approved for the selected security level; the server will not query it. Click to deselect.'
+                      : 'Not approved for the selected security level; the server will not query it')
                     : undefined}
                   className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
                     outOfBoundary
@@ -224,7 +224,7 @@ const DataSourcesSelector = () => {
                   </div>
                   {outOfBoundary && (
                     <div className="text-xs mt-1 text-amber-400">
-                      Not approved for the selected compliance level
+                      Not approved for the selected security level
                       {isSelected && ' — selected but will not be searched; click to deselect'}
                     </div>
                   )}

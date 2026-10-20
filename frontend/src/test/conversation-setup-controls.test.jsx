@@ -217,6 +217,9 @@ describe('conversation setup cluster', () => {
     fireEvent.click(screen.getByRole('button', { name: 'About conversation setup' }))
     expect(screen.getByRole('dialog', { name: 'About conversation setup' })).toBeTruthy()
     expect(screen.getByText(/It locks after the conversation starts/)).toBeTruthy()
+    // Server messages say "compliance level"; the help ties that term to the
+    // control's "Security level" label.
+    expect(screen.getByText(/is this deployment's compliance level/)).toBeTruthy()
     expect(screen.getByText(/does not hide conversations that are already in your history/)).toBeTruthy()
   })
 
