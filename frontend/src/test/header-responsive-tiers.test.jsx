@@ -236,6 +236,36 @@ describe('header shapes', () => {
     expect(SECURITY_LEVEL_MIN_WIDTH).toBeLessThan(ACTION_LABELS_MIN_WIDTH)
     expect(ACTION_LABELS_MIN_WIDTH).toBeLessThan(COMPACT_ACTIONS_MIN_WIDTH)
   })
+
+  it('keeps the locked guidance reachable in the compact security level', () => {
+    // A begun conversation locks the security level. The compact form has no
+    // room for the guidance line, so it stays in the accessibility tree
+    // (the select points at it) instead of taking space in the bar.
+    measured.header = COMPACT_ACTIONS_MIN_WIDTH - 1
+    setContext({
+      chatOver: {
+        activeConversationClassification: { state: 'classified', level: 'Internal' },
+        conversationAccepted: true,
+      },
+    })
+    renderHeader()
+
+    const security = securityLevelInBar()
+    expect(security).toBeTruthy()
+    expect(security.dataset.density).toBe('compact')
+    expect(security.dataset.locked).toBe('true')
+
+    const select = security.querySelector('select')
+    expect(select.disabled).toBe(true)
+    expect(select.value).toBe('Internal')
+
+    const guidanceId = select.getAttribute('aria-describedby')
+    const guidance = document.getElementById(guidanceId)
+    expect(guidance).toBeTruthy()
+    expect(guidance.textContent).toContain('Start a new chat')
+    // The guidance is announced, not painted: the compact bar has no room.
+    expect(guidance.className).toContain('sr-only')
+  })
 })
 
 describe('header labels follow the bar width', () => {
