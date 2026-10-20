@@ -93,7 +93,7 @@ def encode_session(session: Session) -> bytes:
     # Message metadata is free-form; anything left that JSON cannot express is
     # stored as its string form rather than failing the whole write.
     return json.dumps(
-        payload, default=lambda v: _safe_default(v), separators=(",", ":")
+        payload, default=_safe_default, separators=(",", ":")
     ).encode("utf-8")
 
 

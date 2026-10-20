@@ -174,10 +174,12 @@ async def test_delete_and_exists(server):
     session = await repo_a.create(_session())
 
     assert await repo_b.exists(session.id)
-    assert await repo_a.delete(session.id) is True
+    removed = await repo_a.delete(session.id)
+    assert removed is True
     assert not await repo_b.exists(session.id)
     assert await repo_a.get(session.id) is None
-    assert await repo_a.delete(session.id) is False
+    removed_again = await repo_a.delete(session.id)
+    assert removed_again is False
 
 
 @pytest.mark.asyncio
