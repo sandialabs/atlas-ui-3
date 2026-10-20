@@ -173,9 +173,9 @@ const ChatArea = () => {
   const currentModelToolSupport = currentModelEntry
     ? currentModelEntry.supports_tools !== false
     : null
-  // The selected-tools warning keeps its existing rule: no model list yet
-  // means "assume yes"; a list without the model means "no".
-  const currentModelSupportsTools = models ? currentModelToolSupport === true : true
+  // The selected-tools warning only fires on a known "no": an empty list
+  // while models load, or a stale stored model, is not evidence either way.
+  const currentModelSupportsTools = currentModelToolSupport !== false
 
   // Auto-resize textarea. Delegated so the measurement cannot displace the
   // transcript's scroll position while the user types (#866).
