@@ -21,7 +21,11 @@ from .models import Base
 logger = logging.getLogger(__name__)
 
 _engine: Optional[Engine] = None
+_engine_pool: Optional["PoolSettings"] = None
 _session_factory: Optional[sessionmaker] = None
+
+# Drivers built on libpq, which accept a ``connect_timeout`` connection argument.
+_LIBPQ_DRIVERS = frozenset({"psycopg", "psycopg2"})
 
 
 def _resolve_db_url(db_url: str) -> str:
@@ -81,9 +85,11 @@ class PoolSettings:
 def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> Dict[str, Any]:
     """Build ``create_engine`` keyword arguments for a PostgreSQL URL."""
     kwargs: Dict[str, Any] = {"pool_pre_ping": pool.pool_pre_ping, "echo": False}
-    # A connect_timeout already in the URL query wins over the setting, since
-    # the driver would otherwise receive the setting's value instead.
-    if "connect_timeout" not in make_url(db_url).query:
+    url = make_url(db_url)
+    # Only libpq drivers understand connect_timeout (pg8000 or asyncpg would
+    # reject it). A connect_timeout already in the URL query wins over the
+    # setting, since the driver would otherwise receive the setting's value.
+    if url.get_driver_name() in _LIBPQ_DRIVERS and "connect_timeout" not in url.query:
         kwargs["connect_args"] = {"connect_timeout": pool.connect_timeout}
     if pool.disable_pooling:
         kwargs["poolclass"] = NullPool
@@ -106,8 +112,14 @@ def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None
         pool: PostgreSQL pool settings. If None, the ``PoolSettings``
               defaults are used. Ignored for other databases.
     """
-    global _engine
+    global _engine, _engine_pool
     if _engine is not None:
+        if pool is not None and _engine.dialect.name == "postgresql" and pool != _engine_pool:
+            logger.warning(
+                "Chat history engine already exists; ignoring new pool settings %s (engine built with %s)",
+                pool,
+                _engine_pool,
+            )
         return _engine
 
     if db_url is None:
@@ -117,6 +129,7 @@ def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None
 
     if db_url.startswith("postgresql"):
         pool = pool or PoolSettings()
+        _engine_pool = pool
         _engine = create_engine(db_url, **_postgres_engine_kwargs(db_url, pool))
         if pool.disable_pooling:
             logger.info("Chat history PostgreSQL pooling disabled (NullPool); pool externally, e.g. PgBouncer")
@@ -165,8 +178,9 @@ def init_database(db_url: Optional[str] = None, pool: Optional[PoolSettings] = N
 
 def reset_engine():
     """Reset the global engine (for testing)."""
-    global _engine, _session_factory
+    global _engine, _engine_pool, _session_factory
     if _engine is not None:
         _engine.dispose()
     _engine = None
+    _engine_pool = None
     _session_factory = None

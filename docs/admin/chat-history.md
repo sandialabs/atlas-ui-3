@@ -96,7 +96,14 @@ connections per process)`.
 | `CHAT_HISTORY_DB_DISABLE_POOLING` | `false` | Open a fresh connection per use (SQLAlchemy `NullPool`). Use it when an external pooler such as PgBouncer does the pooling. |
 
 Out-of-range values (for example a pool size of `0`) fail at startup. These
-settings apply to PostgreSQL only; DuckDB ignores them.
+settings apply to PostgreSQL only; DuckDB ignores them. `connect_timeout` is
+sent only to the libpq-based drivers (`psycopg`, `psycopg2`); other drivers
+keep their own connect behavior.
+
+With the Compose stack, `docker-compose.postgres.yml` passes these variables
+from your shell or `.env` into the container. A custom override file that
+points at a different database must pass them through itself, because the
+base `atlas-ui` service lists its environment explicitly.
 
 For many replicas, an external pooler keeps the server-side connection count
 flat as replicas scale. With PgBouncer in `transaction` mode, either keep a

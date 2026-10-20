@@ -121,6 +121,21 @@ class TestPostgresEngine:
         kwargs = _postgres_engine_kwargs(f"{_PG_URL}?connect_timeout=30", PoolSettings(connect_timeout=4))
         assert "connect_args" not in kwargs
 
+    def test_connect_timeout_only_for_libpq_drivers(self):
+        # pg8000 is not libpq-based and rejects a connect_timeout argument.
+        kwargs = _postgres_engine_kwargs("postgresql+pg8000://atlas:pw@db.example.com/atlas", PoolSettings())
+        assert "connect_args" not in kwargs
+
+    def test_existing_engine_warns_on_different_pool(self, caplog):
+        first = chat_history_database.get_engine(_PG_URL, PoolSettings(pool_size=2))
+        with caplog.at_level("WARNING", logger=chat_history_database.__name__):
+            again = chat_history_database.get_engine(_PG_URL, PoolSettings(pool_size=2))
+            assert not [r for r in caplog.records if r.levelname == "WARNING"]
+            other = chat_history_database.get_engine(_PG_URL, PoolSettings(pool_size=9))
+        assert first is again is other
+        assert other.pool.size() == 2
+        assert "ignoring new pool settings" in caplog.text
+
     def test_null_pool_omits_queue_pool_arguments(self):
         # NullPool rejects pool_size/max_overflow, so they must not be passed.
         kwargs = _postgres_engine_kwargs(_PG_URL, PoolSettings(disable_pooling=True))
@@ -135,3 +150,30 @@ class TestDuckDbUnaffected:
         )
         assert engine.dialect.name == "duckdb"
         assert not isinstance(engine.pool, NullPool)
+
+
+class TestAppFactoryWiring:
+    def test_app_factory_passes_configured_pool_to_init_database(self, monkeypatch):
+        # Without this, dropping the pool argument in AppFactory would silently
+        # fall back to the defaults while every other test still passed.
+        import atlas.modules.chat_history as chat_history
+        from atlas.infrastructure.app_factory import AppFactory
+
+        captured = {}
+
+        def fake_init_database(db_url=None, pool=None):
+            captured["db_url"] = db_url
+            captured["pool"] = pool
+
+        monkeypatch.setenv("FEATURE_CHAT_HISTORY_ENABLED", "true")
+        monkeypatch.setenv("CHAT_HISTORY_DB_URL", _PG_URL)
+        monkeypatch.setenv("CHAT_HISTORY_DB_POOL_SIZE", "3")
+        monkeypatch.setenv("CHAT_HISTORY_DB_MAX_OVERFLOW", "1")
+        monkeypatch.setattr(chat_history, "init_database", fake_init_database)
+        monkeypatch.setattr(chat_history, "get_session_factory", lambda: None)
+
+        AppFactory()
+
+        assert captured["db_url"] == _PG_URL
+        assert captured["pool"].pool_size == 3
+        assert captured["pool"].max_overflow == 1
