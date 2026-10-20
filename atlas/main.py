@@ -326,9 +326,14 @@ async def _merge_run_session_files(
                 _merge_one_file(
                     replacement, name, meta, run_session_id, preserve=True
                 )
-        await _persist_session(
-            chat_service, current if current is not None else connection_session
-        )
+        target = current if current is not None else connection_session
+        is_live_here = getattr(chat_service.session_repository, "is_live_here", None)
+        if not callable(is_live_here) or is_live_here(target.id):
+            # Only the replica driving the session publishes it. A copy read
+            # here from the shared store belongs to a session another replica
+            # resumed; writing it would bump the version under that replica
+            # and make its next turn's write lose.
+            await _persist_session(chat_service, target)
     except Exception as e:
         # Losing the merge costs a download, not the run's result -- but this
         # is the branch that fires on unexpected artifact loss, so it carries

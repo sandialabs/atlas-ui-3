@@ -366,3 +366,23 @@ async def test_teardown_during_an_outage_does_not_pin_the_session(server):
     server.connected = False
     await replica.end_session(session_id)
     assert not repo.is_live_here(session_id)
+
+
+@pytest.mark.asyncio
+async def test_run_merge_on_another_replica_does_not_bump_the_owner(server):
+    """A late run-file merge on the old replica must not make B's next write lose."""
+    repo_a = _redis_repo(server)
+    replica_a = _service(repo_a, "conn-a")
+    session_id, run_id = uuid4(), uuid4()
+    await _turn(replica_a, session_id, "start a run", [])
+    run_session = await replica_a.create_session(run_id, USER)
+    run_session.context["files"] = {"out.csv": {"key": "u/out.csv"}}
+    await _disconnect(replica_a, session_id)
+
+    replica_b = _service(_redis_repo(server), "conn-b")
+    resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
+    version = resumed.store_version
+
+    await main._merge_run_session_files(replica_a, run_id, session_id, "conv-42")
+    assert (await _redis_repo(server).get(session_id)).store_version == version
+    assert await replica_b.persist_session(resumed) is True

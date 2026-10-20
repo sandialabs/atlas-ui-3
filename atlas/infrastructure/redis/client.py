@@ -17,6 +17,7 @@ silent process-local mode. Commands made after startup raise
 domain errors; there is no fallback store.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -189,8 +190,12 @@ class RedisClientManager:
             logger.warning("Error closing Redis pool: %s", type(exc).__name__)
         self._started = False
 
-    async def health(self) -> Dict[str, Any]:
-        """Report reachability, latency and error counters (never raises)."""
+    async def health(self, timeout: float = 1.0) -> Dict[str, Any]:
+        """Report reachability, latency and error counters (never raises).
+
+        The ping is bounded by ``timeout`` so a black-holed Redis cannot hold
+        a health probe for the full socket timeout.
+        """
         report: Dict[str, Any] = {
             "url": redact_redis_url(self.settings.url),
             "key_prefix": self.settings.key_prefix,
@@ -201,7 +206,7 @@ class RedisClientManager:
         }
         started = time.perf_counter()
         try:
-            await self._client.ping()
+            await asyncio.wait_for(self._client.ping(), timeout)
         except Exception as exc:
             self.stats.record_error(exc)
             report["command_errors"] = self.stats.command_errors

@@ -146,3 +146,17 @@ async def test_start_and_health_against_a_server():
     assert report["status"] == "unavailable"
     assert report["command_errors"] == 1
     await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_health_ping_is_bounded():
+    import asyncio
+
+    class Hanging:
+        async def ping(self):
+            await asyncio.sleep(30)
+
+    manager = RedisClientManager(RedisSettings(url="redis://x/0"), client=Hanging())
+    report = await manager.health(timeout=0.05)
+    assert report["status"] == "unavailable"
+    assert report["error"] == "TimeoutError"

@@ -80,8 +80,11 @@ warning naming the key. **Messages sent while incognito are never
 stored**: incognito promises the conversation is not stored. While a session
 is incognito only its context (the incognito flag and bindings) is written,
 and a resumed incognito session continues with an empty history, as a
-reconnect always did. After the user opts back in, only the messages after
-the incognito prefix are written.
+reconnect always did. After the user opts back in, the stored history is
+what chat history itself would save: the messages after the leading
+incognito prefix. (As with chat history, incognito turns taken in the middle
+of an already-saved conversation are part of that history once the user
+turns incognito off again.)
 
 ### Concurrent updates
 
