@@ -100,6 +100,16 @@ settings apply to PostgreSQL only; DuckDB ignores them. `connect_timeout` is
 sent only to the libpq-based drivers (`psycopg`, `psycopg2`); other drivers
 keep their own connect behavior.
 
+`CHAT_HISTORY_DB_DISABLE_POOLING=true` ignores the pool size, overflow,
+timeout and recycle settings; only pre-ping and the connect timeout still
+apply.
+
+Some chat-history routes call the database directly on the event loop, so a
+request waiting for a pooled connection stalls every request on that worker
+until a connection frees up or `CHAT_HISTORY_DB_POOL_TIMEOUT` expires. When you
+shrink the pool, also shorten the timeout (a few seconds) so exhaustion
+surfaces as errors in the logs, not as a hung worker.
+
 With the Compose stack, `docker-compose.postgres.yml` passes these variables
 from your shell or `.env` into the container. A custom override file that
 points at a different database must pass them through itself, because the

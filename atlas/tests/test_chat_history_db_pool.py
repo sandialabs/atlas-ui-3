@@ -113,8 +113,12 @@ class TestPostgresEngine:
         engine = chat_history_database.get_engine(_PG_URL, PoolSettings(disable_pooling=True))
         assert isinstance(engine.pool, NullPool)
 
-    def test_connect_timeout_is_passed_to_driver(self):
-        kwargs = _postgres_engine_kwargs(_PG_URL, PoolSettings(connect_timeout=4))
+    @pytest.mark.parametrize("scheme", ["postgresql", "postgresql+psycopg", "postgresql+psycopg2"])
+    def test_connect_timeout_is_passed_to_driver(self, scheme):
+        # The bare scheme is what Compose and the docs use; it resolves to a
+        # libpq driver (psycopg or psycopg2, depending on SQLAlchemy version).
+        url = f"{scheme}://atlas:pw@db.example.com:5432/atlas"
+        kwargs = _postgres_engine_kwargs(url, PoolSettings(connect_timeout=4))
         assert kwargs["connect_args"] == {"connect_timeout": 4}
 
     def test_connect_timeout_in_url_wins(self):
