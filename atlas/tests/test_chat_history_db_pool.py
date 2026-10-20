@@ -9,8 +9,11 @@ database is needed.
 """
 
 import importlib
+import re
+from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 from sqlalchemy.pool import NullPool, QueuePool
 
@@ -18,6 +21,7 @@ from atlas.modules.chat_history import database as chat_history_database
 from atlas.modules.chat_history.database import PoolSettings, _postgres_engine_kwargs
 from atlas.modules.config.config_manager import AppSettings
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _PG_URL = "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas"
 
 _POOL_ENV_VARS = (
@@ -142,6 +146,21 @@ class TestPostgresEngine:
         assert other.pool.size() == 2
         assert "ignoring new pool settings" in caplog.text
 
+    def test_startup_log_states_the_connection_budget(self, caplog):
+        with caplog.at_level("INFO", logger=chat_history_database.__name__):
+            chat_history_database.get_engine(
+                _PG_URL, PoolSettings(pool_size=4, max_overflow=2, pool_recycle=-1, connect_timeout=3)
+            )
+        assert "up to 6 connections per process" in caplog.text
+        assert "pool_recycle=disabled" in caplog.text
+        assert "connect_timeout=3s" in caplog.text
+
+    def test_startup_log_when_url_sets_connect_timeout(self, caplog):
+        with caplog.at_level("INFO", logger=chat_history_database.__name__):
+            chat_history_database.get_engine(f"{_PG_URL}?connect_timeout=30", PoolSettings(disable_pooling=True))
+        assert "pooling disabled" in caplog.text
+        assert "connect_timeout=driver/URL" in caplog.text
+
     def test_null_pool_omits_queue_pool_arguments(self):
         # NullPool rejects pool_size/max_overflow, so they must not be passed.
         kwargs = _postgres_engine_kwargs(_PG_URL, PoolSettings(disable_pooling=True))
@@ -186,3 +205,24 @@ class TestAppFactoryWiring:
         assert captured["db_url"] == _PG_URL
         assert captured["pool"].pool_size == 3
         assert captured["pool"].max_overflow == 1
+
+
+class TestComposeDefaults:
+    def test_compose_fallbacks_match_pool_defaults(self):
+        # docker-compose.postgres.yml repeats the defaults as ${VAR:-default}
+        # fallbacks (an empty value would fail validation), so keep them in step.
+        compose = yaml.safe_load((_REPO_ROOT / "docker-compose.postgres.yml").read_text())
+        entries = dict(item.split("=", 1) for item in compose["services"]["atlas-ui"]["environment"])
+        settings = _settings()
+        for var in _POOL_ENV_VARS:
+            match = re.fullmatch(r"\$\{" + var + r":-(.*)\}", entries[var])
+            assert match, f"{var} is not passed through with a fallback"
+            field = next(
+                name for name, info in AppSettings.model_fields.items() if info.validation_alias == var
+            )
+            expected = getattr(settings, field)
+            fallback = match.group(1)
+            if isinstance(expected, bool):
+                assert fallback == str(expected).lower(), var
+            else:
+                assert type(expected)(fallback) == expected, var

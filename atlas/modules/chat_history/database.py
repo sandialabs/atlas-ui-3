@@ -130,18 +130,27 @@ def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None
     if db_url.startswith("postgresql"):
         pool = pool or PoolSettings()
         _engine_pool = pool
-        _engine = create_engine(db_url, **_postgres_engine_kwargs(db_url, pool))
+        engine_kwargs = _postgres_engine_kwargs(db_url, pool)
+        _engine = create_engine(db_url, **engine_kwargs)
+        connect_args = engine_kwargs.get("connect_args", {})
+        # Not set here when the URL carries its own value or the driver is not libpq.
+        connect_timeout = f"{connect_args['connect_timeout']}s" if "connect_timeout" in connect_args else "driver/URL"
         if pool.disable_pooling:
-            logger.info("Chat history PostgreSQL pooling disabled (NullPool); pool externally, e.g. PgBouncer")
+            logger.info(
+                "Chat history PostgreSQL pooling disabled (NullPool); pool externally, e.g. PgBouncer. "
+                "connect_timeout=%s",
+                connect_timeout,
+            )
         else:
             logger.info(
                 "Chat history PostgreSQL pool: pool_size=%d max_overflow=%d (up to %d connections per process), "
-                "pool_timeout=%ss pool_recycle=%ss",
+                "pool_timeout=%ss pool_recycle=%s connect_timeout=%s",
                 pool.pool_size,
                 pool.max_overflow,
                 pool.max_connections_per_process,
                 pool.pool_timeout,
-                pool.pool_recycle,
+                "disabled" if pool.pool_recycle == -1 else f"{pool.pool_recycle}s",
+                connect_timeout,
             )
     else:
         _engine = create_engine(db_url, echo=False)
