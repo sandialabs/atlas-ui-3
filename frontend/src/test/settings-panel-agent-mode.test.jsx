@@ -90,8 +90,8 @@ describe('SettingsPanel agent mode settings', () => {
     const toggle = await screen.findByRole('switch', { name: 'Auto-Approve Tool Calls' })
     expect(toggle).toHaveAttribute('aria-checked', 'false')
     expect(toggle).toHaveAccessibleDescription(/wait for your confirmation before they run/i)
-    expect(toggle).toHaveAccessibleDescription(/Currently off\. You are asked to approve each tool call before it runs\. This is the default\./)
-    expect(toggle).toHaveAccessibleDescription(/administrator requires approval for always ask/i)
+    expect(toggle).toHaveAccessibleDescription(/Currently off\. Tool calls ask for your approval before they run.*This is the default\./)
+    expect(toggle).toHaveAccessibleDescription(/marked as always requiring approval ask regardless of this setting/i)
     // Off is the safe default, so it is not styled as a warning.
     expect(screen.getByText('Currently off.').closest('p')).not.toHaveClass('approval-warning-text')
   })

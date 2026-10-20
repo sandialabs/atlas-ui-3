@@ -94,8 +94,8 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     expect(toggle).toHaveTextContent('Auto-approve: Off')
     // Off is the default, and it means "ask first" -- say so to everyone, not
     // only to sighted mouse users who find the tooltip.
-    expect(toggle).toHaveAccessibleDescription(/asked to approve each tool call before it runs\. This is the default/i)
-    expect(toggle.getAttribute('title')).toMatch(/is off\. You are asked to approve each tool call/i)
+    expect(toggle).toHaveAccessibleDescription(/ask for your approval before they run.*This is the default/i)
+    expect(toggle.getAttribute('title')).toMatch(/is off\. Tool calls ask for your approval/i)
   })
 
   it('keeps the +N more toggle pinned next to auto-approve, outside the scroll region (review)', () => {
@@ -206,7 +206,7 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     const toggle = screen.getByRole('switch', { name: 'Auto-approve tool calls' })
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     expect(toggle).toHaveTextContent('Auto-approve: On')
-    expect(toggle).toHaveAccessibleDescription(/except tools an administrator requires approval for/i)
+    expect(toggle).toHaveAccessibleDescription(/except tools an administrator has marked as always requiring approval/i)
     fireEvent.click(toggle)
     expect(updateSettings).toHaveBeenCalledWith({ autoApproveTools: false })
   })

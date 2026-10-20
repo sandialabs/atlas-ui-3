@@ -762,7 +762,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             <div id="auto-approve-tools-help" className="text-sm text-gray-400 space-y-1">
               <p>
                 Controls whether tool calls wait for your confirmation before they run.
-                Tools an administrator requires approval for always ask, whatever this is set to.
+                Tools an administrator has marked as always requiring approval ask regardless of this setting.
               </p>
               {/* Off is the safe default; on is the state worth a warning
                   colour, since tools then run with nobody looking. */}

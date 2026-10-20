@@ -80,19 +80,28 @@ still get the explanations.
 **General → Auto-Approve Tool Calls** controls whether tool calls wait for your
 confirmation before they run.
 
-- **Off (the default):** every tool call stops at an **APPROVAL REQUIRED** row
-  in the transcript and runs only after you click **Approve** (you can edit the
+- **Off (the default):** a tool call stops at an **APPROVAL REQUIRED** row in
+  the transcript and runs only after you click **Approve** (you can edit the
   arguments first, or **Reject** with an optional reason).
 - **On:** tool calls run without asking -- including calls in conversations
   you are not currently viewing.
-- **Admin-gated tools always ask.** When an administrator requires approval for
-  a tool (per-tool `require_approval` or `FORCE_TOOL_APPROVAL_GLOBALLY`), that
-  tool's calls prompt no matter how this switch is set.
+- **Admin-marked tools always ask.** When an administrator marks a tool as
+  always requiring approval (per-tool `require_approval` or
+  `FORCE_TOOL_APPROVAL_GLOBALLY`), its calls prompt no matter how this switch
+  is set.
+
+Some calls never reach the switch at all. A policy hook can approve a call on
+its own, and approving an agent launch covers the tool calls made inside that
+sub-conversation, so neither prompts even with auto-approve off. A hook that
+*escalates* a call to "ask" is treated like any other non-admin call: with
+auto-approve on, it is approved automatically. Only the admin markings above
+are guaranteed to stop and ask.
 
 The same switch sits on the **Active Tools** bar above the message box
-(**Auto-approve: Off / On**), and each approval row says why it is asking --
-either because auto-approve is off, or because an administrator requires
-approval for that tool.
+(**Auto-approve: Off / On**), and each approval row says why it is asking:
+auto-approve is off, an administrator marked the tool as always requiring
+approval, or auto-approve is on but the automatic approval could not be sent
+(for example while disconnected), so it waits for you.
 
 ## Model capability icons
 
@@ -104,7 +113,8 @@ reader name:
 | Image | Green picture: "Accepts image input" | Grey picture with a slash: "No image input" |
 | Wrench | Blue wrench: "Supports tool calling" | Grey wrench struck through: "No tool calling" |
 
-Unsupported states differ in shape (the slash), not only in colour.
+Unsupported states differ in shape (the slash), not only in colour, and the
+grey glyph keeps at least 3:1 contrast against the menu in both themes.
 
 ## Admin tab
 

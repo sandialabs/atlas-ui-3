@@ -11,14 +11,15 @@ const Strike = () => (
 )
 
 // One capability icon. Color alone can't tell models apart, so an unsupported
-// capability is also slashed and dimmed, and every icon carries its meaning as
-// a tooltip and an accessible name.
+// capability is also slashed, and every icon carries its meaning as a tooltip
+// and an accessible name. No extra opacity on the grey: the slash already
+// marks the state, and dimming further drops the glyph below 3:1 contrast.
 const CapabilityIcon = ({ icon, offIcon, supported, color, yes, no }) => {
   const Icon = supported || !offIcon ? icon : offIcon
   const text = supported ? yes : no
   return (
     <span role="img" aria-label={text} title={text}
-      className={`relative inline-flex ${supported ? color : 'text-gray-500 opacity-70'}`}>
+      className={`relative inline-flex ${supported ? color : 'text-gray-400'}`}>
       <Icon aria-hidden="true" className="w-3.5 h-3.5" />
       {!supported && !offIcon && <Strike />}
     </span>

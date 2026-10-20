@@ -14,10 +14,17 @@ export const resolveAutoApproved = (message, settings) => {
 // One wording for what Auto-Approve Tool Calls does, shared by the settings
 // toggle, the Active Tools strip and the approval row, so the three never
 // disagree about what "off" means. No app name: deployments rename the app.
+//
+// Scoped to what the client actually decides. The backend can still skip the
+// prompt on its own (a policy hook that auto-approves, an agent launch whose
+// approval covers its sub-conversation), and a hook that escalates a call to
+// "ask" sends admin_required: false, so auto-approve answers it like any
+// other non-admin call. Only tools an administrator marked (per-tool
+// require_approval, or FORCE_TOOL_APPROVAL_GLOBALLY) are guaranteed to ask.
 export const AUTO_APPROVE_OFF_TEXT =
-  'You are asked to approve each tool call before it runs. This is the default.'
+  'Tool calls ask for your approval before they run, unless your deployment\'s policy or an agent launch you approved already covers them. This is the default.'
 export const AUTO_APPROVE_ON_TEXT =
-  'Tool calls run without asking, except tools an administrator requires approval for, which always ask.'
+  'Tool calls run without asking, except tools an administrator has marked as always requiring approval.'
 export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APPROVE_OFF_TEXT)
 
 // Why a pending approval row is asking at all. A pending row whose
@@ -26,7 +33,7 @@ export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APP
 // setting, so a row is never mislabelled by a later toggle.
 export const approvalReason = (message, settings) => {
   if (message?.admin_required) {
-    return 'An administrator requires approval for this tool. It always asks, even with auto-approve on.'
+    return 'An administrator has marked this tool as always requiring approval, so it asks even with auto-approve on.'
   }
   if (message?.auto_approved === false && settings?.autoApproveTools) {
     return 'Auto-approve is on, but this call could not be approved automatically. Approve or reject it here.'

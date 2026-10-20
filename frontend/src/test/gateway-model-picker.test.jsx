@@ -159,8 +159,9 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     expect(sonnetImage).toContain('text-green-400')
     expect(sonnetWrench).toContain('text-blue-400')
     const [miniImage, miniWrench] = await iconClasses('gpt-4o-mini')
-    expect(miniImage).toContain('text-gray-500')
-    expect(miniWrench).toContain('text-gray-500')
+    expect(miniImage).toContain('text-gray-400')
+    expect(miniWrench).toContain('text-gray-400')
+    expect(miniImage).not.toContain('opacity')
     // Image support is an image glyph, not an eye; unsupported is a different
     // shape, not just a dimmer colour: ImageOff, and a struck-through wrench.
     const sonnet = await screen.findByRole('button', { name: /claude-sonnet/ })
