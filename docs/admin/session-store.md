@@ -118,7 +118,16 @@ replica, resumes the session when:
 
 Resuming stamps the new connection as the session's owner and writes it, so
 the old connection's late teardown leaves it alone, and its stale copy can no
-longer overwrite it. The resumed turn is still subject to the conversation's
+longer overwrite it.
+
+With chat history enabled, the resumed session takes its context (files,
+bindings, workspace, incognito state) from the snapshot but its messages from
+the database: the snapshot's messages are dropped, and the next turn reloads
+the conversation from chat history. The snapshot can trail the database --
+the old connection may still have been committing an interrupted turn when
+the client reconnected -- and the database is the record. Without chat
+history the snapshot's messages are kept, since there is nothing else to
+resume from. The resumed turn is still subject to the conversation's
 recorded data classification, which travels with the session. Anything that
 fails (unknown id, refused, store unreachable, lost write race) starts a fresh
 session, which reloads the conversation from chat history on its next turn.
@@ -131,7 +140,7 @@ page resume.
 | Situation | Behavior |
 |-----------|----------|
 | Redis down at startup | Startup fails. |
-| Redis down, session live on this replica | Turns continue from the local copy; each session write fails, is logged at ERROR and counted. The conversation is still saved to chat history. |
+| Redis down, session live on this replica | Turns continue from the local copy; each session write fails, is logged at ERROR and counted. The conversation is still saved to chat history. A session whose socket closes during the outage is dropped from memory. |
 | Redis down, session not on this replica | Reads raise `SessionStoreUnavailableError`; a reconnect starts a fresh session and the next turn rebuilds context from chat history. |
 | Redis restarted or flushed | Stored sessions are gone; live replicas re-store their sessions on the next write. Reconnects start fresh. |
 | Session idle past the TTL | Expired; a replica still holding it live re-stores it on the next write. |

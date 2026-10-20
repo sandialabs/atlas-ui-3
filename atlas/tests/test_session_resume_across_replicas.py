@@ -265,3 +265,38 @@ async def test_end_session_survives_an_outage(server):
     await replica.create_session(session_id, USER)
     server.connected = False
     await replica.end_session(session_id)  # logs, does not raise
+
+
+@pytest.mark.asyncio
+async def test_resume_rehydrates_from_chat_history_instead_of_the_snapshot(server):
+    """The snapshot can trail the database (a turn committed during takeover)."""
+    replica_a = _service(_redis_repo(server), "conn-a")
+    session_id = uuid4()
+    await _turn(replica_a, session_id, "first question", [])
+
+    replica_b = _service(_redis_repo(server), "conn-b")
+    replica_b.conversation_repository = MagicMock()
+    replica_b.conversation_repository.get_conversation_owner.return_value = USER
+    resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
+    assert resumed.history.messages == []
+    assert resumed.context["conversation_id"] == "conv-42"
+
+    hydrate = AsyncMock(return_value=0)
+    with patch.object(replica_b, "_hydrate_session_from_store", new=hydrate), \
+            patch.object(replica_b, "_save_conversation", return_value=True):
+        await _turn(replica_b, session_id, "follow-up", [])
+    hydrate.assert_awaited_once()
+    assert hydrate.await_args.args[1] == "conv-42"
+
+
+@pytest.mark.asyncio
+async def test_teardown_during_an_outage_does_not_pin_the_session(server):
+    repo = _redis_repo(server)
+    replica = _service(repo, "conn-a")
+    session_id = uuid4()
+    await replica.create_session(session_id, USER)
+    assert repo.is_live_here(session_id)
+
+    server.connected = False
+    await replica.end_session(session_id)
+    assert not repo.is_live_here(session_id)

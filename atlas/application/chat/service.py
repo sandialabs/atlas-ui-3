@@ -1045,6 +1045,19 @@ class ChatService:
         """
         if session.context.get("incognito") is True:
             self._incognito_sessions.add(session.id)
+        # With chat history on, the database -- not the snapshot -- is the
+        # record of what the conversation holds. The snapshot can be older
+        # than it: the previous connection may still have been committing an
+        # interrupted turn when this one took over, and its session write then
+        # lost the version race. Drop the snapshot's messages so the next turn
+        # rehydrates from the store (an empty history always does) instead of
+        # building on, and saving over, a stale thread.
+        if (
+            self.conversation_repository is not None
+            and session.context.get("incognito") is not True
+            and session.history.messages
+        ):
+            session.history.messages.clear()
         floor = session.context.get(_SAVE_FLOOR_KEY)
         if isinstance(floor, dict):
             value = floor.get("floor")
@@ -1984,7 +1997,13 @@ class ChatService:
             self._save_floor_locked.discard(session_id)
             return
         session.active = False
-        await self.persist_session(session)
+        if not await self.persist_session(session):
+            # The ended session could not be written (store down, or another
+            # connection owns it now); drop the local working copy anyway so
+            # an outage cannot pin every disconnected session in memory.
+            discard = getattr(self.session_repository, "discard_local", None)
+            if callable(discard):
+                discard(session_id)
         self._incognito_sessions.discard(session_id)
         self._incognito_save_floor.pop(session_id, None)
         self._save_floor_locked.discard(session_id)

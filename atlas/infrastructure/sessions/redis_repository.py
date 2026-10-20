@@ -106,6 +106,14 @@ class RedisSessionRepository:
             code="SESSION_STORE_UNAVAILABLE",
         )
 
+    def discard_local(self, session_id: UUID) -> None:
+        """Forget this replica's working copy without touching Redis.
+
+        For teardown when the final write could not be made (store
+        unavailable): the ended session must not stay pinned in memory.
+        """
+        self._evict(session_id)
+
     def is_live_here(self, session_id: UUID) -> bool:
         """True when this replica holds the session's working copy."""
         return session_id in self._live
