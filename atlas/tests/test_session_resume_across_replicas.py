@@ -134,7 +134,11 @@ async def test_resume_refuses_a_tracked_run_session(server):
     assert await main._resume_connection_session(replica_b, str(run_session.id), USER) is None
 
 
-@pytest.mark.parametrize("requested", [None, "", "not-a-uuid", str(uuid4())])
+# Fixed values: a random id in the parameters would differ between xdist
+# workers and fail collection.
+@pytest.mark.parametrize(
+    "requested", [None, "", "not-a-uuid", "6b1f6a52-0f8e-4d0c-9a51-3c2b8f1d7e40"]
+)
 @pytest.mark.asyncio
 async def test_unknown_or_malformed_ids_start_fresh(server, requested):
     replica = _service(_redis_repo(server), "conn-b")
