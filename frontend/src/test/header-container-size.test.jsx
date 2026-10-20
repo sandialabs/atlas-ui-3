@@ -7,7 +7,7 @@
  * appeared with nowhere to go, ran ~211px past the header's right edge, and the
  * model selector painted over the save-mode button.
  *
- * useElementWidth is what replaced that query, so these tests pin its contract:
+ * useElementSize is what replaced that query, so these tests pin its contract:
  * it measures the element itself, it measures before paint, and it keeps up
  * with later resizes. The bar's shapes are pinned in
  * header-responsive-tiers.test.jsx.
@@ -16,7 +16,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { render, act } from '@testing-library/react'
-import { useElementWidth } from '../hooks/useElementWidth'
+import { useElementSize } from '../hooks/useElementSize'
 // Imported, never re-declared: a local copy of the thresholds drifted from the
 // component's (1320 here vs the shipped value) and left these cases asserting
 // nothing (PR #839 review).
@@ -49,7 +49,8 @@ let stubbedWidth = 0
 const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect
 
 const Probe = () => {
-  const [ref, width] = useElementWidth()
+  const [ref, size] = useElementSize()
+  const width = size.width
   return (
     <div ref={ref} data-testid="probe">
       <span data-testid="width">{width}</span>
@@ -63,7 +64,7 @@ const Probe = () => {
   )
 }
 
-describe('useElementWidth', () => {
+describe('useElementSize', () => {
   beforeEach(() => {
     observerCallbacks = []
     globalThis.ResizeObserver = FakeResizeObserver

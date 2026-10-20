@@ -1,5 +1,5 @@
 /**
- * Tracks the rendered width of a single element.
+ * Tracks the rendered size of a single element.
  *
  * Exists because the header's responsive breakpoints have to react to the space
  * the header actually gets, not to the viewport. The header is laid out inside
@@ -21,23 +21,25 @@
  * it current; it is absent in jsdom-style environments, where the one-shot
  * layout measurement is still correct for a static test viewport.
  *
- * Returns `[ref, width]`. `width` is 0 until the element is attached, so
- * callers should treat 0 as "not measured yet" -- for a min-width threshold the
- * compact branch is the safe default, which is what 0 naturally selects.
+ * Returns `[ref, size]`, where `size` is `{ width, height }`. Both are 0 until
+ * the element is attached, so callers should treat 0 as "not measured yet" --
+ * for a min-width threshold the compact branch is the safe default, which is
+ * what 0 naturally selects.
  */
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
-export function useElementWidth() {
+export function useElementSize() {
   const ref = useRef(null)
-  const [width, setWidth] = useState(0)
+  const [size, setSize] = useState({ width: 0, height: 0 })
 
-  // Only re-render when the integer width actually changes. ResizeObserver
+  // Only re-render when the integer size actually changes. ResizeObserver
   // reports sub-pixel fractions that would otherwise churn renders on any
   // reflow that leaves the layout visually identical.
   const measure = useCallback((element) => {
-    const next = Math.round(element.getBoundingClientRect().width)
-    setWidth((prev) => (prev === next ? prev : next))
+    const rect = element.getBoundingClientRect()
+    const next = { width: Math.round(rect.width), height: Math.round(rect.height) }
+    setSize((prev) => (prev.width === next.width && prev.height === next.height ? prev : next))
   }, [])
 
   useLayoutEffect(() => {
@@ -52,7 +54,7 @@ export function useElementWidth() {
     return () => observer.disconnect()
   }, [measure])
 
-  return [ref, width]
+  return [ref, size]
 }
 
-export default useElementWidth
+export default useElementSize

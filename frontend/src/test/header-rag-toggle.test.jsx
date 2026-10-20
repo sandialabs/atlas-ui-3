@@ -13,8 +13,8 @@ vi.mock('../contexts/WSContext', () => ({ useWS: vi.fn() }))
 vi.mock('../contexts/MarketplaceContext', () => ({ useMarketplace: vi.fn() }))
 vi.mock('react-router-dom', () => ({ useNavigate: vi.fn() }))
 vi.mock('../components/WorkspaceSelector', () => ({ default: () => null }))
-vi.mock('../hooks/useElementWidth', () => ({
-  useElementWidth: vi.fn(() => [vi.fn(), mockedWidth])
+vi.mock('../hooks/useElementSize', () => ({
+  useElementSize: vi.fn(() => [vi.fn(), { width: mockedWidth, height: 0 }])
 }))
 vi.mock('../components/ui/toastContext', () => ({
   useToast: () => ({ showToast: vi.fn(), success: vi.fn(), error: vi.fn() })

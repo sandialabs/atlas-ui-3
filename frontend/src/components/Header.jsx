@@ -9,7 +9,7 @@ import { AgentModeHelpButton, AgentModeMenuHint } from './AgentModeHelp'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
 import { Database, Bot, ExternalLink, FileText, CircleHelp, FolderOpen, Monitor, Menu, X, PanelLeft, Printer } from 'lucide-react'
 import { classificationLock } from '../utils/conversationClassification'
-import { useElementWidth } from '../hooks/useElementWidth'
+import { useElementSize } from '../hooks/useElementSize'
 import { useToast } from './ui/toastContext'
 
 // The header has three shapes, widest first:
@@ -126,14 +126,18 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   // The bar is laid out from its own measured width, not the viewport's: the
   // header sits beside a 256px sidebar, so a viewport query would reveal the
-  // cluster while the header still lacks room for it. See useElementWidth.
-  const [headerRef, headerWidth] = useElementWidth()
+  // cluster while the header still lacks room for it. See useElementSize.
+  const [headerRef, headerSize] = useElementSize()
+  const headerWidth = headerSize.width
   // The parts of the bar that are measured as they render: the left group
   // (the conversation setup group plus the sources and workspace controls),
   // the row of action buttons on the right, and the connection status.
-  const [leftGroupRef, leftGroupWidth] = useElementWidth()
-  const [actionClusterRef, actionClusterWidth] = useElementWidth()
-  const [statusRef, statusWidth] = useElementWidth()
+  const [leftGroupRef, leftGroupSize] = useElementSize()
+  const [actionClusterRef, actionClusterSize] = useElementSize()
+  const [statusRef, statusSize] = useElementSize()
+  const leftGroupWidth = leftGroupSize.width
+  const actionClusterWidth = actionClusterSize.width
+  const statusWidth = statusSize.width
 
   // The full bar needs both groups side by side. Measuring them is what makes
   // the threshold follow the content instead of a fixed guess: the compliance
@@ -527,7 +531,18 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           />
           
           {/* Menu Panel */}
-          <div id="mobile-menu" className="fixed top-[57px] sm:top-[65px] right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 max-h-[calc(100vh-57px)] sm:max-h-[calc(100vh-65px)] overflow-y-auto">
+          {/* The menu hangs off the bottom of the bar. The bar's height
+              depends on its shape -- the security level control is taller than
+              the icon buttons -- so the offset is measured rather than
+              hard-coded, and the panel never covers the bar's own controls. */}
+          <div
+            id="mobile-menu"
+            className="fixed right-0 w-64 bg-gray-800 border-l border-gray-700 shadow-lg z-50 overflow-y-auto"
+            style={{
+              top: headerSize.height,
+              maxHeight: `calc(100vh - ${headerSize.height}px)`,
+            }}
+          >
             <div className="p-4 space-y-2">
               {/* User Info */}
               <div className="px-3 py-2 text-sm text-gray-300 bg-gray-700 rounded-lg">

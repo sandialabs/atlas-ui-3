@@ -117,6 +117,19 @@ Both were checked against the rendered bar with the widest content the
 controls allow (the longest save-mode label, a capped workspace name and
 source count, the widest status text).
 
+### The overflow menu hangs off the bar
+
+The bar's height is not fixed: the security level control is a labelled box
+(54px) and the icon buttons are 36px, so the bar is 53px, 69px or 87px tall
+depending on its shape and the padding tier. The overflow menu used to be
+positioned with a hard-coded offset (`top-[57px] sm:top-[65px]`), which
+covered the bottom of the bar's own controls once the bar grew taller.
+
+The bar's height is measured alongside its width (`useElementSize`), and the
+menu panel is placed at the bar's bottom edge, with its maximum height derived
+from it. The measurement also removed the 4px overlap the old offset had in
+the narrow shapes.
+
 ## Verification
 
 Measured in the browser with Playwright, sweeping the viewport from 320px to

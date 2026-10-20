@@ -26,8 +26,8 @@ vi.mock('react-router-dom', () => ({
 // The bar's shape follows its measured width, and jsdom measures nothing, so
 // the header is given a width here. It is wide enough for the setup group,
 // which is where the bar's copy of the selector lives.
-vi.mock('../hooks/useElementWidth', () => ({
-  useElementWidth: vi.fn(() => [vi.fn(), 1600]),
+vi.mock('../hooks/useElementSize', () => ({
+  useElementSize: vi.fn(() => [vi.fn(), { width: 1600, height: 87 }]),
 }))
 
 import Header from '../components/Header'

@@ -56,6 +56,7 @@ const measured = {
   leftGroup: 770,
   actionCluster: 290,
   status: 96,
+  headerHeight: 87,
 }
 
 const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect
@@ -85,6 +86,9 @@ const widthFor = element => {
   if (element.tagName === 'HEADER') return measured.header
   return 0
 }
+
+// The bar's height, which the overflow menu hangs off.
+const heightFor = element => (element.tagName === 'HEADER' ? measured.headerHeight : 0)
 
 // The width the bar needs for the full shape: the left group, the connection
 // status, the gap between them, the action buttons, the room kept for the
@@ -161,7 +165,8 @@ beforeEach(() => {
   globalThis.ResizeObserver = FakeResizeObserver
   Element.prototype.getBoundingClientRect = function () {
     const width = widthFor(this)
-    return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0 }
+    const height = heightFor(this)
+    return { width, height, top: 0, left: 0, right: width, bottom: height, x: 0, y: 0 }
   }
   setContext()
 })
@@ -283,5 +288,21 @@ describe('the action cluster stays measurable while it is collapsed', () => {
     expect(cluster.className).toContain('invisible')
     expect(cluster.className).toContain('absolute')
     expect(screen.getByTestId('header-action-buttons')).toBeTruthy()
+  })
+})
+
+describe('the overflow menu hangs off the bar', () => {
+  it('starts below the bar, whatever height the bar has', () => {
+    // The bar's height depends on its shape: the security level control is
+    // taller than the icon buttons, so a fixed offset either left a gap or
+    // covered the bar's own controls.
+    measured.header = COMPACT_ACTIONS_MIN_WIDTH - 1
+    measured.headerHeight = 87
+    renderHeader()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    const panel = document.getElementById('mobile-menu')
+    expect(panel.style.top).toBe('87px')
+    expect(panel.style.maxHeight).toBe('calc(100vh - 87px)')
   })
 })
