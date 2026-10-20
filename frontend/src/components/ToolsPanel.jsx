@@ -1,4 +1,4 @@
-import { X, Trash2, Search, Plus, Wrench, Shield, Info, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck, Loader2 } from 'lucide-react'
+import { X, Trash2, Search, Plus, Wrench, Shield, Info, Check, Circle, ChevronDown, ChevronRight, Sparkles, Save, Server, User, Mail, Key, ShieldCheck, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
@@ -8,6 +8,19 @@ import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
+import { FOCUS_RING } from '../utils/focusRing'
+
+// Tool and prompt chips are on/off toggles. Green alone was the only cue that
+// one was on, so the state is also a check mark (an empty ring when off) and
+// aria-pressed, and the hover no longer previews the "on" colour -- that made
+// an off chip look selected under the pointer.
+const selectionChipClass = (selected) => `inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded text-gray-50 transition-colors ${FOCUS_RING} ${
+  selected ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-500'
+}`
+
+const SelectionMark = ({ selected }) => (selected
+  ? <Check className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+  : <Circle className="w-3 h-3 flex-shrink-0 opacity-60" aria-hidden="true" />)
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { isUserPromptKey } from '../hooks/chat/useSelections'
 
@@ -922,8 +935,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                 )}
               </span>
               <button
+                type="button"
                 onClick={() => setOauthNotice(null)}
-                className="text-gray-400 hover:text-gray-200"
+                className={`text-gray-400 hover:text-gray-200 rounded ${FOCUS_RING}`}
                 aria-label="Dismiss"
               >
                 <X className="w-3 h-3" />
@@ -961,6 +975,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                   <input
                     type="text"
                     placeholder="Search installed tools..."
+                    aria-label="Search installed tools"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
@@ -988,9 +1003,12 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                         <div className="p-2 flex items-start gap-2">
                           {/* Collapse/Expand Button */}
                           <button
+                            type="button"
                             onClick={() => toggleServerCollapse(server.server)}
-                            className="flex-shrink-0 p-1 hover:bg-gray-600 rounded transition-colors"
+                            className={`flex-shrink-0 p-1 hover:bg-gray-600 rounded transition-colors ${FOCUS_RING}`}
                             title={isCollapsed ? 'Expand server' : 'Collapse server'}
+                            aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${server.server}`}
+                            aria-expanded={!isCollapsed}
                           >
                             {isCollapsed ? (
                               <ChevronRight className="w-4 h-4 text-gray-300" />
@@ -1047,8 +1065,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         openTokenModal(server.server)
                                       }
                                     }}
+                                    type="button"
                                     disabled={connecting}
-                                    className={`flex-shrink-0 p-1 rounded ${
+                                    className={`flex-shrink-0 p-1 rounded ${FOCUS_RING} ${
                                       connecting
                                         ? 'bg-yellow-600/20 text-yellow-400 cursor-wait'
                                         : isAuthenticated
@@ -1175,24 +1194,28 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                       <div key={tool} className="flex flex-col gap-1 w-full">
                                         <div className="flex items-center gap-1">
                                           <button
+                                            type="button"
                                             onClick={() => {
             // Toggle ONLY this specific tool
             toggleTool(toolKey)
                                             }}
-                                            className={`px-2 py-0.5 text-xs rounded text-gray-50 transition-colors hover:opacity-80 ${
-                                              isSelected ? 'bg-green-600' : 'bg-gray-600 hover:bg-green-600'
-                                            }`}
+                                            aria-pressed={isSelected}
+                                            className={selectionChipClass(isSelected)}
                                             title={`Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
                                           >
+                                            <SelectionMark selected={isSelected} />
                                             {tool}
                                           </button>
                                           {toolDetail && (
                                             <button
+                                              type="button"
                                               onClick={() => toggleToolExpansion(toolKey)}
-                                              className="p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
-                                              title="Show tool details"
+                                              className={`p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${FOCUS_RING}`}
+                                              title={isToolExpanded ? 'Hide tool details' : 'Show tool details'}
+                                              aria-label={`${isToolExpanded ? 'Hide' : 'Show'} details for ${tool}`}
+                                              aria-expanded={isToolExpanded}
                                             >
-                                              <Info className="w-3 h-3" />
+                                              <Info className="w-3 h-3" aria-hidden="true" />
                                             </button>
                                           )}
                                         </div>
@@ -1239,21 +1262,25 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                       <div key={prompt.name} className="flex flex-col gap-1 w-full">
                                         <div className="flex items-center gap-1">
                                           <button
+                                            type="button"
                                             onClick={() => togglePrompt(promptKey)}
-                                            className={`px-2 py-0.5 text-xs rounded text-gray-50 transition-colors hover:opacity-80 ${
-                                              isSelected ? 'bg-green-600' : 'bg-gray-600 hover:bg-green-600'
-                                            }`}
+                                            aria-pressed={isSelected}
+                                            className={selectionChipClass(isSelected)}
                                             title={`Click to ${isSelected ? 'disable' : 'enable'} ${prompt.name}`}
                                           >
+                                            <SelectionMark selected={isSelected} />
                                             {prompt.name}
                                           </button>
                                           {prompt.description && (
                                             <button
+                                              type="button"
                                               onClick={() => togglePromptExpansion(promptKey)}
-                                              className="p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors"
-                                              title="Show prompt description"
+                                              className={`p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${FOCUS_RING}`}
+                                              title={isPromptExpanded ? 'Hide prompt description' : 'Show prompt description'}
+                                              aria-label={`${isPromptExpanded ? 'Hide' : 'Show'} description for ${prompt.name}`}
+                                              aria-expanded={isPromptExpanded}
                                             >
-                                              <Info className="w-3 h-3" />
+                                              <Info className="w-3 h-3" aria-hidden="true" />
                                             </button>
                                           )}
                                         </div>
@@ -1287,13 +1314,16 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                           <div className="flex flex-col items-end gap-1 flex-shrink-0">
                             {/* Enable All Button */}
                             <button
+                              type="button"
                               onClick={() => toggleServerItems(server.server)}
-                              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${FOCUS_RING} ${
                                 isServerAllSelected(server.server)
                                   ? 'bg-green-600 hover:bg-green-700 text-white'
                                   : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
                               }`}
-                              title="Toggle all tools and prompts for this server"
+                              title={isServerAllSelected(server.server)
+                                ? `Everything from ${server.server} is on. Click to turn it all off`
+                                : `Turn on every tool and prompt from ${server.server}`}
                             >
                               {isServerAllSelected(server.server) ? 'All On' : 'Enable All'}
                             </button>

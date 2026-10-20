@@ -84,12 +84,24 @@ describe('SettingsPanel agent mode settings', () => {
     })
   })
 
-  it('uses the high-contrast approval warning style', async () => {
+  it('explains that off (the default) asks before every tool call', async () => {
     renderSettingsPanel({ settings: { autoApproveTools: false } })
 
-    const warning = await screen.findByText(/You will be prompted to approve all tool calls/)
-    expect(warning.closest('p')).toHaveClass('approval-warning-text')
-    expect(screen.getByText(/Currently:/)).toBeInTheDocument()
+    const toggle = await screen.findByRole('switch', { name: 'Auto-Approve Tool Calls' })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(toggle).toHaveAccessibleDescription(/wait for your confirmation before they run/i)
+    expect(toggle).toHaveAccessibleDescription(/Currently off\..*asks you to approve each tool call before it runs/i)
+    expect(toggle).toHaveAccessibleDescription(/administrator requires approval for always ask/i)
+    // Off is the safe default, so it is not styled as a warning.
+    expect(screen.getByText('Currently off.').closest('p')).not.toHaveClass('approval-warning-text')
+  })
+
+  it('uses the high-contrast approval warning style when auto-approve is on', async () => {
+    renderSettingsPanel({ settings: { autoApproveTools: true } })
+
+    const status = await screen.findByText('Currently on.')
+    expect(status.closest('p')).toHaveClass('approval-warning-text')
+    expect(status.closest('p')).toHaveTextContent(/conversations you are not currently viewing/)
   })
 
   it('shows a plain-language Agent Mode explanation by default', async () => {

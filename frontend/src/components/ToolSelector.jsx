@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useState, useRef, useEffect } from 'react'
-import { Wrench, ChevronDown, Search, SlidersHorizontal, Server } from 'lucide-react'
+import { useCallback, useId, useMemo, useState, useRef, useEffect } from 'react'
+import { Wrench, ChevronDown, Search, Server } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useEscapeKey } from '../hooks/useEscapeKey'
+import { FOCUS_RING } from '../utils/focusRing'
+import ToolsSettingsIcon from './ToolsSettingsIcon'
 
 // Descriptions are the point of this menu -- the reviewer's complaint was a
 // "long, indistinguishable list of tool names" -- but a full paragraph in a
@@ -47,6 +49,14 @@ const ToolSelector = () => {
   const [query, setQuery] = useState('')
   const dropdownRef = useRef(null)
   const triggerRef = useRef(null)
+  const searchRef = useRef(null)
+  const popoverId = useId()
+
+  // Opening the menu puts focus in the search box, so keyboard users land
+  // inside it instead of having to Tab past the composer to reach the rows.
+  useEffect(() => {
+    if (isOpen) searchRef.current?.focus()
+  }, [isOpen])
 
   // Escape closes the menu and puts focus back on the button that opened it,
   // so it is not lost to the end of the document (PR #839 review). Outside
@@ -95,25 +105,35 @@ const ToolSelector = () => {
         type="button"
         ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-400 transition-colors"
-        title="Turn tools on and off"
+        className={`flex items-center gap-1 text-xs rounded transition-colors ${FOCUS_RING} ${
+          isOpen || selectedCount > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-gray-400 hover:text-blue-400'
+        }`}
+        title="Choose which tools the model can use"
         aria-expanded={isOpen}
-        aria-haspopup="true"
+        aria-haspopup="dialog"
+        aria-controls={isOpen ? popoverId : undefined}
       >
-        <Wrench className="w-3 h-3" />
+        <Wrench className="w-3 h-3" aria-hidden="true" />
         <span className="underline decoration-dotted">
           {selectedCount > 0 ? `${selectedCount} tool${selectedCount === 1 ? '' : 's'}` : 'Tools'}
         </span>
-        <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown aria-hidden="true" className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full left-0 mb-1 w-96 max-w-[90vw] bg-gray-800 border border-gray-600 rounded-lg shadow-lg max-h-96 overflow-y-auto z-50">
+        <div
+          id={popoverId}
+          role="dialog"
+          aria-label="Tools"
+          className="absolute bottom-full left-0 mb-1 w-96 max-w-[90vw] bg-gray-800 border border-gray-600 rounded-lg shadow-lg max-h-96 overflow-y-auto z-50"
+        >
           <div className="p-2 border-b border-gray-700 sticky top-0 bg-gray-800">
             <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <Search aria-hidden="true" className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
               <input
-                type="text"
+                ref={searchRef}
+                type="search"
+                aria-label="Search tools"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search tools..."
@@ -127,7 +147,7 @@ const ToolSelector = () => {
           ) : groups.map(group => (
             <div key={group.server}>
               <div className="px-3 py-1.5 bg-gray-750 border-b border-gray-700 flex items-center gap-2 text-xs font-semibold text-gray-300 capitalize">
-                <Server className="w-3 h-3 text-gray-400" />
+                <Server aria-hidden="true" className="w-3 h-3 text-gray-400" />
                 {group.server}
               </div>
               {group.rows.map(row => {
@@ -138,11 +158,12 @@ const ToolSelector = () => {
                     type="button"
                     onClick={() => toggleTool(row.key)}
                     aria-pressed={isOn}
-                    className={`w-full px-3 py-2 text-left flex items-start gap-2 border-b border-gray-700 last:border-b-0 transition-colors ${
+                    title={`${isOn ? 'Turn off' : 'Turn on'} ${row.name}`}
+                    className={`w-full px-3 py-2 text-left flex items-start gap-2 border-b border-gray-700 last:border-b-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400 ${
                       isOn ? 'bg-blue-900/30 hover:bg-blue-900/40' : 'hover:bg-gray-700'
                     }`}
                   >
-                    <Wrench className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isOn ? 'text-blue-400' : 'text-gray-500'}`} />
+                    <Wrench aria-hidden="true" className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isOn ? 'text-blue-400' : 'text-gray-500'}`} />
                     <span className="flex-1 min-w-0">
                       <span className="block text-sm text-gray-200 break-words">{row.name}</span>
                       {row.description && (
@@ -152,6 +173,7 @@ const ToolSelector = () => {
                     {/* Toggle, not a checkbox: the reviewer asked for tools that
                         read as on/off at a glance. */}
                     <span
+                      aria-hidden="true"
                       className={`mt-0.5 w-8 h-4 rounded-full flex-shrink-0 relative transition-colors ${
                         isOn ? 'bg-blue-600' : 'bg-gray-600'
                       }`}
@@ -167,9 +189,9 @@ const ToolSelector = () => {
           <button
             type="button"
             onClick={() => { setIsOpen(false); openSettingsPanel({ tab: 'tools' }) }}
-            className="w-full px-3 py-2 flex items-center gap-2 text-xs text-gray-300 hover:bg-gray-700 border-t border-gray-700 sticky bottom-0 bg-gray-800"
+            className="group w-full px-3 py-2 flex items-center gap-2 text-xs text-gray-300 hover:bg-gray-700 border-t border-gray-700 sticky bottom-0 bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400"
           >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <ToolsSettingsIcon size="sm" badgeBg="bg-gray-800 group-hover:bg-gray-700" />
             Open Tools and Settings for everything else
           </button>
         </div>

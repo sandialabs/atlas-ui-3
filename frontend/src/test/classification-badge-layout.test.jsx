@@ -90,7 +90,7 @@ describe('model picker rows', () => {
     const badge = within(row).getByTestId('classification-badge')
     expect(name.parentElement.contains(badge)).toBe(false)
     expect(row).toHaveAccessibleName(
-      `${LONG_NAME} No image input Uses tools Allowed data classifications: ${MANY.join(', ')}`)
+      `${LONG_NAME} No image input Supports tool calling Allowed data classifications: ${MANY.join(', ')}`)
   })
 
   it('keeps a model awaiting an API key focusable but unselectable', () => {

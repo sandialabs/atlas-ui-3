@@ -85,12 +85,17 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     setChat({ selectedTools: new Set(['readtool', 'writetool']) })
     render(<EnabledToolsIndicator />)
 
-    const toggle = screen.getByRole('button', { name: /auto-approve off/i })
+    const toggle = screen.getByRole('switch', { name: 'Auto-approve tool calls' })
     // If the toggle lived inside the scroll container it could be scrolled out
     // of view on a narrow screen; it must be a pinned sibling instead.
     expect(toggle.closest('.overflow-x-auto')).toBeNull()
     expect(toggle.className).toContain('flex-shrink-0')
-    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(toggle).toHaveTextContent('Auto-approve: Off')
+    // Off is the default, and it means "ask first" -- say so to everyone, not
+    // only to sighted mouse users who find the tooltip.
+    expect(toggle).toHaveAccessibleDescription(/asks you to approve each tool call before it runs/i)
+    expect(toggle.getAttribute('title')).toMatch(/asks you to approve each tool call/i)
   })
 
   it('keeps the +N more toggle pinned next to auto-approve, outside the scroll region (review)', () => {
@@ -198,8 +203,10 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     })
     render(<EnabledToolsIndicator />)
 
-    const toggle = screen.getByRole('button', { name: /auto-approve on/i })
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    const toggle = screen.getByRole('switch', { name: 'Auto-approve tool calls' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    expect(toggle).toHaveTextContent('Auto-approve: On')
+    expect(toggle).toHaveAccessibleDescription(/except tools an administrator requires approval for/i)
     fireEvent.click(toggle)
     expect(updateSettings).toHaveBeenCalledWith({ autoApproveTools: false })
   })

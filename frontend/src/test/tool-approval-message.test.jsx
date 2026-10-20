@@ -229,6 +229,28 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
   })
 
+  // The row used to give no hint that the user could stop being asked, or why
+  // an admin-gated call still asks with auto-approve on.
+  it.each([true, false])('says why it is asking (compact=%s)', (compact) => {
+    setChat()
+    const { unmount } = render(<ToolApprovalMessage message={baseMessage} compact={compact} />)
+    expect(screen.getByText(/Asking because Auto-Approve Tool Calls is off/)).toBeInTheDocument()
+    unmount()
+
+    setChat({ settings: { autoApproveTools: true } })
+    render(<ToolApprovalMessage message={{ ...baseMessage, admin_required: true }} compact={compact} />)
+    expect(screen.getByText(/administrator requires approval for this tool, even with auto-approve on/)).toBeInTheDocument()
+  })
+
+  it('gives its controls button semantics and the reason box a label', () => {
+    setChat()
+    render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+    for (const name of [/^Approve/, 'Reject', 'Edit']) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute('type', 'button')
+    }
+    expect(screen.getByRole('textbox', { name: 'Rejection reason (optional)' })).toBeInTheDocument()
+  })
+
   it('no longer hosts the auto-approve toggle — it lives on the Active Tools strip', () => {
     setChat()
     render(<ToolApprovalMessage message={baseMessage} compact={true} />)

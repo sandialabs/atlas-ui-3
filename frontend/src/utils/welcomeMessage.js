@@ -5,7 +5,7 @@
 // any markup in it is displayed literally, never interpreted as HTML.
 
 export const DEFAULT_WELCOME_MESSAGE =
-  'Select a model and start chatting. To explore available tools, click the Wrench icon or to view files, click the Folder icon in the top right.'
+  'Select a model and start chatting. To explore available tools, click the Tools and Settings button (a gear with a wrench) or to view files, click the Folder icon in the top right.'
 
 // Return the configured message, or the default when unset or blank.
 export function resolveWelcomeMessage(configured) {

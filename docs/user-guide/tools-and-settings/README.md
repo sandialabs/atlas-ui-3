@@ -1,11 +1,15 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
-one button, **Tools and Settings** (wrench icon), that opens a single tabbed
-panel.
+one button, **Tools and Settings**, that opens a single tabbed panel. Its icon
+is a gear with a small wrench badge: the gear says "settings", the badge says
+tools live there too. A bare wrench is reserved for tools themselves -- the
+tool picker under the message box, the Active Tools bar, and the model
+picker's tool-support icon -- so the header button no longer reads as
+"tools only".
 
 ![Header with the single Tools and Settings button](screenshots/836-01-header.png)
 
@@ -70,6 +74,37 @@ and hover hints, including the Agent Mode explanation and the long form of the
 no-tools callout. Core labels, selected values, run status, warnings, and
 actions stay visible. It is off by default, so first-time and occasional users
 still get the explanations.
+
+## Tool approval
+
+**General → Auto-Approve Tool Calls** controls whether tool calls wait for your
+confirmation before they run.
+
+- **Off (the default):** every tool call stops at an **APPROVAL REQUIRED** row
+  in the transcript and runs only after you click **Approve** (you can edit the
+  arguments first, or **Reject** with an optional reason).
+- **On:** tool calls run without asking -- including calls in conversations
+  you are not currently viewing.
+- **Admin-gated tools always ask.** When an administrator requires approval for
+  a tool (per-tool `require_approval` or `FORCE_TOOL_APPROVAL_GLOBALLY`), that
+  tool's calls prompt no matter how this switch is set.
+
+The same switch sits on the **Active Tools** bar above the message box
+(**Auto-approve: Off / On**), and each approval row says why it is asking --
+either because auto-approve is off, or because an administrator requires
+approval for that tool.
+
+## Model capability icons
+
+Each row in the model picker shows two icons, each with a tooltip and a screen
+reader name:
+
+| Icon | Supported | Not supported |
+| ---- | --------- | ------------- |
+| Image | Green picture: "Accepts image input" | Grey picture with a slash: "No image input" |
+| Wrench | Blue wrench: "Supports tool calling" | Grey wrench struck through: "No tool calling" |
+
+Unsupported states differ in shape (the slash), not only in colour.
 
 ## Admin tab
 

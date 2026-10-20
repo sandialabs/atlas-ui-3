@@ -153,22 +153,30 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     fireEvent.change(await screen.findByLabelText('1. Team'), { target: { value: 'team-alpha' } })
     const iconClasses = async (label) => {
       const row = await screen.findByRole('button', { name: new RegExp(label) })
-      return [row.querySelector('.lucide-eye'), row.querySelector('.lucide-wrench')]
-        .map(icon => icon.getAttribute('class'))
+      return within(row).getAllByRole('img').map(icon => icon.getAttribute('class'))
     }
-    const [sonnetEye, sonnetWrench] = await iconClasses('claude-sonnet')
-    expect(sonnetEye).toContain('text-green-400')
+    const [sonnetImage, sonnetWrench] = await iconClasses('claude-sonnet')
+    expect(sonnetImage).toContain('text-green-400')
     expect(sonnetWrench).toContain('text-blue-400')
-    const [miniEye, miniWrench] = await iconClasses('gpt-4o-mini')
-    expect(miniEye).toContain('text-gray-600')
-    expect(miniWrench).toContain('text-gray-600')
+    const [miniImage, miniWrench] = await iconClasses('gpt-4o-mini')
+    expect(miniImage).toContain('text-gray-500')
+    expect(miniWrench).toContain('text-gray-500')
+    // Image support is an image glyph, not an eye; unsupported is a different
+    // shape, not just a dimmer colour: ImageOff, and a struck-through wrench.
+    const sonnet = await screen.findByRole('button', { name: /claude-sonnet/ })
+    expect(sonnet.querySelector('.lucide-image')).not.toBeNull()
+    expect(sonnet.querySelector('.lucide-eye')).toBeNull()
+    const mini = await screen.findByRole('button', { name: /gpt-4o-mini/ })
+    expect(mini.querySelector('.lucide-image-off')).not.toBeNull()
+    expect(mini.querySelector('.lucide-wrench').nextElementSibling?.tagName.toLowerCase()).toBe('svg')
+    expect(sonnet.querySelector('.lucide-wrench').nextElementSibling).toBeNull()
     // Not by color alone: each icon names what it means, as a tooltip too.
     const names = async (label) => {
       const row = await screen.findByRole('button', { name: new RegExp(label) })
       return within(row).getAllByRole('img').map(icon => [icon.getAttribute('aria-label'), icon.getAttribute('title')])
     }
-    expect(await names('claude-sonnet')).toEqual([['Accepts images', 'Accepts images'], ['Uses tools', 'Uses tools']])
-    expect(await names('gpt-4o-mini')).toEqual([['No image input', 'No image input'], ['No tool use', 'No tool use']])
+    expect(await names('claude-sonnet')).toEqual([['Accepts image input', 'Accepts image input'], ['Supports tool calling', 'Supports tool calling']])
+    expect(await names('gpt-4o-mini')).toEqual([['No image input', 'No image input'], ['No tool calling', 'No tool calling']])
   })
 
   it('names the ordinary models\' capability icons too', () => {
@@ -179,8 +187,8 @@ describe('ModelSelector with an enterprise LiteLLM gateway', () => {
     fireEvent.click(screen.getByRole('button', { name: /select chat model/i }))
     const names = (label) => within(screen.getByRole('button', { name: new RegExp(`^${label}`) }))
       .getAllByRole('img').map(icon => [icon.getAttribute('aria-label'), icon.getAttribute('title')])
-    expect(names('static-model')).toEqual([['No image input', 'No image input'], ['Uses tools', 'Uses tools']])
-    expect(names('vision-model')).toEqual([['Accepts images', 'Accepts images'], ['No tool use', 'No tool use']])
+    expect(names('static-model')).toEqual([['No image input', 'No image input'], ['Supports tool calling', 'Supports tool calling']])
+    expect(names('vision-model')).toEqual([['Accepts image input', 'Accepts image input'], ['No tool calling', 'No tool calling']])
   })
 
   it('keeps gateway models out of the flat list and labels the current one', async () => {

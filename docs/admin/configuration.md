@@ -207,7 +207,7 @@ VITE_WELCOME_MESSAGE="Choose a model to begin. Contact your administrator for he
 ```
 
 *   **Build-time only.** Like the other `VITE_*` settings, the value is compiled into the frontend bundle when `npm run build` runs; changing it requires a rebuild. There is no backend setting or runtime API. For container images, pass it as a build argument: `docker build --build-arg VITE_WELCOME_MESSAGE="..." .`
-*   **Default.** When the variable is unset, empty, or whitespace-only, the original text is shown unchanged: "Select a model and start chatting. To explore available tools, click the Wrench icon or to view files, click the Folder icon in the top right."
+*   **Default.** When the variable is unset, empty, or whitespace-only, the original text is shown unchanged: "Select a model and start chatting. To explore available tools, click the Tools and Settings button (a gear with a wrench) or to view files, click the Folder icon in the top right."
 *   **Plain text.** The value is rendered as text, not HTML; any markup in it is displayed literally. Wrapping and styling match the default message.
 *   The resolved value is printed with the other branding variables in the `[atlas-ui-3] Vite build-time environment` log at the start of a frontend build.
 

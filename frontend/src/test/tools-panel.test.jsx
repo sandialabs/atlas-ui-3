@@ -1881,3 +1881,82 @@ describe('ToolsPanel - catalogue refresh after an in-page auth change', () => {
     await waitFor(() => expect(authHookState.uploadToken).toHaveBeenCalled())
   })
 })
+
+// Selection state and disclosure controls must not rely on colour or a
+// tooltip alone: chips report aria-pressed and carry a check mark, and the
+// expand/details buttons report aria-expanded.
+describe('ToolsPanel - control semantics', () => {
+  const servers = [{
+    server: 'files',
+    description: 'File operations',
+    tools: ['read_file', 'write_file'],
+    tools_detailed: [{ name: 'read_file', description: 'Read a file', inputSchema: {} }],
+    tool_count: 2,
+    prompts: [{ name: 'summarize', description: 'Summarize a file' }],
+    prompt_count: 1,
+  }]
+
+  const renderPanel = () => {
+    useChat.mockReturnValue({
+      selectedTools: new Set(['files_read_file']),
+      selectedPrompts: new Set(),
+      toggleTool: vi.fn(),
+      togglePrompt: vi.fn(),
+      addTools: vi.fn(),
+      addPrompts: vi.fn(),
+      removeTools: vi.fn(),
+      removePrompts: vi.fn(),
+      clearToolsAndPrompts: vi.fn(),
+      complianceLevelFilter: 'all',
+      tools: servers,
+      prompts: [],
+      features: {},
+    })
+    useMarketplace.mockReturnValue({
+      getComplianceFilteredTools: vi.fn(() => servers),
+      getComplianceFilteredPrompts: vi.fn(() => servers),
+      getFilteredTools: vi.fn(() => servers),
+      getFilteredPrompts: vi.fn(() => servers),
+      isComplianceAccessible: vi.fn(() => true),
+    })
+    render(
+      <BrowserRouter>
+        <ToolsPanel isOpen={true} onClose={vi.fn()} />
+      </BrowserRouter>
+    )
+  }
+
+  it('reports each chip\'s on/off state with aria-pressed and a shape, not just green', () => {
+    renderPanel()
+    const on = screen.getByRole('button', { name: 'read_file' })
+    const off = screen.getByRole('button', { name: 'write_file' })
+    expect(on).toHaveAttribute('aria-pressed', 'true')
+    expect(off).toHaveAttribute('aria-pressed', 'false')
+    expect(on.querySelector('.lucide-check')).not.toBeNull()
+    expect(off.querySelector('.lucide-check')).toBeNull()
+    expect(off.querySelector('.lucide-circle')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'summarize' })).toHaveAttribute('aria-pressed', 'false')
+    // An off chip no longer previews the "on" colour under the pointer.
+    expect(off.className).not.toContain('hover:bg-green-600')
+  })
+
+  it('names the details and collapse buttons and reports aria-expanded', () => {
+    renderPanel()
+    const details = screen.getByRole('button', { name: 'Show details for read_file' })
+    expect(details).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(details)
+    expect(screen.getByRole('button', { name: 'Hide details for read_file' })).toHaveAttribute('aria-expanded', 'true')
+
+    expect(screen.getByRole('button', { name: 'Show description for summarize' })).toHaveAttribute('aria-expanded', 'false')
+
+    const collapse = screen.getByRole('button', { name: 'Collapse files' })
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(collapse)
+    expect(screen.getByRole('button', { name: 'Expand files' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('labels the installed-tools search for assistive tech', () => {
+    renderPanel()
+    expect(screen.getByRole('textbox', { name: 'Search installed tools' })).toBeInTheDocument()
+  })
+})

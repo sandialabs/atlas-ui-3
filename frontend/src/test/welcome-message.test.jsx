@@ -20,7 +20,7 @@ vi.mock('../contexts/ChatContext', () => ({
 describe('resolveWelcomeMessage', () => {
   it('keeps the exact original default text', () => {
     expect(DEFAULT_WELCOME_MESSAGE).toBe(
-      'Select a model and start chatting. To explore available tools, click the Wrench icon or to view files, click the Folder icon in the top right.'
+      'Select a model and start chatting. To explore available tools, click the Tools and Settings button (a gear with a wrench) or to view files, click the Folder icon in the top right.'
     )
   })
 
