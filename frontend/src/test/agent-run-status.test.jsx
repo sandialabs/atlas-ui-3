@@ -35,7 +35,12 @@ describe('AgentRunStatus', () => {
     const status = screen.getByTestId('agent-run-status')
     expect(status).toHaveTextContent('Agent is running')
     expect(status).toHaveTextContent(/using tools as needed/i)
-    expect(status).toHaveAttribute('role', 'status')
+    // The live region is the state text only; the Stop button is not
+    // re-announced on every step.
+    const live = screen.getByRole('status')
+    expect(live).toHaveTextContent('Agent is running')
+    expect(status).toContainElement(live)
+    expect(live).not.toContainElement(screen.getByRole('button', { name: /stop/i }))
 
     fireEvent.click(screen.getByRole('button', { name: /stop/i }))
     expect(onStop).toHaveBeenCalledTimes(1)

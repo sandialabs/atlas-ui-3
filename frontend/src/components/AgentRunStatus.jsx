@@ -31,7 +31,7 @@ export default function AgentRunStatus({
 
   return (
     <div
-      role="status"
+      role="group"
       aria-label="Agent run status"
       data-testid="agent-run-status"
       className="mb-2 px-3 py-2 rounded-lg border border-blue-500/60 bg-blue-950/60 text-blue-100 flex items-center gap-3"
@@ -41,7 +41,9 @@ export default function AgentRunStatus({
         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400" />
       </span>
       <Sparkles className="w-4 h-4 flex-shrink-0 text-blue-300" aria-hidden="true" />
-      <div className="min-w-0 flex-1">
+      {/* Only the state text is a live region, so a step change announces
+          "Agent is running, step 3" rather than the whole row and its Stop. */}
+      <div className="min-w-0 flex-1" role="status" aria-live="polite" aria-atomic="true">
         <div className="text-sm font-semibold text-blue-50">
           {title}
           {hasStep && !waitingForAnswer && (

@@ -136,8 +136,10 @@ const inViewport = async (locator) => {
 
 let page = null
 let browser = null
+let MOCK_URL = ''
 try {
   const MOCK_PORT = await freePort()
+  MOCK_URL = `http://127.0.0.1:${MOCK_PORT}`
   const ATLAS_PORT = await freePort()
   const NO_TOOLS_PORT = await freePort()
   run('python', [join(MOCK_FIXTURES, 'mock_llm.py')], { env: { ...process.env, MOCK_LLM_PORT: String(MOCK_PORT) } })
@@ -256,11 +258,18 @@ try {
   await shot(page, '6-agent-running-scrolled-up')
   pass('Agent run status shows "Agent is running" with a step count and stays visible when scrolled to the top')
 
-  const stoppedAt = Date.now()
+  // The row hides on click either way, so prove the backend stopped: the
+  // loop calls the model once per 6 s step, and after Stop (plus one step
+  // already in flight) the mock must see no further RUN1088 calls.
+  const runCalls = async () => (await (await fetch(`${MOCK_URL}/test/log`)).json())
+    .filter(e => (e.user || '').includes('label=RUN1088')).length
   await status.getByRole('button', { name: 'Stop agent run' }).click()
   await status.waitFor({ state: 'detached', timeout: 15000 })
-  check(Date.now() - stoppedAt < 15000, 'run status cleared promptly after Stop')
-  await page.waitForTimeout(8000)
+  await page.waitForTimeout(7000)
+  const callsAfterStop = await runCalls()
+  await page.waitForTimeout(14000)
+  check((await runCalls()) === callsAfterStop, `model calls kept coming after Stop (${callsAfterStop} -> ${await runCalls()})`)
+  check(callsAfterStop < 10, `run reached its last step before Stop took effect (${callsAfterStop} calls)`)
   check((await page.getByText('END[RUN1088]').count()) === 0, 'stopped run never produced its final answer')
   check((await status.count()) === 0, 'run status did not come back after Stop')
   pass('Stop in the run status ends the run and the status row goes away')

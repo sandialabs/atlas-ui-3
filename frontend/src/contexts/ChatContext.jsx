@@ -1896,10 +1896,14 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Stop addresses one run (issue #884). Naming the conversation -- and the
 		// run id when we have one -- is what keeps stopping conversation A from
 		// stopping whatever is running in B.
+		const clearAgentQuestion = agent.setAgentPendingQuestion
 		const stopAgent = useCallback(() => {
 			// Hide the Stop button immediately; the backend stop is best-effort and
-			// the terminal agent_completion event will also clear this.
+			// the terminal agent_completion event will also clear this. A question
+			// the stopped run asked goes with it, or the waiting row and Stop
+			// would stay up with nothing left to answer.
 			setIsAgentRunning(false)
+			clearAgentQuestion(null)
 			if (!sendMessage) return
 			const run = runs.getRun(activeConversationId)
 			sendMessage({
@@ -1908,7 +1912,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				conversation_id: activeConversationId || undefined,
 				run_id: run?.run_id || undefined,
 			})
-		}, [sendMessage, runs, activeConversationId])
+		}, [sendMessage, runs, activeConversationId, clearAgentQuestion])
 
 		// Stop non-agent streaming
 		const stopStreaming = useCallback(() => {

@@ -225,12 +225,15 @@ describe('createWebSocketHandler – agent message handling', () => {
       type: 'agent_update', update_type: 'agent_error', turn: 1, message: 'boom',
     })
     expect(errDeps.setIsAgentRunning).toHaveBeenCalledWith(false)
+    // A question from a run that has ended can no longer be answered.
+    expect(errDeps.setAgentPendingQuestion).toHaveBeenCalledWith(null)
 
     const maxDeps = makeDeps()
     createWebSocketHandler(maxDeps)({
       type: 'agent_update', update_type: 'agent_max_steps', message: 'hit cap',
     })
     expect(maxDeps.setIsAgentRunning).toHaveBeenCalledWith(false)
+    expect(maxDeps.setAgentPendingQuestion).toHaveBeenCalledWith(null)
   })
 
   it('agent_start adds only the small "Agent" marker (issue #849)', () => {
