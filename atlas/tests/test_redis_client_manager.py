@@ -78,6 +78,7 @@ def test_tls_url_uses_ssl_connections_with_ca_bundle():
     pool = manager.client.connection_pool
     assert "SSL" in pool.connection_class.__name__
     assert pool.connection_kwargs["ssl_ca_certs"] == "/ca.pem"
+    assert pool.connection_kwargs["ssl_check_hostname"] is True
 
 
 @pytest.mark.parametrize(

@@ -139,8 +139,11 @@ class RedisClientManager:
             "health_check_interval": settings.health_check_interval,
             "decode_responses": False,
         }
-        if settings.tls_ca_certs and settings.url.startswith("rediss://"):
-            kwargs["ssl_ca_certs"] = settings.tls_ca_certs
+        if settings.url.startswith("rediss://"):
+            # Explicit: older redis-py releases did not check the hostname.
+            kwargs["ssl_check_hostname"] = True
+            if settings.tls_ca_certs:
+                kwargs["ssl_ca_certs"] = settings.tls_ca_certs
         pool = redis_asyncio.BlockingConnectionPool.from_url(settings.url, **kwargs)
         return redis_asyncio.Redis(connection_pool=pool)
 

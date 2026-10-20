@@ -328,11 +328,13 @@ async def _merge_run_session_files(
                 )
         target = current if current is not None else connection_session
         is_live_here = getattr(chat_service.session_repository, "is_live_here", None)
-        if not callable(is_live_here) or is_live_here(target.id):
-            # Only the replica driving the session publishes it. A copy read
-            # here from the shared store belongs to a session another replica
-            # resumed; writing it would bump the version under that replica
-            # and make its next turn's write lose.
+        if not callable(is_live_here) or is_live_here(target.id) or not target.active:
+            # Publish when this replica drives the session, or when nobody
+            # does (its socket closed): a later resume must find the run's
+            # files, and the versioned write refuses it if a resume races it.
+            # A copy of a session another replica has resumed (active, not
+            # live here) is left alone; writing it would bump the version
+            # under that replica and make its next turn's write lose.
             await _persist_session(chat_service, target)
     except Exception as e:
         # Losing the merge costs a download, not the run's result -- but this

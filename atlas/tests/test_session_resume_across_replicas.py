@@ -386,3 +386,20 @@ async def test_run_merge_on_another_replica_does_not_bump_the_owner(server):
     await main._merge_run_session_files(replica_a, run_id, session_id, "conv-42")
     assert (await _redis_repo(server).get(session_id)).store_version == version
     assert await replica_b.persist_session(resumed) is True
+
+
+@pytest.mark.asyncio
+async def test_run_files_merged_after_disconnect_survive_a_later_resume(server):
+    repo_a = _redis_repo(server)
+    replica_a = _service(repo_a, "conn-a")
+    session_id, run_id = uuid4(), uuid4()
+    await _turn(replica_a, session_id, "start a run", [])
+    run_session = await replica_a.create_session(run_id, USER)
+    run_session.context["files"] = {"out.csv": {"key": "u/out.csv"}}
+    await _disconnect(replica_a, session_id)
+
+    await main._merge_run_session_files(replica_a, run_id, session_id, "conv-42")
+
+    replica_b = _service(_redis_repo(server), "conn-b")
+    resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
+    assert resumed.context["files"]["out.csv"]["key"] == "u/out.csv"
