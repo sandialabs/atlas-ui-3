@@ -81,7 +81,7 @@ class FakeResizeObserver {
 const widthFor = element => {
   const testId = element.getAttribute?.('data-testid')
   if (testId === 'header-left-group') return measured.leftGroup
-  if (testId === 'header-action-buttons') return measured.actionCluster
+  if (testId === 'header-action-cluster') return measured.actionCluster
   if (testId === 'header-status') return measured.status
   if (element.tagName === 'HEADER') return measured.header
   return 0
@@ -317,7 +317,6 @@ describe('the action cluster stays measurable while it is collapsed', () => {
     // takes it out of the accessibility tree and the tab order.
     expect(cluster.className).toContain('invisible')
     expect(cluster.className).toContain('absolute')
-    expect(screen.getByTestId('header-action-buttons')).toBeTruthy()
   })
 })
 

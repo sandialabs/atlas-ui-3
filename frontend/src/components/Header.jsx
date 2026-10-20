@@ -343,41 +343,42 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           </span>
         </div>
 
+        {/* User Info. The one piece of unbounded content in the bar, so it is
+            the one that gives way: it truncates (and keeps its full address in
+            its title) when the bar is tight. The buttons around it never
+            shrink, so they can never be pushed off the page. The bar keeps
+            room for it in the fit test; below that it is in the menu with the
+            rest of the collapsed controls. */}
+        {showFullActions && (
+          <div className="text-sm text-gray-300 min-w-0 max-w-[12rem] truncate" title={user}>
+            {user}
+          </div>
+        )}
+
         {/* The action cluster. When the bar is too narrow for it, the cluster
             moves into the overflow menu -- but it stays in the DOM, out of
             flow, so that the bar can still measure how much room it would
             need. That measurement is what decides whether the full bar
             fits, so it has to be available in the collapsed shape too.
 
-            The cluster is two parts: the user name, which is the one piece of
-            unbounded content and the one that gives way (it truncates, and
-            keeps its full address in the title), and the row of buttons,
-            which never shrink. Keeping the buttons in their own
-            `w-max` wrapper means their width is the same whether the bar is
-            showing them or measuring them, so the fit test below is not
-            thrown off by a cluster that has been squeezed. */}
+            The buttons are measured as one block (`w-max`, and never
+            shrinking), so their width is the same whether the bar is showing
+            them or measuring them: a cluster that had been squeezed would
+            report the squeezed width, and the bar would then believe it fit.
+
+            `invisible` (visibility: hidden) is what takes the collapsed
+            cluster out of the accessibility tree and the tab order;
+            `absolute` takes it out of the flow so it can still be measured
+            without taking up room. */}
         <div
+          ref={actionClusterRef}
           data-testid="header-action-cluster"
           className={
             showFullActions
-              ? 'flex items-center gap-2 min-w-0'
-              : // `invisible` (visibility: hidden) is what takes the collapsed
-                // cluster out of the accessibility tree and the tab order;
-                // `absolute` takes it out of the flow so it can still be
-                // measured without taking up room.
-                'absolute invisible pointer-events-none flex items-center gap-2 w-max'
+              ? 'flex items-center gap-2 w-max flex-shrink-0'
+              : 'absolute invisible pointer-events-none flex items-center gap-2 w-max'
           }
         >
-          {/* User Info. The one piece of unbounded content in the bar, so it
-              is the one that gives way: it truncates (and keeps its full
-              address in the title) when the bar is tight. The buttons around
-              it never shrink, so they can never be pushed off the page. */}
-          <div className="text-sm text-gray-300 min-w-0 max-w-[12rem] truncate" title={user}>
-            {user}
-          </div>
-
-          {/* The buttons, measured as one block. */}
-          <div ref={actionClusterRef} data-testid="header-action-buttons" className="flex items-center gap-2 w-max flex-shrink-0">
           {/* Open Chat Transcript Button */}
           <div className="relative flex-shrink-0">
             <button
@@ -502,7 +503,6 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           >
             <Monitor className="w-5 h-5" />
           </button>
-          </div>
         </div>
 
         {/* Hamburger Menu Button - Only visible on mobile/tablet */}
