@@ -13,8 +13,12 @@ import { useToast } from './ui/toastContext'
  * selections under a name, so switching context (work / home / project) is one
  * click instead of re-picking every selection. Saving captures whatever is
  * currently selected; switching replaces the current selections wholesale.
+ *
+ * `showName` is driven by the header's own width, not by a viewport
+ * breakpoint: the bar sits beside a resizable sidebar, so a viewport query
+ * showed the name in bars that had no room for it and hid it in bars that did.
  */
-const WorkspaceSelector = ({ placement = 'down' }) => {
+const WorkspaceSelector = ({ placement = 'down', showName = true }) => {
   const {
     workspaces = [],
     workspacesLoading,
@@ -154,7 +158,7 @@ const WorkspaceSelector = ({ placement = 'down' }) => {
         aria-label={active ? `Workspaces: ${active.name}` : 'Workspaces'}
       >
         <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
-        <span className="text-sm font-medium hidden lg:inline max-w-[10rem] truncate">
+        <span className={`text-sm font-medium max-w-[8rem] truncate ${showName ? 'inline' : 'hidden'}`}>
           {active ? active.name : 'Workspace'}
         </span>
         <ChevronDown className="w-3 h-3 flex-shrink-0" />

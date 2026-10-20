@@ -5,6 +5,12 @@ Date: 2026-08-26
 Why the header's desktop button cluster is gated on a measured element width
 instead of a CSS media query.
 
+> Superseded in part by
+> [Header Responsive Tiers](header-responsive-tiers-2026-10-20.md) (issue
+> #1071): the fixed threshold this note describes did not account for the
+> compliance (security level) selector that later joined the setup group, and
+> the bar now decides its shape by measuring what it holds.
+
 ## The bug
 
 At a 1280px viewport with the conversations sidebar open, the header's controls

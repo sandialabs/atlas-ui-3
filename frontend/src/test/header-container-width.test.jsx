@@ -9,7 +9,8 @@
  *
  * useElementWidth is what replaced that query, so these tests pin its contract:
  * it measures the element itself, it measures before paint, and it keeps up
- * with later resizes.
+ * with later resizes. The bar's shapes are pinned in
+ * header-responsive-tiers.test.jsx.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -19,7 +20,11 @@ import { useElementWidth } from '../hooks/useElementWidth'
 // Imported, never re-declared: a local copy of the thresholds drifted from the
 // component's (1320 here vs the shipped value) and left these cases asserting
 // nothing (PR #839 review).
-import { DESKTOP_ACTIONS_MIN_WIDTH, ACTION_LABELS_MIN_WIDTH } from '../components/Header'
+import {
+  ACTION_LABELS_MIN_WIDTH,
+  COMPACT_ACTIONS_MIN_WIDTH,
+  SECURITY_LEVEL_MIN_WIDTH,
+} from '../components/Header'
 
 const originalResizeObserver = globalThis.ResizeObserver
 
@@ -49,7 +54,7 @@ const Probe = () => {
     <div ref={ref} data-testid="probe">
       <span data-testid="width">{width}</span>
       <span data-testid="mode">
-        {width >= DESKTOP_ACTIONS_MIN_WIDTH ? 'desktop' : 'compact'}
+        {width >= COMPACT_ACTIONS_MIN_WIDTH ? 'setup-group' : 'minimal'}
       </span>
       <span data-testid="labels">
         {width >= ACTION_LABELS_MIN_WIDTH ? 'labels' : 'icons-only'}
@@ -78,13 +83,13 @@ describe('useElementWidth', () => {
     const { getByTestId } = render(<Probe />)
     // Not 0: a wide header must not flash its compact layout on mount.
     expect(getByTestId('width').textContent).toBe('1600')
-    expect(getByTestId('mode').textContent).toBe('desktop')
+    expect(getByTestId('mode').textContent).toBe('setup-group')
   })
 
   it('updates when the element is resized', () => {
     stubbedWidth = 1600
     const { getByTestId } = render(<Probe />)
-    expect(getByTestId('mode').textContent).toBe('desktop')
+    expect(getByTestId('mode').textContent).toBe('setup-group')
 
     // Sidebar opens: the header shrinks even though the viewport did not.
     stubbedWidth = 1600 - 256
@@ -92,33 +97,37 @@ describe('useElementWidth', () => {
       observerCallbacks.forEach((cb) => cb())
     })
     expect(getByTestId('width').textContent).toBe('1344')
-    expect(getByTestId('mode').textContent).toBe('desktop')
+    expect(getByTestId('mode').textContent).toBe('setup-group')
   })
 
-  it('selects the compact layout at the width the old viewport query got wrong', () => {
+  it('selects the minimal layout at the width the old viewport query got wrong', () => {
     // The original bug: 1280px viewport, 256px sidebar, so the header is 1024px
     // wide. The viewport query said "desktop"; the header width says "compact".
     stubbedWidth = 1280 - 256
     const { getByTestId } = render(<Probe />)
     expect(getByTestId('width').textContent).toBe('1024')
-    expect(getByTestId('mode').textContent).toBe('compact')
+    expect(getByTestId('mode').textContent).toBe('minimal')
   })
 
   it('uses the thresholds the header actually ships', () => {
     // Pins the imported values themselves. The point of importing rather than
     // re-declaring is that a change to Header.jsx has to come here too.
-    expect(DESKTOP_ACTIONS_MIN_WIDTH).toBe(1160)
-    expect(ACTION_LABELS_MIN_WIDTH).toBe(760)
-    expect(ACTION_LABELS_MIN_WIDTH).toBeLessThan(DESKTOP_ACTIONS_MIN_WIDTH)
+    expect(COMPACT_ACTIONS_MIN_WIDTH).toBe(1160)
+    expect(SECURITY_LEVEL_MIN_WIDTH).toBe(420)
+    expect(ACTION_LABELS_MIN_WIDTH).toBe(800)
+    // The bar narrows from the outside in: the labels go first, then the
+    // setup group, and the security level is the last thing to leave.
+    expect(SECURITY_LEVEL_MIN_WIDTH).toBeLessThan(ACTION_LABELS_MIN_WIDTH)
+    expect(ACTION_LABELS_MIN_WIDTH).toBeLessThan(COMPACT_ACTIONS_MIN_WIDTH)
   })
 
   it('drops the button text labels below ACTION_LABELS_MIN_WIDTH', () => {
-    // Between the two thresholds: the cluster is already collapsed, and the
+    // Between the two thresholds: the setup group has already gone, and the
     // remaining left-hand buttons still carry their words.
     stubbedWidth = ACTION_LABELS_MIN_WIDTH
     const { getByTestId, unmount } = render(<Probe />)
     expect(getByTestId('labels').textContent).toBe('labels')
-    expect(getByTestId('mode').textContent).toBe('compact')
+    expect(getByTestId('mode').textContent).toBe('minimal')
     unmount()
 
     // One pixel narrower and "New chat" et al. go icon-only, which is the
@@ -128,15 +137,15 @@ describe('useElementWidth', () => {
     expect(narrow.getByTestId('labels').textContent).toBe('icons-only')
   })
 
-  it('shows the desktop cluster exactly at DESKTOP_ACTIONS_MIN_WIDTH', () => {
-    stubbedWidth = DESKTOP_ACTIONS_MIN_WIDTH
+  it('keeps the setup group exactly at COMPACT_ACTIONS_MIN_WIDTH', () => {
+    stubbedWidth = COMPACT_ACTIONS_MIN_WIDTH
     const { getByTestId, unmount } = render(<Probe />)
-    expect(getByTestId('mode').textContent).toBe('desktop')
+    expect(getByTestId('mode').textContent).toBe('setup-group')
     unmount()
 
-    stubbedWidth = DESKTOP_ACTIONS_MIN_WIDTH - 1
+    stubbedWidth = COMPACT_ACTIONS_MIN_WIDTH - 1
     const narrow = render(<Probe />)
-    expect(narrow.getByTestId('mode').textContent).toBe('compact')
+    expect(narrow.getByTestId('mode').textContent).toBe('minimal')
   })
 
   it('rounds sub-pixel widths so fractional reflows do not churn renders', () => {

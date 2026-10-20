@@ -1,6 +1,6 @@
 # Design Notes
 
-Last updated: 2026-10-17
+Last updated: 2026-10-20
 
 Point-in-time records of how and why specific features were built. Each is
 dated and reflects the system as of that date — useful background for
@@ -31,6 +31,7 @@ docs that describe how the system works today, see the
 - [Metrics Logging](metrics-logging.md) - Metrics logging feature
 - [Animated Logo](animated-logo-2026-02-27.md) - Animated logo feature flag and effects
 - [Header Container-Width Breakpoint](header-container-width-breakpoint-2026-08-26.md) - Desktop button cluster gated on measured header width, not viewport
+- [Header Responsive Tiers](header-responsive-tiers-2026-10-20.md) - The bar measures what it holds, collapses in three steps, and keeps the security level visible (issue #1071)
 - [Theme Default and Warning Contrast](theme-default-and-warning-contrast-2026-06-14.md) - Dark default + light-mode warning contrast (PR #654)
 - [Compact Tool / System / Approval Messages](compact-tool-system-messages-2026-06-23.md) - Approval prompts as compact rows with persisted collapse
 - [Opt-in Fine-tune Capture](finetune-capture-2026-06-25.md) - Consent-gated chat capture and rollback preference pairs (issue #622)

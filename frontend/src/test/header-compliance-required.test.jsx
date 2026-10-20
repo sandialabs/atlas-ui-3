@@ -23,6 +23,12 @@ vi.mock('../contexts/MarketplaceContext', () => ({
 vi.mock('react-router-dom', () => ({
   useNavigate: vi.fn(),
 }))
+// The bar's shape follows its measured width, and jsdom measures nothing, so
+// the header is given a width here. It is wide enough for the setup group,
+// which is where the bar's copy of the selector lives.
+vi.mock('../hooks/useElementWidth', () => ({
+  useElementWidth: vi.fn(() => [vi.fn(), 1600]),
+}))
 
 import Header from '../components/Header'
 import { useChat } from '../contexts/ChatContext'

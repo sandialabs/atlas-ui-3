@@ -4,7 +4,7 @@ import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
 import WorkspaceSelector from './WorkspaceSelector'
-import ConversationSetupCluster, { NewChatButton } from './ConversationSetupControls'
+import ConversationSetupCluster, { NewChatButton, SecurityLevelControl } from './ConversationSetupControls'
 import { AgentModeHelpButton, AgentModeMenuHint } from './AgentModeHelp'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
 import { Database, Bot, ExternalLink, FileText, CircleHelp, FolderOpen, Monitor, Menu, X, PanelLeft, Printer } from 'lucide-react'
@@ -12,13 +12,51 @@ import { classificationLock } from '../utils/conversationClassification'
 import { useElementWidth } from '../hooks/useElementWidth'
 import { useToast } from './ui/toastContext'
 
-// Header width (not viewport width) at which the full desktop button cluster
-// fits. Below it the cluster collapses into the hamburger menu. The
-// conversation-setup group (security level, save mode, New Chat, help) joined
-// the left side, so this threshold sits above the width at which the two sides
-// would otherwise meet; it still carries headroom for locale-dependent label
-// widths.
-export const DESKTOP_ACTIONS_MIN_WIDTH = 1160
+// The header has three shapes, widest first:
+//
+//   full     the conversation setup group (security level, save mode, New
+//            Chat, help) and every action button (transcript, agent mode,
+//            tools and settings, help, files, canvas) in the bar;
+//   compact  the setup group stays in the bar, the action buttons move into
+//            the overflow menu;
+//   minimal  icons only -- New Chat, Sources, Workspace, plus the security
+//            level in its compact form -- and everything else in the menu.
+//
+// Which shape applies is decided by the header's own measured width, never
+// by the viewport: the header sits beside a resizable conversations sidebar,
+// so a viewport query reveals controls the header has no room for. The old
+// fixed threshold did exactly that (issue #1071): with the compliance
+// (security level) selector enabled the setup group is ~150px wider, so at
+// intermediate widths the trailing buttons were pushed past the right edge
+// of the page and became unreachable.
+
+// The bar's horizontal padding, used when the two groups are added up. The
+// bar pads by 16px on each side from the `sm` breakpoint up.
+const HEADER_HORIZONTAL_PADDING = 32
+
+// The gap between the connection status and the action cluster. The bar's own
+// gap is 16px from the `sm` breakpoint up, and the full bar is far wider than
+// that, so the larger value is the one that applies.
+const RIGHT_GROUP_GAP = 16
+
+// The room the bar keeps for the user name. The name is the one part of the
+// action cluster that may shrink (it truncates, and keeps its full address in
+// its title), so the fit test reserves this much for it rather than its full
+// width: a long address must not push the buttons off the page.
+const USER_NAME_MIN_WIDTH = 96
+
+// Header width at which the compact shape still holds the setup group beside
+// the menu button. Below it the bar drops to the minimal shape, and the save
+// mode and setup help move into the overflow menu. The number is a budget for
+// the widest setup group (a long save-mode label, a long workspace name)
+// plus the connection status and the menu button.
+export const COMPACT_ACTIONS_MIN_WIDTH = 1160
+
+// Below this the security level leaves the bar for the overflow menu, where
+// it stays reachable. It is the narrowest bar that still holds the compact
+// security level beside the icon-only buttons and, on small screens, the
+// conversations toggle.
+export const SECURITY_LEVEL_MIN_WIDTH = 420
 
 // Below this the left-hand buttons drop their text labels and show icons only.
 // This is the header's own width rather than a Tailwind viewport breakpoint
@@ -26,7 +64,12 @@ export const DESKTOP_ACTIONS_MIN_WIDTH = 1160
 // a viewport query kept labels at widths where they no longer fit and dropped
 // them at widths where they did (issue #839 review -- "New chat has this
 // problem in particular").
-export const ACTION_LABELS_MIN_WIDTH = 760
+export const ACTION_LABELS_MIN_WIDTH = 800
+
+// Below this the connection status shows its dot only. The text used to
+// follow the viewport (`hidden sm:inline`), so a wide sidebar on a wide
+// screen left the bar with a status label it had no room for.
+export const STATUS_TEXT_MIN_WIDTH = 560
 
 const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onToggleCanvas, onCloseCanvas, onToggleSettings }) => {
   const navigate = useNavigate()
@@ -81,21 +124,52 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
   const toast = useToast()
   const [transcriptDropdownOpen, setTranscriptDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  // The desktop cluster is gated on the header's own width, not the viewport's:
-  // the header sits beside a 256px sidebar, so a viewport query would reveal the
+  // The bar is laid out from its own measured width, not the viewport's: the
+  // header sits beside a 256px sidebar, so a viewport query would reveal the
   // cluster while the header still lacks room for it. See useElementWidth.
   const [headerRef, headerWidth] = useElementWidth()
-  const showDesktopActions = headerWidth >= DESKTOP_ACTIONS_MIN_WIDTH
-  const showActionLabels = headerWidth >= ACTION_LABELS_MIN_WIDTH
-  
+  // The parts of the bar that are measured as they render: the left group
+  // (the conversation setup group plus the sources and workspace controls),
+  // the row of action buttons on the right, and the connection status.
+  const [leftGroupRef, leftGroupWidth] = useElementWidth()
+  const [actionClusterRef, actionClusterWidth] = useElementWidth()
+  const [statusRef, statusWidth] = useElementWidth()
 
-  // Reset the compact menu once the header is wide enough for the desktop
+  // The full bar needs both groups side by side. Measuring them is what makes
+  // the threshold follow the content instead of a fixed guess: the compliance
+  // (security level) selector widens the setup group by ~150px, a long
+  // save-mode label or workspace name widens it further, and the set of
+  // action buttons depends on the deployment's features. A fixed threshold
+  // either pushed the trailing buttons off the right edge of the page (issue
+  // #1071) or collapsed the bar while there was still room for it.
+  const fullBarMinWidth =
+    leftGroupWidth +
+    statusWidth +
+    RIGHT_GROUP_GAP +
+    actionClusterWidth +
+    USER_NAME_MIN_WIDTH +
+    HEADER_HORIZONTAL_PADDING
+  // The full shape is only ever a widening of the compact one: the two share
+  // the same left group, so a bar that collapsed because the left group
+  // shrank would immediately widen again. The compact threshold is the floor
+  // that keeps the minimal shape from claiming a width the setup group needs.
+  const showFullActions = headerWidth >= fullBarMinWidth && headerWidth >= COMPACT_ACTIONS_MIN_WIDTH
+  const showCompactActions = headerWidth >= COMPACT_ACTIONS_MIN_WIDTH
+  // The security level stays in the bar for as long as it fits: in the
+  // compact shape it is part of the setup group, and in the minimal shape it
+  // stays in its compact form until even that no longer fits.
+  const showSecurityInBar = showCompactActions || headerWidth >= SECURITY_LEVEL_MIN_WIDTH
+  const showActionLabels = headerWidth >= ACTION_LABELS_MIN_WIDTH
+  const showStatusText = headerWidth >= STATUS_TEXT_MIN_WIDTH
+
+
+  // Reset the compact menu once the header is wide enough for the full
   // cluster, so it does not spring back open if the header narrows again. The
-  // render above is already gated on !showDesktopActions, so this is state
+  // render above is already gated on !showFullActions, so this is state
   // hygiene rather than what actually hides the menu.
   useEffect(() => {
-    if (showDesktopActions) setMobileMenuOpen(false)
-  }, [showDesktopActions])
+    if (showFullActions) setMobileMenuOpen(false)
+  }, [showFullActions])
 
   // Close dropdowns when mobile menu opens
   useEffect(() => {
@@ -167,7 +241,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           buttons with nothing to truncate, so letting the section shrink below
           them only makes it paint over the right-hand group. The right section
           shrinks instead, truncating the model name. */}
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div ref={leftGroupRef} data-testid="header-left-group" className="flex items-center gap-2 sm:gap-4">
         {/* Mobile sidebar toggle */}
         {features?.chat_history && (
           <button
@@ -180,9 +254,10 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
         )}
 
         {/* Conversation setup: security level, save mode, then New Chat. The
-            full cluster is desktop-only; the compact header carries New Chat
-            and puts the rest of the group in the overflow menu below. */}
-        <div className={`${showDesktopActions ? 'flex' : 'hidden'} items-center`}>
+            compact and full bars carry the whole group; the minimal bar keeps
+            only the security level (in its compact form) and New Chat, and
+            puts the save mode and the setup help in the overflow menu. */}
+        {showCompactActions ? (
           <ConversationSetupCluster
             complianceOptions={complianceOptions}
             complianceRequired={complianceRequired}
@@ -197,12 +272,20 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
             hasMessages={messages.length > 0}
             quiet={reduceHelpText}
           />
-        </div>
-
-        {/* Compact header: keep New Chat one tap away while security level and
-            save mode live in the grouped overflow menu. */}
-        {!showDesktopActions && (
-          <NewChatButton onClick={startNewChat} showLabel={showActionLabels} quiet={reduceHelpText} />
+        ) : (
+          <div className="flex items-center gap-2">
+            {showSecurityInBar && complianceOptions.length > 0 && (
+              <SecurityLevelControl
+                density="compact"
+                complianceOptions={complianceOptions}
+                complianceRequired={complianceRequired}
+                value={complianceLevelFilter}
+                onChange={setComplianceLevelFilter}
+                lock={lock}
+              />
+            )}
+            <NewChatButton onClick={startNewChat} showLabel={showActionLabels} quiet={reduceHelpText} />
+          </div>
         )}
 
         {features?.rag && (
@@ -223,38 +306,76 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           >
             <Database className="w-4 h-4 sm:w-5 sm:h-5" />
             {showActionLabels && (
-              <span className="text-sm font-medium whitespace-nowrap">
+              // Capped so a large source count cannot widen the bar: the
+              // header budgets for this button, and a count is not worth
+              // pushing a control off the page.
+              <span className="text-sm font-medium whitespace-nowrap max-w-[5rem] truncate">
                 {selectedDataSources?.size > 0 ? `${selectedDataSources.size} sources` : 'Sources'}
               </span>
             )}
           </button>
         )}
         
-        {/* Workspace switcher: prompt + data sources + tools as one context */}
-        {features?.workspaces && <WorkspaceSelector />}
+        {/* Workspace switcher: prompt + data sources + tools as one context.
+            The name follows the bar's own width like every other label, so a
+            narrow bar with a wide sidebar does not squeeze it out. */}
+        {features?.workspaces && <WorkspaceSelector showName={showActionLabels} />}
       </div>
 
       {/* Right section */}
-      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0 relative">
         {/* The model picker moved to the chat bar (issue #839 review): the
             message box is where people work, so the model in use belongs there.
             See ModelSelector, rendered by ChatArea. */}
 
-        {/* Connection Status - Show dot on all screens, text on sm+ */}
-        <div className="flex items-center gap-2 text-xs">
+        {/* Connection Status - the dot is always shown, the text only when the
+            bar has room for it. The text is capped: a status can carry a
+            whole sentence ("Unauthenticated: ..."), and that must not push
+            the buttons off the page. */}
+        <div ref={statusRef} data-testid="header-status" className="flex items-center gap-2 text-xs flex-shrink-0">
           <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className="text-gray-400 hidden sm:inline">{connectionStatus}</span>
+          <span className={`text-gray-400 max-w-[5rem] truncate ${showStatusText ? 'inline' : 'hidden'}`}>
+            {connectionStatus}
+          </span>
         </div>
 
-        {/* Desktop-only buttons (hidden on mobile, shown in hamburger menu) */}
-        <div className={`${showDesktopActions ? 'flex' : 'hidden'} items-center gap-2`}>
-          {/* User Info */}
+        {/* The action cluster. When the bar is too narrow for it, the cluster
+            moves into the overflow menu -- but it stays in the DOM, out of
+            flow, so that the bar can still measure how much room it would
+            need. That measurement is what decides whether the full bar
+            fits, so it has to be available in the collapsed shape too.
+
+            The cluster is two parts: the user name, which is the one piece of
+            unbounded content and the one that gives way (it truncates, and
+            keeps its full address in the title), and the row of buttons,
+            which never shrink. Keeping the buttons in their own
+            `w-max` wrapper means their width is the same whether the bar is
+            showing them or measuring them, so the fit test below is not
+            thrown off by a cluster that has been squeezed. */}
+        <div
+          data-testid="header-action-cluster"
+          className={
+            showFullActions
+              ? 'flex items-center gap-2 min-w-0'
+              : // `invisible` (visibility: hidden) is what takes the collapsed
+                // cluster out of the accessibility tree and the tab order;
+                // `absolute` takes it out of the flow so it can still be
+                // measured without taking up room.
+                'absolute invisible pointer-events-none flex items-center gap-2 w-max'
+          }
+        >
+          {/* User Info. The one piece of unbounded content in the bar, so it
+              is the one that gives way: it truncates (and keeps its full
+              address in the title) when the bar is tight. The buttons around
+              it never shrink, so they can never be pushed off the page. */}
           <div className="text-sm text-gray-300 min-w-0 max-w-[12rem] truncate" title={user}>
             {user}
           </div>
 
+          {/* The buttons, measured as one block. */}
+          <div ref={actionClusterRef} data-testid="header-action-buttons" className="flex items-center gap-2 w-max flex-shrink-0">
           {/* Open Chat Transcript Button */}
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <button
               onClick={() => setTranscriptDropdownOpen(!transcriptDropdownOpen)}
               disabled={messages.length === 0}
@@ -306,10 +427,10 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
               disclosure behind the adjacent help button, so the toolbar keeps
               its icon-only density for people who already know the feature. */}
           {agentModeAvailable && (
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-0.5 flex-shrink-0">
               <button
                 onClick={() => setAgentModeEnabled(!agentModeEnabled)}
-                className={`p-2 rounded-lg transition-colors ${
+                className={`flex-shrink-0 p-2 rounded-lg transition-colors ${
                   agentModeEnabled 
                     ? 'bg-blue-600 hover:bg-blue-700 text-white' 
                     : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
@@ -338,7 +459,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           <button
             type="button"
             onClick={() => onToggleSettings()}
-            className="group p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            className="group flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
             title="Tools and Settings: tools, integrations, prompts, and general settings"
             aria-label="Tools and Settings"
             aria-haspopup="dialog"
@@ -351,7 +472,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
               word could go and the toolbar could lose a chunk of text. */}
           <button
             onClick={() => navigate('/help')}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
+            className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
             title="Help"
             aria-label="Help"
           >
@@ -362,7 +483,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           {features?.files_panel && (
             <button
               onClick={onToggleFiles}
-              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
               title="File Manager"
             >
               <FolderOpen className="w-5 h-5" />
@@ -372,17 +493,18 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           {/* Canvas Panel Toggle */}
           <button
             onClick={onToggleCanvas}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
             title="Toggle Canvas"
           >
             <Monitor className="w-5 h-5" />
           </button>
+          </div>
         </div>
 
         {/* Hamburger Menu Button - Only visible on mobile/tablet */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className={`${showDesktopActions ? 'hidden' : 'block'} p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors`}
+          className={`${showFullActions ? 'hidden' : 'block'} p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors`}
           title="Menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
@@ -396,7 +518,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           an effect runs after paint, so keying this on state alone would flash
           the backdrop over the desktop cluster for a frame -- and let it swallow
           a click -- while the header is being widened past the threshold. */}
-      {mobileMenuOpen && !showDesktopActions && (
+      {mobileMenuOpen && !showFullActions && (
         <>
           {/* Backdrop */}
           <div 
