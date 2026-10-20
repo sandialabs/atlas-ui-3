@@ -1,6 +1,6 @@
 # Administrator's Guide
 
-Last updated: 2026-09-24
+Last updated: 2026-10-20
 
 For administrators responsible for deploying, configuring, and managing Atlas UI 3.
 
@@ -30,7 +30,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 ## Storage & Infrastructure
 
 - [File Storage (S3)](file-storage.md) - Configuring S3-compatible object storage
-- [Session Store](session-store.md) - Configuring the session repository (pluggable, sticky-session removal)
+- [Session Store](session-store.md) - Process-local or shared Redis session repository, reconnect to any replica, outage behavior
 - [Troubleshooting File Access](troubleshooting-file-access.md) - Common file-access issues for MCP servers
 
 ## Operations

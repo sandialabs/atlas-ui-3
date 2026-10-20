@@ -32,7 +32,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, TypeVar
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, WebSocketException
@@ -77,11 +77,13 @@ from atlas.domain.errors import (
     LLMMalformedToolCallError,
     LLMTimeoutError,
     RateLimitError,
+    SessionStoreUnavailableError,
     ValidationError,
 )
 
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
+from atlas.infrastructure.sessions.codec import decode_session, encode_session
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
@@ -324,6 +326,16 @@ async def _merge_run_session_files(
                 _merge_one_file(
                     replacement, name, meta, run_session_id, preserve=True
                 )
+        target = current if current is not None else connection_session
+        is_live_here = getattr(chat_service.session_repository, "is_live_here", None)
+        if not callable(is_live_here) or is_live_here(target.id) or not target.active:
+            # Publish when this replica drives the session, or when nobody
+            # does (its socket closed): a later resume must find the run's
+            # files, and the versioned write refuses it if a resume races it.
+            # A copy of a session another replica has resumed (active, not
+            # live here) is left alone; writing it would bump the version
+            # under that replica and make its next turn's write lose.
+            await _persist_session(chat_service, target)
     except Exception as e:
         # Losing the merge costs a download, not the run's result -- but this
         # is the branch that fires on unexpected artifact loss, so it carries
@@ -805,6 +817,94 @@ _MAX_RUN_CONVERSATIONS = 64
 _connection_session_lock = asyncio.Lock()
 
 
+async def _persist_session(chat_service, session) -> None:
+    """Publish ``session`` to a shared store (issue #1091); a no-op without one."""
+    persist = getattr(chat_service, "persist_session", None)
+    if session is not None and callable(persist):
+        await persist(session)
+
+
+# Marks a tracked run's own session, which belongs to the run rather than to a
+# connection and so can never be resumed by one.
+_RUN_SESSION_MARKER = "tracked_run_session"
+
+# Query parameter a reconnecting client uses to name its previous session.
+RESUME_SESSION_PARAM = "resume_session"
+
+
+async def _resume_connection_session(chat_service, requested, user_email):
+    """Take over the session a reconnecting client names, or return None.
+
+    Issue #1091: a client whose socket dropped reconnects -- possibly to
+    another replica behind the load balancer -- and names the session it had.
+    With a shared session store that session's history, file map, conversation
+    and classification bindings come back; with the process-local store only a
+    reconnect to the same process finds it.
+
+    The session must belong to the authenticated user and must be a
+    connection's session (never a tracked run's). Taking it over stamps this
+    connection as its owner and writes it, so the old connection's late
+    teardown sees it was superseded, and a stale copy elsewhere can no longer
+    overwrite it (the shared store versions every write). Any failure -- an
+    unknown id, another user's session, an unreachable store, a lost write
+    race -- returns None and the connection starts a fresh session, exactly
+    as every connection did before.
+    """
+    if not requested or not isinstance(requested, str):
+        return None
+    try:
+        session_id = UUID(requested.strip())
+    except ValueError:
+        return None
+    try:
+        session = await chat_service.session_repository.get(session_id)
+    except SessionStoreUnavailableError:
+        logger.warning("Session store unavailable; starting a fresh session instead of resuming")
+        return None
+    if session is None:
+        return None
+    if not user_email or session.user_email != user_email:
+        logger.warning(
+            "Refused to resume session %s: it belongs to another user",
+            sanitize_for_logging(str(session_id)),
+        )
+        return None
+    if session.context.get(_RUN_SESSION_MARKER):
+        return None
+    if session.active:
+        # The previous connection has not finished tearing down -- its socket
+        # may not have been noticed closing yet, or its turn is still
+        # unwinding. Taking over now would race that teardown for the same
+        # session, so this connection starts fresh, as it always used to.
+        logger.info(
+            "Not resuming session %s: its previous connection is still active",
+            sanitize_for_logging(str(session_id)),
+        )
+        return None
+    # Work on a detached copy: a turn of the old connection that is still
+    # unwinding holds the stored object and must not see this connection's
+    # changes, nor make its late writes through it.
+    session = decode_session(encode_session(session), session.store_version)
+    session.active = True
+    session.connection_owner = chat_service.connection_id
+    if not await chat_service.persist_session(session, adopt=True):
+        return None
+    chat_service.restore_connection_state(session)
+    logger.info(
+        "Resumed session %s for user %s on a new connection",
+        sanitize_for_logging(str(session_id)),
+        sanitize_for_logging(user_email),
+    )
+    return session
+
+
+def _superseded_connection(chat_service, session) -> bool:
+    """True when another connection has resumed ``session`` since this one made it."""
+    owner = getattr(session, "connection_owner", None)
+    mine = getattr(chat_service, "connection_id", None)
+    return isinstance(owner, str) and isinstance(mine, str) and owner != mine
+
+
 async def _ensure_connection_session(chat_service, connection_session_id, user_email):
     """The connection's session, created if this connection has none yet.
 
@@ -926,6 +1026,11 @@ async def _seed_run_session_files(
         run_session = await chat_service.session_repository.get(run_session_id)
         if run_session is None:
             run_session = await chat_service.create_session(run_session_id, user_email)
+        if not run_session.context.get(_RUN_SESSION_MARKER):
+            run_session.context[_RUN_SESSION_MARKER] = True
+            # Stored now, not at the run's first commit, so no connection can
+            # resume the run's session in the meantime.
+            await _persist_session(chat_service, run_session)
         if files:
             run_session.context.setdefault("files", {}).update({
                 name: (
@@ -1018,7 +1123,24 @@ async def cleanup_disconnected_session(
 
     # Release MCP sessions for this conversation, unless a surviving run still
     # owns that conversation.
-    session = await chat_service.session_repository.get(session_id)
+    try:
+        session = await chat_service.session_repository.get(session_id)
+    except SessionStoreUnavailableError:
+        # Redis is down and this replica holds no copy: there is nothing to
+        # release by conversation, but the session's per-connection state
+        # must still be torn down below.
+        session = None
+    if session is not None and _superseded_connection(chat_service, session):
+        # The client reconnected and resumed this session on a new connection
+        # (issue #1091). Its MCP sessions and the session itself now belong to
+        # that connection; tearing them down here would pull them out from
+        # under it.
+        logger.info(
+            "WebSocket for session %s closed after another connection resumed it; "
+            "leaving the session to that connection",
+            sanitize_for_logging(str(session_id)),
+        )
+        return
     if session:
         conv_id = session.context.get("conversation_id", str(session_id))
         # Ask the registry, not this connection's run set: a run started in
@@ -1150,6 +1272,16 @@ async def lifespan(app: FastAPI):
                 "Set GLOBUS_SESSION_SECRET to a strong random value in .env."
             )
 
+    # Shared infrastructure (issue #1091). A replica configured for Redis
+    # sessions must not start without Redis: it would serve users from a
+    # process-local store other replicas cannot see.
+    try:
+        await app_factory.start_shared_infrastructure()
+    except Exception as e:
+        logger.error("STARTUP FAILED: %s", e)
+        await app_factory.stop_shared_infrastructure()
+        raise
+
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
 
@@ -1224,6 +1356,7 @@ async def lifespan(app: FastAPI):
     await mcp_manager.stop_auto_reconnect()
     # Cleanup MCP clients
     await mcp_manager.cleanup()
+    await app_factory.stop_shared_infrastructure()
 
 
 # Create FastAPI app with minimal setup
@@ -1679,7 +1812,31 @@ async def websocket_endpoint(websocket: WebSocket):
         sanitize_for_logging(user_email)
     )
 
-    session_id = uuid4()
+    # Create connection adapter with authenticated user and chat service
+    connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
+    chat_service = app_factory.create_chat_service(connection_adapter)
+    chat_service.connection_id = str(uuid4())
+
+    # A reconnecting client names the session it had (issue #1091); when that
+    # session can be taken over, this connection continues it -- on any
+    # replica, with a shared session store. Otherwise it starts a new one.
+    # A client opts in by sending the parameter (empty on its first connect)
+    # and is then told its session id; clients that never send it see the
+    # protocol exactly as before.
+    requested_session = websocket.query_params.get(RESUME_SESSION_PARAM)
+    resumed_session = await _resume_connection_session(
+        chat_service, requested_session, user_email
+    )
+    session_id = resumed_session.id if resumed_session is not None else uuid4()
+    if requested_session is not None:
+        await websocket_update_callback(
+            websocket,
+            {
+                "type": "connection_session",
+                "session_id": str(session_id),
+                "resumed": resumed_session is not None,
+            },
+        )
     # ``active_chat_task`` tracks the in-flight turn for this connection. The
     # ``steering`` channel (issue #824) lets a second chat message arrive while
     # an agent loop is still running: instead of starting a second concurrent
@@ -1687,10 +1844,6 @@ async def websocket_endpoint(websocket: WebSocket):
     # pushed onto the running loop's channel and injected as a normal user turn
     # at the next iteration boundary.
     active_chat_task = {"task": None, "steering": None, "conversation_id": None}
-
-    # Create connection adapter with authenticated user and chat service
-    connection_adapter = WebSocketConnectionAdapter(websocket, user_email)
-    chat_service = app_factory.create_chat_service(connection_adapter)
 
     # Parallel conversation runs (issue #884). The registry is process-wide and
     # outlives this socket; ``connection_run_ids`` is just this connection's
@@ -2583,21 +2736,27 @@ async def websocket_endpoint(websocket: WebSocket):
                 # A tracked run may own the conversation this session is
                 # currently pointing at; handle_reset_session would otherwise
                 # release its MCP sessions on the way to a fresh conversation.
-                reset_session_record = await chat_service.session_repository.get(session_id)
-                reset_conv_id = (
-                    reset_session_record.context.get("conversation_id")
-                    if reset_session_record
-                    else None
-                )
-                preserve_resources = (
-                    run_registry.active_for_conversation(reset_conv_id, user_email)
-                    is not None
-                )
-                response = await chat_service.handle_reset_session(
-                    session_id=session_id,
-                    user_email=user_email,
-                    preserve_conversation_resources=preserve_resources,
-                )
+                try:
+                    reset_session_record = await chat_service.session_repository.get(session_id)
+                    reset_conv_id = (
+                        reset_session_record.context.get("conversation_id")
+                        if reset_session_record
+                        else None
+                    )
+                    preserve_resources = (
+                        run_registry.active_for_conversation(reset_conv_id, user_email)
+                        is not None
+                    )
+                    response = await chat_service.handle_reset_session(
+                        session_id=session_id,
+                        user_email=user_email,
+                        preserve_conversation_resources=preserve_resources,
+                    )
+                except DomainError as e:
+                    # Session store unavailable, or the session was resumed
+                    # by another connection (issue #1091): tell the client
+                    # rather than dropping the socket.
+                    response = {"type": "error", "message": e.message, "error_type": "domain"}
                 await websocket.send_json(response)
 
             elif message_type == "attach_file":
@@ -2744,10 +2903,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        await cleanup_disconnected_session(
-            chat_service, session_id, user_email, active_chat_task, connection_run_ids
-        )
+        pass
     finally:
+        # Tear down on every exit, not only a clean disconnect: a handler
+        # error that ends the socket must still end its session, or a shared
+        # store keeps it marked active and owned by a dead connection, and
+        # every reconnect is refused until the TTL expires (issue #1091).
+        try:
+            await cleanup_disconnected_session(
+                chat_service, session_id, user_email, active_chat_task, connection_run_ids
+            )
+        except Exception as e:  # pragma: no cover - teardown must not mask the exit
+            logger.warning("Error tearing down session on socket exit: %s", type(e).__name__)
         # Stop feeding run-status frames to a socket that is gone; the runs
         # themselves keep going.
         unsubscribe_run_status()

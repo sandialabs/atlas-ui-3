@@ -383,12 +383,69 @@ class AppSettings(BaseSettings):
     session_repository_type: str = Field(
         default="memory",
         description=(
-            "Session store implementation: 'memory' (process-local, default) "
-            "or a custom type registered in create_session_repository. "
-            "A non-memory implementation is required for multi-replica "
-            "deployments without sticky sessions (issue #760)."
+            "Session store implementation: 'memory' (process-local, default), "
+            "'redis' (shared across replicas; needs REDIS_URL) or a custom type "
+            "registered in create_session_repository. A shared store is "
+            "required for multi-replica deployments without sticky sessions "
+            "(issues #760, #1091)."
         ),
         validation_alias="SESSION_REPOSITORY_TYPE",
+    )
+    session_ttl_seconds: int = Field(
+        default=86400,
+        ge=60,
+        description="Seconds a stored session survives without a write (redis store)",
+        validation_alias="SESSION_TTL_SECONDS",
+    )
+
+    # Shared Redis (issue #1091). One bounded pool per API process, used by
+    # every Redis-backed feature. Not consulted unless a feature needs Redis,
+    # so single-instance deployments need none of these.
+    redis_url: Optional[str] = Field(
+        default=None,
+        description="Redis URL (redis://, rediss:// for TLS, or unix://); credentials go in the URL",
+        validation_alias="REDIS_URL",
+    )
+    redis_key_prefix: str = Field(
+        default="atlas",
+        min_length=1,
+        description="Namespace for every Atlas key; give each deployment sharing a Redis its own",
+        validation_alias="REDIS_KEY_PREFIX",
+    )
+    redis_max_connections: int = Field(
+        default=20,
+        ge=1,
+        description="Connections each process may hold open to Redis",
+        validation_alias="REDIS_MAX_CONNECTIONS",
+    )
+    redis_pool_timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="Seconds a command waits for a free pooled Redis connection before failing",
+        validation_alias="REDIS_POOL_TIMEOUT",
+    )
+    redis_socket_timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="Seconds to wait for a Redis reply before failing the command",
+        validation_alias="REDIS_SOCKET_TIMEOUT",
+    )
+    redis_connect_timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="Seconds to wait when opening a Redis connection",
+        validation_alias="REDIS_CONNECT_TIMEOUT",
+    )
+    redis_health_check_interval: int = Field(
+        default=30,
+        ge=0,
+        description="Seconds between liveness checks on an idle pooled connection (0 disables)",
+        validation_alias="REDIS_HEALTH_CHECK_INTERVAL",
+    )
+    redis_tls_ca_certs: Optional[str] = Field(
+        default=None,
+        description="CA bundle used to verify the Redis server certificate with rediss://",
+        validation_alias="REDIS_TLS_CA_CERTS",
     )
 
     # MCP Token Storage settings

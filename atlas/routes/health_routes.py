@@ -71,11 +71,29 @@ async def health_check() -> Dict[str, Any]:
         - service: Service name
         - version: Service version
         - timestamp: Current UTC timestamp in ISO-8601 format
+        - session_store: Only with a shared session store (issue #1091):
+          its backend, reachability and latency. An unreachable
+          store reports status "degraded" (HTTP 200: the replica still
+          answers, and a readiness probe that pulled every replica during a
+          Redis outage would turn it into a full outage).
     """
-    return {
+    report: Dict[str, Any] = {
         "status": "healthy",
         "service": "atlas-ui-3-backend",
         "version": VERSION,
         "git_commit": GIT_COMMIT,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+    from atlas.infrastructure.app_factory import app_factory
+
+    if getattr(app_factory, "redis", None) is not None:
+        store = await app_factory.session_store_health()
+        # This endpoint is unauthenticated: report reachability only. The
+        # store's address, namespace and counters stay in the startup and
+        # error logs, not in an anonymous response.
+        report["session_store"] = {
+            k: store[k] for k in ("backend", "status", "latency_ms") if k in store
+        }
+        if store.get("status") != "ok":
+            report["status"] = "degraded"
+    return report
