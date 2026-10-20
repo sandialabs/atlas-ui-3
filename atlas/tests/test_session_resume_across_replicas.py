@@ -15,6 +15,7 @@ import pytest
 
 import atlas.main as main
 from atlas.application.chat.service import ChatService
+from atlas.domain.errors import SessionConflictError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.domain.sessions.models import Session
 from atlas.infrastructure.redis import RedisClientManager, RedisSettings
@@ -71,6 +72,12 @@ async def _turn(service, session_id, content, seen):
         )
 
 
+async def _disconnect(service, session_id):
+    """The old socket closing: its normal teardown ends the session."""
+    with patch("atlas.modules.mcp_tools.mcp_tool_manager.release_sessions", new=AsyncMock()):
+        await main.cleanup_disconnected_session(service, session_id, USER, {"task": None})
+
+
 @pytest.fixture
 def server():
     return fakeredis.FakeServer()
@@ -87,6 +94,7 @@ async def test_reconnect_to_another_replica_continues_the_session(server):
     live_a = await replica_a.session_repository.get(session_id)
     live_a.context.setdefault("files", {})["notes.txt"] = {"key": "u/notes.txt"}
     await replica_a.persist_session(live_a)
+    await _disconnect(replica_a, session_id)
 
     resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
     assert resumed is not None
@@ -98,13 +106,18 @@ async def test_reconnect_to_another_replica_continues_the_session(server):
     # The follow-up on B ran with the history A built.
     assert seen[1] == ["first question", "re: first question"]
 
-    # A notices its socket closed only now. Its copy is stale: the teardown
-    # must not overwrite B's newer session.
-    with patch("atlas.modules.mcp_tools.mcp_tool_manager.release_sessions", new=AsyncMock()):
-        await main.cleanup_disconnected_session(replica_a, session_id, USER, {"task": None})
+    # A late write from A (an interrupted turn still unwinding there) holds
+    # A's old copy and must not overwrite B's newer session.
+    live_a.history.add_message(Message(role=MessageRole.ASSISTANT, content="stale"))
+    assert await replica_a.persist_session(live_a) is False
 
     stored = await _redis_repo(server).get(session_id)
     assert stored.active is True
+    assert stored.connection_owner == "conn-b"
+    # A New Chat from the superseded connection cannot take the id back.
+    with pytest.raises(SessionConflictError):
+        await replica_a.create_session(session_id, USER)
+    stored = await _redis_repo(server).get(session_id)
     assert stored.connection_owner == "conn-b"
     assert [m.content for m in stored.history.messages] == [
         "first question", "re: first question", "follow-up", "re: follow-up",
@@ -117,6 +130,7 @@ async def test_resume_refuses_another_users_session(server):
     replica_b = _service(_redis_repo(server), "conn-b")
     session_id = uuid4()
     await _turn(replica_a, session_id, "private", [])
+    await _disconnect(replica_a, session_id)
 
     assert await main._resume_connection_session(replica_b, str(session_id), "mallory@example.com") is None
     stored = await _redis_repo(server).get(session_id)
@@ -164,6 +178,7 @@ async def test_resume_restores_incognito_and_save_floor(server):
         await replica_a.handle_chat_message(
             session_id=session_id, content="secret", model="m", user_email=USER, incognito=True,
         )
+    await _disconnect(replica_a, session_id)
 
     replica_b = _service(_redis_repo(server), "conn-b")
     resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
@@ -184,6 +199,7 @@ async def test_resumed_incognito_session_saves_later_turns_after_opting_in(serve
         await replica_a.handle_chat_message(
             session_id=session_id, content="secret", model="m", user_email=USER, incognito=True,
         )
+    await _disconnect(replica_a, session_id)
 
     replica_b = _service(_redis_repo(server), "conn-b")
     replica_b.conversation_repository = MagicMock()
@@ -209,6 +225,7 @@ async def test_save_floor_survives_when_the_history_is_stored(server):
         await replica_a.handle_chat_message(
             session_id=session_id, content="public", model="m", user_email=USER, incognito=False,
         )
+    await _disconnect(replica_a, session_id)
 
     replica_b = _service(_redis_repo(server), "conn-b")
     resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
@@ -230,24 +247,49 @@ async def test_write_locks_do_not_outlive_their_writes(server):
 
 
 @pytest.mark.asyncio
-async def test_same_process_takeover_leaves_the_session_to_the_new_connection():
-    """Process-local store: the old socket's teardown skips a resumed session."""
+async def test_active_session_is_not_taken_over():
+    """The previous connection has not torn down yet: start fresh instead of racing it."""
     repo = InMemorySessionRepository()
     old = _service(repo, "conn-old")
     new = _service(repo, "conn-new")
     session_id = uuid4()
     await _turn(old, session_id, "hello", [])
 
-    resumed = await main._resume_connection_session(new, str(session_id), USER)
-    assert resumed is not None
+    assert await main._resume_connection_session(new, str(session_id), USER) is None
+    session = await repo.get(session_id)
+    assert session.connection_owner == "conn-old"
 
+
+@pytest.mark.asyncio
+async def test_same_process_takeover_detaches_the_old_connection():
+    """Process-local store: the resumed session is a new object the old one cannot touch."""
+    repo = InMemorySessionRepository()
+    old = _service(repo, "conn-old")
+    new = _service(repo, "conn-new")
+    session_id = uuid4()
+    await _turn(old, session_id, "hello", [])
+    old_object = await repo.get(session_id)
+    await _disconnect(old, session_id)
+
+    resumed = await main._resume_connection_session(new, str(session_id), USER)
+    assert resumed is not None and resumed is not old_object
+    assert await repo.get(session_id) is resumed
+
+    # The old connection's late work: a write through its stale object, a
+    # second teardown, and a New Chat are all kept off the resumed session.
+    old_object.history.add_message(Message(role=MessageRole.ASSISTANT, content="stale"))
+    assert await old.persist_session(old_object) is False
     release = AsyncMock()
     with patch("atlas.modules.mcp_tools.mcp_tool_manager.release_sessions", new=release):
         await main.cleanup_disconnected_session(old, session_id, USER, {"task": None})
-
     release.assert_not_called()
+    with pytest.raises(SessionConflictError):
+        await old.create_session(session_id, USER)
+
     session = await repo.get(session_id)
+    assert session is resumed
     assert session.active is True and session.connection_owner == "conn-new"
+    assert [m.content for m in session.history.messages] == ["hello", "re: hello"]
 
 
 @pytest.mark.asyncio
@@ -273,6 +315,7 @@ async def test_resume_rehydrates_from_chat_history_instead_of_the_snapshot(serve
     replica_a = _service(_redis_repo(server), "conn-a")
     session_id = uuid4()
     await _turn(replica_a, session_id, "first question", [])
+    await _disconnect(replica_a, session_id)
 
     replica_b = _service(_redis_repo(server), "conn-b")
     replica_b.conversation_repository = MagicMock()

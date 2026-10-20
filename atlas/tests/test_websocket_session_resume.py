@@ -74,7 +74,9 @@ def test_reconnect_resumes_an_owned_session(mock_app_factory, repo):
             "session_id": str(session.id),
             "resumed": True,
         }
-        assert session.active is True
+        live = asyncio.run(repo.get(session.id))
+        assert live is not session  # a detached copy
+        assert live.active is True and live.context["conversation_id"] == "conv-7"
 
 
 def test_another_users_session_is_not_resumed(mock_app_factory, repo):

@@ -49,6 +49,13 @@ from atlas.infrastructure.sessions.codec import decode_session, encode_session
 logger = logging.getLogger(__name__)
 
 
+def _owned_by_another(stored_owner: Any, owner: Optional[str]) -> bool:
+    """True when a stored record names a different connection as its owner."""
+    if isinstance(stored_owner, bytes):
+        stored_owner = stored_owner.decode("utf-8", "replace")
+    return bool(stored_owner) and bool(owner) and stored_owner != owner
+
+
 class RedisSessionRepository:
     """``SessionRepository`` over a shared Redis server."""
 
@@ -146,18 +153,33 @@ class RedisSessionRepository:
             return None
 
     async def create(self, session: Session) -> Session:
-        """Store ``session`` (replacing any record with the same id)."""
-        from redis.exceptions import RedisError
+        """Store ``session``, replacing a record with the same id this connection owns.
+
+        New Chat and conversation restore recreate a connection's session
+        under its existing id. If another connection has resumed that id
+        since (the stored owner differs), the recreation would overwrite the
+        live session it now drives, so it is refused with
+        ``SessionConflictError``.
+        """
+        from redis.exceptions import RedisError, WatchError
 
         key = self._key(session.id)
         async with self._serialized(session.id):
             payload = encode_session(session)
             try:
                 async with self._redis.client.pipeline(transaction=True) as pipe:
+                    await pipe.watch(key)
+                    stored_owner = await pipe.hget(key, "owner")
+                    if _owned_by_another(stored_owner, session.connection_owner):
+                        await pipe.unwatch()
+                        raise self._conflict(session, None)
+                    pipe.multi()
                     pipe.hincrby(key, "version", 1)
-                    pipe.hset(key, "data", payload)
+                    pipe.hset(key, mapping={"data": payload, "owner": session.connection_owner or ""})
                     pipe.expire(key, self._ttl)
                     version, _, _ = await pipe.execute()
+            except WatchError:
+                raise self._conflict(session, None)
             except RedisError as exc:
                 raise self._unavailable("create", session.id, exc) from exc
             session.store_version = int(version)
@@ -210,7 +232,11 @@ class RedisSessionRepository:
                         raise self._conflict(session, int(stored))
                     new_version = (int(stored) if stored is not None else session.store_version) + 1
                     pipe.multi()
-                    pipe.hset(key, mapping={"data": payload, "version": new_version})
+                    pipe.hset(key, mapping={
+                        "data": payload,
+                        "version": new_version,
+                        "owner": session.connection_owner or "",
+                    })
                     pipe.expire(key, self._ttl)
                     await pipe.execute()
             except WatchError:

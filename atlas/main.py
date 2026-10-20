@@ -83,6 +83,7 @@ from atlas.domain.errors import (
 
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
+from atlas.infrastructure.sessions.codec import decode_session, encode_session
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
@@ -863,6 +864,20 @@ async def _resume_connection_session(chat_service, requested, user_email):
         return None
     if session.context.get(_RUN_SESSION_MARKER):
         return None
+    if session.active:
+        # The previous connection has not finished tearing down -- its socket
+        # may not have been noticed closing yet, or its turn is still
+        # unwinding. Taking over now would race that teardown for the same
+        # session, so this connection starts fresh, as it always used to.
+        logger.info(
+            "Not resuming session %s: its previous connection is still active",
+            sanitize_for_logging(str(session_id)),
+        )
+        return None
+    # Work on a detached copy: a turn of the old connection that is still
+    # unwinding holds the stored object and must not see this connection's
+    # changes, nor make its late writes through it.
+    session = decode_session(encode_session(session), session.store_version)
     session.active = True
     session.connection_owner = chat_service.connection_id
     if not await chat_service.persist_session(session, adopt=True):

@@ -89,6 +89,11 @@ transaction (`WATCH`/`MULTI`) only if the stored version still matches.
 A stale copy is refused (`SessionConflictError`, logged and counted as
 `session_conflicts`) instead of replacing newer state. Writes from one process
 to one session are serialized, so a process never conflicts with itself.
+Recreating a session under its id (New Chat, conversation restore) is refused
+when the stored record names a different connection as its owner, so a
+superseded connection cannot take the session back. The process-local store
+applies the same owner rule, and refuses a write through an object the
+session has been replaced with since.
 
 Inside a process the chat pipeline mutates the session object it was handed.
 The repository returns the same object for sessions that are live on that
@@ -113,8 +118,17 @@ replica, resumes the session when:
 
 - it exists in the store,
 - it belongs to the authenticated user (another user's id is refused and
-  logged), and
-- it is a connection's session, not a tracked run's.
+  logged),
+- it is a connection's session, not a tracked run's, and
+- its previous connection has finished tearing down (the session is marked
+  inactive). A session still held by a live connection, or by one whose turn
+  is still unwinding, is not taken over: the reconnect starts fresh instead
+  of racing it. A replica that crashes without tearing down leaves its
+  sessions held until `SESSION_TTL_SECONDS` expires them; reconnects from
+  those users start fresh and reload their conversations from chat history.
+
+The new connection works on a detached copy of the session, so a turn of the
+old connection that is still finishing cannot reach it.
 
 Resuming stamps the new connection as the session's owner and writes it, so
 the old connection's late teardown leaves it alone, and its stale copy can no
