@@ -7,6 +7,7 @@ from uuid import UUID
 from atlas.core.model_access import ModelAccessDecision, check_model_access
 from atlas.domain.errors import AuthorizationError, SessionNotFoundError
 from atlas.domain.messages.models import Message, MessageRole
+from atlas.domain.sessions.models import Session
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
@@ -303,6 +304,7 @@ class ChatOrchestrator:
         files: Optional[Dict[str, Any]] = None,
         rewind_to_user_index: Optional[int] = None,
         steering: Optional[Any] = None,
+        session: Optional[Session] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -331,13 +333,18 @@ class ChatOrchestrator:
                 agent mode, where the loop drains it at each iteration boundary
                 so a user message sent mid-run reaches the LLM as a normal user
                 turn without stopping the loop. Other modes ignore it.
+            session: The caller's session object. ChatService passes the one
+                it prepared for this turn, so the turn mutates exactly that
+                object whatever the repository returns on a fresh ``get``
+                (a shared store returns copies; issue #1091). Looked up by
+                ``session_id`` when omitted.
             **kwargs: Additional parameters
 
         Returns:
             Response dictionary
         """
-        # Get session from repository
-        session = await self.session_repository.get(session_id)
+        if session is None or session.id != session_id:
+            session = await self.session_repository.get(session_id)
         if not session:
             raise SessionNotFoundError(f"Session {session_id} not found")
 

@@ -102,6 +102,25 @@ class SessionNotFoundError(SessionError):
     pass
 
 
+class SessionConflictError(SessionError):
+    """A session write lost a race with a newer write from another process.
+
+    Raised by a versioned session store when the copy being written is older
+    than the stored one, so the write is refused instead of silently replacing
+    newer state.
+    """
+    pass
+
+
+class SessionStoreUnavailableError(SessionError):
+    """The shared session store could not be reached.
+
+    Raised instead of falling back to process-local state: a fallback would
+    hide the outage and lose writes other replicas could never see.
+    """
+    pass
+
+
 class PromptOverrideError(DomainError):
     """Raised when MCP prompt override fails."""
     pass

@@ -1,7 +1,7 @@
 """Application factory for dependency injection and wiring."""
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from atlas.application.chat.service import ChatService
 from atlas.core.auth import is_user_in_group
@@ -78,8 +78,18 @@ class AppFactory:
         # the default "memory" store is process-local, so a multi-replica
         # deployment plugs in a distributed store through that setting to
         # remove the undocumented sticky-session requirement.
+        # The shared Redis pool exists only when a feature needs it; startup
+        # (``start_shared_infrastructure``) verifies it before serving.
+        app_settings = self.config_manager.app_settings
+        self.redis = None
+        if app_settings.session_repository_type == "redis":
+            from atlas.infrastructure.redis import RedisClientManager, RedisSettings
+
+            self.redis = RedisClientManager(RedisSettings.from_app_settings(app_settings))
         self.session_repository = create_session_repository(
-            self.config_manager.app_settings.session_repository_type
+            app_settings.session_repository_type,
+            redis=self.redis,
+            session_ttl_seconds=app_settings.session_ttl_seconds,
         )
 
         # Chat history persistence (feature-flagged)
@@ -120,6 +130,29 @@ class AppFactory:
             logger.info("AppFactory async initialization complete")
         except Exception as e:
             logger.warning("MCP initialization failed; continuing without tools: %s", e)
+
+    async def start_shared_infrastructure(self) -> None:
+        """Verify shared services before the app takes traffic. Raises on failure."""
+        if self.redis is not None:
+            await self.redis.start()
+
+    async def stop_shared_infrastructure(self) -> None:
+        """Release shared connection pools on shutdown."""
+        if self.redis is not None:
+            await self.redis.close()
+
+    async def session_store_health(self) -> Dict[str, Any]:
+        """Health of the session store, for ``/api/health``."""
+        backend = self.config_manager.app_settings.session_repository_type
+        report: Dict[str, Any] = {"backend": backend}
+        if self.redis is not None:
+            report.update(await self.redis.health())
+            stats = getattr(self.session_repository, "stats", None)
+            if callable(stats):
+                report.update(stats())
+        else:
+            report["status"] = "ok"
+        return report
 
     def create_chat_service(
         self, connection: Optional[ChatConnectionProtocol] = None

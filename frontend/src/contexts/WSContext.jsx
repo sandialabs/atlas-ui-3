@@ -25,6 +25,11 @@ export const WSProvider = ({ children }) => {
   const healthCheckFailuresRef = useRef(0)
   const healthCheckTimeoutRef = useRef(null)
   const sessionEndedRef = useRef(false)
+  // The server-side session this page's socket drives. Sent back on every
+  // reconnect so the server can resume it -- on whichever replica the load
+  // balancer picks -- instead of starting over. Held for the page's lifetime
+  // only: a reload starts a fresh UI, so it must start a fresh session too.
+  const serverSessionIdRef = useRef('')
 
   const connectWebSocket = () => {
     // The server sends a `session_ended` frame and closes with 4401 when the
@@ -39,7 +44,8 @@ export const WSProvider = ({ children }) => {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws`
+    const resume = encodeURIComponent(serverSessionIdRef.current)
+    const wsUrl = `${protocol}//${window.location.host}/ws?resume_session=${resume}`
     
     try {
       wsRef.current = new WebSocket(wsUrl)
@@ -54,6 +60,10 @@ export const WSProvider = ({ children }) => {
           const data = JSON.parse(event.data)
           if (data && data.type === 'session_ended') {
             markSessionEnded(data.reason)
+          }
+          if (data && data.type === 'connection_session' && typeof data.session_id === 'string') {
+            serverSessionIdRef.current = data.session_id
+            return
           }
           messageHandlersRef.current.forEach(handler => {
             try {

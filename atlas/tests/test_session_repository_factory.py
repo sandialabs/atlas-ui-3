@@ -1,7 +1,7 @@
 """Tests for the session repository factory (issue #760).
 
 The factory is the extension point that lets a deployment plug in a
-distributed session store (Redis, shared DB, etc.) through
+distributed session store (the built-in Redis store, or another) through
 ``SESSION_REPOSITORY_TYPE``, removing the undocumented sticky-session
 requirement the in-memory default imposes on multi-replica deployments.
 """
@@ -26,6 +26,12 @@ def test_memory_type_returns_in_memory_repository():
 
 def test_unknown_type_raises_value_error():
     with pytest.raises(ValueError, match="Unknown SESSION_REPOSITORY_TYPE"):
+        create_session_repository("dynamo")
+
+
+def test_redis_type_without_a_redis_client_fails_loudly():
+    """``redis`` is built in now (issue #1091) but never falls back to memory."""
+    with pytest.raises(ValueError, match="REDIS_URL"):
         create_session_repository("redis")
 
 

@@ -18,7 +18,14 @@ from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain import conversation_classification as conv_class
 from atlas.domain.conversation_lineage import parent_conversation_id_from_metadata
-from atlas.domain.errors import AuthorizationError, DomainError, ValidationError
+from atlas.domain.errors import (
+    AuthorizationError,
+    DomainError,
+    SessionConflictError,
+    SessionNotFoundError,
+    SessionStoreUnavailableError,
+    ValidationError,
+)
 from atlas.domain.messages.models import MessageType, ToolResult
 from atlas.domain.sessions.models import Session
 from atlas.hooks import HookEvent, get_hook_manager
@@ -71,6 +78,9 @@ UNSET = object()
 
 # Upper bound on a client-supplied workspace id persisted in conversation metadata.
 _MAX_WORKSPACE_ID_LEN = 128
+
+# Session-context key mirroring the incognito save floor (issue #1091).
+_SAVE_FLOOR_KEY = "incognito_save_floor"
 
 
 # Type hint for the update callback
@@ -132,6 +142,11 @@ class ChatService:
             # Create default in-memory repository
             from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
             self.session_repository = InMemorySessionRepository()
+
+        # The WebSocket connection this service serves, stamped on the sessions
+        # it creates so a resumed session's old connection can tell it no
+        # longer owns it (issue #1091). None for headless/CLI services.
+        self.connection_id: Optional[str] = None
 
         # Chat history persistence (None when feature disabled)
         self.conversation_repository = conversation_repository
@@ -259,7 +274,11 @@ class ChatService:
         user_email: Optional[str] = None
     ) -> Session:
         """Create a new chat session."""
-        session = Session(id=session_id, user_email=user_email)
+        session = Session(
+            id=session_id,
+            user_email=user_email,
+            connection_owner=getattr(self, "connection_id", None),
+        )
 
         # SessionStart hook (GH #713): opt-in, zero overhead when no hooks.json.
         # Fires on every session creation including restore; a hook can reject
@@ -790,6 +809,7 @@ class ChatService:
                             temperature=temperature,
                             update_callback=update_callback,
                             steering=steering,
+                            session=session,
                             **kwargs
                         )
                     try:
@@ -810,6 +830,7 @@ class ChatService:
                         temperature=temperature,
                         update_callback=update_callback,
                         steering=steering,
+                        session=session,
                         **kwargs
                     )
             await self._commit_turn(
@@ -923,6 +944,13 @@ class ChatService:
                 self._incognito_save_floor[session_id] = len(session.history.messages)
         else:
             self._save_floor_locked.add(session_id)
+        # Mirrored onto the session so a connection that resumes it -- on any
+        # replica -- keeps the incognito prefix out of the saved conversation
+        # (see restore_connection_state).
+        session.context[_SAVE_FLOOR_KEY] = {
+            "floor": self._incognito_save_floor.get(session_id, 0),
+            "locked": session_id in self._save_floor_locked,
+        }
 
         # Persist conversation (if not incognito and feature enabled)
         if (
@@ -960,6 +988,62 @@ class ChatService:
                 raise
             except Exception as e:
                 logger.error("Failed to persist conversation: %s", e, exc_info=True)
+
+        # Publish the session snapshot so a reconnect to any replica resumes
+        # it. After the conversation save: the database is the record, the
+        # session store only a cache of the live state.
+        await self.persist_session(session)
+
+    async def persist_session(self, session: Session) -> bool:
+        """Write ``session`` to the session store; never raises.
+
+        The process-local store makes this a no-op in effect. A shared store
+        can refuse the write because another connection resumed the session
+        and wrote a newer copy (``SessionConflictError``), or be unreachable
+        (``SessionStoreUnavailableError``). Neither loses the turn: the
+        conversation is already in the database. Both are logged by the store
+        and counted in ``/api/health``; this returns False so callers can tell.
+        """
+        try:
+            await self.session_repository.update(session)
+            return True
+        except asyncio.CancelledError:
+            raise
+        except (SessionConflictError, SessionStoreUnavailableError, SessionNotFoundError) as e:
+            logger.warning(
+                "Session %s snapshot not stored: %s",
+                sanitize_for_logging(str(session.id)),
+                type(e).__name__,
+            )
+            return False
+        except Exception as e:
+            # A finished turn must not fail because its snapshot could not be
+            # written; the failure stays visible in the log.
+            logger.error(
+                "Session %s snapshot not stored: unexpected %s",
+                sanitize_for_logging(str(getattr(session, "id", ""))),
+                type(e).__name__,
+                exc_info=True,
+            )
+            return False
+
+    def restore_connection_state(self, session: Session) -> None:
+        """Rebuild this service's per-connection state from a resumed session.
+
+        A resumed session's history and context came from the store; the
+        incognito flag and the incognito save floor live on this service and
+        must come back with it, or the next save could write messages the user
+        sent while incognito.
+        """
+        if session.context.get("incognito") is True:
+            self._incognito_sessions.add(session.id)
+        floor = session.context.get(_SAVE_FLOOR_KEY)
+        if isinstance(floor, dict):
+            value = floor.get("floor")
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                self._incognito_save_floor[session.id] = value
+            if floor.get("locked") is True:
+                self._save_floor_locked.add(session.id)
 
     def validate_conversation_id_owner(
         self,
@@ -1160,6 +1244,7 @@ class ChatService:
         loaded = load_messages_into_history(
             session.history, canonical_messages, conversation_id
         )
+        await self.persist_session(session)
 
         logger.info(
             "Restored conversation %s into session %s for user %s (%d messages)",
@@ -1337,6 +1422,7 @@ class ChatService:
         session = await self.create_session(session_id, user_email)
         new_conv_id = str(uuid4())
         session.context["conversation_id"] = new_conv_id
+        await self.persist_session(session)
 
         logger.info(f"Reset session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
 
@@ -1398,6 +1484,7 @@ class ChatService:
 
             sanitized_s3_key = s3_key.replace('\r', '').replace('\n', '')
             logger.info(f"Attached file ({sanitized_s3_key}) to session {session_id}")
+            await self.persist_session(session)
 
             # Emit files_update to notify UI
             if update_callback:
@@ -1872,11 +1959,17 @@ class ChatService:
 
     async def end_session(self, session_id: UUID) -> None:
         """End a session."""
-        session = await self.session_repository.get(session_id)
+        try:
+            session = await self.session_repository.get(session_id)
+        except SessionStoreUnavailableError:
+            session = None
         if session is None:
+            self._incognito_sessions.discard(session_id)
+            self._incognito_save_floor.pop(session_id, None)
+            self._save_floor_locked.discard(session_id)
             return
         session.active = False
-        await self.session_repository.update(session)
+        await self.persist_session(session)
         self._incognito_sessions.discard(session_id)
         self._incognito_save_floor.pop(session_id, None)
         self._save_floor_locked.discard(session_id)
