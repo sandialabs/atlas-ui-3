@@ -851,7 +851,7 @@ class AppSettings(BaseSettings):
     chat_history_db_pool_recycle: int = Field(
         default=1800,
         ge=-1,
-        description="Seconds after which a pooled connection is replaced (-1 disables); "
+        description="Seconds after which a pooled connection is replaced (-1 disables, 0 is rejected); "
                     "keep it below any proxy or load-balancer idle timeout",
         validation_alias="CHAT_HISTORY_DB_POOL_RECYCLE",
     )
@@ -937,6 +937,14 @@ class AppSettings(BaseSettings):
     # Capability tokens (for headless access to downloads/iframes)
     capability_token_secret: str = ""
     capability_token_ttl_seconds: int = 3600
+
+    @field_validator("chat_history_db_pool_recycle")
+    @classmethod
+    def _validate_pool_recycle(cls, value: int) -> int:
+        """Reject 0: SQLAlchemy would replace the connection on every checkout."""
+        if value == 0:
+            raise ValueError("CHAT_HISTORY_DB_POOL_RECYCLE must be -1 (disabled) or a positive number of seconds")
+        return value
 
     @field_validator("capability_token_secret")
     @classmethod

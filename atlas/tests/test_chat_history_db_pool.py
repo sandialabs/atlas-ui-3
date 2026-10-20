@@ -86,6 +86,8 @@ class TestPoolSettingsFromAppSettings:
             ("CHAT_HISTORY_DB_MAX_OVERFLOW", "-1"),
             ("CHAT_HISTORY_DB_POOL_TIMEOUT", "0"),
             ("CHAT_HISTORY_DB_POOL_RECYCLE", "-2"),
+            # 0 would reconnect on every checkout, silently defeating the pool.
+            ("CHAT_HISTORY_DB_POOL_RECYCLE", "0"),
             ("CHAT_HISTORY_DB_CONNECT_TIMEOUT", "0"),
         ],
     )

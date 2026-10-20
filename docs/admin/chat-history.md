@@ -90,7 +90,7 @@ connections per process)`.
 | `CHAT_HISTORY_DB_POOL_SIZE` | `5` | Connections each process keeps open (at least 1). |
 | `CHAT_HISTORY_DB_MAX_OVERFLOW` | `10` | Extra connections a process may open beyond the pool under load (`0` for a hard cap at the pool size). |
 | `CHAT_HISTORY_DB_POOL_TIMEOUT` | `30` | Seconds a request waits for a free pooled connection before failing with an error. |
-| `CHAT_HISTORY_DB_POOL_RECYCLE` | `1800` | Seconds after which a pooled connection is replaced (`-1` disables). Keep it below any proxy, firewall or load-balancer idle timeout. |
+| `CHAT_HISTORY_DB_POOL_RECYCLE` | `1800` | Seconds after which a pooled connection is replaced (`-1` disables; `0` is rejected, since it would reconnect on every checkout). Keep it below any proxy, firewall or load-balancer idle timeout. |
 | `CHAT_HISTORY_DB_POOL_PRE_PING` | `true` | Check each connection is alive before handing it out, so a database restart does not surface as failed requests. |
 | `CHAT_HISTORY_DB_CONNECT_TIMEOUT` | `10` | Seconds to wait when opening a connection, so an unreachable database fails fast instead of hanging. A `connect_timeout` in the URL query wins. |
 | `CHAT_HISTORY_DB_DISABLE_POOLING` | `false` | Open a fresh connection per use (SQLAlchemy `NullPool`). Use it when an external pooler such as PgBouncer does the pooling. |
@@ -122,8 +122,13 @@ small Atlas pool (bounded by PgBouncer's `default_pool_size`) or set
 1.21 or later (`max_prepared_statements` set) or `session` mode, since the
 psycopg driver can use server-side prepared statements.
 
-Run schema migrations once per deployment (for example a Kubernetes Job or
-init step that runs `alembic upgrade head`), not from every replica at start.
+Run schema migrations once per deployment, before any replica starts (for
+example a Kubernetes Job or init step that runs `alembic upgrade head`), not
+from every replica. Atlas also runs `create_all` at startup, which creates only
+missing tables, so after the migration it changes nothing. The reverse order
+breaks: on a database whose tables were first created by an Atlas startup,
+`alembic upgrade head` fails with `DuplicateTable`; run `alembic stamp head`
+once on such a database to record its schema as current.
 DuckDB remains the default for local development; multi-replica deployments
 need PostgreSQL, since DuckDB is a single-process file database.
 
