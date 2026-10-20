@@ -151,7 +151,7 @@ try {
   const toolsTab = page.getByRole('tab', { name: /Tools & Integrations/ })
   await toolsTab.waitFor()
   check((await toolsTab.getAttribute('aria-selected')) === 'true', 'Settings opened on the Tools tab')
-  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Close tools and settings' }).click()
   await toolsTab.waitFor({ state: 'detached', timeout: 5000 })
   pass('"Choose tools" opens Settings on the Tools & Integrations tab')
 
@@ -248,7 +248,8 @@ try {
   await seed(page, nt, { tools: [] })
   await callout.waitFor()
   check((await callout.getByRole('button', { name: 'Choose tools' }).count()) === 0, 'no Choose tools when tools disabled')
-  check(await callout.getByText('Tools are disabled for this deployment.').isVisible(), 'disabled note in callout')
+  check(await callout.getByText('Tools are disabled for this deployment, so messages run as normal chat.').isVisible(), 'one-line disabled note in callout')
+  check((await callout.getByText(/tool-capable model/).count()) === 0, 'no model guidance when tools are disabled')
   check(await callout.getByRole('button', { name: 'Turn off Agent Mode' }).isVisible(), 'Turn off kept when tools disabled')
   await page.getByRole('button', { name: 'What Agent Mode does' }).click()
   const ntDialog = page.getByRole('dialog', { name: 'What Agent Mode does' })

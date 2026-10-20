@@ -119,6 +119,16 @@ describe('ChatArea - agent run status is pinned to the composer', () => {
     expect(stopAgent).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps the waiting row and Stop together when a question outlives the run', () => {
+    // agent_error / agent_max_steps clear isAgentRunning but can leave the
+    // pending question; the status row and the composer Stop share one gate.
+    useChat.mockReturnValue(chatContext({ isAgentRunning: false, agentPendingQuestion: 'Which file?' }))
+    renderChat()
+
+    expect(screen.getByTestId('agent-run-status')).toHaveTextContent(/waiting for your answer/i)
+    expect(screen.getByRole('button', { name: 'Stop agent' })).toBeInTheDocument()
+  })
+
   it('does not render a run status when nothing is running', () => {
     useChat.mockReturnValue(chatContext())
     renderChat()

@@ -106,6 +106,24 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     expect(banner).toHaveTextContent(/switch to a tool-capable model/i)
   })
 
+  it('does not claim the model lacks tools while the model list is loading', () => {
+    useChat.mockReturnValue(chatContext({ models: [] }))
+    renderChat()
+
+    const banner = screen.getByTestId('agent-mode-no-tools-banner')
+    expect(banner).toHaveTextContent(/tool-capable model/i)
+    expect(banner).not.toHaveTextContent(/does not support tools/i)
+    expect(banner).not.toHaveTextContent(/supports tools/i)
+  })
+
+  it('does not claim a stale stored model lacks tools', () => {
+    useChat.mockReturnValue(chatContext({ currentModel: 'removed-model' }))
+    renderChat()
+
+    const banner = screen.getByTestId('agent-mode-no-tools-banner')
+    expect(banner).not.toHaveTextContent(/does not support tools/i)
+  })
+
   it('offers a direct action that opens the tools picker', () => {
     useChat.mockReturnValue(chatContext())
     const listener = vi.fn()
@@ -162,8 +180,11 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
 
     const banner = screen.getByTestId('agent-mode-no-tools-banner')
     expect(screen.queryByRole('button', { name: /choose tools/i })).not.toBeInTheDocument()
-    expect(banner).toHaveTextContent(/tools are disabled/i)
-    // Turning Agent Mode off still works, and the explanation stays.
+    expect(banner).toHaveTextContent(/agent mode is on, but tools are disabled/i)
+    expect(banner).toHaveTextContent(/messages run as normal chat/i)
+    // Nothing to select or switch, so no tool or model guidance.
+    expect(banner).not.toHaveTextContent(/no tools are selected/i)
+    expect(banner).not.toHaveTextContent(/tool-capable model/i)
     expect(screen.getByRole('button', { name: /turn off agent mode/i })).toBeInTheDocument()
   })
 

@@ -100,6 +100,11 @@ const ChatArea = () => {
   // Optional onboarding copy can be switched off in Tools and Settings.
   // Warnings, state, and actions never depend on it.
   const reduceHelpText = settings?.reduceHelpText === true
+  // A run is active while it is working or waiting on the user's answer.
+  // agent_error / agent_max_steps clear isAgentRunning but can leave a
+  // pending question, so both the footer status and the composer Stop use
+  // this one gate.
+  const agentRunActive = isAgentRunning || !!agentPendingQuestion
   const maxFileSizeBytes = fileUpload?.max_file_size_bytes || DEFAULT_MAX_FILE_SIZE_BYTES
 
   // Pair each message with its rewind ordinal once per messages change, rather
@@ -161,6 +166,13 @@ const ChatArea = () => {
   const currentModelSupportsTools = models?.some(
     m => m.name === currentModel && m.supports_tools !== false
   ) ?? true
+  // Tri-state for the Agent Mode callout: null while the model list is still
+  // loading or the stored model is not in it, so the callout never claims a
+  // model "does not support tools" when that is only unknown.
+  const currentModelEntry = models?.find(m => m?.name === currentModel)
+  const currentModelToolSupport = currentModelEntry
+    ? currentModelEntry.supports_tools !== false
+    : null
 
   // Auto-resize textarea. Delegated so the measurement cannot displace the
   // transcript's scroll position while the user types (#866).
@@ -979,7 +991,7 @@ const ChatArea = () => {
               always visible, and reuses the same run state and Stop handler as
               the composer controls. */}
           <AgentRunStatus
-            isAgentRunning={isAgentRunning}
+            isAgentRunning={agentRunActive}
             currentAgentStep={currentAgentStep}
             onStop={stopAgent}
             waitingForAnswer={!!agentPendingQuestion}
@@ -1049,7 +1061,9 @@ const ChatArea = () => {
                 <Sparkles className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-300" aria-hidden="true" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-amber-200">
-                    Agent Mode is on, but no tools are selected
+                    {features?.tools
+                      ? 'Agent Mode is on, but no tools are selected'
+                      : 'Agent Mode is on, but tools are disabled'}
                   </p>
                   {/* The title and actions stay put on short viewports; only the
                       explanation scrolls, so the composer never gets pushed
@@ -1058,33 +1072,42 @@ const ChatArea = () => {
                     data-testid="agent-mode-no-tools-detail"
                     className="max-h-24 overflow-y-auto custom-scrollbar sm:max-h-none sm:overflow-visible"
                   >
-                    {reduceHelpText ? (
+                    {!features?.tools ? (
+                      // Nothing to select and no model to switch for, so the
+                      // tool and model guidance would only be noise here.
                       <p className="mt-1 text-sm text-amber-100/90">
-                        Select at least one tool to let the assistant take multiple steps.
+                        Tools are disabled for this deployment, so messages run as normal chat.
                       </p>
                     ) : (
-                      <p className="mt-1 text-sm text-amber-100/90">
-                        Agent Mode lets the assistant take multiple steps: it calls the tools you
-                        select, inspects the results, and continues until the task is done. With no
-                        tools selected, this chat behaves like normal chat.
-                      </p>
+                      <>
+                        {reduceHelpText ? (
+                          <p className="mt-1 text-sm text-amber-100/90">
+                            Select at least one tool to let the assistant take multiple steps.
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-sm text-amber-100/90">
+                            Agent Mode lets the assistant take multiple steps: it calls the tools you
+                            select, inspects the results, and continues until the task is done. With no
+                            tools selected, this chat behaves like normal chat.
+                          </p>
+                        )}
+                        <p className={reduceHelpText ? 'mt-1 text-sm text-amber-100/90' : 'mt-1.5 text-sm text-amber-100/90'}>
+                          You also need a tool-capable model.
+                          {currentModelToolSupport === true && (
+                            <> <strong>{currentModelLabel}</strong> supports tools.</>
+                          )}
+                          {currentModelToolSupport === false && (
+                            <>
+                              {' '}<strong>{currentModelLabel}</strong> does not support tools, so switch
+                              to a tool-capable model to use Agent Mode.
+                            </>
+                          )}
+                        </p>
+                      </>
                     )}
-                    <p className={reduceHelpText ? 'mt-1 text-sm text-amber-100/90' : 'mt-1.5 text-sm text-amber-100/90'}>
-                      {currentModelSupportsTools ? (
-                        <>
-                          You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
-                          supports tools.
-                        </>
-                      ) : (
-                        <>
-                          You also need a tool-capable model. <strong>{currentModelLabel}</strong>{' '}
-                          does not support tools, so switch to a tool-capable model to use Agent Mode.
-                        </>
-                      )}
-                    </p>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {features?.tools ? (
+                    {features?.tools && (
                       <button
                         type="button"
                         onClick={() => openSettingsPanel({ tab: 'tools' })}
@@ -1093,10 +1116,6 @@ const ChatArea = () => {
                         <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
                         Choose tools
                       </button>
-                    ) : (
-                      <span className="text-xs text-amber-200">
-                        Tools are disabled for this deployment.
-                      </span>
                     )}
                     <button
                       type="button"
@@ -1256,7 +1275,7 @@ const ChatArea = () => {
                   running agent. isAgentRunning is only ever set on an agent-mode
                   send and agentPendingQuestion is agent-specific, so neither
                   fires during a normal chat turn. */}
-              {(isAgentRunning || agentPendingQuestion) && (
+              {agentRunActive && (
                 <button
                   type="button"
                   onClick={stopAgent}
