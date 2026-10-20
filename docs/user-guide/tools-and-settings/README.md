@@ -85,22 +85,21 @@ confirmation before they run.
   arguments first, or **Reject** with an optional reason).
 - **On:** tool calls run without asking -- including calls in conversations
   you are not currently viewing.
-- **Admin-marked tools always ask.** When an administrator marks a tool as
-  always requiring approval (per-tool `require_approval` or
-  `FORCE_TOOL_APPROVAL_GLOBALLY`), its calls prompt no matter how this switch
-  is set.
+- **Auto-approve never answers admin-marked tools.** When an administrator
+  marks a tool as requiring approval (per-tool `require_approval` or
+  `FORCE_TOOL_APPROVAL_GLOBALLY`), auto-approve leaves its calls for you to
+  approve.
 
-Some calls never reach the switch at all. A policy hook can approve a call on
-its own, and approving an agent launch covers the tool calls made inside that
-sub-conversation, so neither prompts even with auto-approve off. A hook that
-*escalates* a call to "ask" is treated like any other non-admin call: with
-auto-approve on, it is approved automatically. Only the admin markings above
-are guaranteed to stop and ask.
+Some calls never reach the switch at all, admin-marked ones included. A policy
+hook can approve a call on its own, and approving an agent launch covers the
+tool calls made inside that sub-conversation, so neither prompts. A hook that
+*escalates* a call to "ask" is treated like any other unmarked call: with
+auto-approve on, it is approved automatically.
 
 The same switch sits on the **Active Tools** bar above the message box
-(**Auto-approve: Off / On**), and each approval row says why it is asking:
-auto-approve is off, an administrator marked the tool as always requiring
-approval, or auto-approve is on but the automatic approval could not be sent
+(**Auto-approve: Off / On**) whenever tools are selected, and each approval
+row says why it is asking: auto-approve is off, an administrator marked the
+tool as requiring approval, or auto-approve is on but the automatic approval could not be sent
 (for example while disconnected), so it waits for you.
 
 ## Model capability icons

@@ -239,7 +239,7 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
 
     setChat({ settings: { autoApproveTools: true } })
     render(<ToolApprovalMessage message={{ ...baseMessage, admin_required: true }} compact={compact} />)
-    expect(screen.getByText(/administrator has marked this tool as always requiring approval/)).toBeInTheDocument()
+    expect(screen.getByText(/administrator has marked this tool as requiring approval, so auto-approve does not answer it/)).toBeInTheDocument()
   })
 
   // Auto-approve on, but the automatic send failed (socket closed): the row

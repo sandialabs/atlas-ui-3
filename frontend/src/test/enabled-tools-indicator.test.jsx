@@ -206,7 +206,7 @@ describe('EnabledToolsIndicator (#870 single-row strip)', () => {
     const toggle = screen.getByRole('switch', { name: 'Auto-approve tool calls' })
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     expect(toggle).toHaveTextContent('Auto-approve: On')
-    expect(toggle).toHaveAccessibleDescription(/except tools an administrator has marked as always requiring approval/i)
+    expect(toggle).toHaveAccessibleDescription(/never answers tools an administrator has marked as requiring approval/i)
     fireEvent.click(toggle)
     expect(updateSettings).toHaveBeenCalledWith({ autoApproveTools: false })
   })

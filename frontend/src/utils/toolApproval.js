@@ -19,12 +19,14 @@ export const resolveAutoApproved = (message, settings) => {
 // prompt on its own (a policy hook that auto-approves, an agent launch whose
 // approval covers its sub-conversation), and a hook that escalates a call to
 // "ask" sends admin_required: false, so auto-approve answers it like any
-// other non-admin call. Only tools an administrator marked (per-tool
-// require_approval, or FORCE_TOOL_APPROVAL_GLOBALLY) are guaranteed to ask.
+// other non-admin call. What this switch controls is narrower: it never
+// answers a tool an administrator marked (per-tool require_approval, or
+// FORCE_TOOL_APPROVAL_GLOBALLY). Those can still be skipped server-side by the
+// same hooks and launch approvals, so the copy makes no "always" promise.
 export const AUTO_APPROVE_OFF_TEXT =
   'Tool calls ask for your approval before they run, unless your deployment\'s policy or an agent launch you approved already covers them. This is the default.'
 export const AUTO_APPROVE_ON_TEXT =
-  'Tool calls run without asking, except tools an administrator has marked as always requiring approval.'
+  'Tool calls run without asking. Auto-approve never answers tools an administrator has marked as requiring approval; those still ask.'
 export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APPROVE_OFF_TEXT)
 
 // Why a pending approval row is asking at all. A pending row whose
@@ -33,10 +35,12 @@ export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APP
 // setting, so a row is never mislabelled by a later toggle.
 export const approvalReason = (message, settings) => {
   if (message?.admin_required) {
-    return 'An administrator has marked this tool as always requiring approval, so it asks even with auto-approve on.'
+    return 'An administrator has marked this tool as requiring approval, so auto-approve does not answer it.'
   }
   if (message?.auto_approved === false && settings?.autoApproveTools) {
     return 'Auto-approve is on, but this call could not be approved automatically. Approve or reject it here.'
   }
-  return 'Asking because Auto-Approve Tool Calls is off. You can turn it on from the Active Tools bar or in Tools and Settings > General.'
+  // Points only at Settings: the Active Tools bar is hidden when no tools
+  // are selected, which is exactly when an agent launch can still ask.
+  return 'Asking because Auto-Approve Tool Calls is off. You can turn it on in Tools and Settings > General.'
 }

@@ -91,7 +91,7 @@ describe('SettingsPanel agent mode settings', () => {
     expect(toggle).toHaveAttribute('aria-checked', 'false')
     expect(toggle).toHaveAccessibleDescription(/wait for your confirmation before they run/i)
     expect(toggle).toHaveAccessibleDescription(/Currently off\. Tool calls ask for your approval before they run.*This is the default\./)
-    expect(toggle).toHaveAccessibleDescription(/marked as always requiring approval ask regardless of this setting/i)
+    expect(toggle).toHaveAccessibleDescription(/never approves tools an administrator has marked as requiring approval/i)
     // Off is the safe default, so it is not styled as a warning.
     expect(screen.getByText('Currently off.').closest('p')).not.toHaveClass('approval-warning-text')
   })
