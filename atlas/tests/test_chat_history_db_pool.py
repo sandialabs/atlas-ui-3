@@ -8,6 +8,8 @@ left alone. ``create_engine`` loads the driver without connecting, so no
 database is needed.
 """
 
+import importlib
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.pool import NullPool, QueuePool
@@ -160,8 +162,11 @@ class TestAppFactoryWiring:
     def test_app_factory_passes_configured_pool_to_init_database(self, monkeypatch):
         # Without this, dropping the pool argument in AppFactory would silently
         # fall back to the defaults while every other test still passed.
-        import atlas.modules.chat_history as chat_history
         from atlas.infrastructure.app_factory import AppFactory
+
+        # AppFactory imports init_database from the package at call time, so
+        # patch the package object itself.
+        chat_history = importlib.import_module("atlas.modules.chat_history")
 
         captured = {}
 
