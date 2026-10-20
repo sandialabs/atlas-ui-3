@@ -32,7 +32,8 @@ its local copy during an outage; its next write fails loudly instead.
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import UUID
 
 from atlas.core.log_sanitizer import sanitize_for_logging
@@ -57,18 +58,31 @@ class RedisSessionRepository:
         self._redis = redis
         self._ttl = int(ttl_seconds)
         self._live: Dict[UUID, Session] = {}
-        self._locks: Dict[UUID, asyncio.Lock] = {}
+        self._locks: Dict[UUID, List[Any]] = {}
 
     # -- helpers ---------------------------------------------------------
 
     def _key(self, session_id: UUID) -> str:
         return self._redis.key("session", str(session_id))
 
-    def _lock(self, session_id: UUID) -> asyncio.Lock:
-        lock = self._locks.get(session_id)
-        if lock is None:
-            lock = self._locks[session_id] = asyncio.Lock()
-        return lock
+    @asynccontextmanager
+    async def _serialized(self, session_id: UUID) -> AsyncIterator[None]:
+        """Hold this session's write lock; the lock exists only while in use.
+
+        Counted rather than kept per session, so a long-running replica does
+        not keep one lock for every session it ever wrote.
+        """
+        entry = self._locks.get(session_id)
+        if entry is None:
+            entry = self._locks[session_id] = [asyncio.Lock(), 0]
+        entry[1] += 1
+        try:
+            async with entry[0]:
+                yield
+        finally:
+            entry[1] -= 1
+            if entry[1] == 0 and self._locks.get(session_id) is entry:
+                del self._locks[session_id]
 
     def _after_write(self, session: Session, adopt: bool) -> None:
         if not session.active:
@@ -78,9 +92,6 @@ class RedisSessionRepository:
 
     def _evict(self, session_id: UUID) -> None:
         self._live.pop(session_id, None)
-        lock = self._locks.get(session_id)
-        if lock is not None and not lock.locked():
-            self._locks.pop(session_id, None)
 
     def _unavailable(self, op: str, session_id: UUID, exc: BaseException) -> SessionStoreUnavailableError:
         self._redis.stats.record_error(exc)
@@ -131,7 +142,7 @@ class RedisSessionRepository:
         from redis.exceptions import RedisError
 
         key = self._key(session.id)
-        async with self._lock(session.id):
+        async with self._serialized(session.id):
             payload = encode_session(session)
             try:
                 async with self._redis.client.pipeline(transaction=True) as pipe:
@@ -167,7 +178,7 @@ class RedisSessionRepository:
         from redis.exceptions import RedisError, WatchError
 
         key = self._key(session.id)
-        async with self._lock(session.id):
+        async with self._serialized(session.id):
             payload = encode_session(session)
             try:
                 async with self._redis.client.pipeline(transaction=True) as pipe:

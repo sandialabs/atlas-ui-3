@@ -165,9 +165,64 @@ async def test_resume_restores_incognito_and_save_floor(server):
     resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
 
     assert session_id in replica_b._incognito_sessions
-    assert replica_b._incognito_save_floor[session_id] == 2
-    # Incognito messages never reached the shared store.
+    # Incognito messages never reached the shared store, so the resumed
+    # history is empty and no floor is left to skip past.
     assert resumed.history.messages == []
+    assert session_id not in replica_b._incognito_save_floor
+
+
+@pytest.mark.asyncio
+async def test_resumed_incognito_session_saves_later_turns_after_opting_in(server):
+    """An emptied history must not leave a stale floor that hides new turns."""
+    replica_a = _service(_redis_repo(server), "conn-a")
+    session_id = uuid4()
+    with patch.object(replica_a, "_get_orchestrator", return_value=_orchestrator([])):
+        await replica_a.handle_chat_message(
+            session_id=session_id, content="secret", model="m", user_email=USER, incognito=True,
+        )
+
+    replica_b = _service(_redis_repo(server), "conn-b")
+    replica_b.conversation_repository = MagicMock()
+    await main._resume_connection_session(replica_b, str(session_id), USER)
+    saved = []
+    with patch.object(replica_b, "_get_orchestrator", return_value=_orchestrator([])), \
+            patch.object(replica_b, "_save_conversation", side_effect=lambda *a, **k: saved.append(k) or True):
+        await replica_b.handle_chat_message(
+            session_id=session_id, content="now saved", model="m", user_email=USER, incognito=False,
+        )
+    assert saved and saved[0]["start_index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_save_floor_survives_when_the_history_is_stored(server):
+    """Incognito prefix then opt-in: the stored history keeps the prefix, so the floor stays."""
+    replica_a = _service(_redis_repo(server), "conn-a")
+    session_id = uuid4()
+    with patch.object(replica_a, "_get_orchestrator", return_value=_orchestrator([])):
+        await replica_a.handle_chat_message(
+            session_id=session_id, content="secret", model="m", user_email=USER, incognito=True,
+        )
+        await replica_a.handle_chat_message(
+            session_id=session_id, content="public", model="m", user_email=USER, incognito=False,
+        )
+
+    replica_b = _service(_redis_repo(server), "conn-b")
+    resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
+    assert len(resumed.history.messages) == 4
+    assert replica_b._incognito_save_floor[session_id] == 2
+    assert session_id in replica_b._save_floor_locked
+
+
+@pytest.mark.asyncio
+async def test_write_locks_do_not_outlive_their_writes(server):
+    repo = _redis_repo(server)
+    replica = _service(repo, "conn-a")
+    for _ in range(5):
+        session_id = uuid4()
+        await replica.create_session(session_id, USER)
+        await replica.end_session(session_id)
+    assert repo._locks == {}
+    assert repo.stats()["live_sessions"] == 0
 
 
 @pytest.mark.asyncio

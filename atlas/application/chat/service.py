@@ -1049,7 +1049,14 @@ class ChatService:
         if isinstance(floor, dict):
             value = floor.get("floor")
             if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                self._incognito_save_floor[session.id] = value
+                # The floor counts leading messages of *this* history. A store
+                # that omitted the incognito messages hands back a shorter
+                # (often empty) history, so the floor shrinks with it: there
+                # is nothing left below it to protect, and an unclamped floor
+                # would keep the user's next saved turns out of the record.
+                value = min(value, len(session.history.messages))
+                if value > 0:
+                    self._incognito_save_floor[session.id] = value
             if floor.get("locked") is True:
                 self._save_floor_locked.add(session.id)
 
