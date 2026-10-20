@@ -2,6 +2,8 @@ import { useChat } from '../contexts/ChatContext'
 import { X, ChevronDown, ChevronUp, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
+import { describeAutoApprove } from '../utils/toolApproval'
+import { FOCUS_RING } from '../utils/focusRing'
 
 const EnabledToolsIndicator = () => {
   const { selectedTools, toggleTool, settings, updateSettings, tools = [] } = useChat()
@@ -54,18 +56,20 @@ const EnabledToolsIndicator = () => {
             : 'Selected tools; scroll horizontally to see more'
         }
       >
-        {displayTools.map((item, idx) => (
+        {displayTools.map(item => (
           <div
-            key={idx}
+            key={item.key}
             className="flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-700 text-gray-300"
           >
             <span className="max-w-40 truncate" title={item.name}>{item.name}</span>
             <button
+              type="button"
               onClick={() => toggleTool(item.key)}
-              className="hover:bg-red-600 hover:bg-opacity-50 rounded p-0.5 transition-colors flex-shrink-0"
+              className={`hover:bg-red-600 hover:bg-opacity-50 rounded p-0.5 transition-colors flex-shrink-0 ${FOCUS_RING}`}
               title={`Remove ${item.name}`}
+              aria-label={`Remove ${item.name}`}
             >
-              <X className="w-3 h-3" />
+              <X className="w-3 h-3" aria-hidden="true" />
             </button>
           </div>
         ))}
@@ -75,7 +79,7 @@ const EnabledToolsIndicator = () => {
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
           aria-expanded={isExpanded}
-          className={`flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${
+          className={`flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${FOCUS_RING} ${
             isExpandedLayout ? 'mt-0.5' : ''
           }`}
           title={isExpanded ? 'Show less' : `Show ${allTools.length - COMPACT_THRESHOLD} more`}
@@ -96,9 +100,19 @@ const EnabledToolsIndicator = () => {
       {/* Auto-approve lives here rather than on every approval row (#762).
           This strip is the persistent per-conversation status bar, so one
           indicator replaces one pill per tool call — and it stays on screen
-          instead of scrolling away with the transcript. */}
+          instead of scrolling away with the transcript. A switch with a fixed
+          name, so a screen reader hears "Auto-approve tool calls, off" rather
+          than a label that rewrites itself; the description says what off and
+          on actually do. */}
+      <span id="active-tools-auto-approve-help" className="sr-only">
+        {describeAutoApprove(autoApproveOn)}
+      </span>
       <button
         type="button"
+        role="switch"
+        aria-checked={autoApproveOn}
+        aria-label="Auto-approve tool calls"
+        aria-describedby="active-tools-auto-approve-help"
         onClick={() => {
           try {
             updateSettings?.({ autoApproveTools: !autoApproveOn })
@@ -106,17 +120,16 @@ const EnabledToolsIndicator = () => {
             console.error('Failed to toggle auto-approve from the Active Tools strip', e)
           }
         }}
-        aria-pressed={autoApproveOn}
-        className={`flex-shrink-0 px-2 py-1 rounded border transition-colors cursor-pointer ${
+        className={`flex-shrink-0 px-2 py-1 rounded border transition-colors cursor-pointer ${FOCUS_RING} ${
           isExpandedLayout ? 'mt-0.5' : ''
         } ${
           autoApproveOn
             ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
             : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
         }`}
-        title="Click to toggle auto-approve for non-admin tool calls. Admin-required calls will still prompt."
+        title={`Auto-approve tool calls is ${autoApproveOn ? 'on' : 'off'}. ${describeAutoApprove(autoApproveOn)} Click to turn it ${autoApproveOn ? 'off' : 'on'}.`}
       >
-        {autoApproveOn ? 'Auto-approve ON' : 'Auto-approve OFF'}
+        {autoApproveOn ? 'Auto-approve: On' : 'Auto-approve: Off'}
       </button>
     </div>
   )

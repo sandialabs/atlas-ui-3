@@ -1,11 +1,15 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
-one button, **Tools and Settings** (wrench icon), that opens a single tabbed
-panel.
+one button, **Tools and Settings**, that opens a single tabbed panel. Its icon
+is a gear with a small wrench badge: the gear says "settings", the badge says
+tools live there too. A bare wrench is reserved for tools themselves -- the
+tool picker under the message box, the Active Tools bar, and the model
+picker's tool-support icon -- so the header button no longer reads as
+"tools only".
 
 ![Header with the single Tools and Settings button](screenshots/836-01-header.png)
 
@@ -70,6 +74,46 @@ and hover hints, including the Agent Mode explanation and the long form of the
 no-tools callout. Core labels, selected values, run status, warnings, and
 actions stay visible. It is off by default, so first-time and occasional users
 still get the explanations.
+
+## Tool approval
+
+**General → Auto-Approve Tool Calls** controls whether tool calls wait for your
+confirmation before they run.
+
+- **Off (the default):** a tool call stops at an **APPROVAL REQUIRED** row in
+  the transcript and runs only after you click **Approve** (you can edit the
+  arguments first, or **Reject** with an optional reason).
+- **On:** tool calls run without asking -- including calls in conversations
+  you are not currently viewing.
+- **Auto-approve never answers admin-marked tools.** When an administrator
+  marks a tool as requiring approval (per-tool `require_approval` or
+  `FORCE_TOOL_APPROVAL_GLOBALLY`), auto-approve leaves its calls for you to
+  approve.
+
+Some calls never reach the switch at all, admin-marked ones included. A policy
+hook can approve a call on its own, and approving an agent launch covers the
+tool calls made inside that sub-conversation, so neither prompts. A hook that
+*escalates* a call to "ask" is treated like any other unmarked call: with
+auto-approve on, it is approved automatically.
+
+The same switch sits on the **Active Tools** bar above the message box
+(**Auto-approve: Off / On**) whenever tools are selected, and each approval
+row says why it is asking: auto-approve is off, an administrator marked the
+tool as requiring approval, or auto-approve is on but the automatic approval could not be sent
+(for example while disconnected), so it waits for you.
+
+## Model capability icons
+
+Each row in the model picker shows two icons, each with a tooltip and a screen
+reader name:
+
+| Icon | Supported | Not supported |
+| ---- | --------- | ------------- |
+| Image | Green picture: "Accepts image input" | Grey picture with a slash: "No image input" |
+| Wrench | Blue wrench: "Supports tool calling" | Grey wrench struck through: "No tool calling" |
+
+Unsupported states differ in shape (the slash), not only in colour, and the
+grey glyph keeps at least 3:1 contrast against the menu in both themes.
 
 ## Admin tab
 

@@ -95,3 +95,18 @@ describe('header New Chat', () => {
     expect(handlers.onCloseCanvas).toHaveBeenCalledTimes(1)
   })
 })
+
+// The header button opens the combined panel -- general settings, prompts and
+// admin as well as tools -- so it must not share the tool picker's bare wrench.
+describe('header Tools and Settings button', () => {
+  it('uses the gear-and-wrench glyph and opens the combined panel', () => {
+    const handlers = renderHeader()
+    const [button] = screen.getAllByRole('button', { name: 'Tools and Settings' })
+    expect(button.querySelector('.lucide-settings')).not.toBeNull()
+    expect(button.querySelector('.lucide-wrench')).not.toBeNull()
+    expect(button).toHaveAttribute('aria-haspopup', 'dialog')
+    expect(button.getAttribute('title')).toMatch(/general settings/)
+    fireEvent.click(button)
+    expect(handlers.onToggleSettings).toHaveBeenCalledTimes(1)
+  })
+})

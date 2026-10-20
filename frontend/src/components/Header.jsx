@@ -6,7 +6,8 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import WorkspaceSelector from './WorkspaceSelector'
 import ConversationSetupCluster, { NewChatButton } from './ConversationSetupControls'
 import { AgentModeHelpButton, AgentModeMenuHint } from './AgentModeHelp'
-import { Database, Wrench, Bot, ExternalLink, FileText, CircleHelp, FolderOpen, Monitor, Menu, X, PanelLeft, Printer } from 'lucide-react'
+import ToolsSettingsIcon from './ToolsSettingsIcon'
+import { Database, Bot, ExternalLink, FileText, CircleHelp, FolderOpen, Monitor, Menu, X, PanelLeft, Printer } from 'lucide-react'
 import { classificationLock } from '../utils/conversationClassification'
 import { useElementWidth } from '../hooks/useElementWidth'
 import { useToast } from './ui/toastContext'
@@ -335,12 +336,14 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
               settings (including light/dark), and admin quick controls all
               live behind this one button (issue #836). */}
           <button
+            type="button"
             onClick={() => onToggleSettings()}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
-            title="Tools and Settings"
+            className="group p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            title="Tools and Settings: tools, integrations, prompts, and general settings"
             aria-label="Tools and Settings"
+            aria-haspopup="dialog"
           >
-            <Wrench className="w-5 h-5" />
+            <ToolsSettingsIcon badgeBg="bg-gray-700 group-hover:bg-gray-600" />
           </button>
 
           {/* Help. Icon only, and a ringed question mark rather than the old
@@ -489,9 +492,9 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                   onToggleSettings()
                   setMobileMenuOpen(false)
                 }}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                className="group w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
               >
-                <Wrench className="w-5 h-5" />
+                <ToolsSettingsIcon badgeBg="bg-gray-700 group-hover:bg-gray-600" />
                 <span>Tools and Settings</span>
               </button>
 

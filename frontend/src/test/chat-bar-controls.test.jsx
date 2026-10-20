@@ -6,7 +6,7 @@
  * names, enabled datasets visible as pills, and quick access to data source
  * selection.
  */
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, createEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
@@ -120,6 +120,79 @@ describe('ToolSelector in the chat bar', () => {
 
     expect(screen.queryByPlaceholderText('Search tools...')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
+  })
+
+  // The menu is a popover with a search box, not an ARIA menu, so it says so,
+  // and opening it lands keyboard focus in the search rather than leaving it
+  // on the trigger. Its footer uses the Tools and Settings glyph (gear and
+  // wrench), not a generic sliders icon.
+  it('opens as a labelled dialog with focus in the search box', () => {
+    render(<ToolSelector />)
+    const trigger = screen.getByRole('button', { name: /1 tool/ })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
+    fireEvent.click(trigger)
+    const popover = screen.getByRole('dialog', { name: 'Tools' })
+    expect(trigger).toHaveAttribute('aria-controls', popover.id)
+    expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
+    const footer = screen.getByText(/Open Tools and Settings/)
+    expect(footer.querySelector('.lucide-settings')).not.toBeNull()
+  })
+
+  // A touch open must not focus the search box: that raises the on-screen
+  // keyboard over the popover's rows.
+  it.each(['touch', 'pen'])('does not focus the search box when opened by %s', (pointerType) => {
+    render(<ToolSelector />)
+    const trigger = screen.getByRole('button', { name: /1 tool/ })
+    // jsdom has no PointerEvent, so set pointerType on the event by hand.
+    const down = createEvent.pointerDown(trigger)
+    Object.defineProperty(down, 'pointerType', { value: pointerType })
+    fireEvent(trigger, down)
+    fireEvent.click(trigger)
+    expect(screen.getByRole('searchbox', { name: 'Search tools' })).not.toHaveFocus()
+  })
+
+  it('does not carry a touch open over to a later synthetic-click open', () => {
+    render(<ToolSelector />)
+    const trigger = screen.getByRole('button', { name: /1 tool/ })
+    const down = createEvent.pointerDown(trigger)
+    Object.defineProperty(down, 'pointerType', { value: 'touch' })
+    fireEvent(trigger, down)
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    // A screen reader's click action: no pointerdown, no keydown.
+    fireEvent.click(trigger)
+    expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
+  })
+
+  // A touch pointerdown that never becomes a click (cancelled tap, drag off)
+  // must not leak into the next, pointer-less open.
+  it.each([
+    ['cancelled', (trigger) => fireEvent(trigger, createEvent.pointerCancel(trigger))],
+    ['stale', () => vi.advanceTimersByTime(5000)],
+  ])('ignores a %s touch pointerdown on the next synthetic-click open', (_label, settle) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      render(<ToolSelector />)
+      const trigger = screen.getByRole('button', { name: /1 tool/ })
+      const down = createEvent.pointerDown(trigger)
+      Object.defineProperty(down, 'pointerType', { value: 'touch' })
+      fireEvent(trigger, down)
+      settle(trigger)
+      fireEvent.click(trigger)
+      expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still focuses the search box when opened with a mouse', () => {
+    render(<ToolSelector />)
+    const trigger = screen.getByRole('button', { name: /1 tool/ })
+    const down = createEvent.pointerDown(trigger)
+    Object.defineProperty(down, 'pointerType', { value: 'mouse' })
+    fireEvent(trigger, down)
+    fireEvent.click(trigger)
+    expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
   })
 
   // Parity with ToolsPanel (PR #839 review). The menu used to read the raw

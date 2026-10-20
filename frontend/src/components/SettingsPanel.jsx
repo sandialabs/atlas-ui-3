@@ -11,6 +11,9 @@ import AdminQuickPanel from './admin/AdminQuickPanel'
 import CaptureConsentSection from './CaptureConsentSection'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import { getFocusableElements, isTopmostModalDialog } from '../utils/focusTrap'
+import { describeAutoApprove } from '../utils/toolApproval'
+import { FOCUS_RING } from '../utils/focusRing'
+import ToolsSettingsIcon from './ToolsSettingsIcon'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -464,7 +467,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0">
           <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
-            <Wrench className="w-5 h-5 text-blue-400" />
+            <ToolsSettingsIcon className="text-blue-400" />
             Tools and Settings
           </h2>
           <button
@@ -730,14 +733,20 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           {/* Auto-Approve Tools Setting (always in sync via context) */}
           <div className="bg-gray-700 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-gray-50 font-medium">Auto-Approve Tool Calls</label>
+              <label className="text-gray-50 font-medium" htmlFor="auto-approve-tools">Auto-Approve Tool Calls</label>
               <button
+                type="button"
+                id="auto-approve-tools"
+                role="switch"
+                aria-checked={!!ctxSettings?.autoApproveTools}
+                aria-label="Auto-Approve Tool Calls"
+                aria-describedby="auto-approve-tools-help"
                 onClick={() => {
                   const next = !ctxSettings?.autoApproveTools
                   updateCtxSettings({ autoApproveTools: next })
                   setSettings(previous => ({ ...previous, autoApproveTools: next }))
                 }}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${FOCUS_RING} ${
                   ctxSettings?.autoApproveTools ? 'bg-green-600' : 'bg-gray-600'
                 }`}
               >
@@ -750,29 +759,39 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             </div>
             {/* Scope disclosure, not onboarding copy: keep it visible even
                 when the user has turned off helper text. */}
-            <p className="text-sm text-gray-400">
-              When enabled, tools that don't require admin approval will execute automatically without prompting --
-              including tool calls in conversations you are not currently viewing.
-              Tools that require admin approval will still prompt for confirmation.
-            </p>
-            {!ctxSettings?.autoApproveTools && (
-              <p className="text-sm approval-warning-text mt-2">
-                <strong><span aria-hidden="true">⚠</span> Currently:</strong> You will be prompted to approve all tool calls unless admin has disabled approval for specific tools.
+            <div id="auto-approve-tools-help" className="text-sm text-gray-400 space-y-1">
+              <p>
+                Controls whether tool calls wait for your confirmation before they run.
+                It never approves tools an administrator has marked as requiring approval.
               </p>
-            )}
+              {/* Off is the safe default; on is the state worth a warning
+                  colour, since tools then run with nobody looking. */}
+              <p className={ctxSettings?.autoApproveTools ? 'approval-warning-text' : undefined}>
+                <strong className={ctxSettings?.autoApproveTools ? undefined : 'text-gray-200'}>
+                  {ctxSettings?.autoApproveTools ? 'Currently on.' : 'Currently off.'}
+                </strong>{' '}
+                {describeAutoApprove(!!ctxSettings?.autoApproveTools)}
+                {ctxSettings?.autoApproveTools && ' This includes tool calls in conversations you are not currently viewing.'}
+              </p>
+            </div>
           </div>
 
           {/* Compact Messages Setting (always in sync via context) */}
           <div className="bg-gray-700 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-gray-50 font-medium">Compact Tool Messages</label>
+              <label className="text-gray-50 font-medium" htmlFor="compact-tool-messages">Compact Tool Messages</label>
               <button
+                type="button"
+                id="compact-tool-messages"
+                role="switch"
+                aria-checked={ctxSettings?.compactMessages !== false}
+                aria-label="Compact Tool Messages"
                 onClick={() => {
                   const next = !(ctxSettings?.compactMessages !== false)
                   updateCtxSettings({ compactMessages: next })
                   setSettings(previous => ({ ...previous, compactMessages: next }))
                 }}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${FOCUS_RING} ${
                   ctxSettings?.compactMessages !== false ? 'bg-green-600' : 'bg-gray-600'
                 }`}
               >

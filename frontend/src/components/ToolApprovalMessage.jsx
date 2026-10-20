@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useToast } from './ui/toastContext'
-import { resolveAutoApproved } from '../utils/toolApproval'
+import { approvalReason, resolveAutoApproved } from '../utils/toolApproval'
+import { FOCUS_RING } from '../utils/focusRing'
 
 // Inline tool-approval prompt rendered as a chat message. Extracted from
 // Message.jsx. `compact` (default true) renders the dense single-line row added
@@ -148,6 +149,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             {key}
           </label>
           <textarea
+            aria-label={`Argument ${key}`}
             value={typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
             onChange={(e) => {
               const newValue = e.target.value
@@ -206,16 +208,18 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           </span>
           <span className="font-medium">{message.tool_name}</span>
         </div>
+        <p className="text-xs text-gray-400 -mt-2 mb-3">{approvalReason(message, settings)}</p>
 
         {/* Arguments Section */}
         <div className="mb-4">
           <div className="border-l-4 border-yellow-500 pl-4">
             <button
+              type="button"
               onClick={toggleCollapsed}
-              className="w-full text-left text-sm font-semibold text-yellow-400 mb-2 flex items-center gap-2 hover:text-yellow-300 transition-colors"
+              className={`w-full text-left text-sm font-semibold text-yellow-400 mb-2 flex items-center gap-2 hover:text-yellow-300 transition-colors rounded ${FOCUS_RING}`}
               aria-expanded={isExpanded}
             >
-              <span className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
+              <span aria-hidden="true" className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
                 ▶
               </span>
               Tool Arguments {!isExpanded ? `(${Object.keys(args).length} params)` : ''}
@@ -226,8 +230,9 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
                 {message.allow_edit !== false && (
                   <div className="mb-2 flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => setIsEditing(!isEditing)}
-                      className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                      className={`px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors ${FOCUS_RING}`}
                     >
                       {isEditing ? 'View Mode' : 'Edit Arguments'}
                     </button>
@@ -255,14 +260,16 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             instead of becoming a sliver (#747). */}
         <div className="flex flex-wrap gap-2 items-center">
           <button
+            type="button"
             onClick={handleApprove}
-            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
+            className={`px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0 ${FOCUS_RING}`}
           >
             Approve {isEditing ? '(with edits)' : ''}
           </button>
           <button
+            type="button"
             onClick={handleReject}
-            className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
+            className={`px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0 ${FOCUS_RING}`}
           >
             Reject
           </button>
@@ -271,6 +278,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Rejection reason (optional)..."
+            aria-label="Rejection reason (optional)"
             className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -304,10 +312,10 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         <button
           type="button"
           onClick={toggleCollapsed}
-          className="flex items-center gap-2 text-left hover:text-white transition-colors cursor-pointer"
+          className={`flex items-center gap-2 text-left hover:text-white transition-colors cursor-pointer rounded ${FOCUS_RING}`}
           aria-expanded={isExpanded}
         >
-          <span className={`text-gray-500 text-xs transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
+          <span aria-hidden="true" className={`text-gray-500 text-xs transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
             ▶
           </span>
           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-600">
@@ -320,6 +328,11 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         </button>
       </div>
 
+      {/* Why this call is waiting on the user: the setting is off, or an
+          admin gate overrides it. Without this the row never said the user
+          could stop being asked. */}
+      <p className="mt-1 ml-5 text-xs text-gray-400">{approvalReason(message, settings)}</p>
+
       {/* Expanded arguments (view / edit) */}
       {isExpanded && (
         <div className="mt-2 ml-5 border-l-2 border-yellow-500 pl-3">
@@ -329,8 +342,10 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
                 edits would be ignored server-side, so showing it is misleading. */}
             {message.allow_edit !== false && (
               <button
+                type="button"
                 onClick={() => setIsEditing(!isEditing)}
-                className="px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                className={`px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors ${FOCUS_RING}`}
+                title={isEditing ? 'Show the arguments read-only' : 'Change the arguments before approving'}
               >
                 {isEditing ? 'View' : 'Edit'}
               </button>
@@ -352,14 +367,16 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           layout above (#747). */}
       <div className="flex flex-wrap gap-2 items-center mt-2 ml-5">
         <button
+          type="button"
           onClick={handleApprove}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0"
+          className={`px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors whitespace-nowrap shrink-0 ${FOCUS_RING}`}
         >
           Approve {isEditing ? '(with edits)' : ''}
         </button>
         <button
+          type="button"
           onClick={handleReject}
-          className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0"
+          className={`px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded border border-gray-600 transition-colors whitespace-nowrap shrink-0 ${FOCUS_RING}`}
         >
           Reject
         </button>
@@ -368,6 +385,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="Rejection reason (optional)..."
+          aria-label="Rejection reason (optional)"
           className="flex-1 min-w-[12rem] bg-gray-900 text-gray-200 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>

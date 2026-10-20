@@ -16,7 +16,7 @@ real LLM keys from `.env`, driving the built frontend through a browser.
 ### 1. Tools and Settings → Prompts tab
 
 The prompt library lives in the **Prompts** tab of the
-[Tools and Settings panel](../tools-and-settings/README.md) (the wrench button
+[Tools and Settings panel](../tools-and-settings/README.md) (the gear-and-wrench button
 in the top bar). General holds the legacy settings; **User Info** is a reserved
 stub for the related issue #595.
 

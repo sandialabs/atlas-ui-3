@@ -229,6 +229,69 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
   })
 
+  // The row used to give no hint that the user could stop being asked, or why
+  // an admin-gated call still asks with auto-approve on.
+  it.each([true, false])('says why it is asking (compact=%s)', (compact) => {
+    setChat()
+    const { unmount } = render(<ToolApprovalMessage message={baseMessage} compact={compact} />)
+    expect(screen.getByText(/Asking because Auto-Approve Tool Calls is off/)).toBeInTheDocument()
+    unmount()
+
+    setChat({ settings: { autoApproveTools: true } })
+    render(<ToolApprovalMessage message={{ ...baseMessage, admin_required: true }} compact={compact} />)
+    expect(screen.getByText(/administrator has marked this tool as requiring approval, so auto-approve does not answer it/)).toBeInTheDocument()
+  })
+
+  // Auto-approve on, but the automatic send failed (socket closed): the row
+  // falls back to manual and must not claim the setting is off.
+  it.each([true, false])('does not say auto-approve is off when an auto-approval could not be sent (compact=%s)', (compact) => {
+    setChat({ settings: { autoApproveTools: true } })
+    render(<ToolApprovalMessage message={{ ...baseMessage, auto_approved: false }} compact={compact} />)
+    expect(screen.getByText(/Auto-approve is on, but this call could not be approved automatically/)).toBeInTheDocument()
+    expect(screen.queryByText(/Auto-Approve Tool Calls is off/)).not.toBeInTheDocument()
+  })
+
+  // End to end through the effect: the automatic send fails, the store patch
+  // records auto_approved: false, and the re-rendered row explains itself.
+  it('explains a failed automatic approval after the effect records it', async () => {
+    vi.useFakeTimers()
+    try {
+      const sendApprovalResponse = vi.fn().mockReturnValue(false)
+      const updateToolResult = vi.fn()
+      setChat({ settings: { autoApproveTools: true }, sendApprovalResponse, updateToolResult })
+      const { container, rerender } = render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+      // Before the send the call is treated as auto-approved: no row.
+      expect(container).toBeEmptyDOMElement()
+
+      await vi.advanceTimersByTimeAsync(200)
+      expect(sendApprovalResponse).toHaveBeenCalledTimes(1)
+      expect(updateToolResult).toHaveBeenCalledWith('call_1', { auto_approved: false })
+
+      const patched = { ...baseMessage, ...updateToolResult.mock.calls[0][1] }
+      rerender(<ToolApprovalMessage message={patched} compact={true} />)
+      expect(screen.getByText(/Auto-approve is on, but this call could not be approved automatically/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /^Approve/ })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Keyed on the row's recorded auto_approved, not the live setting alone.
+  it('keeps the plain reason for a row whose auto-approval was never attempted', () => {
+    setChat({ settings: { autoApproveTools: false } })
+    render(<ToolApprovalMessage message={{ ...baseMessage, auto_approved: false }} compact={true} />)
+    expect(screen.getByText(/Asking because Auto-Approve Tool Calls is off/)).toBeInTheDocument()
+  })
+
+  it('gives its controls button semantics and the reason box a label', () => {
+    setChat()
+    render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+    for (const name of [/^Approve/, 'Reject', 'Edit']) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute('type', 'button')
+    }
+    expect(screen.getByRole('textbox', { name: 'Rejection reason (optional)' })).toBeInTheDocument()
+  })
+
   it('no longer hosts the auto-approve toggle — it lives on the Active Tools strip', () => {
     setChat()
     render(<ToolApprovalMessage message={baseMessage} compact={true} />)
