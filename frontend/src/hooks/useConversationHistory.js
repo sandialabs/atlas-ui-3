@@ -1,4 +1,9 @@
 import { useState, useCallback, useRef } from 'react'
+import {
+  CONVERSATION_PAGE_SIZE,
+  appendUnique,
+  mergeFreshFirst,
+} from '../utils/conversationPagination'
 
 /**
  * Hook for conversation history REST API operations.
@@ -8,26 +13,104 @@ export function useConversationHistory() {
   const [conversations, setConversations] = useState([])
   const [tags, setTags] = useState([])
   const [loading, setLoading] = useState(false)
+  // The next page of older conversations is on its way (issue #1085).
+  const [loadingMore, setLoadingMore] = useState(false)
+  // Why the last "load more" failed, so the sidebar can offer a retry.
+  const [loadMoreError, setLoadMoreError] = useState(null)
+  // Whether older conversations remain beyond the ones the list holds.
+  const [hasMore, setHasMore] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTag, setActiveTag] = useState(null)
   const abortRef = useRef(null)
+  // The rows the list currently holds. The sidebar renders them from state,
+  // but the paging bookkeeping needs the value at request time rather than
+  // the one captured when a callback was created.
+  const conversationsRef = useRef([])
+  // Where the next page starts, counted in rows the server has handed over.
+  const offsetRef = useRef(0)
+  // How many conversations the current listing holds in total, so the client
+  // can tell "there is an older page" from "that is all of them".
+  const totalRef = useRef(0)
+  // Guards against a second "load more" while one is in flight.
+  const loadingMoreRef = useRef(false)
+
+  // Store a new list and re-derive the paging state from it. The offset
+  // follows the rows the list holds: the server's ordering shifts by one
+  // whenever a conversation is deleted, so the next page has to shift too.
+  const applyList = useCallback((next, total) => {
+    const rows = Array.isArray(next) ? next : []
+    conversationsRef.current = rows
+    offsetRef.current = rows.length
+    if (typeof total === 'number') totalRef.current = total
+    setConversations(rows)
+    setHasMore(totalRef.current > rows.length)
+  }, [])
 
   const fetchConversations = useCallback(async (options = {}) => {
-    const { limit = 50, offset = 0, tag = null } = options
+    const { limit = CONVERSATION_PAGE_SIZE, offset = 0, tag = null } = options
     setLoading(true)
+    setLoadMoreError(null)
     try {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
       if (tag) params.set('tag', tag)
       const res = await fetch(`/api/conversations?${params}`)
       if (!res.ok) return
       const data = await res.json()
-      setConversations(data.conversations || [])
+      applyList(data.conversations || [], data.total)
     } catch (e) {
       console.error('Failed to fetch conversations:', e)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [applyList])
+
+  // Re-read the newest page and keep the older rows the user already
+  // loaded, so a refresh (a message saved, a background run finished) does
+  // not send the user back to the top of the history.
+  const refreshConversations = useCallback(async (options = {}) => {
+    const { limit = CONVERSATION_PAGE_SIZE, tag = null } = options
+    try {
+      const params = new URLSearchParams({ limit: String(limit), offset: '0' })
+      if (tag) params.set('tag', tag)
+      const res = await fetch(`/api/conversations?${params}`)
+      if (!res.ok) return
+      const data = await res.json()
+      const fresh = data.conversations || []
+      applyList(mergeFreshFirst(fresh, conversationsRef.current), data.total)
+    } catch (e) {
+      console.error('Failed to refresh conversations:', e)
+    }
+  }, [applyList])
+
+  // Fetch the next page of older conversations and append it. The rows the
+  // list already holds stay exactly where they are, so neither the scroll
+  // position nor the open conversation changes (issue #1085).
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current) return
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    setLoadMoreError(null)
+    try {
+      const params = new URLSearchParams({
+        limit: String(CONVERSATION_PAGE_SIZE),
+        offset: String(offsetRef.current),
+      })
+      if (activeTag) params.set('tag', activeTag)
+      const res = await fetch(`/api/conversations?${params}`)
+      if (!res.ok) throw new Error(`Failed to load older conversations (${res.status})`)
+      const data = await res.json()
+      applyList(
+        appendUnique(conversationsRef.current, data.conversations || []),
+        data.total
+      )
+    } catch (e) {
+      console.error('Failed to load more conversations:', e)
+      setLoadMoreError('Could not load older conversations. Try again.')
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }, [activeTag, applyList])
 
   const searchConversations = useCallback(async (query) => {
     if (!query || !query.trim()) {
@@ -45,13 +128,15 @@ export function useConversationHistory() {
       const res = await fetch(`/api/conversations/search?${params}`, { signal: controller.signal })
       if (!res.ok) return
       const data = await res.json()
-      setConversations(data.conversations || [])
+      // Search results are their own list: there is nothing older to page
+      // through, so the paging state is reset with them.
+      applyList(data.conversations || [], (data.conversations || []).length)
     } catch (e) {
       if (e.name !== 'AbortError') console.error('Search failed:', e)
     } finally {
       setLoading(false)
     }
-  }, [fetchConversations, activeTag])
+  }, [fetchConversations, activeTag, applyList])
 
   // `complianceLevel` is the active level ('' for none). When given, the server
   // refuses a conversation recorded under another classification (issue #1042)
@@ -64,7 +149,7 @@ export function useConversationHistory() {
       const res = await fetch(`/api/conversations/${conversationId}${query}`)
       if (res.status === 409) {
         const body = await res.json().catch(() => ({}))
-        return { classificationRefused: true, message: body.detail || 'This conversation cannot be opened under the selected security level.' }
+        return { classificationRefused: true, message: body.detail || 'This conversation cannot be opened under the selected compliance level.' }
       }
       if (!res.ok) return null
       return await res.json()
@@ -78,13 +163,15 @@ export function useConversationHistory() {
     try {
       const res = await fetch(`/api/conversations/${conversationId}`, { method: 'DELETE' })
       if (!res.ok) return false
-      setConversations(prev => prev.filter(c => c.id !== conversationId))
+      const rows = conversationsRef.current.filter(c => c.id !== conversationId)
+      // The server's history is one row shorter now, so the total is too.
+      applyList(rows, Math.max(0, totalRef.current - 1))
       return true
     } catch (e) {
       console.error('Failed to delete conversation:', e)
       return false
     }
-  }, [])
+  }, [applyList])
 
   const deleteMultiple = useCallback(async (ids) => {
     try {
@@ -95,26 +182,28 @@ export function useConversationHistory() {
       })
       if (!res.ok) return 0
       const data = await res.json()
-      setConversations(prev => prev.filter(c => !ids.includes(c.id)))
+      const removed = new Set(ids)
+      const rows = conversationsRef.current.filter(c => !removed.has(c.id))
+      applyList(rows, Math.max(0, totalRef.current - removed.size))
       return data.deleted_count || 0
     } catch (e) {
       console.error('Failed to delete conversations:', e)
       return 0
     }
-  }, [])
+  }, [applyList])
 
   const deleteAll = useCallback(async () => {
     try {
       const res = await fetch('/api/conversations', { method: 'DELETE' })
       if (!res.ok) return 0
       const data = await res.json()
-      setConversations([])
+      applyList([], 0)
       return data.deleted_count || 0
     } catch (e) {
       console.error('Failed to delete all conversations:', e)
       return 0
     }
-  }, [])
+  }, [applyList])
 
   const downloadAll = useCallback(async () => {
     try {
@@ -148,7 +237,7 @@ export function useConversationHistory() {
       if (!res.ok) return null
       const data = await res.json()
       // Update local state to reflect new tag (deduplicate)
-      setConversations(prev => prev.map(c =>
+      applyList(conversationsRef.current.map(c =>
         c.id === conversationId
           ? { ...c, tags: [...new Set([...(c.tags || []), tagName])] }
           : c
@@ -158,7 +247,7 @@ export function useConversationHistory() {
       console.error('Failed to add tag:', e)
       return null
     }
-  }, [])
+  }, [applyList])
 
   const removeTag = useCallback(async (conversationId, tagId) => {
     try {
@@ -178,7 +267,7 @@ export function useConversationHistory() {
         body: JSON.stringify({ title }),
       })
       if (!res.ok) return false
-      setConversations(prev => prev.map(c =>
+      applyList(conversationsRef.current.map(c =>
         c.id === conversationId ? { ...c, title } : c
       ))
       return true
@@ -186,7 +275,7 @@ export function useConversationHistory() {
       console.error('Failed to update title:', e)
       return false
     }
-  }, [])
+  }, [applyList])
 
   const fetchTags = useCallback(async () => {
     try {
@@ -201,6 +290,7 @@ export function useConversationHistory() {
 
   const filterByTag = useCallback((tagName) => {
     setActiveTag(tagName)
+    // A different tag is a different list, so the paging state starts over.
     if (tagName) {
       fetchConversations({ tag: tagName })
     } else {
@@ -212,9 +302,14 @@ export function useConversationHistory() {
     conversations,
     tags,
     loading,
+    loadingMore,
+    loadMoreError,
+    hasMore,
     searchQuery,
     activeTag,
     fetchConversations,
+    refreshConversations,
+    loadMore,
     searchConversations,
     loadConversation,
     deleteConversation,

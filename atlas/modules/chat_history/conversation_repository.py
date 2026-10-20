@@ -260,6 +260,51 @@ class ConversationRepository:
                 session.commit()
                 return conv
 
+    def _scoped_query(self, session: Session, user_email: str, tag_name: Optional[str]):
+        """The conversation query for one user, narrowed to a tag when asked.
+
+        The user scope is the same on every page of a listing, so a caller
+        that pages through the history never sees another account's rows
+        (issue #1085). A tag that does not exist yields no rows at all.
+        """
+        query = session.query(ConversationRecord).filter(
+            ConversationRecord.user_email == user_email
+        )
+        if not tag_name:
+            return query
+        tag = session.query(TagRecord).filter(
+            TagRecord.name == tag_name,
+            TagRecord.user_email == user_email,
+        ).first()
+        if not tag:
+            return None
+        conv_ids = [
+            r.conversation_id
+            for r in session.query(ConversationTagLink).filter(
+                ConversationTagLink.tag_id == tag.id
+            ).all()
+        ]
+        return query.filter(ConversationRecord.id.in_(conv_ids))
+
+    def count_conversations(
+        self,
+        user_email: str,
+        tag_name: Optional[str] = None,
+    ) -> int:
+        """How many conversations a listing can page through (issue #1085).
+
+        The count is scoped exactly like the listing it belongs to -- the
+        same user, and the same tag when one is given -- so a client can
+        tell "there is an older page" from "that is all of them" without
+        fetching the whole history.
+        """
+        user_email = normalize_user_email(user_email)
+        with self._get_session() as session:
+            query = self._scoped_query(session, user_email, tag_name)
+            if query is None:
+                return 0
+            return query.count()
+
     def list_conversations(
         self,
         user_email: str,
@@ -270,27 +315,16 @@ class ConversationRepository:
         """List conversations for a user, most recent first."""
         user_email = normalize_user_email(user_email)
         with self._get_session() as session:
-            query = session.query(ConversationRecord).filter(
-                ConversationRecord.user_email == user_email
+            query = self._scoped_query(session, user_email, tag_name)
+            if query is None:
+                return []
+
+            # The id breaks ties between conversations saved in the same
+            # instant, so the order is total and a page boundary cannot
+            # hand the same row out twice or skip one (issue #1085).
+            query = query.order_by(
+                desc(ConversationRecord.updated_at), desc(ConversationRecord.id)
             )
-
-            if tag_name:
-                tag = session.query(TagRecord).filter(
-                    TagRecord.name == tag_name,
-                    TagRecord.user_email == user_email,
-                ).first()
-                if tag:
-                    conv_ids = [
-                        r.conversation_id
-                        for r in session.query(ConversationTagLink).filter(
-                            ConversationTagLink.tag_id == tag.id
-                        ).all()
-                    ]
-                    query = query.filter(ConversationRecord.id.in_(conv_ids))
-                else:
-                    return []
-
-            query = query.order_by(desc(ConversationRecord.updated_at))
             conversations = query.offset(offset).limit(limit).all()
 
             metadata_by_id = {

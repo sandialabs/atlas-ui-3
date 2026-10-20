@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-10-04
+Last updated: 2026-10-20
 
 ## Overview
 
@@ -229,6 +229,35 @@ All endpoints are at `/api/conversations` and scoped to the authenticated user.
 
 When the feature is disabled, all endpoints return empty results gracefully.
 
+### Listing one page at a time
+
+`GET /api/conversations` returns a page of the caller's history, newest
+first, and says how much of it is left:
+
+```json
+{
+  "conversations": [ ... ],
+  "has_more": true,
+  "total": 342
+}
+```
+
+- `limit` (1-200, default 50) and `offset` (default 0) select the window.
+- `has_more` is true while older conversations remain beyond the window.
+- `total` counts the same set the page comes from -- the caller's own
+  conversations, narrowed to `tag` when one is given -- so a client can tell
+  "there is an older page" from "that is all of them" without fetching the
+  whole history.
+
+The page is served from the same query the first page uses, so the
+per-user scope and the tag filter apply to every page; a caller cannot page
+its way into another account's conversations. The order is
+`updated_at` descending with the id as a tiebreak, so a page boundary
+cannot hand the same row out twice or skip one.
+
+The sidebar walks back through the history with this (see
+[Browsing Older Saved Conversations](../user-guide/conversation-history/README.md)).
+
 ## Save Modes (Not Saved / Browser / Server)
 
 Each conversation has one of three persistence states, chosen from the
@@ -263,6 +292,9 @@ The sidebar shows:
 - **Conversation list** with title, preview, timestamp, message count, and tags
 - **Search bar** for filtering by title or content
 - **Tag filter** buttons for quick filtering
+- **Load more** at the bottom of the list, which appends the next page of
+  older conversations (see
+  [Browsing Older Saved Conversations](../user-guide/conversation-history/README.md))
 - **Delete All** button in the footer
 
 The **Header** groups conversation setup together, with security level first:

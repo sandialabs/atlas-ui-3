@@ -44,10 +44,25 @@ async def list_conversations(
     tag: Optional[str] = Query(default=None),
     current_user: str = Depends(get_current_user),
 ):
-    """List conversations for the authenticated user."""
+    """List conversations for the authenticated user, newest first.
+
+    The listing is a page of the user's history, not the whole history:
+    ``offset``/``limit`` select the window and the response says how much
+    of it is left, so a client can walk back through older conversations
+    (issue #1085) instead of fetching everything at once.
+
+    ``total`` counts the same set the page comes from -- the caller's own
+    conversations, narrowed to ``tag`` when one is given -- so the
+    visibility rules that scope the first page scope every page after it.
+    """
     repo = _get_repo()
     if repo is None:
-        return {"conversations": [], "error": "Chat history is not enabled"}
+        return {
+            "conversations": [],
+            "has_more": False,
+            "total": 0,
+            "error": "Chat history is not enabled",
+        }
 
     conversations = repo.list_conversations(
         user_email=current_user,
@@ -55,7 +70,12 @@ async def list_conversations(
         offset=offset,
         tag_name=tag,
     )
-    return {"conversations": conversations}
+    total = repo.count_conversations(user_email=current_user, tag_name=tag)
+    return {
+        "conversations": conversations,
+        "has_more": offset + len(conversations) < total,
+        "total": total,
+    }
 
 
 @router.get("/search")

@@ -114,6 +114,19 @@ export async function listConversations(userEmail, limit = 50, offset = 0) {
     .map(summaryFromRecord))
 }
 
+/**
+ * How many conversations `userEmail` has stored.
+ *
+ * The count is what tells the sidebar "there is an older page" from "that is
+ * all of them" (issue #1085), so it is scoped exactly like the listing: only
+ * the records this account owns, never another account's and never an
+ * unowned legacy record.
+ */
+export async function countConversations(userEmail) {
+  if (!userEmail) return 0
+  return withStore('readonly', async (store) => (await ownedRecords(store, userEmail)).length)
+}
+
 /** Get one of `userEmail`'s conversations with full messages; null if not theirs. */
 export async function getConversation(id, userEmail) {
   if (!userEmail) return null

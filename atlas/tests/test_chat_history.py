@@ -1317,3 +1317,130 @@ class TestConversationRoutes:
             resp = client.get("/api/conversations", headers={"X-User-Email": config_manager.app_settings.test_user})
             assert resp.status_code == 200
             assert resp.json()["conversations"] == []
+
+
+class TestConversationPagination:
+    """The history is served a page at a time (issue #1085).
+
+    The sidebar walks back through the older conversations, so the listing
+    has to say how much of the history is left, hand out the pages in a
+    stable order, and keep every page scoped to the account that asked for
+    it.
+    """
+
+    USER = "pager@test.com"
+
+    @pytest.fixture
+    def client(self, repo):
+        from unittest.mock import patch
+
+        from main import app
+        from starlette.testclient import TestClient
+
+        with patch("atlas.routes.conversation_routes._get_repo", return_value=repo):
+            yield TestClient(app)
+
+    def _save(self, repo, conversation_id, user=None, title=None):
+        repo.save_conversation(
+            conversation_id=conversation_id,
+            user_email=user or self.USER,
+            title=title or conversation_id,
+            model="gpt-4",
+            messages=_make_messages(1),
+        )
+
+    def _get(self, client, **params):
+        query = "&".join(f"{k}={v}" for k, v in params.items())
+        resp = client.get(
+            f"/api/conversations?{query}",
+            headers={"X-User-Email": self.USER},
+        )
+        assert resp.status_code == 200
+        return resp.json()
+
+    def test_listing_reports_the_total_and_whether_more_remain(self, client, repo):
+        for i in range(3):
+            self._save(repo, f"page-{i}")
+
+        body = self._get(client, limit=2, offset=0)
+        assert len(body["conversations"]) == 2
+        assert body["total"] == 3
+        assert body["has_more"] is True
+
+        body = self._get(client, limit=2, offset=2)
+        assert len(body["conversations"]) == 1
+        assert body["total"] == 3
+        assert body["has_more"] is False
+
+    def test_pages_walk_the_history_newest_first_without_repeating(self, client, repo):
+        import time
+
+        for i in range(5):
+            self._save(repo, f"walk-{i}")
+            # Distinct update times, so the order is the save order.
+            time.sleep(0.01)
+
+        first = self._get(client, limit=2, offset=0)
+        second = self._get(client, limit=2, offset=2)
+        third = self._get(client, limit=2, offset=4)
+
+        ids = [c["id"] for page in (first, second, third) for c in page["conversations"]]
+        assert len(ids) == 5
+        assert len(set(ids)) == 5
+        assert ids == ["walk-4", "walk-3", "walk-2", "walk-1", "walk-0"]
+
+    def test_every_page_is_scoped_to_the_caller(self, client, repo):
+        self._save(repo, "mine-1")
+        self._save(repo, "mine-2")
+        self._save(repo, "theirs-1", user="someone-else@test.com")
+
+        for offset in (0, 1, 2):
+            body = self._get(client, limit=1, offset=offset)
+            assert all(c["id"].startswith("mine-") for c in body["conversations"])
+            assert body["total"] == 2
+
+    def test_a_page_beyond_the_history_is_empty(self, client, repo):
+        self._save(repo, "only-one")
+
+        body = self._get(client, limit=10, offset=10)
+        assert body["conversations"] == []
+        assert body["has_more"] is False
+        assert body["total"] == 1
+
+    def test_the_total_follows_the_tag_filter(self, client, repo):
+        self._save(repo, "tagged")
+        self._save(repo, "untagged")
+        repo.add_tag("tagged", "important", self.USER)
+
+        body = self._get(client, limit=10, offset=0, tag="important")
+        assert [c["id"] for c in body["conversations"]] == ["tagged"]
+        assert body["total"] == 1
+        assert body["has_more"] is False
+
+    def test_the_total_of_an_unknown_tag_is_zero(self, client, repo):
+        self._save(repo, "some-conversation")
+
+        body = self._get(client, limit=10, offset=0, tag="no-such-tag")
+        assert body["conversations"] == []
+        assert body["total"] == 0
+        assert body["has_more"] is False
+
+    def test_count_conversations_scopes_to_the_owner(self, repo):
+        self._save(repo, "mine")
+        self._save(repo, "theirs", user="someone-else@test.com")
+
+        assert repo.count_conversations(self.USER) == 1
+        assert repo.count_conversations("someone-else@test.com") == 1
+
+    def test_a_deleted_conversation_shortens_the_history(self, client, repo):
+        for i in range(3):
+            self._save(repo, f"gone-{i}")
+
+        resp = client.delete(
+            "/api/conversations/gone-0", headers={"X-User-Email": self.USER}
+        )
+        assert resp.status_code == 200
+
+        body = self._get(client, limit=10, offset=0)
+        assert body["total"] == 2
+        assert "gone-0" not in [c["id"] for c in body["conversations"]]
