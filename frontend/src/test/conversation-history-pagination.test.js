@@ -153,4 +153,30 @@ describe('useConversationHistory paging', () => {
     expect(result.current.conversations.map(c => c.id)).toEqual(['hit'])
     expect(result.current.hasMore).toBe(false)
   })
+
+  it('drops a page that arrives after the listing was replaced', async () => {
+    let releaseSlowPage
+    const slowPage = new Promise((resolve) => { releaseSlowPage = resolve })
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('offset=1')) {
+        return slowPage.then(() => jsonResponse(page(['old'], 2)))
+      }
+      return Promise.resolve(jsonResponse(page(['a'], 2)))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useConversationHistory())
+    await act(async () => { await result.current.fetchConversations() })
+
+    // A page is on its way...
+    let pending
+    await act(async () => { pending = result.current.loadMore() })
+    // ...and the listing is replaced before it lands.
+    await act(async () => { await result.current.searchConversations('hit') })
+    releaseSlowPage()
+    await act(async () => { await pending })
+
+    // The page belonged to the previous listing, so it is not appended.
+    expect(result.current.conversations.map(c => c.id)).not.toContain('old')
+  })
 })

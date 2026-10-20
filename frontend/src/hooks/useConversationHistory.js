@@ -31,6 +31,10 @@ export function useConversationHistory() {
   // How many conversations the current listing holds in total, so the client
   // can tell "there is an older page" from "that is all of them".
   const totalRef = useRef(0)
+  // Which listing the requests belong to. A reset (a new tag, a cleared
+  // search) starts a new one, and a page that was still on its way for the
+  // previous one is dropped instead of being appended to the wrong list.
+  const generationRef = useRef(0)
   // Guards against a second "load more" while one is in flight.
   const loadingMoreRef = useRef(false)
 
@@ -56,6 +60,9 @@ export function useConversationHistory() {
 
   const fetchConversations = useCallback(async (options = {}) => {
     const { limit = CONVERSATION_PAGE_SIZE, offset = 0, tag = null } = options
+    // A new listing: anything still on its way for the previous one no
+    // longer belongs here.
+    const generation = ++generationRef.current
     setLoading(true)
     setLoadMoreError(null)
     try {
@@ -64,6 +71,7 @@ export function useConversationHistory() {
       const res = await fetch(`/api/conversations?${params}`)
       if (!res.ok) return
       const data = await res.json()
+      if (generationRef.current !== generation) return
       applyList(data.conversations || [], data.total)
     } catch (e) {
       console.error('Failed to fetch conversations:', e)
@@ -77,12 +85,14 @@ export function useConversationHistory() {
   // not send the user back to the top of the history.
   const refreshConversations = useCallback(async (options = {}) => {
     const { limit = CONVERSATION_PAGE_SIZE, tag = null } = options
+    const generation = generationRef.current
     try {
       const params = new URLSearchParams({ limit: String(limit), offset: '0' })
       if (tag) params.set('tag', tag)
       const res = await fetch(`/api/conversations?${params}`)
       if (!res.ok) return
       const data = await res.json()
+      if (generationRef.current !== generation) return
       const fresh = data.conversations || []
       applyList(mergeFreshFirst(fresh, conversationsRef.current), data.total)
     } catch (e) {
@@ -96,6 +106,7 @@ export function useConversationHistory() {
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current) return
     loadingMoreRef.current = true
+    const generation = generationRef.current
     setLoadingMore(true)
     setLoadMoreError(null)
     try {
@@ -107,6 +118,7 @@ export function useConversationHistory() {
       const res = await fetch(`/api/conversations?${params}`)
       if (!res.ok) throw new Error(`Failed to load older conversations (${res.status})`)
       const data = await res.json()
+      if (generationRef.current !== generation) return
       applyList(
         appendUnique(conversationsRef.current, data.conversations || []),
         data.total
@@ -128,6 +140,9 @@ export function useConversationHistory() {
     }
     setSearchQuery(query)
     setLoading(true)
+    // A search is its own listing: a page still on its way for the previous
+    // one must not be appended to the results.
+    const generation = ++generationRef.current
     if (abortRef.current) abortRef.current.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -136,6 +151,7 @@ export function useConversationHistory() {
       const res = await fetch(`/api/conversations/search?${params}`, { signal: controller.signal })
       if (!res.ok) return
       const data = await res.json()
+      if (generationRef.current !== generation) return
       // Search results are their own list: there is nothing older to page
       // through, so the paging state is reset with them.
       applyList(data.conversations || [], (data.conversations || []).length)

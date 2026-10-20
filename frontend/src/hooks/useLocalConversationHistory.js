@@ -45,10 +45,15 @@ export function useLocalConversationHistory(user) {
   const conversationsRef = useRef([])
   const offsetRef = useRef(0)
   const totalRef = useRef(0)
+  // Which listing the requests belong to. A reset (a cleared search, a new
+  // account) starts a new one, and a page that was still on its way for the
+  // previous one is dropped instead of being appended to the wrong list.
+  const generationRef = useRef(0)
   const loadingMoreRef = useRef(false)
 
   // A different account signed in: drop the previous one's list.
   useEffect(() => {
+    generationRef.current += 1
     setConversations([])
     conversationsRef.current = []
     offsetRef.current = 0
@@ -87,11 +92,15 @@ export function useLocalConversationHistory(user) {
 
   const fetchConversations = useCallback(async () => {
     const requestedOwner = owner
+    // A new listing: a page still on its way for the previous one no longer
+    // belongs here.
+    const generation = ++generationRef.current
     setLoading(true)
     setLoadMoreError(null)
     try {
       const list = await db.listConversations(requestedOwner, CONVERSATION_PAGE_SIZE, 0)
       if (ownerRef.current !== requestedOwner) return
+      if (generationRef.current !== generation) return
       applyList(list, await countOwned(requestedOwner))
     } catch (e) {
       console.error('Failed to fetch local conversations:', e)
@@ -103,9 +112,11 @@ export function useLocalConversationHistory(user) {
   // Re-read the newest page and keep the older rows already loaded.
   const refreshConversations = useCallback(async () => {
     const requestedOwner = owner
+    const generation = generationRef.current
     try {
       const list = await db.listConversations(requestedOwner, CONVERSATION_PAGE_SIZE, 0)
       if (ownerRef.current !== requestedOwner) return
+      if (generationRef.current !== generation) return
       applyList(mergeFreshFirst(list, conversationsRef.current), await countOwned(requestedOwner))
     } catch (e) {
       console.error('Failed to refresh local conversations:', e)
@@ -116,6 +127,7 @@ export function useLocalConversationHistory(user) {
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current) return
     const requestedOwner = owner
+    const generation = generationRef.current
     loadingMoreRef.current = true
     setLoadingMore(true)
     setLoadMoreError(null)
@@ -126,6 +138,7 @@ export function useLocalConversationHistory(user) {
         offsetRef.current
       )
       if (ownerRef.current !== requestedOwner) return
+      if (generationRef.current !== generation) return
       applyList(
         appendUnique(conversationsRef.current, page),
         await countOwned(requestedOwner)
@@ -145,11 +158,15 @@ export function useLocalConversationHistory(user) {
       return fetchConversations()
     }
     const requestedOwner = owner
+    // A search is its own listing: a page still on its way for the previous
+    // one must not be appended to the results.
+    const generation = ++generationRef.current
     setSearchQuery(query)
     setLoading(true)
     try {
       const results = await db.searchConversations(requestedOwner, query.trim(), 20)
       if (ownerRef.current !== requestedOwner) return
+      if (generationRef.current !== generation) return
       // Search results are their own list: there is nothing older to page
       // through, so the paging state is reset with them.
       applyList(results, results.length)
