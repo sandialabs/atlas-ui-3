@@ -1,6 +1,6 @@
 # Compliance and Data Security
 
-Last updated: 2026-10-09
+Last updated: 2026-10-20
 
 The compliance system is designed to prevent the unintentional mixing of data from different security environments. This is essential for organizations that handle sensitive information.
 
@@ -113,7 +113,7 @@ The script only touches conversations with no record and never rewrites one.
 
 ## Enabling the Compliance Selector
 
-Set `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`. The header then shows a compliance level selector, labelled **Security level** (in the overflow menu on narrow screens), listing every defined level, plus "All Levels" for no filter.
+Set `FEATURE_COMPLIANCE_LEVELS_ENABLED=true`. The header then shows a compliance level selector, labelled **Security level**, listing every defined level, plus "All Levels" for no filter. The selector stays in the header as long as the header has room for it, in a compact form on narrow screens; only on the narrowest headers does it move into the overflow menu, where it remains available.
 
 The UI uses "security level" in its own messages (model picker, data sources, conversation refusals) to match that label; its help popover explains that the security level is the deployment's compliance level. Messages that come from the server, and the API's `compliance_level` field, keep the "compliance level" name.
 
