@@ -166,7 +166,14 @@ try {
   await page.keyboard.press('Escape')
   await helpDialog.waitFor({ state: 'detached', timeout: 5000 })
   check(await helpButton.evaluate(el => el === document.activeElement), 'focus returns to the help button')
-  pass('Help popover opens, explains Agent Mode, closes on Escape, and returns focus')
+  // Keyboard path through the Close button returns focus too.
+  await helpButton.press('Enter')
+  await helpDialog.waitFor()
+  await helpDialog.getByRole('button', { name: 'Close' }).focus()
+  await page.keyboard.press('Enter')
+  await helpDialog.waitFor({ state: 'detached', timeout: 5000 })
+  check(await helpButton.evaluate(el => el === document.activeElement), 'Close returns focus to the help button')
+  pass('Help popover opens, explains Agent Mode, closes on Escape or Close, and returns focus')
 
   // 3. Short phone viewport keeps the composer reachable.
   await page.setViewportSize({ width: 390, height: 600 })

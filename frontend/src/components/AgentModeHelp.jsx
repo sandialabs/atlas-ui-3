@@ -33,10 +33,15 @@ export function AgentModeHelpButton({ quiet = false, toolsEnabled = true }) {
   const panelId = useId()
   const buttonRef = useRef(null)
 
-  useEscapeKey(open, () => {
+  // Every dismissal (Escape, Close, clicking outside) hands focus back to the
+  // trigger; otherwise closing from inside the dialog unmounts the focused
+  // element and drops keyboard users onto <body>.
+  const close = () => {
     setOpen(false)
     buttonRef.current?.focus()
-  })
+  }
+
+  useEscapeKey(open, close)
 
   if (quiet) return null
 
@@ -56,7 +61,7 @@ export function AgentModeHelpButton({ quiet = false, toolsEnabled = true }) {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="fixed inset-0 z-40" onClick={close} aria-hidden="true" />
           <div
             id={panelId}
             role="dialog"
@@ -83,7 +88,7 @@ export function AgentModeHelpButton({ quiet = false, toolsEnabled = true }) {
               )}
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={close}
                 className="px-2.5 py-1.5 rounded-md text-gray-300 hover:text-gray-100 hover:bg-gray-700 text-xs transition-colors"
               >
                 Close

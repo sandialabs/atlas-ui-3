@@ -35,6 +35,30 @@ describe('AgentModeHelpButton', () => {
     expect(dialog).toHaveTextContent(/model that supports tool calling/i)
   })
 
+  it('returns focus to the help button when closed from inside the dialog', () => {
+    render(<AgentModeHelpButton />)
+    const trigger = screen.getByRole('button', { name: 'What Agent Mode does' })
+
+    fireEvent.click(trigger)
+    const close = screen.getByRole('button', { name: 'Close' })
+    close.focus()
+    fireEvent.click(close)
+
+    expect(screen.queryByRole('dialog', { name: 'What Agent Mode does' })).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('returns focus to the help button on Escape', () => {
+    render(<AgentModeHelpButton />)
+    const trigger = screen.getByRole('button', { name: 'What Agent Mode does' })
+
+    fireEvent.click(trigger)
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog', { name: 'What Agent Mode does' })).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
   it('does not offer the tools picker when tools are disabled', () => {
     render(<AgentModeHelpButton toolsEnabled={false} />)
 
