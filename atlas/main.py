@@ -865,7 +865,7 @@ async def _resume_connection_session(chat_service, requested, user_email):
         return None
     session.active = True
     session.connection_owner = chat_service.connection_id
-    if not await chat_service.persist_session(session):
+    if not await chat_service.persist_session(session, adopt=True):
         return None
     chat_service.restore_connection_state(session)
     logger.info(

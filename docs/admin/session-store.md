@@ -92,8 +92,10 @@ to one session are serialized, so a process never conflicts with itself.
 
 Inside a process the chat pipeline mutates the session object it was handed.
 The repository returns the same object for sessions that are live on that
-replica (created or last written there and still active) and reads other
-sessions from Redis. `ChatService` passes its session object to the
+replica (created there, or resumed there by a reconnecting client, and still
+active) and reads other sessions from Redis. Writing a copy of a session that
+is live elsewhere does not make it live locally, so a replica does not
+accumulate other replicas' sessions. `ChatService` passes its session object to the
 orchestrator explicitly, so a turn never depends on two lookups returning the
 same object.
 

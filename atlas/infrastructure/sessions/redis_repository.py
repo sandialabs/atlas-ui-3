@@ -10,8 +10,10 @@ The chat pipeline mutates the ``Session`` object it is handed and expects the
 next ``get`` *in the same process* to return that same object. A repository
 that deserialized a fresh copy on every ``get`` would hide those mutations.
 This repository therefore keeps the sessions that are live on this replica
-(created or written here and still active) in a local map and returns them by
-reference; everything else is read from Redis.
+(created here, or adopted by a connection that resumed them here, and still
+active) in a local map and returns them by reference; everything else is read
+from Redis. Writing a copy of a session that is live elsewhere does not make
+it live here, so a replica never accumulates other replicas' sessions.
 
 Writes are optimistic: the copy carries the ``store_version`` it was read at,
 and ``update`` refuses the write (``SessionConflictError``) when Redis already
@@ -68,11 +70,11 @@ class RedisSessionRepository:
             lock = self._locks[session_id] = asyncio.Lock()
         return lock
 
-    def _keep_or_evict(self, session: Session) -> None:
-        if session.active:
-            self._live[session.id] = session
-        else:
+    def _after_write(self, session: Session, adopt: bool) -> None:
+        if not session.active:
             self._evict(session.id)
+        elif adopt or session.id in self._live:
+            self._live[session.id] = session
 
     def _evict(self, session_id: UUID) -> None:
         self._live.pop(session_id, None)
@@ -140,7 +142,7 @@ class RedisSessionRepository:
             except RedisError as exc:
                 raise self._unavailable("create", session.id, exc) from exc
             session.store_version = int(version)
-            self._keep_or_evict(session)
+            self._after_write(session, adopt=True)
         logger.info(
             "Created session %s for user %s",
             sanitize_for_logging(str(session.id)),
@@ -150,6 +152,18 @@ class RedisSessionRepository:
 
     async def update(self, session: Session) -> Session:
         """Write ``session`` if no newer version has been stored since it was read."""
+        return await self._write(session, adopt=False)
+
+    async def adopt(self, session: Session) -> Session:
+        """Write ``session`` like ``update`` and make it live on this replica.
+
+        Used when a connection here takes over a session that was read from
+        the store (a reconnect resuming it): from then on this replica's
+        pipeline mutates it, so later lookups must return this object.
+        """
+        return await self._write(session, adopt=True)
+
+    async def _write(self, session: Session, adopt: bool) -> Session:
         from redis.exceptions import RedisError, WatchError
 
         key = self._key(session.id)
@@ -185,7 +199,7 @@ class RedisSessionRepository:
             except RedisError as exc:
                 raise self._unavailable("update", session.id, exc) from exc
             session.store_version = new_version
-            self._keep_or_evict(session)
+            self._after_write(session, adopt)
         return session
 
     def _conflict(self, session: Session, stored: Optional[int]) -> SessionConflictError:

@@ -994,8 +994,12 @@ class ChatService:
         # session store only a cache of the live state.
         await self.persist_session(session)
 
-    async def persist_session(self, session: Session) -> bool:
+    async def persist_session(self, session: Session, adopt: bool = False) -> bool:
         """Write ``session`` to the session store; never raises.
+
+        ``adopt`` marks a session this connection is taking over (a resumed
+        session): a shared store then serves this object to later lookups in
+        this process. Stores without that notion just update it.
 
         The process-local store makes this a no-op in effect. A shared store
         can refuse the write because another connection resumed the session
@@ -1005,7 +1009,11 @@ class ChatService:
         and counted in ``/api/health``; this returns False so callers can tell.
         """
         try:
-            await self.session_repository.update(session)
+            adopt_fn = getattr(self.session_repository, "adopt", None) if adopt else None
+            if callable(adopt_fn):
+                await adopt_fn(session)
+            else:
+                await self.session_repository.update(session)
             return True
         except asyncio.CancelledError:
             raise

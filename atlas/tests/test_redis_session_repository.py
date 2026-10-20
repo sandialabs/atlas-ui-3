@@ -269,3 +269,20 @@ def test_factory_requires_redis_for_redis_type():
 def test_factory_still_rejects_unknown_types():
     with pytest.raises(ValueError, match="Unknown SESSION_REPOSITORY_TYPE"):
         create_session_repository("dynamo")
+
+
+@pytest.mark.asyncio
+async def test_writing_another_replicas_session_does_not_make_it_live_here(server):
+    _, repo_a = _replica(server)
+    _, repo_b = _replica(server)
+    session = await repo_a.create(_session())
+
+    copy = await repo_b.get(session.id)
+    copy.context["merged"] = True
+    await repo_b.update(copy)
+    assert not repo_b.is_live_here(session.id)
+
+    adopted = await repo_b.get(session.id)
+    await repo_b.adopt(adopted)
+    assert repo_b.is_live_here(session.id)
+    assert await repo_b.get(session.id) is adopted
