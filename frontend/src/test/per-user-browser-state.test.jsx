@@ -403,4 +403,58 @@ describe('useLocalConversationHistory across accounts', () => {
     await act(async () => { resolveAlice(); await pending })
     expect(result.current.conversations).toEqual([])
   })
+
+  it('drops a list whose count finishes after the account changed', async () => {
+    // The list itself arrives, but the count that follows it is still
+    // running when another account signs in.
+    vi.spyOn(db, 'listConversations').mockImplementation((owner) => (
+      owner === ALICE
+        ? Promise.resolve([{ id: 'a1', title: 'Alice chat' }])
+        : Promise.resolve([])
+    ))
+    let countStarted = false
+    let resolveCount
+    vi.spyOn(db, 'countConversations').mockImplementation((owner) => {
+      countStarted = true
+      expect(owner).toBe(ALICE)
+      return new Promise(resolve => { resolveCount = () => resolve(1) })
+    })
+
+    const { result, rerender } = renderHook(
+      ({ u }) => useLocalConversationHistory(u),
+      { initialProps: { u: ALICE } },
+    )
+    let pending
+    act(() => { pending = result.current.fetchConversations() })
+    // The list has arrived and the count is under way.
+    await act(async () => { while (!countStarted) await Promise.resolve() })
+    // Another account signs in before the count comes back.
+    rerender({ u: BOB })
+    await act(async () => { resolveCount(); await pending })
+    expect(result.current.conversations).toEqual([])
+  })
+
+  it('stops offering a page when the count cannot be read', async () => {
+    // The count is unavailable, so the page that comes back decides whether
+    // there is more behind it.
+    vi.spyOn(db, 'listConversations').mockImplementation((owner, limit, offset) => (
+      owner === ALICE
+        ? Promise.resolve(
+            offset === 0
+              ? Array.from({ length: 50 }, (_, i) => ({ id: `a${i}`, title: `Alice ${i}` }))
+              : [{ id: 'a50', title: 'Alice 50' }]
+          )
+        : Promise.resolve([])
+    ))
+    vi.spyOn(db, 'countConversations').mockRejectedValue(new Error('no count'))
+
+    const { result } = renderHook(() => useLocalConversationHistory(ALICE))
+    await act(async () => { await result.current.fetchConversations() })
+    // A full page: there may be more behind it.
+    expect(result.current.hasMore).toBe(true)
+
+    await act(async () => { await result.current.loadMore() })
+    // A short page: the stored history ends here.
+    expect(result.current.hasMore).toBe(false)
+  })
 })

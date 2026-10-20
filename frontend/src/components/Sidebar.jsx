@@ -4,6 +4,7 @@ import { useConversationHistory } from '../hooks/useConversationHistory'
 import { useLocalConversationHistory } from '../hooks/useLocalConversationHistory'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { ConversationTreeRow } from './ConversationTreeRow'
+import ConversationLoadMore from './ConversationLoadMore'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
 import { applyRunEndRefresh } from '../utils/runEndRefresh'
 import { classificationLabel, classificationRefusal } from '../utils/conversationClassification'
@@ -79,6 +80,9 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [isResizing, setIsResizing] = useState(false)
+  // The text in the search box. It is kept here so a tag filter can clear
+  // it: the search on screen does not describe the tagged list.
+  const [searchText, setSearchText] = useState('')
   const searchTimerRef = useRef(null)
   const prevMessageCountRef = useRef(0)
   const refreshTimerRef = useRef(null)
@@ -110,12 +114,12 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     if (currentCount > prevCount && currentCount > 0) {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = setTimeout(() => {
-        history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+        history.refreshConversations(history.activeTag ? { tag: history.activeTag } : {})
       }, 1500)
     }
 
     if (currentCount === 0 && prevCount > 0) {
-      history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+      history.refreshConversations(history.activeTag ? { tag: history.activeTag } : {})
     }
 
     return () => {
@@ -135,7 +139,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     prevBackgroundSavesRef.current = backgroundSaves
     if (!chatHistoryEnabled || saveMode === 'none') return
     if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
-    history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+    history.refreshConversations(history.activeTag ? { tag: history.activeTag } : {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backgroundSaves, chatHistoryEnabled, saveMode])
 
@@ -157,7 +161,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       if (runRefreshTimerRef.current) clearTimeout(runRefreshTimerRef.current)
       runRefreshTimerRef.current = setTimeout(() => {
         runRefreshTimerRef.current = null
-        history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+        history.refreshConversations(history.activeTag ? { tag: history.activeTag } : {})
       }, 2500)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,7 +198,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
     if (!prevId && activeConversationId && chatHistoryEnabled && saveMode !== 'none') {
       // Cancel any pending delayed refresh since we're fetching now
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
-      history.fetchConversations(history.activeTag ? { tag: history.activeTag } : {})
+      history.refreshConversations(history.activeTag ? { tag: history.activeTag } : {})
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConversationId, chatHistoryEnabled])
@@ -252,10 +256,23 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
   // --- Handlers ---
   const handleSearch = useCallback((e) => {
     const query = e.target.value
+    setSearchText(query)
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
     searchTimerRef.current = setTimeout(() => {
       history.searchConversations(query)
     }, 300)
+  }, [history])
+
+  // A tag is a different listing: the search on screen no longer describes
+  // it. The text in the search box and the request it has not made yet go
+  // with it, so the list is not replaced by a search for the old text.
+  const handleFilterByTag = useCallback((tagName) => {
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current)
+      searchTimerRef.current = null
+    }
+    setSearchText('')
+    history.filterByTag(tagName)
   }, [history])
 
   // Every click on a row is the user's latest intent, and so is New Chat.
@@ -316,6 +333,13 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
       prev.includes(conv.id) ? prev.filter(id => id !== conv.id) : [...prev, conv.id]
     ))
   }, [setCollapsedConversationIds])
+
+  // Walk back through older conversations (issue #1085). The rows already on
+  // screen keep their place -- the next page is appended below them -- so
+  // the scroll position and the open conversation are both untouched.
+  const handleLoadMore = useCallback(() => {
+    history.loadMore()
+  }, [history])
 
   // The same rule the click applies, so a row that would be refused always
   // looks it -- with levels disabled too (a classified row cannot continue).
@@ -460,6 +484,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
             <input
               type="text"
               placeholder="Search conversations..."
+              value={searchText}
               onChange={handleSearch}
               className="w-full px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
             />
@@ -469,7 +494,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
           {history.tags.length > 0 && (
             <div className="px-3 py-2 border-b border-gray-700 flex flex-wrap gap-1 flex-shrink-0">
               <button
-                onClick={() => history.filterByTag(null)}
+                onClick={() => handleFilterByTag(null)}
                 className={`text-xs px-2 py-0.5 rounded ${!history.activeTag ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
               >
                 All
@@ -477,7 +502,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
               {history.tags.map(tag => (
                 <button
                   key={tag.id}
-                  onClick={() => history.filterByTag(tag.name)}
+                  onClick={() => handleFilterByTag(tag.name)}
                   className={`text-xs px-2 py-0.5 rounded ${history.activeTag === tag.name ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
                 >
                   {tag.name} ({tag.conversation_count})
@@ -495,35 +520,48 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                 {history.searchQuery ? 'No matching conversations' : 'No saved conversations'}
               </div>
             ) : (
-              <div className="py-1" role="list" aria-label="Conversations">
-                {visibleConversations.map(conv => {
-                  const isGroupCollapsed = collapsedConversationSet.has(conv.id)
-                  const ownRun = (runsByConversation || {})[conv.id]
-                  // A collapsed parent summarizes its subtree, so a child that
-                  // needs approval or failed is not invisible. Expanded rows
-                  // show their own run only; the children are on screen.
-                  const shownRun = conv._hasChildren && isGroupCollapsed
-                    ? (conv._aggregateRun || ownRun)
-                    : ownRun
-                  const refusal = rowRefusal(conv)
-                  return (
-                    <ConversationTreeRow
-                      key={conv.id}
-                      conv={conv}
-                      isActive={activeConversationId === conv.id}
-                      isGroupCollapsed={isGroupCollapsed}
-                      shownRun={shownRun}
-                      refusal={refusal}
-                      classification={classificationLabel(conv)}
-                      showClassification={!!(complianceEnabled || refusal)}
-                      formatDate={formatDate}
-                      onOpen={() => handleLoadConversation(conv)}
-                      onContextMenu={(e) => handleContextMenu(e, conv)}
-                      onToggleCollapsed={(e) => handleToggleCollapsed(e, conv)}
-                    />
-                  )
-                })}
-              </div>
+              <>
+                <div className="py-1" role="list" aria-label="Conversations">
+                  {visibleConversations.map(conv => {
+                    const isGroupCollapsed = collapsedConversationSet.has(conv.id)
+                    const ownRun = (runsByConversation || {})[conv.id]
+                    // A collapsed parent summarizes its subtree, so a child that
+                    // needs approval or failed is not invisible. Expanded rows
+                    // show their own run only; the children are on screen.
+                    const shownRun = conv._hasChildren && isGroupCollapsed
+                      ? (conv._aggregateRun || ownRun)
+                      : ownRun
+                    const refusal = rowRefusal(conv)
+                    return (
+                      <ConversationTreeRow
+                        key={conv.id}
+                        conv={conv}
+                        isActive={activeConversationId === conv.id}
+                        isGroupCollapsed={isGroupCollapsed}
+                        shownRun={shownRun}
+                        refusal={refusal}
+                        classification={classificationLabel(conv)}
+                        showClassification={!!(complianceEnabled || refusal)}
+                        formatDate={formatDate}
+                        onOpen={() => handleLoadConversation(conv)}
+                        onContextMenu={(e) => handleContextMenu(e, conv)}
+                        onToggleCollapsed={(e) => handleToggleCollapsed(e, conv)}
+                      />
+                    )
+                  })}
+                </div>
+                {/* Older conversations (issue #1085): a control at the bottom of
+                    the list that fetches the next page and appends it. A search
+                    is its own list, so it has no page to walk back to. */}
+                {!history.searchQuery && (
+                  <ConversationLoadMore
+                    hasMore={history.hasMore}
+                    loading={history.loadingMore}
+                    error={history.loadMoreError}
+                    onLoadMore={handleLoadMore}
+                  />
+                )}
+              </>
             )}
           </div>
 
