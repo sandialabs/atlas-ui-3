@@ -52,6 +52,16 @@ services:
       dockerfile: Dockerfile
     environment:
       - CHAT_HISTORY_DB_URL=postgresql://atlas:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or .env}@postgres:5432/atlas_chat_history
+      # Connection pool (issue #1091). The base file lists atlas-ui's
+      # environment explicitly, so .env values reach the container only
+      # through these passthroughs; the fallbacks are the built-in defaults.
+      - CHAT_HISTORY_DB_POOL_SIZE=${CHAT_HISTORY_DB_POOL_SIZE:-5}
+      - CHAT_HISTORY_DB_MAX_OVERFLOW=${CHAT_HISTORY_DB_MAX_OVERFLOW:-10}
+      - CHAT_HISTORY_DB_POOL_TIMEOUT=${CHAT_HISTORY_DB_POOL_TIMEOUT:-30}
+      - CHAT_HISTORY_DB_POOL_RECYCLE=${CHAT_HISTORY_DB_POOL_RECYCLE:-1800}
+      - CHAT_HISTORY_DB_POOL_PRE_PING=${CHAT_HISTORY_DB_POOL_PRE_PING:-true}
+      - CHAT_HISTORY_DB_CONNECT_TIMEOUT=${CHAT_HISTORY_DB_CONNECT_TIMEOUT:-10}
+      - CHAT_HISTORY_DB_DISABLE_POOLING=${CHAT_HISTORY_DB_DISABLE_POOLING:-false}
 
 networks:
   atlas-network:

@@ -36,7 +36,7 @@ from atlas.core.compliance import get_compliance_manager  # noqa: E402
 from atlas.core.user_identity import normalize_user_email  # noqa: E402
 from atlas.domain.conversation_classification import CLASSIFICATION_METADATA_KEY  # noqa: E402
 from atlas.modules.chat_history.conversation_repository import ConversationRepository  # noqa: E402
-from atlas.modules.chat_history.database import get_session_factory, init_database  # noqa: E402
+from atlas.modules.chat_history.database import PoolSettings, get_session_factory, init_database  # noqa: E402
 from atlas.modules.chat_history.models import ConversationRecord  # noqa: E402
 
 
@@ -85,11 +85,16 @@ def main(argv=None) -> int:
             return 2
 
     db_url = args.db_url
+    pool = None
     if not db_url:
         from atlas.modules.config import config_manager
 
-        db_url = config_manager.app_settings.chat_history_db_url
-    init_database(db_url)
+        # Use the operator's pool settings too (e.g. NullPool behind PgBouncer).
+        # An explicit --db-url keeps the script independent of the app config.
+        app_settings = config_manager.app_settings
+        db_url = app_settings.chat_history_db_url
+        pool = PoolSettings.from_app_settings(app_settings)
+    init_database(db_url, pool)
     factory = get_session_factory()
 
     if args.dry_run:
