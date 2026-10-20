@@ -151,6 +151,19 @@ describe('ToolSelector in the chat bar', () => {
     expect(screen.getByRole('searchbox', { name: 'Search tools' })).not.toHaveFocus()
   })
 
+  it('does not carry a touch open over to a later synthetic-click open', () => {
+    render(<ToolSelector />)
+    const trigger = screen.getByRole('button', { name: /1 tool/ })
+    const down = createEvent.pointerDown(trigger)
+    Object.defineProperty(down, 'pointerType', { value: 'touch' })
+    fireEvent(trigger, down)
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    // A screen reader's click action: no pointerdown, no keydown.
+    fireEvent.click(trigger)
+    expect(screen.getByRole('searchbox', { name: 'Search tools' })).toHaveFocus()
+  })
+
   it('still focuses the search box when opened with a mouse', () => {
     render(<ToolSelector />)
     const trigger = screen.getByRole('button', { name: /1 tool/ })

@@ -57,8 +57,12 @@ const ToolSelector = () => {
   // Not on a touch or pen open: focusing a text field raises the on-screen
   // keyboard, which covers most of the popover's rows.
   const skipSearchFocusRef = useRef(false)
+  // The flag is consumed on read, so a later open with no pointerdown (a
+  // screen reader's synthetic click) is not stuck with a stale touch value.
   useEffect(() => {
-    if (isOpen && !skipSearchFocusRef.current) searchRef.current?.focus()
+    const skip = skipSearchFocusRef.current
+    skipSearchFocusRef.current = false
+    if (isOpen && !skip) searchRef.current?.focus()
   }, [isOpen])
 
   // Escape closes the menu and puts focus back on the button that opened it,
