@@ -21,25 +21,39 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
 
+_SECRET_QUERY_KEYS = frozenset({"password", "username", "ssl_password"})
+
+
 def redact_redis_url(url: str) -> str:
-    """Return ``url`` with any password removed, for logs and health output."""
+    """Return ``url`` with credentials masked, for logs and health output.
+
+    Covers the password in the authority (``redis://user:pw@host``) and the
+    query-string forms redis-py also accepts (``?password=...``).
+    """
     try:
         parts = urlsplit(url)
     except ValueError:
         return "<unparseable REDIS_URL>"
-    if parts.password is None:
-        return url
-    host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    user = parts.username or ""
-    netloc = f"{user}:***@{host}" if user else f":***@{host}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    netloc = parts.netloc
+    if parts.password is not None:
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        user = parts.username or ""
+        netloc = f"{user}:***@{host}" if user else f":***@{host}"
+    query = parts.query
+    if query:
+        pairs = parse_qsl(query, keep_blank_values=True)
+        query = urlencode(
+            [(k, "***" if k.lower() in _SECRET_QUERY_KEYS else v) for k, v in pairs],
+            safe="*",
+        )
+    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
 
 
 @dataclass(frozen=True)

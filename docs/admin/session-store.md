@@ -76,11 +76,12 @@ Only serializable session data is written: identity and owner, history,
 and JSON-shaped context entries. Process-local runtime handles (a turn's
 citation register, task or channel objects) are left out; any context entry
 that cannot be expressed as JSON is dropped from the stored copy with a
-warning naming the key. **Incognito sessions are stored without their
-messages**: incognito promises the conversation is not stored, so only its
-context (the incognito flag, save floor and bindings) is written, and a
-resumed incognito session continues with an empty history, as a reconnect
-always did.
+warning naming the key. **Messages sent while incognito are never
+stored**: incognito promises the conversation is not stored. While a session
+is incognito only its context (the incognito flag and bindings) is written,
+and a resumed incognito session continues with an empty history, as a
+reconnect always did. After the user opts back in, only the messages after
+the incognito prefix are written.
 
 ### Concurrent updates
 
@@ -164,13 +165,17 @@ newer state.
 
 ### Observability
 
-`GET /api/health` includes a `session_store` block when the shared store is
-configured: reachability, latency, the masked URL, pool size, command error
-count and last error type, `session_conflicts`, `session_expired_while_live`,
-`session_decode_errors`, and the number of sessions live on that replica. An
-unreachable store reports `"status": "degraded"` with HTTP 200, so a load
+`GET /api/health` is unauthenticated, so with the shared store configured it
+adds only a `session_store` block with `backend`, `status` and `latency_ms`.
+An unreachable store reports `"status": "degraded"` with HTTP 200, so a load
 balancer does not pull every replica during a Redis outage; alert on the
 field instead.
+
+`GET /admin/session-store` (admin group) returns the detail for the replica
+that answers: the masked URL, key prefix, pool size, command error count and
+last error type, `session_conflicts`, `session_expired_while_live`,
+`session_decode_errors`, and the number of sessions live on that replica.
+Store errors and refused writes are also logged (ERROR and WARNING).
 
 ### Kubernetes notes
 
@@ -211,8 +216,18 @@ A further implementation registers in
 satisfy the `SessionRepository` protocol in `atlas.interfaces.sessions`
 (`get`, `create`, `update`, `delete`, `exists`). An unknown type fails at
 startup rather than falling back to the in-memory store. A shared store must
-handle `update` of a stale copy (refuse it or merge it) and must not return
-process-local objects from another process.
+handle `update` of a stale copy (refuse it or merge it), refuse `create` over
+a record another connection owns, and must not return process-local objects
+from another process.
+
+Three optional methods are used when present, and a store that resumes
+sessions across processes should provide them:
+
+- `adopt(session)`: write a resumed session and serve that object to later
+  lookups in this process (without it, resume falls back to `update`).
+- `discard_local(session_id)`: forget a local working copy when the final
+  write failed.
+- `stats()`: extra fields for `/admin/session-store`.
 
 ## Related
 

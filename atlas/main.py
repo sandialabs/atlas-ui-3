@@ -1019,7 +1019,11 @@ async def _seed_run_session_files(
         run_session = await chat_service.session_repository.get(run_session_id)
         if run_session is None:
             run_session = await chat_service.create_session(run_session_id, user_email)
-        run_session.context[_RUN_SESSION_MARKER] = True
+        if not run_session.context.get(_RUN_SESSION_MARKER):
+            run_session.context[_RUN_SESSION_MARKER] = True
+            # Stored now, not at the run's first commit, so no connection can
+            # resume the run's session in the meantime.
+            await _persist_session(chat_service, run_session)
         if files:
             run_session.context.setdefault("files", {}).update({
                 name: (
@@ -1112,7 +1116,13 @@ async def cleanup_disconnected_session(
 
     # Release MCP sessions for this conversation, unless a surviving run still
     # owns that conversation.
-    session = await chat_service.session_repository.get(session_id)
+    try:
+        session = await chat_service.session_repository.get(session_id)
+    except SessionStoreUnavailableError:
+        # Redis is down and this replica holds no copy: there is nothing to
+        # release by conversation, but the session's per-connection state
+        # must still be torn down below.
+        session = None
     if session is not None and _superseded_connection(chat_service, session):
         # The client reconnected and resumed this session on a new connection
         # (issue #1091). Its MCP sessions and the session itself now belong to

@@ -15,7 +15,7 @@ context entry that does not survive a JSON round trip is dropped with a
 warning naming the key, so a new runtime handle never breaks a write and the
 omission is visible in the log.
 
-Incognito sessions are stored without their messages (see ``encode_session``).
+Messages sent while incognito are never stored (see ``encode_session``).
 """
 
 import json
@@ -27,7 +27,7 @@ from uuid import UUID
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.messages.models import ConversationHistory, Message
-from atlas.domain.sessions.models import Session
+from atlas.domain.sessions.models import SAVE_FLOOR_CONTEXT_KEY, Session
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,16 @@ PAYLOAD_FORMAT = 1
 
 # Context entries that are per-process by construction and never stored.
 PROCESS_LOCAL_CONTEXT_KEYS = frozenset({"citation_register"})
+
+SAVE_FLOOR_KEY = SAVE_FLOOR_CONTEXT_KEY
+
+
+def _save_floor(session: Session) -> int:
+    floor = session.context.get(SAVE_FLOOR_KEY)
+    value = floor.get("floor") if isinstance(floor, dict) else None
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return min(value, len(session.history.messages))
+    return 0
 
 
 def _json_default(value: Any) -> Any:
@@ -71,13 +81,20 @@ def _serializable_context(session: Session) -> Dict[str, Any]:
 def encode_session(session: Session) -> bytes:
     """Return the stored form of ``session``.
 
-    An incognito session's messages are never written: incognito promises the
-    conversation is not stored, and the shared store is storage. Its context
-    (bindings, save floor) is, so a resumed incognito session stays incognito
-    and keeps its classification binding; it resumes with an empty history,
-    as a reconnect always did before shared sessions.
+    Messages sent while incognito are never written: incognito promises the
+    conversation is not stored, and the shared store is storage. While the
+    session is incognito no history is written at all; once the user opts
+    back in, only the messages after the incognito prefix (the save floor)
+    are, and the stored floor is rebased to 0 to match. The context
+    (bindings, incognito flag) is written, so a resumed incognito session
+    stays incognito and keeps its classification binding.
     """
     incognito = session.context.get("incognito") is True
+    floor = 0 if incognito else _save_floor(session)
+    messages = [] if incognito else session.history.messages[floor:]
+    context = _serializable_context(session)
+    if floor and isinstance(context.get(SAVE_FLOOR_KEY), dict):
+        context[SAVE_FLOOR_KEY] = {**context[SAVE_FLOOR_KEY], "floor": 0}
     payload = {
         "format": PAYLOAD_FORMAT,
         "id": str(session.id),
@@ -86,9 +103,9 @@ def encode_session(session: Session) -> bytes:
         "updated_at": session.updated_at.isoformat(),
         "active": session.active,
         "connection_owner": session.connection_owner,
-        "history": [] if incognito else [m.to_dict() for m in session.history.messages],
-        "history_omitted": incognito,
-        "context": _serializable_context(session),
+        "history": [m.to_dict() for m in messages],
+        "history_omitted": incognito or floor > 0,
+        "context": context,
     }
     # Message metadata is free-form; anything left that JSON cannot express is
     # stored as its string form rather than failing the whole write.

@@ -265,6 +265,17 @@ async def update_banner_config(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@admin_router.get("/session-store")
+async def get_session_store_status(admin_user: str = Depends(require_admin)):  # noqa: ARG001 (enforces auth)
+    """Session-store detail for operators (issue #1091).
+
+    The public ``/api/health`` reports only reachability; this adds the
+    masked Redis URL, key prefix, pool size, error and conflict counters and
+    the sessions live on this replica.
+    """
+    return await app_factory.session_store_health()
+
+
 @admin_router.get("/help-config")
 async def get_help_config(admin_user: str = Depends(require_admin)):  # noqa: ARG001 (enforces auth)
     try:

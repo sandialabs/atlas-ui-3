@@ -72,7 +72,7 @@ async def health_check() -> Dict[str, Any]:
         - version: Service version
         - timestamp: Current UTC timestamp in ISO-8601 format
         - session_store: Only with a shared session store (issue #1091):
-          its reachability, latency and error counters. An unreachable
+          its backend, reachability and latency. An unreachable
           store reports status "degraded" (HTTP 200: the replica still
           answers, and a readiness probe that pulled every replica during a
           Redis outage would turn it into a full outage).
@@ -88,7 +88,12 @@ async def health_check() -> Dict[str, Any]:
 
     if getattr(app_factory, "redis", None) is not None:
         store = await app_factory.session_store_health()
-        report["session_store"] = store
+        # This endpoint is unauthenticated: report reachability only. The
+        # store's address, namespace and counters stay in the startup and
+        # error logs, not in an anonymous response.
+        report["session_store"] = {
+            k: store[k] for k in ("backend", "status", "latency_ms") if k in store
+        }
         if store.get("status") != "ok":
             report["status"] = "degraded"
     return report

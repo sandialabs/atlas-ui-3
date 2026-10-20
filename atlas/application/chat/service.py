@@ -27,7 +27,7 @@ from atlas.domain.errors import (
     ValidationError,
 )
 from atlas.domain.messages.models import MessageType, ToolResult
-from atlas.domain.sessions.models import Session
+from atlas.domain.sessions.models import SAVE_FLOOR_CONTEXT_KEY, Session
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol
@@ -80,7 +80,7 @@ UNSET = object()
 _MAX_WORKSPACE_ID_LEN = 128
 
 # Session-context key mirroring the incognito save floor (issue #1091).
-_SAVE_FLOOR_KEY = "incognito_save_floor"
+_SAVE_FLOOR_KEY = SAVE_FLOOR_CONTEXT_KEY
 
 
 # Type hint for the update callback

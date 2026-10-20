@@ -17,7 +17,6 @@ import atlas.main as main
 from atlas.application.chat.service import ChatService
 from atlas.domain.errors import SessionConflictError
 from atlas.domain.messages.models import Message, MessageRole
-from atlas.domain.sessions.models import Session
 from atlas.infrastructure.redis import RedisClientManager, RedisSettings
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 from atlas.infrastructure.sessions.redis_repository import RedisSessionRepository
@@ -139,13 +138,22 @@ async def test_resume_refuses_another_users_session(server):
 
 @pytest.mark.asyncio
 async def test_resume_refuses_a_tracked_run_session(server):
-    repo = _redis_repo(server)
-    run_session = Session(id=uuid4(), user_email=USER)
-    run_session.context[main._RUN_SESSION_MARKER] = True
-    await repo.create(run_session)
+    """The run marker is stored as soon as the run session is seeded."""
+    repo_a = _redis_repo(server)
+    replica_a = _service(repo_a, "conn-a")
+    connection_id, run_id = uuid4(), uuid4()
+    await main._seed_run_session_files(
+        replica_a, connection_id, run_id, USER, conversation_id="conv-run"
+    )
+    stored = await _redis_repo(server).get(run_id)
+    assert stored.context[main._RUN_SESSION_MARKER] is True
 
+    # Even once the run's session is no longer held, it is never resumable.
+    run_session = await repo_a.get(run_id)
+    run_session.active = False
+    await repo_a.update(run_session)
     replica_b = _service(_redis_repo(server), "conn-b")
-    assert await main._resume_connection_session(replica_b, str(run_session.id), USER) is None
+    assert await main._resume_connection_session(replica_b, str(run_id), USER) is None
 
 
 # Fixed values: a random id in the parameters would differ between xdist
@@ -214,9 +222,10 @@ async def test_resumed_incognito_session_saves_later_turns_after_opting_in(serve
 
 
 @pytest.mark.asyncio
-async def test_save_floor_survives_when_the_history_is_stored(server):
-    """Incognito prefix then opt-in: the stored history keeps the prefix, so the floor stays."""
-    replica_a = _service(_redis_repo(server), "conn-a")
+async def test_incognito_prefix_never_reaches_the_store_after_opting_in(server):
+    """Incognito turn, then a saved one: only the saved turn is written."""
+    repo_a = _redis_repo(server)
+    replica_a = _service(repo_a, "conn-a")
     session_id = uuid4()
     with patch.object(replica_a, "_get_orchestrator", return_value=_orchestrator([])):
         await replica_a.handle_chat_message(
@@ -225,12 +234,16 @@ async def test_save_floor_survives_when_the_history_is_stored(server):
         await replica_a.handle_chat_message(
             session_id=session_id, content="public", model="m", user_email=USER, incognito=False,
         )
+    raw = await repo_a._redis.client.hget(repo_a._key(session_id), "data")
+    assert b"secret" not in raw
+    assert b"public" in raw
     await _disconnect(replica_a, session_id)
 
     replica_b = _service(_redis_repo(server), "conn-b")
     resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
-    assert len(resumed.history.messages) == 4
-    assert replica_b._incognito_save_floor[session_id] == 2
+    assert [m.content for m in resumed.history.messages] == ["public", "re: public"]
+    # The stored history starts after the prefix, so the floor is rebased.
+    assert session_id not in replica_b._incognito_save_floor
     assert session_id in replica_b._save_floor_locked
 
 
@@ -330,6 +343,16 @@ async def test_resume_rehydrates_from_chat_history_instead_of_the_snapshot(serve
         await _turn(replica_b, session_id, "follow-up", [])
     hydrate.assert_awaited_once()
     assert hydrate.await_args.args[1] == "conv-42"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_an_outage_still_tears_down(server):
+    replica = _service(_redis_repo(server), "conn-a")
+    session_id = uuid4()
+    replica._incognito_sessions.add(session_id)
+    server.connected = False
+    await _disconnect(replica, session_id)  # does not raise
+    assert session_id not in replica._incognito_sessions
 
 
 @pytest.mark.asyncio

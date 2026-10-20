@@ -288,3 +288,43 @@ async def test_writing_another_replicas_session_does_not_make_it_live_here(serve
     await repo_b.adopt(adopted)
     assert repo_b.is_live_here(session.id)
     assert await repo_b.get(session.id) is adopted
+
+
+@pytest.mark.asyncio
+async def test_stale_write_does_not_evict_the_adopted_session(server):
+    """A late write through a replaced object loses, and the live one stays."""
+    _, repo = _replica(server)
+    session = await repo.create(_session())
+    session.active = False
+    await repo.update(session)  # old connection's teardown
+
+    adopted = await repo.get(session.id)
+    adopted.active = True
+    await repo.adopt(adopted)
+
+    stale = session
+    stale.context["late"] = True
+    with pytest.raises(SessionConflictError):
+        await repo.update(stale)
+    assert await repo.get(session.id) is adopted
+
+
+@pytest.mark.asyncio
+async def test_recreate_is_refused_when_another_connection_owns_the_id(server):
+    _, repo_a = _replica(server)
+    _, repo_b = _replica(server)
+    original = _session()
+    original.connection_owner = "conn-a"
+    await repo_a.create(original)
+
+    taken = await repo_b.get(original.id)
+    taken.connection_owner = "conn-b"
+    await repo_b.adopt(taken)
+
+    replacement = Session(id=original.id, user_email=original.user_email, connection_owner="conn-a")
+    with pytest.raises(SessionConflictError):
+        await repo_a.create(replacement)
+    assert (await _replica(server)[1].get(original.id)).connection_owner == "conn-b"
+    # The owning connection may recreate it (New Chat).
+    mine = Session(id=original.id, user_email=original.user_email, connection_owner="conn-b")
+    await repo_b.create(mine)

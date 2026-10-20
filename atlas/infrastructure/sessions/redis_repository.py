@@ -249,7 +249,12 @@ class RedisSessionRepository:
 
     def _conflict(self, session: Session, stored: Optional[int]) -> SessionConflictError:
         self._redis.stats.incr("session_conflicts")
-        self._evict(session.id)
+        # Drop only a stale working copy. When the losing write came through
+        # an object this replica already replaced (a resumed session adopted
+        # after the old connection's teardown), the live object is the newer
+        # one and stays.
+        if self._live.get(session.id) is session:
+            self._evict(session.id)
         logger.warning(
             "Session %s write refused: this copy is version %d, the store holds %s "
             "(another connection or replica wrote it since)",

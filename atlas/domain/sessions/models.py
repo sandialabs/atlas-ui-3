@@ -7,6 +7,10 @@ from uuid import UUID, uuid4
 
 from ..messages.models import ConversationHistory
 
+# Session-context key holding the incognito save floor: how many leading
+# history messages were sent while incognito and must never be stored.
+SAVE_FLOOR_CONTEXT_KEY = "incognito_save_floor"
+
 
 @dataclass
 class Session:

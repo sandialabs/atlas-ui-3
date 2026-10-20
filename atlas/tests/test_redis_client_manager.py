@@ -86,6 +86,11 @@ def test_tls_url_uses_ssl_connections_with_ca_bundle():
         ("redis://redis:6379/0", "redis://redis:6379/0"),
         ("rediss://user:secret@redis:6380/1", "rediss://user:***@redis:6380/1"),
         ("redis://:secret@redis/0", "redis://:***@redis/0"),
+        ("redis://redis:6379/0?password=secret", "redis://redis:6379/0?password=***"),
+        (
+            "rediss://redis/0?username=ops&password=secret&ssl_cert_reqs=required",
+            "rediss://redis/0?username=***&password=***&ssl_cert_reqs=required",
+        ),
     ],
 )
 def test_passwords_never_reach_logs(url, expected):
