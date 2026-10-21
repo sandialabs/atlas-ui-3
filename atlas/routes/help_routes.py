@@ -181,10 +181,10 @@ async def get_help_image(
     config_manager = app_factory.get_config_manager()
     config = resolve_help_config(config_manager.app_settings)
 
-    if not config.content_url:
+    if not config.content_url or not config.is_remote_markdown:
         raise HTTPException(
             status_code=404,
-            detail="No external documentation is configured, so there are no Help images to serve.",
+            detail="No hosted documentation is configured, so there are no Help images to serve.",
         )
 
     url = await resolve_image_target(h, config)

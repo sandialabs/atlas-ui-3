@@ -611,8 +611,11 @@ _MARKDOWN_LINK_RE = re.compile(
 )
 # [ref]: target -- the definition a reference-style link or image uses.
 _MARKDOWN_DEFINITION_RE = re.compile(
-    r"(?m)^(\s{0,3}\[[^\]\n]+\]:\s*)(<?)([^\s>]+)(>?)",
+    r"(?m)^(\s{0,3}\[([^\]\n]+)\]:\s*)(<?)([^\s>]+)(>?)",
 )
+# ![alt][ref] -- a reference-style image. The label it uses is collected so
+# the definition it points at is proxied rather than merely made absolute.
+_REFERENCE_IMAGE_RE = re.compile(r"!\[[^\]]*\]\[([^\]]*)\]")
 
 
 def image_token(absolute_url: str) -> str:
@@ -694,6 +697,10 @@ def _rewrite_link_target(target: str, document_url: str, config: Optional[HelpCo
         return target
     if candidate.startswith("#"):
         return target
+    if candidate.startswith(IMAGE_PROXY_PATH) or candidate.startswith("!["):
+        # Already an ATLAS path -- a linked image, whose source the image
+        # rewrite has already pointed at the proxy.
+        return target
     if candidate.startswith("//"):
         scheme = urlparse(document_url).scheme or "https"
         candidate = f"{scheme}:{candidate}"
@@ -747,6 +754,14 @@ def rewrite_markdown_images(
 
     targets: Dict[str, str] = {}
 
+    # The labels the reference-style images use. Their definitions are
+    # proxied, like the images themselves.
+    image_labels = set()
+    for match in _REFERENCE_IMAGE_RE.finditer(markdown):
+        label = match.group(1).strip().lower()
+        if label:
+            image_labels.add(label)
+
     def _markdown_sub(match: re.Match) -> str:
         prefix, open_angle, src, close_angle, suffix = match.groups()
         rewritten = _rewrite_src(src, document_url, config, targets)
@@ -764,8 +779,13 @@ def rewrite_markdown_images(
         return f"{prefix}{open_angle}{rewritten}{close_angle}{suffix})"
 
     def _definition_sub(match: re.Match) -> str:
-        prefix, open_angle, target, close_angle = match.groups()
-        rewritten = _rewrite_link_target(target, document_url, config)
+        prefix, label, open_angle, target, close_angle = match.groups()
+        if label.strip().lower() in image_labels:
+            # The definition is used by an image, so it is served through the
+            # image proxy like every other image.
+            rewritten = _rewrite_src(target, document_url, config, targets)
+        else:
+            rewritten = _rewrite_link_target(target, document_url, config)
         return f"{prefix}{open_angle}{rewritten}{close_angle}"
 
     rewritten = _MARKDOWN_IMAGE_RE.sub(_markdown_sub, markdown)

@@ -47,11 +47,16 @@ Some hosted documentation.
 ![root relative](/help-images/logo.png)
 ![absolute elsewhere](https://cdn.example.org/other.png)
 
-A [relative link](install.md) and an [absolute one](https://docs.example.org/setup).
+[![linked image](images/logo.png)](https://docs.example.org/setup)
+
+![reference image][logo]
+
+[relative link](install.md) and an [absolute one](https://docs.example.org/setup).
 
 [reference link][install]
 
 [install]: ../setup.md
+[logo]: images/logo.png
 """
 
 
@@ -363,6 +368,45 @@ def test_relative_links_in_a_hosted_document_point_at_the_documentation(
     assert f"[install]: {base}/setup.md" in content
     # An absolute link is left as it is.
     assert "[absolute one](https://docs.example.org/setup)" in content
+
+
+def test_a_linked_image_keeps_its_proxy_source(help_settings, docs_server):
+    """A linked image is not rewritten twice.
+
+    The image source is already an ATLAS proxy path; the link rewrite must
+    not resolve it against the document URL.
+    """
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
+    client = _client()
+    content = client.get("/api/help", headers=_user_headers()).json()["content"]
+    assert f"{docs_server.base_url}/api/help/image" not in content
+    # The relative image, the root-relative one, the linked image and the
+    # reference-style image: four proxy references, none of them resolved
+    # against the documentation host.
+    assert content.count("/api/help/image?h=") == 4
+
+
+def test_a_reference_style_image_is_served_through_the_proxy(help_settings, docs_server):
+    """The definition an image uses is proxied, like the image itself."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
+    client = _client()
+    content = client.get("/api/help", headers=_user_headers()).json()["content"]
+    token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/images/logo.png"
+    )
+    assert f"[logo]: /api/help/image?h={token}" in content
+
+
+def test_the_image_proxy_is_not_served_in_external_link_mode(help_settings, docs_server):
+    """In external-link mode nothing is fetched, so there are no images."""
+    help_settings(mode="external_link", url=f"{docs_server.base_url}/help.md")
+    client = _client()
+    token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/images/logo.png"
+    )
+    resp = client.get(f"/api/help/image?h={token}", headers=_user_headers())
+    assert resp.status_code == 404
+    assert docs_server.requests == []
 
 
 def test_remote_markdown_image_proxy_serves_the_image(help_settings, docs_server):
