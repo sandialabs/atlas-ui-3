@@ -579,8 +579,37 @@ async def test_the_fallback_blames_the_feature_flag_when_it_is_off():
 
     orch.event_publisher.publish_warning.assert_awaited_once()
     message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
-    assert "FEATURE_ATLAS_RAG_TOOLS_ENABLED" in message
-    assert "Authorization" not in message
+    # The route below reads the sources, so the tools are what went missing.
+    assert "tools for this turn were not available" in message
+    assert "Authorization" in message
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_names_rag_when_rag_is_off():
+    """With RAG off nothing reads the sources, so that is what to name."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = _routing_orchestrator(
+        _config(rag=False),
+        _StubAuthorization(strip_prefixes=("calc", "atlas_")),
+        tools_mode,
+        rag_mode=rag_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "FEATURE_RAG_ENABLED" in message
 
 
 @pytest.mark.asyncio
@@ -613,6 +642,43 @@ async def test_the_fallback_does_not_run_the_rag_reader_when_rag_is_off():
 
     rag_mode.assert_not_awaited()
     plain_mode.assert_awaited_once()
+    # The sources were dropped, and the user is told.
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "FEATURE_RAG_ENABLED" in message
+
+
+@pytest.mark.asyncio
+async def test_a_sources_only_turn_with_rag_off_says_the_sources_were_not_read():
+    """Nothing can read the sources, so the turn says so instead of guessing."""
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    plain_mode = AsyncMock(return_value={"mode": "plain"})
+    orch = ChatOrchestrator(
+        llm=MagicMock(),
+        event_publisher=AsyncMock(),
+        session_repository=InMemorySessionRepository(),
+        rag_mode=SimpleNamespace(run_streaming=rag_mode),
+        plain_mode=SimpleNamespace(run_streaming=plain_mode),
+        config_manager=_config(rag=False),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=[],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    rag_mode.assert_not_awaited()
+    plain_mode.assert_awaited_once()
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "could not be read" in message
+    assert "FEATURE_RAG_ENABLED" in message
 
 
 @pytest.mark.asyncio

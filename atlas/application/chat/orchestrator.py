@@ -661,29 +661,19 @@ class ChatOrchestrator:
                     "Tool authorization removed every selected tool; running "
                     "the turn without tools"
                 )
-                if selected_data_sources and not data_sources_auto:
+                if selected_data_sources and not data_sources_auto and self._rag_enabled():
                     # The turn carries sources the user picked and has no
                     # tool to read them with. It falls through to the route
-                    # that reads them, but the user should know the search
-                    # tool was taken away rather than finding out from the
-                    # answer.
-                    if self._builtin_search_flags_on():
-                        message = (
-                            "**The tools for this turn were not available.** "
-                            "Authorization removed every selected tool, so the "
-                            "model could not use them. The sources you "
-                            "selected were read without them."
-                        )
-                    else:
-                        # The deployment took the search tool away, not
-                        # authorization: say the real reason.
-                        message = (
-                            "**Your data sources could not be searched.** The "
-                            "built-in `atlas_search` tool is turned off in this "
-                            "deployment (`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so "
-                            "the model could not read the sources you selected. "
-                            "Ask an administrator to turn it on."
-                        )
+                    # that reads them, but the user should know the tools
+                    # were taken away rather than finding out from the
+                    # answer. (With RAG off nothing reads the sources either
+                    # way, and the plain route below says so.)
+                    message = (
+                        "**The tools for this turn were not available.** "
+                        "Authorization removed every selected tool, so the "
+                        "model could not use them. The sources you "
+                        "selected were read without them."
+                    )
                     await self.event_publisher.publish_warning(message=message)
 
         if authorized_tools:
@@ -718,6 +708,23 @@ class ChatOrchestrator:
                 temperature=temperature,
             )
         else:
+            if selected_data_sources:
+                # The turn carries sources and nothing can read them: RAG is
+                # switched off in this deployment. Say so rather than
+                # answering as if the sources had been consulted.
+                logger.warning(
+                    "Data sources selected but RAG is turned off; this turn "
+                    "will not read them",
+                )
+                await self.event_publisher.publish_warning(
+                    message=(
+                        "**Your data sources could not be read.** RAG is "
+                        "turned off in this deployment "
+                        "(`FEATURE_RAG_ENABLED`), so nothing could read the "
+                        "sources you selected. Ask an administrator to turn "
+                        "it on."
+                    ),
+                )
             return await self.plain_mode.run_streaming(
                 session=session,
                 model=model,
