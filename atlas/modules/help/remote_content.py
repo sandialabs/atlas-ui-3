@@ -98,6 +98,10 @@ class _CachedDocument:
     # True when the last refresh failed: the copy is the last one that was
     # fetched, not necessarily the current one.
     stale: bool = False
+    # Why the last refresh failed. It is kept with the copy so the reader
+    # keeps being told that this is the last copy, for as long as it is
+    # being served.
+    last_error: Optional[str] = None
 
 
 @dataclass
@@ -410,6 +414,10 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
             cached=True,
             stale=cached.stale,
             fetched_at=cached.fetched_at,
+            # The reason the last refresh failed travels with the copy, so
+            # the reader is told about it on every request, not only on the
+            # one that failed.
+            error=cached.last_error,
         )
 
     request_headers: Dict[str, str] = {"Accept": "text/markdown, text/plain, */*"}
@@ -433,6 +441,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
             cached.expires_at = now + config.cache_ttl_seconds
             cached.fetched_at = now
             cached.stale = False
+            cached.last_error = None
         return RemoteHelpResult(
             content=cached.content,
             source_url=final_url,
@@ -468,6 +477,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
         fetched_at=now,
         final_url=final_url,
         stale=False,
+        last_error=None,
     )
     with _cache_lock:
         _document_cache[url] = entry
@@ -493,6 +503,7 @@ def _stale_fallback(
             # Do not retry the failing host on every request: the copy that
             # is already here is good enough for the next few seconds.
             cached.stale = True
+            cached.last_error = message
             cached.expires_at = time.monotonic() + FAILED_REFRESH_BACKOFF_SECONDS
         return RemoteHelpResult(
             content=cached.content,
@@ -593,6 +604,15 @@ _HTML_IMAGE_RE = re.compile(
     r"(<img\b[^>]*?\bsrc\s*=\s*)(\"|')(.*?)\2",
     re.IGNORECASE | re.DOTALL,
 )
+# [text](target) -- a link. The lookbehind keeps it from matching the
+# "[alt](src)" of an image, which is handled above.
+_MARKDOWN_LINK_RE = re.compile(
+    r"(?<!!)(\[[^\]]*\]\(\s*)(<?)([^\s>)]+)(>?)([^)]*)\)",
+)
+# [ref]: target -- the definition a reference-style link or image uses.
+_MARKDOWN_DEFINITION_RE = re.compile(
+    r"(?m)^(\s{0,3}\[[^\]\n]+\]:\s*)(<?)([^\s>]+)(>?)",
+)
 
 
 def image_token(absolute_url: str) -> str:
@@ -659,6 +679,45 @@ def _rewrite_src(
     return _proxy_url(token)
 
 
+def _rewrite_link_target(target: str, document_url: str, config: Optional[HelpConfig] = None) -> str:
+    """Resolve a link target against the document URL.
+
+    A relative link in a hosted document ("install.md", "../setup/") points
+    at the documentation host, not at ATLAS. Left alone it would resolve
+    against the ATLAS origin and lead nowhere, so it is made absolute here.
+
+    An anchor ("#section") stays as it is: it refers to a place in the
+    document that is rendered on this very page.
+    """
+    candidate = (target or "").strip()
+    if not candidate:
+        return target
+    if candidate.startswith("#"):
+        return target
+    if candidate.startswith("//"):
+        scheme = urlparse(document_url).scheme or "https"
+        candidate = f"{scheme}:{candidate}"
+
+    try:
+        absolute = urljoin(document_url, candidate)
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https"):
+            return target
+        parsed.port
+    except ValueError:
+        return target
+
+    if config is not None:
+        if not _is_allowed_url(absolute, config):
+            return target
+    else:
+        document_origin = _origin(document_url)
+        if document_origin is None or _origin(absolute) != document_origin:
+            return target
+
+    return absolute
+
+
 @dataclass
 class RewrittenDocument:
     """A hosted document with its image references pointed at the proxy."""
@@ -699,6 +758,18 @@ def rewrite_markdown_images(
         prefix, quote_char, src = match.groups()
         return f"{prefix}{quote_char}{_rewrite_src(src, document_url, config, targets)}{quote_char}"
 
+    def _link_sub(match: re.Match) -> str:
+        prefix, open_angle, target, close_angle, suffix = match.groups()
+        rewritten = _rewrite_link_target(target, document_url, config)
+        return f"{prefix}{open_angle}{rewritten}{close_angle}{suffix})"
+
+    def _definition_sub(match: re.Match) -> str:
+        prefix, open_angle, target, close_angle = match.groups()
+        rewritten = _rewrite_link_target(target, document_url, config)
+        return f"{prefix}{open_angle}{rewritten}{close_angle}"
+
     rewritten = _MARKDOWN_IMAGE_RE.sub(_markdown_sub, markdown)
     rewritten = _HTML_IMAGE_RE.sub(_html_sub, rewritten)
+    rewritten = _MARKDOWN_LINK_RE.sub(_link_sub, rewritten)
+    rewritten = _MARKDOWN_DEFINITION_RE.sub(_definition_sub, rewritten)
     return RewrittenDocument(markdown=rewritten, image_targets=targets)

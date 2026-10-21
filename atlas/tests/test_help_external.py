@@ -46,6 +46,12 @@ Some hosted documentation.
 ![relative](images/logo.png)
 ![root relative](/help-images/logo.png)
 ![absolute elsewhere](https://cdn.example.org/other.png)
+
+A [relative link](install.md) and an [absolute one](https://docs.example.org/setup).
+
+[reference link][install]
+
+[install]: ../setup.md
 """
 
 
@@ -340,6 +346,23 @@ def test_remote_markdown_resolves_relative_images(help_settings, docs_server):
     # blocks it; widening the policy is the operator's call).
     assert "https://cdn.example.org/other.png" in content
     assert "cdn.example.org" not in content.split("![absolute elsewhere]")[0]
+
+
+def test_relative_links_in_a_hosted_document_point_at_the_documentation(
+    help_settings, docs_server
+):
+    """A relative link in a hosted document must not resolve against ATLAS."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
+    client = _client()
+    content = client.get("/api/help", headers=_user_headers()).json()["content"]
+
+    base = f"http://127.0.0.1:{docs_server.port}"
+    # An inline relative link becomes an absolute URL on the documentation.
+    assert f"[relative link]({base}/install.md)" in content
+    # A reference-style definition too.
+    assert f"[install]: {base}/setup.md" in content
+    # An absolute link is left as it is.
+    assert "[absolute one](https://docs.example.org/setup)" in content
 
 
 def test_remote_markdown_image_proxy_serves_the_image(help_settings, docs_server):
@@ -767,9 +790,11 @@ def test_a_failed_refresh_is_not_retried_on_every_request(help_settings, docs_se
     requests_after_failure = len(docs_server.requests)
 
     # The next request is served from the copy that is already here, without
-    # another attempt at the failing host.
+    # another attempt at the failing host -- and it still says that this is
+    # the last copy that was fetched.
     again = client.get("/api/help", headers=_user_headers()).json()
     assert again["stale"] is True
+    assert again["fetch_error"]
     assert "# Hosted Help" in again["content"]
     assert len(docs_server.requests) == requests_after_failure
     assert requests_after_failure > requests_before
