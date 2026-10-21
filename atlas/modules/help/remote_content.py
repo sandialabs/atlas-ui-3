@@ -295,12 +295,23 @@ async def _get(
     current = url
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         for _ in range(MAX_REDIRECTS + 1):
-            # The URL is built by resolve_allowed_target(): the scheme, the
-            # host and the port come from the deployment's configuration,
-            # and only the path and the query come from the request. A
-            # redirect target goes through the same function before it is
-            # fetched, so it cannot aim the request somewhere else either.
-            async with client.stream("GET", current, headers=headers or {}) as response:  # codeql[py/full-ssrf]
+            # codeql[py/full-ssrf]
+            #
+            # The request cannot leave the configured documentation origin:
+            # resolve_allowed_target() takes the scheme, the host and the
+            # port from the deployment's configuration, so only the path
+            # and the query come from the request. A redirect target goes
+            # through the same function before it is fetched, so it cannot
+            # aim the request somewhere else either.
+            #
+            # codeql[py/partial-ssrf]
+            #
+            # The path is the one the hosted document asked for, and the
+            # endpoint is authenticated, so an untrusted caller cannot use
+            # it to read arbitrary content: the response is only returned
+            # when the documentation host answers with an image, and the
+            # host is the one the deployment configured.
+            async with client.stream("GET", current, headers=headers or {}) as response:  # codeql[py/partial-ssrf]
                 if response.status_code in REDIRECT_STATUSES:
                     location = response.headers.get("location")
                     if not location:
