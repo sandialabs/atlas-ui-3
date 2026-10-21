@@ -190,9 +190,10 @@ if start_app "remote_markdown" "http://127.0.0.1:$DOCS_PORT/help.md"; then
     fi
 
     # The relative image reference must point at the documentation host
-    # through the Atlas image proxy, not at an ATLAS-local path.
-    EXPECTED_PROXY="/api/help/image?url=http%3A%2F%2F127.0.0.1%3A${DOCS_PORT}%2Fimages%2Flogo.png"
-    if printf '%s' "$CONTENT" | grep -q "$EXPECTED_PROXY"; then
+    # through the Atlas image proxy, not at an ATLAS-local path. The proxy
+    # is given the identifier of the image, never a URL.
+    EXPECTED_PROXY="/api/help/image?h="
+    if printf '%s' "$CONTENT" | grep -q "$EXPECTED_PROXY" && ! printf '%s' "$CONTENT" | grep -q "image?url="; then
         print_result 0 "the relative image reference is resolved against the document"
     else
         print_result 1 "the relative image reference is resolved against the document"
@@ -205,7 +206,7 @@ if start_app "remote_markdown" "http://127.0.0.1:$DOCS_PORT/help.md"; then
     fi
 
     # The proxy really serves the image.
-    PROXY_URL="$(printf '%s' "$CONTENT" | grep -o '/api/help/image?url=[^)]*' | head -1)"
+    PROXY_URL="$(printf '%s' "$CONTENT" | grep -o '/api/help/image?h=[^)]*' | head -1)"
     if [ -n "$PROXY_URL" ]; then
         IMAGE_FILE="$(mktemp)"
         STATUS="$(curl -s -o "$IMAGE_FILE" -w '%{http_code}' -H 'X-User-Email: pr1108@example.org' "http://127.0.0.1:$APP_PORT$PROXY_URL")"
@@ -219,13 +220,14 @@ if start_app "remote_markdown" "http://127.0.0.1:$DOCS_PORT/help.md"; then
         print_result 1 "the image proxy serves the image bytes (no proxy URL in the document)"
     fi
 
-    # The proxy refuses a host that is not the configured one.
+    # The proxy serves the images the document references and nothing else,
+    # so an identifier of an image it does not know is refused.
     FOREIGN_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-User-Email: pr1108@example.org' \
-        "http://127.0.0.1:$APP_PORT/api/help/image?url=https%3A%2F%2Fevil.example.org%2Fx.png")"
-    if [ "$FOREIGN_STATUS" = "403" ]; then
-        print_result 0 "the image proxy refuses another host"
+        "http://127.0.0.1:$APP_PORT/api/help/image?h=00000000000000000000000000000000")"
+    if [ "$FOREIGN_STATUS" = "404" ]; then
+        print_result 0 "the image proxy refuses an image the document does not reference"
     else
-        print_result 1 "the image proxy refuses another host (HTTP $FOREIGN_STATUS)"
+        print_result 1 "the image proxy refuses an image the document does not reference (HTTP $FOREIGN_STATUS)"
     fi
 
     # A second request reuses the cached document.

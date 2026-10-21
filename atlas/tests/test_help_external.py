@@ -299,12 +299,21 @@ def test_remote_markdown_resolves_relative_images(help_settings, docs_server):
     client = _client()
     content = client.get("/api/help", headers=_user_headers()).json()["content"]
 
-    # A relative reference becomes an absolute URL on the documentation host,
-    # served through the Atlas image proxy.
-    assert f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fimages%2Flogo.png" in content
+    # A relative reference becomes an image of the documentation host, served
+    # through the Atlas image proxy under an opaque identifier.
+    relative_token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/images/logo.png"
+    )
+    assert f"/api/help/image?h={relative_token}" in content
     # A root-relative reference is resolved against the documentation host
     # too -- it is not an ATLAS-local /help-images path.
-    assert f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fhelp-images%2Flogo.png" in content
+    root_token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/help-images/logo.png"
+    )
+    assert f"/api/help/image?h={root_token}" in content
+    assert "/help-images/logo.png" not in content.replace(
+        f"/api/help/image?h={root_token}", ""
+    )
     # An absolute reference to another host is left alone (the default CSP
     # blocks it; widening the policy is the operator's call).
     assert "https://cdn.example.org/other.png" in content
@@ -323,15 +332,26 @@ def test_remote_markdown_image_proxy_serves_the_image(help_settings, docs_server
     assert resp.content == PNG_BYTES
 
 
-def test_image_proxy_refuses_other_hosts(help_settings, docs_server):
-    """The image proxy is not an open fetcher."""
+def test_image_proxy_refuses_an_image_the_document_does_not_mention(
+    help_settings, docs_server
+):
+    """The proxy serves the images of the document, not arbitrary paths."""
     help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
     client = _client()
-    resp = client.get(
-        "/api/help/image?url=https%3A%2F%2Fevil.example.org%2Fpayload.png",
-        headers=_user_headers(),
+    # The document was read, so its images are known.
+    client.get("/api/help", headers=_user_headers())
+
+    unknown = remote_content.image_token("https://evil.example.org/payload.png")
+    resp = client.get(f"/api/help/image?h={unknown}", headers=_user_headers())
+    assert resp.status_code == 404
+
+    # A path on the documentation host that the document does not reference is
+    # refused as well.
+    unmentioned = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/secret.png"
     )
-    assert resp.status_code == 403
+    resp = client.get(f"/api/help/image?h={unmentioned}", headers=_user_headers())
+    assert resp.status_code == 404
 
 
 def test_image_proxy_uses_the_configured_scheme(help_settings, docs_server):
@@ -364,22 +384,45 @@ def test_allowed_hosts_widen_the_image_sources(help_settings, docs_server):
             allowed_hosts=f"127.0.0.1:{second.port}",
         )
         client = _client()
-        allowed = client.get(
-            f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{second.port}%2Fimages%2Flogo.png",
-            headers=_user_headers(),
+        # The document on the first host references an image on the second
+        # one; that image is served, because the operator listed the host.
+        remote_content.register_image_targets(
+            f"{docs_server.base_url}/help.md",
+            {
+                remote_content.image_token(
+                    f"http://127.0.0.1:{second.port}/images/logo.png"
+                ): f"http://127.0.0.1:{second.port}/images/logo.png"
+            },
         )
+        token = remote_content.image_token(
+            f"http://127.0.0.1:{second.port}/images/logo.png"
+        )
+        allowed = client.get(f"/api/help/image?h={token}", headers=_user_headers())
         assert allowed.status_code == 200
 
-        # A host nobody listed is still refused.
+        # An image the document does not reference is not served, whichever
+        # host it is on.
         third = _DocsServer()
         try:
-            refused = client.get(
-                f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{third.port}%2Fimages%2Flogo.png",
-                headers=_user_headers(),
+            foreign = remote_content.image_token(
+                f"http://127.0.0.1:{third.port}/images/logo.png"
             )
-            assert refused.status_code == 403
+            refused = client.get(
+                f"/api/help/image?h={foreign}", headers=_user_headers()
+            )
+            assert refused.status_code == 404
         finally:
             third.stop()
+
+        # And a registered image on a host the deployment did not allow is
+        # refused by the policy, before the fetch.
+        blocked = remote_content.image_token("https://evil.example.org/logo.png")
+        remote_content.register_image_targets(
+            f"{docs_server.base_url}/help.md",
+            {blocked: "https://evil.example.org/logo.png"},
+        )
+        policy = client.get(f"/api/help/image?h={blocked}", headers=_user_headers())
+        assert policy.status_code == 403
     finally:
         second.stop()
 
@@ -388,10 +431,14 @@ def test_image_proxy_rejects_non_images(help_settings, docs_server):
     """A non-image on the documentation host is not served as an image."""
     help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
     client = _client()
-    resp = client.get(
-        f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fhelp.md",
-        headers=_user_headers(),
+    token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/help.md"
     )
+    remote_content.register_image_targets(
+        f"{docs_server.base_url}/help.md",
+        {token: f"http://127.0.0.1:{docs_server.port}/help.md"},
+    )
+    resp = client.get(f"/api/help/image?h={token}", headers=_user_headers())
     assert resp.status_code == 502
 
 
@@ -478,7 +525,10 @@ def test_a_redirect_within_the_host_is_followed(help_settings, docs_server):
     assert "# Redirected Help" in body["content"]
     # The image reference resolves against the URL the document was read
     # from, not against the configured one.
-    assert f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fv2%2Fimages%2Flogo.png" in body["content"]
+    v2_token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/v2/images/logo.png"
+    )
+    assert f"/api/help/image?h={v2_token}" in body["content"]
 
 
 def test_a_cached_redirect_keeps_the_final_url(help_settings, docs_server):
@@ -491,7 +541,10 @@ def test_a_cached_redirect_keeps_the_final_url(help_settings, docs_server):
     second = client.get("/api/help", headers=_user_headers()).json()
     assert second["cached"] is True
     assert second["source"] == f"{docs_server.base_url}/v2/help.md"
-    assert f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fv2%2Fimages%2Flogo.png" in second["content"]
+    v2_token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/v2/images/logo.png"
+    )
+    assert f"/api/help/image?h={v2_token}" in second["content"]
 
 
 def test_a_document_over_the_size_cap_is_refused(help_settings, docs_server):
@@ -516,10 +569,14 @@ def test_an_image_over_the_size_cap_is_refused(help_settings, docs_server):
         max_image_bytes=100,
     )
     client = _client()
-    resp = client.get(
-        f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fbig.png",
-        headers=_user_headers(),
+    token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/big.png"
     )
+    remote_content.register_image_targets(
+        f"{docs_server.base_url}/help.md",
+        {token: f"http://127.0.0.1:{docs_server.port}/big.png"},
+    )
+    resp = client.get(f"/api/help/image?h={token}", headers=_user_headers())
     assert resp.status_code == 502
     assert "byte limit" in resp.json()["detail"]
 
@@ -528,12 +585,18 @@ def test_the_image_cache_is_bounded(help_settings, docs_server):
     """The image cache cannot grow without limit."""
     help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
     client = _client()
+    targets = {}
     for index in range(remote_content.MAX_CACHED_IMAGES + 10):
-        resp = client.get(
-            f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}"
-            f"/images/logo.png?variant={index}",
-            headers=_user_headers(),
+        url = (
+            f"http://127.0.0.1:{docs_server.port}/images/logo.png?variant={index}"
         )
+        token = remote_content.image_token(url)
+        targets[token] = url
+    remote_content.register_image_targets(
+        f"{docs_server.base_url}/help.md", targets
+    )
+    for token in targets:
+        resp = client.get(f"/api/help/image?h={token}", headers=_user_headers())
         assert resp.status_code == 200
     assert len(remote_content._image_cache) <= remote_content.MAX_CACHED_IMAGES
 
@@ -611,7 +674,7 @@ def test_image_proxy_without_configuration_is_not_found(help_settings):
     help_settings(mode="local", url="")
     client = _client()
     resp = client.get(
-        "/api/help/image?url=https%3A%2F%2Fdocs.example.org%2Flogo.png",
+        "/api/help/image?h=0123456789abcdef0123456789abcdef",
         headers=_user_headers(),
     )
     assert resp.status_code == 404

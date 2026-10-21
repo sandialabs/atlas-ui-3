@@ -84,14 +84,16 @@ documentation host, and lets the response be cached.
   host and are *not* treated as ATLAS-local `/help-images/` paths. ATLAS
   serves them through `/api/help/image`, so the browser never contacts the
   documentation host directly and the default content security policy
-  (`img-src 'self'`) keeps working. Only the configured documentation host
-  (and any host listed in `HELP_ALLOWED_HOSTS`) may be fetched that way; an
-  absolute image URL pointing somewhere else is left alone and is blocked by
-  the default policy unless the operator widens `SECURITY_CSP_VALUE`.
+  (`img-src 'self'`) keeps working. The proxy is given the *identifier* of an
+  image, not a URL: it serves the images the hosted document references and
+  nothing else, so it cannot be used to read another path of the
+  documentation host. An absolute image URL pointing somewhere else is left
+  alone and is blocked by the default policy unless the operator widens
+  `SECURITY_CSP_VALUE`.
 * **What a request may reach.** The scheme, host and port of every request
-  come from the configuration; a request can only choose a path on a host
-  the deployment already trusts. A redirect is resolved the same way, so it
-  cannot aim the request at another host, and a request cannot downgrade
+  come from the configuration, and the URL itself comes from the registry of
+  the images the document references. A redirect is resolved the same way, so
+  it cannot aim the request at another host, and a request cannot downgrade
   the scheme.
 * **Limits.** A document larger than `HELP_REMOTE_MAX_BYTES` and an image
   larger than `HELP_REMOTE_MAX_IMAGE_BYTES` are refused rather than

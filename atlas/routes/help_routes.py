@@ -38,6 +38,8 @@ from atlas.modules.help.remote_content import (
     HelpPolicyError,
     fetch_remote_image,
     fetch_remote_markdown,
+    register_image_targets,
+    resolve_image_target,
     rewrite_markdown_images,
 )
 
@@ -95,10 +97,13 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
     result = await fetch_remote_markdown(config)
     if result.content:
         document_url = result.source_url or config.content_url
+        rewritten = rewrite_markdown_images(result.content, document_url, config)
+        # The image proxy serves the images of this document, and only those.
+        register_image_targets(document_url, rewritten.image_targets)
         return {
             "mode": config.mode,
             "requested_mode": config.requested_mode,
-            "content": rewrite_markdown_images(result.content, document_url, config),
+            "content": rewritten.markdown,
             "content_url": config.content_url,
             "link_url": "",
             "cached": result.cached,
@@ -129,13 +134,15 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
 
 @router.get("/help/image")
 async def get_help_image(
-    url: str = Query(..., description="Absolute URL of the image to fetch"),
+    h: str = Query(..., description="Identifier of the image to serve"),
     current_user: str = Depends(get_current_user),  # noqa: ARG001
 ):
     """Serve an image referenced by the hosted Help document.
 
-    Only the configured documentation host (and any host the operator listed
-    in ``HELP_ALLOWED_HOSTS``) may be fetched.
+    The request carries the identifier of an image, not a URL: the
+    identifier is looked up in the registry of the images the hosted
+    document references, so the proxy can only serve the images of that
+    document and never an arbitrary path of the documentation host.
     """
     config_manager = app_factory.get_config_manager()
     config = resolve_help_config(config_manager.app_settings)
@@ -144,6 +151,13 @@ async def get_help_image(
         raise HTTPException(
             status_code=404,
             detail="No external documentation is configured, so there are no Help images to serve.",
+        )
+
+    url = await resolve_image_target(h, config)
+    if url is None:
+        raise HTTPException(
+            status_code=404,
+            detail="That image is not referenced by the hosted documentation.",
         )
 
     try:

@@ -18,13 +18,14 @@ copy to fall back on.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
 import time
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -103,6 +104,10 @@ class _CachedImage:
 # and a shared cache would be a lot of machinery for one document.
 _document_cache: Dict[str, _CachedDocument] = {}
 _image_cache: Dict[str, _CachedImage] = {}
+# The images the hosted document references, per document URL: proxy token ->
+# absolute URL. The image proxy is given the token, so it can only ever fetch
+# an image the document actually asks for.
+_image_targets: Dict[str, Dict[str, str]] = {}
 _cache_lock = threading.Lock()
 
 
@@ -111,6 +116,19 @@ def clear_caches() -> None:
     with _cache_lock:
         _document_cache.clear()
         _image_cache.clear()
+        _image_targets.clear()
+
+
+def register_image_targets(document_url: str, targets: Dict[str, str]) -> None:
+    """Record the images a hosted document references."""
+    with _cache_lock:
+        _image_targets[document_url] = dict(targets)
+
+
+def known_image_targets(document_url: str) -> Dict[str, str]:
+    """The images the hosted document referenced the last time it was read."""
+    with _cache_lock:
+        return dict(_image_targets.get(document_url, {}))
 
 
 def _prune_expired_images(now: float) -> None:
@@ -297,15 +315,11 @@ async def _get(
         for _ in range(MAX_REDIRECTS + 1):
             # The request cannot leave the configured documentation origin:
             # resolve_allowed_target() takes the scheme, the host and the
-            # port from the deployment's configuration, so only the path
-            # and the query come from the request. A redirect target goes
+            # port from the deployment's configuration, and the URL itself
+            # comes from the registry of the images the hosted document
+            # references -- never from the request. A redirect target goes
             # through the same function before it is fetched, so it cannot
-            # aim the request somewhere else either. The endpoint is
-            # authenticated, and the response is only returned when the
-            # documentation host answers with an image, so it cannot be
-            # used to read arbitrary content from that host.
-            # codeql[py/full-ssrf]
-            # codeql[py/partial-ssrf]
+            # aim the request somewhere else either.
             async with client.stream("GET", current, headers=headers or {}) as response:
                 if response.status_code in REDIRECT_STATUSES:
                     location = response.headers.get("location")
@@ -441,6 +455,29 @@ def _stale_fallback(
     return RemoteHelpResult(content="", source_url=url, error=message)
 
 
+async def resolve_image_target(token: str, config: HelpConfig) -> Optional[str]:
+    """The URL of the image a proxy token stands for, or ``None``.
+
+    The token is looked up in the registry of the images the hosted document
+    references. A token that is not in it is refused: the proxy serves the
+    images of the documentation, not arbitrary paths of the documentation
+    host.
+
+    A replica that has not read the document yet has no registry, so it
+    reads the document first -- the fetch is cached, so this is cheap.
+    """
+    document_url = config.content_url
+    targets = known_image_targets(document_url)
+    if token not in targets:
+        result = await fetch_remote_markdown(config)
+        if result.content:
+            document_url = result.source_url or document_url
+            rewritten = rewrite_markdown_images(result.content, document_url, config)
+            register_image_targets(document_url, rewritten.image_targets)
+            targets = known_image_targets(document_url)
+    return targets.get(token)
+
+
 async def fetch_remote_image(url: str, config: HelpConfig) -> Tuple[bytes, str]:
     """Fetch an image the hosted document references.
 
@@ -501,11 +538,26 @@ _HTML_IMAGE_RE = re.compile(
 )
 
 
-def _proxy_url(absolute_url: str) -> str:
-    return f"{IMAGE_PROXY_PATH}?url={quote(absolute_url, safe='')}"
+def image_token(absolute_url: str) -> str:
+    """The opaque id the image proxy uses for an image URL.
+
+    The proxy is given this id, not a URL: the id is looked up in the
+    registry of the images the hosted document actually references, so a
+    request can never aim the fetch at an arbitrary path.
+    """
+    return hashlib.sha256(absolute_url.encode("utf-8")).hexdigest()[:32]
 
 
-def _rewrite_src(src: str, document_url: str, config: Optional[HelpConfig] = None) -> str:
+def _proxy_url(token: str) -> str:
+    return f"{IMAGE_PROXY_PATH}?h={token}"
+
+
+def _rewrite_src(
+    src: str,
+    document_url: str,
+    config: Optional[HelpConfig] = None,
+    targets: Optional[Dict[str, str]] = None,
+) -> str:
     """Resolve one image reference against the document URL.
 
     A reference that lands on the documentation host (or on another host the
@@ -538,12 +590,24 @@ def _rewrite_src(src: str, document_url: str, config: Optional[HelpConfig] = Non
         if _origin(absolute) != document_origin:
             return src
 
-    return _proxy_url(absolute)
+    token = image_token(absolute)
+    if targets is not None:
+        targets[token] = absolute
+    return _proxy_url(token)
+
+
+@dataclass
+class RewrittenDocument:
+    """A hosted document with its image references pointed at the proxy."""
+
+    markdown: str
+    # The images the document references: proxy token -> absolute URL.
+    image_targets: Dict[str, str]
 
 
 def rewrite_markdown_images(
     markdown: str, document_url: str, config: Optional[HelpConfig] = None
-) -> str:
+) -> RewrittenDocument:
     """Point a hosted document's image references at the Atlas image proxy.
 
     Relative references (``images/x.png``) and root-relative ones
@@ -551,20 +615,27 @@ def rewrite_markdown_images(
     document never has to know that it is being rendered inside Atlas -- and
     a reference like ``/help-images/x.png`` is not mistaken for an
     ATLAS-local path.
+
+    The images the document references are returned with it: the proxy is
+    given the id of an image, never a URL, so a request cannot aim the
+    fetch at a path the document does not mention.
     """
     if not markdown or not document_url:
-        return markdown
+        return RewrittenDocument(markdown=markdown, image_targets={})
+
+    targets: Dict[str, str] = {}
 
     def _markdown_sub(match: re.Match) -> str:
         prefix, open_angle, src, close_angle, suffix = match.groups()
-        rewritten = _rewrite_src(src, document_url, config)
+        rewritten = _rewrite_src(src, document_url, config, targets)
         # The closing parenthesis is part of the match but not of a group, so
         # it has to be put back by hand.
         return f"{prefix}{open_angle}{rewritten}{close_angle}{suffix})"
 
     def _html_sub(match: re.Match) -> str:
         prefix, quote_char, src = match.groups()
-        return f"{prefix}{quote_char}{_rewrite_src(src, document_url, config)}{quote_char}"
+        return f"{prefix}{quote_char}{_rewrite_src(src, document_url, config, targets)}{quote_char}"
 
     rewritten = _MARKDOWN_IMAGE_RE.sub(_markdown_sub, markdown)
-    return _HTML_IMAGE_RE.sub(_html_sub, rewritten)
+    rewritten = _HTML_IMAGE_RE.sub(_html_sub, rewritten)
+    return RewrittenDocument(markdown=rewritten, image_targets=targets)
