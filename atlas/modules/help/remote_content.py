@@ -42,6 +42,10 @@ IMAGE_PROXY_PATH = "/api/help/image"
 # allowed hosts before it is requested.
 MAX_REDIRECTS = 3
 
+# How many documents to keep. A deployment configures one documentation URL;
+# this is only a safety net for a process that has seen several.
+MAX_CACHED_DOCUMENTS = 4
+
 REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 
 
@@ -86,6 +90,37 @@ def clear_caches() -> None:
     with _cache_lock:
         _document_cache.clear()
         _image_cache.clear()
+
+
+def _prune_expired_images(now: float) -> None:
+    """Drop the cached images that are past their TTL.
+
+    A document is kept past its TTL on purpose: it is the last known good
+    copy, and it is what an outage falls back to. An image has no such
+    role, and a documentation site whose image URLs change on every edit
+    would otherwise leave an entry behind each time.
+    """
+    with _cache_lock:
+        for url, (expires_at, _body, _content_type) in list(_image_cache.items()):
+            if expires_at <= now:
+                del _image_cache[url]
+
+
+def _trim_document_cache() -> None:
+    """Keep the document cache small.
+
+    A deployment configures one documentation URL, so this is a safety net
+    for a long-running process that has seen several URLs: the oldest copies
+    go, the most recent ones stay.
+    """
+    with _cache_lock:
+        if len(_document_cache) <= MAX_CACHED_DOCUMENTS:
+            return
+        ordered = sorted(
+            _document_cache.items(), key=lambda item: item[1].fetched_at, reverse=True
+        )
+        for url, _entry in ordered[MAX_CACHED_DOCUMENTS:]:
+            del _document_cache[url]
 
 
 def _origin(url: str) -> Tuple[str, str, int]:
@@ -248,6 +283,19 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
         )
 
     content = body.decode("utf-8", errors="replace")
+    content_type = (response_headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type and not (
+        content_type.startswith("text/")
+        or content_type in ("application/markdown", "application/x-markdown")
+    ):
+        # Not fatal: the document is still rendered as Markdown. But a host
+        # serving HTML at the documentation URL is usually a mistake worth
+        # naming in the log.
+        logger.warning(
+            "The Help document at %s has content-type '%s'; Markdown was expected",
+            final_url,
+            content_type,
+        )
     entry = _CachedDocument(
         content=content,
         etag=response_headers.get("etag"),
@@ -257,6 +305,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
     )
     with _cache_lock:
         _document_cache[url] = entry
+    _trim_document_cache()
     return RemoteHelpResult(
         content=content,
         source_url=final_url,
@@ -294,6 +343,7 @@ async def fetch_remote_image(url: str, config: HelpConfig) -> Tuple[bytes, str]:
     _require_allowed_url(url, config, "an image")
 
     now = time.monotonic()
+    _prune_expired_images(now)
     with _cache_lock:
         cached = _image_cache.get(url)
     if cached and cached[0] > now:

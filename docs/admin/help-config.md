@@ -88,6 +88,11 @@ documentation host, and lets the response be cached.
   same pipeline used for chat messages, so a hosted document cannot inject
   scripts into the page.
 
+The Help page reads `GET /api/help`, which returns the content for the
+configured mode. `GET /api/config` still carries the local document in
+`help_content` (for the clients that already read it) and reports the mode
+in its `help` block.
+
 ## External link
 
 In `external_link` mode the Help button is a link to the configured URL: it
