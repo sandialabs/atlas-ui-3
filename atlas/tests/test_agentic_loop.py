@@ -846,8 +846,12 @@ class TestAgenticLoopSearchIsATool:
     every source and injected the passages as a system message. The user saw no
     search, and the model never chose one. Now the loop makes the same normal
     tools call it makes without sources, and the model has to call
-    ``atlas_search`` for anything to be retrieved. Since #921 the tool is only
-    in the schema when the user selected it -- sources never add it.
+    ``atlas_search`` for anything to be retrieved.
+
+    The loop builds the schema from exactly the tool list it is handed. The
+    list itself is resolved upstream (the orchestrator adds the search tool
+    when the user selected data sources, issue #1102), so a loop that is
+    called directly sees only what its caller asked for.
     """
 
     @pytest.mark.asyncio
@@ -880,13 +884,12 @@ class TestAgenticLoopSearchIsATool:
         assert calls[0] == [{"role": "user", "content": "Search with RAG"}]
 
     @pytest.mark.asyncio
-    async def test_selected_sources_do_not_add_the_search_tool(self):
-        """Sources scope the tool; they never add it (#921).
+    async def test_selected_sources_do_not_add_the_search_tool_in_the_loop(self):
+        """Sources scope the tool; the loop does not add it itself (#1102).
 
-        ``atlas_search`` is used only when the user ticked it. A turn that
-        picked sources plus another tool must not grow an ``atlas_search`` the
-        user never turned on -- that is exactly how a prompt like "use search"
-        ended up calling the built-in tool over the user's own search provider.
+        The orchestrator resolves the turn's tool list -- a selection of data
+        sources implies ``atlas_search`` there -- so the loop is handed the
+        list it must use. Called directly, it uses exactly what it was given.
         """
         tool_mgr = _make_tool_manager({"tool1": "r"})
         events, handler = _collect_events()

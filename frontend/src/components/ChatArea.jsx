@@ -14,6 +14,7 @@ import ModelSelector from './ModelSelector'
 import ToolSelector from './ToolSelector'
 import WorkspaceSelector from './WorkspaceSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
+import { searchToolAutoEnabled } from '../utils/searchToolAvailability'
 import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
 import CorrectTurnModal from './CorrectTurnModal'
@@ -87,6 +88,8 @@ const ChatArea = () => {
     answerAgentQuestion,
     fileExtraction,
     selectedDataSources,
+    ragEnabled,
+    ragSources,
     features,
     fileUpload,
     appName,
@@ -109,6 +112,17 @@ const ChatArea = () => {
   const showAgentQuestion = !!agentPendingQuestion
   const agentRunActive = isAgentRunning || showAgentQuestion
   const maxFileSizeBytes = fileUpload?.max_file_size_bytes || DEFAULT_MAX_FILE_SIZE_BYTES
+
+  // Selected data sources imply the built-in search tool (issue #1102), so
+  // such a turn does have something for the agent loop to call -- the
+  // "agent mode has nothing to act on" callout must not claim otherwise.
+  const searchAutoEnabled = searchToolAutoEnabled({
+    tools,
+    selectedDataSources,
+    ragEnabled,
+    reachableSourceCount: (ragSources || []).length
+  })
+  const effectiveToolCount = (selectedTools?.size || 0) + (searchAutoEnabled ? 1 : 0)
 
   // Pair each message with its rewind ordinal once per messages change, rather
   // than re-running the two-pass scan on every render (incl. each streamed token).
@@ -1050,11 +1064,15 @@ const ChatArea = () => {
               availability too: the enabled flag is persisted and can outlive
               a config where the feature is off.
 
+              The count is the *effective* one: selected data sources imply
+              the built-in search tool (#1102), so such a turn does have
+              something to call.
+
               The plain-language explanation is the point of this callout, so
               it is stronger than a passing warning row. "Reduce helper text"
               shortens the copy but keeps the state, the model requirement, and
               both actions. */}
-          {agentModeAvailable && agentModeEnabled && selectedTools.size === 0 && (
+          {agentModeAvailable && agentModeEnabled && effectiveToolCount === 0 && (
             <div
               className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100"
               data-testid="agent-mode-no-tools-banner"

@@ -131,10 +131,12 @@ class AgenticLoop(AgentLoopProtocol):
             payload={"max_steps": max_steps, "strategy": "agentic"},
         ))
 
-        # Retrieval is an explicit ``atlas_search`` call (#921): data sources
-        # scope what that tool may read, they never add it to the schema and
-        # they never run retrieval on their own. The model decides whether to
-        # call it, and the call shows up in the UI like any other tool.
+        # Retrieval is an explicit ``atlas_search`` call: data sources scope
+        # what that tool may read, they never run retrieval on their own.
+        # Since #1102 the orchestrator resolves the turn's tool list, so a
+        # selection of data sources has the search tool in it (the model
+        # decides whether to call it, and the call shows up in the UI like
+        # any other tool).
         effective_tools = normalize_selected_tools(selected_tools)
 
         tools_schema: List[Dict[str, Any]] = []

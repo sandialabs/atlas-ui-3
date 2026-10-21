@@ -8,6 +8,11 @@ import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
+import {
+  SEARCH_AUTO_ENABLED_NOTE,
+  SEARCH_TOOL_KEY,
+  searchToolAutoEnabled
+} from '../utils/searchToolAvailability'
 import { FOCUS_RING } from '../utils/focusRing'
 
 // Tool and prompt chips are on/off toggles. Green alone was the only cue that
@@ -165,7 +170,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     tools: allTools,
     prompts: allPrompts,
     features,
-    refreshConfig
+    refreshConfig,
+    selectedDataSources,
+    ragEnabled,
+    ragSources
   } = useChat()
   const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts, isComplianceAccessible } = useMarketplace()
   
@@ -554,6 +562,17 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   const complianceEnabled = features?.compliance_levels
   const tools = complianceEnabled ? getComplianceFilteredTools(complianceLevelFilter) : getFilteredTools()
   const prompts = complianceEnabled ? getComplianceFilteredPrompts(complianceLevelFilter) : getFilteredPrompts()
+
+  // The built-in search tool is on because the user selected data sources
+  // (issue #1102). The server offers it for the very same reason, so the chip
+  // is shown as on -- and cannot be switched off, which would contradict the
+  // source selection.
+  const searchAutoEnabled = searchToolAutoEnabled({
+    tools,
+    selectedDataSources,
+    ragEnabled,
+    reachableSourceCount: (ragSources || []).length
+  })
   
   // Extract unique compliance levels from all available tools and prompts
   const availableComplianceLevels = new Set()
@@ -745,6 +764,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     const server = getServerByName(serverName)
     if (!server) return false
     const { toolKeys, promptKeys } = getServerKeys(server)
+    // The server-level button is about the user's own selection: the search
+    // tool the data sources imply (#1102) is not counted here, because it
+    // cannot be switched off from this row and counting it would leave the
+    // button reading "All On" with nothing left to turn off.
     const allToolsSelected = toolKeys.length === 0 || toolKeys.every(k => selectedTools.has(k))
     const allPromptsSelected = promptKeys.length === 0 || promptKeys.every(k => selectedPrompts.has(k))
     return allToolsSelected && allPromptsSelected
@@ -1185,23 +1208,31 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                     <div className="flex flex-wrap gap-1">
                 {server.tools.map(tool => {
                                     const toolKey = `${server.server}_${tool}`
-                                    const isSelected = selectedTools.has(toolKey)
+                                    // The built-in search tool is on because the
+                                    // user selected data sources (#1102). It is
+                                    // shown as on and cannot be switched off
+                                    // while they are selected.
+                                    const autoEnabled = toolKey === SEARCH_TOOL_KEY && searchAutoEnabled
+                                    const isSelected = selectedTools.has(toolKey) || autoEnabled
                                     const isToolExpanded = expandedTools.has(toolKey)
                                     // Find detailed tool info
                                     const toolDetail = server.tools_detailed?.find(t => t.name === tool)
-                                    
+
                                     return (
                                       <div key={tool} className="flex flex-col gap-1 w-full">
                                         <div className="flex items-center gap-1">
                                           <button
                                             type="button"
-                                            onClick={() => {
+                                            onClick={autoEnabled ? undefined : () => {
             // Toggle ONLY this specific tool
             toggleTool(toolKey)
                                             }}
                                             aria-pressed={isSelected}
+                                            aria-disabled={autoEnabled ? true : undefined}
                                             className={selectionChipClass(isSelected)}
-                                            title={`Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
+                                            title={autoEnabled
+                                              ? SEARCH_AUTO_ENABLED_NOTE
+                                              : `Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
                                           >
                                             <SelectionMark selected={isSelected} />
                                             {tool}
@@ -1219,6 +1250,11 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                             </button>
                                           )}
                                         </div>
+                                        {autoEnabled && (
+                                          <p className="text-xs text-blue-300">
+                                            {SEARCH_AUTO_ENABLED_NOTE}
+                                          </p>
+                                        )}
                                         {isToolExpanded && toolDetail && (
                                           <div className="bg-gray-800 rounded p-2 text-xs space-y-2 border border-gray-600">
                                             {toolDetail.description && (

@@ -118,6 +118,13 @@ SEARCH_TOOL_DESCRIPTION = (
     # The instruction lives on the tool, not in the system prompt, because that
     # is what survives agent mode: it travels with the schema whenever the tool
     # is offered, and costs nothing on a turn that is not offered it (#874).
+    # Since #1102 the tool is offered whenever the user has selected data
+    # sources, so the model is the one who decides whether a search is worth
+    # it -- which only works if it is told that the sources are there and that
+    # searching them is the expected way to read them.
+    "The user has data sources selected for this conversation: search them "
+    "whenever the question could be answered from them, and say plainly that "
+    "you did not search when it could not. "
     "Each result is numbered. Cite them inline as [1], [2] immediately after "
     "the claim each supports, and never cite a number you were not given -- "
     "the numbers are stable for the whole conversation, so a source keeps its "

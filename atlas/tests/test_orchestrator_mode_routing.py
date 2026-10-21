@@ -104,7 +104,13 @@ async def test_none_data_sources_routes_to_plain():
 
 @pytest.mark.asyncio
 async def test_nonempty_data_sources_routes_to_rag():
-    """Non-empty selected_data_sources should route to RAG mode."""
+    """Non-empty selected_data_sources should route to RAG mode.
+
+    This orchestrator has no config manager, so the deployment's feature
+    flags are unknown and the built-in search tool cannot be offered (see
+    ``test_sources_with_no_tools_route_to_tools_when_search_is_available``
+    for the flags-on case).
+    """
     orch, repo, mocks = _make_orchestrator()
     sid = await _seed_session(repo)
 
@@ -117,6 +123,40 @@ async def test_nonempty_data_sources_routes_to_rag():
 
     mocks["rag"].assert_awaited_once()
     mocks["plain"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sources_with_no_tools_route_to_tools_when_search_is_available():
+    """Selected sources imply the search tool, so the turn is a tools turn.
+
+    The model is offered ``atlas_search`` and decides whether to call it
+    (issue #1102). It is not a forced invocation, and it is not plain RAG:
+    the search shows up in the transcript like any other tool call.
+    """
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.config_manager = SimpleNamespace(
+        app_settings=SimpleNamespace(
+            feature_rag_enabled=True,
+            feature_atlas_rag_tools_enabled=True,
+        )
+    )
+    orch.tool_authorization = MagicMock()
+    orch.tool_authorization.filter_authorized_tools = AsyncMock(
+        side_effect=lambda selected_tools, user_email=None: selected_tools
+    )
+
+    await orch.execute(
+        session_id=sid,
+        content="search query",
+        model="test-model",
+        selected_data_sources=["server:source1"],
+    )
+
+    mocks["tools"].assert_awaited_once()
+    mocks["rag"].assert_not_awaited()
+    assert mocks["tools"].await_args.kwargs["selected_tools"] == ["atlas_search"]
 
 
 @pytest.mark.asyncio
@@ -198,7 +238,11 @@ async def test_agent_mode_with_no_tools_falls_back_to_plain_with_warning():
 
 @pytest.mark.asyncio
 async def test_agent_mode_with_rag_sources_and_no_tools_falls_back_to_plain_with_warning():
-    """RAG source selection alone should not auto-enable agent tools."""
+    """RAG source selection alone does not enable agent tools.
+
+    Without the search tool available (no feature flags here), the turn has
+    nothing for the agent loop to call, so it is downgraded.
+    """
     orch, repo, mocks = _make_orchestrator()
     sid = await _seed_session(repo)
 
@@ -215,6 +259,36 @@ async def test_agent_mode_with_rag_sources_and_no_tools_falls_back_to_plain_with
     mocks["rag"].assert_awaited_once()
     mocks["plain"].assert_not_awaited()
     mocks["warning"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_agent_mode_with_sources_routes_to_agent_when_search_is_available():
+    """Selected sources give the agent loop something to call (#1102)."""
+    orch, repo, mocks = _make_orchestrator()
+    sid = await _seed_session(repo)
+
+    orch.config_manager = SimpleNamespace(
+        app_settings=SimpleNamespace(
+            feature_agent_mode_available=True,
+            agent_max_steps=10,
+            feature_rag_enabled=True,
+            feature_atlas_rag_tools_enabled=True,
+        )
+    )
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=[],
+        selected_data_sources=["atlas_rag:technical-docs"],
+        agent_mode=True,
+    )
+
+    mocks["agent"].assert_awaited_once()
+    mocks["rag"].assert_not_awaited()
+    mocks["warning"].assert_not_awaited()
+    assert mocks["agent"].await_args.kwargs["selected_tools"] == ["atlas_search"]
 
 
 @pytest.mark.asyncio
