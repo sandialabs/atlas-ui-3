@@ -511,6 +511,7 @@ class ChatOrchestrator:
             getattr(self.config_manager, "app_settings", None),
             imply=model_supports_tools
             and not data_sources_auto
+            and not only_rag
             and self._search_allowed_with_outbound_tools(selected_tools),
         )
 

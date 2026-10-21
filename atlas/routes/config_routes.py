@@ -228,6 +228,9 @@ async def get_config_shell(
             "oidc_auth": app_settings.feature_oidc_auth_enabled,
             "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
             "finetune_capture": app_settings.feature_finetune_capture_enabled,
+            # Whether the data sources imply the built-in search tool in a
+            # turn that also carries an MCP server's tool (issue #1102).
+            "atlas_search_with_outbound_tools": app_settings.feature_atlas_search_with_outbound_tools,
         },
         "file_upload": get_file_upload_limit_config(),
         "file_extraction": _get_file_extraction_config(config_manager),
@@ -585,6 +588,9 @@ async def get_config(
             "oidc_auth": app_settings.feature_oidc_auth_enabled,
             "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
             "finetune_capture": app_settings.feature_finetune_capture_enabled,
+            # Whether the data sources imply the built-in search tool in a
+            # turn that also carries an MCP server's tool (issue #1102).
+            "atlas_search_with_outbound_tools": app_settings.feature_atlas_search_with_outbound_tools,
         },
         "file_upload": get_file_upload_limit_config(),
         "file_extraction": _get_file_extraction_config(config_manager)

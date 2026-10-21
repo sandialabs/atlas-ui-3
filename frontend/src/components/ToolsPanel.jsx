@@ -574,7 +574,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     tools,
     effectiveDataSources,
     currentModel,
-    models
+    models,
+    selectedTools: savedSelectedTools,
+    searchWithOutboundTools: features?.atlas_search_with_outbound_tools
   })
   
   // Extract unique compliance levels from all available tools and prompts

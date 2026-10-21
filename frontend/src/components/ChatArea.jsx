@@ -119,7 +119,9 @@ const ChatArea = () => {
     tools,
     effectiveDataSources,
     currentModel,
-    models
+    models,
+    selectedTools,
+    searchWithOutboundTools: features?.atlas_search_with_outbound_tools
   })
   // The implied search tool counts only when the user did not tick it
   // themselves -- it is already in the selection if they did.

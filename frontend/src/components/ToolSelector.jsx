@@ -140,7 +140,9 @@ const ToolSelector = () => {
     tools,
     effectiveDataSources,
     currentModel,
-    models
+    models,
+    selectedTools,
+    searchWithOutboundTools: features?.atlas_search_with_outbound_tools
   })
 
   if (!features?.tools) return null

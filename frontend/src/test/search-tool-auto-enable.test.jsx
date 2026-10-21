@@ -54,6 +54,16 @@ const OTHER_SERVER = {
   prompt_count: 0
 }
 
+const WEB_SERVER = {
+  server: 'web',
+  description: 'Outbound web tools',
+  tools: ['fetch'],
+  tools_detailed: [{ name: 'fetch', description: 'Fetch a URL', inputSchema: {} }],
+  tool_count: 1,
+  prompts: [],
+  prompt_count: 0
+}
+
 const NOTE = 'Automatically enabled by selected data sources.'
 const EXPLICIT_NOTE = 'Also selected on its own, so it stays on when the sources are deselected.'
 
@@ -202,6 +212,35 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
     expect(chip).toHaveAttribute('aria-pressed', 'false')
     expect(chip).not.toHaveAttribute('aria-disabled')
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+  })
+
+  it('does not lock the chip when the deployment keeps the search out of outbound turns', () => {
+    // FEATURE_ATLAS_SEARCH_WITH_OUTBOUND_TOOLS=false: the server keeps the
+    // implied tool out of a turn that carries an MCP server's tool, so the
+    // panel must not claim it is on.
+    marketplaceState.tools = [ATLAS_SERVER, WEB_SERVER]
+    renderPanel({
+      effectiveDataSources: ['srv:doc'],
+      selectedTools: new Set(['web__fetch']),
+      features: { tools: true, atlas_search_with_outbound_tools: false }
+    })
+
+    const chip = screen.getByRole('button', { name: 'search' })
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+  })
+
+  it('still locks the chip when the deployment allows the search next to outbound tools', () => {
+    marketplaceState.tools = [ATLAS_SERVER, WEB_SERVER]
+    renderPanel({
+      effectiveDataSources: ['srv:doc'],
+      selectedTools: new Set(['web__fetch']),
+      features: { tools: true, atlas_search_with_outbound_tools: true }
+    })
+
+    const chip = screen.getByRole('button', { name: 'search' })
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(NOTE)).toBeInTheDocument()
   })
   it('does not touch another server that has a tool called search', () => {
     marketplaceState.tools = [ATLAS_SERVER, OTHER_SERVER]

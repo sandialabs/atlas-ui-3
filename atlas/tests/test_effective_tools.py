@@ -698,6 +698,7 @@ async def test_a_sources_only_turn_with_rag_off_says_the_sources_were_not_read()
 # -- The deployment setting that separates an internal corpus from an
 # -- outbound tool ---------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_the_search_tool_is_not_implied_next_to_an_outbound_tool_when_asked():
     """``FEATURE_ATLAS_SEARCH_WITH_OUTBOUND_TOOLS=false`` keeps them apart.
@@ -724,6 +725,70 @@ async def test_the_search_tool_is_not_implied_next_to_an_outbound_tool_when_aske
     )
 
     assert tools_mode.await_args.kwargs["selected_tools"] == ["web__fetch"]
+
+
+@pytest.mark.asyncio
+async def test_an_only_rag_turn_is_not_given_the_search_tool():
+    """``only_rag`` asks for the sources to be read directly.
+
+    The implied tool would send the turn to the tools branch instead, so the
+    implication is skipped for such a turn.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+        rag_mode=rag_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=[],
+        selected_data_sources=["srv:src"],
+        only_rag=True,
+        files=None,
+    )
+
+    tools_mode.assert_not_awaited()
+    rag_mode.assert_awaited_once()
+    assert rag_mode.await_args.kwargs["data_sources"] == ["srv:src"]
+
+
+@pytest.mark.asyncio
+async def test_an_only_rag_agent_turn_runs_as_a_rag_turn():
+    """``only_rag`` wins over agent mode, as it did before."""
+    agent_mode = AsyncMock(return_value={"mode": "agent"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = ChatOrchestrator(
+        llm=MagicMock(),
+        event_publisher=AsyncMock(),
+        session_repository=InMemorySessionRepository(),
+        agent_mode=SimpleNamespace(run=agent_mode),
+        rag_mode=SimpleNamespace(run_streaming=rag_mode),
+        config_manager=_config(),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=[],
+        selected_data_sources=["srv:src"],
+        only_rag=True,
+        agent_mode=True,
+        files=None,
+    )
+
+    agent_mode.assert_not_awaited()
+    rag_mode.assert_awaited_once()
 
 
 @pytest.mark.asyncio
