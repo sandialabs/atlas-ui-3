@@ -115,7 +115,8 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
   it('lets the user remove their own tick while the sources imply the tool', () => {
     // The user ticked it themselves, so they must be able to untick it --
     // the tool stays on because the sources imply it, but the selection they
-    // made is theirs to undo.
+    // made is theirs to undo. The note about their own tick is what shows
+    // that the click did something.
     const removeTools = vi.fn()
     const context = renderPanel({
       effectiveDataSources: ['srv:doc'],
@@ -125,6 +126,8 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
 
     const chip = screen.getByRole('button', { name: 'search' })
     expect(chip).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByText(EXPLICIT_NOTE)).toBeInTheDocument()
+
     fireEvent.click(chip)
     fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
     expect(removeTools).toHaveBeenCalledWith(['atlas_search'])

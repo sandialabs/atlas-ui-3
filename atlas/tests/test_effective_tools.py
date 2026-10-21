@@ -424,19 +424,23 @@ async def test_execute_does_not_imply_the_tool_when_the_flags_are_off():
 
 
 @pytest.mark.asyncio
-async def test_an_agent_turn_with_the_flags_off_warns_about_the_sources():
-    """An agent turn whose search tool cannot run says so.
+async def test_an_agent_turn_with_the_flags_off_does_not_run_on_the_search_tool():
+    """The search tool is not in the schema under flags-off, so it must not
+    count as a tool the agent loop can call.
 
-    The agent branch does no authorization filtering, so the tool list still
-    names the search tool the user ticked -- but under flags-off it never
-    reaches the schema, so the sources it should have read stay unread.
+    An agent turn whose only tool was the search tool would otherwise run
+    with an empty schema, and a model that still calls a tool gets a
+    provider rejection for it. The turn is downgraded instead, and the
+    sources are read by the route that reads them.
     """
     agent_mode = AsyncMock(return_value={"mode": "agent"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
     orch = ChatOrchestrator(
         llm=MagicMock(),
         event_publisher=AsyncMock(),
         session_repository=InMemorySessionRepository(),
         agent_mode=SimpleNamespace(run=agent_mode),
+        rag_mode=SimpleNamespace(run_streaming=rag_mode),
         config_manager=_config(tools=False),
     )
     sid = uuid4()
@@ -452,10 +456,11 @@ async def test_an_agent_turn_with_the_flags_off_warns_about_the_sources():
         files=None,
     )
 
-    agent_mode.assert_awaited_once()
+    agent_mode.assert_not_awaited()
+    rag_mode.assert_awaited_once()
     orch.event_publisher.publish_warning.assert_awaited_once()
     message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
-    assert "could not be searched" in message
+    assert "Agent mode needs at least one tool" in message
 
 
 @pytest.mark.asyncio
@@ -579,9 +584,10 @@ async def test_the_fallback_blames_the_feature_flag_when_it_is_off():
 
     orch.event_publisher.publish_warning.assert_awaited_once()
     message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
-    # The route below reads the sources, so the tools are what went missing.
-    assert "tools for this turn were not available" in message
-    assert "Authorization" in message
+    # The route below reads the sources, so the search tool is what went
+    # missing -- and the flag that removed it is named.
+    assert "FEATURE_ATLAS_RAG_TOOLS_ENABLED" in message
+    assert "read directly" in message
 
 
 @pytest.mark.asyncio

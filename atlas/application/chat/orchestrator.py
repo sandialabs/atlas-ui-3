@@ -245,6 +245,49 @@ class ChatOrchestrator:
             return True
         return bool(getattr(settings, "feature_rag_enabled", False))
 
+    def _sources_message(self, *, read_directly: bool) -> str:
+        """What to tell the user about sources the turn could not search.
+
+        ``read_directly`` says whether the route below reads the sources
+        without the model's tools; the message must not contradict it. The
+        flag named is the one that is actually off.
+        """
+        if not self._rag_enabled():
+            return (
+                "**Your data sources could not be read.** RAG is turned off in "
+                "this deployment (`FEATURE_RAG_ENABLED`), so nothing could "
+                "read the sources you selected. Ask an administrator to turn "
+                "it on."
+            )
+        if not self._builtin_search_flags_on():
+            if read_directly:
+                return (
+                    "**The built-in `atlas_search` tool is turned off in this "
+                    "deployment (`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so the "
+                    "model could not search the sources itself. They were "
+                    "read directly."
+                )
+            return (
+                "**Your data sources could not be searched.** The built-in "
+                "`atlas_search` tool is turned off in this deployment "
+                "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so the model could not "
+                "read the sources you selected. Ask an administrator to turn "
+                "it on."
+            )
+        if read_directly:
+            return (
+                "**The tools for this turn were not available.** "
+                "Authorization removed every selected tool, so the model could "
+                "not use them. The sources you selected were read without "
+                "them."
+            )
+        return (
+            "**Your data sources could not be searched.** The built-in "
+            "`atlas_search` tool is not available to this conversation, so the "
+            "model could not read the sources you selected. Ask an "
+            "administrator to check your access to the built-in ATLAS tools."
+        )
+
     async def _warn_if_sources_unsearchable(
         self,
         selected_tools: Optional[List[str]],
@@ -285,33 +328,15 @@ class ChatOrchestrator:
             # name from a saved conversation) and the flags let it through
             # to the schema, so its sources are read.
             return
-        if self._builtin_search_flags_on():
-            # The flags are on, so the tool was reachable and something else
-            # took it away -- authorization, most likely.
-            logger.warning(
-                "Data sources selected but the built-in search tool is not "
-                "available to this turn",
-            )
-            message = (
-                "**Your data sources could not be searched.** The built-in "
-                "`atlas_search` tool is not available to this conversation, "
-                "so the model could not read the sources you selected. "
-                "Ask an administrator to check your access to the built-in "
-                "ATLAS tools."
-            )
-        else:
-            logger.warning(
-                "Data sources selected but the built-in search tool is turned "
-                "off; this turn will not search them",
-            )
-            message = (
-                "**Your data sources could not be searched.** The built-in "
-                "`atlas_search` tool is turned off in this deployment "
-                "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so the model could not "
-                "read the sources you selected. Ask an administrator to turn "
-                "it on."
-            )
-        await self.event_publisher.publish_warning(message=message)
+        logger.warning(
+            "Data sources selected but the built-in search tool is not "
+            "available to this turn",
+        )
+        # The tools branch does not read the sources itself, so the message
+        # must not claim they were.
+        await self.event_publisher.publish_warning(
+            message=self._sources_message(read_directly=False),
+        )
 
     async def execute(
         self,
@@ -529,6 +554,17 @@ class ChatOrchestrator:
                 if isinstance(new_agent, bool):
                     agent_mode = new_agent
 
+        if not self._builtin_search_flags_on():
+            # The schema builder drops the search tool under flags-off, so it
+            # must not count as a tool the turn can run: an agent turn whose
+            # only tool was the search tool would otherwise run with an empty
+            # schema, and a model that still calls a tool gets a provider
+            # rejection for it.
+            effective_tools = [
+                t for t in effective_tools
+                if normalize_tool_name(t) != SEARCH_TOOL_NAME
+            ]
+
         # Handle file ingestion
         update_callback = kwargs.get("update_callback")
         logger.debug(f"Orchestrator.execute: update_callback present = {update_callback is not None}")
@@ -668,13 +704,9 @@ class ChatOrchestrator:
                     # were taken away rather than finding out from the
                     # answer. (With RAG off nothing reads the sources either
                     # way, and the plain route below says so.)
-                    message = (
-                        "**The tools for this turn were not available.** "
-                        "Authorization removed every selected tool, so the "
-                        "model could not use them. The sources you "
-                        "selected were read without them."
+                    await self.event_publisher.publish_warning(
+                        message=self._sources_message(read_directly=True),
                     )
-                    await self.event_publisher.publish_warning(message=message)
 
         if authorized_tools:
             # After filtering: authorization can strip ``atlas_search`` (the
@@ -717,13 +749,7 @@ class ChatOrchestrator:
                     "will not read them",
                 )
                 await self.event_publisher.publish_warning(
-                    message=(
-                        "**Your data sources could not be read.** RAG is "
-                        "turned off in this deployment "
-                        "(`FEATURE_RAG_ENABLED`), so nothing could read the "
-                        "sources you selected. Ask an administrator to turn "
-                        "it on."
-                    ),
+                    message=self._sources_message(read_directly=False),
                 )
             return await self.plain_mode.run_streaming(
                 session=session,
