@@ -23,7 +23,7 @@ import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, build
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
-import { resolveTurnDataSources, searchToolReason as searchToolReasonFor } from '../utils/ragSources'
+import { resolveTurnDataSources } from '../utils/ragSources'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 import { isKnownUser } from '../utils/userStorage'
 import { normalizeSaveMode } from '../utils/saveModeConfig'
@@ -923,22 +923,20 @@ export const ChatProvider = ({ children }) => {
 	// The tool panels read this so the built-in search tool's automatic state
 	// matches what the server will really offer (#1102): a source the level
 	// excludes never reaches the turn, so it cannot imply the search tool.
-	// The search tool's *own* selection is deliberately not a term here: it
-	// would expand the list and lock the tool on, and a user who ticked it
-	// could never untick it.
+	//
+	// Two terms are deliberately left out, and the helper documents both:
+	// the RAG toggle (a stale flag -- the toggle is gone from the UI -- would
+	// lock the search chip on with no way to unlock it) and the search
+	// tool's own selection (ticking it would lock it on and it could never
+	// be unticked). The wire payload keeps them: they decide what the turn
+	// may read, not what the panel shows.
 	const effectiveDataSources = useMemo(() => resolveTurnDataSources({
 		selectedDataSources,
-		ragEnabled,
+		ragEnabled: false,
 		searchToolSelected: false,
 		allSourceIds: getAllRagSourceIds(),
 		dropExcluded: keys => dropExcluded(keys, ragKeyLevel),
-	}), [selectedDataSources, ragEnabled, getAllRagSourceIds, dropExcluded, ragKeyLevel])
-
-	// Why the search tool is on, when it is on because of the sources.
-	const searchToolReason = useMemo(() => searchToolReasonFor({
-		selectedDataSources,
-		effectiveDataSources,
-	}), [selectedDataSources, effectiveDataSources])
+	}), [selectedDataSources, getAllRagSourceIds, dropExcluded, ragKeyLevel])
 
 	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null, selectedToolsOverride = null, captureCorrection = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
@@ -2275,9 +2273,6 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// panels read this to decide whether the built-in search tool is
 		// automatically on.
 		effectiveDataSources,
-		// Why the search tool is on, when it is on because of the sources:
-		// 'sources' (the user picked them) or 'rag' (the RAG toggle).
-		searchToolReason,
 		toggleDataSource: guarded.toggleDataSource,
 		addDataSources: guarded.addDataSources,
 		clearDataSources: guarded.clearDataSources,

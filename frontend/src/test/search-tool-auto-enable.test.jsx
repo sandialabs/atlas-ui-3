@@ -55,7 +55,6 @@ const OTHER_SERVER = {
 }
 
 const NOTE = 'Automatically enabled by selected data sources.'
-const RAG_NOTE = 'Automatically enabled while RAG is on.'
 const EXPLICIT_NOTE = 'Also selected on its own, so it stays on when the sources are deselected.'
 
 const chatContext = (overrides = {}) => ({
@@ -168,18 +167,17 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
     expect(screen.getByText(EXPLICIT_NOTE)).toBeInTheDocument()
   })
 
-  it('names the RAG toggle when the toggle is what put the sources in play', () => {
-    // Nothing was hand-picked: the RAG toggle expanded the list, so the
-    // note says so rather than claiming the user picked sources.
-    renderPanel({
-      effectiveDataSources: ['srv:doc'],
-      searchToolReason: 'rag'
-    })
+  it('does not lock the chip for a stale RAG flag with nothing picked', () => {
+    // The RAG toggle is gone from the UI, so its flag is only ever a
+    // leftover. It must not lock the search chip on with no way to unlock
+    // it.
+    renderPanel({ effectiveDataSources: [] })
 
-    expect(screen.getByText(RAG_NOTE)).toBeInTheDocument()
+    const chip = screen.getByRole('button', { name: 'search' })
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+    expect(chip).not.toHaveAttribute('aria-disabled')
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
   })
-
   it('does not touch another server that has a tool called search', () => {
     marketplaceState.tools = [ATLAS_SERVER, OTHER_SERVER]
     const context = renderPanel({ effectiveDataSources: ['srv:doc'] })

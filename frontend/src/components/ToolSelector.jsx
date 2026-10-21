@@ -4,10 +4,10 @@ import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import {
+  SEARCH_AUTO_ENABLED_NOTE,
   SEARCH_EXPLICIT_NOTE,
   SEARCH_TOOL_KEY,
-  searchToolAutoEnabled,
-  searchToolNote
+  searchToolAutoEnabled
 } from '../utils/searchToolAvailability'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { FOCUS_RING } from '../utils/focusRing'
@@ -41,7 +41,6 @@ const ToolSelector = () => {
     features,
     complianceLevelFilter,
     effectiveDataSources,
-    searchToolReason,
     currentModel,
     models
   } = useChat()
@@ -141,7 +140,6 @@ const ToolSelector = () => {
     currentModel,
     models
   })
-  const searchNote = searchToolNote(searchToolReason)
 
   if (!features?.tools) return null
 
@@ -216,7 +214,7 @@ const ToolSelector = () => {
                     aria-pressed={isOn}
                     aria-disabled={autoEnabled ? true : undefined}
                     title={autoEnabled
-                      ? searchNote
+                      ? SEARCH_AUTO_ENABLED_NOTE
                       : `${isOn ? 'Turn off' : 'Turn on'} ${row.name}`}
                     className={`w-full px-3 py-2 text-left flex items-start gap-2 border-b border-gray-700 last:border-b-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400 ${
                       isOn ? 'bg-blue-900/30 hover:bg-blue-900/40' : 'hover:bg-gray-700'
@@ -229,7 +227,7 @@ const ToolSelector = () => {
                         <span className="block text-xs text-gray-400 break-words">{row.description}</span>
                       )}
                       {autoEnabled && (
-                        <span className="block text-xs text-blue-300 break-words">{searchNote}</span>
+                        <span className="block text-xs text-blue-300 break-words">{SEARCH_AUTO_ENABLED_NOTE}</span>
                       )}
                       {autoEnabled && explicit && (
                         <span className="block text-xs text-blue-300 break-words">{SEARCH_EXPLICIT_NOTE}</span>

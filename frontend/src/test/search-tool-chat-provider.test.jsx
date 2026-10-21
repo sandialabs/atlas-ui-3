@@ -130,7 +130,6 @@ describe('The search tool and the sources a turn carries (real ChatProvider)', (
     const { result } = renderChat()
 
     expect(result.current.effectiveDataSources).toEqual([])
-    expect(result.current.searchToolReason).toBeNull()
 
     act(() => { result.current.sendChatMessage('search for cars') })
     const payload = h.sendMessage.mock.calls[0][0]
@@ -142,20 +141,20 @@ describe('The search tool and the sources a turn carries (real ChatProvider)', (
     const { result } = renderChat()
 
     expect(result.current.effectiveDataSources).toEqual(['srv:src1'])
-    expect(result.current.searchToolReason).toBe('sources')
 
     act(() => { result.current.sendChatMessage('search for cars') })
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.selected_data_sources).toEqual(['srv:src1'])
   })
 
-  it('the RAG toggle carries every source, and says so', () => {
+  it('the RAG toggle carries every source, but does not lock the chip', () => {
+    // The RAG toggle is gone from the UI, so its flag is only ever a
+    // leftover from an older version. It still decides what the wire may
+    // read, but it must not lock the search chip on.
     h.ragEnabled = true
     const { result } = renderChat()
 
-    expect(result.current.effectiveDataSources.length).toBeGreaterThan(0)
-    // Nothing was hand-picked: the toggle is what put the sources in play.
-    expect(result.current.searchToolReason).toBe('rag')
+    expect(result.current.effectiveDataSources).toEqual([])
 
     act(() => { result.current.sendChatMessage('search for cars') })
     const payload = h.sendMessage.mock.calls[0][0]
@@ -167,7 +166,6 @@ describe('The search tool and the sources a turn carries (real ChatProvider)', (
     const { result } = renderChat()
 
     expect(result.current.effectiveDataSources).toEqual([])
-    expect(result.current.searchToolReason).toBeNull()
 
     act(() => { result.current.sendChatMessage('hello') })
     const payload = h.sendMessage.mock.calls[0][0]

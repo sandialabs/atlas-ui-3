@@ -153,21 +153,26 @@ by the tool the user asked for.
   flag had to be kept in step.
 - `frontend/src/utils/ragSources.js` holds the source resolution, and both
   the chat context's memo and the outgoing payload call it. The two differ in
-  exactly one term, and the difference is deliberate: the wire payload
+  exactly two terms, and both differences are deliberate: the wire payload
   expands to every source when the user ticks the search tool on its own
-  ("search everything I can reach"), while the panels' list does not -- that
-  expansion would lock the tool on, and a user who ticked it could never
-  untick it.
+  ("search everything I can reach") or when the leftover RAG flag is set,
+  while the panels' list does not -- either expansion would lock the tool on
+  and the user could never untick it.
 - The panels read the *effective* data sources -- the ones the turn would
   really carry, after the active compliance level has had its say -- and the
   selected model's tool support, so the panel never claims a tool the server
   is not going to offer.
 - Both the chat-bar **Tools** menu and the Tools and Settings panel show the
   automatic state, with the note and a non-toggleable control. The note names
-  the RAG toggle when that is what put the sources in play (nothing was
-  hand-picked then). A tool that is *also* selected in its own right says so
-  too: the sources imply it, but the user's own tick is what keeps it on once
-  the sources are deselected.
+  the sources the user picked. A tool that is *also* selected in its own
+  right says so too: the sources imply it, but the user's own tick is what
+  keeps it on once the sources are deselected.
+- Sources the client expanded on its own -- the RAG toggle, or the search
+  tool ticked on its own -- do not imply the tool. The RAG toggle is gone
+  from the UI, so its flag is only ever a leftover from an older version (or
+  a saved workspace), and a leftover must not lock the search chip on with no
+  way to unlock it. The server skips the implication for the same sources
+  (`data_sources_auto`), so the panel and the model agree.
 - The composer's "agent mode has nothing to act on" callout counts the
   implied tool, so a turn with sources selected is not told it has no tool.
 

@@ -13,8 +13,14 @@
 //     would then expand the source list, which would lock the tool on --
 //     and a user who ticked it could never untick it (issue #1102).
 //
+// `ragEnabled` is the same story: the RAG toggle is gone from the UI, so
+// the flag is only ever a leftover from an older version (or a saved
+// workspace). It still decides what the wire may read, but it must not lock
+// the search chip on: a user with a stale flag would have no way to unlock
+// it.
+//
 // Both callers use this one helper, so the rule lives in one place and the
-// difference is explicit rather than accidental.
+// differences are explicit rather than accidental.
 
 export const resolveTurnDataSources = ({
 	selectedDataSources,
@@ -28,12 +34,4 @@ export const resolveTurnDataSources = ({
 	if (!ragActivated) return []
 	const sources = hasSelectedSources ? [...selectedDataSources] : allSourceIds
 	return dropExcluded(sources)
-}
-
-// Why the built-in search tool is on, when it is on because of the sources:
-// 'sources' when the user picked them, 'rag' when the RAG toggle expanded
-// them, and null when no source is in play.
-export const searchToolReason = ({ selectedDataSources, effectiveDataSources }) => {
-	if (!effectiveDataSources || effectiveDataSources.length === 0) return null
-	return selectedDataSources && selectedDataSources.size > 0 ? 'sources' : 'rag'
 }

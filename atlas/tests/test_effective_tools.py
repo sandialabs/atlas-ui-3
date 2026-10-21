@@ -464,7 +464,8 @@ async def test_execute_falls_back_when_authorization_takes_every_tool():
 
     Authorization stripped the search tool (the deployment has it switched
     off), so the tools branch would run with nothing to run. The turn falls
-    through to the route that reads the sources instead of dropping them.
+    through to the route that reads the sources instead of dropping them --
+    and says so, because the user asked for tools that did not run.
     """
     tools_mode = AsyncMock(return_value={"mode": "tools"})
     rag_mode = AsyncMock(return_value={"mode": "rag"})
@@ -490,6 +491,67 @@ async def test_execute_falls_back_when_authorization_takes_every_tool():
     tools_mode.assert_not_awaited()
     rag_mode.assert_awaited_once()
     assert rag_mode.await_args.kwargs["data_sources"] == ["srv:src"]
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "not available" in message
+
+
+@pytest.mark.asyncio
+async def test_auto_expanded_sources_do_not_imply_the_search_tool():
+    """Sources the client expanded on its own do not imply the tool.
+
+    The user picked nothing: the client filled the list with every source it
+    could reach (the RAG toggle, or the search tool ticked on its own).
+    Implying the tool here would put an internal corpus search next to the
+    user's outbound tools without them asking for it.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        data_sources_auto=True,
+        files=None,
+    )
+
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["calc"]
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_warning_stays_quiet_for_auto_expanded_sources():
+    """Nothing was picked, so there is nothing to tell the user about."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=("calc", "atlas_")),
+        tools_mode,
+        rag_mode=rag_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        data_sources_auto=True,
+        files=None,
+    )
+
+    orch.event_publisher.publish_warning.assert_not_awaited()
 
 
 @pytest.mark.asyncio

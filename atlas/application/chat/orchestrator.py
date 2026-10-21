@@ -430,6 +430,11 @@ class ChatOrchestrator:
         # implied search tool included. A model that cannot call tools gets
         # no implied tool at all: its tools are stripped, so the turn has
         # none and keeps the sources it had.
+        #
+        # Sources the client expanded on its own (the RAG toggle, or the
+        # search tool ticked on its own) do not imply the tool: the user
+        # picked nothing, so nothing of theirs is at stake. A search tool
+        # the user ticked in their own right is in the selection either way.
         model_supports_tools = self._model_supports_tools(model)
         # Whether the *user* picked the search tool, as opposed to the
         # sources implying it. The hook may take the sources away, and the
@@ -439,7 +444,7 @@ class ChatOrchestrator:
             selected_tools,
             selected_data_sources,
             getattr(self.config_manager, "app_settings", None),
-            imply=model_supports_tools,
+            imply=model_supports_tools and not data_sources_auto,
         )
 
         # UserPromptSubmit hook (GH #713): fires after the user message is added,
@@ -642,11 +647,12 @@ class ChatOrchestrator:
                     "Tool authorization removed every selected tool; running "
                     "the turn without tools"
                 )
-                if selected_data_sources:
-                    # The turn carries sources and has no tool to read them
-                    # with. It falls through to the route that reads them,
-                    # but the user should know the search tool was taken
-                    # away rather than finding out from the answer.
+                if selected_data_sources and not data_sources_auto:
+                    # The turn carries sources the user picked and has no
+                    # tool to read them with. It falls through to the route
+                    # that reads them, but the user should know the search
+                    # tool was taken away rather than finding out from the
+                    # answer.
                     await self.event_publisher.publish_warning(
                         message=(
                             "**The tools for this turn were not available.** "
