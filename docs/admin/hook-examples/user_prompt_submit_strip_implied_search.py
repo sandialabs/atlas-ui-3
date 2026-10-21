@@ -38,9 +38,22 @@ BUILTIN_TOOLS = {
     "atlas_result",
     "atlas_follow_up",
 }
-# The search tool, and the name it had before the tools were consolidated
-# (issue #855).
+# The pre-#855 names of the built-ins (issue #855). A selection may still
+# carry them, and they are the same tools.
+LEGACY_ALIASES = {
+    "canvas_canvas": "atlas_canvas",
+    "atlas_agent_sleep": "atlas_sleep",
+    "atlas_rag_query": "atlas_search",
+    "atlas_rag_discover_data_sources": "atlas_discover_sources",
+}
+# The search tool, under its current name and the one it had before the tools
+# were consolidated.
 SEARCH_TOOLS = ("atlas_search", "atlas_rag_query")
+
+
+def normalize(tool):
+    """The current name of a built-in tool, whatever it is called."""
+    return LEGACY_ALIASES.get(tool, tool)
 
 
 def is_search_tool(tool):
@@ -50,7 +63,7 @@ def is_search_tool(tool):
 def is_builtin(tool):
     # An explicit list, not a prefix: an operator may configure an MCP
     # server whose name starts with "atlas_", and that server is outbound.
-    return tool in BUILTIN_TOOLS
+    return normalize(tool) in BUILTIN_TOOLS
 
 
 env = json.load(sys.stdin)

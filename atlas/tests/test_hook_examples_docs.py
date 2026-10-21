@@ -11,6 +11,7 @@ importing it, so the exercised path is the one Atlas uses.
 import asyncio
 import importlib.util
 import json
+import re
 import sys
 import shutil
 import stat
@@ -138,6 +139,30 @@ class TestDocsExamples:
         )
         assert outcome.modified
         assert outcome.payload["selected_tools"] == ["atlas_web__fetch"]
+
+    async def test_user_prompt_submit_strips_the_legacy_search_tool(self):
+        """A selection may still carry the pre-#855 name of the search tool."""
+        outcome = await _run(
+            HookEvent.USER_PROMPT_SUBMIT, "user_prompt_submit_strip_implied_search.py",
+            {"prompt": "look it up", "selected_tools": ["atlas_rag_query", "web__fetch"],
+             "selected_data_sources": ["srv:doc"], "agent_mode": False},
+        )
+        assert outcome.modified
+        assert outcome.payload["selected_tools"] == ["web__fetch"]
+
+    async def test_the_strip_hook_knows_the_built_in_tools(self):
+        """The hook's list of built-ins must match the ones the server has.
+
+        The hook is a standalone script (it cannot import the atlas package),
+        so its list is copied -- and a copy goes stale. This pins it to the
+        real thing.
+        """
+        from atlas.modules.mcp_tools.atlas_server import ATLAS_TOOL_NAMES
+
+        source = (EXAMPLES / "user_prompt_submit_strip_implied_search.py").read_text()
+        block = source.split("BUILTIN_TOOLS = {")[1].split("}")[0]
+        listed = set(re.findall(r'"(atlas_[a-z_]+)"', block))
+        assert listed == set(ATLAS_TOOL_NAMES)
 
     async def test_pre_llm_call_swaps_model_for_restricted_turns(self):
         restricted = await _run(HookEvent.PRE_LLM_CALL, "pre_llm_call.py",

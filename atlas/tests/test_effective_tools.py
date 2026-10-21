@@ -38,14 +38,17 @@ from atlas.modules.config.models import LLMConfig
 from atlas.modules.mcp_tools.atlas_server import search_tools_enabled
 
 
-def _settings(rag=True, tools=True):
+def _settings(rag=True, tools=True, search_with_outbound=True):
     return SimpleNamespace(
         feature_rag_enabled=rag, feature_atlas_rag_tools_enabled=tools,
+        feature_atlas_search_with_outbound_tools=search_with_outbound,
     )
 
 
-def _config(rag=True, tools=True):
-    return SimpleNamespace(app_settings=_settings(rag=rag, tools=tools))
+def _config(rag=True, tools=True, search_with_outbound=True):
+    return SimpleNamespace(app_settings=_settings(
+        rag=rag, tools=tools, search_with_outbound=search_with_outbound,
+    ))
 
 
 def _orchestrator(config):
@@ -458,13 +461,13 @@ async def test_an_agent_turn_with_the_flags_off_does_not_run_on_the_search_tool(
 
     agent_mode.assert_not_awaited()
     rag_mode.assert_awaited_once()
-    # Two notes: the turn was downgraded (it had no tool to call), and the
-    # sources were read directly because the search tool is off.
+    # Two notes: the turn was downgraded (the tool it had is not available),
+    # and the sources were read directly because the search tool is off.
     messages = [
         call.kwargs["message"]
         for call in orch.event_publisher.publish_warning.await_args_list
     ]
-    assert any("Agent mode needs at least one tool" in m for m in messages)
+    assert any("Agent mode could not use the selected tool" in m for m in messages)
     assert any("FEATURE_ATLAS_RAG_TOOLS_ENABLED" in m for m in messages)
 
 
@@ -691,6 +694,88 @@ async def test_a_sources_only_turn_with_rag_off_says_the_sources_were_not_read()
     assert "could not be read" in message
     assert "FEATURE_RAG_ENABLED" in message
 
+
+# -- The deployment setting that separates an internal corpus from an
+# -- outbound tool ---------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_the_search_tool_is_not_implied_next_to_an_outbound_tool_when_asked():
+    """``FEATURE_ATLAS_SEARCH_WITH_OUTBOUND_TOOLS=false`` keeps them apart.
+
+    The model reads an internal corpus and can hand what it read to an MCP
+    server in the same turn, which no per-user access control narrows.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(search_with_outbound=False),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["web__fetch"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["web__fetch"]
+
+
+@pytest.mark.asyncio
+async def test_the_search_tool_is_still_implied_next_to_a_builtin_tool():
+    """Only an MCP server counts as outbound."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(search_with_outbound=False),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_canvas"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["atlas_canvas", "atlas_search"]
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_search_tool_survives_the_setting():
+    """The tool the user ticked is theirs, whatever the setting says."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(search_with_outbound=False),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_search", "web__fetch"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["atlas_search", "web__fetch"]
+
+
+# -- The deployment setting that separates an internal corpus from an
+# -- outbound tool ---------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_an_explicit_search_tool_that_the_flag_removed_says_so():

@@ -31,7 +31,10 @@ Two things follow for operators:
   read in the same turn as an outbound tool. There is no per-turn switch to
   separate the two: if that matters for your deployment, leave the search
   tool switched off (`FEATURE_ATLAS_RAG_TOOLS_ENABLED=false`), do not offer
-  the RAG sources to those users, or install the reference hook
+  the RAG sources to those users, set
+  `FEATURE_ATLAS_SEARCH_WITH_OUTBOUND_TOOLS=false` (the orchestrator then
+  keeps the implied tool out of any turn that carries a tool from an MCP
+  server), or install the reference hook
   [user_prompt_submit_strip_implied_search.py](hook-examples/user_prompt_submit_strip_implied_search.py),
   which removes the implied search tool from any turn that also calls an
   outbound MCP server.

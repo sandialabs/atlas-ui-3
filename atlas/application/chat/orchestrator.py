@@ -15,7 +15,12 @@ from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 from atlas.modules.config.settings import agent_mode_available, configured_agent_max_steps
-from atlas.modules.mcp_tools.atlas_server import SEARCH_TOOL_NAME, normalize_tool_name, search_tools_enabled
+from atlas.modules.mcp_tools.atlas_server import (
+    SEARCH_TOOL_NAME,
+    is_builtin_tool,
+    normalize_tool_name,
+    search_tools_enabled,
+)
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from .modes.agent import AgentModeRunner
@@ -230,6 +235,25 @@ class ChatOrchestrator:
         under flags-off as one that never named the tool.
         """
         return search_tools_enabled(getattr(self.config_manager, "app_settings", None))
+
+    def _search_allowed_with_outbound_tools(self, selected_tools: Optional[List[str]]) -> bool:
+        """Whether the search tool may be implied next to an outbound tool.
+
+        The model reads an internal corpus and can hand what it read to an
+        MCP server in the same turn, which no per-user access control
+        narrows. A deployment that does not want that can switch the
+        implication off for such turns
+        (``FEATURE_ATLAS_SEARCH_WITH_OUTBOUND_TOOLS=false``); the tool the
+        user ticked in their own right is theirs either way.
+        """
+        settings = getattr(self.config_manager, "app_settings", None)
+        if settings is None:
+            return True
+        if getattr(settings, "feature_atlas_search_with_outbound_tools", True):
+            return True
+        return not any(
+            not is_builtin_tool(t) for t in (selected_tools or [])
+        )
 
     def _rag_enabled(self) -> bool:
         """Whether this deployment reads data sources at all.
@@ -485,7 +509,9 @@ class ChatOrchestrator:
             selected_tools,
             selected_data_sources,
             getattr(self.config_manager, "app_settings", None),
-            imply=model_supports_tools and not data_sources_auto,
+            imply=model_supports_tools
+            and not data_sources_auto
+            and self._search_allowed_with_outbound_tools(selected_tools),
         )
 
         # UserPromptSubmit hook (GH #713): fires after the user message is added,
@@ -657,12 +683,22 @@ class ChatOrchestrator:
         # to call and does not need downgrading.
         if agent_mode and not effective_tools:
             logger.info("Agent mode requested with no tools selected; running as a normal chat turn")
-            await self.event_publisher.publish_warning(
-                message=(
+            if user_selected_search and not self._builtin_search_flags_on():
+                # The user did select a tool -- the search one -- but the
+                # deployment has it switched off, so there is nothing to call.
+                # Say that, rather than claiming nothing was selected.
+                message = (
+                    "**Agent mode could not use the selected tool.** The "
+                    "built-in `atlas_search` tool is turned off in this "
+                    "deployment (`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so this "
+                    "message ran without agent mode."
+                )
+            else:
+                message = (
                     "**Agent mode needs at least one tool.** No tools were selected, "
                     "so this message ran without agent mode. Select one or more tools to use agent mode."
-                ),
-            )
+                )
+            await self.event_publisher.publish_warning(message=message)
             agent_mode = False
 
         # Route to appropriate mode (always streaming)
@@ -689,6 +725,9 @@ class ChatOrchestrator:
         # then falls through to the route that reads them rather than
         # dropping them.
         authorized_tools: List[str] = []
+        # Whether the fallback below already told the user what happened, so
+        # the route that reads the sources does not say it a second time.
+        sources_warning_published = False
         if effective_tools and not only_rag:
             authorized_tools = await self.tool_authorization.filter_authorized_tools(
                 selected_tools=effective_tools,
@@ -699,7 +738,11 @@ class ChatOrchestrator:
                     "Tool authorization removed every selected tool; running "
                     "the turn without tools"
                 )
-                if selected_data_sources and not data_sources_auto and self._rag_enabled():
+                if (
+                    selected_data_sources
+                    and not data_sources_auto
+                    and self._rag_enabled()
+                ):
                     # The turn carries sources the user picked and has no
                     # tool to read them with. It falls through to the route
                     # that reads them, but the user should know the tools
@@ -709,6 +752,7 @@ class ChatOrchestrator:
                     await self.event_publisher.publish_warning(
                         message=self._sources_message(read_directly=True),
                     )
+                    sources_warning_published = True
 
         if authorized_tools:
             # After filtering: authorization can strip ``atlas_search`` (the
@@ -733,7 +777,11 @@ class ChatOrchestrator:
             # caller explicitly asked for a RAG-only turn (``only_rag``).
             # With the search tool available, a turn that carries sources has
             # it in its tool list above and runs as a tools turn instead.
-            if user_selected_search and not self._builtin_search_flags_on():
+            if (
+                not sources_warning_published
+                and user_selected_search
+                and not self._builtin_search_flags_on()
+            ):
                 # The user asked for the search tool and the deployment has
                 # it switched off: the sources are read directly instead, and
                 # the user is told that is what happened.

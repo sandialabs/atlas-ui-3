@@ -509,6 +509,15 @@ def is_atlas_tool(tool_name: Any) -> bool:
     return normalize_tool_name(tool_name) in ATLAS_TOOL_SCHEMAS
 
 
+def is_builtin_tool(tool_name: Any) -> bool:
+    """True for one of the built-in tools, by name.
+
+    Not by prefix: an operator may configure an MCP server whose name starts
+    with ``atlas_``, and that server's tools are not built-ins.
+    """
+    return normalize_tool_name(tool_name) in ATLAS_TOOL_NAMES
+
+
 def atlas_tool_schemas(
     tool_names: List[str],
     *,
