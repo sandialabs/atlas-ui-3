@@ -87,6 +87,7 @@ from atlas.infrastructure.sessions.codec import decode_session, encode_session
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
+from atlas.modules.help.help_config import resolve_help_config, report_help_config_problem
 from atlas.routes.admin_routes import admin_router
 
 # Import essential routes
@@ -105,6 +106,7 @@ from atlas.routes.files_routes import (
 from atlas.routes.globus_auth_routes import api_router as globus_api_router
 from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
+from atlas.routes.help_routes import router as help_router
 from atlas.routes.litellm_gateway_routes import router as litellm_gateway_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
@@ -1200,6 +1202,24 @@ async def _run_limit_sweeper(config):
             logger.warning("Run limit sweeper iteration failed", exc_info=True)
 
 
+def _log_help_configuration() -> None:
+    """Log how the Help page gets its content (issue #1107).
+
+    A remote mode without a usable URL is a configuration error, and the
+    operator has to see it in the log even if nobody opens the Help page.
+    """
+    config = resolve_help_config(app_factory.get_config_manager().app_settings)
+    if config.error:
+        report_help_config_problem(config)
+        return
+    if config.is_external_link:
+        logger.info("Help page: external documentation link -> %s", config.content_url)
+    elif config.is_remote_markdown:
+        logger.info("Help page: remotely hosted Markdown from %s", config.content_url)
+    else:
+        logger.info("Help page: local Markdown")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -1284,6 +1304,11 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
+
+    # Report how the Help page gets its content (issue #1107). A
+    # misconfiguration is an error the operator has to see, so it is logged
+    # once at startup rather than only when somebody opens the Help page.
+    _log_help_configuration()
 
     # Ensure feedback directory exists
     _ensure_feedback_directory()
@@ -1472,6 +1497,7 @@ if _session_secret:
 
 # Include essential routes (add files API)
 app.include_router(config_router)
+app.include_router(help_router)
 app.include_router(admin_router)
 app.include_router(telemetry_router)
 app.include_router(files_router)

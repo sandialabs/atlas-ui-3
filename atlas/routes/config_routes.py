@@ -12,6 +12,8 @@ from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config.models import qualified_tool_name
 from atlas.modules.config.settings import configured_agent_max_steps
+from atlas.modules.help.help_config import resolve_help_config
+from atlas.modules.help.local_content import load_local_help_content
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
     ATLAS_SERVER_NAME,
@@ -175,6 +177,11 @@ async def get_config_shell(
     llm_config = config_manager.llm_config
     app_settings = config_manager.app_settings
 
+    # The Help display mode (issue #1107) belongs in the shell config: the
+    # header needs it on the first paint to know whether the Help button
+    # opens the in-app page or an external site.
+    help_config = resolve_help_config(app_settings)
+
     # Build models list without per-user token validity checks (fast path)
     models_list = []
     for model_name, model_config in llm_config.models.items():
@@ -211,6 +218,7 @@ async def get_config_shell(
         # Mirrors the orchestrator's clamp: int() with a fallback, floor of 1.
         "agent_max_steps": configured_agent_max_steps(app_settings),
         "banner_enabled": app_settings.banner_enabled,
+        "help": help_config.as_public_dict(),
         "features": {
             "workspaces": app_settings.workspaces_effective,
             "rag": app_settings.feature_rag_enabled,
@@ -419,68 +427,12 @@ async def get_config(
                         'allowed_data_classifications': declared_classifications(server_config),
                     })
 
-    # Read help page content from a markdown file (with legacy JSON fallback)
-    help_content = ""
-    help_config_filename = config_manager.app_settings.help_config_file
-    help_paths = []
-    try:
-        # Reuse config manager search logic (private but acceptable for now)
-        try:
-            help_paths = config_manager._search_paths(help_config_filename)  # type: ignore[attr-defined]
-        except AttributeError:
-            # Fallback minimal search if method renamed/removed
-            from pathlib import Path
-            atlas_root = Path(__file__).parent.parent
-            project_root = atlas_root.parent
-            help_paths = [
-                project_root / "config" / "overrides" / help_config_filename,
-                project_root / "config" / "defaults" / help_config_filename,
-                atlas_root / "configfilesadmin" / help_config_filename,
-                atlas_root / "configfiles" / help_config_filename,
-                atlas_root / help_config_filename,
-                project_root / help_config_filename,
-            ]
-
-        found_path = None
-        for p in help_paths:
-            if p.exists():
-                found_path = p
-                break
-
-        # Legacy fallback: if help.md was not found, try help-config.json
-        if not found_path and help_config_filename.endswith(".md"):
-            legacy_filename = help_config_filename.rsplit(".", 1)[0] + "-config.json"
-            try:
-                legacy_paths = config_manager._search_paths(legacy_filename)  # type: ignore[attr-defined]
-            except AttributeError:
-                from pathlib import Path
-                atlas_root = Path(__file__).parent.parent
-                project_root = atlas_root.parent
-                legacy_paths = [
-                    project_root / "config" / "overrides" / legacy_filename,
-                    project_root / "config" / "defaults" / legacy_filename,
-                    atlas_root / "configfilesadmin" / legacy_filename,
-                    atlas_root / "configfiles" / legacy_filename,
-                    atlas_root / legacy_filename,
-                    project_root / legacy_filename,
-                ]
-            for p in legacy_paths:
-                if p.exists():
-                    found_path = p
-                    logger.info("Using legacy help config %s (migrate to help.md)", found_path)
-                    break
-
-        if found_path:
-            with open(found_path, "r", encoding="utf-8") as f:
-                help_content = f.read()
-            logger.info(f"Loaded help content from {found_path}")
-        else:
-            logger.warning(
-                "Help content file not found in any of these locations: %s",
-                [str(p) for p in help_paths]
-            )
-    except Exception as e:
-        logger.warning(f"Error loading help content: {e}")
+    # Read help page content from a markdown file (with legacy JSON fallback).
+    # The dedicated /api/help endpoint is what the Help page uses; this copy
+    # of the local document stays in /api/config for the clients that already
+    # read help_content from there.
+    help_content, _help_path = load_local_help_content(config_manager, app_settings)
+    help_config = resolve_help_config(app_settings)
 
     # Keep INFO logging concise; server lists can be very long.
     logger.info(
@@ -571,6 +523,9 @@ async def get_config(
         "agent_max_steps": configured_agent_max_steps(app_settings),  # Ceiling for the agent loop (bounds the Max Agent Iterations slider)
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_content": help_content,  # Help page content from help.md
+        # How the Help page gets its content (issue #1107): the local
+        # Markdown, a remotely hosted document, or an external link.
+        "help": help_config.as_public_dict(),
         "tool_approvals": {
             "require_approval_by_default": tool_approvals_config.require_approval_by_default,
             "tools": filtered_tool_approvals

@@ -26,6 +26,15 @@ const DEFAULT_FILE_UPLOAD = {
   max_file_size_bytes: 250 * 1024 * 1024
 }
 
+// How the Help page gets its content (issue #1107). 'local' is the default
+// and the pre-#1107 behavior: the Help button opens the in-app page.
+const DEFAULT_HELP = {
+  mode: 'local',
+  requested_mode: 'local',
+  content_url: '',
+  error: null
+}
+
 export const CONFIG_CACHE_KEY = 'chatui-config-cache'
 
 // The selected model is remembered per user (issue #1050): on a shared
@@ -110,7 +119,7 @@ function readCachedConfig() {
  */
 const SAFE_CACHE_FIELDS = [
   'app_name', 'models', 'features', 'file_extraction', 'file_upload',
-  'banner_enabled', 'agent_mode_available', 'agent_max_steps'
+  'banner_enabled', 'agent_mode_available', 'agent_max_steps', 'help'
 ]
 
 /**
@@ -176,6 +185,14 @@ export function useChatConfig() {
       ? { ...DEFAULT_FILE_UPLOAD, ...cached.current.file_upload }
       : DEFAULT_FILE_UPLOAD
   )
+  // How the Help page gets its content (issue #1107). The header needs this
+  // on the first paint to know whether the Help button opens the in-app page
+  // or an external documentation site.
+  const [help, setHelp] = useState(
+    cached.current?.help
+      ? { ...DEFAULT_HELP, ...cached.current.help }
+      : DEFAULT_HELP
+  )
   const [isCanvasOpen, setIsCanvasOpen] = useState(false)
   // Empty until /api/config says who is signed in; then their saved model.
   const [currentModel, setCurrentModel] = useState('')
@@ -219,6 +236,7 @@ export function useChatConfig() {
     setFeatures(prev => ({ ...DEFAULT_FEATURES, ...(cfg.features || prev) }))
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
     setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
+    setHelp(prev => ({ ...DEFAULT_HELP, ...(cfg.help || prev) }))
     setAgentModeAvailable(!!cfg.agent_mode_available)
     // Only a response carrying a valid ceiling updates it: a mixed-version
     // pod that omits (or garbles) the field must not reset a confirmed
@@ -379,6 +397,7 @@ export function useChatConfig() {
     ragServers,
     features,
     setFeatures,
+    help,
     isCanvasOpen,
     setIsCanvasOpen,
     currentModel,

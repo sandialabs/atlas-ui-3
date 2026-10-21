@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-10-16
+Last updated: 2026-10-21
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -17,7 +17,7 @@ To customize your instance, place your own versions of the configuration files i
 *   **`mcp.json`**: Registers and configures the MCP (tool) servers that provide capabilities to the LLM.
 *   **`llmconfig.yml`**: Defines the list of available Large Language Models and their connection details.
 *   **`compliance-levels.json`**: Defines the security compliance levels (e.g., Public, Internal, HIPAA) and the rules for how they can interact.
-*   **`help.md`**: Populates the content of the "Help" page in the user interface (Markdown).
+*   **`help.md`**: Populates the content of the "Help" page in the user interface (Markdown). The `HELP_DISPLAY_MODE` and `HELP_CONTENT_URL` settings can point the Help page at externally hosted documentation instead -- see [Help Page](help-config.md).
 *   **`splash-config.json`**: Configures the startup splash screen for displaying policies and information to users.
 *   **`messages.txt`**: Defines the text for system-wide banner messages that can be displayed to all users.
 

@@ -7,6 +7,13 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
   const [size, setSize] = useState(0)
   const [loading, setLoading] = useState(true)
   const [reloading, setReloading] = useState(false)
+  // How the Help page actually gets its content (issue #1107). When the
+  // deployment serves the documentation from somewhere else, editing this
+  // file changes nothing a user sees -- and saying so is the whole point of
+  // this card.
+  const [displayMode, setDisplayMode] = useState('local')
+  const [contentUrl, setContentUrl] = useState('')
+  const [configError, setConfigError] = useState(null)
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -18,6 +25,9 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
       setFilePath(data.file_path || '')
       setLastModified(data.last_modified || null)
       setSize((data.content || '').length)
+      setDisplayMode(data.mode || 'local')
+      setContentUrl(data.content_url || '')
+      setConfigError(data.error || null)
       return data
     } catch (err) {
       console.error('Error fetching help status:', err)
@@ -69,6 +79,15 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
     ? new Date(lastModified * 1000).toLocaleString()
     : '—'
 
+  // The local editor only controls what users see when the Help page is
+  // showing the local document (issue #1107).
+  const externalSourceIsLive = displayMode !== 'local'
+  const modeLabel = {
+    local: 'Local Markdown (this file)',
+    remote_markdown: 'Externally hosted Markdown',
+    external_link: 'External documentation link'
+  }[displayMode] || displayMode
+
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center gap-3 mb-4">
@@ -80,6 +99,39 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
       <div className="px-3 py-1 rounded text-sm font-medium mb-4 text-green-400 bg-green-900/20">
         Ready
       </div>
+
+      <div className="mb-3 px-3 py-2 bg-gray-900/50 rounded text-xs text-gray-400">
+        Source: {modeLabel}
+      </div>
+
+      {contentUrl && (
+        <div className="mb-3 px-3 py-2 bg-gray-900/50 rounded text-xs text-gray-400 font-mono break-all">
+          URL: {contentUrl}
+        </div>
+      )}
+
+      {configError && (
+        <div className="mb-3 px-3 py-2 bg-yellow-900/20 border border-yellow-700 rounded text-xs text-yellow-300">
+          <div className="font-medium mb-1">Help configuration problem</div>
+          <div>{configError}</div>
+        </div>
+      )}
+
+      {externalSourceIsLive && (
+        <div className="mb-4 px-3 py-2 bg-yellow-900/20 border border-yellow-700 rounded text-xs text-yellow-300">
+          The Help page is showing externally hosted documentation, so this file is
+          not what users see. Editing it has no effect until HELP_DISPLAY_MODE is
+          set back to <span className="font-mono">local</span>.
+        </div>
+      )}
+
+      {!externalSourceIsLive && configError && (
+        <div className="mb-4 px-3 py-2 bg-gray-900/50 rounded text-xs text-gray-400">
+          The configured documentation could not be used, so the Help page is
+          showing this file. Fix the configuration above to serve the external
+          documentation.
+        </div>
+      )}
 
       {filePath && (
         <div className="mb-3 px-3 py-2 bg-gray-900/50 rounded text-xs text-gray-400 font-mono break-all">
