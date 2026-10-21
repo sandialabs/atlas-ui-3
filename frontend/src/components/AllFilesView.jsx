@@ -92,10 +92,20 @@ const AllFilesView = () => {
           aVal = a.size
           bVal = b.size
           break
-        case 'last_modified':
-          aVal = new Date(a.last_modified)
-          bVal = new Date(b.last_modified)
-          break
+        case 'last_modified': {
+          // A file can come back without a timestamp (the API allows a null
+          // last_modified), and a value that cannot be parsed is just as
+          // unknown. Those sort last in either direction instead of
+          // pretending to be from 1970.
+          const aTime = a.last_modified ? new Date(a.last_modified).getTime() : NaN
+          const bTime = b.last_modified ? new Date(b.last_modified).getTime() : NaN
+          const aUnknown = Number.isNaN(aTime)
+          const bUnknown = Number.isNaN(bTime)
+          if (aUnknown && bUnknown) return 0
+          if (aUnknown) return 1
+          if (bUnknown) return -1
+          return sortOrder === 'asc' ? aTime - bTime : bTime - aTime
+        }
         default:
           return 0
       }
@@ -154,7 +164,9 @@ const AllFilesView = () => {
   }
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'Unknown'
     const date = new Date(dateString)
+    if (Number.isNaN(date.getTime())) return 'Unknown'
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 

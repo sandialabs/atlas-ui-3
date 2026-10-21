@@ -167,7 +167,9 @@ const FilesPage = () => {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'Unknown'
-    return new Date(dateString).toLocaleDateString() + ' ' + new Date(dateString).toLocaleTimeString()
+    const date = new Date(dateString)
+    if (Number.isNaN(date.getTime())) return 'Unknown'
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
   }
 
   // Filter files

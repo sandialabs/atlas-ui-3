@@ -1,6 +1,6 @@
 # Troubleshooting File Access for MCP Servers
 
-Last updated: 2026-10-04
+Last updated: 2026-10-21
 
 This guide helps resolve issues with MCP servers accessing attached files in Atlas UI.
 
@@ -264,6 +264,44 @@ Prior to PR #285, filenames with whitespace could produce malformed S3 `Tagging`
 
 **Solution:**
 As of PR #285, filenames are automatically sanitized: all whitespace characters (spaces, tabs, etc.) are replaced with underscores before storage. This happens in both the frontend (on file select/drop) and the backend (`FileManager.sanitize_filename`). No user action is required -- files like `my report.pdf` will be stored as `my_report.pdf`.
+
+### Issue 9: Every Upload Fails with AccessDenied
+
+**Symptoms:**
+- `POST /api/files` (and every upload that goes through the file API) fails
+- The backend log shows `S3 upload failed` with an `AccessDenied` message, and
+  the object is not stored
+
+**Cause:**
+Uploads write the object's tags (`source`, `user_email`, `original_filename`)
+in the same request that stores it. AWS S3 checks `s3:PutObjectTagging` for
+those tags, so a policy that grants `s3:PutObject` but not
+`s3:PutObjectTagging` fails the upload. Reading the tags of a stored object
+needs `s3:GetObjectTagging`; without it the file is still served, but its tags
+come back empty.
+
+**Solution:**
+Grant the tagging permissions alongside the object permissions. See
+[File Storage and Tool Integration](./file-storage.md) for the full list of
+actions the backend uses.
+
+### Issue 10: `POST /api/files` Answers 500 although the File Was Stored
+
+**Symptoms:**
+- The upload request fails with a validation error mentioning `last_modified`,
+  but `GET /api/files` lists the file
+
+**Cause:**
+The S3 client libraries report an object's modification time as a `datetime`,
+while the API reports it as an ISO-8601 string. A mismatch between the two
+makes the response fail validation, and the failure happens *after* the object
+has been stored.
+
+**Solution:**
+The storage layer converts the timestamp to the string the API serves, so this
+does not need operator action. If you see it, check that the running backend
+is the current version (`/api/health` reports it) and that no custom storage
+client bypasses `atlas.modules.file_storage.timestamps.iso_timestamp`.
 
 ## Debugging Tips
 

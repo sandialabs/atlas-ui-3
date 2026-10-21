@@ -55,6 +55,13 @@ def add_metadata_headers(response: Response, metadata: Dict[str, str]):
         response.headers[f"x-amz-meta-{key}"] = value
 
 
+def add_last_modified(response: Response, meta: Dict[str, str]):
+    """Add the Last-Modified header S3 returns for an object."""
+    last_modified = meta.get("last_modified")
+    if last_modified:
+        response.headers["Last-Modified"] = last_modified
+
+
 @app.put("/{bucket}/{key:path}")
 async def put_object(bucket: str, key: str, request: Request):
     """PUT Object endpoint."""
@@ -147,6 +154,7 @@ async def get_object(bucket: str, key: str, request: Request):
     response = StreamingResponse(iter_data(), media_type=meta.get("content_type", "application/octet-stream"))
     response.headers["ETag"] = f'"{meta["etag"]}"'
     response.headers["Content-Type"] = meta.get("content_type", "application/octet-stream")
+    add_last_modified(response, meta)
 
     # Add metadata headers
     add_metadata_headers(response, meta.get("metadata", {}))
@@ -168,6 +176,7 @@ async def head_object(bucket: str, key: str):
     response = Response(status_code=200)
     response.headers["ETag"] = f'"{meta["etag"]}"'
     response.headers["Content-Type"] = meta.get("content_type", "application/octet-stream")
+    add_last_modified(response, meta)
 
     # Add metadata headers
     add_metadata_headers(response, meta.get("metadata", {}))

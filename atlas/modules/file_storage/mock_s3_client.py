@@ -11,6 +11,8 @@ import logging
 import re
 import time
 import uuid
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -24,6 +26,7 @@ from atlas.core.telemetry import (
     set_attrs,
     start_span,
 )
+from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,26 @@ def _category_from_key(key: str) -> str:
 
 
 _STORAGE_BACKEND = "mock"
+
+
+def _http_date_to_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse an HTTP-date (the ``Last-Modified`` header) into a datetime."""
+    if not value:
+        return None
+    try:
+        return parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso_to_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp (the listing's ``LastModified``)."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class MockS3StorageClient:
@@ -176,12 +199,20 @@ class MockS3StorageClient:
 
                 etag = response.headers.get("ETag", "").strip('"')
 
+                # Read the object back, the way the real client does after a
+                # PutObject, so the reported timestamp is the stored object's
+                # modification time and not the moment of the response.
+                head_response = self.client.head(f"/{self.bucket_name}/{s3_key}")
+                last_modified = iso_timestamp(
+                    _http_date_to_datetime(head_response.headers.get("Last-Modified"))
+                )
+
                 result = {
                     "key": s3_key,
                     "filename": filename,
                     "size": len(content_bytes),
                     "content_type": content_type,
-                    "last_modified": None,  # Mock doesn't need exact timestamp
+                    "last_modified": last_modified,
                     "etag": etag,
                     "tags": file_tags,
                     "user_email": user_email
@@ -291,13 +322,19 @@ class MockS3StorageClient:
                 # Extract filename from metadata headers
                 filename = response.headers.get("x-amz-meta-original_filename", file_key.split('/')[-1])
 
+                # The mock server reports the object's modification time the
+                # way S3 does, in the Last-Modified header.
+                last_modified = iso_timestamp(
+                    _http_date_to_datetime(response.headers.get("Last-Modified"))
+                )
+
                 result = {
                     "key": file_key,
                     "filename": filename,
                     "content_base64": content_base64,
                     "content_type": response.headers.get("Content-Type", "application/octet-stream"),
                     "size": len(content_bytes),
-                    "last_modified": None,
+                    "last_modified": last_modified,
                     "etag": response.headers.get("ETag", "").strip('"'),
                     "tags": tags
                 }
@@ -390,6 +427,9 @@ class MockS3StorageClient:
                     etag_elem = content.find("s3:ETag", ns)
                     if etag_elem is None:
                         etag_elem = content.find("ETag")
+                    modified_elem = content.find("s3:LastModified", ns)
+                    if modified_elem is None:
+                        modified_elem = content.find("LastModified")
 
                     if key_elem is None:
                         continue
@@ -397,18 +437,28 @@ class MockS3StorageClient:
                     key = key_elem.text
                     size = int(size_elem.text) if size_elem is not None else 0
                     etag = etag_elem.text.strip('"') if etag_elem is not None else ""
+                    # The listing reports the modification time as an
+                    # ISO-8601 string; it is parsed and re-formatted so every
+                    # path of this client speaks the same format.
+                    last_modified = iso_timestamp(
+                        _iso_to_datetime(modified_elem.text if modified_elem is not None else None)
+                    )
 
                     # Get metadata via HEAD
                     head_response = self.client.head(f"/{self.bucket_name}/{key}")
                     filename = head_response.headers.get("x-amz-meta-original_filename", key.split('/')[-1])
                     content_type = head_response.headers.get("Content-Type", "application/octet-stream")
+                    if not last_modified:
+                        last_modified = iso_timestamp(
+                            _http_date_to_datetime(head_response.headers.get("Last-Modified"))
+                        )
 
                     files.append({
                         "key": key,
                         "filename": filename,
                         "size": size,
                         "content_type": content_type,
-                        "last_modified": None,
+                        "last_modified": last_modified,
                         "etag": etag,
                         "tags": {},
                         "user_email": user_email

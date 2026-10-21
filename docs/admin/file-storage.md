@@ -1,6 +1,6 @@
 # File Storage and Tool Integration
 
-Last updated: 2026-01-19
+Last updated: 2026-10-21
 
 The application uses S3-compatible object storage for handling all user-uploaded files. This system is designed to be secure and flexible, allowing tools to access files without ever needing direct S3 credentials.
 
@@ -42,6 +42,34 @@ stored in the environment.
 
 Both values must be set together. If only one is provided it is ignored, a
 warning is logged, and the default credential chain is used.
+
+#### IAM permissions
+
+The backend calls these S3 APIs, so the credentials in `.env` need a policy
+that allows them:
+
+| Action | Used for |
+|---|---|
+| `s3:PutObject` | uploads |
+| `s3:PutObjectTagging` | uploads -- every object is written with tags (`source`, `user_email`, `original_filename`), and AWS S3 checks this permission for the tags that ride along on the upload request, so a policy without it fails *every* upload with `AccessDenied` |
+| `s3:GetObject` | downloads |
+| `s3:GetObjectTagging` | reading the tags of a stored object -- without it the file is still served, but its tags come back empty |
+| `s3:ListBucket` | `GET /api/files` |
+| `s3:DeleteObject` | `DELETE /api/files/{key}` |
+
+The tagging permission is separate from `s3:PutObject` even though the tags
+are written in the same request: a policy that grants only `s3:PutObject` is
+enough to store the bytes, and not enough to store them with their tags.
+
+#### File metadata in the API
+
+`POST /api/files`, `GET /api/files` and `GET /api/files/{key}` report
+`last_modified` as an ISO-8601 string (for example
+`2026-10-21T12:30:45+00:00`). The S3 client libraries hand the timestamp back
+as a `datetime`, and the API layer converts it; clients can parse it with any
+ISO-8601 parser. The field is `null` when the storage backend cannot report
+a timestamp, so clients must treat a missing value as "unknown" rather than
+as the epoch.
 
 ## How MCP Tools Access Files
 
