@@ -112,6 +112,25 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
     expect(context.toggleTool).not.toHaveBeenCalled()
   })
 
+  it('lets the user remove their own tick while the sources imply the tool', () => {
+    // The user ticked it themselves, so they must be able to untick it --
+    // the tool stays on because the sources imply it, but the selection they
+    // made is theirs to undo.
+    const removeTools = vi.fn()
+    const context = renderPanel({
+      effectiveDataSources: ['srv:doc'],
+      selectedTools: new Set(['atlas_search']),
+      removeTools
+    })
+
+    const chip = screen.getByRole('button', { name: 'search' })
+    expect(chip).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
+    expect(removeTools).toHaveBeenCalledWith(['atlas_search'])
+    expect(context.toggleTool).not.toHaveBeenCalled()
+  })
+
   it('goes back to an ordinary toggle once every source is deselected', () => {
     const context = renderPanel({ effectiveDataSources: [] })
 

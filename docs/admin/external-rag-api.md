@@ -16,6 +16,26 @@ RAG is controlled by the `FEATURE_RAG_ENABLED` feature flag. The `atlas_rag` pse
 - When `FEATURE_RAG_ENABLED=true`, the backend loads `rag-sources.json`, initializes HTTP/general RAG services, and exposes discovered sources to the UI via `/api/config`.
 - When both `FEATURE_RAG_ENABLED=true` and `FEATURE_ATLAS_RAG_TOOLS_ENABLED=true`, the backend also exposes the `atlas_rag` pseudo-server/tools and MCP-backed RAG discovery paths. The dedicated flag defaults to `false` so production can enable general RAG without automatically surfacing atlas_rag tools.
 
+### Selecting a Source Turns the Search Tool On
+
+When a user picks a data source, the built-in `atlas_search` tool is offered
+to the model for that turn, whether or not they ticked it themselves (issue
+#1102). The tool reads **only** the selected sources, and the user's own
+access and the active classification are applied to every query, so selecting
+a source cannot widen what a search may reach.
+
+Two things follow for operators:
+
+- A turn that carries a selected source and any other tool the user ticked
+  can now call `atlas_search` as well. An internal corpus may therefore be
+  read in the same turn as an outbound tool. There is no per-turn switch to
+  separate the two: if that matters for your deployment, leave the search
+  tool switched off (`FEATURE_ATLAS_RAG_TOOLS_ENABLED=false`) or do not offer
+  the RAG sources to those users.
+- The model decides whether a question is worth a search, so a turn may
+  answer without reading the sources. That is the intended behavior; the
+  sources are the user's evidence, not a mandatory part of every answer.
+
 ### Best-Effort Discovery and Retrieval
 
 RAG discovery is best-effort. If one configured RAG source is offline or misconfigured, other sources can still be discovered and used. Expect partial results when some sources fail.

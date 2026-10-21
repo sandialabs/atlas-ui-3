@@ -65,3 +65,7 @@ export const SEARCH_AUTO_ENABLED_NOTE = 'Automatically enabled by selected data 
 // right: the sources imply it, but the user's own tick is what keeps it on
 // once they deselect the sources.
 export const SEARCH_EXPLICIT_NOTE = 'Also selected on its own, so it stays on when the sources are deselected.'
+
+// The tooltip for that case: clicking removes the user's own tick, and the
+// tool stays on because the sources imply it.
+export const SEARCH_EXPLICIT_REMOVE_TITLE = 'Remove your selection. The tool stays on while the data sources are selected.'

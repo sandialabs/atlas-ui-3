@@ -555,6 +555,67 @@ async def test_the_fallback_warning_stays_quiet_for_auto_expanded_sources():
 
 
 @pytest.mark.asyncio
+async def test_the_fallback_blames_the_feature_flag_when_it_is_off():
+    """The deployment took the tool away, not authorization."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = _routing_orchestrator(
+        _config(tools=False),
+        _StubAuthorization(strip_prefixes=("calc", "atlas_")),
+        tools_mode,
+        rag_mode=rag_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "FEATURE_ATLAS_RAG_TOOLS_ENABLED" in message
+    assert "Authorization" not in message
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_does_not_run_the_rag_reader_when_rag_is_off():
+    """With RAG off there is nothing to read, so the turn is a plain turn."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    plain_mode = AsyncMock(return_value={"mode": "plain"})
+    orch = ChatOrchestrator(
+        llm=MagicMock(),
+        event_publisher=AsyncMock(),
+        session_repository=InMemorySessionRepository(),
+        tools_mode=SimpleNamespace(run_streaming=tools_mode),
+        rag_mode=SimpleNamespace(run_streaming=rag_mode),
+        plain_mode=SimpleNamespace(run_streaming=plain_mode),
+        config_manager=_config(rag=False),
+    )
+    orch.tool_authorization = _StubAuthorization(strip_prefixes=("calc", "atlas_"))
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    rag_mode.assert_not_awaited()
+    plain_mode.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_a_model_without_tool_support_stays_out_of_the_tools_branch():
     """A model that cannot call tools gets no schema, implied or not.
 

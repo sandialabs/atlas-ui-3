@@ -11,6 +11,7 @@ import { sortAtlasFirst } from '../constants/atlasTools'
 import {
   SEARCH_AUTO_ENABLED_NOTE,
   SEARCH_EXPLICIT_NOTE,
+  SEARCH_EXPLICIT_REMOVE_TITLE,
   SEARCH_TOOL_KEY,
   searchToolAutoEnabled
 } from '../utils/searchToolAvailability'
@@ -1225,15 +1226,21 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         <div className="flex items-center gap-1">
                                           <button
                                             type="button"
-                                            onClick={autoEnabled ? undefined : () => {
-            // Toggle ONLY this specific tool
-            toggleTool(toolKey)
+                                            onClick={() => {
+            // Toggle ONLY this specific tool. While the sources imply the
+            // search tool, a click removes the user's *own* tick -- the tool
+            // stays on because the sources imply it. With no tick of their
+            // own there is nothing to remove, so the click does nothing.
+            if (autoEnabled && !explicit) return
+                                            toggleTool(toolKey)
                                             }}
                                             aria-pressed={isSelected}
-                                            aria-disabled={autoEnabled ? true : undefined}
+                                            aria-disabled={autoEnabled && !explicit ? true : undefined}
                                             className={selectionChipClass(isSelected)}
                                             title={autoEnabled
-                                              ? SEARCH_AUTO_ENABLED_NOTE
+                                              ? (explicit
+                                                ? SEARCH_EXPLICIT_REMOVE_TITLE
+                                                : SEARCH_AUTO_ENABLED_NOTE)
                                               : `Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
                                           >
                                             <SelectionMark selected={isSelected} />

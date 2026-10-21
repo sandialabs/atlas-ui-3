@@ -231,6 +231,20 @@ class ChatOrchestrator:
         """
         return search_tools_enabled(getattr(self.config_manager, "app_settings", None))
 
+    def _rag_enabled(self) -> bool:
+        """Whether this deployment reads data sources at all.
+
+        The RAG runner is the route that reads the sources without the
+        built-in search tool. With RAG off there is nothing to read, so a
+        turn that carries sources runs as a plain turn instead of pretending
+        to have looked. Without settings to consult (a programmatic caller
+        that never had any) the historical behaviour stands.
+        """
+        settings = getattr(self.config_manager, "app_settings", None)
+        if settings is None:
+            return True
+        return bool(getattr(settings, "feature_rag_enabled", False))
+
     async def _warn_if_sources_unsearchable(
         self,
         selected_tools: Optional[List[str]],
@@ -653,14 +667,24 @@ class ChatOrchestrator:
                     # that reads them, but the user should know the search
                     # tool was taken away rather than finding out from the
                     # answer.
-                    await self.event_publisher.publish_warning(
-                        message=(
+                    if self._builtin_search_flags_on():
+                        message = (
                             "**The tools for this turn were not available.** "
                             "Authorization removed every selected tool, so the "
                             "model could not use them. The sources you "
                             "selected were read without them."
-                        ),
-                    )
+                        )
+                    else:
+                        # The deployment took the search tool away, not
+                        # authorization: say the real reason.
+                        message = (
+                            "**Your data sources could not be searched.** The "
+                            "built-in `atlas_search` tool is turned off in this "
+                            "deployment (`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so "
+                            "the model could not read the sources you selected. "
+                            "Ask an administrator to turn it on."
+                        )
+                    await self.event_publisher.publish_warning(message=message)
 
         if authorized_tools:
             # After filtering: authorization can strip ``atlas_search`` (the
@@ -679,7 +703,7 @@ class ChatOrchestrator:
                 update_callback=update_callback,
                 temperature=temperature,
             )
-        elif selected_data_sources:
+        elif selected_data_sources and self._rag_enabled():
             # Reached when the built-in search tool cannot run (the RAG tools
             # feature is off, or authorization took every tool), or when the
             # caller explicitly asked for a RAG-only turn (``only_rag``).
