@@ -20,10 +20,12 @@ listed), so it is a proxy with a fixed allowlist rather than an open fetcher.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from atlas.core.auth import is_user_in_group
 from atlas.core.log_sanitizer import get_current_user
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.help.help_config import (
@@ -47,6 +49,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["help"])
 
+# What a reader sees when the deployment's Help configuration is wrong. The
+# detailed message names the settings an operator has to change, so it is
+# for the operator: everyone else gets this.
+NEUTRAL_CONFIG_ERROR = (
+    "The Help page is not configured correctly. Please contact your administrator."
+)
+
+
+async def _config_error_for(current_user: str, app_settings, message: Optional[str]):
+    """The configuration error, in the detail the reader may see.
+
+    The message names the environment variables an operator has to change.
+    That is useful in the Admin Dashboard and in the log, and it is not
+    something every reader needs to see, so a reader who is not an
+    administrator gets a neutral notice instead.
+    """
+    if not message:
+        return None
+    try:
+        if await is_user_in_group(current_user, app_settings.admin_group):
+            return message
+    except Exception:  # noqa: BLE001 - the notice must not fail the page
+        logger.warning("Could not check the admin group for the Help notice", exc_info=True)
+    return NEUTRAL_CONFIG_ERROR
+
 
 @router.get("/help")
 async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG001
@@ -55,6 +82,7 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
     app_settings = config_manager.app_settings
     config = resolve_help_config(app_settings)
     report_help_config_problem(config)
+    config_error = await _config_error_for(current_user, app_settings, config.error)
 
     if config.mode == HELP_MODE_EXTERNAL_LINK:
         # Nothing is fetched and nothing is rendered: the browser opens the
@@ -68,7 +96,7 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
             "cached": False,
             "stale": False,
             "source": "external_link",
-            "error": config.error,
+            "error": config_error,
             "fetch_error": None,
             "fallback": None,
         }
@@ -89,7 +117,7 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
             # are different things, so they are reported separately: the
             # first needs an operator to change the configuration, the
             # second usually resolves itself.
-            "error": config.error,
+            "error": config_error,
             "fetch_error": None,
             "fallback": None,
         }
@@ -109,7 +137,7 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
             "cached": result.cached,
             "stale": result.stale,
             "source": document_url,
-            "error": config.error,
+            "error": config_error,
             "fetch_error": result.error,
             "fallback": None,
         }
@@ -125,7 +153,7 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
         "cached": False,
         "stale": False,
         "source": local_path or "local",
-        "error": config.error,
+        "error": config_error,
         "fetch_error": result.error
         or "The hosted documentation could not be reached and no cached copy was available.",
         "fallback": "local",

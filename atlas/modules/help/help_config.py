@@ -24,11 +24,12 @@ never left with a Help button that goes nowhere and Atlas still starts.
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
+
+from atlas.core.loopback import is_loopback_host
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +93,13 @@ class HelpConfig:
 
 
 def _is_loopback_host(hostname: str) -> bool:
-    """True for hosts that only resolve to the local machine."""
-    host = (hostname or "").strip().lower()
-    if host in ("localhost", "localhost.localdomain"):
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
+    """True for hosts that only resolve to the local machine.
+
+    The shared definition (see ``atlas.core.loopback``) is the one this
+    codebase uses, so a host that counts as loopback here counts as
+    loopback everywhere else.
+    """
+    return is_loopback_host(hostname)
 
 
 def validate_help_url(raw_url: str) -> tuple[Optional[str], Optional[str]]:

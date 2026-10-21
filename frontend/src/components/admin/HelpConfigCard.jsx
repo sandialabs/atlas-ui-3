@@ -119,9 +119,19 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
 
       {externalSourceIsLive && (
         <div className="mb-4 px-3 py-2 bg-yellow-900/20 border border-yellow-700 rounded text-xs text-yellow-300">
-          The Help page is showing externally hosted documentation, so this file is
-          not what users see. Editing it has no effect until HELP_DISPLAY_MODE is
-          set back to <span className="font-mono">local</span>.
+          {displayMode === 'remote_markdown' ? (
+            <>
+              The Help page is showing the hosted documentation. This file is
+              only shown when the documentation cannot be reached, so editing
+              it does not change what users normally read.
+            </>
+          ) : (
+            <>
+              The Help page opens the documentation site, so this file is not
+              what users see. Editing it has no effect until HELP_DISPLAY_MODE
+              is set back to <span className="font-mono">local</span>.
+            </>
+          )}
         </div>
       )}
 

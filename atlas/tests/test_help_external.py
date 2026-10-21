@@ -92,6 +92,28 @@ class _DocsHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if route == "/malformed.md":
+            body = (
+                b"# Malformed references\n\n"
+                b"![bad port](https://docs.example.org:abc/x.png)\n"
+                b"![out of range](https://docs.example.org:99999/x.png)\n"
+                b"![fine](images/logo.png)\n"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if route == "/redirect-bad-port":
+            # A redirect to a URL whose port is not a number.
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:abc/help.md")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         if route == "/big.md":
             body = b"x" * 4096
             self.send_response(200)
@@ -547,8 +569,61 @@ def test_a_cached_redirect_keeps_the_final_url(help_settings, docs_server):
     assert f"/api/help/image?h={v2_token}" in second["content"]
 
 
+def test_malformed_image_references_do_not_break_the_page(help_settings, docs_server):
+    """A reference with a port that is not a number is left alone.
+
+    It used to raise out of the rewrite, which turned the whole Help page
+    into an error -- and the document is cached, so the error repeated for
+    the whole TTL.
+    """
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/malformed.md")
+    client = _client()
+    resp = client.get("/api/help", headers=_user_headers())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == HELP_MODE_REMOTE_MARKDOWN
+    # The malformed references are left as they are...
+    assert "docs.example.org:abc/x.png" in body["content"]
+    assert "docs.example.org:99999/x.png" in body["content"]
+    # ... and the sound one is still rewritten.
+    assert "/api/help/image?h=" in body["content"]
+
+
+def test_a_redirect_with_a_bad_port_does_not_break_the_page(help_settings, docs_server):
+    """A redirect to a URL that cannot be parsed falls back, it does not fail."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/redirect-bad-port")
+    client = _client()
+    resp = client.get("/api/help", headers=_user_headers())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == HELP_MODE_LOCAL
+    assert body["fallback"] == "local"
+    assert body["fetch_error"]
+
+
+def test_a_portless_allowed_host_refuses_another_port(help_settings, docs_server):
+    """A host listed without a port is pinned to the default port."""
+    help_settings(
+        mode="remote_markdown",
+        url=f"{docs_server.base_url}/help.md",
+        allowed_hosts="cdn.example.org",
+    )
+    config = resolve_help_config(app_factory.get_config_manager().app_settings)
+    # The default port of the scheme is the only one that is allowed.
+    assert remote_content._allowed_authority(
+        "https://cdn.example.org/x.png", config
+    ) == "https://cdn.example.org"
+    assert remote_content._allowed_authority(
+        "https://cdn.example.org:8443/x.png", config
+    ) is None
+    # A plain http reference to a portless https host is pinned to 443, not
+    # to the port 80 it was written with.
+    assert remote_content._allowed_authority(
+        "http://cdn.example.org/x.png", config
+    ) == "https://cdn.example.org"
+
+
 def test_a_document_over_the_size_cap_is_refused(help_settings, docs_server):
-    """A document larger than the configured cap is not served."""
     help_settings(
         mode="remote_markdown",
         url=f"{docs_server.base_url}/big.md",
@@ -647,10 +722,26 @@ def test_invalid_display_mode_is_reported(help_settings):
     """An unknown mode names the valid ones and falls back to local."""
     help_settings(mode="nonsense", url="https://docs.example.org/help.md")
     client = _client()
-    body = client.get("/api/help", headers=_user_headers()).json()
+    body = client.get("/api/help", headers=_admin_headers()).json()
     assert body["mode"] == HELP_MODE_LOCAL
     assert "nonsense" in body["error"]
     assert "remote_markdown" in body["error"]
+
+
+def test_a_reader_is_not_shown_the_configuration_details(help_settings):
+    """The message that names the settings is for the operator.
+
+    Everybody else gets a neutral notice: the settings an operator has to
+    change are not the reader's business.
+    """
+    help_settings(mode="remote_markdown", url="")
+    client = _client()
+    body = client.get(
+        "/api/help", headers={"X-User-Email": "reader@example.com"}
+    ).json()
+    assert body["mode"] == HELP_MODE_LOCAL
+    assert "HELP_CONTENT_URL" not in body["error"]
+    assert "administrator" in body["error"]
 
 
 def test_plain_http_url_for_a_remote_host_is_rejected(help_settings):

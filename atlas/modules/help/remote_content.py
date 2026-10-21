@@ -29,6 +29,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from atlas.core.loopback import is_loopback_host
 from atlas.modules.help.help_config import HelpConfig
 
 logger = logging.getLogger(__name__)
@@ -178,13 +179,29 @@ def _trim_document_cache() -> None:
             del _document_cache[url]
 
 
-def _origin(url: str) -> Tuple[str, str, int]:
-    """``(scheme, host, port)`` of a URL, normalized for comparison."""
-    parsed = urlparse(url)
-    scheme = (parsed.scheme or "").lower()
-    host = (parsed.hostname or "").lower()
-    port = parsed.port or (443 if scheme == "https" else 80)
+def _origin(url: str) -> Optional[Tuple[str, str, int]]:
+    """``(scheme, host, port)`` of a URL, normalized for comparison.
+
+    ``None`` when the URL cannot be parsed -- a port that is not a number,
+    for instance. A caller must treat that as "not allowed" rather than let
+    the error escape: a single malformed reference in a hosted document
+    would otherwise turn the whole Help page into an error.
+    """
+    try:
+        parsed = urlparse(url)
+        scheme = (parsed.scheme or "").lower()
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
     return scheme, host, port
+
+
+def _default_port(scheme: str) -> int:
+    """The default port of a scheme."""
+    return 443 if scheme == "https" else 80
 
 
 def _allowed_authority(url: str, config: HelpConfig) -> Optional[str]:
@@ -196,38 +213,55 @@ def _allowed_authority(url: str, config: HelpConfig) -> Optional[str]:
 
     The returned authority is built from the configuration, never from the
     request: the request only ever decides *which* of the configured
-    authorities applies.
+    authorities applies. A host listed without a port is pinned to the
+    default port of the scheme it is pinned to (443 for https, 80 for
+    loopback http), so a request cannot reach another port on that host. A
+    reference that names a port explicitly has to name that one; a
+    reference without a port takes the pinned one.
     """
     if not config.content_url:
         return None
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
+    try:
+        parsed = urlparse(url)
+        scheme = (parsed.scheme or "").lower()
+        requested_host = (parsed.hostname or "").lower()
+        requested_port = parsed.port
+        if parsed.username or parsed.password or not requested_host:
+            return None
+    except ValueError:
+        # A port that is not a number, or out of range: not a usable URL.
         return None
-    if parsed.username or parsed.password:
-        return None
-    if not parsed.hostname:
+    if scheme not in ("http", "https"):
         return None
 
-    requested_host = (parsed.hostname or "").lower()
-    requested_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        configured = urlparse(config.content_url)
+        configured_scheme = (configured.scheme or "").lower()
+        configured_host = (configured.hostname or "").lower()
+        configured_port = configured.port
+    except ValueError:
+        return None
+    if configured_port is None:
+        configured_port = _default_port(configured_scheme)
 
-    configured = urlparse(config.content_url)
-    configured_host = (configured.hostname or "").lower()
-    configured_port = configured.port or (
-        443 if configured.scheme == "https" else 80
-    )
-    if requested_host == configured_host and requested_port == configured_port:
-        return _authority(configured.scheme, configured_host, configured_port)
+    if requested_host == configured_host and requested_port in (
+        None,
+        configured_port,
+    ):
+        return _authority(configured_scheme, configured_host, configured_port)
 
     for host, port in config.allowed_hosts:
         if host != requested_host:
             continue
-        if port is not None and port != requested_port:
+        # The scheme the host is pinned to: https, unless the host is
+        # loopback and the deployment talks plain http to it.
+        pinned_scheme = configured_scheme
+        if pinned_scheme == "http" and not is_loopback_host(host):
+            pinned_scheme = "https"
+        pinned_port = port if port is not None else _default_port(pinned_scheme)
+        if requested_port is not None and requested_port != pinned_port:
             continue
-        scheme = configured.scheme
-        if scheme == "http" and host not in ("localhost", "127.0.0.1", "::1"):
-            scheme = "https"
-        return _authority(scheme, host, port or requested_port)
+        return _authority(pinned_scheme, host, pinned_port)
 
     return None
 
@@ -247,19 +281,23 @@ def resolve_allowed_target(url: str, config: HelpConfig) -> str:
     different path on a host the operator already trusts -- it can never
     aim the request somewhere else, and it can never downgrade the scheme.
 
-    A request for a host that is not allowed is refused.
+    A request for a host that is not allowed, or for a URL that cannot be
+    parsed, is refused.
     """
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
+    try:
+        parsed = urlparse(url)
+        scheme = (parsed.scheme or "").lower()
+        host = (parsed.hostname or "").lower()
+        if parsed.username or parsed.password or not host:
+            raise ValueError("the URL has no usable host")
+    except ValueError as exc:
+        raise HelpPolicyError(
+            f"refusing to fetch '{url}': it is not a usable URL ({exc})"
+        ) from exc
+    if scheme not in ("http", "https"):
         raise HelpPolicyError(
             f"refusing to fetch '{url}': only http(s) URLs are allowed"
         )
-    if parsed.username or parsed.password:
-        raise HelpPolicyError(
-            f"refusing to fetch '{url}': credentials in the URL are not allowed"
-        )
-    if not parsed.hostname:
-        raise HelpPolicyError(f"refusing to fetch '{url}': the URL has no host")
 
     authority = _allowed_authority(url, config)
     if authority is None:
@@ -577,9 +615,15 @@ def _rewrite_src(
         scheme = urlparse(document_url).scheme or "https"
         candidate = f"{scheme}:{candidate}"
 
-    absolute = urljoin(document_url, candidate)
-    parsed = urlparse(absolute)
-    if parsed.scheme not in ("http", "https"):
+    try:
+        absolute = urljoin(document_url, candidate)
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https"):
+            return src
+        # A port that is not a number (or out of range) makes the reference
+        # unusable; leave it alone rather than failing the whole document.
+        parsed.port
+    except ValueError:
         return src
 
     if config is not None:
@@ -587,7 +631,7 @@ def _rewrite_src(
             return src
     else:
         document_origin = _origin(document_url)
-        if _origin(absolute) != document_origin:
+        if document_origin is None or _origin(absolute) != document_origin:
             return src
 
     token = image_token(absolute)

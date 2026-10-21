@@ -211,15 +211,15 @@ describe('admin Help card', () => {
     mockHelpResponse({
       content: '# Local help',
       file_path: 'config/help.md',
-      mode: 'remote_markdown',
-      content_url: 'https://docs.example.org/atlas/help.md',
+      mode: 'external_link',
+      content_url: 'https://docs.example.org/atlas/',
     })
     renderCard()
 
-    expect(await screen.findByText('Source: Externally hosted Markdown')).toBeInTheDocument()
+    expect(await screen.findByText('Source: External documentation link')).toBeInTheDocument()
     expect(screen.getByText(/this file is not what users see/)).toBeInTheDocument()
     expect(
-      screen.getByText(/^URL: https:\/\/docs\.example\.org\/atlas\/help\.md$/)
+      screen.getByText(/^URL: https:\/\/docs\.example\.org\/atlas\/$/)
     ).toBeInTheDocument()
   })
 
@@ -234,6 +234,33 @@ describe('admin Help card', () => {
 
     expect(await screen.findByText('Source: Local Markdown (this file)')).toBeInTheDocument()
     expect(screen.queryByText(/not what users see/)).not.toBeInTheDocument()
+  })
+
+  it('says the local file is only the fallback in remote-markdown mode', async () => {
+    mockHelpResponse({
+      content: '# Local help',
+      file_path: 'config/help.md',
+      mode: 'remote_markdown',
+      content_url: 'https://docs.example.org/atlas/help.md',
+    })
+    renderCard()
+
+    expect(
+      await screen.findByText(/only shown when the documentation cannot be reached/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/not what users see/)).not.toBeInTheDocument()
+  })
+
+  it('says the local file is not what users see in external-link mode', async () => {
+    mockHelpResponse({
+      content: '# Local help',
+      file_path: 'config/help.md',
+      mode: 'external_link',
+      content_url: 'https://docs.example.org/atlas/',
+    })
+    renderCard()
+
+    expect(await screen.findByText(/not what users see/)).toBeInTheDocument()
   })
 
   it('shows the configuration error', async () => {

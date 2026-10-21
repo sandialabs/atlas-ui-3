@@ -278,10 +278,28 @@ if start_app "remote_markdown" ""; then
     MODE="$(printf '%s' "$BODY" | json_field mode)"
     ERROR="$(printf '%s' "$BODY" | json_field error)"
     CONTENT="$(printf '%s' "$BODY" | json_field content)"
-    if [ "$MODE" = "local" ] && printf '%s' "$ERROR" | grep -q "HELP_CONTENT_URL" && [ -n "$CONTENT" ]; then
-        print_result 0 "the misconfiguration is reported and the local document is used"
+    if [ "$MODE" = "local" ] && [ -n "$CONTENT" ]; then
+        print_result 0 "the misconfiguration falls back to the local document"
     else
-        print_result 1 "the misconfiguration is reported and the local document is used (mode='$MODE' error='$ERROR')"
+        print_result 1 "the misconfiguration falls back to the local document (mode='$MODE')"
+    fi
+
+    # The message that names the settings is for the operator; everybody else
+    # gets a neutral notice.
+    ADMIN_BODY="$(curl -fsS -H "X-User-Email: admin@example.com" "http://127.0.0.1:$APP_PORT/api/help")"
+    ADMIN_ERROR="$(printf '%s' "$ADMIN_BODY" | json_field error)"
+    if printf '%s' "$ADMIN_ERROR" | grep -q "HELP_CONTENT_URL"; then
+        print_result 0 "the administrator is told which setting is wrong"
+    else
+        print_result 1 "the administrator is told which setting is wrong (error='$ADMIN_ERROR')"
+    fi
+
+    READER_BODY="$(curl -fsS -H "X-User-Email: pr1108-reader@example.org" "http://127.0.0.1:$APP_PORT/api/help")"
+    READER_ERROR="$(printf '%s' "$READER_BODY" | json_field error)"
+    if ! printf '%s' "$READER_ERROR" | grep -q "HELP_CONTENT_URL" && printf '%s' "$READER_ERROR" | grep -q "administrator"; then
+        print_result 0 "a reader is given a neutral notice"
+    else
+        print_result 1 "a reader is given a neutral notice (error='$READER_ERROR')"
     fi
 
     ADMIN_BODY="$(curl -fsS -H 'X-User-Email: pr1108@example.org' "http://127.0.0.1:$APP_PORT/admin/help-config" 2>/dev/null || true)"

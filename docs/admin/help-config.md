@@ -60,6 +60,10 @@ broken Help button:
 * the reason is shown on the Help page and in the Admin Dashboard, and it is
   returned by `GET /api/help` and `GET /admin/help-config`.
 
+The message names the settings an operator has to change, so it is shown in
+full to administrators. Everyone else sees a neutral notice ("The Help page
+is not configured correctly. Please contact your administrator.").
+
 ## Remote Markdown
 
 The document is fetched by the Atlas backend, not by the browser. That avoids
@@ -171,8 +175,9 @@ Admins can edit help content in-app via the Admin Dashboard:
 - `PUT /admin/help-config` — writes new Markdown content (size-limited)
 
 When the deployment uses an external mode, the Admin Dashboard says so and
-warns that the local editor no longer controls what users see. The editor
-still works (the file is still written) -- it simply is not the document the
-Help page shows.
+warns what the local file is for: in `remote_markdown` it is the fallback
+shown when the documentation cannot be reached, and in `external_link` it is
+not what users see at all. The editor still works (the file is still
+written) -- it simply is not the document the Help page shows.
 
 ![The Admin Dashboard Help card when the documentation is hosted elsewhere](../readme_img/help-admin-external-source.png)
