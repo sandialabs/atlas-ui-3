@@ -12,9 +12,13 @@ page show?". The answer depends on the configured display mode:
     No content at all -- just the URL the Help button should open in a new
     tab. Nothing is fetched in this mode.
 
-``GET /api/help/image`` serves an image the hosted document references. It
-only ever talks to the configured documentation host (or a host the operator
-listed), so it is a proxy with a fixed allowlist rather than an open fetcher.
+``GET /api/help/image`` serves an image the hosted document references. The
+request carries the *identifier* of an image, not a URL: the identifier is
+looked up in the registry of the images the document references, so the
+proxy serves the images of that document and never an arbitrary path of the
+documentation host. It only ever talks to the configured documentation host
+(or a host the operator listed), so it is a proxy with a fixed allowlist
+rather than an open fetcher.
 """
 
 from __future__ import annotations
