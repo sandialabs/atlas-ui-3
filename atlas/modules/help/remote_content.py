@@ -144,9 +144,10 @@ def _host_key(url: str) -> Tuple[str, int]:
 def _is_allowed_url(url: str, config: HelpConfig) -> bool:
     """True when ``url`` may be fetched for this configuration.
 
-    The configured documentation host is always allowed. Extra hosts must be
-    listed by the operator, and every one of them must be reached over https
-    (except loopback, for local development).
+    The configured documentation origin is always allowed -- the same
+    scheme, host and port. Extra hosts must be listed by the operator, and
+    every one of them must be reached over https (except loopback, for local
+    development).
     """
     if not config.content_url:
         return False
@@ -158,9 +159,10 @@ def _is_allowed_url(url: str, config: HelpConfig) -> bool:
     if not parsed.hostname:
         return False
 
-    key = _host_key(url)
-    if key == _host_key(config.content_url):
+    if _origin(url) == _origin(config.content_url):
         return True
+
+    key = _host_key(url)
     for host, port in config.allowed_hosts:
         if key[0] != host:
             continue

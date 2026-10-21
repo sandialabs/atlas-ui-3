@@ -287,6 +287,47 @@ def test_image_proxy_refuses_other_hosts(help_settings, docs_server):
     assert resp.status_code == 403
 
 
+def test_image_proxy_refuses_a_scheme_downgrade(help_settings, docs_server):
+    """A different scheme on the same host is not the same origin."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
+    client = _client()
+    resp = client.get(
+        f"/api/help/image?url=https%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fimages%2Flogo.png",
+        headers=_user_headers(),
+    )
+    assert resp.status_code == 403
+
+
+def test_allowed_hosts_widen_the_image_sources(help_settings, docs_server):
+    """An operator can list another host for the images, and only that one."""
+    second = _DocsServer()
+    try:
+        help_settings(
+            mode="remote_markdown",
+            url=f"{docs_server.base_url}/help.md",
+            allowed_hosts=f"127.0.0.1:{second.port}",
+        )
+        client = _client()
+        allowed = client.get(
+            f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{second.port}%2Fimages%2Flogo.png",
+            headers=_user_headers(),
+        )
+        assert allowed.status_code == 200
+
+        # A host nobody listed is still refused.
+        third = _DocsServer()
+        try:
+            refused = client.get(
+                f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{third.port}%2Fimages%2Flogo.png",
+                headers=_user_headers(),
+            )
+            assert refused.status_code == 403
+        finally:
+            third.stop()
+    finally:
+        second.stop()
+
+
 def test_image_proxy_rejects_non_images(help_settings, docs_server):
     """A non-image on the documentation host is not served as an image."""
     help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
