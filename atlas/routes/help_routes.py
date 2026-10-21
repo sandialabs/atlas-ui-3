@@ -187,13 +187,20 @@ async def get_help_image(
             detail="No hosted documentation is configured, so there are no Help images to serve.",
         )
 
+    # The identifier is a hash of the image URL. Anything else is not one,
+    # and is refused before it reaches the registry.
+    if len(h) != 32 or any(character not in "0123456789abcdef" for character in h):
+        raise HTTPException(
+            status_code=404,
+            detail="That is not the identifier of a Help image.",
+        )
+
     url = await resolve_image_target(h, config)
     if url is None:
         raise HTTPException(
             status_code=404,
             detail="That image is not referenced by the hosted documentation.",
         )
-
     try:
         body, content_type = await fetch_remote_image(url, config)
     except HelpPolicyError as exc:

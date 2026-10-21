@@ -13,6 +13,7 @@ Covers the three display modes -- ``local``, ``remote_markdown`` and
 """
 
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -47,7 +48,7 @@ Some hosted documentation.
 ![root relative](/help-images/logo.png)
 ![absolute elsewhere](https://cdn.example.org/other.png)
 
-[![linked image](images/logo.png)](https://docs.example.org/setup)
+[![linked image](images/logo.png)](setup.md)
 
 ![reference image][logo]
 
@@ -374,7 +375,8 @@ def test_a_linked_image_keeps_its_proxy_source(help_settings, docs_server):
     """A linked image is not rewritten twice.
 
     The image source is already an ATLAS proxy path; the link rewrite must
-    not resolve it against the document URL.
+    not resolve it against the document URL. The link the image sits in is
+    rewritten too, though: it points at the documentation, not at ATLAS.
     """
     help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
     client = _client()
@@ -384,6 +386,34 @@ def test_a_linked_image_keeps_its_proxy_source(help_settings, docs_server):
     # reference-style image: four proxy references, none of them resolved
     # against the documentation host.
     assert content.count("/api/help/image?h=") == 4
+    # The link around the image points at the documentation, not at ATLAS.
+    base = f"http://127.0.0.1:{docs_server.port}"
+    assert f"]({base}/setup.md)" in content
+
+
+def test_a_failing_host_is_not_retried_on_every_request(help_settings):
+    """A replica that starts during an outage does not retry the host at once."""
+    # Port 9 (discard) refuses connections: nothing is listening there.
+    help_settings(mode="remote_markdown", url="http://127.0.0.1:9/help.md", timeout=2.0)
+    client = _client()
+    first = client.get("/api/help", headers=_user_headers()).json()
+    assert first["fallback"] == "local"
+
+    started = time.monotonic()
+    second = client.get("/api/help", headers=_user_headers()).json()
+    elapsed = time.monotonic() - started
+    assert second["fallback"] == "local"
+    # The second request did not wait for the host to time out again.
+    assert elapsed < 1.0
+
+
+def test_an_image_identifier_that_is_not_one_is_refused(help_settings, docs_server):
+    """The proxy refuses an identifier that is not a hash."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
+    client = _client()
+    for token in ("not-a-hash", "ZZ" * 16, "0" * 31, "0" * 33):
+        resp = client.get(f"/api/help/image?h={token}", headers=_user_headers())
+        assert resp.status_code == 404
 
 
 def test_a_reference_style_image_is_served_through_the_proxy(help_settings, docs_server):

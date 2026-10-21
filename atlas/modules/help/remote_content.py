@@ -53,6 +53,10 @@ MAX_CACHED_DOCUMENTS = 4
 # the copy that is already here.
 FAILED_REFRESH_BACKOFF_SECONDS = 30
 
+# The same, for a document that could not be fetched at all: a replica that
+# starts during an outage would otherwise try the host on every request.
+FAILED_FETCH_BACKOFF_SECONDS = 30
+
 # The image cache is bounded on purpose. A documentation page can reference
 # many images, and a host that serves an image per URL variant ("logo.png?n=1",
 # "logo.png?n=2", ...) would otherwise fill the process with copies. The
@@ -121,6 +125,9 @@ _image_cache: Dict[str, _CachedImage] = {}
 # absolute URL. The image proxy is given the token, so it can only ever fetch
 # an image the document actually asks for.
 _image_targets: Dict[str, Dict[str, str]] = {}
+# The URLs that could not be fetched, and when: the next request does not
+# try them again straight away.
+_failed_fetches: Dict[str, float] = {}
 _cache_lock = threading.Lock()
 
 
@@ -130,6 +137,7 @@ def clear_caches() -> None:
         _document_cache.clear()
         _image_cache.clear()
         _image_targets.clear()
+        _failed_fetches.clear()
 
 
 def register_image_targets(document_url: str, targets: Dict[str, str]) -> None:
@@ -404,6 +412,10 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
     now = time.monotonic()
     with _cache_lock:
         cached = _document_cache.get(url)
+        last_failure = _failed_fetches.get(url)
+    if last_failure is not None and now - last_failure < FAILED_FETCH_BACKOFF_SECONDS:
+        # The host failed a moment ago; do not wait for it to time out again.
+        return _stale_fallback(url, cached, "the documentation host is not responding")
     if cached and cached.expires_at > now:
         return RemoteHelpResult(
             content=cached.content,
@@ -481,6 +493,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
     )
     with _cache_lock:
         _document_cache[url] = entry
+        _failed_fetches.pop(url, None)
     _trim_document_cache()
     return RemoteHelpResult(
         content=content,
@@ -516,6 +529,8 @@ def _stale_fallback(
             error=message,
         )
     logger.error("Could not fetch the Help document from %s: %s", url, message)
+    with _cache_lock:
+        _failed_fetches[url] = time.monotonic()
     return RemoteHelpResult(content="", source_url=url, error=message)
 
 
@@ -616,6 +631,13 @@ _MARKDOWN_DEFINITION_RE = re.compile(
 # ![alt][ref] -- a reference-style image. The label it uses is collected so
 # the definition it points at is proxied rather than merely made absolute.
 _REFERENCE_IMAGE_RE = re.compile(r"!\[[^\]]*\]\[([^\]]*)\]")
+# [![alt](src)](target) -- an image inside a link. Both parts are rewritten,
+# and the plain patterns below cannot do it: the link pattern would match
+# the inner image and stop there, and the image pattern would match the
+# link text and leave the target alone.
+_LINKED_IMAGE_RE = re.compile(
+    r"(!\[[^\]]*\]\(\s*(<?)([^\s>)]+)(>?)([^)]*)\))(\]\(\s*(<?)([^\s>)]+)(>?)([^)]*)\))"
+)
 
 
 def image_token(absolute_url: str) -> str:
@@ -651,6 +673,10 @@ def _rewrite_src(
     if not candidate:
         return src
     if candidate.startswith("data:"):
+        return src
+    if candidate.startswith(IMAGE_PROXY_PATH):
+        # Already an ATLAS path -- a linked image, whose source the image
+        # rewrite has already pointed at the proxy.
         return src
 
     if candidate.startswith("//"):
@@ -773,6 +799,28 @@ def rewrite_markdown_images(
         prefix, quote_char, src = match.groups()
         return f"{prefix}{quote_char}{_rewrite_src(src, document_url, config, targets)}{quote_char}"
 
+    def _linked_image_sub(match: re.Match) -> str:
+        (
+            image,
+            _image_open,
+            src,
+            _image_close,
+            _image_suffix,
+            _link,
+            link_open,
+            target,
+            link_close,
+            link_suffix,
+        ) = match.groups()
+        # The image part goes through the image rewrite (it is proxied), the
+        # target through the link rewrite (it becomes absolute).
+        rewritten_image = _MARKDOWN_IMAGE_RE.sub(_markdown_sub, image)
+        rewritten_target = _rewrite_link_target(target, document_url, config)
+        return (
+            f"{rewritten_image}]({link_open}{rewritten_target}"
+            f"{link_close}{link_suffix})"
+        )
+
     def _link_sub(match: re.Match) -> str:
         prefix, open_angle, target, close_angle, suffix = match.groups()
         rewritten = _rewrite_link_target(target, document_url, config)
@@ -788,7 +836,8 @@ def rewrite_markdown_images(
             rewritten = _rewrite_link_target(target, document_url, config)
         return f"{prefix}{open_angle}{rewritten}{close_angle}"
 
-    rewritten = _MARKDOWN_IMAGE_RE.sub(_markdown_sub, markdown)
+    rewritten = _LINKED_IMAGE_RE.sub(_linked_image_sub, markdown)
+    rewritten = _MARKDOWN_IMAGE_RE.sub(_markdown_sub, rewritten)
     rewritten = _HTML_IMAGE_RE.sub(_html_sub, rewritten)
     rewritten = _MARKDOWN_LINK_RE.sub(_link_sub, rewritten)
     rewritten = _MARKDOWN_DEFINITION_RE.sub(_definition_sub, rewritten)
