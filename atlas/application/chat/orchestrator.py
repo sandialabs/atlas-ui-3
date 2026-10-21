@@ -15,7 +15,7 @@ from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 from atlas.modules.config.settings import agent_mode_available, configured_agent_max_steps
-from atlas.modules.mcp_tools.atlas_server import search_tools_enabled
+from atlas.modules.mcp_tools.atlas_server import SEARCH_TOOL_NAME, normalize_tool_name, search_tools_enabled
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from .modes.agent import AgentModeRunner
@@ -281,7 +281,9 @@ class ChatOrchestrator:
             message = (
                 "**Your data sources could not be searched.** The built-in "
                 "`atlas_search` tool is not available to this conversation, "
-                "so the model could not read the sources you selected."
+                "so the model could not read the sources you selected. "
+                "Ask an administrator to check your access to the built-in "
+                "ATLAS tools."
             )
         else:
             logger.warning(
@@ -292,7 +294,8 @@ class ChatOrchestrator:
                 "**Your data sources could not be searched.** The built-in "
                 "`atlas_search` tool is turned off in this deployment "
                 "(`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so the model could not "
-                "read the sources you selected."
+                "read the sources you selected. Ask an administrator to turn "
+                "it on."
             )
         await self.event_publisher.publish_warning(message=message)
 
@@ -428,6 +431,10 @@ class ChatOrchestrator:
         # no implied tool at all: its tools are stripped, so the turn has
         # none and keeps the sources it had.
         model_supports_tools = self._model_supports_tools(model)
+        # Whether the *user* picked the search tool, as opposed to the
+        # sources implying it. The hook may take the sources away, and the
+        # implied tool goes with them -- but a tool the user ticked is theirs.
+        user_selected_search = has_search_tool(selected_tools)
         effective_tools = resolve_effective_tools(
             selected_tools,
             selected_data_sources,
@@ -490,6 +497,15 @@ class ChatOrchestrator:
                 if isinstance(new_sources, list):
                     allowed_sources = set(selected_data_sources or [])
                     selected_data_sources = [s for s in new_sources if s in allowed_sources]
+                    if allowed_sources and not selected_data_sources:
+                        # The hook took every source away, so the search tool
+                        # the sources implied goes with them -- unless the
+                        # user ticked it in its own right, which is theirs.
+                        if not user_selected_search:
+                            effective_tools = [
+                                t for t in effective_tools
+                                if normalize_tool_name(t) != SEARCH_TOOL_NAME
+                            ]
                 new_agent = outcome.payload.get("agent_mode")
                 if isinstance(new_agent, bool):
                     agent_mode = new_agent
@@ -626,6 +642,19 @@ class ChatOrchestrator:
                     "Tool authorization removed every selected tool; running "
                     "the turn without tools"
                 )
+                if selected_data_sources:
+                    # The turn carries sources and has no tool to read them
+                    # with. It falls through to the route that reads them,
+                    # but the user should know the search tool was taken
+                    # away rather than finding out from the answer.
+                    await self.event_publisher.publish_warning(
+                        message=(
+                            "**The tools for this turn were not available.** "
+                            "Authorization removed every selected tool, so the "
+                            "model could not use them. The sources you "
+                            "selected were read without them."
+                        ),
+                    )
 
         if authorized_tools:
             # After filtering: authorization can strip ``atlas_search`` (the

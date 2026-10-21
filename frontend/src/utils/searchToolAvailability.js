@@ -61,6 +61,14 @@ export const searchToolAutoEnabled = ({
 // The note the panels show next to an automatically enabled search tool.
 export const SEARCH_AUTO_ENABLED_NOTE = 'Automatically enabled by selected data sources.'
 
+// The same note for the case where the RAG toggle (not a hand-picked
+// selection) is what put the sources in play.
+export const SEARCH_RAG_ENABLED_NOTE = 'Automatically enabled while RAG is on.'
+
+// The note that fits the reason the tool is on.
+export const searchToolNote = (reason) =>
+	reason === 'rag' ? SEARCH_RAG_ENABLED_NOTE : SEARCH_AUTO_ENABLED_NOTE
+
 // The extra line for the case where the tool is *also* selected in its own
 // right: the sources imply it, but the user's own tick is what keeps it on
 // once they deselect the sources.

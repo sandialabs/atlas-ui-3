@@ -23,6 +23,7 @@ import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, build
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
+import { resolveTurnDataSources, searchToolReason as searchToolReasonFor } from '../utils/ragSources'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 import { isKnownUser } from '../utils/userStorage'
 import { normalizeSaveMode } from '../utils/saveModeConfig'
@@ -922,13 +923,22 @@ export const ChatProvider = ({ children }) => {
 	// The tool panels read this so the built-in search tool's automatic state
 	// matches what the server will really offer (#1102): a source the level
 	// excludes never reaches the turn, so it cannot imply the search tool.
-	const effectiveDataSources = useMemo(() => {
-		const hasSelectedSources = selectedDataSources.size > 0
-		const searchToolSelected = [...selectedTools].some(t => migrateToolName(t) === SEARCH_TOOL)
-		if (!ragEnabled && !hasSelectedSources && !searchToolSelected) return []
-		const sources = hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds()
-		return dropExcluded(sources, ragKeyLevel)
-	}, [selectedDataSources, selectedTools, ragEnabled, getAllRagSourceIds, dropExcluded, ragKeyLevel])
+	// The search tool's *own* selection is deliberately not a term here: it
+	// would expand the list and lock the tool on, and a user who ticked it
+	// could never untick it.
+	const effectiveDataSources = useMemo(() => resolveTurnDataSources({
+		selectedDataSources,
+		ragEnabled,
+		searchToolSelected: false,
+		allSourceIds: getAllRagSourceIds(),
+		dropExcluded: keys => dropExcluded(keys, ragKeyLevel),
+	}), [selectedDataSources, ragEnabled, getAllRagSourceIds, dropExcluded, ragKeyLevel])
+
+	// Why the search tool is on, when it is on because of the sources.
+	const searchToolReason = useMemo(() => searchToolReasonFor({
+		selectedDataSources,
+		effectiveDataSources,
+	}), [selectedDataSources, effectiveDataSources])
 
 	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null, selectedToolsOverride = null, captureCorrection = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
@@ -1021,12 +1031,15 @@ export const ChatProvider = ({ children }) => {
 		const hasSelectedSources = selectedDataSources.size > 0
 		const searchToolSelected = toolsToSend.some(t => migrateToolName(t) === SEARCH_TOOL)
 		const ragActivated = ragEnabled || hasSelectedSources || searchToolSelected
-		const dataSourcesToSend = ragActivated
-			? dropExcluded(hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds(), ragKeyLevel)
-			: []
-		// When the RAG toggle alone expanded the list to "everything I can
-		// reach", the sources were not hand-picked -- the backend must not
-		// warn per turn that they were not searched (#930 review).
+		const dataSourcesToSend = resolveTurnDataSources({
+			selectedDataSources,
+			ragEnabled,
+			// Ticking the search tool on its own means "search everything I
+			// can reach", so the turn has to carry the sources for it.
+			searchToolSelected,
+			allSourceIds: getAllRagSourceIds(),
+			dropExcluded: keys => dropExcluded(keys, ragKeyLevel),
+		})
 		const dataSourcesAuto = ragActivated && !hasSelectedSources
 
 		// A user-authored custom prompt (issue #153) replaces the default system
@@ -2262,6 +2275,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// panels read this to decide whether the built-in search tool is
 		// automatically on.
 		effectiveDataSources,
+		// Why the search tool is on, when it is on because of the sources:
+		// 'sources' (the user picked them) or 'rag' (the RAG toggle).
+		searchToolReason,
 		toggleDataSource: guarded.toggleDataSource,
 		addDataSources: guarded.addDataSources,
 		clearDataSources: guarded.clearDataSources,

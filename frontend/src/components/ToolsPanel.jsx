@@ -9,10 +9,10 @@ import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
 import {
-  SEARCH_AUTO_ENABLED_NOTE,
   SEARCH_EXPLICIT_NOTE,
   SEARCH_TOOL_KEY,
-  searchToolAutoEnabled
+  searchToolAutoEnabled,
+  searchToolNote
 } from '../utils/searchToolAvailability'
 import { FOCUS_RING } from '../utils/focusRing'
 
@@ -173,6 +173,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     features,
     refreshConfig,
     effectiveDataSources,
+    searchToolReason,
     currentModel,
     models
   } = useChat()
@@ -574,6 +575,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     currentModel,
     models
   })
+  const searchNote = searchToolNote(searchToolReason)
   
   // Extract unique compliance levels from all available tools and prompts
   const availableComplianceLevels = new Set()
@@ -1233,7 +1235,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                             aria-disabled={autoEnabled ? true : undefined}
                                             className={selectionChipClass(isSelected)}
                                             title={autoEnabled
-                                              ? SEARCH_AUTO_ENABLED_NOTE
+                                              ? searchNote
                                               : `Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
                                           >
                                             <SelectionMark selected={isSelected} />
@@ -1254,7 +1256,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         </div>
                                         {autoEnabled && (
                                           <p className="text-xs text-blue-300">
-                                            {SEARCH_AUTO_ENABLED_NOTE}
+                                            {searchNote}
                                           </p>
                                         )}
                                         {autoEnabled && explicit && (

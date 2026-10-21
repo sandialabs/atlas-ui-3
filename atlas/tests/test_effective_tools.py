@@ -544,6 +544,24 @@ class _NarrowingHookManager:
         )
 
 
+class _SourcesHookManager:
+    """A hook that clears the data sources and leaves the tools alone."""
+
+    def __init__(self):
+        self.seen_tools = None
+
+    def has_hooks(self, event):
+        return True
+
+    async def run_event(self, event, payload, session_context=None):
+        self.seen_tools = list(payload.get("selected_tools") or [])
+        return HookOutcome(
+            verdict="modify",
+            modified=True,
+            payload={**payload, "selected_data_sources": []},
+        )
+
+
 class _EchoHookManager:
     """A hook that rewrites the prompt and leaves the tool list alone."""
 
@@ -633,6 +651,112 @@ async def test_a_policy_hook_that_drops_the_search_tool_from_a_sources_only_turn
 
     tools_mode.assert_not_awaited()
     rag_mode.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_policy_hook_that_keeps_another_tool_still_drops_the_search_tool(
+    monkeypatch,
+):
+    """A hook that keeps one tool drops the search tool with it.
+
+    The point is that the hook's decision is about the search tool
+    specifically, not about emptying the whole list.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    monkeypatch.setattr(
+        "atlas.application.chat.orchestrator.get_hook_manager",
+        lambda: _NarrowingHookManager(keep=["calc"]),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_search", "calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    # The search tool is gone; the tool the hook kept is what runs.
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["calc"]
+
+
+@pytest.mark.asyncio
+async def test_a_policy_hook_that_clears_the_sources_drops_the_implied_tool(
+    monkeypatch,
+):
+    """The implication rests on the sources: no sources, no implied tool.
+
+    A hook that clears the data sources takes the sources away, so the
+    search tool they implied goes with them -- otherwise the turn would run
+    with a search tool and nothing to search.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    plain_mode = AsyncMock(return_value={"mode": "plain"})
+    orch = ChatOrchestrator(
+        llm=MagicMock(),
+        event_publisher=AsyncMock(),
+        session_repository=InMemorySessionRepository(),
+        tools_mode=SimpleNamespace(run_streaming=tools_mode),
+        plain_mode=SimpleNamespace(run_streaming=plain_mode),
+        config_manager=_config(),
+    )
+    orch.tool_authorization = _StubAuthorization(strip_prefixes=())
+    monkeypatch.setattr(
+        "atlas.application.chat.orchestrator.get_hook_manager",
+        lambda: _SourcesHookManager(),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=[],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    tools_mode.assert_not_awaited()
+    plain_mode.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_policy_hook_that_clears_the_sources_keeps_an_explicit_search_tool(
+    monkeypatch,
+):
+    """A tool the user ticked is theirs, whatever the hook does to the sources."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    monkeypatch.setattr(
+        "atlas.application.chat.orchestrator.get_hook_manager",
+        lambda: _SourcesHookManager(),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_search"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["atlas_search"]
 
 
 @pytest.mark.asyncio

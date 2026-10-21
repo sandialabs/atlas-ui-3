@@ -101,6 +101,11 @@ word over it:
 A hook that does not touch the tool list changes nothing, and a hook that
 drops an unrelated tool leaves the implied one alone.
 
+A hook that clears the *sources* takes the implied search tool with them --
+the implication rests on the sources, and a turn with a search tool and
+nothing to search is the exact case the rule exists to avoid. A search tool
+the user ticked in their own right is theirs and stays.
+
 ## What still enforces the boundary
 
 Implying the tool does not widen what a search may read:
@@ -136,20 +141,33 @@ deem a search worthwhile.
 Sources the client expanded on its own (the RAG toggle on, nothing
 hand-picked) stay silent: the user did not choose them.
 
+A turn whose every tool is unauthorized falls through to the route that
+reads its sources, and says so in one line -- the sources are read, but not
+by the tool the user asked for.
+
 ## Frontend
 
 - `frontend/src/utils/searchToolAvailability.js` holds the shared rule. The
   catalogue is the authority on whether the deployment offers the tool at all
   -- the backend leaves it out when the feature is off -- so no extra feature
   flag had to be kept in step.
+- `frontend/src/utils/ragSources.js` holds the source resolution, and both
+  the chat context's memo and the outgoing payload call it. The two differ in
+  exactly one term, and the difference is deliberate: the wire payload
+  expands to every source when the user ticks the search tool on its own
+  ("search everything I can reach"), while the panels' list does not -- that
+  expansion would lock the tool on, and a user who ticked it could never
+  untick it.
 - The panels read the *effective* data sources -- the ones the turn would
   really carry, after the active compliance level has had its say -- and the
   selected model's tool support, so the panel never claims a tool the server
   is not going to offer.
 - Both the chat-bar **Tools** menu and the Tools and Settings panel show the
-  automatic state, with the note and a non-toggleable control. A tool that is
-  *also* selected in its own right says so too: the sources imply it, but
-  the user's own tick is what keeps it on once the sources are deselected.
+  automatic state, with the note and a non-toggleable control. The note names
+  the RAG toggle when that is what put the sources in play (nothing was
+  hand-picked then). A tool that is *also* selected in its own right says so
+  too: the sources imply it, but the user's own tick is what keeps it on once
+  the sources are deselected.
 - The composer's "agent mode has nothing to act on" callout counts the
   implied tool, so a turn with sources selected is not told it has no tool.
 
