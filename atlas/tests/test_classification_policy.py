@@ -153,6 +153,37 @@ def test_builtin_tools_and_unconfigured_sources_are_not_reported(manager, config
     ) == []
 
 
+def test_the_implied_search_tool_does_not_widen_classification_access(
+    manager, config_manager,
+):
+    """Implying the search tool adds no component of its own (#1102).
+
+    The built-in runs in-process and reads only the selected sources, which
+    are judged on their own -- so the turn's verdict is the same whether the
+    user ticked the search tool or had it implied for them by their source
+    selection. The source that is not approved for the level is still
+    refused.
+    """
+    from atlas.application.chat.utilities.effective_tools import resolve_effective_tools
+
+    config = SimpleNamespace(app_settings=SimpleNamespace(
+        feature_rag_enabled=True,
+        feature_atlas_rag_tools_enabled=True,
+    ))
+    explicit = _check(
+        manager, config_manager, "ITAR",
+        tools=["atlas_search"], sources=["uur_docs:handbook"],
+    )
+    implied = _check(
+        manager, config_manager, "ITAR",
+        tools=resolve_effective_tools(
+            ["atlas_canvas"], ["uur_docs:handbook"], config,
+        ),
+        sources=["uur_docs:handbook"],
+    )
+    assert explicit == implied == ["data source uur_docs"]
+
+
 def test_tool_with_no_known_server_fails_closed(manager, config_manager):
     assert _check(manager, config_manager, "ITAR", tools=["nonexistent_tool"]) == [
         "tool nonexistent_tool (no known server)"

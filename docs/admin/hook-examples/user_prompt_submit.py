@@ -11,8 +11,13 @@ Can do:   modify (rewrite prompt, NARROW tools/sources, turn off agent_mode) |
 on_error: allow (per-event default).
 
 Narrowing only: the orchestrator intersects the returned lists with what the
-user actually selected, so a hook can never grant access to a tool or source
+turn would really offer, so a hook can never grant access to a tool or source
 the user did not choose. An empty list means "none" and is preserved.
+
+``selected_tools`` carries the *effective* tool list: the user's own
+selection plus the built-in ``atlas_search`` that the selected data sources
+imply (issue #1102). A hook that clears ``selected_data_sources`` takes the
+implied search tool with it; one the user ticked in their own right stays.
 """
 import json
 import re

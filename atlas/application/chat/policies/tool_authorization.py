@@ -11,6 +11,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     SEARCH_TOOL_NAME,
     launch_tool_enabled,
     normalize_tool_name,
+    search_tools_enabled,
 )
 from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
@@ -93,11 +94,7 @@ class ToolAuthorizationService:
                     continue
                 if resolved in (SEARCH_TOOL_NAME, DISCOVER_TOOL_NAME):
                     settings = getattr(self.config_manager, "app_settings", None)
-                    if (
-                        settings is not None
-                        and settings.feature_rag_enabled
-                        and settings.feature_atlas_rag_tools_enabled
-                    ):
+                    if search_tools_enabled(settings):
                         filtered_tools.append(tool)
                     continue
 

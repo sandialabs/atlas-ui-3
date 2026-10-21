@@ -118,6 +118,15 @@ SEARCH_TOOL_DESCRIPTION = (
     # The instruction lives on the tool, not in the system prompt, because that
     # is what survives agent mode: it travels with the schema whenever the tool
     # is offered, and costs nothing on a turn that is not offered it (#874).
+    # Since #1102 the tool is offered whenever the user has selected data
+    # sources, so the model is the one who decides whether a search is worth
+    # it -- which only works if it is told that the sources are there and that
+    # searching them is the expected way to read them. The wording holds
+    # whether or not sources are actually selected: the tool can also be
+    # ticked on its own, with nothing selected.
+    "Data sources may be selected for this conversation: when they are, "
+    "search them whenever the question could be answered from them, and say "
+    "plainly that you did not search when it could not. "
     "Each result is numbered. Cite them inline as [1], [2] immediately after "
     "the claim each supports, and never cite a number you were not given -- "
     "the numbers are stable for the whole conversation, so a source keeps its "
@@ -426,6 +435,26 @@ ATLAS_SERVER_DESCRIPTION = (
 )
 
 
+def search_tools_enabled(app_settings: Any) -> bool:
+    """Whether the built-in search tool is usable in this deployment.
+
+    Two flags, read in one place so the schema builder, the tool
+    authorization, the execution gate, the config payload and the turn's
+    effective tool list cannot disagree about whether the search tool
+    exists (issue #1102).
+
+    Lives beside the tool definition, like ``launch_tool_enabled`` does for
+    the launch family, so every gate can read it without importing the chat
+    layer (which would be a cycle).
+    """
+    if app_settings is None:
+        return False
+    return bool(
+        getattr(app_settings, "feature_rag_enabled", False)
+        and getattr(app_settings, "feature_atlas_rag_tools_enabled", False)
+    )
+
+
 def launch_tool_enabled(app_settings: Any) -> bool:
     """Whether ``atlas_launch`` is usable in this deployment.
 
@@ -478,6 +507,15 @@ def normalize_tool_names(tool_names: Optional[List[Any]]) -> List[Any]:
 def is_atlas_tool(tool_name: Any) -> bool:
     """True for a consolidated built-in tool name (or a legacy alias of one)."""
     return normalize_tool_name(tool_name) in ATLAS_TOOL_SCHEMAS
+
+
+def is_builtin_tool(tool_name: Any) -> bool:
+    """True for one of the built-in tools, by name.
+
+    Not by prefix: an operator may configure an MCP server whose name starts
+    with ``atlas_``, and that server's tools are not built-ins.
+    """
+    return normalize_tool_name(tool_name) in ATLAS_TOOL_NAMES
 
 
 def atlas_tool_schemas(

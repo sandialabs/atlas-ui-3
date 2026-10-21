@@ -18,6 +18,7 @@ real `HookManager`).
 | ----- | ------- | ------------ |
 | `SessionStart` | [session_start.py](session_start.py) | `modify` to attach session metadata; `deny` to reject a session before it is persisted |
 | `UserPromptSubmit` | [user_prompt_submit.py](user_prompt_submit.py) | Redact secrets out of the prompt and **narrow** the turn's tool selection |
+| `UserPromptSubmit` | [user_prompt_submit_strip_implied_search.py](user_prompt_submit_strip_implied_search.py) | Keep the search tool the data sources imply out of a turn that also calls an outbound MCP server |
 | `PreLlmCall` | [pre_llm_call.py](pre_llm_call.py) | Swap the model for restricted turns (re-authorized server-side) |
 | `PermissionRequest` | [permission_request.py](permission_request.py) | Auto-approve read-only tools; escalate outbound ones |
 | `PreToolUse` | [pre_tool_use.sh](pre_tool_use.sh) | The three-line exit-code contract: exit `2` blocks with stderr as the reason |

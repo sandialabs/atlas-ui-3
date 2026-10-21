@@ -223,6 +223,17 @@ class AppSettings(BaseSettings):
         ),
         validation_alias=AliasChoices("FEATURE_ATLAS_RAG_TOOLS_ENABLED"),
     )
+    feature_atlas_search_with_outbound_tools: bool = Field(
+        True,
+        description=(
+            "Allow the built-in search tool to be implied by the selected data "
+            "sources in a turn that also carries a tool from an MCP server. "
+            "Set false to keep an internal corpus and an outbound tool out of "
+            "the same turn (the model's own search of the corpus would "
+            "otherwise be able to reach an outbound tool in the same turn)."
+        ),
+        validation_alias=AliasChoices("FEATURE_ATLAS_SEARCH_WITH_OUTBOUND_TOOLS"),
+    )
 
     # Banner settings
     banner_enabled: bool = False

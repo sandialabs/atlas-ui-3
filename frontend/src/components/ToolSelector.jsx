@@ -3,6 +3,15 @@ import { Wrench, ChevronDown, Search, Server } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
+import {
+  SEARCH_AUTO_ENABLED_NOTE,
+  SEARCH_EXPLICIT_NOTE,
+  SEARCH_AUTO_ENABLED_SELECT_TITLE,
+  SEARCH_EXPLICIT_REMOVE_TITLE,
+  SEARCH_TOOL_KEY,
+  isSearchSelected,
+  searchToolAutoEnabled
+} from '../utils/searchToolAvailability'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { FOCUS_RING } from '../utils/focusRing'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
@@ -28,7 +37,16 @@ const summarize = (text) => {
  * everything else.
  */
 const ToolSelector = () => {
-  const { tools: allTools = [], selectedTools, toggleTool, features, complianceLevelFilter } = useChat()
+  const {
+    tools: allTools = [],
+    selectedTools,
+    toggleTool,
+    features,
+    complianceLevelFilter,
+    effectiveDataSources,
+    currentModel,
+    models
+  } = useChat()
   // Optional, like ModelSelector's: the chat bar renders in test harnesses and
   // embeds that do not mount MarketplaceProvider.
   const marketplace = useOptionalMarketplace()
@@ -116,9 +134,26 @@ const ToolSelector = () => {
       .filter(group => group.rows.length > 0)
   }, [tools, query])
 
+  // The built-in search tool is on because the user selected data sources
+  // (#1102): the server offers it for the very same reason, so the row is
+  // shown as on and cannot be switched off while the sources are selected.
+  const searchAutoEnabled = searchToolAutoEnabled({
+    tools,
+    effectiveDataSources,
+    currentModel,
+    models,
+    selectedTools,
+    searchWithOutboundTools: features?.atlas_search_with_outbound_tools,
+    builtinNames: features?.atlas_builtin_tools
+  })
+
   if (!features?.tools) return null
 
-  const selectedCount = selectedTools?.size || 0
+  // The count is the effective one: the implied search tool is on, so it
+  // counts as one of the tools the model can use -- unless the user ticked it
+  // themselves, in which case it is already in the selection.
+  const selectedCount = (selectedTools?.size || 0)
+    + (searchAutoEnabled && !isSearchSelected(selectedTools) ? 1 : 0)
 
   return (
     <div ref={dropdownRef} className="relative">
@@ -174,14 +209,24 @@ const ToolSelector = () => {
                 {group.server}
               </div>
               {group.rows.map(row => {
-                const isOn = selectedTools?.has(row.key)
+                const autoEnabled = row.key === SEARCH_TOOL_KEY && searchAutoEnabled
+                const isOn = selectedTools?.has(row.key) || autoEnabled
+                const explicit = isSearchSelected(selectedTools)
                 return (
                   <button
                     key={row.key}
                     type="button"
-                    onClick={() => toggleTool(row.key)}
+                    onClick={() => {
+                      // While the sources imply the search tool, a click
+                      // toggles the user's *own* tick -- the tool stays on
+                      // because the sources imply it, but the selection is
+                      // theirs to make and to undo.
+                      toggleTool(row.key)
+                    }}
                     aria-pressed={isOn}
-                    title={`${isOn ? 'Turn off' : 'Turn on'} ${row.name}`}
+                    title={autoEnabled
+                      ? (explicit ? SEARCH_EXPLICIT_REMOVE_TITLE : SEARCH_AUTO_ENABLED_SELECT_TITLE)
+                      : `${isOn ? 'Turn off' : 'Turn on'} ${row.name}`}
                     className={`w-full px-3 py-2 text-left flex items-start gap-2 border-b border-gray-700 last:border-b-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400 ${
                       isOn ? 'bg-blue-900/30 hover:bg-blue-900/40' : 'hover:bg-gray-700'
                     }`}
@@ -191,6 +236,12 @@ const ToolSelector = () => {
                       <span className="block text-sm text-gray-200 break-words">{row.name}</span>
                       {row.description && (
                         <span className="block text-xs text-gray-400 break-words">{row.description}</span>
+                      )}
+                      {autoEnabled && (
+                        <span className="block text-xs text-blue-300 break-words">{SEARCH_AUTO_ENABLED_NOTE}</span>
+                      )}
+                      {autoEnabled && explicit && (
+                        <span className="block text-xs text-blue-300 break-words">{SEARCH_EXPLICIT_NOTE}</span>
                       )}
                     </span>
                     {/* Toggle, not a checkbox: the reviewer asked for tools that

@@ -36,6 +36,10 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     prompts: [],
     selectedTools: new Set(),
     selectedPrompts: new Set(),
+    selectedDataSources: new Set(),
+    effectiveDataSources: [],
+    ragEnabled: false,
+    ragSources: [],
     toggleTool: vi.fn(),
     togglePrompt: vi.fn(),
     sessionFiles: { files: [], total_files: 0, categories: {} },
@@ -204,6 +208,30 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     renderChat()
 
     expect(screen.queryByTestId('agent-mode-no-tools-banner')).not.toBeInTheDocument()
+  })
+
+  it('stays quiet when the selected data sources imply the search tool', () => {
+    // Issue #1102: selected sources imply the built-in search tool, so the
+    // turn does have something for the agent loop to call.
+    useChat.mockReturnValue(chatContext({
+      tools: [{ server: 'atlas', tools: ['canvas', 'search'], tools_detailed: [] }],
+      effectiveDataSources: ['srv:doc'],
+    }))
+    renderChat()
+
+    expect(screen.queryByTestId('agent-mode-no-tools-banner')).not.toBeInTheDocument()
+  })
+
+  it('still warns when the selected sources cannot be searched', () => {
+    // The deployment does not offer the search tool, so the sources leave the
+    // turn with nothing to read them.
+    useChat.mockReturnValue(chatContext({
+      tools: [{ server: 'atlas', tools: ['canvas'], tools_detailed: [] }],
+      effectiveDataSources: ['srv:doc'],
+    }))
+    renderChat()
+
+    expect(screen.getByTestId('agent-mode-no-tools-banner')).toBeInTheDocument()
   })
 
   it('stays quiet when agent mode is off', () => {

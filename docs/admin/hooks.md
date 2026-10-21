@@ -156,6 +156,11 @@ The simplest useful hook is three lines of bash with no JSON emitted at all.
   applies to `UserPromptSubmit`: `selected_tools` / `selected_data_sources` are
   intersected with what the user actually selected, and an explicitly empty
   list means *none* (it is never re-widened to the original selection).
+  `selected_tools` carries the **effective** tool list -- the user's own
+  selection plus the built-in `atlas_search` the selected data sources imply
+  (issue #1102) -- so a hook can strip the implied search tool along with the
+  user's own. Clearing `selected_data_sources` takes the *implied* search tool
+  with it; one the user ticked in their own right is theirs and stays.
 - `PermissionRequest` may auto-approve (`modify` with `needs_approval: false`)
   or escalate (`require_approval`). `PreToolUse` may escalate but **cannot
   auto-approve** — a hook may never lower a boundary another hook raised. If a

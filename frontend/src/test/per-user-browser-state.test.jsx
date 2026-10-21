@@ -363,11 +363,16 @@ describe('selected model per user', () => {
       return { ok: false, json: async () => ({}) }
     }))
     const { result } = renderHook(() => useChatConfig())
+    // Wait for the *rendered* model, not for the stored one: the fallback
+    // writes the storage synchronously and re-renders a tick later, so
+    // waiting on the storage can observe the write before React has
+    // published the state (a flake under load -- it blocked this PR's CI
+    // once, on a test that has nothing to do with it).
     await waitFor(
-      () => expect(localStorage.getItem(`chatui-current-model:${BOB}`)).toBe('gpt-4o'),
+      () => expect(result.current.currentModel).toBe('gpt-4o'),
       { timeout: 2000 },
     )
-    expect(result.current.currentModel).toBe('gpt-4o')
+    expect(localStorage.getItem(`chatui-current-model:${BOB}`)).toBe('gpt-4o')
   })
 
   it('restores the saved model when the full config fails but the shell succeeds', async () => {

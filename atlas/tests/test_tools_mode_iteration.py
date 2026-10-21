@@ -662,10 +662,11 @@ async def test_data_sources_neither_inject_context_nor_add_the_search_tool():
 
     Tools mode used to route every turn with data sources through
     ``stream_with_rag_and_tools``, which queried the sources and prepended the
-    passages as a system message before the model spoke. Then the sources also
-    added ``atlas_search`` to the schema (#862), so a "use search" prompt could
-    invoke it without the user ever turning it on (#921). Now the ordinary
-    streaming call is made with exactly the tools the user selected.
+    passages as a system message before the model spoke. Now the ordinary
+    streaming call is made with exactly the tools the runner was handed: the
+    orchestrator resolves that list (a selection of data sources implies
+    ``atlas_search`` there, issue #1102), and the runner adds nothing of its
+    own.
     """
     llm = ScriptedToolsLLM(turns=[("No search needed.", None)])
     runner = _runner(llm, _config())

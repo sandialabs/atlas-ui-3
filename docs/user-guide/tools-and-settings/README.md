@@ -191,14 +191,22 @@ appended) stays readable.
 Data source changes apply as soon as you make them, unlike tool and prompt
 checkboxes, which are staged until you press **Save and Close**.
 
-### The search tool is selected, not implied
+### The search tool follows your data sources
 
-Selecting data sources does not by itself turn on the built-in `atlas_search`
-tool. Tick `atlas_search` in the tools list to have the model call it; with
-no tools ticked, a turn with sources selected runs as plain RAG and reads
-them itself. If you select sources together with other tools but leave
-`atlas_search` unticked, nothing in that turn can read the sources and Atlas
-says so.
+Selecting data sources turns on the built-in `atlas_search` tool for you. You
+do not have to tick it separately, and there is nothing to switch off: the
+tool is on because of the sources you selected, and it goes back to being an
+ordinary toggle once you deselect them all.
+
+While the sources are selected, `atlas_search` is shown as enabled in both the
+tools list and the chat-bar **Tools** menu, with the note *Automatically
+enabled by selected data sources.* It cannot be switched off there -- that
+would contradict the sources you just picked.
+
+Being on is not the same as being called. The model decides whether a
+question is worth a search, so it may answer without reading the sources. If
+the search tool is turned off in your deployment, Atlas says so instead of
+quietly leaving your sources unread.
 
 ## Launching sub-conversations
 

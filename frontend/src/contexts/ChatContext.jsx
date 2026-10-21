@@ -23,6 +23,7 @@ import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, build
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
+import { resolveTurnDataSources } from '../utils/ragSources'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 import { isKnownUser } from '../utils/userStorage'
 import { normalizeSaveMode } from '../utils/saveModeConfig'
@@ -902,6 +903,41 @@ export const ChatProvider = ({ children }) => {
 		)
 	}, [config.ragServers])
 
+	// The compliance filter drops what it excludes, so nothing it excludes may
+	// go out -- not in the tool list, and not in the data source list.
+	const dropExcluded = useCallback((keys, levelOf) => {
+		if (!activeComplianceFilter) return keys
+		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
+		return keys.filter(k => {
+			const level = levelOf(k)
+			if (level === COMPLIANCE_EXEMPT) return true
+			if (level === undefined || !levelsReady) return false
+			return isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
+		})
+	}, [activeComplianceFilter, complianceLevels])
+
+	// The data sources a turn would carry: the selected ones, or every
+	// reachable source when the RAG toggle is on and none were picked, minus
+	// the ones the active compliance level excludes.
+	//
+	// The tool panels read this so the built-in search tool's automatic state
+	// matches what the server will really offer (#1102): a source the level
+	// excludes never reaches the turn, so it cannot imply the search tool.
+	//
+	// Two terms are deliberately left out, and the helper documents both:
+	// the RAG toggle (a stale flag -- the toggle is gone from the UI -- would
+	// lock the search chip on with no way to unlock it) and the search
+	// tool's own selection (ticking it would lock it on and it could never
+	// be unticked). The wire payload keeps them: they decide what the turn
+	// may read, not what the panel shows.
+	const effectiveDataSources = useMemo(() => resolveTurnDataSources({
+		selectedDataSources,
+		ragEnabled: false,
+		searchToolSelected: false,
+		allSourceIds: getAllRagSourceIds(),
+		dropExcluded: keys => dropExcluded(keys, ragKeyLevel),
+	}), [selectedDataSources, getAllRagSourceIds, dropExcluded, ragKeyLevel])
+
 	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null, selectedToolsOverride = null, captureCorrection = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
 		// A turn in the replacement chat retires any outstanding Undo: restoring
@@ -969,15 +1005,6 @@ export const ChatProvider = ({ children }) => {
 			}
 		}
 		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
-		const dropExcluded = (keys, levelOf) => {
-			if (!activeComplianceFilter) return keys
-			return keys.filter(k => {
-				const level = levelOf(k)
-				if (level === COMPLIANCE_EXEMPT) return true
-				if (level === undefined || !levelsReady) return false
-				return isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
-			})
-		}
 		// Never send a turn to a model the active level excludes. The picker
 		// flags it; this is reached only when no allowed model exists to
 		// switch to (the prune effect moves off it otherwise).
@@ -1002,12 +1029,15 @@ export const ChatProvider = ({ children }) => {
 		const hasSelectedSources = selectedDataSources.size > 0
 		const searchToolSelected = toolsToSend.some(t => migrateToolName(t) === SEARCH_TOOL)
 		const ragActivated = ragEnabled || hasSelectedSources || searchToolSelected
-		const dataSourcesToSend = ragActivated
-			? dropExcluded(hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds(), ragKeyLevel)
-			: []
-		// When the RAG toggle alone expanded the list to "everything I can
-		// reach", the sources were not hand-picked -- the backend must not
-		// warn per turn that they were not searched (#930 review).
+		const dataSourcesToSend = resolveTurnDataSources({
+			selectedDataSources,
+			ragEnabled,
+			// Ticking the search tool on its own means "search everything I
+			// can reach", so the turn has to carry the sources for it.
+			searchToolSelected,
+			allSourceIds: getAllRagSourceIds(),
+			dropExcluded: keys => dropExcluded(keys, ragKeyLevel),
+		})
 		const dataSourcesAuto = ragActivated && !hasSelectedSources
 
 		// A user-authored custom prompt (issue #153) replaces the default system
@@ -1163,7 +1193,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -2239,6 +2269,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		deleteWorkspace,
 		clearActiveWorkspace,
 		selectedDataSources: selections.selectedDataSources,
+		// The sources a turn would really carry (issue #1102): the tool
+		// panels read this to decide whether the built-in search tool is
+		// automatically on.
+		effectiveDataSources,
 		toggleDataSource: guarded.toggleDataSource,
 		addDataSources: guarded.addDataSources,
 		clearDataSources: guarded.clearDataSources,
