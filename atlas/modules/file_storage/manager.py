@@ -13,6 +13,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from .s3_client import S3StorageClient
+from .timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,7 @@ class FileManager:
                 'source': source_type,
                 'source_tool': source_tool,
                 'extension': filename.split('.')[-1] if '.' in filename else '',
-                'last_modified': file_metadata.get("last_modified").isoformat() if file_metadata.get("last_modified") else None,
+                'last_modified': iso_timestamp(file_metadata.get("last_modified")),
                 'content_type': file_metadata.get("content_type", "application/octet-stream"),
                 'can_display_in_canvas': self.should_display_in_canvas(filename)
             }

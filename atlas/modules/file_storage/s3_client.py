@@ -27,6 +27,7 @@ from atlas.core.telemetry import (
     set_attrs,
     start_span,
 )
+from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,9 @@ class S3StorageClient:
                     "filename": filename,
                     "size": len(content_bytes),
                     "content_type": content_type,
-                    "last_modified": response['LastModified'],
+                    # boto3 returns LastModified as a datetime; the metadata
+                    # contract (and the API that serves it) is a string.
+                    "last_modified": iso_timestamp(response['LastModified']),
                     "etag": response['ETag'].strip('"'),
                     "tags": file_tags,
                     "user_email": user_email
@@ -342,7 +345,9 @@ class S3StorageClient:
                     "content_base64": content_base64,
                     "content_type": response['ContentType'],
                     "size": len(content_bytes),
-                    "last_modified": response['LastModified'],
+                    # boto3 returns LastModified as a datetime; the metadata
+                    # contract (and the API that serves it) is a string.
+                    "last_modified": iso_timestamp(response['LastModified']),
                     "etag": response['ETag'].strip('"'),
                     "tags": tags
                 }
@@ -438,7 +443,7 @@ class S3StorageClient:
                     MaxKeys=limit
                 )
 
-                files = []
+                entries = []
                 for obj in response.get('Contents', []):
                     # Get tags for each object
                     try:
@@ -463,19 +468,28 @@ class S3StorageClient:
                         content_type = 'application/octet-stream'
                         filename = obj['Key'].split('/')[-1]
 
-                    files.append({
-                        "key": obj['Key'],
-                        "filename": filename,
-                        "size": obj['Size'],
-                        "content_type": content_type,
-                        "last_modified": obj['LastModified'],
-                        "etag": obj['ETag'].strip('"'),
-                        "tags": tags,
-                        "user_email": user_email
-                    })
+                    # boto3 returns LastModified as a datetime; the metadata
+                    # contract (and the API that serves it) is a string.
+                    last_modified = iso_timestamp(obj['LastModified'])
+                    entries.append((
+                        obj['LastModified'],
+                        {
+                            "key": obj['Key'],
+                            "filename": filename,
+                            "size": obj['Size'],
+                            "content_type": content_type,
+                            "last_modified": last_modified,
+                            "etag": obj['ETag'].strip('"'),
+                            "tags": tags,
+                            "user_email": user_email
+                        }
+                    ))
 
-                # Sort by last modified, newest first
-                files.sort(key=lambda f: f['last_modified'], reverse=True)
+                # Sort by last modified, newest first. The raw timestamp is
+                # the sort key: the ISO strings would only sort chronologically
+                # as text while every value carries the same UTC offset.
+                entries.sort(key=lambda entry: entry[0], reverse=True)
+                files = [file_data for _, file_data in entries]
 
                 logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
 

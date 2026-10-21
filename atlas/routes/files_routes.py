@@ -18,6 +18,7 @@ from atlas.core.capabilities import verify_file_token
 from atlas.core.log_sanitizer import get_current_user
 from atlas.core.metrics_logger import log_metric
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class FileResponse(BaseModel):
     filename: str
     size: int
     content_type: str
-    last_modified: str
+    last_modified: Optional[str] = None
     etag: str
     tags: Dict[str, str]
     user_email: str
@@ -137,9 +138,23 @@ class FileContentResponse(BaseModel):
     content_base64: str
     content_type: str
     size: int
-    last_modified: str
+    last_modified: Optional[str] = None
     etag: str
     tags: Dict[str, str]
+
+
+def _file_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Return storage metadata shaped for the file response models.
+
+    The storage backends report ``last_modified`` in whatever shape their
+    client library uses -- boto3 hands back a ``datetime`` -- while the API
+    contract is a string. Normalizing here keeps every file route consistent
+    and stops a ``datetime`` from failing response validation (which answers
+    HTTP 500 even though the file was stored).
+    """
+    payload = dict(metadata)
+    payload["last_modified"] = iso_timestamp(payload.get("last_modified"))
+    return payload
 
 
 @router.get("/files/healthz")
@@ -180,7 +195,7 @@ async def upload_file(
 
         log_metric("file_upload", current_user, file_size=content_size, content_type=request.content_type)
 
-        return FileResponse(**result)
+        return FileResponse(**_file_metadata(result))
 
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
@@ -205,20 +220,8 @@ async def list_files(
             limit=limit
         )
 
-        # Convert any datetime objects to ISO format strings for pydantic validation
-        processed_files = []
-        for file_data in result:
-            processed_file = file_data.copy()
-            if not isinstance(processed_file.get('last_modified'), str):
-                # Convert datetime to ISO format string if it's not already a string
-                try:
-                    processed_file['last_modified'] = processed_file['last_modified'].isoformat()
-                except AttributeError:
-                    # If it's not a datetime object, convert to string
-                    processed_file['last_modified'] = str(processed_file['last_modified'])
-            processed_files.append(processed_file)
-
-        return [FileResponse(**file_data) for file_data in processed_files]
+        # _file_metadata normalizes last_modified to an ISO format string
+        return [FileResponse(**_file_metadata(file_data)) for file_data in result]
 
     except Exception as e:
         logger.error(f"Error listing files: {str(e)}")
@@ -332,7 +335,7 @@ async def get_file(
         if not result:
             raise HTTPException(status_code=404, detail="File not found")
 
-        return FileContentResponse(**result)
+        return FileContentResponse(**_file_metadata(result))
 
     except HTTPException:
         raise
