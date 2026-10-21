@@ -902,6 +902,34 @@ export const ChatProvider = ({ children }) => {
 		)
 	}, [config.ragServers])
 
+	// The compliance filter drops what it excludes, so nothing it excludes may
+	// go out -- not in the tool list, and not in the data source list.
+	const dropExcluded = useCallback((keys, levelOf) => {
+		if (!activeComplianceFilter) return keys
+		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
+		return keys.filter(k => {
+			const level = levelOf(k)
+			if (level === COMPLIANCE_EXEMPT) return true
+			if (level === undefined || !levelsReady) return false
+			return isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
+		})
+	}, [activeComplianceFilter, complianceLevels])
+
+	// The data sources a turn would carry: the selected ones, or every
+	// reachable source when the RAG toggle is on and none were picked, minus
+	// the ones the active compliance level excludes.
+	//
+	// The tool panels read this so the built-in search tool's automatic state
+	// matches what the server will really offer (#1102): a source the level
+	// excludes never reaches the turn, so it cannot imply the search tool.
+	const effectiveDataSources = useMemo(() => {
+		const hasSelectedSources = selectedDataSources.size > 0
+		const searchToolSelected = [...selectedTools].some(t => migrateToolName(t) === SEARCH_TOOL)
+		if (!ragEnabled && !hasSelectedSources && !searchToolSelected) return []
+		const sources = hasSelectedSources ? [...selectedDataSources] : getAllRagSourceIds()
+		return dropExcluded(sources, ragKeyLevel)
+	}, [selectedDataSources, selectedTools, ragEnabled, getAllRagSourceIds, dropExcluded, ragKeyLevel])
+
 	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null, selectedToolsOverride = null, captureCorrection = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
 		// A turn in the replacement chat retires any outstanding Undo: restoring
@@ -969,15 +997,6 @@ export const ChatProvider = ({ children }) => {
 			}
 		}
 		const levelsReady = complianceLevelsReady(complianceLevels, activeComplianceFilter)
-		const dropExcluded = (keys, levelOf) => {
-			if (!activeComplianceFilter) return keys
-			return keys.filter(k => {
-				const level = levelOf(k)
-				if (level === COMPLIANCE_EXEMPT) return true
-				if (level === undefined || !levelsReady) return false
-				return isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
-			})
-		}
 		// Never send a turn to a model the active level excludes. The picker
 		// flags it; this is reached only when no allowed model exists to
 		// switch to (the prune effect moves off it otherwise).
@@ -1163,7 +1182,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -2239,6 +2258,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		deleteWorkspace,
 		clearActiveWorkspace,
 		selectedDataSources: selections.selectedDataSources,
+		// The sources a turn would really carry (issue #1102): the tool
+		// panels read this to decide whether the built-in search tool is
+		// automatically on.
+		effectiveDataSources,
 		toggleDataSource: guarded.toggleDataSource,
 		addDataSources: guarded.addDataSources,
 		clearDataSources: guarded.clearDataSources,

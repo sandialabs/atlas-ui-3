@@ -266,10 +266,10 @@ class ChatOrchestrator:
             return
         if self.config_manager is None:
             return
-        if has_search_tool(selected_tools):
+        if has_search_tool(selected_tools) and self._builtin_search_flags_on():
             # The turn names the search tool (possibly under its pre-#855
-            # name from a saved conversation) and it reaches the schema, so
-            # its sources are read.
+            # name from a saved conversation) and the flags let it through
+            # to the schema, so its sources are read.
             return
         if self._builtin_search_flags_on():
             # The flags are on, so the tool was reachable and something else
@@ -413,20 +413,41 @@ class ChatOrchestrator:
         session.history.add_message(user_message)
         session.update_timestamp()
 
+        # #1102: a selection of data sources implies the built-in search
+        # tool. The user does not have to know that "pick a source" and
+        # "tick the search tool" are two separate mechanisms: the tool is
+        # offered to the model, and the model decides whether to call it.
+        # There is no opt-out and nothing persisted -- the implication is a
+        # property of the turn, and deselecting every source removes it
+        # again. A data source selection also stays the ceiling on what that
+        # tool may read; nothing here widens it.
+        #
+        # Resolved *before* the UserPromptSubmit hook runs, so the hook sees
+        # the tools the turn would really offer and can narrow them -- the
+        # implied search tool included. A model that cannot call tools gets
+        # no implied tool at all: its tools are stripped, so the turn has
+        # none and keeps the sources it had.
+        model_supports_tools = self._model_supports_tools(model)
+        effective_tools = resolve_effective_tools(
+            selected_tools,
+            selected_data_sources,
+            getattr(self.config_manager, "app_settings", None),
+            imply=model_supports_tools,
+        )
+
         # UserPromptSubmit hook (GH #713): fires after the user message is added,
         # before file ingestion and mode dispatch. A hook may rewrite/redact the
         # prompt text, narrow selected_tools/data_sources, disable agent_mode,
         # or block the turn with a message. Opt-in; zero overhead without
         # config/hooks.json.
         hook_mgr = get_hook_manager()
-        # A hook that narrows the tool list has the last word over it --
-        # including the search tool the data sources imply (#1102). Tracked
-        # so the implication is not applied behind the hook's back.
-        hook_narrowed_tools = False
         if hook_mgr is not None and hook_mgr.has_hooks(HookEvent.USER_PROMPT_SUBMIT):
             payload = {
                 "prompt": content,
-                "selected_tools": list(selected_tools) if selected_tools else [],
+                # The effective list, not the raw selection: the hook decides
+                # what the turn may offer, so it must see the implied search
+                # tool to be able to strip it (#1102).
+                "selected_tools": list(effective_tools),
                 "selected_data_sources": list(selected_data_sources) if selected_data_sources else [],
                 "agent_mode": bool(agent_mode),
             }
@@ -456,18 +477,15 @@ class ChatOrchestrator:
                     # Reflect the (possibly redacted) prompt in the stored user message
                     user_message.content = content
                 # Tools/sources may only be *narrowed*: intersect the hook's list
-                # with what the user actually selected so a hook cannot grant
+                # with what the turn would really offer so a hook cannot grant
                 # access to a tool or source the user never chose. An explicitly
                 # empty list is preserved (it means "none"), not treated as
                 # "unset" -- collapsing [] to None would widen the turn back to
                 # the caller's full selection.
                 new_tools = outcome.payload.get("selected_tools")
                 if isinstance(new_tools, list):
-                    allowed_tools = set(selected_tools or [])
-                    selected_tools = [t for t in new_tools if t in allowed_tools]
-                    # The hook's list is a subset of the user's: anything it
-                    # dropped is a decision, not an accident.
-                    hook_narrowed_tools = set(selected_tools) != allowed_tools
+                    allowed_tools = set(effective_tools)
+                    effective_tools = [t for t in new_tools if t in allowed_tools]
                 new_sources = outcome.payload.get("selected_data_sources")
                 if isinstance(new_sources, list):
                     allowed_sources = set(selected_data_sources or [])
@@ -511,17 +529,17 @@ class ChatOrchestrator:
         )
 
         # Strip tools / agent mode and warn if the model does not support tool/function calling
-        model_supports_tools = self._model_supports_tools(model)
         if not model_supports_tools:
             warnings = []
-            if selected_tools:
+            if effective_tools:
                 logger.warning(
                     "Model %s does not support tool calling; stripping %d selected tools",
                     model,
-                    len(selected_tools),
+                    len(effective_tools),
                 )
                 warnings.append("Your selected tools have been disabled for this request.")
                 selected_tools = None
+                effective_tools = []
             if agent_mode:
                 logger.warning(
                     "Model %s does not support tool calling; disabling agent mode",
@@ -537,26 +555,6 @@ class ChatOrchestrator:
                         + " Please switch to a tool-capable model."
                     ),
                 )
-
-        # #1102: a selection of data sources implies the built-in search
-        # tool. The user does not have to know that "pick a source" and
-        # "tick the search tool" are two separate mechanisms: the tool is
-        # offered to the model, and the model decides whether to call it.
-        # There is no opt-out and nothing persisted -- the implication is a
-        # property of the turn, and deselecting every source removes it
-        # again. A data source selection also stays the ceiling on what that
-        # tool may read; nothing here widens it.
-        #
-        # The implication is skipped when the turn must not gain a tool it
-        # did not arrive with: a model that cannot call tools (the tools
-        # were stripped above, so the turn has none), or a policy hook that
-        # narrowed the tool list -- the hook gets the last word.
-        effective_tools = resolve_effective_tools(
-            selected_tools,
-            selected_data_sources,
-            getattr(self.config_manager, "app_settings", None),
-            imply=model_supports_tools and not hook_narrowed_tools,
-        )
 
         # Admin kill switch (issue #849 review): the flag can still arrive on the
         # wire from a client with a stale config cache, so the server refuses
@@ -610,34 +608,48 @@ class ChatOrchestrator:
                 agent_loop_strategy=kwargs.get("agent_loop_strategy"),
                 steering=steering,
             )
-        elif effective_tools and not only_rag:
-            # Apply tool authorization
-            effective_tools = await self.tool_authorization.filter_authorized_tools(
+
+        # The tools branch applies tool authorization first, so the routing
+        # below sees the tools the turn may really run. Authorization can
+        # take every one of them -- the built-in search tool goes when the
+        # deployment has it switched off -- and a turn that carries sources
+        # then falls through to the route that reads them rather than
+        # dropping them.
+        authorized_tools: List[str] = []
+        if effective_tools and not only_rag:
+            authorized_tools = await self.tool_authorization.filter_authorized_tools(
                 selected_tools=effective_tools,
                 user_email=user_email
             )
+            if not authorized_tools:
+                logger.info(
+                    "Tool authorization removed every selected tool; running "
+                    "the turn without tools"
+                )
+
+        if authorized_tools:
             # After filtering: authorization can strip ``atlas_search`` (the
-            # deployment has the search tool switched off), which would strand
-            # the sources silently if the check ran any earlier.
+            # deployment has the search tool switched off), which would
+            # strand the sources silently if the check ran any earlier.
             await self._warn_if_sources_unsearchable(
-                effective_tools, selected_data_sources, sources_auto=data_sources_auto,
+                authorized_tools, selected_data_sources, sources_auto=data_sources_auto,
             )
             return await self.tools_mode.run_streaming(
                 session=session,
                 model=model,
                 messages=messages,
-                selected_tools=effective_tools,
+                selected_tools=authorized_tools,
                 selected_data_sources=selected_data_sources,
                 user_email=user_email,
                 update_callback=update_callback,
                 temperature=temperature,
             )
         elif selected_data_sources:
-            # Reached only when the built-in search tool cannot run (the RAG
-            # tools feature is off) or the caller explicitly asked for a
-            # RAG-only turn (``only_rag``). With the search tool available,
-            # a turn that carries sources has it in its tool list above and
-            # runs as a tools turn instead.
+            # Reached when the built-in search tool cannot run (the RAG tools
+            # feature is off, or authorization took every tool), or when the
+            # caller explicitly asked for a RAG-only turn (``only_rag``).
+            # With the search tool available, a turn that carries sources has
+            # it in its tool list above and runs as a tools turn instead.
             return await self.rag_mode.run_streaming(
                 session=session,
                 model=model,

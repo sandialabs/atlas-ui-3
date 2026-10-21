@@ -11,9 +11,9 @@ import { describe, it, expect } from 'vitest'
 import {
   ATLAS_SEARCH_TOOL,
   SEARCH_TOOL_KEY,
+  modelSupportsTools,
   searchToolAutoEnabled,
-  searchToolOffered,
-  sourcesInPlay
+  searchToolOffered
 } from '../utils/searchToolAvailability'
 
 const catalogue = (tools = ['canvas', ATLAS_SEARCH_TOOL]) => [
@@ -41,62 +41,58 @@ describe('searchToolOffered', () => {
   })
 })
 
-describe('sourcesInPlay', () => {
-  it('counts hand-picked sources', () => {
-    expect(sourcesInPlay({
-      selectedDataSources: new Set(['srv:doc']),
-      ragEnabled: false,
-      reachableSourceCount: 0
-    })).toBe(true)
+describe('modelSupportsTools', () => {
+  it('is true for a model that does not say otherwise', () => {
+    expect(modelSupportsTools([{ name: 'm' }], 'm')).toBe(true)
   })
 
-  it('counts the RAG toggle, which means "search my data"', () => {
-    expect(sourcesInPlay({
-      selectedDataSources: new Set(),
-      ragEnabled: true,
-      reachableSourceCount: 2
-    })).toBe(true)
+  it('is false for a model that cannot call tools', () => {
+    expect(modelSupportsTools([{ name: 'm', supports_tools: false }], 'm')).toBe(false)
   })
 
-  it('counts nothing without sources', () => {
-    expect(sourcesInPlay({
-      selectedDataSources: new Set(),
-      ragEnabled: false,
-      reachableSourceCount: 2
-    })).toBe(false)
-    expect(sourcesInPlay({
-      selectedDataSources: new Set(),
-      ragEnabled: true,
-      reachableSourceCount: 0
-    })).toBe(false)
+  it('is true for an unknown model', () => {
+    // The backend assumes tool capability for a model it does not know.
+    expect(modelSupportsTools([], 'm')).toBe(true)
+    expect(modelSupportsTools(undefined, 'm')).toBe(true)
   })
 })
 
 describe('searchToolAutoEnabled', () => {
-  it('is on when sources are selected and the tool is offered', () => {
+  it('is on when sources are carried and the tool is offered', () => {
     expect(searchToolAutoEnabled({
       tools: catalogue(),
-      selectedDataSources: new Set(['srv:doc']),
-      ragEnabled: false,
-      reachableSourceCount: 0
+      effectiveDataSources: ['srv:doc'],
+      currentModel: 'm',
+      models: [{ name: 'm' }]
     })).toBe(true)
   })
 
   it('is off once every source is deselected', () => {
     expect(searchToolAutoEnabled({
       tools: catalogue(),
-      selectedDataSources: new Set(),
-      ragEnabled: false,
-      reachableSourceCount: 3
+      effectiveDataSources: [],
+      currentModel: 'm',
+      models: [{ name: 'm' }]
     })).toBe(false)
   })
 
   it('is off when the deployment does not offer the tool', () => {
     expect(searchToolAutoEnabled({
       tools: catalogue(['canvas']),
-      selectedDataSources: new Set(['srv:doc']),
-      ragEnabled: false,
-      reachableSourceCount: 0
+      effectiveDataSources: ['srv:doc'],
+      currentModel: 'm',
+      models: [{ name: 'm' }]
+    })).toBe(false)
+  })
+
+  it('is off for a model that cannot call tools', () => {
+    // The backend strips every tool for such a model, so the search tool is
+    // not on the table -- and the panel must not claim it is.
+    expect(searchToolAutoEnabled({
+      tools: catalogue(),
+      effectiveDataSources: ['srv:doc'],
+      currentModel: 'm',
+      models: [{ name: 'm', supports_tools: false }]
     })).toBe(false)
   })
 
@@ -110,9 +106,9 @@ describe('searchToolAutoEnabled', () => {
     expect(SEARCH_TOOL_KEY).toBe('atlas_search')
     expect(searchToolAutoEnabled({
       tools,
-      selectedDataSources: new Set(['srv:doc']),
-      ragEnabled: false,
-      reachableSourceCount: 0
+      effectiveDataSources: ['srv:doc'],
+      currentModel: 'm',
+      models: [{ name: 'm' }]
     })).toBe(true)
   })
 })

@@ -9,8 +9,9 @@
 // are read (or not) and cannot switch the tool off while the sources are
 // selected -- turning it off would contradict the selection they just made.
 //
-// This module is pure: it takes the catalogue and the current selection and
-// answers "is the search tool on, and is it on because of the sources?".
+// This module is pure: it takes the catalogue, the sources the turn would
+// carry and the selected model, and answers "is the search tool on, and is it
+// on because of the sources?".
 
 import { ATLAS_SERVER } from '../constants/atlasTools'
 
@@ -31,27 +32,36 @@ export const searchToolOffered = (tools) =>
       && (server.tools || []).includes(ATLAS_SEARCH_TOOL)
   )
 
-// Whether the turn would carry data sources.
+// Whether the selected model can call tools at all.
 //
-// Hand-picked sources always count. The RAG toggle counts too: it means
-// "search my data", and the client then sends every source the user can
-// reach -- which is exactly what the server would read.
-export const sourcesInPlay = ({ selectedDataSources, ragEnabled, reachableSourceCount }) => {
-  if (selectedDataSources && selectedDataSources.size > 0) return true
-  return Boolean(ragEnabled) && (reachableSourceCount || 0) > 0
+// The backend strips every tool for a model that cannot, so the search tool
+// is not on the table for such a turn -- and saying it is would be a lie the
+// user can check by sending a message.
+export const modelSupportsTools = (models, currentModel) => {
+  const entry = (models || []).find(m => (m?.name || m) === currentModel)
+  if (!entry || typeof entry !== 'object') return true
+  return entry.supports_tools !== false
 }
 
 // Whether the search tool is on because of the user's data sources.
 //
 // The server adds it to the turn's tool list under the same condition, so
-// the panels and the model always agree.
+// the panels and the model always agree. `effectiveDataSources` is the list
+// the turn would carry -- the selected sources, or every reachable one when
+// the RAG toggle is on, minus the ones the active compliance level excludes.
 export const searchToolAutoEnabled = ({
   tools,
-  selectedDataSources,
-  ragEnabled,
-  reachableSourceCount,
+  effectiveDataSources,
+  currentModel,
+  models,
 }) => searchToolOffered(tools)
-  && sourcesInPlay({ selectedDataSources, ragEnabled, reachableSourceCount })
+  && modelSupportsTools(models, currentModel)
+  && (effectiveDataSources || []).length > 0
 
 // The note the panels show next to an automatically enabled search tool.
 export const SEARCH_AUTO_ENABLED_NOTE = 'Automatically enabled by selected data sources.'
+
+// The extra line for the case where the tool is *also* selected in its own
+// right: the sources imply it, but the user's own tick is what keeps it on
+// once they deselect the sources.
+export const SEARCH_EXPLICIT_NOTE = 'Also selected on its own, so it stays on when the sources are deselected.'

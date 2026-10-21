@@ -10,6 +10,7 @@ import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
 import { sortAtlasFirst } from '../constants/atlasTools'
 import {
   SEARCH_AUTO_ENABLED_NOTE,
+  SEARCH_EXPLICIT_NOTE,
   SEARCH_TOOL_KEY,
   searchToolAutoEnabled
 } from '../utils/searchToolAvailability'
@@ -171,9 +172,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     prompts: allPrompts,
     features,
     refreshConfig,
-    selectedDataSources,
-    ragEnabled,
-    ragSources
+    effectiveDataSources,
+    currentModel,
+    models
   } = useChat()
   const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts, isComplianceAccessible } = useMarketplace()
   
@@ -569,9 +570,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
   // source selection.
   const searchAutoEnabled = searchToolAutoEnabled({
     tools,
-    selectedDataSources,
-    ragEnabled,
-    reachableSourceCount: (ragSources || []).length
+    effectiveDataSources,
+    currentModel,
+    models
   })
   
   // Extract unique compliance levels from all available tools and prompts
@@ -1214,6 +1215,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                     // while they are selected.
                                     const autoEnabled = toolKey === SEARCH_TOOL_KEY && searchAutoEnabled
                                     const isSelected = selectedTools.has(toolKey) || autoEnabled
+                                    const explicit = selectedTools.has(toolKey)
                                     const isToolExpanded = expandedTools.has(toolKey)
                                     // Find detailed tool info
                                     const toolDetail = server.tools_detailed?.find(t => t.name === tool)
@@ -1253,6 +1255,11 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         {autoEnabled && (
                                           <p className="text-xs text-blue-300">
                                             {SEARCH_AUTO_ENABLED_NOTE}
+                                          </p>
+                                        )}
+                                        {autoEnabled && explicit && (
+                                          <p className="text-xs text-blue-300">
+                                            {SEARCH_EXPLICIT_NOTE}
                                           </p>
                                         )}
                                         {isToolExpanded && toolDetail && (

@@ -88,8 +88,7 @@ const ChatArea = () => {
     answerAgentQuestion,
     fileExtraction,
     selectedDataSources,
-    ragEnabled,
-    ragSources,
+    effectiveDataSources,
     features,
     fileUpload,
     appName,
@@ -118,9 +117,9 @@ const ChatArea = () => {
   // "agent mode has nothing to act on" callout must not claim otherwise.
   const searchAutoEnabled = searchToolAutoEnabled({
     tools,
-    selectedDataSources,
-    ragEnabled,
-    reachableSourceCount: (ragSources || []).length
+    effectiveDataSources,
+    currentModel,
+    models
   })
   // The implied search tool counts only when the user did not tick it
   // themselves -- it is already in the selection if they did.

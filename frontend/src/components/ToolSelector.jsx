@@ -5,6 +5,7 @@ import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import {
   SEARCH_AUTO_ENABLED_NOTE,
+  SEARCH_EXPLICIT_NOTE,
   SEARCH_TOOL_KEY,
   searchToolAutoEnabled
 } from '../utils/searchToolAvailability'
@@ -39,9 +40,9 @@ const ToolSelector = () => {
     toggleTool,
     features,
     complianceLevelFilter,
-    selectedDataSources,
-    ragEnabled,
-    ragSources
+    effectiveDataSources,
+    currentModel,
+    models
   } = useChat()
   // Optional, like ModelSelector's: the chat bar renders in test harnesses and
   // embeds that do not mount MarketplaceProvider.
@@ -135,9 +136,9 @@ const ToolSelector = () => {
   // shown as on and cannot be switched off while the sources are selected.
   const searchAutoEnabled = searchToolAutoEnabled({
     tools,
-    selectedDataSources,
-    ragEnabled,
-    reachableSourceCount: (ragSources || []).length
+    effectiveDataSources,
+    currentModel,
+    models
   })
 
   if (!features?.tools) return null
@@ -204,6 +205,7 @@ const ToolSelector = () => {
               {group.rows.map(row => {
                 const autoEnabled = row.key === SEARCH_TOOL_KEY && searchAutoEnabled
                 const isOn = selectedTools?.has(row.key) || autoEnabled
+                const explicit = Boolean(selectedTools?.has(row.key))
                 return (
                   <button
                     key={row.key}
@@ -226,6 +228,9 @@ const ToolSelector = () => {
                       )}
                       {autoEnabled && (
                         <span className="block text-xs text-blue-300 break-words">{SEARCH_AUTO_ENABLED_NOTE}</span>
+                      )}
+                      {autoEnabled && explicit && (
+                        <span className="block text-xs text-blue-300 break-words">{SEARCH_EXPLICIT_NOTE}</span>
                       )}
                     </span>
                     {/* Toggle, not a checkbox: the reviewer asked for tools that

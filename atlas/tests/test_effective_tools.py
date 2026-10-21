@@ -156,6 +156,32 @@ async def test_sources_with_the_flags_off_warn():
 
 
 @pytest.mark.asyncio
+async def test_a_search_tool_named_while_the_flags_are_off_still_warns():
+    """Naming the tool does not make it run when the feature is off.
+
+    The tool is dropped from the schema under flags-off, so the sources it
+    was supposed to read stay unread -- and the user is told so.
+    """
+    orch = _orchestrator(_config(tools=False))
+
+    await orch._warn_if_sources_unsearchable(["atlas_search"], ["srv:src"])
+
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "could not be searched" in message
+
+
+@pytest.mark.asyncio
+async def test_an_agent_turn_with_the_flags_off_warns():
+    """The agent branch judges the same way: no search tool, no sources read."""
+    orch = _orchestrator(_config(tools=False))
+
+    await orch._warn_if_sources_unsearchable(["atlas_search"], ["srv:src"])
+
+    orch.event_publisher.publish_warning.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_a_search_tool_stripped_by_authorization_warns():
     """The flags are on, but the turn's tool list no longer names the tool."""
     orch = _orchestrator(_config())
@@ -398,6 +424,75 @@ async def test_execute_does_not_imply_the_tool_when_the_flags_are_off():
 
 
 @pytest.mark.asyncio
+async def test_an_agent_turn_with_the_flags_off_warns_about_the_sources():
+    """An agent turn whose search tool cannot run says so.
+
+    The agent branch does no authorization filtering, so the tool list still
+    names the search tool the user ticked -- but under flags-off it never
+    reaches the schema, so the sources it should have read stay unread.
+    """
+    agent_mode = AsyncMock(return_value={"mode": "agent"})
+    orch = ChatOrchestrator(
+        llm=MagicMock(),
+        event_publisher=AsyncMock(),
+        session_repository=InMemorySessionRepository(),
+        agent_mode=SimpleNamespace(run=agent_mode),
+        config_manager=_config(tools=False),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_search"],
+        selected_data_sources=["srv:src"],
+        agent_mode=True,
+        files=None,
+    )
+
+    agent_mode.assert_awaited_once()
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "could not be searched" in message
+
+
+@pytest.mark.asyncio
+async def test_execute_falls_back_when_authorization_takes_every_tool():
+    """A turn whose every tool is unauthorized keeps its sources.
+
+    Authorization stripped the search tool (the deployment has it switched
+    off), so the tools branch would run with nothing to run. The turn falls
+    through to the route that reads the sources instead of dropping them.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = _routing_orchestrator(
+        _config(),
+        # Authorization takes every tool the turn had.
+        _StubAuthorization(strip_prefixes=("calc", "atlas_")),
+        tools_mode,
+        rag_mode=rag_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    tools_mode.assert_not_awaited()
+    rag_mode.assert_awaited_once()
+    assert rag_mode.await_args.kwargs["data_sources"] == ["srv:src"]
+
+
+@pytest.mark.asyncio
 async def test_a_model_without_tool_support_stays_out_of_the_tools_branch():
     """A model that cannot call tools gets no schema, implied or not.
 
@@ -449,25 +544,41 @@ class _NarrowingHookManager:
         )
 
 
+class _EchoHookManager:
+    """A hook that rewrites the prompt and leaves the tool list alone."""
+
+    def __init__(self):
+        self.seen_tools = None
+
+    def has_hooks(self, event):
+        return True
+
+    async def run_event(self, event, payload, session_context=None):
+        self.seen_tools = list(payload.get("selected_tools") or [])
+        return HookOutcome(
+            verdict="modify",
+            modified=True,
+            payload={**payload, "prompt": payload.get("prompt")},
+        )
+
+
 @pytest.mark.asyncio
 async def test_a_policy_hook_that_drops_the_search_tool_wins(monkeypatch):
     """A hook that narrows the tool list has the last word over it.
 
-    The search tool the data sources imply must not appear behind a policy
-    hook's back: a hook that removes the tool (or the whole list) decides
-    what the turn may offer.
+    The hook sees the tools the turn would really offer -- the search tool
+    the data sources imply included -- so it can strip it. The stripped list
+    is what the turn runs with.
     """
     tools_mode = AsyncMock(return_value={"mode": "tools"})
-    rag_mode = AsyncMock(return_value={"mode": "rag"})
     orch = _routing_orchestrator(
         _config(),
         _StubAuthorization(strip_prefixes=()),
         tools_mode,
-        rag_mode=rag_mode,
     )
+    hook = _NarrowingHookManager(keep=[])
     monkeypatch.setattr(
-        "atlas.application.chat.orchestrator.get_hook_manager",
-        lambda: _NarrowingHookManager(keep=[]),
+        "atlas.application.chat.orchestrator.get_hook_manager", lambda: hook,
     )
     sid = uuid4()
     await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
@@ -484,21 +595,29 @@ async def test_a_policy_hook_that_drops_the_search_tool_wins(monkeypatch):
     # The hook emptied the tool list: no tool reaches the runner, implied
     # or otherwise.
     tools_mode.assert_not_awaited()
-    rag_mode.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_a_policy_hook_that_keeps_the_search_tool_lets_it_through(monkeypatch):
-    """The hook's narrowed list is what the turn runs with."""
+async def test_a_policy_hook_that_drops_the_search_tool_from_a_sources_only_turn(
+    monkeypatch,
+):
+    """A sources-only turn offers the search tool, and the hook can take it.
+
+    The user selected no tools at all, so the search tool the sources imply
+    is the only tool in the list the hook sees -- and a hook that strips it
+    leaves the turn with nothing.
+    """
     tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
     orch = _routing_orchestrator(
         _config(),
         _StubAuthorization(strip_prefixes=()),
         tools_mode,
+        rag_mode=rag_mode,
     )
+    hook = _NarrowingHookManager(keep=[])
     monkeypatch.setattr(
-        "atlas.application.chat.orchestrator.get_hook_manager",
-        lambda: _NarrowingHookManager(keep=["calc"]),
+        "atlas.application.chat.orchestrator.get_hook_manager", lambda: hook,
     )
     sid = uuid4()
     await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
@@ -507,9 +626,45 @@ async def test_a_policy_hook_that_keeps_the_search_tool_lets_it_through(monkeypa
         session_id=sid,
         content="find the policy",
         model="test-model",
-        selected_tools=["atlas_search", "calc"],
+        selected_tools=[],
         selected_data_sources=["srv:src"],
         files=None,
     )
 
-    assert tools_mode.await_args.kwargs["selected_tools"] == ["calc"]
+    tools_mode.assert_not_awaited()
+    rag_mode.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_policy_hook_that_leaves_the_tools_alone_changes_nothing(monkeypatch):
+    """A hook that does not touch the tool list keeps the implied tool.
+
+    The implication is resolved before the hook runs, so a hook that only
+    rewrites the prompt leaves the tool list -- implied search tool
+    included -- exactly as it was.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    hook = _EchoHookManager()
+    monkeypatch.setattr(
+        "atlas.application.chat.orchestrator.get_hook_manager", lambda: hook,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    # The hook saw the tools the turn would offer, implied tool included.
+    assert hook.seen_tools == ["calc", "atlas_search"]
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["calc", "atlas_search"]

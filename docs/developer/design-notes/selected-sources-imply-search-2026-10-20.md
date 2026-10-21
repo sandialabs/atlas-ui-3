@@ -92,10 +92,14 @@ word over it:
   it always took. The implication is skipped, and the turn keeps its
   sources.
 - **A UserPromptSubmit hook that narrows the tool list.** A hook is a
-  policy: it may narrow the tools (and the sources) a turn may use. When it
-  has an opinion about the tool list, the turn runs with exactly what the
-  hook left -- the implied tool does not come back behind the hook's back.
-  A hook that does not touch the tool list changes nothing.
+  policy: it may narrow the tools (and the sources) a turn may use. The
+  effective tool list is resolved *before* the hook runs, so the hook sees
+  the tools the turn would really offer -- the implied search tool included
+  -- and can strip it. The hook's list is intersected with that list, so it
+  can only narrow, never grant.
+
+A hook that does not touch the tool list changes nothing, and a hook that
+drops an unrelated tool leaves the implied one alone.
 
 ## What still enforces the boundary
 
@@ -138,8 +142,14 @@ hand-picked) stay silent: the user did not choose them.
   catalogue is the authority on whether the deployment offers the tool at all
   -- the backend leaves it out when the feature is off -- so no extra feature
   flag had to be kept in step.
+- The panels read the *effective* data sources -- the ones the turn would
+  really carry, after the active compliance level has had its say -- and the
+  selected model's tool support, so the panel never claims a tool the server
+  is not going to offer.
 - Both the chat-bar **Tools** menu and the Tools and Settings panel show the
-  automatic state, with the note and a non-toggleable control.
+  automatic state, with the note and a non-toggleable control. A tool that is
+  *also* selected in its own right says so too: the sources imply it, but
+  the user's own tick is what keeps it on once the sources are deselected.
 - The composer's "agent mode has nothing to act on" callout counts the
   implied tool, so a turn with sources selected is not told it has no tool.
 
@@ -154,7 +164,9 @@ the source transitions.
 
 The screenshots the review asked for live in
 `test/pr-validation/assets/pr1102-screenshots/`: the locked search-tool
-state in both panels, and the same two panels with every source deselected.
+state in both panels, the same two panels with every source deselected, and
+a real sources-only turn in which the model called `atlas_search` and the
+answer cited the passages it read.
 
 ## Compatibility
 

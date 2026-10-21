@@ -37,6 +37,7 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     selectedTools: new Set(),
     selectedPrompts: new Set(),
     selectedDataSources: new Set(),
+    effectiveDataSources: [],
     ragEnabled: false,
     ragSources: [],
     toggleTool: vi.fn(),
@@ -214,7 +215,7 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     // turn does have something for the agent loop to call.
     useChat.mockReturnValue(chatContext({
       tools: [{ server: 'atlas', tools: ['canvas', 'search'], tools_detailed: [] }],
-      selectedDataSources: new Set(['srv:doc']),
+      effectiveDataSources: ['srv:doc'],
     }))
     renderChat()
 
@@ -226,7 +227,7 @@ describe('ChatArea - agent mode warning with no tools selected', () => {
     // turn with nothing to read them.
     useChat.mockReturnValue(chatContext({
       tools: [{ server: 'atlas', tools: ['canvas'], tools_detailed: [] }],
-      selectedDataSources: new Set(['srv:doc']),
+      effectiveDataSources: ['srv:doc'],
     }))
     renderChat()
 

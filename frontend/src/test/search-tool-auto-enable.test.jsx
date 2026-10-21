@@ -55,6 +55,7 @@ const OTHER_SERVER = {
 }
 
 const NOTE = 'Automatically enabled by selected data sources.'
+const EXPLICIT_NOTE = 'Also selected on its own, so it stays on when the sources are deselected.'
 
 const chatContext = (overrides = {}) => ({
   selectedTools: new Set(),
@@ -70,9 +71,9 @@ const chatContext = (overrides = {}) => ({
   tools: marketplaceState.tools,
   prompts: [],
   features: { tools: true },
-  selectedDataSources: new Set(),
-  ragEnabled: false,
-  ragSources: [],
+  currentModel: 'gpt-4',
+  models: [{ name: 'gpt-4', supports_tools: true }],
+  effectiveDataSources: [],
   ...overrides
 })
 
@@ -94,7 +95,7 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
   }
 
   it('shows the search tool as enabled and says why', () => {
-    renderPanel({ selectedDataSources: new Set(['srv:doc']) })
+    renderPanel({ effectiveDataSources: ['srv:doc'] })
 
     const chip = screen.getByRole('button', { name: 'search' })
     expect(chip).toHaveAttribute('aria-pressed', 'true')
@@ -102,7 +103,7 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
   })
 
   it('does not let the user switch it off while the sources are selected', () => {
-    const context = renderPanel({ selectedDataSources: new Set(['srv:doc']) })
+    const context = renderPanel({ effectiveDataSources: ['srv:doc'] })
 
     const chip = screen.getByRole('button', { name: 'search' })
     expect(chip).toHaveAttribute('aria-disabled', 'true')
@@ -111,7 +112,7 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
   })
 
   it('goes back to an ordinary toggle once every source is deselected', () => {
-    const context = renderPanel({ selectedDataSources: new Set() })
+    const context = renderPanel({ effectiveDataSources: [] })
 
     const chip = screen.getByRole('button', { name: 'search' })
     expect(chip).toHaveAttribute('aria-pressed', 'false')
@@ -132,15 +133,42 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
       tools_detailed: [ATLAS_SERVER.tools_detailed[0]]
     }
     marketplaceState.tools = [withoutSearch]
-    renderPanel({ selectedDataSources: new Set(['srv:doc']) })
+    renderPanel({ effectiveDataSources: ['srv:doc'] })
 
     expect(screen.queryByRole('button', { name: 'search' })).not.toBeInTheDocument()
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
   })
 
+  it('leaves the state alone for a model that cannot call tools', () => {
+    // The backend strips every tool for such a model, so the search tool is
+    // not on the table for the turn -- and the panel must not claim it is.
+    renderPanel({
+      effectiveDataSources: ['srv:doc'],
+      currentModel: 'plain-model',
+      models: [{ name: 'plain-model', supports_tools: false }]
+    })
+
+    const chip = screen.getByRole('button', { name: 'search' })
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+  })
+
+  it('says so when the tool is also selected in its own right', () => {
+    // "Enable All" (or an earlier tick) puts the search tool in the
+    // selection, so it stays on after the sources are deselected. The chip
+    // has to say that, or the lock reads as "this cannot be turned off".
+    renderPanel({
+      effectiveDataSources: ['srv:doc'],
+      selectedTools: new Set(['atlas_search'])
+    })
+
+    expect(screen.getByText(NOTE)).toBeInTheDocument()
+    expect(screen.getByText(EXPLICIT_NOTE)).toBeInTheDocument()
+  })
+
   it('does not touch another server that has a tool called search', () => {
     marketplaceState.tools = [ATLAS_SERVER, OTHER_SERVER]
-    const context = renderPanel({ selectedDataSources: new Set(['srv:doc']) })
+    const context = renderPanel({ effectiveDataSources: ['srv:doc'] })
 
     const chips = screen.getAllByRole('button', { name: 'search' })
     expect(chips).toHaveLength(2)
@@ -167,7 +195,7 @@ describe('ToolSelector - the search tool is on because of the selected sources',
   }
 
   it('shows the search tool as on and explains the automatic state', () => {
-    renderSelector({ selectedDataSources: new Set(['srv:doc']) })
+    renderSelector({ effectiveDataSources: ['srv:doc'] })
 
     const row = screen.getByRole('button', { name: /search/i })
     expect(row).toHaveAttribute('aria-pressed', 'true')
@@ -175,7 +203,7 @@ describe('ToolSelector - the search tool is on because of the selected sources',
   })
 
   it('does not toggle the automatic search tool off', () => {
-    const context = renderSelector({ selectedDataSources: new Set(['srv:doc']) })
+    const context = renderSelector({ effectiveDataSources: ['srv:doc'] })
 
     const row = screen.getByRole('button', { name: /search/i })
     fireEvent.click(row)
@@ -183,7 +211,7 @@ describe('ToolSelector - the search tool is on because of the selected sources',
   })
 
   it('is an ordinary toggle again once every source is deselected', () => {
-    const context = renderSelector({ selectedDataSources: new Set() })
+    const context = renderSelector({ effectiveDataSources: [] })
 
     const row = screen.getByRole('button', { name: /search/i })
     expect(row).toHaveAttribute('aria-pressed', 'false')
@@ -198,7 +226,7 @@ describe('ToolSelector - the search tool is on because of the selected sources',
     // not be counted a second time in the badge.
     renderSelector({
       selectedTools: new Set(['atlas_canvas', 'atlas_search']),
-      selectedDataSources: new Set(['srv:doc'])
+      effectiveDataSources: ['srv:doc']
     })
 
     expect(screen.getByRole('button', { name: '2 tools' })).toBeInTheDocument()
@@ -207,7 +235,7 @@ describe('ToolSelector - the search tool is on because of the selected sources',
   it('counts the implied tool when it is not ticked explicitly', () => {
     renderSelector({
       selectedTools: new Set(['atlas_canvas']),
-      selectedDataSources: new Set(['srv:doc'])
+      effectiveDataSources: ['srv:doc']
     })
 
     expect(screen.getByRole('button', { name: '2 tools' })).toBeInTheDocument()
