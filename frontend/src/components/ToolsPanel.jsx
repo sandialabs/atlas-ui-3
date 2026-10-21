@@ -14,6 +14,7 @@ import {
   SEARCH_AUTO_ENABLED_SELECT_TITLE,
   SEARCH_EXPLICIT_REMOVE_TITLE,
   SEARCH_TOOL_KEY,
+  isSearchSelected,
   searchToolAutoEnabled
 } from '../utils/searchToolAvailability'
 import { FOCUS_RING } from '../utils/focusRing'
@@ -576,7 +577,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     currentModel,
     models,
     selectedTools: savedSelectedTools,
-    searchWithOutboundTools: features?.atlas_search_with_outbound_tools
+    searchWithOutboundTools: features?.atlas_search_with_outbound_tools,
+    builtinNames: features?.atlas_builtin_tools
   })
   
   // Extract unique compliance levels from all available tools and prompts
@@ -1219,7 +1221,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                     // while they are selected.
                                     const autoEnabled = toolKey === SEARCH_TOOL_KEY && searchAutoEnabled
                                     const isSelected = selectedTools.has(toolKey) || autoEnabled
-                                    const explicit = selectedTools.has(toolKey)
+                                    const explicit = isSearchSelected(selectedTools)
                                     const isToolExpanded = expandedTools.has(toolKey)
                                     // Find detailed tool info
                                     const toolDetail = server.tools_detailed?.find(t => t.name === tool)

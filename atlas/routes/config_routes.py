@@ -15,6 +15,7 @@ from atlas.modules.config.settings import configured_agent_max_steps
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_DESCRIPTION,
     ATLAS_SERVER_NAME,
+    ATLAS_TOOL_NAMES,
     ATLAS_TOOL_SCHEMAS,
     DISCOVER_TOOL_NAME,
     LAUNCH_GATED_TOOL_NAMES,
@@ -231,6 +232,10 @@ async def get_config_shell(
             # Whether the data sources imply the built-in search tool in a
             # turn that also carries an MCP server's tool (issue #1102).
             "atlas_search_with_outbound_tools": app_settings.feature_atlas_search_with_outbound_tools,
+            # The built-in tool names, so the client can tell a built-in from
+            # an MCP server's tool even when the deployment has gated one of
+            # them off.
+            "atlas_builtin_tools": list(ATLAS_TOOL_NAMES),
         },
         "file_upload": get_file_upload_limit_config(),
         "file_extraction": _get_file_extraction_config(config_manager),
@@ -591,6 +596,10 @@ async def get_config(
             # Whether the data sources imply the built-in search tool in a
             # turn that also carries an MCP server's tool (issue #1102).
             "atlas_search_with_outbound_tools": app_settings.feature_atlas_search_with_outbound_tools,
+            # The built-in tool names, so the client can tell a built-in from
+            # an MCP server's tool even when the deployment has gated one of
+            # them off.
+            "atlas_builtin_tools": list(ATLAS_TOOL_NAMES),
         },
         "file_upload": get_file_upload_limit_config(),
         "file_extraction": _get_file_extraction_config(config_manager)

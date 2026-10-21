@@ -316,6 +316,17 @@ describe('ToolSelector - the search tool is on because of the selected sources',
     expect(screen.getByRole('button', { name: '2 tools' })).toBeInTheDocument()
   })
 
+  it('counts a legacy tick once and shows the note for it', () => {
+    // A selection may still carry the pre-#855 name of the search tool.
+    renderSelector({
+      selectedTools: new Set(['atlas_canvas', 'atlas_rag_query']),
+      effectiveDataSources: ['srv:doc']
+    })
+
+    expect(screen.getByRole('button', { name: '2 tools' })).toBeInTheDocument()
+    expect(screen.getByText(EXPLICIT_NOTE)).toBeInTheDocument()
+  })
+
   it('counts the implied tool when it is not ticked explicitly', () => {
     renderSelector({
       selectedTools: new Set(['atlas_canvas']),

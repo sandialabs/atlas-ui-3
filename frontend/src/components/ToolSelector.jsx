@@ -9,6 +9,7 @@ import {
   SEARCH_AUTO_ENABLED_SELECT_TITLE,
   SEARCH_EXPLICIT_REMOVE_TITLE,
   SEARCH_TOOL_KEY,
+  isSearchSelected,
   searchToolAutoEnabled
 } from '../utils/searchToolAvailability'
 import { useEscapeKey } from '../hooks/useEscapeKey'
@@ -142,7 +143,8 @@ const ToolSelector = () => {
     currentModel,
     models,
     selectedTools,
-    searchWithOutboundTools: features?.atlas_search_with_outbound_tools
+    searchWithOutboundTools: features?.atlas_search_with_outbound_tools,
+    builtinNames: features?.atlas_builtin_tools
   })
 
   if (!features?.tools) return null
@@ -151,7 +153,7 @@ const ToolSelector = () => {
   // counts as one of the tools the model can use -- unless the user ticked it
   // themselves, in which case it is already in the selection.
   const selectedCount = (selectedTools?.size || 0)
-    + (searchAutoEnabled && !selectedTools?.has(SEARCH_TOOL_KEY) ? 1 : 0)
+    + (searchAutoEnabled && !isSearchSelected(selectedTools) ? 1 : 0)
 
   return (
     <div ref={dropdownRef} className="relative">
@@ -209,7 +211,7 @@ const ToolSelector = () => {
               {group.rows.map(row => {
                 const autoEnabled = row.key === SEARCH_TOOL_KEY && searchAutoEnabled
                 const isOn = selectedTools?.has(row.key) || autoEnabled
-                const explicit = Boolean(selectedTools?.has(row.key))
+                const explicit = isSearchSelected(selectedTools)
                 return (
                   <button
                     key={row.key}

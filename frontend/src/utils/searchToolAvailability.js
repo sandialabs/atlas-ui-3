@@ -21,24 +21,35 @@ import { ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 export const ATLAS_SEARCH_TOOL = 'search'
 export const SEARCH_TOOL_KEY = `${ATLAS_SERVER}_${ATLAS_SEARCH_TOOL}`
 
-// The keys of the built-in tools, from the catalogue.
+// The keys of the built-in tools.
 //
-// The built-in server's tools are named in full in the selection (`atlas_` +
-// the short name), so the catalogue gives the whole set.
-export const builtinToolKeys = (tools) => {
+// The server publishes its own list of built-in tool names (a built-in that
+// the deployment has gated off is still a built-in), so the client uses that
+// rather than deriving it from the catalogue it happens to have.
+export const builtinToolKeys = (tools, builtinNames) => {
+  if (Array.isArray(builtinNames) && builtinNames.length > 0) {
+    return new Set(builtinNames)
+  }
   const server = (tools || []).find(s => s?.server === ATLAS_SERVER)
   return new Set((server?.tools || []).map(t => `${ATLAS_SERVER}_${t}`))
 }
 
-// Whether the turn carries a tool from an MCP server.
+// Whether the tool is outbound.
 //
 // A tool is outbound unless it belongs to the built-in server: an operator
 // may configure a server whose name starts with "atlas_", and that server
 // is outbound.
-export const hasOutboundTool = (selectedTools, tools) => {
-  const builtins = builtinToolKeys(tools)
+export const hasOutboundTool = (selectedTools, tools, builtinNames) => {
+  const builtins = builtinToolKeys(tools, builtinNames)
   return [...(selectedTools || [])].some(k => !builtins.has(migrateToolName(k)))
 }
+
+// Whether the user selected the search tool in their own right.
+//
+// Compared through the migration, so a selection that still carries the
+// pre-#855 name counts (and is not counted twice).
+export const isSearchSelected = (selectedTools) =>
+  [...(selectedTools || [])].some(k => migrateToolName(k) === SEARCH_TOOL_KEY)
 
 // Whether the deployment offers the search tool at all.
 //
@@ -77,12 +88,13 @@ export const searchToolAutoEnabled = ({
   currentModel,
   models,
   selectedTools,
-  searchWithOutboundTools
+  searchWithOutboundTools,
+  builtinNames
 }) => searchToolOffered(tools)
   && modelSupportsTools(models, currentModel)
   && (effectiveDataSources || []).length > 0
   && (searchWithOutboundTools !== false
-    || !hasOutboundTool(selectedTools, tools))
+    || !hasOutboundTool(selectedTools, tools, builtinNames))
 
 // The note the panels show next to an automatically enabled search tool.
 export const SEARCH_AUTO_ENABLED_NOTE = 'Automatically enabled by selected data sources.'
