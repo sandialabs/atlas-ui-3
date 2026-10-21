@@ -2226,6 +2226,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		ragSources, // Expose flattened list of sources
 		features: config.features,
 		setFeatures: config.setFeatures,
+		// How the Help page gets its content (issue #1107): the local
+		// Markdown, a remotely hosted document, or an external link.
+		help: config.help,
 		currentModel: config.currentModel,
 		setCurrentModel: config.setCurrentModel,
 		selectedTools: selections.selectedTools,

@@ -1090,6 +1090,71 @@ class AppSettings(BaseSettings):
     rag_sources_config_file: str = Field(default="rag-sources.json", validation_alias="RAG_SOURCES_CONFIG_FILE")
     llm_config_file: str = Field(default="llmconfig.yml", validation_alias="LLM_CONFIG_FILE")
     help_config_file: str = Field(default="help.md", validation_alias="HELP_CONFIG_FILE")
+    # Where the Help page gets its content (issue #1107). The mode selects
+    # between the local Markdown, Markdown fetched from help_content_url, and a
+    # plain link to an externally hosted documentation site:
+    #   local           -- the local help.md (pre-#1107 behavior, the default)
+    #   remote_markdown -- fetch help_content_url and render it in the Help page
+    #   external_link   -- the Help button opens help_content_url in a new tab
+    # An unusable combination (a remote mode without a usable URL) is reported
+    # as a configuration error and falls back to the local content, so the
+    # Help button is never left pointing nowhere. See
+    # atlas/modules/help/help_config.py and docs/admin/help-config.md.
+    help_display_mode: str = Field(
+        default="local",
+        description=(
+            "How the Help page gets its content: 'local' (default, the local "
+            "help.md), 'remote_markdown' (fetch HELP_CONTENT_URL and render "
+            "it), or 'external_link' (open HELP_CONTENT_URL in a new tab)."
+        ),
+        validation_alias="HELP_DISPLAY_MODE",
+    )
+    help_content_url: str = Field(
+        default="",
+        description=(
+            "URL of the externally hosted documentation. Required by the "
+            "'remote_markdown' and 'external_link' display modes."
+        ),
+        validation_alias="HELP_CONTENT_URL",
+    )
+    help_allowed_hosts: str = Field(
+        default="",
+        description=(
+            "Comma-separated extra hosts (host or host:port) that may serve "
+            "Help images and same-site redirects, beyond the host of "
+            "HELP_CONTENT_URL. Empty means only that host is allowed."
+        ),
+        validation_alias="HELP_ALLOWED_HOSTS",
+    )
+    help_remote_cache_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        description=(
+            "How long a fetched Help document (and its images) is reused "
+            "before the server asks the host for it again. 0 disables reuse."
+        ),
+        validation_alias="HELP_REMOTE_CACHE_TTL_SECONDS",
+    )
+    help_remote_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120.0,
+        allow_inf_nan=False,
+        description="Timeout in seconds for each request to the hosted documentation.",
+        validation_alias="HELP_REMOTE_TIMEOUT_SECONDS",
+    )
+    help_remote_max_bytes: int = Field(
+        default=1_048_576,
+        gt=0,
+        description="Maximum size in bytes of a fetched Help document.",
+        validation_alias="HELP_REMOTE_MAX_BYTES",
+    )
+    help_remote_max_image_bytes: int = Field(
+        default=5_242_880,
+        gt=0,
+        description="Maximum size in bytes of a fetched Help image.",
+        validation_alias="HELP_REMOTE_MAX_IMAGE_BYTES",
+    )
     messages_config_file: str = Field(default="messages.txt", validation_alias="MESSAGES_CONFIG_FILE")
     splash_config_file: str = Field(default="splash-config.json", validation_alias="SPLASH_CONFIG_FILE")
     splash_screen_file: str = Field(default="splash-screen.md", validation_alias="SPLASH_SCREEN_FILE")

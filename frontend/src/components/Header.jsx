@@ -84,6 +84,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
     messages,
     clearChat,
     features,
+    help,
     settings,
     complianceLevelFilter,
     setComplianceLevelFilter,
@@ -120,6 +121,13 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
   // link in the conversation-setup cluster. Core labels, selected values, and
   // the locked-state guidance never depend on this.
   const reduceHelpText = settings?.reduceHelpText === true
+  // How the Help page gets its content (issue #1107). In 'external_link'
+  // mode the Help button opens the operator's documentation site in a new
+  // tab; ATLAS fetches and renders nothing. A mode that names an external
+  // source but has no usable URL falls back to the in-app Help page, so the
+  // button is never dead.
+  const helpExternalUrl =
+    help?.mode === 'external_link' && help?.content_url ? help.content_url : ''
   const { connectionStatus, isConnected } = useWS()
   const toast = useToast()
   const [transcriptDropdownOpen, setTranscriptDropdownOpen] = useState(false)
@@ -474,15 +482,33 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
 
           {/* Help. Icon only, and a ringed question mark rather than the old
               outline circle: the reviewer asked for a clearer help glyph so the
-              word could go and the toolbar could lose a chunk of text. */}
-          <button
-            onClick={() => navigate('/help')}
-            className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
-            title="Help"
-            aria-label="Help"
-          >
-            <CircleHelp className="w-5 h-5" />
-          </button>
+              word could go and the toolbar could lose a chunk of text.
+              With externally hosted documentation (issue #1107) the button
+              becomes a link: it opens the documentation site in a new tab and
+              leaves the conversation alone. An anchor rather than a button
+              with window.open, so it is keyboard accessible and announces
+              that it opens a new tab. */}
+          {helpExternalUrl ? (
+            <a
+              href={helpExternalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
+              title="Help (opens the documentation in a new tab)"
+              aria-label="Help (opens the documentation in a new tab)"
+            >
+              <CircleHelp className="w-5 h-5" />
+            </a>
+          ) : (
+            <button
+              onClick={() => navigate('/help')}
+              className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
+              title="Help"
+              aria-label="Help"
+            >
+              <CircleHelp className="w-5 h-5" />
+            </button>
+          )}
 
           {/* File Manager Panel Toggle */}
           {features?.files_panel && (
@@ -635,17 +661,31 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                 <span>Tools and Settings</span>
               </button>
 
-              {/* Help Button */}
-              <button
-                onClick={() => {
-                  navigate('/help')
-                  setMobileMenuOpen(false)
-                }}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
-              >
-                <CircleHelp className="w-5 h-5" />
-                <span>Help</span>
-              </button>
+              {/* Help Button. With externally hosted documentation (issue
+                  #1107) it opens the documentation site in a new tab. */}
+              {helpExternalUrl ? (
+                <a
+                  href={helpExternalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                >
+                  <CircleHelp className="w-5 h-5" />
+                  <span>Help</span>
+                </a>
+              ) : (
+                <button
+                  onClick={() => {
+                    navigate('/help')
+                    setMobileMenuOpen(false)
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                >
+                  <CircleHelp className="w-5 h-5" />
+                  <span>Help</span>
+                </button>
+              )}
 
               {/* File Manager Panel Toggle */}
               {features?.files_panel && (

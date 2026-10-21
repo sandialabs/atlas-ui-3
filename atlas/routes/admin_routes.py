@@ -22,6 +22,7 @@ from atlas.core.compliance import declared_classifications
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config import config_manager
+from atlas.modules.help.help_config import resolve_help_config
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,10 @@ async def get_session_store_status(admin_user: str = Depends(require_admin)):  #
 async def get_help_config(admin_user: str = Depends(require_admin)):  # noqa: ARG001 (enforces auth)
     try:
         setup_config_dir()
+        # How the Help page actually gets its content (issue #1107). The Admin
+        # UI shows it so an operator knows whether editing this file has any
+        # effect on what users see.
+        help_config = resolve_help_config(app_factory.get_config_manager().app_settings)
         help_file = get_admin_config_path("help.md")
         if not help_file.exists():
             # Fall back to legacy help-config.json in the same config directory.
@@ -290,12 +295,22 @@ async def get_help_config(admin_user: str = Depends(require_admin)):  # noqa: AR
             if legacy_file.exists():
                 help_file = legacy_file
             else:
-                return {"content": "", "file_path": str(help_file)}
+                return {
+                    "content": "",
+                    "file_path": str(help_file),
+                    **help_config.as_public_dict(),
+                    "external": help_config.has_external_source,
+                }
         content = get_file_content(help_file)
         return {
             "content": content,
             "file_path": str(help_file),
             "last_modified": help_file.stat().st_mtime,
+            **help_config.as_public_dict(),
+            # True when the Help page shows something other than this file, so
+            # the Admin UI can say that editing it will not change the docs
+            # users see.
+            "external": help_config.has_external_source,
         }
     except HTTPException:
         raise
