@@ -105,6 +105,26 @@ class TestDocsExamples:
         assert outcome.verdict == "continue"
         assert outcome.payload["selected_tools"] == ["t"]
 
+    async def test_user_prompt_submit_strips_the_implied_search_from_an_outbound_turn(self):
+        """An internal corpus and an outbound tool must not share a turn."""
+        outcome = await _run(
+            HookEvent.USER_PROMPT_SUBMIT, "user_prompt_submit_strip_implied_search.py",
+            {"prompt": "look it up", "selected_tools": ["atlas_search", "web__fetch"],
+             "selected_data_sources": ["srv:doc"], "agent_mode": False},
+        )
+        assert outcome.modified
+        assert outcome.payload["selected_tools"] == ["web__fetch"]
+
+    async def test_user_prompt_submit_keeps_the_search_tool_in_an_internal_turn(self):
+        """No outbound tool in the turn: the search tool stays."""
+        outcome = await _run(
+            HookEvent.USER_PROMPT_SUBMIT, "user_prompt_submit_strip_implied_search.py",
+            {"prompt": "look it up", "selected_tools": ["atlas_search", "atlas_canvas"],
+             "selected_data_sources": ["srv:doc"], "agent_mode": False},
+        )
+        assert outcome.verdict == "continue"
+        assert outcome.payload["selected_tools"] == ["atlas_search", "atlas_canvas"]
+
     async def test_pre_llm_call_swaps_model_for_restricted_turns(self):
         restricted = await _run(HookEvent.PRE_LLM_CALL, "pre_llm_call.py",
                                 {"model": "hosted-gpt", "messages": []}, compliance_level="HIPAA")

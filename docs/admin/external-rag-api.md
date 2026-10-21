@@ -30,8 +30,11 @@ Two things follow for operators:
   can now call `atlas_search` as well. An internal corpus may therefore be
   read in the same turn as an outbound tool. There is no per-turn switch to
   separate the two: if that matters for your deployment, leave the search
-  tool switched off (`FEATURE_ATLAS_RAG_TOOLS_ENABLED=false`) or do not offer
-  the RAG sources to those users.
+  tool switched off (`FEATURE_ATLAS_RAG_TOOLS_ENABLED=false`), do not offer
+  the RAG sources to those users, or install the reference hook
+  [user_prompt_submit_strip_implied_search.py](hook-examples/user_prompt_submit_strip_implied_search.py),
+  which removes the implied search tool from any turn that also calls an
+  outbound MCP server.
 - The model decides whether a question is worth a search, so a turn may
   answer without reading the sources. That is the intended behavior; the
   sources are the user's evidence, not a mandatory part of every answer.

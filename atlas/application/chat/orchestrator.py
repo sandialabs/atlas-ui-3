@@ -262,10 +262,10 @@ class ChatOrchestrator:
         if not self._builtin_search_flags_on():
             if read_directly:
                 return (
-                    "**The built-in `atlas_search` tool is turned off in this "
-                    "deployment (`FEATURE_ATLAS_RAG_TOOLS_ENABLED`), so the "
-                    "model could not search the sources itself. They were "
-                    "read directly."
+                    "**The built-in `atlas_search` tool is turned off.** "
+                    "This deployment has `FEATURE_ATLAS_RAG_TOOLS_ENABLED` "
+                    "off, so the model could not search the sources itself. "
+                    "They were read directly."
                 )
             return (
                 "**Your data sources could not be searched.** The built-in "
@@ -281,11 +281,13 @@ class ChatOrchestrator:
                 "not use them. The sources you selected were read without "
                 "them."
             )
+        # The tool has no per-user access control of its own, so the reason
+        # it is missing is not the user's permissions: a policy hook may have
+        # taken it away. Keep the wording neutral.
         return (
             "**Your data sources could not be searched.** The built-in "
             "`atlas_search` tool is not available to this conversation, so the "
-            "model could not read the sources you selected. Ask an "
-            "administrator to check your access to the built-in ATLAS tools."
+            "model could not read the sources you selected."
         )
 
     async def _warn_if_sources_unsearchable(
