@@ -85,6 +85,10 @@ class RemoteHelpResult:
     stale: bool = False
     fetched_at: Optional[float] = None
     error: Optional[str] = None
+    # The document with its image references pointed at the proxy, and the
+    # images it references. The rewrite is done once per fetch, not once per
+    # request: it is the most expensive part of serving a hosted document.
+    rewritten: Optional["RewrittenDocument"] = None
 
 
 @dataclass
@@ -106,6 +110,8 @@ class _CachedDocument:
     # keeps being told that this is the last copy, for as long as it is
     # being served.
     last_error: Optional[str] = None
+    # The document with its image references pointed at the proxy.
+    rewritten: Optional["RewrittenDocument"] = None
 
 
 @dataclass
@@ -430,6 +436,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
             # the reader is told about it on every request, not only on the
             # one that failed.
             error=cached.last_error,
+            rewritten=cached.rewritten,
         )
 
     request_headers: Dict[str, str] = {"Accept": "text/markdown, text/plain, */*"}
@@ -481,6 +488,10 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
             final_url,
             content_type,
         )
+    # The rewrite happens here, once per fetch: the result is kept with the
+    # cached document, so a request that is served from the cache does not
+    # pay for it again.
+    rewritten = rewrite_markdown_images(content, final_url, config)
     entry = _CachedDocument(
         content=content,
         etag=response_headers.get("etag"),
@@ -490,6 +501,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
         final_url=final_url,
         stale=False,
         last_error=None,
+        rewritten=rewritten,
     )
     with _cache_lock:
         _document_cache[url] = entry
@@ -501,6 +513,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
         cached=False,
         stale=False,
         fetched_at=now,
+        rewritten=rewritten,
     )
 
 
@@ -527,6 +540,7 @@ def _stale_fallback(
             stale=True,
             fetched_at=cached.fetched_at,
             error=message,
+            rewritten=cached.rewritten,
         )
     logger.error("Could not fetch the Help document from %s: %s", url, message)
     with _cache_lock:
@@ -612,31 +626,37 @@ async def fetch_remote_image(url: str, config: HelpConfig) -> Tuple[bytes, str]:
 
 # ![alt](src "title") and <img src="..."> -- the two ways a Markdown
 # document can point at an image.
+# The possessive quantifiers matter: the target and the suffix used to
+# overlap, so a document without a closing parenthesis made the engine try
+# every split of the run -- a few kilobytes of text took seconds to rewrite.
+# Possessive quantifiers (Python 3.11+) give the characters back never, so
+# the scan stays linear.
 _MARKDOWN_IMAGE_RE = re.compile(
-    r"(!\[[^\]]*\]\(\s*)(<?)([^\s>)]+)(>?)([^)]*)\)",
+    r"(!\[[^\]]*+\]\(\s*+)(<?)([^\s>)]++)(>?)([^)]*+)\)",
 )
 _HTML_IMAGE_RE = re.compile(
-    r"(<img\b[^>]*?\bsrc\s*=\s*)(\"|')(.*?)\2",
+    r"(<img\b[^>]{0,2048}?\bsrc\s*=\s*)(\"|')([^<]{0,8192}?)\2",
     re.IGNORECASE | re.DOTALL,
 )
 # [text](target) -- a link. The lookbehind keeps it from matching the
 # "[alt](src)" of an image, which is handled above.
 _MARKDOWN_LINK_RE = re.compile(
-    r"(?<!!)(\[[^\]]*\]\(\s*)(<?)([^\s>)]+)(>?)([^)]*)\)",
+    r"(?<!!)(\[[^\]]*+\]\(\s*+)(<?)([^\s>)]++)(>?)([^)]*+)\)",
 )
 # [ref]: target -- the definition a reference-style link or image uses.
 _MARKDOWN_DEFINITION_RE = re.compile(
-    r"(?m)^(\s{0,3}\[([^\]\n]+)\]:\s*)(<?)([^\s>]+)(>?)",
+    r"(?m)^(\s{0,3}\[([^\]\n]++)\]:\s*+)(<?)([^\s>]++)(>?)",
 )
 # ![alt][ref] -- a reference-style image. The label it uses is collected so
 # the definition it points at is proxied rather than merely made absolute.
-_REFERENCE_IMAGE_RE = re.compile(r"!\[[^\]]*\]\[([^\]]*)\]")
+_REFERENCE_IMAGE_RE = re.compile(r"!\[[^\]]*+\]\[([^\]]*+)\]")
 # [![alt](src)](target) -- an image inside a link. Both parts are rewritten,
 # and the plain patterns below cannot do it: the link pattern would match
 # the inner image and stop there, and the image pattern would match the
 # link text and leave the target alone.
 _LINKED_IMAGE_RE = re.compile(
-    r"(!\[[^\]]*\]\(\s*(<?)([^\s>)]+)(>?)([^)]*)\))(\]\(\s*(<?)([^\s>)]+)(>?)([^)]*)\))"
+    r"(!\[[^\]]*+\]\(\s*+(<?)([^\s>)]++)(>?)([^)]*+)\))"
+    r"(\]\(\s*+(<?)([^\s>)]++)(>?)([^)]*+)\))"
 )
 
 

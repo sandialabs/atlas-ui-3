@@ -129,7 +129,11 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
     result = await fetch_remote_markdown(config)
     if result.content:
         document_url = result.source_url or config.content_url
-        rewritten = rewrite_markdown_images(result.content, document_url, config)
+        # The rewrite is done once per fetch and kept with the cached
+        # document, so a request served from the cache does not pay for it.
+        rewritten = result.rewritten or rewrite_markdown_images(
+            result.content, document_url, config
+        )
         # The image proxy serves the images of this document, and only
         # those. The registry is keyed by the configured URL, so a
         # redirected document is found under the same key.

@@ -371,6 +371,28 @@ def test_relative_links_in_a_hosted_document_point_at_the_documentation(
     assert "[absolute one](https://docs.example.org/setup)" in content
 
 
+def test_an_adversarial_document_is_rewritten_quickly():
+    """A document that is all image syntax must not freeze the worker.
+
+    The patterns that find the images and the links used to overlap, so the
+    engine tried every way of splitting a long run of text: a few kilobytes
+    took half a minute, and anybody could ask for it again by opening the
+    Help page.
+    """
+    config = resolve_help_config(app_factory.get_config_manager().app_settings)
+    document_url = "https://docs.example.org/help.md"
+    for adversarial in (
+        "![x](a" * 1000,
+        "[x](a" * 1000,
+        "[x]: a" * 1000,
+        '<img src="a' * 1000,
+        "[![x](a" * 1000 + ")]",
+    ):
+        started = time.monotonic()
+        remote_content.rewrite_markdown_images(adversarial, document_url, config)
+        assert time.monotonic() - started < 1.0
+
+
 def test_a_linked_image_keeps_its_proxy_source(help_settings, docs_server):
     """A linked image is not rewritten twice.
 
