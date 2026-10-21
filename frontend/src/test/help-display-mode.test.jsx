@@ -157,6 +157,43 @@ describe('Help page', () => {
     expect(screen.getByText(/requires a usable HELP_CONTENT_URL/)).toBeInTheDocument()
   })
 
+  it('reports a documentation host that is down separately from a misconfiguration', async () => {
+    mockHelpResponse({
+      mode: 'local',
+      content: '# Local Help',
+      error: null,
+      fetch_error: 'the documentation host answered with HTTP 500',
+      fallback: 'local',
+    })
+    render(<HelpPage />)
+
+    expect(
+      await screen.findByText('The hosted documentation is not available right now')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/The local Help content is shown instead/)
+    ).toBeInTheDocument()
+    // A host that is down is not a configuration problem.
+    expect(screen.queryByText('Help configuration problem')).not.toBeInTheDocument()
+  })
+
+  it('says when the copy on screen is a stale one', async () => {
+    mockHelpResponse({
+      mode: 'remote_markdown',
+      content: '# Hosted Help',
+      stale: true,
+      fetch_error: 'could not reach the documentation host',
+    })
+    render(<HelpPage />)
+
+    expect(
+      await screen.findByText('The hosted documentation is not available right now')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/This is the last copy that was fetched/)
+    ).toBeInTheDocument()
+  })
+
   it('reports a failed request', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500 })))
     render(<HelpPage />)
@@ -181,7 +218,9 @@ describe('admin Help card', () => {
 
     expect(await screen.findByText('Source: Externally hosted Markdown')).toBeInTheDocument()
     expect(screen.getByText(/this file is not what users see/)).toBeInTheDocument()
-    expect(screen.getByText(/https:\/\/docs\.example\.org\/atlas\/help\.md/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/^URL: https:\/\/docs\.example\.org\/atlas\/help\.md$/)
+    ).toBeInTheDocument()
   })
 
   it('says the local editor is live in local mode', async () => {

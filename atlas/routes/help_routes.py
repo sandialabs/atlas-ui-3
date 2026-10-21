@@ -67,6 +67,8 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
             "stale": False,
             "source": "external_link",
             "error": config.error,
+            "fetch_error": None,
+            "fallback": None,
         }
 
     local_content, local_path = load_local_help_content(config_manager, app_settings)
@@ -81,7 +83,13 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
             "cached": False,
             "stale": False,
             "source": local_path or "local",
+            # A configuration problem and a documentation host that is down
+            # are different things, so they are reported separately: the
+            # first needs an operator to change the configuration, the
+            # second usually resolves itself.
             "error": config.error,
+            "fetch_error": None,
+            "fallback": None,
         }
 
     result = await fetch_remote_markdown(config)
@@ -96,7 +104,9 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
             "cached": result.cached,
             "stale": result.stale,
             "source": document_url,
-            "error": config.error or result.error,
+            "error": config.error,
+            "fetch_error": result.error,
+            "fallback": None,
         }
 
     # The host could not be reached and nothing was cached: fall back to the
@@ -110,12 +120,9 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
         "cached": False,
         "stale": False,
         "source": local_path or "local",
-        "error": (
-            f"{config.error} " if config.error else ""
-        ) + (
-            result.error
-            or "The hosted documentation could not be reached and no cached copy was available."
-        ),
+        "error": config.error,
+        "fetch_error": result.error
+        or "The hosted documentation could not be reached and no cached copy was available.",
         "fallback": "local",
     }
 

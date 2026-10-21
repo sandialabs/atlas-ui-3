@@ -66,6 +66,8 @@ The document is fetched by the Atlas backend, not by the browser. That avoids
 cross-origin trouble, keeps the reader's IP address away from the
 documentation host, and lets the response be cached.
 
+![The Help page showing a document hosted outside Atlas](../readme_img/help-remote-markdown.png)
+
 * **Caching.** A fetched document is reused for `HELP_REMOTE_CACHE_TTL_SECONDS`
   (5 minutes by default). After that the server revalidates it with a
   conditional request (`ETag` / `Last-Modified`) and only transfers the body
@@ -73,7 +75,9 @@ documentation host, and lets the response be cached.
   redeploy.
 * **Failure.** If the documentation host is unreachable, the last known good
   copy is served (the Help page says it is serving a stale copy). If there is
-  no cached copy, the local `help.md` is shown instead, with the reason.
+  no cached copy, the local `help.md` is shown instead, with the reason. A
+  host that is down is reported separately from a configuration problem: the
+  first usually resolves itself, the second needs an operator.
 * **Images.** Image references in the hosted document are resolved against the
   document URL, so a relative reference (`images/diagram.png`) and a
   root-relative one (`/images/diagram.png`) both point at the documentation
@@ -84,6 +88,16 @@ documentation host, and lets the response be cached.
   (and any host listed in `HELP_ALLOWED_HOSTS`) may be fetched that way; an
   absolute image URL pointing somewhere else is left alone and is blocked by
   the default policy unless the operator widens `SECURITY_CSP_VALUE`.
+* **What a request may reach.** The scheme, host and port of every request
+  come from the configuration; a request can only choose a path on a host
+  the deployment already trusts. A redirect is resolved the same way, so it
+  cannot aim the request at another host, and a request cannot downgrade
+  the scheme.
+* **Limits.** A document larger than `HELP_REMOTE_MAX_BYTES` and an image
+  larger than `HELP_REMOTE_MAX_IMAGE_BYTES` are refused rather than
+  buffered. The image cache is bounded (64 images, 32 MB) and drops the
+  least recently used entries first, so a host that serves an image per URL
+  variant cannot fill the process.
 * **Sanitization.** The document is rendered with `marked` + `DOMPurify`, the
   same pipeline used for chat messages, so a hosted document cannot inject
   scripts into the page.
@@ -100,6 +114,8 @@ opens in a new tab (`target="_blank"`, `rel="noopener noreferrer"`), leaves
 the current conversation open, and is keyboard accessible. Atlas fetches
 nothing and renders nothing -- there is no request to the documentation host
 at all.
+
+![The Help page in external-link mode](../readme_img/help-external-link.png)
 
 ## Local mode
 
@@ -156,3 +172,5 @@ When the deployment uses an external mode, the Admin Dashboard says so and
 warns that the local editor no longer controls what users see. The editor
 still works (the file is still written) -- it simply is not the document the
 Help page shows.
+
+![The Admin Dashboard Help card when the documentation is hosted elsewhere](../readme_img/help-admin-external-source.png)

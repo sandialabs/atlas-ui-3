@@ -55,6 +55,19 @@ const HelpPage = () => {
 
   const mode = helpData?.mode || 'local'
   const linkUrl = helpData?.link_url || ''
+  // A configuration problem and a documentation host that is down are
+  // different things. The first needs an operator to change the
+  // configuration; the second usually resolves itself, and the copy on
+  // screen is still worth reading.
+  const configError = helpData?.error || null
+  const fetchError = helpData?.fetch_error || null
+  const outageNotice = fetchError
+    ? helpData?.stale
+      ? 'The hosted documentation could not be refreshed. This is the last copy that was fetched.'
+      : helpData?.fallback === 'local'
+        ? 'The hosted documentation could not be reached. The local Help content is shown instead.'
+        : fetchError
+    : null
 
   return (
     <div className="h-full bg-gray-900 text-gray-200 flex flex-col">
@@ -92,10 +105,22 @@ const HelpPage = () => {
 
           {/* A misconfiguration is worth saying out loud: the operator asked
               for hosted documentation and ATLAS is showing something else. */}
-          {!loading && !error && helpData?.error && (
+          {!loading && !error && configError && (
             <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mb-6 text-yellow-300">
               <div className="font-medium mb-1">Help configuration problem</div>
-              <div className="text-sm">{helpData.error}</div>
+              <div className="text-sm">{configError}</div>
+            </div>
+          )}
+
+          {/* A documentation host that is down is not a configuration
+              problem: the content on screen is still the right content,
+              just not the newest copy. */}
+          {!loading && !error && outageNotice && (
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6 text-gray-300">
+              <div className="font-medium mb-1 text-gray-200">
+                The hosted documentation is not available right now
+              </div>
+              <div className="text-sm">{outageNotice}</div>
             </div>
           )}
 

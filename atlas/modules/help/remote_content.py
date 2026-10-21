@@ -46,6 +46,13 @@ MAX_REDIRECTS = 3
 # this is only a safety net for a process that has seen several.
 MAX_CACHED_DOCUMENTS = 4
 
+# The image cache is bounded on purpose. A documentation page can reference
+# many images, and a host that serves an image per URL variant ("logo.png?n=1",
+# "logo.png?n=2", ...) would otherwise fill the process with copies. The
+# least recently used entries go first.
+MAX_CACHED_IMAGES = 64
+MAX_CACHED_IMAGE_BYTES = 32 * 1024 * 1024
+
 REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 
 
@@ -76,12 +83,26 @@ class _CachedDocument:
     last_modified: Optional[str]
     expires_at: float
     fetched_at: float
+    # The URL the document was actually read from, after any redirects. The
+    # relative image references in the document resolve against this, not
+    # against the configured URL: a documentation site that redirects
+    # /help.md to /v2/help.md serves its images from /v2/.
+    final_url: str = ""
+
+
+@dataclass
+class _CachedImage:
+    body: bytes
+    content_type: str
+    expires_at: float
+    last_used: float
+    size: int
 
 
 # The caches live in the process: a Help document changes on a human timescale,
 # and a shared cache would be a lot of machinery for one document.
 _document_cache: Dict[str, _CachedDocument] = {}
-_image_cache: Dict[str, Tuple[float, bytes, str]] = {}
+_image_cache: Dict[str, _CachedImage] = {}
 _cache_lock = threading.Lock()
 
 
@@ -101,9 +122,25 @@ def _prune_expired_images(now: float) -> None:
     would otherwise leave an entry behind each time.
     """
     with _cache_lock:
-        for url, (expires_at, _body, _content_type) in list(_image_cache.items()):
-            if expires_at <= now:
+        for url, entry in list(_image_cache.items()):
+            if entry.expires_at <= now:
                 del _image_cache[url]
+
+
+def _evict_images_if_needed() -> None:
+    """Keep the image cache inside its size and count limits.
+
+    The least recently used images go first, so the ones a reader is
+    actually looking at stay in memory.
+    """
+    with _cache_lock:
+        total_bytes = sum(entry.size for entry in _image_cache.values())
+        while _image_cache and (
+            len(_image_cache) > MAX_CACHED_IMAGES or total_bytes > MAX_CACHED_IMAGE_BYTES
+        ):
+            oldest_url = min(_image_cache.items(), key=lambda item: item[1].last_used)[0]
+            total_bytes -= _image_cache[oldest_url].size
+            del _image_cache[oldest_url]
 
 
 def _trim_document_cache() -> None:
@@ -132,54 +169,101 @@ def _origin(url: str) -> Tuple[str, str, int]:
     return scheme, host, port
 
 
-def _host_key(url: str) -> Tuple[str, int]:
-    """The comparison key for an allowed host: ``host`` plus optional port."""
+def _allowed_authority(url: str, config: HelpConfig) -> Optional[str]:
+    """The authority this configuration allows for ``url``, or ``None``.
+
+    The configured documentation origin is always allowed. Extra hosts must
+    be listed by the operator, and every one of them must be reached over
+    https (except loopback, for local development).
+
+    The returned authority is built from the configuration, never from the
+    request: the request only ever decides *which* of the configured
+    authorities applies.
+    """
+    if not config.content_url:
+        return None
     parsed = urlparse(url)
-    scheme = (parsed.scheme or "").lower()
-    host = (parsed.hostname or "").lower()
-    port = parsed.port or (443 if scheme == "https" else 80)
-    return host, port
+    if parsed.scheme not in ("http", "https"):
+        return None
+    if parsed.username or parsed.password:
+        return None
+    if not parsed.hostname:
+        return None
+
+    requested_host = (parsed.hostname or "").lower()
+    requested_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    configured = urlparse(config.content_url)
+    configured_host = (configured.hostname or "").lower()
+    configured_port = configured.port or (
+        443 if configured.scheme == "https" else 80
+    )
+    if requested_host == configured_host and requested_port == configured_port:
+        return _authority(configured.scheme, configured_host, configured_port)
+
+    for host, port in config.allowed_hosts:
+        if host != requested_host:
+            continue
+        if port is not None and port != requested_port:
+            continue
+        scheme = configured.scheme
+        if scheme == "http" and host not in ("localhost", "127.0.0.1", "::1"):
+            scheme = "https"
+        return _authority(scheme, host, port or requested_port)
+
+    return None
 
 
 def _is_allowed_url(url: str, config: HelpConfig) -> bool:
-    """True when ``url`` may be fetched for this configuration.
+    """True when ``url`` may be fetched for this configuration."""
+    return _allowed_authority(url, config) is not None
 
-    The configured documentation origin is always allowed -- the same
-    scheme, host and port. Extra hosts must be listed by the operator, and
-    every one of them must be reached over https (except loopback, for local
-    development).
+
+def resolve_allowed_target(url: str, config: HelpConfig) -> str:
+    """Return the URL to fetch for a requested target, built from the config.
+
+    The authority (scheme, host, port) always comes from the configuration:
+    the configured documentation origin, or one of the hosts the operator
+    listed in ``HELP_ALLOWED_HOSTS``. Only the path and the query come from
+    the request. The worst a request can do is therefore ask for a
+    different path on a host the operator already trusts -- it can never
+    aim the request somewhere else, and it can never downgrade the scheme.
+
+    A request for a host that is not allowed is refused.
     """
-    if not config.content_url:
-        return False
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        return False
-    if parsed.username or parsed.password:
-        return False
-    if not parsed.hostname:
-        return False
-
-    if _origin(url) == _origin(config.content_url):
-        return True
-
-    key = _host_key(url)
-    for host, port in config.allowed_hosts:
-        if key[0] != host:
-            continue
-        if port is not None and key[1] != port:
-            continue
-        if parsed.scheme == "http" and host not in ("localhost", "127.0.0.1", "::1"):
-            return False
-        return True
-    return False
-
-
-def _require_allowed_url(url: str, config: HelpConfig, what: str) -> None:
-    if not _is_allowed_url(url, config):
         raise HelpPolicyError(
-            f"refusing to fetch {what} from '{url}': only the configured documentation "
-            "host is allowed"
+            f"refusing to fetch '{url}': only http(s) URLs are allowed"
         )
+    if parsed.username or parsed.password:
+        raise HelpPolicyError(
+            f"refusing to fetch '{url}': credentials in the URL are not allowed"
+        )
+    if not parsed.hostname:
+        raise HelpPolicyError(f"refusing to fetch '{url}': the URL has no host")
+
+    authority = _allowed_authority(url, config)
+    if authority is None:
+        raise HelpPolicyError(
+            f"refusing to fetch '{url}': only the configured documentation host is allowed"
+        )
+    return _with_authority(authority, parsed)
+
+
+def _authority(scheme: str, host: str, port: int) -> str:
+    """``scheme://host[:port]`` for the given parts."""
+    if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
+
+
+def _with_authority(authority: str, parsed) -> str:
+    """Rebuild a URL with a given authority, keeping its path and query."""
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return f"{authority}{path}"
 
 
 async def _read_capped(response: httpx.Response, max_bytes: int) -> bytes:
@@ -200,6 +284,10 @@ async def _get(
 ) -> Tuple[int, str, bytes, httpx.Headers]:
     """GET a URL, following only same-policy redirects.
 
+    ``url`` must already be a target this configuration allows (see
+    :func:`resolve_allowed_target`). A redirect target is resolved the same
+    way, so a redirect cannot aim the request somewhere else either.
+
     Returns ``(status, final_url, body, response_headers)``.
     """
     limit = config.max_bytes if max_bytes is None else max_bytes
@@ -207,7 +295,12 @@ async def _get(
     current = url
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         for _ in range(MAX_REDIRECTS + 1):
-            async with client.stream("GET", current, headers=headers or {}) as response:
+            # The URL is built by resolve_allowed_target(): the scheme, the
+            # host and the port come from the deployment's configuration,
+            # and only the path and the query come from the request. A
+            # redirect target goes through the same function before it is
+            # fetched, so it cannot aim the request somewhere else either.
+            async with client.stream("GET", current, headers=headers or {}) as response:  # codeql[py/full-ssrf]
                 if response.status_code in REDIRECT_STATUSES:
                     location = response.headers.get("location")
                     if not location:
@@ -215,8 +308,7 @@ async def _get(
                             f"redirect from '{current}' had no Location header"
                         )
                     target = urljoin(current, location)
-                    _require_allowed_url(target, config, "a redirect target")
-                    current = target
+                    current = resolve_allowed_target(target, config)
                     continue
                 body = b""
                 if response.status_code == 200:
@@ -245,7 +337,10 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
     if cached and cached.expires_at > now:
         return RemoteHelpResult(
             content=cached.content,
-            source_url=url,
+            # The URL the document was read from, so the relative image
+            # references resolve against the same place they did the first
+            # time -- the document may have been redirected.
+            source_url=cached.final_url or url,
             cached=True,
             stale=False,
             fetched_at=cached.fetched_at,
@@ -260,7 +355,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
 
     try:
         status, final_url, body, response_headers = await _get(
-            url, config, headers=request_headers
+            resolve_allowed_target(url, config), config, headers=request_headers
         )
     except HelpFetchError as exc:
         return _stale_fallback(url, cached, str(exc))
@@ -304,6 +399,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
         last_modified=response_headers.get("last-modified"),
         expires_at=now + config.cache_ttl_seconds,
         fetched_at=now,
+        final_url=final_url,
     )
     with _cache_lock:
         _document_cache[url] = entry
@@ -327,7 +423,9 @@ def _stale_fallback(
         )
         return RemoteHelpResult(
             content=cached.content,
-            source_url=url,
+            # The URL the document was read from, so the relative image
+            # references keep resolving against the same place.
+            source_url=cached.final_url or url,
             cached=True,
             stale=True,
             fetched_at=cached.fetched_at,
@@ -340,20 +438,23 @@ def _stale_fallback(
 async def fetch_remote_image(url: str, config: HelpConfig) -> Tuple[bytes, str]:
     """Fetch an image the hosted document references.
 
-    Returns ``(body, content_type)``. The URL must be on an allowed host.
+    Returns ``(body, content_type)``. The URL is resolved against the
+    configuration first, so only a host the deployment trusts is contacted.
     """
-    _require_allowed_url(url, config, "an image")
+    target = resolve_allowed_target(url, config)
 
     now = time.monotonic()
     _prune_expired_images(now)
     with _cache_lock:
-        cached = _image_cache.get(url)
-    if cached and cached[0] > now:
-        return cached[1], cached[2]
+        cached = _image_cache.get(target)
+    if cached and cached.expires_at > now:
+        with _cache_lock:
+            cached.last_used = now
+        return cached.body, cached.content_type
 
     try:
         status, final_url, body, response_headers = await _get(
-            url, config, max_bytes=config.max_image_bytes
+            target, config, max_bytes=config.max_image_bytes
         )
     except HelpFetchError as exc:
         raise HelpFetchError(str(exc)) from exc
@@ -370,7 +471,14 @@ async def fetch_remote_image(url: str, config: HelpConfig) -> Tuple[bytes, str]:
         )
 
     with _cache_lock:
-        _image_cache[url] = (now + config.cache_ttl_seconds, body, content_type)
+        _image_cache[target] = _CachedImage(
+            body=body,
+            content_type=content_type,
+            expires_at=now + config.cache_ttl_seconds,
+            last_used=now,
+            size=len(body),
+        )
+    _evict_images_if_needed()
     return body, content_type
 
 

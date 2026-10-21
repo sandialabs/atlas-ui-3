@@ -14,6 +14,7 @@ Covers the three display modes -- ``local``, ``remote_markdown`` and
 
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 import pytest
 from main import app
@@ -56,6 +57,9 @@ class _DocsHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
         server = self.server
         server.requests.append((self.path, dict(self.headers)))
+        # The routing ignores the query string, so a test can ask for the
+        # same image with different parameters.
+        route = urlsplit(self.path).path
 
         if server.fail:
             self.send_response(500)
@@ -63,7 +67,50 @@ class _DocsHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        if self.path == "/help.md":
+        if route == "/redirect-elsewhere":
+            # A redirect to a host the deployment did not configure.
+            self.send_response(302)
+            self.send_header("Location", "http://elsewhere.example.org/help.md")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if route == "/redirect-here":
+            # A redirect to a path on the same host.
+            self.send_response(302)
+            self.send_header("Location", "/v2/help.md")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if route == "/v2/help.md":
+            body = b"# Redirected Help\n\n![logo](images/logo.png)\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if route == "/big.md":
+            body = b"x" * 4096
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if route == "/big.png":
+            body = b"\x89PNG" + b"x" * 4096
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if route == "/help.md":
             etag = '"doc-v1"'
             if self.headers.get("If-None-Match") == etag:
                 self.send_response(304)
@@ -81,7 +128,7 @@ class _DocsHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if self.path == "/images/logo.png":
+        if route == "/images/logo.png":
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(PNG_BYTES)))
@@ -287,15 +334,24 @@ def test_image_proxy_refuses_other_hosts(help_settings, docs_server):
     assert resp.status_code == 403
 
 
-def test_image_proxy_refuses_a_scheme_downgrade(help_settings, docs_server):
-    """A different scheme on the same host is not the same origin."""
+def test_image_proxy_uses_the_configured_scheme(help_settings, docs_server):
+    """The scheme comes from the configuration, not from the request."""
     help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
-    client = _client()
-    resp = client.get(
-        f"/api/help/image?url=https%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fimages%2Flogo.png",
-        headers=_user_headers(),
+    config = resolve_help_config(app_factory.get_config_manager().app_settings)
+    target = remote_content.resolve_allowed_target(
+        f"https://127.0.0.1:{docs_server.port}/images/logo.png", config
     )
-    assert resp.status_code == 403
+    assert target == f"http://127.0.0.1:{docs_server.port}/images/logo.png"
+
+
+def test_a_foreign_host_is_refused_outright(help_settings):
+    """A host nobody configured cannot be fetched, whatever the path."""
+    help_settings(mode="remote_markdown", url="https://docs.example.org/help.md")
+    config = resolve_help_config(app_factory.get_config_manager().app_settings)
+    with pytest.raises(remote_content.HelpPolicyError):
+        remote_content.resolve_allowed_target(
+            "https://evil.example.org/payload.png", config
+        )
 
 
 def test_allowed_hosts_widen_the_image_sources(help_settings, docs_server):
@@ -382,7 +438,7 @@ def test_remote_markdown_serves_stale_copy_when_the_host_fails(help_settings, do
     degraded = client.get("/api/help", headers=_user_headers()).json()
     assert degraded["stale"] is True
     assert "# Hosted Help" in degraded["content"]
-    assert degraded["error"]
+    assert degraded["fetch_error"]
 
 
 def test_remote_markdown_falls_back_to_local_content(help_settings):
@@ -394,7 +450,92 @@ def test_remote_markdown_falls_back_to_local_content(help_settings):
     assert body["mode"] == HELP_MODE_LOCAL
     assert body["content"].strip()
     assert body["fallback"] == "local"
-    assert body["error"]
+    assert body["fetch_error"]
+    # An outage is not a configuration problem.
+    assert body["error"] is None
+
+
+# ---------------------------------------------------------------------------
+# Fetch hardening
+# ---------------------------------------------------------------------------
+
+def test_a_redirect_to_a_foreign_host_is_refused(help_settings, docs_server):
+    """A redirect cannot aim the request at another host."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/redirect-elsewhere")
+    client = _client()
+    body = client.get("/api/help", headers=_user_headers()).json()
+    assert body["mode"] == HELP_MODE_LOCAL
+    assert body["fallback"] == "local"
+    assert body["fetch_error"]
+
+
+def test_a_redirect_within_the_host_is_followed(help_settings, docs_server):
+    """A redirect on the same host is followed, and the images follow it."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/redirect-here")
+    client = _client()
+    body = client.get("/api/help", headers=_user_headers()).json()
+    assert body["mode"] == HELP_MODE_REMOTE_MARKDOWN
+    assert "# Redirected Help" in body["content"]
+    # The image reference resolves against the URL the document was read
+    # from, not against the configured one.
+    assert f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fv2%2Fimages%2Flogo.png" in body["content"]
+
+
+def test_a_cached_redirect_keeps_the_final_url(help_settings, docs_server):
+    """A cached copy still resolves its images against the final URL."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/redirect-here", ttl=300)
+    client = _client()
+    first = client.get("/api/help", headers=_user_headers()).json()
+    assert first["cached"] is False
+
+    second = client.get("/api/help", headers=_user_headers()).json()
+    assert second["cached"] is True
+    assert second["source"] == f"{docs_server.base_url}/v2/help.md"
+    assert f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fv2%2Fimages%2Flogo.png" in second["content"]
+
+
+def test_a_document_over_the_size_cap_is_refused(help_settings, docs_server):
+    """A document larger than the configured cap is not served."""
+    help_settings(
+        mode="remote_markdown",
+        url=f"{docs_server.base_url}/big.md",
+        max_bytes=100,
+    )
+    client = _client()
+    body = client.get("/api/help", headers=_user_headers()).json()
+    assert body["mode"] == HELP_MODE_LOCAL
+    assert body["fallback"] == "local"
+    assert "byte limit" in body["fetch_error"]
+
+
+def test_an_image_over_the_size_cap_is_refused(help_settings, docs_server):
+    """An image larger than the configured cap is not served."""
+    help_settings(
+        mode="remote_markdown",
+        url=f"{docs_server.base_url}/help.md",
+        max_image_bytes=100,
+    )
+    client = _client()
+    resp = client.get(
+        f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}%2Fbig.png",
+        headers=_user_headers(),
+    )
+    assert resp.status_code == 502
+    assert "byte limit" in resp.json()["detail"]
+
+
+def test_the_image_cache_is_bounded(help_settings, docs_server):
+    """The image cache cannot grow without limit."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md")
+    client = _client()
+    for index in range(remote_content.MAX_CACHED_IMAGES + 10):
+        resp = client.get(
+            f"/api/help/image?url=http%3A%2F%2F127.0.0.1%3A{docs_server.port}"
+            f"/images/logo.png?variant={index}",
+            headers=_user_headers(),
+        )
+        assert resp.status_code == 200
+    assert len(remote_content._image_cache) <= remote_content.MAX_CACHED_IMAGES
 
 
 # ---------------------------------------------------------------------------
