@@ -192,4 +192,24 @@ describe('ToolSelector - the search tool is on because of the selected sources',
     fireEvent.click(row)
     expect(context.toggleTool).toHaveBeenCalledWith('atlas_search')
   })
+
+  it('counts the implied tool once when it is already ticked explicitly', () => {
+    // The selection already holds the search tool, so the implied one must
+    // not be counted a second time in the badge.
+    renderSelector({
+      selectedTools: new Set(['atlas_canvas', 'atlas_search']),
+      selectedDataSources: new Set(['srv:doc'])
+    })
+
+    expect(screen.getByRole('button', { name: '2 tools' })).toBeInTheDocument()
+  })
+
+  it('counts the implied tool when it is not ticked explicitly', () => {
+    renderSelector({
+      selectedTools: new Set(['atlas_canvas']),
+      selectedDataSources: new Set(['srv:doc'])
+    })
+
+    expect(screen.getByRole('button', { name: '2 tools' })).toBeInTheDocument()
+  })
 })

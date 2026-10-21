@@ -22,6 +22,7 @@ from .atlas_server import (
     is_atlas_tool,
     launch_tool_enabled,
     normalize_tool_name,
+    search_tools_enabled,
 )
 from .mcp_errors import _is_unauthorized_error
 from .sleep_tool import sleep_tool_enabled
@@ -136,10 +137,7 @@ def _atlas_tool_flags() -> tuple:
         sleep_enabled = sleep_tool_enabled(settings)
     except Exception:
         sleep_enabled = False
-    search_enabled = bool(
-        getattr(settings, "feature_rag_enabled", False)
-        and getattr(settings, "feature_atlas_rag_tools_enabled", False)
-    )
+    search_enabled = search_tools_enabled(settings)
     launch_enabled = launch_tool_enabled(settings)
     return sleep_enabled, search_enabled, launch_enabled
 

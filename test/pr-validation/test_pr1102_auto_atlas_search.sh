@@ -52,10 +52,10 @@ python3 -c "
 from types import SimpleNamespace
 from atlas.application.chat.utilities.effective_tools import resolve_effective_tools
 
-config = SimpleNamespace(app_settings=SimpleNamespace(
-    feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True))
-off = SimpleNamespace(app_settings=SimpleNamespace(
-    feature_rag_enabled=True, feature_atlas_rag_tools_enabled=False))
+config = SimpleNamespace(
+    feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True)
+off = SimpleNamespace(
+    feature_rag_enabled=True, feature_atlas_rag_tools_enabled=False)
 
 assert resolve_effective_tools(['calc'], ['srv:docs'], config) == ['calc', 'atlas_search']
 assert resolve_effective_tools(['calc'], [], config) == ['calc']
@@ -63,6 +63,9 @@ assert resolve_effective_tools(['atlas_search'], ['srv:docs'], config) == ['atla
 assert resolve_effective_tools(['atlas_rag_query'], ['srv:docs'], config) == ['atlas_rag_query']
 assert resolve_effective_tools(['calc'], ['srv:docs'], off) == ['calc']
 assert resolve_effective_tools(['calc'], ['srv:docs'], None) == ['calc']
+# The implication can be switched off (a model without tool support, or a
+# policy hook that narrowed the tool list).
+assert resolve_effective_tools(['calc'], ['srv:docs'], config, imply=False) == ['calc']
 print('the resolution adds the tool exactly when the sources and the flags say so')
 " 2>&1 | tail -3
 print_result ${PIPESTATUS[0]} "effective tool resolution"
@@ -119,6 +122,84 @@ assert orch.event_publisher.publish_warning.await_count == 0, 'the turn warned'
 print('a sources-only turn is a tools turn with atlas_search in its schema')
 " 2>&1 | tail -3
 print_result ${PIPESTATUS[0]} "the search tool reaches the model without a manual tick"
+
+# ==========================================
+print_header "Check 2b: a model without tool support, and a policy hook, both keep it out"
+# ==========================================
+python3 -c "
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+from atlas.application.chat.orchestrator import ChatOrchestrator
+from atlas.domain.sessions.models import Session
+from atlas.hooks import HookOutcome
+from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+from atlas.modules.config.models import LLMConfig
+
+class Authorization:
+    async def filter_authorized_tools(self, selected_tools, user_email=None):
+        return list(selected_tools)
+
+class NarrowingHook:
+    def has_hooks(self, event):
+        return True
+    async def run_event(self, event, payload, session_context=None):
+        return HookOutcome(verdict='modify', modified=True,
+                           payload={**payload, 'selected_tools': []})
+
+def build(tools_mode, rag_mode):
+    orch = ChatOrchestrator(
+        llm=MagicMock(),
+        event_publisher=AsyncMock(),
+        session_repository=InMemorySessionRepository(),
+        tools_mode=SimpleNamespace(run_streaming=tools_mode),
+        rag_mode=SimpleNamespace(run_streaming=rag_mode),
+        config_manager=SimpleNamespace(app_settings=SimpleNamespace(
+            feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True)),
+    )
+    orch.tool_authorization = Authorization()
+    return orch
+
+async def main():
+    # A model that cannot call tools: the tools are stripped, so the implied
+    # search tool must not be added back -- the turn keeps its sources.
+    tools_mode = AsyncMock(return_value={'mode': 'tools'})
+    rag_mode = AsyncMock(return_value={'mode': 'rag'})
+    orch = build(tools_mode, rag_mode)
+    orch.config_manager.llm_config = LLMConfig(models={
+        'plain-model': {'model_name': 'p', 'model_url': 'http://p', 'supports_tools': False}})
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email='u@example.com'))
+    await orch.execute(session_id=sid, content='q', model='plain-model',
+                       selected_tools=['calc'], selected_data_sources=['srv:docs'],
+                       files=None)
+    assert not tools_mode.await_count, 'a model without tool support got a tool schema'
+    assert rag_mode.await_count == 1, rag_mode.await_args
+
+    # A policy hook that narrows the tool list has the last word over it.
+    tools_mode = AsyncMock(return_value={'mode': 'tools'})
+    rag_mode = AsyncMock(return_value={'mode': 'rag'})
+    orch = build(tools_mode, rag_mode)
+    orch.__class__  # noqa: B018 - keep the reference obvious
+    import atlas.application.chat.orchestrator as orch_mod
+    original = orch_mod.get_hook_manager
+    orch_mod.get_hook_manager = lambda: NarrowingHook()
+    try:
+        sid = uuid4()
+        await orch.session_repository.create(Session(id=sid, user_email='u@example.com'))
+        await orch.execute(session_id=sid, content='q', model='test-model',
+                           selected_tools=['atlas_search', 'calc'],
+                           selected_data_sources=['srv:docs'], files=None)
+    finally:
+        orch_mod.get_hook_manager = original
+    assert not tools_mode.await_count, 'the hook-narrowed list still reached the runner'
+
+asyncio.run(main())
+print('neither a tool-less model nor a policy hook gets the implied tool behind its back')
+" 2>&1 | tail -3
+print_result ${PIPESTATUS[0]} "the implication yields to a tool-less model and to a policy hook"
 
 # ==========================================
 print_header "Check 3: the old warning is gone; only a real outage warns"
@@ -180,8 +261,8 @@ config_manager = SimpleNamespace(
     rag_sources_config=RAGSourcesConfig(sources={
         'uur_docs': {'type': 'http', 'url': 'http://r', 'allowed_data_classifications': ['UUR']}}),
 )
-config = SimpleNamespace(app_settings=SimpleNamespace(
-    feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True))
+config = SimpleNamespace(
+    feature_rag_enabled=True, feature_atlas_rag_tools_enabled=True)
 
 tools = resolve_effective_tools(['atlas_canvas'], ['uur_docs:handbook'], config)
 violations = find_classification_violations(

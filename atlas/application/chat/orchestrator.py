@@ -15,6 +15,7 @@ from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 from atlas.modules.config.settings import agent_mode_available, configured_agent_max_steps
+from atlas.modules.mcp_tools.atlas_server import search_tools_enabled
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from .modes.agent import AgentModeRunner
@@ -28,7 +29,6 @@ from .utilities import event_notifier, file_processor
 from .utilities.effective_tools import (
     has_search_tool,
     resolve_effective_tools,
-    search_tools_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,7 +229,7 @@ class ChatOrchestrator:
         on, so a turn whose sources nothing can read is just as stranded
         under flags-off as one that never named the tool.
         """
-        return search_tools_enabled(self.config_manager)
+        return search_tools_enabled(getattr(self.config_manager, "app_settings", None))
 
     async def _warn_if_sources_unsearchable(
         self,
@@ -419,6 +419,10 @@ class ChatOrchestrator:
         # or block the turn with a message. Opt-in; zero overhead without
         # config/hooks.json.
         hook_mgr = get_hook_manager()
+        # A hook that narrows the tool list has the last word over it --
+        # including the search tool the data sources imply (#1102). Tracked
+        # so the implication is not applied behind the hook's back.
+        hook_narrowed_tools = False
         if hook_mgr is not None and hook_mgr.has_hooks(HookEvent.USER_PROMPT_SUBMIT):
             payload = {
                 "prompt": content,
@@ -461,6 +465,9 @@ class ChatOrchestrator:
                 if isinstance(new_tools, list):
                     allowed_tools = set(selected_tools or [])
                     selected_tools = [t for t in new_tools if t in allowed_tools]
+                    # The hook's list is a subset of the user's: anything it
+                    # dropped is a decision, not an accident.
+                    hook_narrowed_tools = set(selected_tools) != allowed_tools
                 new_sources = outcome.payload.get("selected_data_sources")
                 if isinstance(new_sources, list):
                     allowed_sources = set(selected_data_sources or [])
@@ -504,7 +511,8 @@ class ChatOrchestrator:
         )
 
         # Strip tools / agent mode and warn if the model does not support tool/function calling
-        if not self._model_supports_tools(model):
+        model_supports_tools = self._model_supports_tools(model)
+        if not model_supports_tools:
             warnings = []
             if selected_tools:
                 logger.warning(
@@ -538,8 +546,16 @@ class ChatOrchestrator:
         # property of the turn, and deselecting every source removes it
         # again. A data source selection also stays the ceiling on what that
         # tool may read; nothing here widens it.
+        #
+        # The implication is skipped when the turn must not gain a tool it
+        # did not arrive with: a model that cannot call tools (the tools
+        # were stripped above, so the turn has none), or a policy hook that
+        # narrowed the tool list -- the hook gets the last word.
         effective_tools = resolve_effective_tools(
-            selected_tools, selected_data_sources, self.config_manager,
+            selected_tools,
+            selected_data_sources,
+            getattr(self.config_manager, "app_settings", None),
+            imply=model_supports_tools and not hook_narrowed_tools,
         )
 
         # Admin kill switch (issue #849 review): the flag can still arrive on the

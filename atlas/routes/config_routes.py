@@ -20,6 +20,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     LAUNCH_GATED_TOOL_NAMES,
     SEARCH_TOOL_NAME,
     launch_tool_enabled,
+    search_tools_enabled,
 )
 from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
@@ -297,10 +298,7 @@ async def get_config(
 
         # The built-in ATLAS server is available to every user; its individual
         # tools are gated below.
-        atlas_search_enabled = bool(
-            app_settings.feature_rag_enabled
-            and app_settings.feature_atlas_rag_tools_enabled
-        )
+        atlas_search_enabled = search_tools_enabled(app_settings)
         atlas_sleep_enabled = sleep_tool_enabled(app_settings)
         atlas_launch_enabled = launch_tool_enabled(app_settings)
 

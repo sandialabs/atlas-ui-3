@@ -143,8 +143,10 @@ const ToolSelector = () => {
   if (!features?.tools) return null
 
   // The count is the effective one: the implied search tool is on, so it
-  // counts as one of the tools the model can use.
-  const selectedCount = (selectedTools?.size || 0) + (searchAutoEnabled ? 1 : 0)
+  // counts as one of the tools the model can use -- unless the user ticked it
+  // themselves, in which case it is already in the selection.
+  const selectedCount = (selectedTools?.size || 0)
+    + (searchAutoEnabled && !selectedTools?.has(SEARCH_TOOL_KEY) ? 1 : 0)
 
   return (
     <div ref={dropdownRef} className="relative">

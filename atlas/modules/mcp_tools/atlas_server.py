@@ -121,10 +121,12 @@ SEARCH_TOOL_DESCRIPTION = (
     # Since #1102 the tool is offered whenever the user has selected data
     # sources, so the model is the one who decides whether a search is worth
     # it -- which only works if it is told that the sources are there and that
-    # searching them is the expected way to read them.
-    "The user has data sources selected for this conversation: search them "
-    "whenever the question could be answered from them, and say plainly that "
-    "you did not search when it could not. "
+    # searching them is the expected way to read them. The wording holds
+    # whether or not sources are actually selected: the tool can also be
+    # ticked on its own, with nothing selected.
+    "Data sources may be selected for this conversation: when they are, "
+    "search them whenever the question could be answered from them, and say "
+    "plainly that you did not search when it could not. "
     "Each result is numbered. Cite them inline as [1], [2] immediately after "
     "the claim each supports, and never cite a number you were not given -- "
     "the numbers are stable for the whole conversation, so a source keeps its "
@@ -431,6 +433,26 @@ ATLAS_SERVER_DESCRIPTION = (
     "sources and launch options are available, and launch and follow up on "
     "sub-conversations. These run inside ATLAS rather than on an MCP server."
 )
+
+
+def search_tools_enabled(app_settings: Any) -> bool:
+    """Whether the built-in search tool is usable in this deployment.
+
+    Two flags, read in one place so the schema builder, the tool
+    authorization, the execution gate, the config payload and the turn's
+    effective tool list cannot disagree about whether the search tool
+    exists (issue #1102).
+
+    Lives beside the tool definition, like ``launch_tool_enabled`` does for
+    the launch family, so every gate can read it without importing the chat
+    layer (which would be a cycle).
+    """
+    if app_settings is None:
+        return False
+    return bool(
+        getattr(app_settings, "feature_rag_enabled", False)
+        and getattr(app_settings, "feature_atlas_rag_tools_enabled", False)
+    )
 
 
 def launch_tool_enabled(app_settings: Any) -> bool:

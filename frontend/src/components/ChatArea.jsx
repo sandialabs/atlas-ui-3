@@ -14,7 +14,7 @@ import ModelSelector from './ModelSelector'
 import ToolSelector from './ToolSelector'
 import WorkspaceSelector from './WorkspaceSelector'
 import { withUserOrdinals } from '../utils/userMessageOrdinal'
-import { searchToolAutoEnabled } from '../utils/searchToolAvailability'
+import { searchToolAutoEnabled, SEARCH_TOOL_KEY } from '../utils/searchToolAvailability'
 import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureCorrection'
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
 import CorrectTurnModal from './CorrectTurnModal'
@@ -122,7 +122,10 @@ const ChatArea = () => {
     ragEnabled,
     reachableSourceCount: (ragSources || []).length
   })
-  const effectiveToolCount = (selectedTools?.size || 0) + (searchAutoEnabled ? 1 : 0)
+  // The implied search tool counts only when the user did not tick it
+  // themselves -- it is already in the selection if they did.
+  const effectiveToolCount = (selectedTools?.size || 0)
+    + (searchAutoEnabled && !selectedTools?.has(SEARCH_TOOL_KEY) ? 1 : 0)
 
   // Pair each message with its rewind ordinal once per messages change, rather
   // than re-running the two-pass scan on every render (incl. each streamed token).

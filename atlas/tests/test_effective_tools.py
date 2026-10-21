@@ -30,16 +30,22 @@ from atlas.application.chat.orchestrator import ChatOrchestrator
 from atlas.application.chat.utilities.effective_tools import (
     has_search_tool,
     resolve_effective_tools,
-    search_tools_enabled,
 )
 from atlas.domain.sessions.models import Session
+from atlas.hooks import HookOutcome
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+from atlas.modules.config.models import LLMConfig
+from atlas.modules.mcp_tools.atlas_server import search_tools_enabled
+
+
+def _settings(rag=True, tools=True):
+    return SimpleNamespace(
+        feature_rag_enabled=rag, feature_atlas_rag_tools_enabled=tools,
+    )
 
 
 def _config(rag=True, tools=True):
-    return SimpleNamespace(app_settings=SimpleNamespace(
-        feature_rag_enabled=rag, feature_atlas_rag_tools_enabled=tools,
-    ))
+    return SimpleNamespace(app_settings=_settings(rag=rag, tools=tools))
 
 
 def _orchestrator(config):
@@ -52,47 +58,62 @@ def _orchestrator(config):
 # -- The resolution itself ---------------------------------------------------
 
 def test_selected_sources_add_the_search_tool():
-    tools = resolve_effective_tools(["calc"], ["srv:src"], _config())
+    tools = resolve_effective_tools(["calc"], ["srv:src"], _settings())
     assert tools == ["calc", "atlas_search"]
 
 
 def test_no_sources_leaves_the_selection_alone():
-    assert resolve_effective_tools(["calc"], None, _config()) == ["calc"]
-    assert resolve_effective_tools(["calc"], [], _config()) == ["calc"]
+    assert resolve_effective_tools(["calc"], None, _settings()) == ["calc"]
+    assert resolve_effective_tools(["calc"], [], _settings()) == ["calc"]
 
 
 def test_the_search_tool_is_never_duplicated():
-    tools = resolve_effective_tools(["atlas_search"], ["srv:src"], _config())
+    tools = resolve_effective_tools(["atlas_search"], ["srv:src"], _settings())
     assert tools == ["atlas_search"]
 
 
 def test_the_legacy_search_tool_name_is_not_duplicated():
     """A saved conversation still names the tool ``atlas_rag_query`` (pre-#855)."""
-    tools = resolve_effective_tools(["atlas_rag_query"], ["srv:src"], _config())
+    tools = resolve_effective_tools(["atlas_rag_query"], ["srv:src"], _settings())
     assert tools == ["atlas_rag_query"]
 
 
 def test_the_flags_off_keep_the_search_tool_out():
     """With the feature off the turn sees exactly what the user selected."""
-    assert resolve_effective_tools(["calc"], ["srv:src"], _config(rag=False)) == ["calc"]
-    assert resolve_effective_tools(["calc"], ["srv:src"], _config(tools=False)) == ["calc"]
+    assert resolve_effective_tools(["calc"], ["srv:src"], _settings(rag=False)) == ["calc"]
+    assert resolve_effective_tools(["calc"], ["srv:src"], _settings(tools=False)) == ["calc"]
 
 
-def test_no_config_manager_means_no_implied_tool():
+def test_no_settings_mean_no_implied_tool():
     """Programmatic callers never had feature flags to consult."""
     assert resolve_effective_tools(["calc"], ["srv:src"], None) == ["calc"]
 
 
+def test_the_implication_can_be_switched_off():
+    """A turn that must not gain a tool keeps exactly what it arrived with.
+
+    A model that cannot call tools, and a policy hook that has narrowed the
+    tool list, both need this: the search tool the sources imply must not
+    appear behind their back.
+    """
+    assert resolve_effective_tools(
+        ["calc"], ["srv:src"], _settings(), imply=False,
+    ) == ["calc"]
+    assert resolve_effective_tools(
+        None, ["srv:src"], _settings(), imply=False,
+    ) == []
+
+
 def test_a_malformed_selection_does_not_break_the_resolution():
     """Non-string entries are dropped rather than becoming schema lookups."""
-    tools = resolve_effective_tools(["calc", None, 7], ["srv:src"], _config())
+    tools = resolve_effective_tools(["calc", None, 7], ["srv:src"], _settings())
     assert tools == ["calc", "atlas_search"]
 
 
 def test_search_tools_enabled_reads_both_flags():
-    assert search_tools_enabled(_config()) is True
-    assert search_tools_enabled(_config(rag=False)) is False
-    assert search_tools_enabled(_config(tools=False)) is False
+    assert search_tools_enabled(_settings()) is True
+    assert search_tools_enabled(_settings(rag=False)) is False
+    assert search_tools_enabled(_settings(tools=False)) is False
     assert search_tools_enabled(None) is False
 
 
@@ -212,13 +233,14 @@ class _StubAuthorization:
         return [t for t in selected_tools if not t.startswith(self.strip_prefixes)]
 
 
-def _routing_orchestrator(config, authorization, tools_mode):
+def _routing_orchestrator(config, authorization, tools_mode, rag_mode=None):
     """Build an execute()-ready orchestrator with mocked mode runners."""
     orch = ChatOrchestrator(
         llm=MagicMock(),
         event_publisher=AsyncMock(),
         session_repository=InMemorySessionRepository(),
         tools_mode=SimpleNamespace(run_streaming=tools_mode),
+        rag_mode=SimpleNamespace(run_streaming=rag_mode or AsyncMock(return_value={"mode": "rag"})),
         config_manager=config,
     )
     orch.tool_authorization = authorization
@@ -368,6 +390,124 @@ async def test_execute_does_not_imply_the_tool_when_the_flags_are_off():
         content="find the policy",
         model="test-model",
         selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    assert tools_mode.await_args.kwargs["selected_tools"] == ["calc"]
+
+
+@pytest.mark.asyncio
+async def test_a_model_without_tool_support_stays_out_of_the_tools_branch():
+    """A model that cannot call tools gets no schema, implied or not.
+
+    The tools are stripped for a model without tool support, so the search
+    tool the sources imply must not be added back behind that: the turn
+    keeps the sources and runs where it always did.
+    """
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+        rag_mode=rag_mode,
+    )
+    orch.config_manager.llm_config = LLMConfig(models={
+        "plain-model": {"model_name": "p", "model_url": "http://p", "supports_tools": False},
+    })
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="plain-model",
+        selected_tools=["calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    tools_mode.assert_not_awaited()
+    rag_mode.assert_awaited_once()
+
+
+class _NarrowingHookManager:
+    """A UserPromptSubmit hook that keeps only the tools it was told to."""
+
+    def __init__(self, keep):
+        self.keep = keep
+
+    def has_hooks(self, event):
+        return True
+
+    async def run_event(self, event, payload, session_context=None):
+        return HookOutcome(
+            verdict="modify",
+            modified=True,
+            payload={**payload, "selected_tools": list(self.keep)},
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_policy_hook_that_drops_the_search_tool_wins(monkeypatch):
+    """A hook that narrows the tool list has the last word over it.
+
+    The search tool the data sources imply must not appear behind a policy
+    hook's back: a hook that removes the tool (or the whole list) decides
+    what the turn may offer.
+    """
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+        rag_mode=rag_mode,
+    )
+    monkeypatch.setattr(
+        "atlas.application.chat.orchestrator.get_hook_manager",
+        lambda: _NarrowingHookManager(keep=[]),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_search", "calc"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    # The hook emptied the tool list: no tool reaches the runner, implied
+    # or otherwise.
+    tools_mode.assert_not_awaited()
+    rag_mode.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_policy_hook_that_keeps_the_search_tool_lets_it_through(monkeypatch):
+    """The hook's narrowed list is what the turn runs with."""
+    tools_mode = AsyncMock(return_value={"mode": "tools"})
+    orch = _routing_orchestrator(
+        _config(),
+        _StubAuthorization(strip_prefixes=()),
+        tools_mode,
+    )
+    monkeypatch.setattr(
+        "atlas.application.chat.orchestrator.get_hook_manager",
+        lambda: _NarrowingHookManager(keep=["calc"]),
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_search", "calc"],
         selected_data_sources=["srv:src"],
         files=None,
     )

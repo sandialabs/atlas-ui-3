@@ -33,6 +33,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     launch_tool_enabled,
     normalize_tool_name,
     search_kwargs_for,
+    search_tools_enabled,
 )
 from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
@@ -877,10 +878,7 @@ class ExecutionMixin:
             # replayed conversation or a non-UI client can still name it. The
             # sleep tool is gated the same way, one line below.
             app_settings = _client().config_manager.app_settings
-            if not (
-                getattr(app_settings, "feature_rag_enabled", False)
-                and getattr(app_settings, "feature_atlas_rag_tools_enabled", False)
-            ):
+            if not search_tools_enabled(app_settings):
                 error_msg = (
                     f"Tool '{SEARCH_TOOL_NAME}' is disabled "
                     "(RAG or the built-in ATLAS RAG tools are turned off)"

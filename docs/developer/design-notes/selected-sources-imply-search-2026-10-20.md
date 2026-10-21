@@ -72,12 +72,30 @@ routing itself sees the effective list:
 - no sources -> the user's selection is used exactly as given.
 
 The flags that gate the tool (`FEATURE_RAG_ENABLED` and
-`FEATURE_ATLAS_RAG_TOOLS_ENABLED`) are read in one place, so the schema
-builder, the tool ACL and this resolution cannot disagree.
+`FEATURE_ATLAS_RAG_TOOLS_ENABLED`) are read in one place --
+``atlas_server.search_tools_enabled``, next to ``launch_tool_enabled`` -- and
+the schema builder, the tool ACL, the execution gate, the config payload and
+this resolution all call it, so they cannot drift apart.
 
 The mode runners build their schema from exactly the list they are handed;
 they do not resolve anything themselves. The orchestrator is the single
 entry point, and its tests pin what each mode receives.
+
+## Two cases where the implication does not apply
+
+The implication adds a tool the user did not tick, so two things get the last
+word over it:
+
+- **A model that cannot call tools.** The tools are stripped for such a
+  model, so the turn has none; adding the search tool back would hand it a
+  schema it cannot use and put it in the tools branch instead of the route
+  it always took. The implication is skipped, and the turn keeps its
+  sources.
+- **A UserPromptSubmit hook that narrows the tool list.** A hook is a
+  policy: it may narrow the tools (and the sources) a turn may use. When it
+  has an opinion about the tool list, the turn runs with exactly what the
+  hook left -- the implied tool does not come back behind the hook's back.
+  A hook that does not touch the tool list changes nothing.
 
 ## What still enforces the boundary
 
@@ -133,6 +151,10 @@ that. `atlas/tests/test_effective_tools.py` pins the resolution, the warning
 and the routing; `frontend/src/test/search-tool-availability.test.js` and
 `frontend/src/test/search-tool-auto-enable.test.jsx` pin the panel state and
 the source transitions.
+
+The screenshots the review asked for live in
+`test/pr-validation/assets/pr1102-screenshots/`: the locked search-tool
+state in both panels, and the same two panels with every source deselected.
 
 ## Compatibility
 
