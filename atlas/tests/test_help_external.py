@@ -150,7 +150,7 @@ class _DocsHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if route == "/images/logo.png":
+        if route in ("/images/logo.png", "/v2/images/logo.png"):
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(PNG_BYTES)))
@@ -553,6 +553,32 @@ def test_a_redirect_within_the_host_is_followed(help_settings, docs_server):
     assert f"/api/help/image?h={v2_token}" in body["content"]
 
 
+def test_the_image_registry_is_found_after_a_redirect(help_settings, docs_server):
+    """A redirected document does not make every image request refetch it.
+
+    The registry is keyed by the configured URL, so the images of a
+    redirected document are found under the same key.
+    """
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/redirect-here")
+    client = _client()
+    content = client.get("/api/help", headers=_user_headers()).json()["content"]
+    token = remote_content.image_token(
+        f"http://127.0.0.1:{docs_server.port}/v2/images/logo.png"
+    )
+    proxy_path = f"/api/help/image?h={token}"
+    assert proxy_path in content
+
+    documents_read = len([r for r in docs_server.requests if r[0] == "/redirect-here"])
+    resp = client.get(proxy_path, headers=_user_headers())
+    assert resp.status_code == 200
+    # The image was served from the registry: the document was not read
+    # again.
+    assert (
+        len([r for r in docs_server.requests if r[0] == "/redirect-here"])
+        == documents_read
+    )
+
+
 def test_a_cached_redirect_keeps_the_final_url(help_settings, docs_server):
     """A cached copy still resolves its images against the final URL."""
     help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/redirect-here", ttl=300)
@@ -728,6 +754,27 @@ def test_invalid_display_mode_is_reported(help_settings):
     assert "remote_markdown" in body["error"]
 
 
+def test_a_failed_refresh_is_not_retried_on_every_request(help_settings, docs_server):
+    """An outage does not make every request wait for the host to time out."""
+    help_settings(mode="remote_markdown", url=f"{docs_server.base_url}/help.md", ttl=0)
+    client = _client()
+    client.get("/api/help", headers=_user_headers())
+    requests_before = len(docs_server.requests)
+
+    docs_server.set_fail(True)
+    degraded = client.get("/api/help", headers=_user_headers()).json()
+    assert degraded["stale"] is True
+    requests_after_failure = len(docs_server.requests)
+
+    # The next request is served from the copy that is already here, without
+    # another attempt at the failing host.
+    again = client.get("/api/help", headers=_user_headers()).json()
+    assert again["stale"] is True
+    assert "# Hosted Help" in again["content"]
+    assert len(docs_server.requests) == requests_after_failure
+    assert requests_after_failure > requests_before
+
+
 def test_a_reader_is_not_shown_the_configuration_details(help_settings):
     """The message that names the settings is for the operator.
 
@@ -736,12 +783,31 @@ def test_a_reader_is_not_shown_the_configuration_details(help_settings):
     """
     help_settings(mode="remote_markdown", url="")
     client = _client()
-    body = client.get(
+    reader_body = client.get(
         "/api/help", headers={"X-User-Email": "reader@example.com"}
     ).json()
-    assert body["mode"] == HELP_MODE_LOCAL
-    assert "HELP_CONTENT_URL" not in body["error"]
-    assert "administrator" in body["error"]
+    assert reader_body["mode"] == HELP_MODE_LOCAL
+    assert "HELP_CONTENT_URL" not in reader_body["error"]
+    assert "administrator" in reader_body["error"]
+
+    # The config endpoints carry the mode for the header, but the
+    # configuration error is for the operator only there as well.
+    config_body = client.get(
+        "/api/config", headers={"X-User-Email": "reader@example.com"}
+    ).json()
+    assert config_body["help"]["mode"] == HELP_MODE_LOCAL
+    assert config_body["help"]["error"] is None
+
+    shell_body = client.get(
+        "/api/config/shell", headers={"X-User-Email": "reader@example.com"}
+    ).json()
+    assert shell_body["help"]["error"] is None
+
+    # An administrator gets the detail everywhere.
+    admin_config = client.get(
+        "/api/config", headers=_admin_headers()
+    ).json()
+    assert "HELP_CONTENT_URL" in admin_config["help"]["error"]
 
 
 def test_plain_http_url_for_a_remote_host_is_rejected(help_settings):

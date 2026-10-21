@@ -179,8 +179,12 @@ async def get_config_shell(
 
     # The Help display mode (issue #1107) belongs in the shell config: the
     # header needs it on the first paint to know whether the Help button
-    # opens the in-app page or an external site.
+    # opens the in-app page or an external site. The configuration error
+    # names the settings an operator has to change, so it is only for
+    # administrators.
     help_config = resolve_help_config(app_settings)
+    is_admin = await is_user_in_group(current_user, app_settings.admin_group)
+    help_public = help_config.as_public_dict(include_error=is_admin)
 
     # Build models list without per-user token validity checks (fast path)
     models_list = []
@@ -218,7 +222,7 @@ async def get_config_shell(
         # Mirrors the orchestrator's clamp: int() with a fallback, floor of 1.
         "agent_max_steps": configured_agent_max_steps(app_settings),
         "banner_enabled": app_settings.banner_enabled,
-        "help": help_config.as_public_dict(),
+        "help": help_public,
         "features": {
             "workspaces": app_settings.workspaces_effective,
             "rag": app_settings.feature_rag_enabled,
@@ -433,6 +437,9 @@ async def get_config(
     # read help_content from there.
     help_content, _help_path = load_local_help_content(config_manager, app_settings)
     help_config = resolve_help_config(app_settings)
+    # The configuration error names the settings an operator has to change,
+    # so it is only for administrators.
+    is_in_admin_group = await is_user_in_group(current_user, app_settings.admin_group)
 
     # Keep INFO logging concise; server lists can be very long.
     logger.info(
@@ -516,7 +523,7 @@ async def get_config(
         "data_sources": rag_data_sources,  # RAG data sources for the user
         "rag_servers": rag_servers,  # Optional richer structure for RAG UI
         "user": current_user,
-    "is_in_admin_group": await is_user_in_group(current_user, app_settings.admin_group),
+    "is_in_admin_group": is_in_admin_group,
         "active_sessions": 0,  # TODO: Implement session counting in ChatService
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
@@ -524,8 +531,10 @@ async def get_config(
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_content": help_content,  # Help page content from help.md
         # How the Help page gets its content (issue #1107): the local
-        # Markdown, a remotely hosted document, or an external link.
-        "help": help_config.as_public_dict(),
+        # Markdown, a remotely hosted document, or an external link. The
+        # configuration error names the settings an operator has to change,
+        # so it is only for administrators.
+        "help": help_config.as_public_dict(include_error=is_in_admin_group),
         "tool_approvals": {
             "require_approval_by_default": tool_approvals_config.require_approval_by_default,
             "tools": filtered_tool_approvals

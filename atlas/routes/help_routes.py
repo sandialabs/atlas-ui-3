@@ -130,8 +130,10 @@ async def get_help(current_user: str = Depends(get_current_user)):  # noqa: ARG0
     if result.content:
         document_url = result.source_url or config.content_url
         rewritten = rewrite_markdown_images(result.content, document_url, config)
-        # The image proxy serves the images of this document, and only those.
-        register_image_targets(document_url, rewritten.image_targets)
+        # The image proxy serves the images of this document, and only
+        # those. The registry is keyed by the configured URL, so a
+        # redirected document is found under the same key.
+        register_image_targets(config.content_url, rewritten.image_targets)
         return {
             "mode": config.mode,
             "requested_mode": config.requested_mode,

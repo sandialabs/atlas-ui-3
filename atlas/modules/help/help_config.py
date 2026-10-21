@@ -76,19 +76,21 @@ class HelpConfig:
         """True when a documentation URL is configured, whatever the mode."""
         return bool(self.content_url)
 
-    def as_public_dict(self) -> dict:
+    def as_public_dict(self, include_error: bool = True) -> dict:
         """The subset of the configuration the browser is allowed to see.
 
         The URL is included because the browser has to open it (external
         link mode) and because the Admin UI has to show which document is
         configured. The error message is included so a misconfiguration is
-        visible in the UI rather than only in the server log.
+        visible in the UI rather than only in the server log -- but it names
+        the settings an operator has to change, so a caller that is not
+        serving an administrator passes ``include_error=False``.
         """
         return {
             "mode": self.mode,
             "requested_mode": self.requested_mode,
             "content_url": self.content_url,
-            "error": self.error,
+            "error": self.error if include_error else None,
         }
 
 

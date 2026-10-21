@@ -48,6 +48,11 @@ MAX_REDIRECTS = 3
 # this is only a safety net for a process that has seen several.
 MAX_CACHED_DOCUMENTS = 4
 
+# How long a failed refresh is not retried. Without it, every request during
+# an outage waits for the documentation host to time out before it is served
+# the copy that is already here.
+FAILED_REFRESH_BACKOFF_SECONDS = 30
+
 # The image cache is bounded on purpose. A documentation page can reference
 # many images, and a host that serves an image per URL variant ("logo.png?n=1",
 # "logo.png?n=2", ...) would otherwise fill the process with copies. The
@@ -90,6 +95,9 @@ class _CachedDocument:
     # against the configured URL: a documentation site that redirects
     # /help.md to /v2/help.md serves its images from /v2/.
     final_url: str = ""
+    # True when the last refresh failed: the copy is the last one that was
+    # fetched, not necessarily the current one.
+    stale: bool = False
 
 
 @dataclass
@@ -400,7 +408,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
             # time -- the document may have been redirected.
             source_url=cached.final_url or url,
             cached=True,
-            stale=False,
+            stale=cached.stale,
             fetched_at=cached.fetched_at,
         )
 
@@ -424,6 +432,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
         with _cache_lock:
             cached.expires_at = now + config.cache_ttl_seconds
             cached.fetched_at = now
+            cached.stale = False
         return RemoteHelpResult(
             content=cached.content,
             source_url=final_url,
@@ -458,6 +467,7 @@ async def fetch_remote_markdown(config: HelpConfig) -> RemoteHelpResult:
         expires_at=now + config.cache_ttl_seconds,
         fetched_at=now,
         final_url=final_url,
+        stale=False,
     )
     with _cache_lock:
         _document_cache[url] = entry
@@ -479,6 +489,11 @@ def _stale_fallback(
         logger.warning(
             "Serving the last known good Help document from %s: %s", url, message
         )
+        with _cache_lock:
+            # Do not retry the failing host on every request: the copy that
+            # is already here is good enough for the next few seconds.
+            cached.stale = True
+            cached.expires_at = time.monotonic() + FAILED_REFRESH_BACKOFF_SECONDS
         return RemoteHelpResult(
             content=cached.content,
             # The URL the document was read from, so the relative image
@@ -504,13 +519,17 @@ async def resolve_image_target(token: str, config: HelpConfig) -> Optional[str]:
     A replica that has not read the document yet has no registry, so it
     reads the document first -- the fetch is cached, so this is cheap.
     """
+    # The registry is keyed by the configured URL, not by the URL the
+    # document was read from: the document may redirect, and the two would
+    # then name different keys.
     document_url = config.content_url
     targets = known_image_targets(document_url)
     if token not in targets:
         result = await fetch_remote_markdown(config)
         if result.content:
-            document_url = result.source_url or document_url
-            rewritten = rewrite_markdown_images(result.content, document_url, config)
+            rewritten = rewrite_markdown_images(
+                result.content, result.source_url or document_url, config
+            )
             register_image_targets(document_url, rewritten.image_targets)
             targets = known_image_targets(document_url)
     return targets.get(token)
