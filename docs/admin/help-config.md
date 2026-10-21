@@ -99,11 +99,11 @@ documentation host, and lets the response be cached.
   the images the document references. A redirect is resolved the same way, so
   it cannot aim the request at another host, and a request cannot downgrade
   the scheme.
-* **Links.** A relative link in a hosted document (`[install](install.md)`,
-  or a reference-style definition) points at the documentation host, not at
-  ATLAS, so it is made absolute before the document is rendered. An anchor
-  (`#section`) stays as it is: it refers to a place in the document that is
-  on the page.
+* **Links.** A relative link in a hosted document -- a link whose target is
+  something like `install.md`, or a reference-style definition -- points at
+  the documentation host, not at ATLAS, so it is made absolute before the
+  document is rendered. An anchor (`#section`) stays as it is: it refers to
+  a place in the document that is on the page.
 * **Limits.** A document larger than `HELP_REMOTE_MAX_BYTES` and an image
   larger than `HELP_REMOTE_MAX_IMAGE_BYTES` are refused rather than
   buffered. The image cache is bounded (64 images, 32 MB) and drops the
