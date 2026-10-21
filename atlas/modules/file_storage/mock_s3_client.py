@@ -11,7 +11,7 @@ import logging
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -63,11 +63,6 @@ def _iso_to_datetime(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
-
-
-def _now_iso() -> str:
-    """Return the current UTC time in the API's ISO-8601 format."""
-    return iso_timestamp(datetime.now(timezone.utc)) or ""
 
 
 class MockS3StorageClient:
@@ -204,14 +199,20 @@ class MockS3StorageClient:
 
                 etag = response.headers.get("ETag", "").strip('"')
 
+                # Read the object back, the way the real client does after a
+                # PutObject, so the reported timestamp is the stored object's
+                # modification time and not the moment of the response.
+                head_response = self.client.head(f"/{self.bucket_name}/{s3_key}")
+                last_modified = iso_timestamp(
+                    _http_date_to_datetime(head_response.headers.get("Last-Modified"))
+                )
+
                 result = {
                     "key": s3_key,
                     "filename": filename,
                     "size": len(content_bytes),
                     "content_type": content_type,
-                    # The mock reports a real timestamp: the API contract for
-                    # last_modified is a string, not a missing value.
-                    "last_modified": _now_iso(),
+                    "last_modified": last_modified,
                     "etag": etag,
                     "tags": file_tags,
                     "user_email": user_email

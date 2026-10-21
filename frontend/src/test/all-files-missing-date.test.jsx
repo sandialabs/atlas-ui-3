@@ -31,6 +31,14 @@ const undatedFile = {
   tags: { source: 'user' }
 }
 
+const unparseableFile = {
+  key: 'sessions/s1/unparseable.txt',
+  filename: 'unparseable.txt',
+  size: 10,
+  last_modified: 'not-a-timestamp',
+  tags: { source: 'user' }
+}
+
 const renderWithFiles = async (files) => {
   global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => files })
   render(<AllFilesView />)
@@ -62,6 +70,18 @@ describe('AllFilesView - missing timestamp', () => {
     expect(screen.getByText('Unknown')).toBeInTheDocument()
   })
 
+  it('shows "Unknown" for a timestamp it cannot parse', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [datedFile, unparseableFile]
+    })
+    render(<AllFilesView />)
+
+    await screen.findByText('unparseable.txt')
+    expect(screen.getByText('Unknown')).toBeInTheDocument()
+    expect(screen.queryByText('Invalid Date')).not.toBeInTheDocument()
+  })
+
   it('sorts a file without a timestamp last, in both directions', async () => {
     await renderWithFiles([undatedFile, datedFile])
 
@@ -79,5 +99,22 @@ describe('AllFilesView - missing timestamp', () => {
       fireEvent.click(screen.getByRole('button', { name: /Date/ }))
     })
     await waitFor(() => expect(order()).toEqual(['dated.txt', 'undated.txt']))
+  })
+
+  it('sorts a file with an unparseable timestamp last as well', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [unparseableFile, datedFile]
+    })
+    render(<AllFilesView />)
+
+    await screen.findByText('unparseable.txt')
+    const order = () =>
+      screen
+        .getAllByRole('heading', { level: 3 })
+        .map((heading) => heading.textContent)
+        .filter((text) => text.endsWith('.txt'))
+
+    await waitFor(() => expect(order()).toEqual(['dated.txt', 'unparseable.txt']))
   })
 })

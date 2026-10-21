@@ -13,6 +13,7 @@ These tests pin the contract at both ends:
 """
 
 import base64
+import os
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -247,16 +248,21 @@ async def test_s3_list_files_reports_iso_last_modified_newest_first(monkeypatch)
     assert all(isinstance(f["last_modified"], str) for f in files)
 
 
+def _stored_object_path(root: Path, bucket: str, key: str) -> Path:
+    """Return the path of the object the mock server stored."""
+    return root / bucket / key
+
+
 def _stored_object_mtime(root: Path, bucket: str, key: str) -> datetime:
     """Return the modification time of the object the mock server stored."""
     return datetime.fromtimestamp(
-        (root / bucket / key).stat().st_mtime, tz=timezone.utc
+        _stored_object_path(root, bucket, key).stat().st_mtime, tz=timezone.utc
     )
 
 
 @pytest.mark.asyncio
-async def test_mock_upload_reports_iso_last_modified(monkeypatch, tmp_path):
-    """The in-process mock backend reports the object's own timestamp."""
+async def test_mock_upload_reports_the_stored_objects_time(monkeypatch, tmp_path):
+    """The mock backend reports the stored object's own timestamp."""
     from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
 
     monkeypatch.setenv("MOCK_S3_ROOT", str(tmp_path))
@@ -270,15 +276,15 @@ async def test_mock_upload_reports_iso_last_modified(monkeypatch, tmp_path):
         source_type="user",
     )
 
-    reported = datetime.fromisoformat(result["last_modified"])
     stored = _stored_object_mtime(tmp_path, "atlas-test-last-modified", result["key"])
-    # The reported timestamp is the stored object's, not "now" from a fallback.
-    assert abs((reported - stored).total_seconds()) < 5
+    # The reported timestamp is the stored object's, to the second the
+    # Last-Modified header carries -- not a fallback to "now".
+    assert datetime.fromisoformat(result["last_modified"]) == stored.replace(microsecond=0)
 
 
 @pytest.mark.asyncio
-async def test_mock_get_and_list_report_the_same_timestamp(monkeypatch, tmp_path):
-    """Get and list report the object's own timestamp, in one format."""
+async def test_mock_get_and_list_report_the_stored_objects_time(monkeypatch, tmp_path):
+    """Get and list follow the object's modification time, in one format."""
     from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
 
     monkeypatch.setenv("MOCK_S3_ROOT", str(tmp_path))
@@ -291,19 +297,24 @@ async def test_mock_get_and_list_report_the_same_timestamp(monkeypatch, tmp_path
         source_type="user",
     )
 
-    stored = _stored_object_mtime(tmp_path, "atlas-test-last-modified", uploaded["key"])
+    # Backdate the stored object: a backend that reported "now" instead of the
+    # object's own time would answer with the current date, not this one.
+    backdated = datetime(2020, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    object_path = _stored_object_path(tmp_path, "atlas-test-last-modified", uploaded["key"])
+    object_path.touch()
+    os.utime(object_path, (backdated.timestamp(), backdated.timestamp()))
 
     fetched = await client.get_file(
         user_email="alice@example.com", file_key=uploaded["key"]
     )
     assert fetched is not None
-    reported = datetime.fromisoformat(fetched["last_modified"])
-    assert abs((reported - stored).total_seconds()) < 5
+    assert datetime.fromisoformat(fetched["last_modified"]) == backdated
 
     files = await client.list_files(user_email="alice@example.com")
     assert len(files) == 1
-    listed = datetime.fromisoformat(files[0]["last_modified"])
-    assert abs((listed - stored).total_seconds()) < 5
+    assert datetime.fromisoformat(files[0]["last_modified"]).replace(
+        microsecond=0
+    ) == backdated
     # One format everywhere: the same offset notation on every path.
     assert files[0]["last_modified"].endswith("+00:00")
     assert fetched["last_modified"].endswith("+00:00")
