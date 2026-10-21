@@ -287,6 +287,11 @@ print_result $PYTEST_EXIT "tests/test_files_last_modified.py passes"
 # ==========================================
 print_header "6. Backend unit tests"
 
+# The suite reads the environment, so a .env that belongs to another checkout
+# of this project (python-dotenv's find_dotenv walks up from the installed
+# package) can make two unrelated auth tests in tests/test_core_auth.py fail
+# on an unmodified tree as well. A clean checkout -- and CI, which runs the
+# suite in a container without a .env -- is unaffected.
 cd "$PROJECT_ROOT"
 set -o pipefail
 env -u DEBUG_MODE -u ENVIRONMENT \
