@@ -6,6 +6,7 @@ import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import {
   SEARCH_AUTO_ENABLED_NOTE,
   SEARCH_EXPLICIT_NOTE,
+  SEARCH_AUTO_ENABLED_SELECT_TITLE,
   SEARCH_EXPLICIT_REMOVE_TITLE,
   SEARCH_TOOL_KEY,
   searchToolAutoEnabled
@@ -213,17 +214,14 @@ const ToolSelector = () => {
                     type="button"
                     onClick={() => {
                       // While the sources imply the search tool, a click
-                      // removes the user's *own* tick -- the tool stays on
-                      // because the sources imply it. With no tick of their
-                      // own there is nothing to remove, so the click does
-                      // nothing.
-                      if (autoEnabled && !explicit) return
+                      // toggles the user's *own* tick -- the tool stays on
+                      // because the sources imply it, but the selection is
+                      // theirs to make and to undo.
                       toggleTool(row.key)
                     }}
                     aria-pressed={isOn}
-                    aria-disabled={autoEnabled && !explicit ? true : undefined}
                     title={autoEnabled
-                      ? (explicit ? SEARCH_EXPLICIT_REMOVE_TITLE : SEARCH_AUTO_ENABLED_NOTE)
+                      ? (explicit ? SEARCH_EXPLICIT_REMOVE_TITLE : SEARCH_AUTO_ENABLED_SELECT_TITLE)
                       : `${isOn ? 'Turn off' : 'Turn on'} ${row.name}`}
                     className={`w-full px-3 py-2 text-left flex items-start gap-2 border-b border-gray-700 last:border-b-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400 ${
                       isOn ? 'bg-blue-900/30 hover:bg-blue-900/40' : 'hover:bg-gray-700'

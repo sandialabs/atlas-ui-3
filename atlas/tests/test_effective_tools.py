@@ -458,9 +458,14 @@ async def test_an_agent_turn_with_the_flags_off_does_not_run_on_the_search_tool(
 
     agent_mode.assert_not_awaited()
     rag_mode.assert_awaited_once()
-    orch.event_publisher.publish_warning.assert_awaited_once()
-    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
-    assert "Agent mode needs at least one tool" in message
+    # Two notes: the turn was downgraded (it had no tool to call), and the
+    # sources were read directly because the search tool is off.
+    messages = [
+        call.kwargs["message"]
+        for call in orch.event_publisher.publish_warning.await_args_list
+    ]
+    assert any("Agent mode needs at least one tool" in m for m in messages)
+    assert any("FEATURE_ATLAS_RAG_TOOLS_ENABLED" in m for m in messages)
 
 
 @pytest.mark.asyncio
@@ -685,6 +690,39 @@ async def test_a_sources_only_turn_with_rag_off_says_the_sources_were_not_read()
     message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
     assert "could not be read" in message
     assert "FEATURE_RAG_ENABLED" in message
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_search_tool_that_the_flag_removed_says_so():
+    """The user asked for the search tool and the deployment has it off.
+
+    The turn reads the sources directly instead, and the user is told that
+    is what happened -- the search they asked for did not run.
+    """
+    rag_mode = AsyncMock(return_value={"mode": "rag"})
+    orch = _routing_orchestrator(
+        _config(tools=False),
+        _StubAuthorization(strip_prefixes=()),
+        AsyncMock(return_value={"mode": "tools"}),
+        rag_mode=rag_mode,
+    )
+    sid = uuid4()
+    await orch.session_repository.create(Session(id=sid, user_email="u@example.com"))
+
+    await orch.execute(
+        session_id=sid,
+        content="find the policy",
+        model="test-model",
+        selected_tools=["atlas_search"],
+        selected_data_sources=["srv:src"],
+        files=None,
+    )
+
+    rag_mode.assert_awaited_once()
+    orch.event_publisher.publish_warning.assert_awaited_once()
+    message = orch.event_publisher.publish_warning.await_args.kwargs["message"]
+    assert "FEATURE_ATLAS_RAG_TOOLS_ENABLED" in message
+    assert "read directly" in message
 
 
 @pytest.mark.asyncio

@@ -733,6 +733,13 @@ class ChatOrchestrator:
             # caller explicitly asked for a RAG-only turn (``only_rag``).
             # With the search tool available, a turn that carries sources has
             # it in its tool list above and runs as a tools turn instead.
+            if user_selected_search and not self._builtin_search_flags_on():
+                # The user asked for the search tool and the deployment has
+                # it switched off: the sources are read directly instead, and
+                # the user is told that is what happened.
+                await self.event_publisher.publish_warning(
+                    message=self._sources_message(read_directly=True),
+                )
             return await self.rag_mode.run_streaming(
                 session=session,
                 model=model,

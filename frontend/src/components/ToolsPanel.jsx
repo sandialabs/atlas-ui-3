@@ -11,6 +11,7 @@ import { sortAtlasFirst } from '../constants/atlasTools'
 import {
   SEARCH_AUTO_ENABLED_NOTE,
   SEARCH_EXPLICIT_NOTE,
+  SEARCH_AUTO_ENABLED_SELECT_TITLE,
   SEARCH_EXPLICIT_REMOVE_TITLE,
   SEARCH_TOOL_KEY,
   searchToolAutoEnabled
@@ -1228,19 +1229,17 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                             type="button"
                                             onClick={() => {
             // Toggle ONLY this specific tool. While the sources imply the
-            // search tool, a click removes the user's *own* tick -- the tool
-            // stays on because the sources imply it. With no tick of their
-            // own there is nothing to remove, so the click does nothing.
-            if (autoEnabled && !explicit) return
+            // search tool, a click toggles the user's *own* tick -- the tool
+            // stays on because the sources imply it, but the selection is
+            // theirs to make and to undo.
                                             toggleTool(toolKey)
                                             }}
                                             aria-pressed={isSelected}
-                                            aria-disabled={autoEnabled && !explicit ? true : undefined}
                                             className={selectionChipClass(isSelected)}
                                             title={autoEnabled
                                               ? (explicit
                                                 ? SEARCH_EXPLICIT_REMOVE_TITLE
-                                                : SEARCH_AUTO_ENABLED_NOTE)
+                                                : SEARCH_AUTO_ENABLED_SELECT_TITLE)
                                               : `Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
                                           >
                                             <SelectionMark selected={isSelected} />

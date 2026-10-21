@@ -104,12 +104,16 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
   })
 
   it('does not let the user switch it off while the sources are selected', () => {
-    const context = renderPanel({ effectiveDataSources: ['srv:doc'] })
+    const addTools = vi.fn()
+    renderPanel({ effectiveDataSources: ['srv:doc'], addTools })
 
     const chip = screen.getByRole('button', { name: 'search' })
-    expect(chip).toHaveAttribute('aria-disabled', 'true')
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    // The click selects it in the user's own right; the sources keep it on
+    // either way, so the tool is never off.
     fireEvent.click(chip)
-    expect(context.toggleTool).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
+    expect(addTools).toHaveBeenCalledWith(['atlas_search'])
   })
 
   it('lets the user remove their own tick while the sources imply the tool', () => {
@@ -125,7 +129,6 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
     })
 
     const chip = screen.getByRole('button', { name: 'search' })
-    expect(chip).not.toHaveAttribute('aria-disabled')
     expect(screen.getByText(EXPLICIT_NOTE)).toBeInTheDocument()
 
     fireEvent.click(chip)
@@ -202,16 +205,21 @@ describe('ToolsPanel - the search tool is on because of the selected sources', (
   })
   it('does not touch another server that has a tool called search', () => {
     marketplaceState.tools = [ATLAS_SERVER, OTHER_SERVER]
-    const context = renderPanel({ effectiveDataSources: ['srv:doc'] })
+    const addTools = vi.fn()
+    renderPanel({ effectiveDataSources: ['srv:doc'], addTools })
 
     const chips = screen.getAllByRole('button', { name: 'search' })
     expect(chips).toHaveLength(2)
-    const locked = chips.filter(c => c.getAttribute('aria-disabled') === 'true')
-    expect(locked).toHaveLength(1)
+    // The built-in chip carries the automatic-state note; the other server's
+    // does not.
+    const implied = chips.find(c => (c.getAttribute('title') || '').includes('Automatically enabled'))
+    const other = chips.find(c => c !== implied)
+    expect(implied).toBeTruthy()
+    expect(other).toBeTruthy()
 
-    fireEvent.click(chips.find(c => c.getAttribute('aria-disabled') !== 'true'))
+    fireEvent.click(other)
     fireEvent.click(screen.getByRole('button', { name: /Save and Close/i }))
-    expect(context.addTools).toHaveBeenCalledWith(['other_search'])
+    expect(addTools).toHaveBeenCalledWith(['other_search'])
   })
 })
 
@@ -236,12 +244,15 @@ describe('ToolSelector - the search tool is on because of the selected sources',
     expect(screen.getByText(NOTE)).toBeInTheDocument()
   })
 
-  it('does not toggle the automatic search tool off', () => {
+  it('toggles the user\'s own tick, never the tool off', () => {
     const context = renderSelector({ effectiveDataSources: ['srv:doc'] })
 
     const row = screen.getByRole('button', { name: /search/i })
+    expect(row).toHaveAttribute('aria-pressed', 'true')
+    // The click selects it in the user's own right; the sources keep it on,
+    // so the tool is never off.
     fireEvent.click(row)
-    expect(context.toggleTool).not.toHaveBeenCalled()
+    expect(context.toggleTool).toHaveBeenCalledWith('atlas_search')
   })
 
   it('is an ordinary toggle again once every source is deselected', () => {

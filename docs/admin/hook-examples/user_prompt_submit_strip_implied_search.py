@@ -27,9 +27,19 @@ user did not choose. An empty list means "none" and is preserved.
 import json
 import sys
 
-BUILTIN_PREFIX = "atlas_"
-# The built-in search tool, and the name it had before the tools were
-# consolidated (issue #855).
+BUILTIN_TOOLS = {
+    "atlas_canvas",
+    "atlas_sleep",
+    "atlas_search",
+    "atlas_discover_sources",
+    "atlas_discover_launch_options",
+    "atlas_launch",
+    "atlas_get_runs",
+    "atlas_result",
+    "atlas_follow_up",
+}
+# The search tool, and the name it had before the tools were consolidated
+# (issue #855).
 SEARCH_TOOLS = ("atlas_search", "atlas_rag_query")
 
 
@@ -38,7 +48,9 @@ def is_search_tool(tool):
 
 
 def is_builtin(tool):
-    return tool.startswith(BUILTIN_PREFIX)
+    # An explicit list, not a prefix: an operator may configure an MCP
+    # server whose name starts with "atlas_", and that server is outbound.
+    return tool in BUILTIN_TOOLS
 
 
 env = json.load(sys.stdin)
