@@ -67,7 +67,9 @@ enough to store the bytes, and not enough to store them with their tags.
 `last_modified` as an ISO-8601 string (for example
 `2026-10-21T12:30:45+00:00`). The S3 client libraries hand the timestamp back
 as a `datetime`, and the API layer converts it; clients can parse it with any
-ISO-8601 parser.
+ISO-8601 parser. The field is `null` when the storage backend cannot report
+a timestamp, so clients must treat a missing value as "unknown" rather than
+as the epoch.
 
 ## How MCP Tools Access Files
 

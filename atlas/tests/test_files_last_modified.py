@@ -15,6 +15,7 @@ These tests pin the contract at both ends:
 import base64
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
@@ -246,9 +247,16 @@ async def test_s3_list_files_reports_iso_last_modified_newest_first(monkeypatch)
     assert all(isinstance(f["last_modified"], str) for f in files)
 
 
+def _stored_object_mtime(root: Path, bucket: str, key: str) -> datetime:
+    """Return the modification time of the object the mock server stored."""
+    return datetime.fromtimestamp(
+        (root / bucket / key).stat().st_mtime, tz=timezone.utc
+    )
+
+
 @pytest.mark.asyncio
 async def test_mock_upload_reports_iso_last_modified(monkeypatch, tmp_path):
-    """The in-process mock backend reports a timestamp too, not ``None``."""
+    """The in-process mock backend reports the object's own timestamp."""
     from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
 
     monkeypatch.setenv("MOCK_S3_ROOT", str(tmp_path))
@@ -262,17 +270,20 @@ async def test_mock_upload_reports_iso_last_modified(monkeypatch, tmp_path):
         source_type="user",
     )
 
-    assert isinstance(result["last_modified"], str)
-    assert datetime.fromisoformat(result["last_modified"]) is not None
+    reported = datetime.fromisoformat(result["last_modified"])
+    stored = _stored_object_mtime(tmp_path, "atlas-test-last-modified", result["key"])
+    # The reported timestamp is the stored object's, not "now" from a fallback.
+    assert abs((reported - stored).total_seconds()) < 5
 
 
 @pytest.mark.asyncio
-async def test_mock_list_reports_iso_last_modified(monkeypatch, tmp_path):
+async def test_mock_get_and_list_report_the_same_timestamp(monkeypatch, tmp_path):
+    """Get and list report the object's own timestamp, in one format."""
     from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
 
     monkeypatch.setenv("MOCK_S3_ROOT", str(tmp_path))
     client = MockS3StorageClient(s3_bucket_name="atlas-test-last-modified")
-    await client.upload_file(
+    uploaded = await client.upload_file(
         user_email="alice@example.com",
         filename="report.txt",
         content_base64=base64.b64encode(b"hello").decode(),
@@ -280,11 +291,22 @@ async def test_mock_list_reports_iso_last_modified(monkeypatch, tmp_path):
         source_type="user",
     )
 
-    files = await client.list_files(user_email="alice@example.com")
+    stored = _stored_object_mtime(tmp_path, "atlas-test-last-modified", uploaded["key"])
 
+    fetched = await client.get_file(
+        user_email="alice@example.com", file_key=uploaded["key"]
+    )
+    assert fetched is not None
+    reported = datetime.fromisoformat(fetched["last_modified"])
+    assert abs((reported - stored).total_seconds()) < 5
+
+    files = await client.list_files(user_email="alice@example.com")
     assert len(files) == 1
-    assert isinstance(files[0]["last_modified"], str)
-    assert datetime.fromisoformat(files[0]["last_modified"]) is not None
+    listed = datetime.fromisoformat(files[0]["last_modified"])
+    assert abs((listed - stored).total_seconds()) < 5
+    # One format everywhere: the same offset notation on every path.
+    assert files[0]["last_modified"].endswith("+00:00")
+    assert fetched["last_modified"].endswith("+00:00")
 
 
 # --- The file manager keeps working with either shape ---

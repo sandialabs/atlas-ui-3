@@ -55,6 +55,16 @@ def _http_date_to_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _iso_to_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp (the listing's ``LastModified``)."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _now_iso() -> str:
     """Return the current UTC time in the API's ISO-8601 format."""
     return iso_timestamp(datetime.now(timezone.utc)) or ""
@@ -313,7 +323,9 @@ class MockS3StorageClient:
 
                 # The mock server reports the object's modification time the
                 # way S3 does, in the Last-Modified header.
-                last_modified = _http_date_to_datetime(response.headers.get("Last-Modified"))
+                last_modified = iso_timestamp(
+                    _http_date_to_datetime(response.headers.get("Last-Modified"))
+                )
 
                 result = {
                     "key": file_key,
@@ -321,7 +333,7 @@ class MockS3StorageClient:
                     "content_base64": content_base64,
                     "content_type": response.headers.get("Content-Type", "application/octet-stream"),
                     "size": len(content_bytes),
-                    "last_modified": iso_timestamp(last_modified) or _now_iso(),
+                    "last_modified": last_modified,
                     "etag": response.headers.get("ETag", "").strip('"'),
                     "tags": tags
                 }
@@ -425,9 +437,10 @@ class MockS3StorageClient:
                     size = int(size_elem.text) if size_elem is not None else 0
                     etag = etag_elem.text.strip('"') if etag_elem is not None else ""
                     # The listing reports the modification time as an
-                    # ISO-8601 string, the same shape the API serves.
-                    last_modified = (
-                        modified_elem.text if modified_elem is not None and modified_elem.text else None
+                    # ISO-8601 string; it is parsed and re-formatted so every
+                    # path of this client speaks the same format.
+                    last_modified = iso_timestamp(
+                        _iso_to_datetime(modified_elem.text if modified_elem is not None else None)
                     )
 
                     # Get metadata via HEAD
@@ -437,7 +450,7 @@ class MockS3StorageClient:
                     if not last_modified:
                         last_modified = iso_timestamp(
                             _http_date_to_datetime(head_response.headers.get("Last-Modified"))
-                        ) or _now_iso()
+                        )
 
                     files.append({
                         "key": key,
