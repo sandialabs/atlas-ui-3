@@ -64,6 +64,8 @@ The message names the settings an operator has to change, so it is shown in
 full to administrators. Everyone else sees a neutral notice ("The Help page
 is not configured correctly. Please contact your administrator.").
 
+![The configuration problem an administrator sees](../readme_img/help-configuration-problem.png)
+
 ## Remote Markdown
 
 The document is fetched by the Atlas backend, not by the browser. That avoids
@@ -82,6 +84,10 @@ documentation host, and lets the response be cached.
   no cached copy, the local `help.md` is shown instead, with the reason. A
   host that is down is reported separately from a configuration problem: the
   first usually resolves itself, the second needs an operator.
+
+  ![The stale copy during an outage](../readme_img/help-stale-copy.png)
+
+  ![The local document when the documentation host cannot be reached](../readme_img/help-local-fallback.png)
 * **Images.** Image references in the hosted document are resolved against the
   document URL, so a relative reference (`images/diagram.png`) and a
   root-relative one (`/images/diagram.png`) both point at the documentation
