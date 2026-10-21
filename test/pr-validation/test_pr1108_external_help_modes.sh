@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test script for PR #1107: externally hosted Help documentation.
+# Test script for PR #1108: externally hosted Help documentation.
 #
 # What this validates, against a running server and a mock documentation
 # host (not against the unit tests alone):
@@ -17,7 +17,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FIXTURE_DIR="$SCRIPT_DIR/fixtures/pr1107"
+FIXTURE_DIR="$SCRIPT_DIR/fixtures/pr1108"
 
 PASSED=0
 FAILED=0
@@ -31,7 +31,7 @@ print_result() {
     fi
 }
 
-echo "=== PR #1107 Validation: externally hosted Help documentation ==="
+echo "=== PR #1108 Validation: externally hosted Help documentation ==="
 
 if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     # shellcheck disable=SC1091
@@ -143,7 +143,7 @@ stop_app() {
 }
 
 help_json() {
-    curl -fsS -H "X-User-Email: pr1107@example.org" "http://127.0.0.1:$APP_PORT/api/help"
+    curl -fsS -H "X-User-Email: pr1108@example.org" "http://127.0.0.1:$APP_PORT/api/help"
 }
 
 json_field() {
@@ -163,7 +163,7 @@ if start_app "local" ""; then
         print_result 1 "the local mode serves the local document (mode='$MODE')"
     fi
 
-    SHELL_BODY="$(curl -fsS -H 'X-User-Email: pr1107@example.org' "http://127.0.0.1:$APP_PORT/api/config/shell")"
+    SHELL_BODY="$(curl -fsS -H 'X-User-Email: pr1108@example.org' "http://127.0.0.1:$APP_PORT/api/config/shell")"
     SHELL_MODE="$(printf '%s' "$SHELL_BODY" | json_field help)"
     if printf '%s' "$SHELL_BODY" | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['help']['mode']=='local' else 1)"; then
         print_result 0 "the shell config reports the local mode"
@@ -183,7 +183,7 @@ if start_app "remote_markdown" "http://127.0.0.1:$DOCS_PORT/help.md"; then
     BODY="$(help_json)"
     MODE="$(printf '%s' "$BODY" | json_field mode)"
     CONTENT="$(printf '%s' "$BODY" | json_field content)"
-    if [ "$MODE" = "remote_markdown" ] && printf '%s' "$CONTENT" | grep -q "PR1107_HOSTED_DOCUMENT_MARKER"; then
+    if [ "$MODE" = "remote_markdown" ] && printf '%s' "$CONTENT" | grep -q "PR1108_HOSTED_DOCUMENT_MARKER"; then
         print_result 0 "the hosted document is fetched and returned"
     else
         print_result 1 "the hosted document is fetched and returned (mode='$MODE')"
@@ -208,7 +208,7 @@ if start_app "remote_markdown" "http://127.0.0.1:$DOCS_PORT/help.md"; then
     PROXY_URL="$(printf '%s' "$CONTENT" | grep -o '/api/help/image?url=[^)]*' | head -1)"
     if [ -n "$PROXY_URL" ]; then
         IMAGE_FILE="$(mktemp)"
-        STATUS="$(curl -s -o "$IMAGE_FILE" -w '%{http_code}' -H 'X-User-Email: pr1107@example.org' "http://127.0.0.1:$APP_PORT$PROXY_URL")"
+        STATUS="$(curl -s -o "$IMAGE_FILE" -w '%{http_code}' -H 'X-User-Email: pr1108@example.org' "http://127.0.0.1:$APP_PORT$PROXY_URL")"
         if [ "$STATUS" = "200" ] && [ -s "$IMAGE_FILE" ]; then
             print_result 0 "the image proxy serves the image bytes"
         else
@@ -220,7 +220,7 @@ if start_app "remote_markdown" "http://127.0.0.1:$DOCS_PORT/help.md"; then
     fi
 
     # The proxy refuses a host that is not the configured one.
-    FOREIGN_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-User-Email: pr1107@example.org' \
+    FOREIGN_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-User-Email: pr1108@example.org' \
         "http://127.0.0.1:$APP_PORT/api/help/image?url=https%3A%2F%2Fevil.example.org%2Fx.png")"
     if [ "$FOREIGN_STATUS" = "403" ]; then
         print_result 0 "the image proxy refuses another host"
@@ -282,7 +282,7 @@ if start_app "remote_markdown" ""; then
         print_result 1 "the misconfiguration is reported and the local document is used (mode='$MODE' error='$ERROR')"
     fi
 
-    ADMIN_BODY="$(curl -fsS -H 'X-User-Email: pr1107@example.org' "http://127.0.0.1:$APP_PORT/admin/help-config" 2>/dev/null || true)"
+    ADMIN_BODY="$(curl -fsS -H 'X-User-Email: pr1108@example.org' "http://127.0.0.1:$APP_PORT/admin/help-config" 2>/dev/null || true)"
     if [ -z "$ADMIN_BODY" ]; then
         print_result 0 "the admin endpoint is admin-gated (the request was refused)"
     else
