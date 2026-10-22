@@ -255,9 +255,11 @@ class TestStartupValidation:
         with pytest.raises(AuthConfigurationError, match="configuration is incomplete"):
             validate_auth_modes(_settings(header=False, oidc=False), oidc_requested=True)
 
-    def test_real_app_ignores_identity_headers(self):
+    @pytest.mark.parametrize("header_auth, expected_status", [("false", "401"), ("true", "200")])
+    def test_real_app_wires_the_flag(self, header_auth, expected_status):
         # The HTTP tests above build their own app; this one checks main.py
-        # actually wires the flag into AuthMiddleware, end to end.
+        # actually wires the flag into AuthMiddleware, end to end. The "true"
+        # run is the control: the same request authenticates by header there.
         script = (
             "from fastapi.testclient import TestClient\n"
             "from atlas.main import app\n"
@@ -267,19 +269,26 @@ class TestStartupValidation:
             "print(client.get('/', headers=h, follow_redirects=False).headers.get('location'))\n"
         )
         result = _run_atlas(script, {
-            "FEATURE_HEADER_AUTH_ENABLED": "false",
+            "FEATURE_HEADER_AUTH_ENABLED": header_auth,
             "FEATURE_OIDC_AUTH_ENABLED": "true",
             "OIDC_SESSION_SECRET": "test-session-secret",
             "OIDC_ISSUER": "https://idp.example.gov",
             "OIDC_CLIENT_ID": "atlas",
             "FEATURE_PROXY_SECRET_ENABLED": "true",
             "PROXY_SECRET": PROXY_SECRET,
+            "PROXY_SECRET_HEADER": "X-Proxy-Secret",
+            "AUTH_USER_HEADER": "X-User-Email",
+            "AUTH_USER_HEADER_TYPE": "email-string",
+            "FEATURE_DOMAIN_WHITELIST_ENABLED": "false",
             "DEBUG_MODE": "false",
         })
         assert result.returncode == 0, result.stderr
         status, location = result.stdout.strip().splitlines()[-2:]
-        assert status == "401"
-        assert location.startswith("/auth/oidc/login")
+        assert status == expected_status
+        if header_auth == "false":
+            assert location.startswith("/auth/oidc/login")
+        else:
+            assert location == "None"
 
     def test_app_import_fails_when_oidc_is_unavailable(self):
         # End to end through main.py: OIDC is requested but startup disables

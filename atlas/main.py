@@ -1765,7 +1765,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # all skipped below, so a valid proxy secret plus an asserted identity
     # header cannot stand in for a login -- and the proxy secret, which only
     # exists to make that header trustworthy, is not required either.
-    header_auth_enabled = bool(getattr(config_manager.app_settings, "feature_header_auth_enabled", True))
+    header_auth_enabled = bool(config_manager.app_settings.feature_header_auth_enabled)
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
