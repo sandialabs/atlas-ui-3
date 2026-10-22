@@ -1257,8 +1257,13 @@ class AppSettings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_aws_alb_config(self):
-        """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth."""
-        if self.auth_user_header_type == "aws-alb-jwt":
+        """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth.
+
+        Skipped when header auth is disabled: the ALB header is never read
+        then, so a leftover AUTH_USER_HEADER_TYPE must not block OIDC-only
+        startup.
+        """
+        if self.feature_header_auth_enabled and self.auth_user_header_type == "aws-alb-jwt":
             placeholder = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/..."
             if not self.auth_aws_expected_alb_arn or self.auth_aws_expected_alb_arn == placeholder:
                 raise ValueError(

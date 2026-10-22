@@ -54,7 +54,7 @@ live OIDC session gets:
 | --- | --- |
 | API call (`/api/...`) | `401` |
 | Browser navigation | `302` to `/auth/oidc/login?next=<path>` |
-| WebSocket `/ws` | Handshake rejected with close code `1008` |
+| WebSocket `/ws` | Handshake rejected before it is accepted (HTTP `403`; browsers report close code `1006`) |
 
 Signed file-download links (`/mcp/files/download/...` and
 `/api/files/download/...` with a capability `token`) keep working, because

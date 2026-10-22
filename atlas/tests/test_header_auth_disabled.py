@@ -247,6 +247,17 @@ class TestStartupValidation:
     def test_a_usable_mode_starts(self, header, oidc):
         validate_auth_modes(_settings(header=header, oidc=oidc), oidc_requested=oidc)
 
+    def test_leftover_alb_header_type_does_not_block_oidc_only(self, monkeypatch):
+        from atlas.modules.config.settings import AppSettings
+
+        monkeypatch.setenv("AUTH_USER_HEADER_TYPE", "aws-alb-jwt")
+        monkeypatch.setenv("AUTH_AWS_EXPECTED_ALB_ARN", "")
+        monkeypatch.setenv("FEATURE_HEADER_AUTH_ENABLED", "false")
+        assert AppSettings().feature_header_auth_enabled is False
+        monkeypatch.setenv("FEATURE_HEADER_AUTH_ENABLED", "true")
+        with pytest.raises(ValueError, match="auth_aws_expected_alb_arn"):
+            AppSettings()
+
     def test_both_disabled_fails(self):
         with pytest.raises(AuthConfigurationError, match="No authentication mode"):
             validate_auth_modes(_settings(header=False, oidc=False), oidc_requested=False)
