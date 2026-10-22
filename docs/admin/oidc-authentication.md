@@ -1,6 +1,6 @@
 # OIDC Login, Confidential-Client Authentication, and Delegated Credentials
 
-Last updated: 2026-10-08
+Last updated: 2026-10-21
 
 Atlas can authenticate users itself as an OpenID Connect relying party, instead
 of trusting an identity header set by a reverse proxy. This is an **opt-in
@@ -32,6 +32,40 @@ Atlas supports two parallel deployment models, and this feature adds the second:
 The two coexist. With OIDC enabled, a request carrying a live Atlas session
 authenticates on that basis; anything without one still falls through to the
 header path, so a mixed rollout does not break existing traffic.
+
+### OIDC-only mode
+
+That fall-through means a request with no OIDC session can still authenticate
+by presenting the identity header (plus the proxy secret, when
+`FEATURE_PROXY_SECRET_ENABLED` is on). Once the rollout is done, turn header
+auth off so OIDC is the only way in:
+
+```bash
+FEATURE_OIDC_AUTH_ENABLED=true
+FEATURE_HEADER_AUTH_ENABLED=false
+```
+
+With header auth disabled Atlas never reads `AUTH_USER_HEADER`, on HTTP or on
+the `/ws` handshake -- not with a valid proxy secret, and not in debug mode
+(the `test@test.com` and `?user=` fallbacks are off too). A request without a
+live OIDC session gets:
+
+| Request | Response |
+| --- | --- |
+| API call (`/api/...`) | `401` |
+| Browser navigation | `302` to `/auth/oidc/login?next=<path>` |
+| WebSocket `/ws` | Handshake rejected with close code `1008` |
+
+Signed file-download links (`/mcp/files/download/...` and
+`/api/files/download/...` with a capability `token`) keep working, because
+they authenticate with the token rather than with a header. The proxy secret
+gate, if enabled, still applies in front of everything except OIDC sessions
+and `/mcp/files/download/`.
+
+Atlas refuses to start when no login mode is left: with
+`FEATURE_HEADER_AUTH_ENABLED=false` and `FEATURE_OIDC_AUTH_ENABLED=false`, or
+with header auth disabled and OIDC disabled at startup for missing
+configuration (see below). The startup error names which case applies.
 
 ## Login flow
 
@@ -107,7 +141,9 @@ and the reason.
 
 Atlas refuses to enable OIDC login without `OIDC_SESSION_SECRET`, `OIDC_ISSUER`,
 and `OIDC_CLIENT_ID`; it logs the reason at startup and falls back to
-header-based auth rather than starting a half-configured login flow.
+header-based auth rather than starting a half-configured login flow. In
+OIDC-only mode (`FEATURE_HEADER_AUTH_ENABLED=false`) there is nothing to fall
+back to, so startup fails instead.
 
 ### Session lifetime and refresh-on-use
 

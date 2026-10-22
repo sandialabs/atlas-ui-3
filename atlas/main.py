@@ -52,6 +52,7 @@ from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
+from atlas.core.auth_mode import validate_auth_modes
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from atlas.core.metrics_logger import log_metric
@@ -1264,7 +1265,9 @@ async def lifespan(app: FastAPI):
         )
 
     # SECURITY WARNING: Check for missing proxy secret in production
-    if not config.app_settings.debug_mode:
+    # Without header auth no identity header is trusted, so there is nothing
+    # for the proxy secret to protect.
+    if not config.app_settings.debug_mode and config.app_settings.feature_header_auth_enabled:
         if not config.app_settings.feature_proxy_secret_enabled:
             logger.warning(
                 "SECURITY WARNING: Proxy secret validation is DISABLED in production. "
@@ -1413,6 +1416,7 @@ if config.app_settings.feature_globus_auth_enabled:
 
 # Security: OIDC login needs a signed session cookie to carry the opaque
 # session id and the in-flight PKCE state. Refuse to enable it without one.
+_oidc_auth_requested = config.app_settings.feature_oidc_auth_enabled
 if config.app_settings.feature_oidc_auth_enabled:
     if not config.app_settings.oidc_session_secret:
         logger.error(
@@ -1425,6 +1429,9 @@ if config.app_settings.feature_oidc_auth_enabled:
             "OIDC auth DISABLED — OIDC_ISSUER and OIDC_CLIENT_ID are both required."
         )
         config.app_settings.feature_oidc_auth_enabled = False
+# OIDC-only mode (header auth off) cannot run once OIDC itself is unavailable:
+# refuse to start rather than serve an app nobody can sign in to.
+validate_auth_modes(config.app_settings, oidc_requested=_oidc_auth_requested)
 # Domain whitelist check (if enabled) - add before Auth so it runs after
 if config.app_settings.feature_domain_whitelist_enabled:
     app.add_middleware(
@@ -1443,6 +1450,7 @@ app.add_middleware(
     proxy_secret=config.app_settings.proxy_secret,
     auth_redirect_url=config.app_settings.auth_redirect_url,
     oidc_enabled=config.app_settings.feature_oidc_auth_enabled,
+    header_auth_enabled=config.app_settings.feature_header_auth_enabled,
 )
 
 # Session middleware backing the Globus OAuth state, the OIDC login session,
@@ -1781,7 +1789,12 @@ async def websocket_endpoint(websocket: WebSocket):
     # letting any non-empty header value authenticate the socket.
     app_settings = config_manager.app_settings
     auth_header_name = app_settings.auth_user_header
-    x_email_header = websocket.headers.get(auth_header_name)
+    # OIDC-only mode: the OIDC session above is the only credential. The
+    # identity header, the debug query parameter and the debug test user are
+    # all skipped, so a valid proxy secret plus an asserted identity header
+    # cannot stand in for a login.
+    header_auth_enabled = bool(getattr(app_settings, "feature_header_auth_enabled", True))
+    x_email_header = websocket.headers.get(auth_header_name) if header_auth_enabled else None
     if not user_email and x_email_header:
         # Async form: JWT verification can fetch the ALB public key with a
         # blocking 5s httpx call, which would stall the whole event loop.
@@ -1793,7 +1806,7 @@ async def websocket_endpoint(websocket: WebSocket):
         )
 
     # Fallback to query parameter (development/testing ONLY)
-    if not user_email and is_debug_mode:
+    if not user_email and is_debug_mode and header_auth_enabled:
         user_email = websocket.query_params.get('user')
         if user_email:
             logger.info(
@@ -1802,7 +1815,7 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
     # Final fallback to test user (development mode ONLY)
-    if not user_email and is_debug_mode:
+    if not user_email and is_debug_mode and header_auth_enabled:
         user_email = config_manager.app_settings.test_user or 'test@test.com'
         logger.info(
             "WebSocket using fallback test user (debug mode): %s",
@@ -1811,6 +1824,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # PRODUCTION: Reject unauthenticated connections
     if not user_email:
+        if not header_auth_enabled:
+            logger.warning(
+                "WebSocket authentication failed - no OIDC login session (header auth disabled). Client: %s",
+                sanitize_for_logging(websocket.client)
+            )
+            raise WebSocketException(
+                code=1008,
+                reason="Authentication required. Please sign in."
+            )
         logger.warning(
             "WebSocket authentication failed - no user found in %s header. Client: %s",
             sanitize_for_logging(auth_header_name),

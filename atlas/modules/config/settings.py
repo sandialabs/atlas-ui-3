@@ -519,6 +519,19 @@ class AppSettings(BaseSettings):
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
 
+    # Trusted-header authentication (AUTH_USER_HEADER set by a reverse proxy).
+    # On by default so existing deployments keep working. Turn it off to run
+    # OIDC-only: identity headers are then never consulted -- not even with a
+    # valid proxy secret, and not in debug mode -- so a request without an
+    # OIDC login session cannot authenticate by asserting an identity.
+    feature_header_auth_enabled: bool = Field(
+        default=True,
+        description="Accept the trusted identity header (AUTH_USER_HEADER) from a reverse proxy. "
+                    "Set to false to require OIDC login for every request; startup then fails "
+                    "unless OIDC login is enabled and fully configured.",
+        validation_alias=AliasChoices("FEATURE_HEADER_AUTH_ENABLED"),
+    )
+
     # Authentication header configuration
     auth_user_header: str = Field(
         default="X-User-Email",
