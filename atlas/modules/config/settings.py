@@ -519,6 +519,19 @@ class AppSettings(BaseSettings):
     auth_group_check_url: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_URL")
     auth_group_check_api_key: Optional[str] = Field(default=None, validation_alias="AUTH_GROUP_CHECK_API_KEY")
 
+    # Trusted-header authentication (AUTH_USER_HEADER set by a reverse proxy).
+    # On by default so existing deployments keep working. Turn it off to run
+    # OIDC-only: identity headers are then never consulted -- not even with a
+    # valid proxy secret, and not in debug mode -- so a request without an
+    # OIDC login session cannot authenticate by asserting an identity.
+    feature_header_auth_enabled: bool = Field(
+        default=True,
+        description="Accept the trusted identity header (AUTH_USER_HEADER) from a reverse proxy. "
+                    "Set to false to require OIDC login for every request; startup then fails "
+                    "unless OIDC login is enabled and fully configured.",
+        validation_alias=AliasChoices("FEATURE_HEADER_AUTH_ENABLED"),
+    )
+
     # Authentication header configuration
     auth_user_header: str = Field(
         default="X-User-Email",
@@ -1244,8 +1257,13 @@ class AppSettings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_aws_alb_config(self):
-        """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth."""
-        if self.auth_user_header_type == "aws-alb-jwt":
+        """Validate that AWS ALB ARN is properly configured when using aws-alb-jwt auth.
+
+        Skipped when header auth is disabled: the ALB header is never read
+        then, so a leftover AUTH_USER_HEADER_TYPE must not block OIDC-only
+        startup.
+        """
+        if self.feature_header_auth_enabled and self.auth_user_header_type == "aws-alb-jwt":
             placeholder = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/your-alb-name/..."
             if not self.auth_aws_expected_alb_arn or self.auth_aws_expected_alb_arn == placeholder:
                 raise ValueError(

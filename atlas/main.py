@@ -52,6 +52,7 @@ from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
+from atlas.core.auth_mode import validate_auth_modes
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
 from atlas.core.log_sanitizer import sanitize_for_logging, summarize_tool_approval_response_for_logging
 from atlas.core.metrics_logger import log_metric
@@ -1264,7 +1265,9 @@ async def lifespan(app: FastAPI):
         )
 
     # SECURITY WARNING: Check for missing proxy secret in production
-    if not config.app_settings.debug_mode:
+    # Without header auth no identity header is trusted, so there is nothing
+    # for the proxy secret to protect.
+    if not config.app_settings.debug_mode and config.app_settings.feature_header_auth_enabled:
         if not config.app_settings.feature_proxy_secret_enabled:
             logger.warning(
                 "SECURITY WARNING: Proxy secret validation is DISABLED in production. "
@@ -1413,6 +1416,7 @@ if config.app_settings.feature_globus_auth_enabled:
 
 # Security: OIDC login needs a signed session cookie to carry the opaque
 # session id and the in-flight PKCE state. Refuse to enable it without one.
+_oidc_auth_requested = config.app_settings.feature_oidc_auth_enabled
 if config.app_settings.feature_oidc_auth_enabled:
     if not config.app_settings.oidc_session_secret:
         logger.error(
@@ -1425,6 +1429,9 @@ if config.app_settings.feature_oidc_auth_enabled:
             "OIDC auth DISABLED — OIDC_ISSUER and OIDC_CLIENT_ID are both required."
         )
         config.app_settings.feature_oidc_auth_enabled = False
+# OIDC-only mode (header auth off) cannot run once OIDC itself is unavailable:
+# refuse to start rather than serve an app nobody can sign in to.
+validate_auth_modes(config.app_settings, oidc_requested=_oidc_auth_requested)
 # Domain whitelist check (if enabled) - add before Auth so it runs after
 if config.app_settings.feature_domain_whitelist_enabled:
     app.add_middleware(
@@ -1443,6 +1450,7 @@ app.add_middleware(
     proxy_secret=config.app_settings.proxy_secret,
     auth_redirect_url=config.app_settings.auth_redirect_url,
     oidc_enabled=config.app_settings.feature_oidc_auth_enabled,
+    header_auth_enabled=config.app_settings.feature_header_auth_enabled,
 )
 
 # Session middleware backing the Globus OAuth state, the OIDC login session,
@@ -1751,6 +1759,19 @@ async def websocket_endpoint(websocket: WebSocket):
     # exactly as it does for HTTP in AuthMiddleware. Checked before the proxy
     # secret because an OIDC deployment may have no reverse proxy at all.
     oidc_ws_user = await _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
+
+    # OIDC-only mode: the OIDC session above is the only credential, so a
+    # socket without one is rejected here, before the proxy secret, the
+    # identity header, the debug query parameter or the debug test user are
+    # ever looked at. Everything below only runs with header auth enabled or
+    # with a live OIDC session already established, so no fallback added
+    # there can reopen header auth on WebSocket alone.
+    if not config_manager.app_settings.feature_header_auth_enabled and oidc_ws_user is None:
+        logger.warning(
+            "WebSocket authentication failed - no OIDC login session (header auth disabled). Client: %s",
+            sanitize_for_logging(websocket.client)
+        )
+        raise WebSocketException(code=1008, reason="Authentication required. Please sign in.")
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (

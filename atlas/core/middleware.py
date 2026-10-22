@@ -32,7 +32,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         proxy_secret: str = None,
         auth_redirect_url: str = "/auth",
         oidc_enabled: bool = False,
-        oidc_login_url: str = "/auth/oidc/login"
+        oidc_login_url: str = "/auth/oidc/login",
+        header_auth_enabled: bool = True,
     ):
         super().__init__(app)
         self.debug_mode = debug_mode
@@ -46,6 +47,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.auth_redirect_url = auth_redirect_url
         self.oidc_enabled = oidc_enabled
         self.oidc_login_url = oidc_login_url
+        self.header_auth_enabled = header_auth_enabled
 
     def _unauthenticated_redirect_url(self, request: Request) -> str:
         """Where to send an unauthenticated browser.
@@ -69,9 +71,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """Resolve identity from an established OIDC login session.
 
         Returns None whenever OIDC login is disabled, the session middleware is
-        absent, or no live session backs the cookie -- in every one of those
-        cases the caller falls through to the existing header-based path, so
-        enabling OIDC never removes a working authentication mode.
+        absent, or no live session backs the cookie. The caller then falls
+        through to the header-based path -- unless header auth is disabled, in
+        which case the request is unauthenticated.
         """
         if not self.oidc_enabled:
             return None
@@ -155,8 +157,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.auth_source = "oidc"
             return await self._finish(request, call_next, oidc_user)
 
-        # Validate proxy secret if enabled (skip in debug mode for local development)
-        if self.proxy_secret_enabled and not self.debug_mode:
+        # Validate proxy secret if enabled (skip in debug mode for local development).
+        # The secret exists to make the identity header trustworthy; with
+        # header auth disabled no header is trusted, so the gate has nothing
+        # to protect and would only turn the OIDC login redirect (and signed
+        # download links) into 503s on a deployment with no proxy in front.
+        if self.proxy_secret_enabled and not self.debug_mode and self.header_auth_enabled:
             if not self.proxy_secret:
                 # Fail closed: proxy secret is required but not configured
                 logger.error("Proxy secret validation enabled but PROXY_SECRET is not set — rejecting request")
@@ -207,6 +213,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 else:
                     logger.warning("Invalid capability token provided")
 
+        # OIDC-only mode: with header auth disabled the OIDC session checked
+        # above was the only credential. The identity header is never read --
+        # not with a valid proxy secret, not in debug mode -- so asserting an
+        # identity cannot stand in for a login.
+        if not self.header_auth_enabled:
+            return self._unauthenticated_response(request)
+
         # Check authentication via configured header (default: X-User-Email)
         user_email = None
         if self.debug_mode:
@@ -227,25 +240,28 @@ class AuthMiddleware(BaseHTTPMiddleware):
             user_email = await self._resolve_user(x_auth_header)
 
             if not user_email:
-                # Distinguish between API endpoints (return 401) and browser endpoints (redirect)
-                # /mcp/ paths are handled above (token-only auth), but included here
-                # defensively for any future /mcp/ endpoints that reach this point.
-                if request.url.path.startswith('/api/') or request.url.path.startswith('/mcp/'):
-                    logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "Unauthorized"}
-                    )
-                else:
-                    redirect_target = self._unauthenticated_redirect_url(request)
-                    logger.warning(
-                        f"Missing {self.auth_header_name}, redirecting to {redirect_target}"
-                    )
-                    return RedirectResponse(url=redirect_target, status_code=302)
+                return self._unauthenticated_response(request)
 
         # Add user to request state
         request.state.user_email = user_email
         return await self._finish(request, call_next, user_email)
+
+    def _unauthenticated_response(self, request: Request) -> Response:
+        """401 for API callers, a redirect to sign in for browser navigation."""
+        # /mcp/ paths are handled above (token-only auth), but included here
+        # defensively for any future /mcp/ endpoints that reach this point.
+        if request.url.path.startswith('/api/') or request.url.path.startswith('/mcp/'):
+            logger.warning(f"Missing authentication for API endpoint: {request.url.path}")
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized"}
+            )
+        redirect_target = self._unauthenticated_redirect_url(request)
+        if self.header_auth_enabled:
+            logger.warning(f"Missing {self.auth_header_name}, redirecting to {redirect_target}")
+        else:
+            logger.warning(f"No OIDC login session, redirecting to {redirect_target}")
+        return RedirectResponse(url=redirect_target, status_code=302)
 
     async def _finish(self, request: Request, call_next, user_email: str) -> Response:
         """Shared tail of dispatch: side-effects that apply to any auth source."""
