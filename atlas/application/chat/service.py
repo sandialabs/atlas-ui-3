@@ -83,6 +83,13 @@ _MAX_WORKSPACE_ID_LEN = 128
 _SAVE_FLOOR_KEY = SAVE_FLOOR_CONTEXT_KEY
 
 
+def _has_save_floor(session: Session) -> bool:
+    """Whether the session's history begins with turns never saved (incognito)."""
+    floor = session.context.get(_SAVE_FLOOR_KEY)
+    value = floor.get("floor") if isinstance(floor, dict) else None
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 # Type hint for the update callback
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -601,13 +608,15 @@ class ChatService:
             # its life while its history slowly grew back toward the stored
             # count -- at which point the no-shrink guard stops refusing and
             # the partial thread replaces the real one.
-            # A manual compaction (issue #877) always reloads: the stored
-            # record is the full transcript, while this connection's copy may
-            # trail a background run that finished in its own session.
+            # A manual compaction (issue #877) reloads too: the stored record
+            # is the full transcript, while this connection's copy may trail a
+            # background run that finished in its own session. Not when the
+            # session carries an incognito save floor: there the live history
+            # holds turns the store never saw, and it is what gets compacted.
             if (
                 previous_conversation_id != conversation_id
                 or not session.history.messages
-                or kwargs.get("compact_only")
+                or (kwargs.get("compact_only") and not _has_save_floor(session))
             ):
                 # This session is not already carrying the conversation the turn
                 # names. Load it from the store before running the turn.
@@ -627,6 +636,12 @@ class ChatService:
                     is_incognito=turn_is_incognito,
                     previous_conversation_id=previous_conversation_id,
                 )
+                # Never compact a history the store could not confirm: the
+                # checkpoint would be saved over the full record.
+                if kwargs.get("compact_only") and session.context.get("hydration_failed"):
+                    raise ValidationError(
+                        "The conversation could not be loaded, so it was not compacted. Try again shortly."
+                    )
         elif "conversation_id" not in session.context:
             session.context["conversation_id"] = str(session_id)
 

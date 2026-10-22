@@ -56,8 +56,12 @@ class RunCompactionGuard:
         user_email: Optional[str],
         history: Optional[ConversationHistory],
         policy: CompactionPolicy,
+        session_context: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.compactor = compactor
+        # The run's session context: names the conversation on every frame
+        # (runs execute in parallel) and holds the cumulative usage totals.
+        self.session_context = session_context
         self.model = model
         self.user_email = user_email
         self.history = history
@@ -147,6 +151,9 @@ class RunCompactionGuard:
         force_summary: bool,
     ) -> Dict[str, Any]:
         base = {"type": "context_compaction", "scope": CHECKPOINT_SCOPE_RUN, "trigger": trigger}
+        conversation_id = (self.session_context or {}).get("conversation_id")
+        if conversation_id:
+            base["conversation_id"] = str(conversation_id)
         await self.compactor._send({**base, "status": "started"})
         saved = self._save(messages)
         try:
@@ -177,7 +184,7 @@ class RunCompactionGuard:
             await self.compactor._send(done)
             await self.compactor.publish_usage(
                 model=self.model, messages=messages, tools_schema=tools_schema,
-                policy=self.policy, history=self.history,
+                policy=self.policy, history=self.history, session_context=self.session_context,
             )
             return done
         except NothingToCompact as reason:

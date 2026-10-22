@@ -99,6 +99,7 @@ class TurnContext:
             # Manual compaction keeps only the latest turn verbatim: the user
             # asked for a smaller context, not for the auto threshold's.
             keep_tokens=0,
+            conversation_id=session.context.get("conversation_id"),
         )
         return outcome
 
@@ -138,6 +139,7 @@ class TurnContext:
             # not its size: keep only the newest turn, or a run of short
             # turns would all fit the keep budget and nothing would compact.
             keep_tokens=0 if trigger == TRIGGER_TURN_INTERVAL else None,
+            conversation_id=session.context.get("conversation_id"),
         )
 
     def run_guard(
@@ -148,6 +150,7 @@ class TurnContext:
             return None
         return self.compactor.run_guard(
             model=model, user_email=user_email, history=session.history, policy=policy,
+            session_context=session.context,
         )
 
     async def report_usage(

@@ -741,3 +741,47 @@ async def test_usage_estimate_only_for_the_bound_conversation(use_manager, repo)
         with patch.object(orchestrator, "_ensure_model_authorized", AsyncMock(side_effect=AuthorizationError("no"))):
             with pytest.raises(AuthorizationError):
                 await service.report_context_usage(sid, "m", USER, conversation_id=CONV)
+
+
+@pytest.mark.asyncio
+async def test_compaction_refused_when_the_store_cannot_confirm_it(use_manager, repo):
+    service, sessions = _make_service(repo)
+    sid = _new_session(sessions)
+    await _turn(service, sid, "CUI", content="first")
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock()
+    with patch.object(service, "_get_orchestrator", return_value=orchestrator), \
+            patch.object(repo, "get_conversation", side_effect=RuntimeError("store down")):
+        with pytest.raises(ValidationError):
+            await service.handle_chat_message(
+                session_id=sid, content="", model="m", user_email=USER,
+                compliance_level="CUI", conversation_id=CONV, compact_only=True,
+            )
+    orchestrator.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_compaction_keeps_a_floored_live_history(use_manager, repo):
+    from atlas.domain.sessions.models import SAVE_FLOOR_CONTEXT_KEY
+
+    service, sessions = _make_service(repo)
+    sid = _new_session(sessions)
+    await _turn(service, sid, "CUI", content="first")
+    # An incognito stretch left a save floor: the live history is the truth.
+    sessions[sid].context[SAVE_FLOOR_CONTEXT_KEY] = {"floor": 2, "locked": True}
+    live = len(sessions[sid].history.messages)
+    seen = []
+
+    async def _execute(**kwargs):
+        seen.append(len(kwargs["session"].history.messages))
+        return {}
+
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(service, "_get_orchestrator", return_value=orchestrator), \
+            patch.object(repo, "get_conversation", side_effect=AssertionError("must not reload")):
+        await service.handle_chat_message(
+            session_id=sid, content="", model="m", user_email=USER,
+            compliance_level="CUI", conversation_id=CONV, compact_only=True,
+        )
+    assert seen == [live]

@@ -599,3 +599,30 @@ class TestRunGuardInPlace:
         tool = messages[3]
         engine.prune_tool_outputs(messages, len(messages) - 1)
         assert messages[3] is tool and tool["content"].startswith(engine.PRUNED_MARKER)
+
+
+@pytest.mark.asyncio
+async def test_run_frames_name_their_conversation_and_totals():
+    from atlas.application.chat.context.compaction_policy import USAGE_TOTALS_KEY
+
+    pub = Publisher()
+    compactor = _compactor(SummaryLLM(), pub)
+    policy = CompactionPolicy(auto=True, threshold_percent=50, keep_recent_percent=20, max_retries=2)
+    context = {"conversation_id": "conv-7", USAGE_TOTALS_KEY: {"prompt_tokens": 900, "completion_tokens": 40, "calls": 3}}
+    guard = compactor.run_guard(model="m", user_email="u@x", history=ConversationHistory(),
+                                policy=policy, session_context=context)
+    await guard.recover_from_overflow(_chatty(), [], 0)
+    assert all(f.get("conversation_id") == "conv-7" for f in pub.frames)
+    usage = [f for f in pub.frames if f["type"] == "context_usage"][-1]
+    assert usage["cumulative_prompt_tokens"] == 900 and usage["reported_calls"] == 3
+
+
+@pytest.mark.asyncio
+async def test_history_frames_name_their_conversation():
+    pub = Publisher()
+    history = _long_history()
+    await _compactor(SummaryLLM(), pub).compact_history(
+        history=history, model="m", user_email=None, build_request=_builder(history),
+        trigger=TRIGGER_MANUAL, keep_tokens=0, conversation_id="conv-8",
+    )
+    assert pub.frames and all(f["conversation_id"] == "conv-8" for f in pub.frames if f["type"] == "context_compaction")

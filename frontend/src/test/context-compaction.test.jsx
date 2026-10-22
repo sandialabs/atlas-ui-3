@@ -284,3 +284,26 @@ describe('second review follow-ups', () => {
     expect(result.current.usage.conversation_id).toBe('c1')
   })
 })
+
+describe('third review follow-ups', () => {
+  it('the busy refusal does not end a running compaction', () => {
+    const { result } = renderHook(() => useContextCompaction({ config: {}, activeConversationId: 'c1', sendMessage: vi.fn(() => true) }))
+    const handle = createWebSocketHandler({
+      addMessage: vi.fn(), mapMessages: vi.fn(), setIsThinking: vi.fn(), setCurrentAgentStep: vi.fn(),
+      onContextCompaction: (f) => result.current.handleCompaction(f),
+    })
+    act(() => { result.current.compactNow() })
+    act(() => { handle({ type: 'error', message: 'busy', error_type: 'compaction_in_progress' }) })
+    expect(result.current.isManualCompacting).toBe(true)
+  })
+})
+
+describe('parallel runs', () => {
+  it('ignores compaction frames for another conversation', () => {
+    const { result } = renderHook(() => useContextCompaction({ config: {}, activeConversationId: 'c1', sendMessage: vi.fn() }))
+    act(() => { result.current.handleCompaction({ status: 'started', trigger: 'auto', scope: 'run', conversation_id: 'c2' }) })
+    expect(result.current.isCompacting).toBe(false)
+    act(() => { result.current.handleCompaction({ status: 'started', trigger: 'auto', scope: 'run', conversation_id: 'c1' }) })
+    expect(result.current.isCompacting).toBe(true)
+  })
+})

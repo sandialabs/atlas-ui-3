@@ -689,8 +689,12 @@ export function createWebSocketHandler(deps) {
           setCurrentAgentStep(0)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           endTokenStream()
-          // Whatever was pending -- a manual compaction included -- has ended.
-          if (typeof onContextCompaction === 'function') onContextCompaction({ status: 'failed', silent: true })
+          // Whatever was pending -- a manual compaction included -- has ended,
+          // except when the error is the refusal of a message sent while that
+          // compaction is still running.
+          if (typeof onContextCompaction === 'function' && data.error_type !== 'compaction_in_progress') {
+            onContextCompaction({ status: 'failed', silent: true })
+          }
           addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
           break
         case 'agent_step_update':

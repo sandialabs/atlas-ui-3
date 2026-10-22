@@ -94,8 +94,10 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
 
   const handleCompaction = useCallback((frame) => {
     if (!frame || !frame.status) return
+    // A run compacting in another conversation leaves this one's state alone.
+    if (frame.conversation_id && activeConversationId && frame.conversation_id !== activeConversationId) return
     setCompaction(frame)
-  }, [])
+  }, [activeConversationId])
 
   // Stop or a dropped connection ends a compaction whose result frame may
   // never arrive; the server-side work is cancelled either way.

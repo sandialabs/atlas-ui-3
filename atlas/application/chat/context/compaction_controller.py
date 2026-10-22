@@ -178,6 +178,7 @@ class ContextCompactor:
         trigger: str,
         focus: Optional[str] = None,
         keep_tokens: Optional[int] = None,
+        conversation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Write a conversation checkpoint covering all but the recent turns.
 
@@ -190,6 +191,8 @@ class ContextCompactor:
         if keep_tokens is None:
             keep_tokens = policy.keep_tokens(window)
         base = {"type": "context_compaction", "scope": CHECKPOINT_SCOPE_CONVERSATION, "trigger": trigger}
+        if conversation_id:
+            base["conversation_id"] = str(conversation_id)
         await self._send({**base, "status": "started"})
         added: Optional[Message] = None
         try:
@@ -309,8 +312,12 @@ class ContextCompactor:
         user_email: Optional[str],
         history: Optional[ConversationHistory],
         policy: CompactionPolicy,
+        session_context: Optional[Dict[str, Any]] = None,
     ) -> "RunCompactionGuard":
-        return RunCompactionGuard(self, model=model, user_email=user_email, history=history, policy=policy)
+        return RunCompactionGuard(
+            self, model=model, user_email=user_email, history=history, policy=policy,
+            session_context=session_context,
+        )
 
 
 def _index_of(history: ConversationHistory, message_id: str) -> int:
