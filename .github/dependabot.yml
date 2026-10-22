@@ -25,15 +25,8 @@ updates:
           - "minor"
           - "patch"
     ignore:
-      # FastMCP 4 implements MCP 2026-07-28, which removed server-initiated
-      # requests (SEP-2322). That drops Context.sample(), which the
-      # sampling_demo and tool_planner MCP servers depend on. Re-evaluate once
-      # those servers no longer rely on server-initiated sampling.
-      # Tracked in https://github.com/sandialabs/atlas-ui-3/issues/905
       - dependency-name: "fastmcp"
-        update-types:
-          - "version-update:semver-major"
-
+        update-types: ["version-update:semver-major"]
   # Python dependencies (file-extractor-mock)
   - package-ecosystem: "pip"
     directory: "/mocks/file-extractor-mock"
