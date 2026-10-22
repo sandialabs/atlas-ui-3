@@ -32,6 +32,16 @@ def validate_auth_modes(app_settings, *, oidc_requested: bool) -> None:
             "Header auth is disabled (FEATURE_HEADER_AUTH_ENABLED=false): "
             "OIDC login is the only way to authenticate."
         )
+        # The proxy-secret flag defaults to on, so only an explicitly
+        # configured secret is worth a warning that it goes unchecked.
+        if getattr(app_settings, "feature_proxy_secret_enabled", False) and getattr(
+            app_settings, "proxy_secret", None
+        ):
+            logger.warning(
+                "PROXY_SECRET is set but not checked while header auth is "
+                "disabled: it only protects the identity header, which is "
+                "ignored in OIDC-only mode."
+            )
         return
     if oidc_requested:
         raise AuthConfigurationError(

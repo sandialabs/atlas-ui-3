@@ -1760,17 +1760,22 @@ async def websocket_endpoint(websocket: WebSocket):
     # secret because an OIDC deployment may have no reverse proxy at all.
     oidc_ws_user = await _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
 
-    # OIDC-only mode: the OIDC session above is the only credential. The
-    # identity header, the debug query parameter and the debug test user are
-    # all skipped below, so a valid proxy secret plus an asserted identity
-    # header cannot stand in for a login -- and the proxy secret, which only
-    # exists to make that header trustworthy, is not required either.
-    header_auth_enabled = bool(config_manager.app_settings.feature_header_auth_enabled)
+    # OIDC-only mode: the OIDC session above is the only credential, so a
+    # socket without one is rejected here, before the proxy secret, the
+    # identity header, the debug query parameter or the debug test user are
+    # ever looked at. Everything below only runs with header auth enabled or
+    # with a live OIDC session already established, so no fallback added
+    # there can reopen header auth on WebSocket alone.
+    if not config_manager.app_settings.feature_header_auth_enabled and oidc_ws_user is None:
+        logger.warning(
+            "WebSocket authentication failed - no OIDC login session (header auth disabled). Client: %s",
+            sanitize_for_logging(websocket.client)
+        )
+        raise WebSocketException(code=1008, reason="Authentication required. Please sign in.")
 
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
         oidc_ws_user is None
-        and header_auth_enabled
         and config_manager.app_settings.feature_proxy_secret_enabled
         and not is_debug_mode
     ):
@@ -1797,7 +1802,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # letting any non-empty header value authenticate the socket.
     app_settings = config_manager.app_settings
     auth_header_name = app_settings.auth_user_header
-    x_email_header = websocket.headers.get(auth_header_name) if header_auth_enabled else None
+    x_email_header = websocket.headers.get(auth_header_name)
     if not user_email and x_email_header:
         # Async form: JWT verification can fetch the ALB public key with a
         # blocking 5s httpx call, which would stall the whole event loop.
@@ -1809,7 +1814,7 @@ async def websocket_endpoint(websocket: WebSocket):
         )
 
     # Fallback to query parameter (development/testing ONLY)
-    if not user_email and is_debug_mode and header_auth_enabled:
+    if not user_email and is_debug_mode:
         user_email = websocket.query_params.get('user')
         if user_email:
             logger.info(
@@ -1818,7 +1823,7 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
     # Final fallback to test user (development mode ONLY)
-    if not user_email and is_debug_mode and header_auth_enabled:
+    if not user_email and is_debug_mode:
         user_email = config_manager.app_settings.test_user or 'test@test.com'
         logger.info(
             "WebSocket using fallback test user (debug mode): %s",
@@ -1827,15 +1832,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # PRODUCTION: Reject unauthenticated connections
     if not user_email:
-        if not header_auth_enabled:
-            logger.warning(
-                "WebSocket authentication failed - no OIDC login session (header auth disabled). Client: %s",
-                sanitize_for_logging(websocket.client)
-            )
-            raise WebSocketException(
-                code=1008,
-                reason="Authentication required. Please sign in."
-            )
         logger.warning(
             "WebSocket authentication failed - no user found in %s header. Client: %s",
             sanitize_for_logging(auth_header_name),

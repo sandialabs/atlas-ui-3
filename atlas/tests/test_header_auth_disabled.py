@@ -210,6 +210,18 @@ class TestWebSocketOidcOnly:
         assert exc_info.value.code == 1008
         assert exc_info.value.reason == "Authentication required. Please sign in."
 
+    def test_header_mode_still_enforces_the_proxy_secret(self, ws_factory):
+        # Control for the test above: with header auth on, an unset
+        # PROXY_SECRET still fails closed.
+        settings = ws_factory.get_config_manager.return_value.app_settings
+        settings.feature_header_auth_enabled = True
+        settings.proxy_secret = None
+        with patch("main._resolve_oidc_websocket_user", AsyncMock(return_value=None)):
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                with _ws_client().websocket_connect("/ws", headers={"X-User-Email": "a@example.gov"}):
+                    pass
+        assert exc_info.value.reason == "Server misconfigured: proxy secret not set"
+
     @pytest.mark.parametrize("path", ["/ws", "/ws?user=admin@example.gov"])
     def test_debug_mode_fallbacks_are_rejected(self, ws_factory, path):
         settings = ws_factory.get_config_manager.return_value.app_settings
@@ -257,6 +269,17 @@ class TestStartupValidation:
         monkeypatch.setenv("FEATURE_HEADER_AUTH_ENABLED", "true")
         with pytest.raises(ValueError, match="auth_aws_expected_alb_arn"):
             AppSettings()
+
+    def test_ignored_proxy_secret_is_logged(self, caplog):
+        settings = _settings(header=False, oidc=True)
+        settings.feature_proxy_secret_enabled = True
+        settings.proxy_secret = None
+        with caplog.at_level("WARNING", logger="atlas.core.auth_mode"):
+            validate_auth_modes(settings, oidc_requested=True)
+            assert "PROXY_SECRET is set but not checked" not in caplog.text
+            settings.proxy_secret = PROXY_SECRET
+            validate_auth_modes(settings, oidc_requested=True)
+        assert "PROXY_SECRET is set but not checked" in caplog.text
 
     def test_both_disabled_fails(self):
         with pytest.raises(AuthConfigurationError, match="No authentication mode"):
