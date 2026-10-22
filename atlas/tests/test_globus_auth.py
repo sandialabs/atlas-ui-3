@@ -9,10 +9,10 @@ Updated: 2026-02-24
 """
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from atlas.core.globus_auth import (
@@ -443,3 +443,47 @@ class TestLiteLLMCallerGlobusKey:
                 globus_scope="alcf-uuid",
                 user_email="user@example.com",
             )
+
+
+class TestGlobusCallbackDebugFallback:
+    """The debug test-user fallback must not apply in OIDC-only mode."""
+
+    @pytest.mark.parametrize("header_auth, expect_user", [(True, True), (False, False)])
+    def test_debug_test_user_only_with_header_auth(self, header_auth, expect_user):
+        from atlas.core.session_middleware import SessionMiddleware
+
+        app = FastAPI()
+        app.include_router(browser_router)
+
+        @app.get("/seed-state")
+        async def seed_state(request: Request):
+            request.session["globus_oauth_state"] = "s1"
+            return {}
+
+        app.add_middleware(SessionMiddleware, secret_key="test-session-secret")
+
+        settings = MagicMock()
+        settings.feature_globus_auth_enabled = True
+        settings.debug_mode = True
+        settings.feature_header_auth_enabled = header_auth
+        settings.test_user = "test@test.com"
+        settings.globus_redirect_uri = "http://testserver/auth/globus/callback"
+
+        with patch("atlas.routes.globus_auth_routes.app_factory") as factory, \
+                patch("atlas.routes.globus_auth_routes._get_globus_config", return_value=settings), \
+                patch("atlas.routes.globus_auth_routes.exchange_code_for_tokens",
+                      AsyncMock(return_value={"access_token": "t"})), \
+                patch("atlas.routes.globus_auth_routes.store_globus_tokens",
+                      return_value=1) as store:
+            factory.get_config_manager.return_value.app_settings = settings
+            client = TestClient(app)
+            client.get("/seed-state")
+            response = client.get("/auth/globus/callback?code=c&state=s1", follow_redirects=False)
+
+        if expect_user:
+            assert "globus_auth=success" in response.headers["location"]
+            store.assert_called_once()
+            assert store.call_args[0][0] == "test@test.com"
+        else:
+            assert "globus_error=no_user_email" in response.headers["location"]
+            store.assert_not_called()

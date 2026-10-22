@@ -88,12 +88,28 @@ def main():
     check("The identity is the OIDC user, not the spoofed header",
           response.status_code == 200 and response.json().get("user") == idp_module.USER_EMAIL,
           f"(got {response.text[:120]})")
+    # Record which identity the socket is bound to. This wraps the real
+    # factory (it still builds the real chat service) rather than mocking it.
+    from atlas.infrastructure.app_factory import app_factory
+
+    bound_users = []
+    real_create = app_factory.create_chat_service
+
+    def recording_create(connection_adapter, *args, **kwargs):
+        bound_users.append(connection_adapter.user_email)
+        return real_create(connection_adapter, *args, **kwargs)
+
+    app_factory.create_chat_service = recording_create
     try:
         with client.websocket_connect("/ws", headers=SPOOFED):
             pass
         check("Logged-in WebSocket handshake connects", True)
     except WebSocketDisconnect as exc:
         check("Logged-in WebSocket handshake connects", False, f"(code {exc.code} {exc.reason})")
+    finally:
+        app_factory.create_chat_service = real_create
+    check("The socket is bound to the OIDC user, not the spoofed header",
+          bound_users == [idp_module.USER_EMAIL], f"(got {bound_users})")
 
     print("\n3. Signed download links still authenticate without a session")
     key = "users/validation-user@example.gov/missing.txt"

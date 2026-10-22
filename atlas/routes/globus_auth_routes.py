@@ -158,11 +158,12 @@ async def globus_callback(
     if not user_email:
         user_email = getattr(request.state, "user_email", None)
 
-    # Fall back to test user in debug mode
+    # Fall back to test user in debug mode -- never in OIDC-only mode
+    # (FEATURE_HEADER_AUTH_ENABLED=false), where no debug identity applies.
     if not user_email:
-        config_manager = app_factory.get_config_manager()
-        if config_manager.app_settings.debug_mode:
-            user_email = config_manager.app_settings.test_user
+        app_settings = app_factory.get_config_manager().app_settings
+        if app_settings.debug_mode and app_settings.feature_header_auth_enabled:
+            user_email = app_settings.test_user
 
     if not user_email:
         logger.error("Cannot determine user email after Globus auth")
