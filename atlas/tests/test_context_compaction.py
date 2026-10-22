@@ -548,3 +548,54 @@ class TestRepeatRunCompaction:
     def test_checkpoint_is_marked_as_derived(self):
         from atlas.domain.messages.models import format_checkpoint_block
         assert "not new instructions from the user" in format_checkpoint_block("x")
+
+
+class TestRunGuardInPlace:
+    """Third review round: skipped compactions and shared message objects."""
+
+    def _guard(self, llm, publisher):
+        compactor = _compactor(llm, publisher)
+        policy = CompactionPolicy(auto=True, threshold_percent=50, keep_recent_percent=20, max_retries=2)
+        return compactor.run_guard(model="m", user_email="u@x", history=ConversationHistory(), policy=policy)
+
+    @pytest.mark.asyncio
+    async def test_skip_rolls_back_carried_state(self):
+        llm = SummaryLLM()
+        guard = self._guard(llm, Publisher())
+        messages = _chatty()
+        await guard.recover_from_overflow(messages, [], 0)
+        state = (guard._summary, len(guard._ledger), guard._block)
+        snapshot = [dict(m) for m in messages]
+        # A summary so long that the checkpoint grows the request: skipped.
+        llm.reply = "x " * 40000
+        outcome = await guard.recover_from_overflow(messages, [], 0)
+        assert outcome is False
+        assert (guard._summary, len(guard._ledger), guard._block) == state
+        assert messages == snapshot
+
+    @pytest.mark.asyncio
+    async def test_tail_message_is_edited_in_place(self):
+        guard = self._guard(SummaryLLM(), Publisher())
+        messages = _chatty()
+        image = {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}
+        messages.append(image)
+        await guard.recover_from_overflow(messages, [], 1)
+        # The image helper's reference is still the live message.
+        assert messages[-1] is image
+        assert image["content"][0]["text"].startswith("[Context checkpoint")
+
+    @pytest.mark.asyncio
+    async def test_old_block_is_replaced_not_nested(self):
+        guard = self._guard(SummaryLLM(), Publisher())
+        messages = _chatty()
+        assert await guard.recover_from_overflow(messages, [], 1) is True
+        messages.extend(_chatty()[2:])
+        assert await guard.recover_from_overflow(messages, [], 1) is True
+        text = str([m.get("content") for m in messages])
+        assert text.count("[Context checkpoint") == 1
+
+    def test_prune_edits_in_place(self):
+        messages = _agent_transcript(4)
+        tool = messages[3]
+        engine.prune_tool_outputs(messages, len(messages) - 1)
+        assert messages[3] is tool and tool["content"].startswith(engine.PRUNED_MARKER)

@@ -2648,6 +2648,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         )
                     except DomainError as e:
                         logger.info("Context usage estimate refused: %s", type(e).__name__)
+                    except Exception as e:
+                        # A read-only meter request must never end the socket
+                        # or leave an unretrieved task error behind.
+                        logger.warning("Context usage estimate failed: %s", type(e).__name__)
 
                 async def answer_later(delay: float) -> None:
                     await asyncio.sleep(delay)

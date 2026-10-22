@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.domain.messages.models import (
     CHECKPOINT_SCOPE_RUN,
@@ -148,7 +148,7 @@ class RunCompactionGuard:
     ) -> Dict[str, Any]:
         base = {"type": "context_compaction", "scope": CHECKPOINT_SCOPE_RUN, "trigger": trigger}
         await self.compactor._send({**base, "status": "started"})
-        snapshot = list(messages)
+        saved = self._save(messages)
         try:
             before = await estimate_request_tokens_async(messages, tools_schema, self.model)
             floor = leading_system_count(messages)
@@ -160,7 +160,7 @@ class RunCompactionGuard:
                 summary = await self._summarize_into(messages, floor, tail_start)
             after = await estimate_request_tokens_async(messages, tools_schema, self.model)
             if after.tokens >= before.tokens:
-                messages[:] = snapshot
+                self._restore(messages, saved)
                 raise NothingToCompact("the agent's context holds nothing older than its latest step")
             content = checkpoint_row_content(trigger, before.tokens, after.tokens)
             checkpoint_id = self._record(trigger, content, summary, before.tokens, after.tokens, pruned)
@@ -187,7 +187,7 @@ class RunCompactionGuard:
         except Exception as exc:
             # Leave the run exactly as it was; it continues uncompacted and,
             # if the request really is too long, the provider's error ends it.
-            messages[:] = snapshot
+            self._restore(messages, saved)
             logger.warning("Agent context compaction failed (%s)", type(exc).__name__, exc_info=True)
             failed = {**base, "status": "failed", "error": failure_text(exc)}
             await self.compactor._send(failed)
@@ -196,9 +196,23 @@ class RunCompactionGuard:
             # Cancelled mid-compaction (Stop, disconnect): the unwinding run
             # must not carry a half-rebuilt transcript, and the client must
             # not keep waiting for a compaction that has ended.
-            messages[:] = snapshot
+            self._restore(messages, saved)
             await self.compactor.send_quietly({**base, "status": "failed", "silent": True})
             raise
+
+    def _save(self, messages: List[Dict[str, Any]]) -> Tuple[Any, ...]:
+        # Messages are edited in place (other per-turn helpers, such as the
+        # tool-image cap, hold references to them), so keep each one's fields
+        # as well as the list, plus what this guard carries between runs.
+        return (list(messages), [dict(m) for m in messages], self._summary, len(self._ledger), self._block)
+
+    def _restore(self, messages: List[Dict[str, Any]], saved: Tuple[Any, ...]) -> None:
+        originals, fields, self._summary, ledger_len, self._block = saved
+        for message, kept in zip(originals, fields):
+            message.clear()
+            message.update(kept)
+        messages[:] = originals
+        del self._ledger[ledger_len:]
 
     async def _summarize_into(self, messages: List[Dict[str, Any]], floor: int, tail_start: int) -> Optional[str]:
         stretch = messages[floor:tail_start]
@@ -222,17 +236,20 @@ class RunCompactionGuard:
                 self._ledger.append({"role": "tool", "tool_call_id": m.get("tool_call_id")})
         text = build_checkpoint_text(summary, executed_tool_ledger(self._ledger), self._request)
         block = format_checkpoint_block(text)
+        first = tail[0] if tail else None
+        stripped = self._without_own_block(first) if first is not None else None
+        if stripped is not first:
+            # Strip the earlier block before it is replaced; edited in place
+            # so helpers holding this message keep tracking the live one.
+            first["content"] = stripped["content"]
         self._summary = summary
         self._block = block
-        if tail:
-            tail[0] = self._without_own_block(tail[0])
-        first = tail[0] if tail else None
         if first is not None and first.get("role") == "user" and isinstance(first.get("content"), str):
-            tail = [{**first, "content": f"{block}\n\n{first['content']}"}] + tail[1:]
+            first["content"] = f"{block}\n\n{first['content']}"
         elif first is not None and first.get("role") == "user" and isinstance(first.get("content"), list):
             # A multimodal message (e.g. a tool image): fold in as a text
             # block rather than adding a second consecutive user message.
-            tail = [{**first, "content": [{"type": "text", "text": block}] + list(first["content"])}] + tail[1:]
+            first["content"] = [{"type": "text", "text": block}] + list(first["content"])
         else:
             tail = [{"role": "user", "content": f"{block}\n\nContinue the current task from the state above."}] + tail
         messages[:] = messages[:floor] + kept_system + tail

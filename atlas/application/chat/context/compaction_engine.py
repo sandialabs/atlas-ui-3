@@ -141,13 +141,11 @@ def prune_tool_outputs(messages: List[Dict[str, Any]], protect_from: int) -> int
         if role == "tool" and isinstance(content, str) and len(content) > PRUNE_MIN_CHARS:
             if content.startswith(PRUNED_MARKER):
                 continue
-            messages[index] = {
-                **msg,
-                "content": (
-                    f"{PRUNED_MARKER}: {len(content)} characters. It began:]\n"
-                    f"{content[:PRUNE_PREVIEW_CHARS]}"
-                ),
-            }
+            # In place: per-turn helpers hold references to these messages.
+            msg["content"] = (
+                f"{PRUNED_MARKER}: {len(content)} characters. It began:]\n"
+                f"{content[:PRUNE_PREVIEW_CHARS]}"
+            )
             changed += 1
         elif role == "user" and isinstance(content, list):
             blocks = []
@@ -159,7 +157,7 @@ def prune_tool_outputs(messages: List[Dict[str, Any]], protect_from: int) -> int
                 else:
                     blocks.append(block)
             if dropped:
-                messages[index] = {**msg, "content": blocks}
+                msg["content"] = blocks
                 changed += 1
     return changed
 
