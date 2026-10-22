@@ -159,6 +159,15 @@ def agent_mode_available(settings) -> bool:
     return bool(getattr(settings, "feature_agent_mode_available", True))
 
 
+def context_compaction_config(settings) -> dict:
+    """The context-compaction settings the chat UI needs (issue #877)."""
+    return {
+        "enabled": bool(getattr(settings, "feature_context_compaction_enabled", True)),
+        "auto_default": bool(getattr(settings, "context_auto_compact_default", True)),
+        "threshold_percent": float(getattr(settings, "context_compaction_threshold_percent", 80.0)),
+    }
+
+
 class AppSettings(BaseSettings):
     """Main application settings loaded from environment variables."""
 
@@ -280,6 +289,54 @@ class AppSettings(BaseSettings):
         ),
         validation_alias=AliasChoices("AGENT_LOOP_STRATEGY"),
     )
+    # Context tracking and compaction (issue #877). The chat UI shows an
+    # estimate of the next request's size against the model's context window;
+    # compaction summarizes older context into a checkpoint while the full
+    # transcript stays stored. See docs/admin/context-compaction.md.
+    feature_context_compaction_enabled: bool = Field(
+        default=True,
+        description="Show context usage and allow manual/automatic context compaction.",
+        validation_alias=AliasChoices("FEATURE_CONTEXT_COMPACTION_ENABLED"),
+    )
+    context_auto_compact_default: bool = Field(
+        default=True,
+        description="Whether automatic compaction starts on for a new conversation (users can toggle it per conversation).",
+        validation_alias=AliasChoices("CONTEXT_AUTO_COMPACT_DEFAULT"),
+    )
+    context_compaction_threshold_percent: float = Field(
+        default=80.0,
+        gt=0,
+        le=100,
+        description="Compact automatically when the estimated request reaches this percent of the usable context.",
+        validation_alias=AliasChoices("CONTEXT_COMPACTION_THRESHOLD_PERCENT"),
+    )
+    context_compaction_turn_interval: int = Field(
+        default=0,
+        ge=0,
+        description="Also compact automatically every N user turns since the last checkpoint (0 = off).",
+        validation_alias=AliasChoices("CONTEXT_COMPACTION_TURN_INTERVAL"),
+    )
+    context_compaction_keep_recent_percent: float = Field(
+        default=25.0,
+        ge=0,
+        le=90,
+        description="Share of the usable context kept verbatim after the checkpoint.",
+        validation_alias=AliasChoices("CONTEXT_COMPACTION_KEEP_RECENT_PERCENT"),
+    )
+    context_compaction_max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Emergency compactions allowed per request after a context-length error before the error is surfaced.",
+        validation_alias=AliasChoices("CONTEXT_COMPACTION_MAX_RETRIES"),
+    )
+    context_fallback_window_tokens: int = Field(
+        default=128000,
+        gt=0,
+        description="Context window assumed for a model whose window is neither configured nor known to LiteLLM.",
+        validation_alias=AliasChoices("CONTEXT_FALLBACK_WINDOW_TOKENS"),
+    )
+
     # Backward compatibility: support old AGENT_MODE_AVAILABLE env if present
     @property
     def agent_mode_available(self) -> bool:

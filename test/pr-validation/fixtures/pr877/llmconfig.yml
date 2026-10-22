@@ -1,0 +1,16 @@
+models:
+  compaction-mock:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/compaction-mock"
+    api_key: "mock"
+    description: "Scripted mock model for context compaction (issue #877)"
+    supports_tools: true
+    # A small window so a handful of turns reaches the compaction threshold.
+    context_window: 6000
+    max_tokens: 400
+  unknown-alias:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/in-house-alias-v9"
+    api_key: "mock"
+    description: "An alias LiteLLM does not know: the window falls back"
+    supports_tools: true

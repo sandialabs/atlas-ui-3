@@ -249,6 +249,19 @@
         }
       ],
       "expect": 1
+    },
+    {
+      "name": "a compaction checkpoint row is stored and matches its live twin (issue #877)",
+      "view": [
+        {"role": "user", "content": "Audit the repo", "message_type": "chat"},
+        {"role": "system", "content": "Context compacted (automatic): ~90K -> ~20K tokens", "message_type": "context_checkpoint"}
+      ],
+      "stored": [
+        {"role": "user", "content": "Audit the repo", "message_type": "chat"},
+        {"role": "system", "content": "Context compacted (automatic): ~90K -> ~20K tokens", "message_type": "context_checkpoint", "metadata": {"message_type": "context_checkpoint"}},
+        {"role": "assistant", "content": "Done", "message_type": "chat"}
+      ],
+      "expect": 2
     }
   ]
 }

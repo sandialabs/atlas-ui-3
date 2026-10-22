@@ -62,6 +62,8 @@ export function cleanupStreamState() {
  * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
  * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
  * @param {Function} [deps.onConversationSaved] - Called with the id when the conversation on screen is persisted.
+ * @param {Function} [deps.onContextUsage] - Receives `context_usage` estimates (issue #877).
+ * @param {Function} [deps.onContextCompaction] - Receives `context_compaction` progress frames (issue #877).
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
 export function createWebSocketHandler(deps) {
@@ -91,6 +93,8 @@ export function createWebSocketHandler(deps) {
     getVisibleConversationId,
     onRunStatus,
     onConversationSaved,
+    onContextUsage,
+    onContextCompaction,
   } = deps
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
@@ -571,6 +575,42 @@ export function createWebSocketHandler(deps) {
           // yet. endTokenStream() has just committed it.
           attachPendingCitations()
           _pendingCitations = null
+          break
+        }
+        case 'context_usage': {
+          if (typeof onContextUsage === 'function') onContextUsage(data)
+          break
+        }
+        case 'context_compaction': {
+          if (typeof onContextCompaction === 'function') onContextCompaction(data)
+          if (data.status === 'completed' && data.content) {
+            // The live twin of the stored checkpoint row: same role, type and
+            // content, so a joined-run refresh aligns the two (issue #959).
+            addMessage({
+              role: 'system',
+              type: 'context_checkpoint',
+              content: data.content,
+              context_checkpoint: {
+                scope: data.scope,
+                trigger: data.trigger,
+                summary: data.summary || null,
+                before_tokens: data.before_tokens,
+                after_tokens: data.after_tokens,
+              },
+              timestamp: new Date().toISOString(),
+            })
+          } else if (data.status === 'failed' || (data.status === 'skipped' && data.trigger === 'manual')) {
+            // An automatic attempt that found nothing to do is not news; a
+            // failure, or the user's own request coming to nothing, is.
+            addMessage({
+              role: 'system',
+              type: 'warning',
+              content: data.status === 'failed'
+                ? (data.error || 'Context compaction failed.')
+                : (data.reason || 'Nothing to compact.'),
+              timestamp: new Date().toISOString(),
+            })
+          }
           break
         }
         case 'conversation_saved': {

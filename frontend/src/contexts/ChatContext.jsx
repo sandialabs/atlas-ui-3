@@ -16,6 +16,7 @@ import { useSettings } from '../hooks/useSettings'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
+import { useContextCompaction } from '../hooks/chat/useContextCompaction'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
@@ -292,6 +293,25 @@ export const ChatProvider = ({ children }) => {
 		const { sendMessage, addMessageHandler, isConnected } = useWS()
 	const toast = useToast()
 	const { currentModel } = config
+
+	// Context meter and compaction (issue #877). The request fields are read
+	// through a ref so a compaction sent later carries the then-current model,
+	// conversation and classification, exactly as a chat frame would.
+	const contextRequestFieldsRef = useRef(null)
+	contextRequestFieldsRef.current = {
+		model: currentModel,
+		conversation_id: activeConversationId || undefined,
+		compliance_level_filter: selections.complianceLevelFilter,
+		save_mode: saveMode,
+		incognito: saveMode !== 'server',
+	}
+	const buildContextRequestFields = useCallback(() => ({ ...contextRequestFieldsRef.current }), [])
+	const contextCompaction = useContextCompaction({
+		config: config.contextCompaction,
+		activeConversationId,
+		sendMessage,
+		buildRequestFields: buildContextRequestFields,
+	})
 	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled } = selections
 
 	// Compliance level of a selection key, for the compliance filter: null when
@@ -664,6 +684,8 @@ export const ChatProvider = ({ children }) => {
 			// on the run's terminal status, which a stopped run reports before
 			// its interrupted turn is persisted.
 			onConversationSaved: finishJoinedRun,
+			onContextUsage: contextCompaction.handleUsage,
+			onContextCompaction: contextCompaction.handleCompaction,
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1117,6 +1139,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// treats an omitted field as "leave the binding alone", so a user who
 			// cleared their workspace could never unbind the conversation.
 			workspace_id: pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null,
+			// Per-conversation automatic compaction (issue #877).
+			auto_compact: contextCompaction.enabled ? contextCompaction.autoCompact : undefined,
 		})
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
@@ -1193,7 +1217,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, contextCompaction.enabled, contextCompaction.autoCompact])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -2200,7 +2224,20 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		(!!activeConversationId && !String(activeConversationId).startsWith('local_')) ||
 		messages.some(m => m.role === 'assistant')
 
+	// Estimate the context of a conversation as soon as it is on screen (and
+	// again when the model changes the window it is measured against), so the
+	// meter does not wait for the next turn. Debounced past the restore frame
+	// that loads the conversation into the server session.
+	const requestContextUsage = contextCompaction.requestUsage
+	useEffect(() => {
+		if (!isConnected || !currentModel || !activeConversationId) return
+		const timer = setTimeout(() => requestContextUsage(), 400)
+		return () => clearTimeout(timer)
+	}, [activeConversationId, currentModel, isConnected, requestContextUsage])
+
 	const value = {
+		// Context meter and compaction controls (issue #877).
+		contextCompaction,
 		// Parallel conversation runs (issue #884): conversation_id -> run record,
 		// including conversations that are not on screen.
 		runsByConversation: runs.runsByConversation,

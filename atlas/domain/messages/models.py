@@ -8,10 +8,23 @@ from uuid import UUID, uuid4
 
 from atlas.domain.chat.citation_register import CITATIONS_METADATA_KEY
 
+# A compaction record (issue #877). The row marks where in the transcript the
+# context was compacted and carries the checkpoint itself in its metadata; the
+# messages it summarizes stay in history untouched.
+CONTEXT_CHECKPOINT_MESSAGE_TYPE = "context_checkpoint"
+CONTEXT_CHECKPOINT_KEY = "context_checkpoint"
+# A checkpoint of the whole conversation replaces the messages it covers in
+# every later request. A run checkpoint only compacted one agent run's working
+# transcript, which dies with the run, so it is a record and nothing more.
+CHECKPOINT_SCOPE_CONVERSATION = "conversation"
+CHECKPOINT_SCOPE_RUN = "run"
+
 # Message types that exist only so the UI can re-render a reloaded
 # conversation. They are persisted (issue #684) but must never be replayed
 # back to the LLM as conversation turns.
-DISPLAY_ONLY_MESSAGE_TYPES = frozenset({"tool_call", "agent_intermediate"})
+DISPLAY_ONLY_MESSAGE_TYPES = frozenset({
+    "tool_call", "agent_intermediate", CONTEXT_CHECKPOINT_MESSAGE_TYPE,
+})
 
 # Metadata key holding a compact, model-visible summary of the tool calls an
 # agent turn made (issue #755). Set on the turn's closing assistant message and
@@ -130,6 +143,16 @@ class ToolResult:
         return result
 
 
+def format_checkpoint_block(summary: str) -> str:
+    """Wrap a checkpoint summary the way every request presents it."""
+    return (
+        "[Context checkpoint: the earlier part of this conversation was "
+        "compacted to save context. Summary of everything before this point:]\n"
+        f"{summary.strip()}\n"
+        "[End of checkpoint. The conversation continues below.]"
+    )
+
+
 @dataclass
 class ConversationHistory:
     """Domain model for conversation history."""
@@ -204,12 +227,19 @@ class ConversationHistory:
         of a long agent conversation carries one, and re-sending all of them
         would grow the prompt without limit. The recent turns are the ones a
         follow-up is about, so older digests are dropped first.
+
+        When the conversation has been compacted (issue #877), the messages the
+        latest conversation checkpoint covers are left out and its summary is
+        folded into the first message after them instead -- or, when nothing
+        follows yet, sent as a user message of its own. The rows themselves are
+        never removed from history.
         """
+        covered_through, checkpoint_block = self.active_checkpoint()
         folded: Dict[int, str] = {}
         budget = MAX_FOLDED_DIGEST_CHARS
         kept = 0
         for index in range(len(self.messages) - 1, -1, -1):
-            if kept >= MAX_FOLDED_DIGESTS or budget <= 0:
+            if kept >= MAX_FOLDED_DIGESTS or budget <= 0 or index <= covered_through:
                 break
             msg = self.messages[index]
             if msg.metadata.get("message_type") in DISPLAY_ONLY_MESSAGE_TYPES:
@@ -235,19 +265,83 @@ class ConversationHistory:
         # replayed as identity alone so the model can keep citing ``[3]`` as the
         # same document many turns later.
         citation_line, citation_index = self._fold_citations()
+        if checkpoint_block and citation_line and citation_index is not None and citation_index <= covered_through:
+            # The newest citing message was compacted away; the numbers still
+            # mean the same documents, so they ride on the checkpoint instead.
+            checkpoint_block = f"{checkpoint_block}\n\n{citation_line}"
 
         out: List[Dict[str, str]] = []
+        pending_block = checkpoint_block
         for index, msg in enumerate(self.messages):
+            if index <= covered_through:
+                continue
             if msg.metadata.get("message_type") in DISPLAY_ONLY_MESSAGE_TYPES:
                 continue
             content = msg.content
+            if pending_block:
+                if msg.role == MessageRole.USER:
+                    content = f"{pending_block}\n\n{content}" if content else pending_block
+                else:
+                    out.append({"role": MessageRole.USER.value, "content": pending_block})
+                pending_block = None
             digest = folded.get(index)
             if digest:
                 content = f"{content}\n\n{digest}" if content else digest
             if citation_line and index == citation_index:
                 content = f"{content}\n\n{citation_line}" if content else citation_line
             out.append({"role": msg.role.value, "content": content})
+        if pending_block:
+            out.append({"role": MessageRole.USER.value, "content": pending_block})
         return out
+
+    def active_checkpoint(self) -> tuple[int, Optional[str]]:
+        """Return ``(covered_through_index, checkpoint_block)`` for the latest
+        conversation checkpoint, or ``(-1, None)`` when there is none."""
+        through_index, record = self.active_checkpoint_record()
+        if record is None:
+            return -1, None
+        return through_index, format_checkpoint_block(record["summary"])
+
+    def active_checkpoint_record(self) -> tuple[int, Optional[Dict[str, Any]]]:
+        """Return ``(covered_through_index, record)`` for the latest valid
+        conversation checkpoint, or ``(-1, None)``.
+
+        A checkpoint names the last message it summarizes by id and by its
+        distance back from the checkpoint row (``through_offset``). The id
+        holds within a session; a conversation loaded back from the store gets
+        fresh message ids, and there the distance -- which neither a rewind
+        (it only cuts the tail) nor a saved slice (it only drops the head)
+        changes -- finds the same message. A checkpoint that resolves to
+        neither is ignored rather than guessed at, so a bad record can only
+        ever cost the compaction, never context.
+        """
+        positions = {msg.id: index for index, msg in enumerate(self.messages)}
+        for index in range(len(self.messages) - 1, -1, -1):
+            msg = self.messages[index]
+            if msg.metadata.get("message_type") != CONTEXT_CHECKPOINT_MESSAGE_TYPE:
+                continue
+            record = msg.metadata.get(CONTEXT_CHECKPOINT_KEY)
+            if not isinstance(record, dict):
+                continue
+            if record.get("scope", CHECKPOINT_SCOPE_CONVERSATION) != CHECKPOINT_SCOPE_CONVERSATION:
+                continue
+            summary = record.get("summary")
+            if not isinstance(summary, str) or not summary.strip():
+                continue
+            through_index = None
+            through = record.get("through_message_id")
+            if through:
+                try:
+                    through_index = positions.get(UUID(str(through)))
+                except ValueError:
+                    through_index = None
+            offset = record.get("through_offset")
+            if through_index is None and isinstance(offset, int) and not isinstance(offset, bool) and offset > 0:
+                through_index = index - offset
+            if through_index is None or not 0 <= through_index < index:
+                continue
+            return through_index, record
+        return -1, None
 
     def _fold_citations(self) -> tuple[Optional[str], Optional[int]]:
         """Build the replayed citation line and say which message carries it.

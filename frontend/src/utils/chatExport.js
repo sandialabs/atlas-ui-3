@@ -94,7 +94,7 @@ const TOOL_APPROVAL_PERSISTED_FIELDS = [
 // (atlas/domain/messages/models.py): persisted, but never replayed to the
 // LLM as conversation turns -- which is exactly what the restore payload
 // filter in ChatContext excludes them for.
-export const DISPLAY_ONLY_MESSAGE_TYPES = ['tool_call', 'agent_intermediate']
+export const DISPLAY_ONLY_MESSAGE_TYPES = ['tool_call', 'agent_intermediate', 'context_checkpoint']
 
 // A replayed bubble (issue #957) is a transient placeholder: it holds a
 // mid-answer fragment the run's stored transcript supersedes when the run

@@ -2331,6 +2331,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             # that does not send it.
                             workspace_id=data.get("workspace_id", UNSET),
                             steering=steering_channel,
+                            # Per-conversation automatic compaction toggle
+                            # (issue #877); a non-bool means the default.
+                            auto_compact=data.get("auto_compact"),
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
@@ -2587,6 +2590,101 @@ async def websocket_endpoint(websocket: WebSocket):
                     active_chat_task["task"] = chat_task
                 else:
                     run_registry.attach_task(run_record.run_id, chat_task)
+
+            elif message_type == "context_usage_request":
+                # Issue #877: the context meter's estimate for a conversation
+                # just opened (or a model just switched to), before its next
+                # turn. Read-only, and skipped while a turn is running: that
+                # turn reports its own usage when it ends.
+                running = active_chat_task.get("task")
+                if running is None or running.done():
+                    try:
+                        await chat_service.report_context_usage(
+                            session_id,
+                            data.get("model", ""),
+                            user_email,
+                            auto_compact=data.get("auto_compact"),
+                            conversation_id=_normalize_conversation_id(data.get("conversation_id")),
+                        )
+                    except DomainError as e:
+                        logger.info("Context usage estimate refused: %s", type(e).__name__)
+
+            elif message_type == "compact_context":
+                # Issue #877: manual compaction between turns. It runs through
+                # handle_chat_message (compact_only) so it gets every check a
+                # turn gets -- required level, conversation classification and
+                # ownership, model authorization -- and is saved the same way.
+                # It never starts while a turn or run is executing in the
+                # conversation: compaction rewrites what the next request
+                # carries, and a running turn owns that.
+                compact_conversation_id = _normalize_conversation_id(data.get("conversation_id"))
+                running = active_chat_task.get("task")
+                busy = (running is not None and not running.done()) or (
+                    compact_conversation_id
+                    and run_registry.active_for_conversation_any_owner(compact_conversation_id)
+                )
+                if busy:
+                    await websocket.send_json({
+                        "type": "context_compaction",
+                        "status": "failed",
+                        "trigger": "manual",
+                        "error": "The conversation is still running. Compact it once the turn has finished.",
+                        "conversation_id": compact_conversation_id,
+                    })
+                    continue
+                if compact_conversation_id:
+                    refusal = _conversation_access_error(
+                        chat_service, compact_conversation_id, user_email
+                    )
+                    if refusal is not None:
+                        await websocket.send_json(refusal)
+                        continue
+
+                async def handle_compact(data=data, conversation_id=compact_conversation_id):
+                    try:
+                        await chat_service.handle_chat_message(
+                            session_id=session_id,
+                            content="",
+                            model=data.get("model", ""),
+                            user_email=user_email,
+                            compact_only=True,
+                            compact_focus=data.get("focus"),
+                            auto_compact=data.get("auto_compact"),
+                            compliance_level=data.get("compliance_level_filter"),
+                            update_callback=lambda message: websocket_update_callback(websocket, message),
+                            incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
+                            conversation_id=conversation_id,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except ValidationError as e:
+                        await websocket_update_callback(websocket, {
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, "message") else e),
+                            "error_type": (
+                                e.code
+                                if getattr(e, "code", None) == CONVERSATION_CLASSIFICATION_ERROR
+                                else "validation"
+                            ),
+                        })
+                    except DomainError as e:
+                        await websocket_update_callback(websocket, {
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, "message") else e),
+                            "error_type": "authorization" if isinstance(e, AuthorizationError) else "domain",
+                        })
+                    except Exception as e:
+                        logger.error("Unexpected error compacting a conversation: %s", e, exc_info=True)
+                        await websocket_update_callback(websocket, {
+                            "type": "context_compaction",
+                            "status": "failed",
+                            "trigger": "manual",
+                            "error": "Context compaction failed unexpectedly.",
+                        })
+
+                active_chat_task["steering"] = None
+                active_chat_task["conversation_id"] = compact_conversation_id
+                active_chat_task["task"] = asyncio.create_task(handle_compact())
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection).

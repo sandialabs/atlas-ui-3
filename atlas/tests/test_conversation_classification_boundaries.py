@@ -674,3 +674,71 @@ def test_stamping_logs_each_relabelled_conversation(repo, caplog):
         and CONV in r.getMessage()
         for r in caplog.records
     )
+
+
+# --- context compaction (issue #877) ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compaction_refused_under_another_level(use_manager, repo):
+    service, sessions = _make_service(repo)
+    await _turn(service, _new_session(sessions), "CUI")
+
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock()
+    with patch.object(service, "_get_orchestrator", return_value=orchestrator):
+        with pytest.raises(ValidationError):
+            await service.handle_chat_message(
+                session_id=_new_session(sessions), content="", model="m",
+                user_email=USER, compliance_level="UUR", conversation_id=CONV,
+                compact_only=True,
+            )
+    # Refused before anything ran: no summarizer call could have happened.
+    orchestrator.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_compaction_reloads_the_stored_transcript(use_manager, repo):
+    service, sessions = _make_service(repo)
+    sid = _new_session(sessions)
+    await _turn(service, sid, "CUI", content="first")
+    await _turn(service, sid, "CUI", content="second")
+    # The connection's copy trails the store (a run finished elsewhere).
+    sessions[sid].history.messages = sessions[sid].history.messages[:1]
+
+    seen = []
+
+    async def _execute(**kwargs):
+        seen.append((kwargs.get("compact_only"), len(kwargs["session"].history.messages)))
+        return {"type": "context_compaction"}
+
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(service, "_get_orchestrator", return_value=orchestrator):
+        await service.handle_chat_message(
+            session_id=sid, content="", model="m", user_email=USER,
+            compliance_level="CUI", conversation_id=CONV, compact_only=True,
+        )
+    assert seen == [(True, 4)]
+    assert repo.get_conversation(CONV, USER)["data_classification"] == "CUI"
+
+
+@pytest.mark.asyncio
+async def test_usage_estimate_only_for_the_bound_conversation(use_manager, repo):
+    service, sessions = _make_service(repo)
+    sid = _new_session(sessions)
+    await _turn(service, sid, "CUI")
+
+    orchestrator = MagicMock()
+    orchestrator._ensure_model_authorized = AsyncMock()
+    orchestrator.turn_context.report_usage = AsyncMock(return_value={"type": "context_usage"})
+    with patch.object(service, "_get_orchestrator", return_value=orchestrator):
+        assert await service.report_context_usage(sid, "m", USER, conversation_id="other") is None
+        orchestrator.turn_context.report_usage.assert_not_awaited()
+        assert await service.report_context_usage(sid, "m", USER, conversation_id=CONV) == {"type": "context_usage"}
+        orchestrator._ensure_model_authorized.assert_awaited_with("m", USER)
+
+        from atlas.domain.errors import AuthorizationError
+        orchestrator._ensure_model_authorized = AsyncMock(side_effect=AuthorizationError("no"))
+        with pytest.raises(AuthorizationError):
+            await service.report_context_usage(sid, "m", USER, conversation_id=CONV)

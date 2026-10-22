@@ -19,6 +19,8 @@ import { buildCorrectionContext, flattenAvailableTools } from '../utils/captureC
 import { useCaptureConsent } from '../hooks/useCaptureConsent'
 import CorrectTurnModal from './CorrectTurnModal'
 import AgentBusyIndicator from './AgentBusyIndicator'
+import ContextUsageMeter from './ContextUsageMeter'
+import { parseCompactCommand } from '../hooks/chat/useContextCompaction'
 import AgentRunStatus from './AgentRunStatus'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useToast } from './ui/toastContext'
@@ -96,6 +98,7 @@ const ChatArea = () => {
     followUpSuggestions,
     setFollowUpSuggestions,
     settings,
+    contextCompaction,
   } = useChat()
   const { isConnected, connectionStatus, sessionEnded } = useWS()
   const toast = useToast()
@@ -311,6 +314,21 @@ const ChatArea = () => {
     e.preventDefault()
     const message = inputValue.trim()
     if (!message || !currentModel || !isConnected) return
+
+    // `/compact [focus]` compacts between turns (issue #877); it is never
+    // sent as a chat message.
+    const compactCommand = contextCompaction?.enabled ? parseCompactCommand(message) : null
+    if (compactCommand) {
+      if (isThinking || isStreaming || isAgentRunning || contextCompaction.isCompacting) {
+        toast.error('Wait for the current response to finish before compacting.')
+        return
+      }
+      if (contextCompaction.compactNow(compactCommand.focus)) {
+        setInputValue('')
+        resetComposerHeight(textareaRef.current, messagesRef.current)
+      }
+      return
+    }
 
     // A turn that entered as a plain chat is still generating: refuse a
     // second submission rather than starting another untracked task against
@@ -1024,6 +1042,14 @@ const ChatArea = () => {
 
           {/* Enabled data sources, as pills (issue #839 review) */}
           <EnabledDataSourcesIndicator />
+
+          {/* Estimated context and compaction controls (issue #877) */}
+          <div className="flex justify-end mb-2 empty:hidden">
+            <ContextUsageMeter
+              contextCompaction={contextCompaction}
+              disabled={!isConnected || isThinking || isStreaming || isAgentRunning}
+            />
+          </div>
 
           {/* Warning: WebSocket disconnected - sending is blocked until reconnected */}
           {!isConnected && (

@@ -64,6 +64,7 @@ from .litellm_gateway_client import get_gateway_client, mint_delegated_llm_token
 from .litellm_streaming import LiteLLMStreamingMixin
 from .models import LLMResponse, split_provider
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
+from .usage_tracking import record_response_usage
 
 logger = logging.getLogger(__name__)
 
@@ -656,6 +657,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             while attempt <= max_retries:
                 try:
                     response = await acompletion(**kwargs)
+                    record_response_usage(response)
                     set_attrs(span, _llm_response_attrs(response, attempt))
                     set_attrs(span, {
                         "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,

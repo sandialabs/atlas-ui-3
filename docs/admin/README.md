@@ -1,6 +1,6 @@
 # Administrator's Guide
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
 
 For administrators responsible for deploying, configuring, and managing Atlas UI 3.
 
@@ -39,6 +39,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 - [Admin Panel](admin-panel.md) - Using the administrative interface
 - [User Feedback](feedback.md) - Collecting and reviewing user feedback
 - [Chat History Persistence](chat-history.md) - Conversation storage and retention
+- [Context Tracking and Compaction](context-compaction.md) - Context meter, manual/automatic compaction, model context windows and settings
 - [Parallel Conversation Runs](parallel-conversation-runs.md) - Concurrent agent runs, per-user caps, and background execution
 - [PyPI Release Guide](pypi-releases.md) - Publishing the `atlas-chat` package
 

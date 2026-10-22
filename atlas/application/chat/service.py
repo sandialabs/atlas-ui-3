@@ -601,7 +601,14 @@ class ChatService:
             # its life while its history slowly grew back toward the stored
             # count -- at which point the no-shrink guard stops refusing and
             # the partial thread replaces the real one.
-            if previous_conversation_id != conversation_id or not session.history.messages:
+            # A manual compaction (issue #877) always reloads: the stored
+            # record is the full transcript, while this connection's copy may
+            # trail a background run that finished in its own session.
+            if (
+                previous_conversation_id != conversation_id
+                or not session.history.messages
+                or kwargs.get("compact_only")
+            ):
                 # This session is not already carrying the conversation the turn
                 # names. Load it from the store before running the turn.
                 #
@@ -1002,6 +1009,34 @@ class ChatService:
         # it. After the conversation save: the database is the record, the
         # session store only a cache of the live state.
         await self.persist_session(session)
+
+    async def report_context_usage(
+        self,
+        session_id: UUID,
+        model: str,
+        user_email: Optional[str],
+        auto_compact: Any = None,
+        conversation_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Estimate the next request of the conversation on this connection.
+
+        Issue #877: lets the meter show a value as soon as a conversation is
+        opened, before its next turn. Read-only: it reports the session's own
+        history against a model the user is authorized for, and only when the
+        session is carrying the conversation the client names.
+        """
+        session = await self.session_repository.get(session_id)
+        if session is None or not session.history.messages:
+            return None
+        if conversation_id and session.context.get("conversation_id") != conversation_id:
+            return None
+        orchestrator = self._get_orchestrator()
+        await orchestrator._ensure_model_authorized(model, user_email)
+        # This service and its publisher belong to the requesting connection,
+        # so the estimate is answered on that socket only.
+        return await orchestrator.turn_context.report_usage(
+            session, model, user_email, None, auto_compact, None,
+        )
 
     async def persist_session(self, session: Session, adopt: bool = False) -> bool:
         """Write ``session`` to the session store; never raises.
