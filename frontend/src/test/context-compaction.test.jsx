@@ -259,3 +259,28 @@ describe('review follow-ups', () => {
     expect(result.current.isManualCompacting).toBe(false)
   })
 })
+
+describe('second review follow-ups', () => {
+  it('stop or a dropped connection clears a pending compaction', () => {
+    const { result } = renderHook(() => useContextCompaction({ config: {}, activeConversationId: 'c1', sendMessage: vi.fn(() => true) }))
+    act(() => { result.current.compactNow() })
+    expect(result.current.isCompacting).toBe(true)
+    act(() => { result.current.clearPending() })
+    expect(result.current.isCompacting).toBe(false)
+  })
+
+  it('keeps a finished compaction when clearing', () => {
+    const { result } = renderHook(() => useContextCompaction({ config: {}, activeConversationId: 'c1', sendMessage: vi.fn() }))
+    act(() => { result.current.handleCompaction({ status: 'completed', trigger: 'manual' }) })
+    act(() => { result.current.clearPending() })
+    expect(result.current.compaction.status).toBe('completed')
+  })
+
+  it('ignores an estimate for another conversation', () => {
+    const { result } = renderHook(() => useContextCompaction({ config: {}, activeConversationId: 'c1', sendMessage: vi.fn() }))
+    act(() => { result.current.handleUsage({ ...USAGE, conversation_id: 'c2' }) })
+    expect(result.current.usage).toBeNull()
+    act(() => { result.current.handleUsage({ ...USAGE, conversation_id: 'c1' }) })
+    expect(result.current.usage.conversation_id).toBe('c1')
+  })
+})

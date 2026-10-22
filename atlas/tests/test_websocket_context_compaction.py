@@ -140,8 +140,15 @@ def test_refusal_ends_pending_compaction(chat_service):
 
 
 def test_usage_requests_are_throttled(chat_service):
+    import time
+
     with _connect(TestClient(app)) as ws:
-        for _ in range(3):
-            ws.send_json({"type": "context_usage_request", "model": "m", "conversation_id": CONV})
-        ws.send_json({"type": "compact_context", "model": "m", "conversation_id": CONV})
-    assert chat_service.report_context_usage.await_count == 1
+        for target in ("first", "middle", "last"):
+            ws.send_json({"type": "context_usage_request", "model": "m", "conversation_id": target})
+        # The requests inside the window collapse into one trailing answer
+        # for the newest, so a quick switch still lands on the right estimate.
+        deadline = time.monotonic() + 3
+        while chat_service.report_context_usage.await_count < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+    answered = [c.kwargs["conversation_id"] for c in chat_service.report_context_usage.await_args_list]
+    assert answered == ["first", "last"]

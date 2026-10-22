@@ -65,17 +65,27 @@ class RunCompactionGuard:
         self.window = compactor.window(model)
         self._step = 0
         self._last_auto_step: Optional[int] = None
-        # The turn's request, captured once from the transcript the run
-        # started with and carried verbatim by every checkpoint. Never read
-        # back out of a checkpoint or a later user-role message: those can
-        # hold model or tool text (a summary, a synthetic image message).
+        # The turn's request, captured once and carried verbatim by every
+        # checkpoint. Taken from the stored user row, not the assembled
+        # transcript: there a conversation checkpoint may be folded into it,
+        # and later user-role messages can hold model or tool text.
         self._request: Optional[str] = None
         self._request_seen = False
+        # Carried across this run's compactions: each one summarizes only
+        # what is new since the last, so the earlier summary and the tool
+        # calls it already listed are passed on rather than re-summarized.
+        self._summary: Optional[str] = None
+        self._ledger: List[Dict[str, Any]] = []
+        self._block: Optional[str] = None
 
     def _capture_request(self, messages: List[Dict[str, Any]]) -> None:
         if self._request_seen:
             return
         self._request_seen = True
+        stored = [m for m in (self.history.messages if self.history else []) if m.role == MessageRole.USER]
+        if stored:
+            self._request = request_text({"content": stored[-1].content})
+            return
         for msg in reversed(messages):
             if msg.get("role") == "user":
                 self._request = request_text(msg)
@@ -184,14 +194,16 @@ class RunCompactionGuard:
             return failed
         except BaseException:
             # Cancelled mid-compaction (Stop, disconnect): the unwinding run
-            # must not carry a half-rebuilt transcript.
+            # must not carry a half-rebuilt transcript, and the client must
+            # not keep waiting for a compaction that has ended.
             messages[:] = snapshot
+            await self.compactor.send_quietly({**base, "status": "failed", "silent": True})
             raise
 
     async def _summarize_into(self, messages: List[Dict[str, Any]], floor: int, tail_start: int) -> Optional[str]:
         stretch = messages[floor:tail_start]
         kept_system = [m for m in stretch if m.get("role") == "system"]
-        segment = [m for m in stretch if m.get("role") != "system"]
+        segment = [self._without_own_block(m) for m in stretch if m.get("role") != "system"]
         if not segment:
             return None
         tail = messages[tail_start:]
@@ -199,9 +211,21 @@ class RunCompactionGuard:
             self.compactor.llm, self.model, segment,
             user_email=self.user_email,
             input_budget_tokens=self.window.usable,
+            previous_summary=self._summary,
         )
-        text = build_checkpoint_text(summary, executed_tool_ledger(segment), self._request)
+        # Keep the calls listed by earlier checkpoints, however long ago they
+        # ran: a side-effecting call must never fall out of the ledger.
+        for m in segment:
+            if m.get("tool_calls"):
+                self._ledger.append({"role": "assistant", "tool_calls": m["tool_calls"]})
+            elif m.get("role") == "tool":
+                self._ledger.append({"role": "tool", "tool_call_id": m.get("tool_call_id")})
+        text = build_checkpoint_text(summary, executed_tool_ledger(self._ledger), self._request)
         block = format_checkpoint_block(text)
+        self._summary = summary
+        self._block = block
+        if tail:
+            tail[0] = self._without_own_block(tail[0])
         first = tail[0] if tail else None
         if first is not None and first.get("role") == "user" and isinstance(first.get("content"), str):
             tail = [{**first, "content": f"{block}\n\n{first['content']}"}] + tail[1:]
@@ -213,6 +237,22 @@ class RunCompactionGuard:
             tail = [{"role": "user", "content": f"{block}\n\nContinue the current task from the state above."}] + tail
         messages[:] = messages[:floor] + kept_system + tail
         return text
+
+    def _without_own_block(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Drop the block an earlier compaction folded into this message.
+
+        Its content is already carried as ``previous_summary`` and the
+        ledger; summarizing it again would only clip and blur it.
+        """
+        block = self._block
+        if not block or message.get("role") != "user":
+            return message
+        content = message.get("content")
+        if isinstance(content, str) and content.startswith(block):
+            return {**message, "content": content[len(block):].lstrip("\n")}
+        if isinstance(content, list) and content and content[0] == {"type": "text", "text": block}:
+            return {**message, "content": list(content[1:])}
+        return message
 
     def _record(
         self, trigger: str, content: str, summary: Optional[str], before: int, after: int, pruned: int,

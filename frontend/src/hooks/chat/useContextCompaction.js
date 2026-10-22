@@ -86,12 +86,21 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
   }, [activeConversationId])
 
   const handleUsage = useCallback((frame) => {
-    if (frame && typeof frame.estimated_tokens === 'number') setUsage(frame)
-  }, [])
+    if (!frame || typeof frame.estimated_tokens !== 'number') return
+    // An estimate for a conversation the user has already left.
+    if (frame.conversation_id && activeConversationId && frame.conversation_id !== activeConversationId) return
+    setUsage(frame)
+  }, [activeConversationId])
 
   const handleCompaction = useCallback((frame) => {
     if (!frame || !frame.status) return
     setCompaction(frame)
+  }, [])
+
+  // Stop or a dropped connection ends a compaction whose result frame may
+  // never arrive; the server-side work is cancelled either way.
+  const clearPending = useCallback(() => {
+    setCompaction(current => (current?.status === 'started' ? null : current))
   }, [])
 
   const isCompacting = compaction?.status === 'started'
@@ -133,5 +142,6 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
     requestUsage,
     handleUsage,
     handleCompaction,
+    clearPending,
   }
 }

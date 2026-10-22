@@ -81,6 +81,13 @@ class TurnContext:
         custom_system_prompt: Optional[str],
     ) -> Dict[str, Any]:
         """Compact between turns at the user's request; never adds a user turn."""
+        if not self.policy(None).enabled:
+            refused = {
+                "type": "context_compaction", "status": "failed", "trigger": TRIGGER_MANUAL,
+                "error": "Context compaction is turned off on this server.",
+            }
+            await self.compactor._send(refused)
+            return refused
         focus_text = focus.strip()[:MAX_FOCUS_CHARS] if isinstance(focus, str) else None
         outcome = await self.compactor.compact_history(
             history=session.history,

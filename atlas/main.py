@@ -1886,9 +1886,10 @@ async def websocket_endpoint(websocket: WebSocket):
     # at the next iteration boundary.
     active_chat_task = {"task": None, "steering": None, "conversation_id": None, "kind": None}
     # Issue #877: when this connection last answered a context_usage_request.
-    # The meter asks on conversation open and model change; a client that asks
-    # faster than this gets no answer rather than a re-tokenized transcript.
-    last_usage_request = {"at": 0.0}
+    # The meter asks on conversation open and model change. Requests inside
+    # the window are coalesced: only the newest is answered, once the window
+    # ends, so a quick switch still gets the estimate for where it landed.
+    last_usage_request = {"at": 0.0, "pending": None, "timer": None}
 
     # Parallel conversation runs (issue #884). The registry is process-wide and
     # outlives this socket; ``connection_run_ids`` is just this connection's
@@ -2632,20 +2633,36 @@ async def websocket_endpoint(websocket: WebSocket):
                 # just opened (or a model just switched to), before its next
                 # turn. Read-only, and skipped while a turn is running: that
                 # turn reports its own usage when it ends.
-                running = active_chat_task.get("task")
-                now = time.monotonic()
-                if (running is None or running.done()) and now - last_usage_request["at"] >= 1.0:
-                    last_usage_request["at"] = now
+                async def answer_usage(request: dict) -> None:
+                    running = active_chat_task.get("task")
+                    if running is not None and not running.done():
+                        return
+                    last_usage_request["at"] = time.monotonic()
                     try:
                         await chat_service.report_context_usage(
                             session_id,
-                            data.get("model", ""),
+                            request.get("model", ""),
                             user_email,
-                            auto_compact=data.get("auto_compact"),
-                            conversation_id=_normalize_conversation_id(data.get("conversation_id")),
+                            auto_compact=request.get("auto_compact"),
+                            conversation_id=_normalize_conversation_id(request.get("conversation_id")),
                         )
                     except DomainError as e:
                         logger.info("Context usage estimate refused: %s", type(e).__name__)
+
+                async def answer_later(delay: float) -> None:
+                    await asyncio.sleep(delay)
+                    request, last_usage_request["pending"] = last_usage_request["pending"], None
+                    if request is not None:
+                        await answer_usage(request)
+
+                wait = 1.0 - (time.monotonic() - last_usage_request["at"])
+                timer = last_usage_request["timer"]
+                if wait <= 0 and (timer is None or timer.done()):
+                    await answer_usage(data)
+                else:
+                    last_usage_request["pending"] = data
+                    if timer is None or timer.done():
+                        last_usage_request["timer"] = asyncio.create_task(answer_later(max(wait, 0.0)))
 
             elif message_type == "compact_context":
                 # Issue #877: manual compaction between turns. It runs through
@@ -2698,6 +2715,12 @@ async def websocket_endpoint(websocket: WebSocket):
                             conversation_id=conversation_id,
                         )
                     except asyncio.CancelledError:
+                        # Stopped before it finished: end the client's pending
+                        # state, best effort, then unwind as cancelled.
+                        try:
+                            await asyncio.wait_for(websocket_update_callback(websocket, refused), timeout=1.0)
+                        except (Exception, asyncio.CancelledError):
+                            pass
                         raise
                     except ValidationError as e:
                         await websocket_update_callback(websocket, {
@@ -3074,6 +3097,9 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
+        usage_timer = last_usage_request.get("timer")
+        if usage_timer is not None and not usage_timer.done():
+            usage_timer.cancel()
         # Tear down on every exit, not only a clean disconnect: a handler
         # error that ends the socket must still end its session, or a shared
         # store keeps it marked active and owned by a dead connection, and

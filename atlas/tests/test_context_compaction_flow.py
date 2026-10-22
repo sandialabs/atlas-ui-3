@@ -252,3 +252,23 @@ class TestOrchestrator:
                            session=session, agent_mode=True, selected_tools=["grep"])
         guard = agent.run.await_args.kwargs["compaction"]
         assert guard is not None and guard.model == "m" and guard.user_email == "u@x"
+
+    @pytest.mark.asyncio
+    async def test_manual_compaction_refused_when_feature_off(self):
+        orch, repo, _, publisher, _, _ = _orchestrator(window=100000)
+        orch.turn_context.compactor.config_manager.app_settings = SimpleNamespace(
+            feature_context_compaction_enabled=False)
+        session = await _session(repo)
+        count = len(session.history.messages)
+        await orch.execute(session_id=session.id, content="", model="m", user_email="u@x",
+                           session=session, compact_only=True)
+        assert len(session.history.messages) == count
+        assert _frames(publisher, "context_compaction")[-1]["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_usage_frame_names_its_conversation(self):
+        orch, repo, _, publisher, _, _ = _orchestrator(window=100000)
+        session = await _session(repo)
+        session.context["conversation_id"] = "conv-9"
+        await orch.execute(session_id=session.id, content="hi", model="m", user_email="u@x", session=session)
+        assert _frames(publisher, "context_usage")[-1]["conversation_id"] == "conv-9"

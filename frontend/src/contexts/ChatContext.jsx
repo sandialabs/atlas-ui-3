@@ -312,6 +312,7 @@ export const ChatProvider = ({ children }) => {
 		sendMessage,
 		buildRequestFields: buildContextRequestFields,
 	})
+	const clearPendingCompaction = contextCompaction.clearPending
 	const { selectedTools, selectedPrompts, activePrompts, activePromptKey, clearActivePrompt, selectedDataSources, ragEnabled } = selections
 
 	// Compliance level of a selection key, for the compliance filter: null when
@@ -1977,6 +1978,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			cleanupStreamState()
 			streamEnd()
 			setIsThinking(false)
+			clearPendingCompaction()
 			if (!sendMessage) return
 			const run = runs.getRun(activeConversationId)
 			sendMessage({
@@ -1984,7 +1986,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				conversation_id: activeConversationId || undefined,
 				run_id: run?.run_id || undefined,
 			})
-		}, [sendMessage, streamEnd, runs, activeConversationId])
+		}, [sendMessage, streamEnd, runs, activeConversationId, clearPendingCompaction])
 
 			const answerAgentQuestion = useCallback((content) => {
 			if (!content || !content.trim()) return
@@ -2233,6 +2235,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// meter does not wait for the next turn. Debounced past the restore frame
 	// that loads the conversation into the server session.
 	const requestContextUsage = contextCompaction.requestUsage
+	useEffect(() => {
+		if (!isConnected) clearPendingCompaction()
+	}, [isConnected, clearPendingCompaction])
 	useEffect(() => {
 		if (!isConnected || !currentModel || !activeConversationId) return
 		const timer = setTimeout(() => requestContextUsage(), 400)

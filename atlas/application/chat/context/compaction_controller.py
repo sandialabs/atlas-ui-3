@@ -19,6 +19,7 @@ original message is ever removed or rewritten.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -85,6 +86,13 @@ class ContextCompactor:
         except Exception:  # a dead transport must not fail compaction
             logger.debug("Could not deliver a context event", exc_info=True)
 
+    async def send_quietly(self, payload: Dict[str, Any]) -> None:
+        """Best-effort send from a cancellation path, which re-raises next."""
+        try:
+            await asyncio.wait_for(self._send(payload), timeout=1.0)
+        except (Exception, asyncio.CancelledError):
+            logger.debug("Could not deliver a context event while cancelling", exc_info=True)
+
     def usage_payload(
         self,
         *,
@@ -139,6 +147,10 @@ class ContextCompactor:
         payload = self.usage_payload(
             model=model, estimate=estimate, policy=policy, history=history, sink=sink, totals=totals,
         )
+        # Lets the client drop an estimate for a conversation it has left.
+        conversation_id = (session_context or {}).get("conversation_id")
+        if conversation_id:
+            payload["conversation_id"] = str(conversation_id)
         await self._send(payload)
         return payload
 
@@ -242,8 +254,10 @@ class ContextCompactor:
         except BaseException:
             # Cancelled mid-compaction (Stop, disconnect, reset): the cancel
             # path saves the session, and a half-built checkpoint row with no
-            # summary checked must never be saved with it.
+            # summary checked must never be saved with it. The client is told
+            # the compaction ended, if it is still there to hear it.
             self._discard(history, added)
+            await self.send_quietly({**base, "status": "failed", "silent": True})
             raise
 
     @staticmethod

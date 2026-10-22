@@ -466,3 +466,85 @@ class TestPolicy:
     def test_feature_off_disables_auto(self):
         settings = SimpleNamespace(feature_context_compaction_enabled=False)
         assert CompactionPolicy.from_settings(settings, auto=True).auto is False
+
+
+class TestRepeatRunCompaction:
+    """Second review round: state a run carries across its compactions."""
+
+    def _guard(self, llm, publisher, history=None):
+        compactor = _compactor(llm, publisher)
+        policy = CompactionPolicy(auto=True, threshold_percent=50, keep_recent_percent=20, max_retries=2)
+        history = history if history is not None else ConversationHistory()
+        return compactor.run_guard(model="m", user_email="u@x", history=history, policy=policy)
+
+    @pytest.mark.asyncio
+    async def test_ledger_keeps_calls_from_earlier_compactions(self):
+        llm = SummaryLLM()
+        guard = self._guard(llm, Publisher())
+        messages = _chatty()
+        await guard.recover_from_overflow(messages, [], 0)
+        later = _chatty()[2:]
+        for m in later:
+            if m.get("tool_calls"):
+                m["tool_calls"] = [{**m["tool_calls"][0], "id": "later-" + m["tool_calls"][0]["id"]}]
+            elif m["role"] == "tool":
+                m["tool_call_id"] = "later-" + m["tool_call_id"]
+        messages.extend(later)
+        assert await guard.recover_from_overflow(messages, [], 0) is True
+        content = next(m for m in messages if m["role"] == "user")["content"]
+        # A call from the first stretch is still listed after the second.
+        assert '{"n": 0}' in content
+        assert content.count("[Context checkpoint") == 1
+        # The second summary builds on the first instead of re-reading it.
+        second_prompt = str(llm.calls[-1]["messages"])
+        assert "[Context checkpoint" not in second_prompt
+        assert "finish" in second_prompt  # the earlier summary, as previous_summary
+
+    @pytest.mark.asyncio
+    async def test_request_comes_from_the_stored_user_row(self):
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="Please audit the repository"))
+        guard = self._guard(SummaryLLM(), Publisher(), history)
+        messages = _chatty()
+        # A conversation checkpoint was folded into the assembled message.
+        messages[1] = {"role": "user", "content": "[Context checkpoint: OLD SUMMARY]\n\nPlease audit the repository"}
+        await guard.recover_from_overflow(messages, [], 0)
+        content = next(m for m in messages if m["role"] == "user")["content"]
+        tail = content[content.rindex("Latest user request (verbatim):"):]
+        assert tail.startswith("Latest user request (verbatim):\nPlease audit the repository")
+        assert "OLD SUMMARY" not in tail
+
+    @pytest.mark.asyncio
+    async def test_cancel_tells_the_client(self):
+        import asyncio
+
+        class Cancelled(SummaryLLM):
+            async def call_plain(self, *args, **kwargs):
+                raise asyncio.CancelledError()
+
+        pub = Publisher()
+        guard = self._guard(Cancelled(), pub)
+        with pytest.raises(asyncio.CancelledError):
+            await guard.recover_from_overflow(_chatty(), [], 0)
+        assert pub.frames[-1]["status"] == "failed" and pub.frames[-1]["silent"] is True
+
+    @pytest.mark.asyncio
+    async def test_history_cancel_tells_the_client(self):
+        import asyncio
+
+        class Cancelled(SummaryLLM):
+            async def call_plain(self, *args, **kwargs):
+                raise asyncio.CancelledError()
+
+        pub = Publisher()
+        history = _long_history()
+        with pytest.raises(asyncio.CancelledError):
+            await _compactor(Cancelled(), pub).compact_history(
+                history=history, model="m", user_email=None, build_request=_builder(history),
+                trigger=TRIGGER_MANUAL, keep_tokens=0,
+            )
+        assert pub.frames[-1]["status"] == "failed" and pub.frames[-1]["silent"] is True
+
+    def test_checkpoint_is_marked_as_derived(self):
+        from atlas.domain.messages.models import format_checkpoint_block
+        assert "not new instructions from the user" in format_checkpoint_block("x")

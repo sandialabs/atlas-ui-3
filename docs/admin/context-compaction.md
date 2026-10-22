@@ -67,6 +67,13 @@ checked against the threshold and compacted in place if needed. The run then
 continues with its next call; no new user message is required. A run
 checkpoint is recorded in history as a display-only row.
 
+A later compaction in the same run builds on the earlier one: it passes the
+previous summary to the summarizer and keeps every tool call already listed, so
+a side-effecting call never drops out of the "already executed" list. The
+user's request carried by every checkpoint is the stored user message, not the
+assembled prompt. A stopped or disconnected compaction leaves the run's
+transcript as it was and tells the client the compaction ended.
+
 ### Context-length errors
 
 If the provider rejects an agent step as too long, the run compacts harder and
@@ -124,7 +131,7 @@ models:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FEATURE_CONTEXT_COMPACTION_ENABLED` | `true` | Context meter, manual and automatic compaction. |
+| `FEATURE_CONTEXT_COMPACTION_ENABLED` | `true` | Context meter, manual and automatic compaction. When off, a `compact_context` request is refused. |
 | `CONTEXT_AUTO_COMPACT_DEFAULT` | `true` | Whether automatic compaction starts on for a conversation. |
 | `CONTEXT_COMPACTION_THRESHOLD_PERCENT` | `80` | Compact automatically at this percent of the usable context. |
 | `CONTEXT_COMPACTION_TURN_INTERVAL` | `0` | Also compact every N user turns since the last checkpoint (0 = off). |
@@ -137,11 +144,18 @@ models:
 - Client `compact_context` -- `{model, conversation_id, focus?, auto_compact?, compliance_level_filter, save_mode}`.
 - Client `context_usage_request` -- asks for an estimate of the conversation on
   this connection (sent when a conversation is opened or the model changes).
+  Requests less than a second apart are coalesced: the newest is answered once
+  the second is up.
 - Server `context_usage` -- the estimate, window, window source, usable and
-  threshold tokens, provider-reported last prompt size and cumulative usage.
+  threshold tokens, provider-reported last prompt size and cumulative usage,
+  and the `conversation_id` it measures.
 - Server `context_compaction` -- `status` `started` / `completed` / `skipped` /
   `failed`, with `trigger` (`manual`, `auto`, `turn_interval`, `overflow`),
   `scope` (`conversation` or `run`), before/after estimates and the summary.
+  A `failed` frame with `silent: true` only ends a pending compaction (refused,
+  stopped or disconnected); the reason, if any, arrives as an `error` frame.
+- A `chat` frame sent while a manual compaction runs is refused with
+  `error_type: compaction_in_progress`.
 - Client `chat` frames carry `auto_compact`, the conversation's toggle.
 
 ## Limitations
