@@ -599,7 +599,7 @@ export function createWebSocketHandler(deps) {
               },
               timestamp: new Date().toISOString(),
             })
-          } else if (data.status === 'failed' || (data.status === 'skipped' && data.trigger === 'manual')) {
+          } else if (!data.silent && (data.status === 'failed' || (data.status === 'skipped' && data.trigger === 'manual'))) {
             // An automatic attempt that found nothing to do is not news; a
             // failure, or the user's own request coming to nothing, is.
             addMessage({
@@ -689,6 +689,8 @@ export function createWebSocketHandler(deps) {
           setCurrentAgentStep(0)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           endTokenStream()
+          // Whatever was pending -- a manual compaction included -- has ended.
+          if (typeof onContextCompaction === 'function') onContextCompaction({ status: 'failed', silent: true })
           addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
           break
         case 'agent_step_update':

@@ -106,3 +106,42 @@ def test_chat_forwards_auto_toggle(chat_service):
         ws.send_json({"type": "compact_context", "model": "m"})
     calls = [c.kwargs for c in chat_service.handle_chat_message.await_args_list]
     assert calls and calls[0]["auto_compact"] is False
+
+
+def test_chat_refused_while_compacting(chat_service):
+    import asyncio
+
+    release = asyncio.Event()
+
+    async def handle(**kwargs):
+        if kwargs.get("compact_only"):
+            await release.wait()
+        return {}
+
+    chat_service.handle_chat_message = AsyncMock(side_effect=handle)
+    with _connect(TestClient(app)) as ws:
+        ws.send_json({"type": "compact_context", "model": "m", "conversation_id": CONV})
+        ws.send_json({"type": "chat", "content": "hi", "model": "m", "conversation_id": CONV})
+        frame = ws.receive_json()
+        assert frame["error_type"] == "compaction_in_progress"
+        ws.send_json({"type": "stop_streaming"})
+    calls = [c.kwargs for c in chat_service.handle_chat_message.await_args_list]
+    assert all(c.get("compact_only") for c in calls)
+
+
+def test_refusal_ends_pending_compaction(chat_service):
+    chat_service.handle_chat_message = AsyncMock(side_effect=ValidationError("no level"))
+    with _connect(TestClient(app)) as ws:
+        ws.send_json({"type": "compact_context", "model": "m", "conversation_id": CONV})
+        first, second = ws.receive_json(), ws.receive_json()
+    assert first["type"] == "error"
+    assert second == {"type": "context_compaction", "status": "failed", "trigger": "manual",
+                      "silent": True, "conversation_id": CONV}
+
+
+def test_usage_requests_are_throttled(chat_service):
+    with _connect(TestClient(app)) as ws:
+        for _ in range(3):
+            ws.send_json({"type": "context_usage_request", "model": "m", "conversation_id": CONV})
+        ws.send_json({"type": "compact_context", "model": "m", "conversation_id": CONV})
+    assert chat_service.report_context_usage.await_count == 1

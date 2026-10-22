@@ -962,6 +962,10 @@ export const ChatProvider = ({ children }) => {
 
 	const sendChatMessage = useCallback((content, extraFiles = {}, { rewindToUserIndex = null, selectedToolsOverride = null, captureCorrection = null } = {}) => {
 		if (!content.trim() || !currentModel) return false
+		if (contextCompaction.isManualCompacting) {
+			toast.error('The conversation is being compacted. Send your message once it has finished.')
+			return false
+		}
 		// A turn in the replacement chat retires any outstanding Undo: restoring
 		// the old snapshot now would discard this exchange, which in incognito
 		// mode is not saved anywhere and could not be recovered.
@@ -1217,7 +1221,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, contextCompaction.enabled, contextCompaction.autoCompact])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped

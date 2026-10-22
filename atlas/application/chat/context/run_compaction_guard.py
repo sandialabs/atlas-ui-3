@@ -21,15 +21,15 @@ from atlas.domain.messages.models import (
     MessageRole,
     format_checkpoint_block,
 )
-from atlas.modules.llm.token_estimation import estimate_request_tokens
+from atlas.modules.llm.token_estimation import estimate_request_tokens_async
 
 from .compaction_engine import (
     build_checkpoint_text,
     executed_tool_ledger,
     find_tail_start,
-    latest_user_request,
     leading_system_count,
     prune_tool_outputs,
+    request_text,
     summarize_messages,
 )
 from .compaction_policy import (
@@ -65,6 +65,21 @@ class RunCompactionGuard:
         self.window = compactor.window(model)
         self._step = 0
         self._last_auto_step: Optional[int] = None
+        # The turn's request, captured once from the transcript the run
+        # started with and carried verbatim by every checkpoint. Never read
+        # back out of a checkpoint or a later user-role message: those can
+        # hold model or tool text (a summary, a synthetic image message).
+        self._request: Optional[str] = None
+        self._request_seen = False
+
+    def _capture_request(self, messages: List[Dict[str, Any]]) -> None:
+        if self._request_seen:
+            return
+        self._request_seen = True
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                self._request = request_text(msg)
+                return
 
     @property
     def threshold(self) -> int:
@@ -74,6 +89,7 @@ class RunCompactionGuard:
         self, messages: List[Dict[str, Any]], tools_schema: Optional[List[Dict[str, Any]]],
     ) -> Optional[Dict[str, Any]]:
         """Compact at a step boundary when the next request is over threshold."""
+        self._capture_request(messages)
         self._step += 1
         if not self.policy.auto:
             return None
@@ -82,7 +98,7 @@ class RunCompactionGuard:
             and self._step - self._last_auto_step < MIN_STEPS_BETWEEN_AUTO_COMPACTIONS
         ):
             return None
-        estimate = estimate_request_tokens(messages, tools_schema, self.model)
+        estimate = await estimate_request_tokens_async(messages, tools_schema, self.model)
         if estimate.tokens < self.threshold:
             return None
         self._last_auto_step = self._step
@@ -102,6 +118,7 @@ class RunCompactionGuard:
         Bounded by ``max_retries`` and only with auto-compaction on: with it
         off the user chose to compact by hand, and the error is surfaced.
         """
+        self._capture_request(messages)
         if not self.policy.auto or attempt >= self.policy.max_retries:
             return False
         keep = int(self.policy.keep_tokens(self.window) * (0.5 ** (attempt + 1)))
@@ -123,15 +140,15 @@ class RunCompactionGuard:
         await self.compactor._send({**base, "status": "started"})
         snapshot = list(messages)
         try:
-            before = estimate_request_tokens(messages, tools_schema, self.model)
+            before = await estimate_request_tokens_async(messages, tools_schema, self.model)
             floor = leading_system_count(messages)
             tail_start = find_tail_start(messages, keep_tokens, floor)
             pruned = prune_tool_outputs(messages, tail_start)
             summary = None
-            middle = estimate_request_tokens(messages, tools_schema, self.model)
+            middle = await estimate_request_tokens_async(messages, tools_schema, self.model)
             if force_summary or middle.tokens >= self.threshold:
                 summary = await self._summarize_into(messages, floor, tail_start)
-            after = estimate_request_tokens(messages, tools_schema, self.model)
+            after = await estimate_request_tokens_async(messages, tools_schema, self.model)
             if after.tokens >= before.tokens:
                 messages[:] = snapshot
                 raise NothingToCompact("the agent's context holds nothing older than its latest step")
@@ -165,6 +182,11 @@ class RunCompactionGuard:
             failed = {**base, "status": "failed", "error": failure_text(exc)}
             await self.compactor._send(failed)
             return failed
+        except BaseException:
+            # Cancelled mid-compaction (Stop, disconnect): the unwinding run
+            # must not carry a half-rebuilt transcript.
+            messages[:] = snapshot
+            raise
 
     async def _summarize_into(self, messages: List[Dict[str, Any]], floor: int, tail_start: int) -> Optional[str]:
         stretch = messages[floor:tail_start]
@@ -178,15 +200,15 @@ class RunCompactionGuard:
             user_email=self.user_email,
             input_budget_tokens=self.window.usable,
         )
-        tail_has_request = any(m.get("role") == "user" for m in tail)
-        text = build_checkpoint_text(
-            summary,
-            executed_tool_ledger(segment),
-            None if tail_has_request else latest_user_request(segment),
-        )
+        text = build_checkpoint_text(summary, executed_tool_ledger(segment), self._request)
         block = format_checkpoint_block(text)
-        if tail and tail[0].get("role") == "user" and isinstance(tail[0].get("content"), str):
-            tail = [{**tail[0], "content": f"{block}\n\n{tail[0]['content']}"}] + tail[1:]
+        first = tail[0] if tail else None
+        if first is not None and first.get("role") == "user" and isinstance(first.get("content"), str):
+            tail = [{**first, "content": f"{block}\n\n{first['content']}"}] + tail[1:]
+        elif first is not None and first.get("role") == "user" and isinstance(first.get("content"), list):
+            # A multimodal message (e.g. a tool image): fold in as a text
+            # block rather than adding a second consecutive user message.
+            tail = [{**first, "content": [{"type": "text", "text": block}] + list(first["content"])}] + tail[1:]
         else:
             tail = [{"role": "user", "content": f"{block}\n\nContinue the current task from the state above."}] + tail
         messages[:] = messages[:floor] + kept_system + tail

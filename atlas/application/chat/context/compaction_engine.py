@@ -240,35 +240,12 @@ def executed_tool_ledger(messages: Sequence[Dict[str, Any]], limit: int = 60) ->
 
 
 LATEST_REQUEST_HEADER = "Latest user request (verbatim):\n"
-CHECKPOINT_PREFIX = "[Context checkpoint"
-CHECKPOINT_END = "\n[End of checkpoint."
 
 
-def latest_user_request(messages: Sequence[Dict[str, Any]]) -> Optional[str]:
-    """The newest user request in ``messages``, verbatim.
-
-    A run compacted twice has, as its newest user message, the previous
-    checkpoint; the request it preserved is read back out of it, so every
-    later checkpoint still carries what the user actually asked for.
-    """
-    for msg in reversed(messages):
-        if msg.get("role") != "user":
-            continue
-        text = _content_text(msg.get("content")).strip()
-        if not text:
-            continue
-        if text.startswith(CHECKPOINT_PREFIX):
-            start = text.find(LATEST_REQUEST_HEADER)
-            if start < 0:
-                continue
-            request = text[start + len(LATEST_REQUEST_HEADER):]
-            end = request.find(CHECKPOINT_END)
-            request = (request[:end] if end >= 0 else request).strip()
-            if request:
-                return _clip(request, LATEST_REQUEST_MAX_CHARS)
-            continue
-        return _clip(text, LATEST_REQUEST_MAX_CHARS)
-    return None
+def request_text(message: Dict[str, Any]) -> Optional[str]:
+    """A user message's text, clipped for carrying in a checkpoint."""
+    text = _content_text(message.get("content")).strip()
+    return _clip(text, LATEST_REQUEST_MAX_CHARS) if text else None
 
 
 def _chunk(items: List[str], chunk_chars: int) -> List[str]:

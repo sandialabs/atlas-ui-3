@@ -14,12 +14,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from atlas.domain.sessions.models import Session
 from atlas.modules.llm.usage_tracking import UsageSink
 
-from .compaction_controller import (
-    TRIGGER_MANUAL,
-    CompactionPolicy,
-    ContextCompactor,
-    RunCompactionGuard,
-)
+from .compaction_controller import ContextCompactor
+from .compaction_policy import TRIGGER_MANUAL, TRIGGER_TURN_INTERVAL, CompactionPolicy
+from .run_compaction_guard import RunCompactionGuard
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +110,9 @@ class TurnContext:
             return None
         build = self._request_builder(session, model, user_email, tools, custom_system_prompt)
         try:
-            from atlas.modules.llm.token_estimation import estimate_request_tokens
+            from atlas.modules.llm.token_estimation import estimate_request_tokens_async
             messages, schema = await build()
-            estimate = estimate_request_tokens(messages, schema, model)
+            estimate = await estimate_request_tokens_async(messages, schema, model)
         except Exception:
             logger.debug("Pre-turn context estimate failed", exc_info=True)
             return None
@@ -130,6 +127,10 @@ class TurnContext:
             user_email=user_email,
             build_request=build,
             trigger=trigger,
+            # The turn trigger is about how many turns the context carries,
+            # not its size: keep only the newest turn, or a run of short
+            # turns would all fit the keep budget and nothing would compact.
+            keep_tokens=0 if trigger == TRIGGER_TURN_INTERVAL else None,
         )
 
     def run_guard(

@@ -34,14 +34,12 @@ from atlas.domain.messages.models import (
     MessageRole,
 )
 from atlas.modules.llm.context_window import ContextWindow, resolve_context_window
-from atlas.modules.llm.token_estimation import TokenEstimate, estimate_request_tokens
+from atlas.modules.llm.token_estimation import TokenEstimate, estimate_request_tokens_async
 from atlas.modules.llm.usage_tracking import UsageSink
 
 from .compaction_engine import approx_tokens, summarize_messages
-from .compaction_policy import (  # noqa: F401 - re-exported for callers
+from .compaction_policy import (
     TRIGGER_AUTO,
-    TRIGGER_MANUAL,
-    TRIGGER_OVERFLOW,
     TRIGGER_TURN_INTERVAL,
     USAGE_TOTALS_KEY,
     CompactionPolicy,
@@ -137,7 +135,7 @@ class ContextCompactor:
                 totals["completion_tokens"] = int(totals.get("completion_tokens", 0)) + sink.completion_tokens
                 totals["calls"] = int(totals.get("calls", 0)) + sink.calls
                 session_context[USAGE_TOTALS_KEY] = totals
-        estimate = estimate_request_tokens(messages, tools_schema, model)
+        estimate = await estimate_request_tokens_async(messages, tools_schema, model)
         payload = self.usage_payload(
             model=model, estimate=estimate, policy=policy, history=history, sink=sink, totals=totals,
         )
@@ -184,7 +182,7 @@ class ContextCompactor:
         added: Optional[Message] = None
         try:
             messages, tools = await build_request()
-            before = estimate_request_tokens(messages, tools, model)
+            before = await estimate_request_tokens_async(messages, tools, model)
             through_id, segment, previous = self._history_segment(history, keep_tokens)
             summary = await summarize_messages(
                 self.llm, model, segment,
@@ -212,7 +210,7 @@ class ContextCompactor:
             history.add_message(added)
             record["through_offset"] = len(history.messages) - 1 - _index_of(history, through_id)
             messages, tools = await build_request()
-            after = estimate_request_tokens(messages, tools, model)
+            after = await estimate_request_tokens_async(messages, tools, model)
             if after.tokens >= before.tokens:
                 raise NothingToCompact("the checkpoint would not make the context any smaller")
             record["after_tokens"] = after.tokens
@@ -241,6 +239,12 @@ class ContextCompactor:
             failed = {**base, "status": "failed", "error": failure_text(exc)}
             await self._send(failed)
             return failed
+        except BaseException:
+            # Cancelled mid-compaction (Stop, disconnect, reset): the cancel
+            # path saves the session, and a half-built checkpoint row with no
+            # summary checked must never be saved with it.
+            self._discard(history, added)
+            raise
 
     @staticmethod
     def _discard(history: ConversationHistory, added: Optional[Message]) -> None:

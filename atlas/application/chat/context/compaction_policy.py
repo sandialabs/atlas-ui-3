@@ -101,5 +101,12 @@ def user_turns_since_checkpoint(history: ConversationHistory) -> int:
 
 
 def failure_text(exc: Exception) -> str:
-    message = getattr(exc, "message", None) or str(exc) or type(exc).__name__
-    return f"Context compaction failed: {str(message)[:300]}"
+    """The user-facing reason. Only a domain error's own message is shown:
+    raw provider or transport text can name internal hosts and URLs."""
+    from atlas.domain.errors import DomainError
+
+    if isinstance(exc, DomainError):
+        message = getattr(exc, "message", None) or str(exc)
+        if message:
+            return f"Context compaction failed: {str(message)[:300]}"
+    return "Context compaction failed: the model could not produce a checkpoint."

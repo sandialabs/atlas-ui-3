@@ -1030,12 +1030,10 @@ class ChatService:
             return None
         if conversation_id and session.context.get("conversation_id") != conversation_id:
             return None
-        orchestrator = self._get_orchestrator()
-        await orchestrator._ensure_model_authorized(model, user_email)
         # This service and its publisher belong to the requesting connection,
         # so the estimate is answered on that socket only.
-        return await orchestrator.turn_context.report_usage(
-            session, model, user_email, None, auto_compact, None,
+        return await self._get_orchestrator().report_context_usage(
+            session, model, user_email, auto_compact,
         )
 
     async def persist_session(self, session: Session, adopt: bool = False) -> bool:

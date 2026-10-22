@@ -410,6 +410,19 @@ class ChatOrchestrator:
             )
         return result
 
+    async def report_context_usage(
+        self, session: Session, model: str, user_email: Optional[str], auto_compact: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Publish the estimated next request of ``session`` (issue #877).
+
+        The model comes from the client, so it is authorized exactly as for
+        a turn before anything is measured against it.
+        """
+        await self._ensure_model_authorized(model, user_email)
+        return await self.turn_context.report_usage(
+            session, model, user_email, None, auto_compact, None,
+        )
+
     async def _execute_turn(
         self,
         session_id: UUID,

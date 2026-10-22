@@ -729,16 +729,15 @@ async def test_usage_estimate_only_for_the_bound_conversation(use_manager, repo)
     sid = _new_session(sessions)
     await _turn(service, sid, "CUI")
 
-    orchestrator = MagicMock()
-    orchestrator._ensure_model_authorized = AsyncMock()
+    from atlas.domain.errors import AuthorizationError
+
+    orchestrator = service._get_orchestrator()
     orchestrator.turn_context.report_usage = AsyncMock(return_value={"type": "context_usage"})
     with patch.object(service, "_get_orchestrator", return_value=orchestrator):
         assert await service.report_context_usage(sid, "m", USER, conversation_id="other") is None
         orchestrator.turn_context.report_usage.assert_not_awaited()
         assert await service.report_context_usage(sid, "m", USER, conversation_id=CONV) == {"type": "context_usage"}
-        orchestrator._ensure_model_authorized.assert_awaited_with("m", USER)
-
-        from atlas.domain.errors import AuthorizationError
-        orchestrator._ensure_model_authorized = AsyncMock(side_effect=AuthorizationError("no"))
-        with pytest.raises(AuthorizationError):
-            await service.report_context_usage(sid, "m", USER, conversation_id=CONV)
+        # The model check is the turn's own: a model the user may not use is refused.
+        with patch.object(orchestrator, "_ensure_model_authorized", AsyncMock(side_effect=AuthorizationError("no"))):
+            with pytest.raises(AuthorizationError):
+                await service.report_context_usage(sid, "m", USER, conversation_id=CONV)

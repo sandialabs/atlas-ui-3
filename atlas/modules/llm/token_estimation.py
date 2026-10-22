@@ -13,6 +13,7 @@ network call. They are charged a flat, deliberately generous amount instead.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -110,6 +111,9 @@ def estimate_request_tokens(
     if text_chars <= TOKENIZER_MAX_CHARS:
         try:
             import litellm
+            # Model keys like llama-* would otherwise fetch a Hugging Face
+            # tokenizer; an estimate must never touch the network.
+            litellm.disable_hf_tokenizer_download = True
             counted = litellm.token_counter(model=model or "", messages=text_messages)
             if tools_text:
                 counted += litellm.token_counter(model=model or "", text=tools_text)
@@ -119,3 +123,16 @@ def estimate_request_tokens(
             logger.debug("Tokenizer estimate unavailable; using the heuristic", exc_info=True)
 
     return TokenEstimate(_heuristic(text_chars, len(text_messages)) + media_tokens, METHOD_HEURISTIC)
+
+
+async def estimate_request_tokens_async(
+    messages: List[Dict[str, Any]],
+    tools_schema: Optional[List[Dict[str, Any]]] = None,
+    model: Optional[str] = None,
+) -> TokenEstimate:
+    """:func:`estimate_request_tokens` off the event loop.
+
+    Tokenizing a long transcript is CPU work; on the loop it would stall
+    every other connection this worker serves.
+    """
+    return await asyncio.to_thread(estimate_request_tokens, list(messages), tools_schema, model)

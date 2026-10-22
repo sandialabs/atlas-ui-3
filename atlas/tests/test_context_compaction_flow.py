@@ -9,7 +9,8 @@ import pytest
 
 from atlas.application.chat.agent.agentic_loop import AgenticLoop
 from atlas.application.chat.agent.protocols import AgentContext
-from atlas.application.chat.context.compaction_controller import CompactionPolicy, ContextCompactor
+from atlas.application.chat.context.compaction_controller import ContextCompactor
+from atlas.application.chat.context.compaction_policy import CompactionPolicy
 from atlas.application.chat.orchestrator import ChatOrchestrator
 from atlas.domain.errors import ContextWindowExceededError
 from atlas.domain.messages.models import (
@@ -226,6 +227,18 @@ class TestOrchestrator:
         usage = _frames(publisher, "context_usage")[-1]
         assert usage["auto_compact"] is False
         assert usage["estimated_tokens"] > usage["threshold_tokens"]
+
+    @pytest.mark.asyncio
+    async def test_turn_interval_writes_checkpoint(self):
+        orch, repo, llm, publisher, plain, _ = _orchestrator(window=200000)
+        orch.turn_context.compactor.config_manager.app_settings = SimpleNamespace(context_compaction_turn_interval=3)
+        session = await _session(repo, turns=4)
+        await orch.execute(session_id=session.id, content="short", model="m",
+                           user_email="u@x", session=session, auto_compact=True)
+        done = [f for f in _frames(publisher, "context_compaction") if f["status"] == "completed"]
+        assert done and done[0]["trigger"] == "turn_interval"
+        sent = plain.run_streaming.await_args.kwargs["messages"]
+        assert [m["role"] for m in sent] == ["user"] and sent[0]["content"].endswith("short")
 
     @pytest.mark.asyncio
     async def test_agent_run_gets_guard(self):

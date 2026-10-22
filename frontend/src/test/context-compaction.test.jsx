@@ -226,3 +226,36 @@ describe('ContextCheckpointRow', () => {
     expect(screen.getByText(/Ship it/)).toBeInTheDocument()
   })
 })
+
+describe('review follow-ups', () => {
+  it('an error frame ends a pending manual compaction', () => {
+    const sendMessage = vi.fn(() => true)
+    const { result } = renderHook(() => useContextCompaction({
+      config: {}, activeConversationId: 'c1', sendMessage,
+    }))
+    const handle = createWebSocketHandler({
+      addMessage: vi.fn(), mapMessages: vi.fn(), setIsThinking: vi.fn(), setCurrentAgentStep: vi.fn(),
+      onContextCompaction: (f) => result.current.handleCompaction(f),
+    })
+    act(() => { result.current.compactNow() })
+    expect(result.current.isManualCompacting).toBe(true)
+    act(() => { handle({ type: 'error', message: 'refused' }) })
+    expect(result.current.isCompacting).toBe(false)
+  })
+
+  it('a silent refusal adds no transcript row', () => {
+    const addMessage = vi.fn()
+    const handle = createWebSocketHandler({
+      addMessage, mapMessages: vi.fn(), setIsThinking: vi.fn(), setCurrentAgentStep: vi.fn(),
+    })
+    handle({ type: 'context_compaction', status: 'failed', trigger: 'manual', silent: true })
+    expect(addMessage).not.toHaveBeenCalled()
+  })
+
+  it('a run compaction does not block steering', () => {
+    const { result } = renderHook(() => useContextCompaction({ config: {}, activeConversationId: 'c1', sendMessage: vi.fn() }))
+    act(() => { result.current.handleCompaction({ status: 'started', trigger: 'auto', scope: 'run' }) })
+    expect(result.current.isCompacting).toBe(true)
+    expect(result.current.isManualCompacting).toBe(false)
+  })
+})

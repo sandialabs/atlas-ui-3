@@ -95,6 +95,10 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
   }, [])
 
   const isCompacting = compaction?.status === 'started'
+  // A manual compaction owns the conversation until it ends: a message sent
+  // meanwhile would race it. (An agent run's own compaction does not block
+  // steering; the run drains steering at its next step.)
+  const isManualCompacting = isCompacting && compaction?.trigger === 'manual'
 
   const compactNow = useCallback((focus = '') => {
     if (!enabled || typeof sendMessage !== 'function') return false
@@ -122,6 +126,7 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
     usage,
     compaction,
     isCompacting,
+    isManualCompacting,
     autoCompact,
     setAutoCompact,
     compactNow,

@@ -29,6 +29,7 @@ del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, TypeVar
@@ -953,6 +954,20 @@ def _record_run_conversation(connection_session, conversation_id) -> None:
         del known[:-_MAX_RUN_CONVERSATIONS]
 
 
+def _compaction_refused(conversation_id: Optional[str]) -> dict:
+    """Ends a client's pending manual compaction after a refusal (issue #877).
+
+    ``silent``: the error frame sent alongside already tells the user why.
+    """
+    return {
+        "type": "context_compaction",
+        "status": "failed",
+        "trigger": "manual",
+        "silent": True,
+        "conversation_id": conversation_id,
+    }
+
+
 def _normalize_conversation_id(raw: Any) -> Optional[str]:
     """The client's conversation id as every check on the chat path sees it.
 
@@ -1869,7 +1884,11 @@ async def websocket_endpoint(websocket: WebSocket):
     # turn (which would race on the same session history), its content is
     # pushed onto the running loop's channel and injected as a normal user turn
     # at the next iteration boundary.
-    active_chat_task = {"task": None, "steering": None, "conversation_id": None}
+    active_chat_task = {"task": None, "steering": None, "conversation_id": None, "kind": None}
+    # Issue #877: when this connection last answered a context_usage_request.
+    # The meter asks on conversation open and model change; a client that asks
+    # faster than this gets no answer rather than a re-tokenized transcript.
+    last_usage_request = {"at": 0.0}
 
     # Parallel conversation runs (issue #884). The registry is process-wide and
     # outlives this socket; ``connection_run_ids`` is just this connection's
@@ -1925,6 +1944,22 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             if message_type == "chat":
+                # Issue #877: a manual compaction rewrites what this
+                # conversation's next request carries and saves the session;
+                # a turn started under it would race on the same history.
+                compacting = active_chat_task.get("task")
+                if (
+                    active_chat_task.get("kind") == "compact"
+                    and compacting is not None
+                    and not compacting.done()
+                ):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "The conversation is being compacted. Send your message once it has finished.",
+                        "error_type": "compaction_in_progress",
+                        "conversation_id": data.get("conversation_id"),
+                    })
+                    continue
                 # Issue #824: if an agent loop is already running for this
                 # connection, steer it instead of starting a second concurrent
                 # turn (which would race on the same session history). The
@@ -2588,6 +2623,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 chat_task = asyncio.create_task(handle_chat_guarded())
                 if run_record is None:
                     active_chat_task["task"] = chat_task
+                    active_chat_task["kind"] = "chat"
                 else:
                     run_registry.attach_task(run_record.run_id, chat_task)
 
@@ -2597,7 +2633,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # turn. Read-only, and skipped while a turn is running: that
                 # turn reports its own usage when it ends.
                 running = active_chat_task.get("task")
-                if running is None or running.done():
+                now = time.monotonic()
+                if (running is None or running.done()) and now - last_usage_request["at"] >= 1.0:
+                    last_usage_request["at"] = now
                     try:
                         await chat_service.report_context_usage(
                             session_id,
@@ -2638,9 +2676,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     if refusal is not None:
                         await websocket.send_json(refusal)
+                        await websocket.send_json(_compaction_refused(compact_conversation_id))
                         continue
 
                 async def handle_compact(data=data, conversation_id=compact_conversation_id):
+                    # Every refusal below also ends the client's pending
+                    # compaction; the error frame says why.
+                    refused = _compaction_refused(conversation_id)
                     try:
                         await chat_service.handle_chat_message(
                             session_id=session_id,
@@ -2667,12 +2709,14 @@ async def websocket_endpoint(websocket: WebSocket):
                                 else "validation"
                             ),
                         })
+                        await websocket_update_callback(websocket, refused)
                     except DomainError as e:
                         await websocket_update_callback(websocket, {
                             "type": "error",
                             "message": str(e.message if hasattr(e, "message") else e),
                             "error_type": "authorization" if isinstance(e, AuthorizationError) else "domain",
                         })
+                        await websocket_update_callback(websocket, refused)
                     except Exception as e:
                         logger.error("Unexpected error compacting a conversation: %s", e, exc_info=True)
                         await websocket_update_callback(websocket, {
@@ -2685,6 +2729,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 active_chat_task["steering"] = None
                 active_chat_task["conversation_id"] = compact_conversation_id
                 active_chat_task["task"] = asyncio.create_task(handle_compact())
+                active_chat_task["kind"] = "compact"
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection).
