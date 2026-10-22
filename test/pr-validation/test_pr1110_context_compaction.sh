@@ -1,9 +1,9 @@
 #!/bin/bash
-# Validation script for issue #877: context tracking and manual/automatic
+# Validation script for PR #1110 (issue #877): context tracking and manual/automatic
 # compaction for long conversations and agent runs.
 #
 # A real backend is started on a free port with a scripted OpenAI-compatible
-# mock model (fixtures/pr877/mock_llm.py) whose configured context window is
+# mock model (fixtures/pr1110/mock_llm.py) whose configured context window is
 # small, so a few turns reach the compaction threshold. The scenario checks,
 # end to end over the WebSocket and the conversations REST API:
 #   1. Automatic compaction before a turn writes a stored checkpoint, the next
@@ -19,7 +19,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FIXTURES="$SCRIPT_DIR/fixtures/pr877"
+FIXTURES="$SCRIPT_DIR/fixtures/pr1110"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

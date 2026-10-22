@@ -170,7 +170,7 @@ async def agent_run():
     content = "label=AGENT steps=8 narrate=260 overflow_at=6 please run the audit"
     await turn(ws, chat(content, agent_mode=True, agent_max_steps=12,
                         selected_tools=["atlas_sleep"]), frames, timeout=120)
-    if os.environ.get("PR877_DEBUG"):
+    if os.environ.get("SCENARIO_DEBUG"):
         for f in frames:
             if f.get("type") != "token_stream":
                 print("  frame:", json.dumps({k: (v if not isinstance(v, str) else v[:120]) for k, v in f.items() if k not in ("summary",)})[:300])
