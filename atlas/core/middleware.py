@@ -157,8 +157,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.auth_source = "oidc"
             return await self._finish(request, call_next, oidc_user)
 
-        # Validate proxy secret if enabled (skip in debug mode for local development)
-        if self.proxy_secret_enabled and not self.debug_mode:
+        # Validate proxy secret if enabled (skip in debug mode for local development).
+        # The secret exists to make the identity header trustworthy; with
+        # header auth disabled no header is trusted, so the gate has nothing
+        # to protect and would only turn the OIDC login redirect (and signed
+        # download links) into 503s on a deployment with no proxy in front.
+        if self.proxy_secret_enabled and not self.debug_mode and self.header_auth_enabled:
             if not self.proxy_secret:
                 # Fail closed: proxy secret is required but not configured
                 logger.error("Proxy secret validation enabled but PROXY_SECRET is not set — rejecting request")

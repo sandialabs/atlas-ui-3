@@ -30,7 +30,9 @@ PROXY_SECRET = "proxy-secret"
 SPOOFED = {"X-Proxy-Secret": PROXY_SECRET, "X-User-Email": "admin@example.gov"}
 
 
-def _build_app(*, header_auth_enabled=False, debug_mode=False, proxy_secret_enabled=True):
+def _build_app(
+    *, header_auth_enabled=False, debug_mode=False, proxy_secret_enabled=True, proxy_secret=PROXY_SECRET
+):
     app = FastAPI()
 
     @app.get("/api/whoami")
@@ -60,7 +62,7 @@ def _build_app(*, header_auth_enabled=False, debug_mode=False, proxy_secret_enab
         AuthMiddleware,
         debug_mode=debug_mode,
         proxy_secret_enabled=proxy_secret_enabled,
-        proxy_secret=PROXY_SECRET,
+        proxy_secret=proxy_secret,
         oidc_enabled=True,
         header_auth_enabled=header_auth_enabled,
     )
@@ -127,6 +129,19 @@ class TestHttpOidcOnly:
         )
         assert response.json() == {"user": "owner@example.gov"}
 
+    def test_proxy_secret_gate_does_not_apply(self, session_store):
+        # FEATURE_PROXY_SECRET_ENABLED defaults to true; an OIDC-only
+        # deployment with no proxy and no PROXY_SECRET must still offer login
+        # and serve signed downloads instead of failing closed with 503.
+        client = TestClient(_build_app(proxy_secret=None))
+        page = client.get("/workspace/abc", follow_redirects=False)
+        assert page.status_code == 302
+        assert page.headers["location"].startswith("/auth/oidc/login?next=")
+        assert client.get("/api/whoami", headers={"X-User-Email": "a@example.gov"}).status_code == 401
+        token = generate_file_token("owner@example.gov", "users/owner/report.pdf")
+        download = client.get(f"/api/files/download/report?token={token}")
+        assert download.json() == {"user": "owner@example.gov"}
+
     def test_invalid_capability_token_does_not_fall_back_to_header(self, session_store):
         client = TestClient(_build_app())
         response = client.get("/api/files/download/report?token=forged", headers=SPOOFED)
@@ -185,6 +200,16 @@ class TestWebSocketOidcOnly:
                 ws.send_json({"type": "attach_file", "s3_key": "users/admin@example.gov/x.txt"})
                 assert _connected_user(ws_factory) == "admin@example.gov"
 
+    def test_rejection_names_sign_in_even_without_a_proxy_secret(self, ws_factory):
+        settings = ws_factory.get_config_manager.return_value.app_settings
+        settings.proxy_secret = None
+        with patch("main._resolve_oidc_websocket_user", AsyncMock(return_value=None)):
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                with _ws_client().websocket_connect("/ws", headers={"X-User-Email": "a@example.gov"}):
+                    pass
+        assert exc_info.value.code == 1008
+        assert exc_info.value.reason == "Authentication required. Please sign in."
+
     @pytest.mark.parametrize("path", ["/ws", "/ws?user=admin@example.gov"])
     def test_debug_mode_fallbacks_are_rejected(self, ws_factory, path):
         settings = ws_factory.get_config_manager.return_value.app_settings
@@ -201,6 +226,16 @@ class TestWebSocketOidcOnly:
             with _ws_client().websocket_connect("/ws", headers=SPOOFED) as ws:
                 ws.send_json({"type": "attach_file", "s3_key": "users/user@example.gov/x.txt"})
                 assert _connected_user(ws_factory) == "user@example.gov"
+
+
+def _run_atlas(script, env_overrides):
+    """Run ``script`` in a fresh interpreter so main.py's import-time setup runs."""
+    atlas_dir = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONPATH": str(atlas_dir.parent), **env_overrides}
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=atlas_dir, env=env, capture_output=True, text=True, timeout=120,
+    )
 
 
 def _settings(*, header, oidc):
@@ -220,23 +255,42 @@ class TestStartupValidation:
         with pytest.raises(AuthConfigurationError, match="configuration is incomplete"):
             validate_auth_modes(_settings(header=False, oidc=False), oidc_requested=True)
 
+    def test_real_app_ignores_identity_headers(self):
+        # The HTTP tests above build their own app; this one checks main.py
+        # actually wires the flag into AuthMiddleware, end to end.
+        script = (
+            "from fastapi.testclient import TestClient\n"
+            "from atlas.main import app\n"
+            "client = TestClient(app)\n"
+            "h = {'X-Proxy-Secret': 'proxy-secret', 'X-User-Email': 'admin@example.gov'}\n"
+            "print(client.get('/api/config', headers=h).status_code)\n"
+            "print(client.get('/', headers=h, follow_redirects=False).headers.get('location'))\n"
+        )
+        result = _run_atlas(script, {
+            "FEATURE_HEADER_AUTH_ENABLED": "false",
+            "FEATURE_OIDC_AUTH_ENABLED": "true",
+            "OIDC_SESSION_SECRET": "test-session-secret",
+            "OIDC_ISSUER": "https://idp.example.gov",
+            "OIDC_CLIENT_ID": "atlas",
+            "FEATURE_PROXY_SECRET_ENABLED": "true",
+            "PROXY_SECRET": PROXY_SECRET,
+            "DEBUG_MODE": "false",
+        })
+        assert result.returncode == 0, result.stderr
+        status, location = result.stdout.strip().splitlines()[-2:]
+        assert status == "401"
+        assert location.startswith("/auth/oidc/login")
+
     def test_app_import_fails_when_oidc_is_unavailable(self):
         # End to end through main.py: OIDC is requested but startup disables
         # it (no session secret), and with header auth off the app must not
         # come up at all.
-        atlas_dir = Path(__file__).resolve().parents[1]
-        env = {
-            **os.environ,
-            "PYTHONPATH": str(atlas_dir.parent),
+        result = _run_atlas("import atlas.main", {
             "FEATURE_HEADER_AUTH_ENABLED": "false",
             "FEATURE_OIDC_AUTH_ENABLED": "true",
             "OIDC_SESSION_SECRET": "",
             "OIDC_ISSUER": "https://idp.example.gov",
             "OIDC_CLIENT_ID": "atlas",
-        }
-        result = subprocess.run(
-            [sys.executable, "-c", "import atlas.main"],
-            cwd=atlas_dir, env=env, capture_output=True, text=True, timeout=120,
-        )
+        })
         assert result.returncode != 0
         assert "AuthConfigurationError" in result.stderr

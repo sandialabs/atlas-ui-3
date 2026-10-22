@@ -1760,9 +1760,17 @@ async def websocket_endpoint(websocket: WebSocket):
     # secret because an OIDC deployment may have no reverse proxy at all.
     oidc_ws_user = await _resolve_oidc_websocket_user(websocket, config_manager.app_settings)
 
+    # OIDC-only mode: the OIDC session above is the only credential. The
+    # identity header, the debug query parameter and the debug test user are
+    # all skipped below, so a valid proxy secret plus an asserted identity
+    # header cannot stand in for a login -- and the proxy secret, which only
+    # exists to make that header trustworthy, is not required either.
+    header_auth_enabled = bool(getattr(config_manager.app_settings, "feature_header_auth_enabled", True))
+
     # WebSocket connections must present the shared proxy secret (same as AuthMiddleware)
     if (
         oidc_ws_user is None
+        and header_auth_enabled
         and config_manager.app_settings.feature_proxy_secret_enabled
         and not is_debug_mode
     ):
@@ -1789,11 +1797,6 @@ async def websocket_endpoint(websocket: WebSocket):
     # letting any non-empty header value authenticate the socket.
     app_settings = config_manager.app_settings
     auth_header_name = app_settings.auth_user_header
-    # OIDC-only mode: the OIDC session above is the only credential. The
-    # identity header, the debug query parameter and the debug test user are
-    # all skipped, so a valid proxy secret plus an asserted identity header
-    # cannot stand in for a login.
-    header_auth_enabled = bool(getattr(app_settings, "feature_header_auth_enabled", True))
     x_email_header = websocket.headers.get(auth_header_name) if header_auth_enabled else None
     if not user_email and x_email_header:
         # Async form: JWT verification can fetch the ALB public key with a

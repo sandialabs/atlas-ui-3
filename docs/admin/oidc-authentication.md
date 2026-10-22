@@ -59,8 +59,9 @@ live OIDC session gets:
 Signed file-download links (`/mcp/files/download/...` and
 `/api/files/download/...` with a capability `token`) keep working, because
 they authenticate with the token rather than with a header. The proxy secret
-gate, if enabled, still applies in front of everything except OIDC sessions
-and `/mcp/files/download/`.
+(`FEATURE_PROXY_SECRET_ENABLED` / `PROXY_SECRET`) is not checked in this mode:
+it only exists to make the identity header trustworthy, so an OIDC-only
+deployment needs no reverse proxy and no `PROXY_SECRET`.
 
 Atlas refuses to start when no login mode is left: with
 `FEATURE_HEADER_AUTH_ENABLED=false` and `FEATURE_OIDC_AUTH_ENABLED=false`, or
