@@ -636,6 +636,11 @@ async def get_compliance_levels(current_user: str = Depends(get_current_user)):
         for name, level_obj in compliance_mgr.levels.items():
             levels.append({
                 "name": name,
+                # The canonical identifier stays machine-readable (policies,
+                # aliases, persistence); display_name is the friendly label
+                # the UI renders (issue #1117), resolved to ``name`` when the
+                # level does not configure one.
+                "display_name": level_obj.display_name or name,
                 "description": level_obj.description,
                 "aliases": level_obj.aliases,
                 "allowed_with": level_obj.allowed_with,

@@ -8,6 +8,21 @@ const MCPServerManager = ({ addNotification }) => {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState({})
   const [searchQuery, setSearchQuery] = useState('')
+  // Level definitions for friendly labels on the classification badge
+  // (issue #1117). Best-effort: the badge falls back to the canonical name
+  // when the fetch fails, exactly as before.
+  const [complianceLevels, setComplianceLevels] = useState([])
+
+  const loadComplianceLevels = useCallback(async () => {
+    try {
+      const response = await fetch('/api/compliance-levels')
+      if (!response.ok) return
+      const data = await response.json()
+      if (Array.isArray(data?.levels)) setComplianceLevels(data.levels)
+    } catch {
+      // Presentation only; the raw level name is an acceptable fallback.
+    }
+  }, [])
 
   const loadServers = useCallback(async () => {
     try {
@@ -43,6 +58,10 @@ const MCPServerManager = ({ addNotification }) => {
   useEffect(() => {
     loadServers()
   }, [loadServers])
+
+  useEffect(() => {
+    loadComplianceLevels()
+  }, [loadComplianceLevels])
 
   const addServer = async (serverName) => {
     try {
@@ -219,11 +238,19 @@ const MCPServerManager = ({ addNotification }) => {
                   <div className="flex items-center gap-2 mb-2">
                     {getStatusIcon(status)}
                     <h3 className="font-medium text-gray-50">{serverName}</h3>
-                    {serverInfo?.compliance_level && (
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${getComplianceLevelColor(serverInfo.compliance_level)}`}>
-                        {serverInfo.compliance_level}
-                      </span>
-                    )}
+                    {serverInfo?.compliance_level && (() => {
+                      const levelName = serverInfo.compliance_level
+                      const level = complianceLevels.find(l => l?.name === levelName || (Array.isArray(l?.aliases) && l.aliases.includes(levelName)))
+                      const label = (level?.display_name && String(level.display_name).trim()) || levelName
+                      return (
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${getComplianceLevelColor(levelName)}`}
+                          title={label !== levelName ? levelName : undefined}
+                        >
+                          {label}
+                        </span>
+                      )
+                    })()}
                   </div>
                   
                   {serverInfo?.short_description && (

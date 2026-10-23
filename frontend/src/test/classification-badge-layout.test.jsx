@@ -139,3 +139,42 @@ describe('model picker rows', () => {
     })
   })
 })
+
+describe('friendly classification labels (issue #1117)', () => {
+  const LEVELS = [{
+    name: 'CUI_no_ECI_no_ITAR_no_PII',
+    display_name: 'CUI (Restricted)',
+    aliases: ['CUI_RESTRICTED'],
+  }]
+
+  it('renders classifications through their display names', () => {
+    render(
+      <ClassificationBadge
+        resource={{ allowed_data_classifications: ['CUI_no_ECI_no_ITAR_no_PII'] }}
+        levels={LEVELS}
+      />
+    )
+    // The compact and the hover view both carry the friendly label.
+    expect(screen.getAllByText('CUI (Restricted)').length).toBeGreaterThan(0)
+    expect(screen.queryByText('CUI_no_ECI_no_ITAR_no_PII')).not.toBeInTheDocument()
+  })
+
+  it('resolves a declared alias to its display name', () => {
+    render(
+      <ClassificationBadge
+        resource={{ allowed_data_classifications: ['CUI_RESTRICTED'] }}
+        levels={LEVELS}
+      />
+    )
+    expect(screen.getAllByText('CUI (Restricted)').length).toBeGreaterThan(0)
+  })
+
+  it('keeps raw names when the definitions are not provided', () => {
+    render(
+      <ClassificationBadge
+        resource={{ allowed_data_classifications: ['CUI_no_ECI_no_ITAR_no_PII'] }}
+      />
+    )
+    expect(screen.getAllByText('CUI_no_ECI_no_ITAR_no_PII').length).toBeGreaterThan(0)
+  })
+})

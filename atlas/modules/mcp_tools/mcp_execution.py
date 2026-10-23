@@ -1097,8 +1097,17 @@ class ExecutionMixin:
         )
         if not decision.allowed:
             if decision.denial is McpDenialKind.CLASSIFICATION:
+                # The user reads this level name, so show the configured
+                # friendly label (issue #1117); authorization itself compared
+                # canonical names and is untouched.
+                from atlas.core.compliance import get_compliance_manager
+
+                level_label = (
+                    get_compliance_manager().get_display_name(active_level)
+                    or active_level
+                )
                 error_msg = (
-                    f"Tool '{tool_call.name}' is not approved for {active_level} data"
+                    f"Tool '{tool_call.name}' is not approved for {level_label} data"
                 )
             else:
                 error_msg = f"Tool '{tool_call.name}' is not authorized for this user"

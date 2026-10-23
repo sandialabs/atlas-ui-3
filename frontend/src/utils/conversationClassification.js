@@ -6,6 +6,14 @@
 // and every chat turn on its own -- so this only lets the sidebar mark rows and
 // explain a refusal before a round-trip. Its messages name the header control
 // as the UI labels it ("security level"); the server's say "compliance level".
+//
+// Recorded levels render as their configured friendly label where the
+// deployment defines one (issue #1117): display_name ?? name, aliases
+// resolved. Every comparison below stays on canonical names -- only the
+// rendered strings change -- so a label can never widen what the server
+// would refuse.
+
+import { complianceDisplayName } from './complianceDisplay'
 
 export const CLASSIFICATION_ERROR_TYPE = 'conversation_classification'
 
@@ -39,11 +47,20 @@ function canonicalLevel(name, levels) {
   return match ? match.name : name
 }
 
+// Friendly label for a level name or alias: display_name ?? canonical name,
+// falling back to the raw name the deployment no longer defines. Rendering
+// only; matching keeps using canonicalLevel above.
+function displayLevel(name, levels) {
+  if (!name) return null
+  const canonical = canonicalLevel(name, levels) || name
+  return complianceDisplayName(levels, canonical) || canonical
+}
+
 // Why the conversation cannot be opened under the active level, or null.
 export function classificationRefusal(conv, { complianceEnabled, activeLevel, levels = [] }) {
   const { state, level } = classificationOf(conv)
   const active = complianceEnabled ? canonicalLevel(activeLevel || null, levels) : null
-  const activeLabel = active || 'no security level'
+  const activeLabel = (active && displayLevel(active, levels)) || 'no security level'
   switch (state) {
     case 'unknown':
       return null
@@ -57,20 +74,22 @@ export function classificationRefusal(conv, { complianceEnabled, activeLevel, le
         : null
     case 'classified':
       if (!complianceEnabled) {
-        return `This conversation was saved under ${level}, and security levels are not enabled, so it cannot be continued.`
+        return `This conversation was saved under ${displayLevel(level, levels)}, and security levels are not enabled, so it cannot be continued.`
       }
       return canonicalLevel(level, levels) === active
         ? null
-        : `This conversation was saved under ${canonicalLevel(level, levels)} and cannot be continued under ${activeLabel}. Switch the security level to ${canonicalLevel(level, levels)} to continue it, or start a new conversation.`
+        : `This conversation was saved under ${displayLevel(level, levels)} and cannot be continued under ${activeLabel}. Switch the security level to ${displayLevel(level, levels)} to continue it, or start a new conversation.`
     default:
       return "This conversation's recorded security level could not be read, so it cannot be continued. Start a new conversation."
   }
 }
 
 // Short label for a sidebar row; null when there is nothing worth showing.
-export function classificationLabel(conv) {
+// The recorded canonical level renders as its friendly label (issue #1117);
+// a level the deployment no longer defines keeps its recorded name.
+export function classificationLabel(conv, levels = []) {
   const { state, level } = classificationOf(conv)
-  if (state === 'classified') return level
+  if (state === 'classified') return displayLevel(level, levels)
   if (state === 'legacy') return 'Unrecorded level'
   if (state === 'invalid') return 'Unreadable level'
   return null

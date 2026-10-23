@@ -228,3 +228,69 @@ describe('conversation setup cluster', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+describe('friendly compliance labels (issue #1117)', () => {
+  const DISPLAY_LEVELS = [
+    {
+      name: 'CUI_no_ECI_no_ITAR_no_PII',
+      display_name: 'CUI (Restricted)',
+      description: 'CUI excluding ECI, ITAR, and PII',
+      aliases: ['CUI_RESTRICTED'],
+      allowed_with: ['CUI_no_ECI_no_ITAR_no_PII'],
+    },
+    { name: 'Public', description: '', aliases: [], allowed_with: ['Public'] },
+  ]
+
+  it('renders display_name in the options and keeps the value canonical', () => {
+    render(
+      <SecurityLevelControl
+        complianceOptions={DISPLAY_LEVELS}
+        complianceRequired={false}
+        value="Public"
+        onChange={vi.fn()}
+        lock={unlocked}
+      />
+    )
+    const select = screen.getByLabelText('Security level')
+    // The first option is the "All Levels" empty value.
+    const options = [...select.options].filter(o => o.value !== '')
+    expect(options.map(o => o.value)).toEqual([
+      'CUI_no_ECI_no_ITAR_no_PII',
+      'Public',
+    ])
+    expect(options[0].textContent).toBe('CUI (Restricted)')
+    expect(options[1].textContent).toBe('Public')
+  })
+
+  it('keeps the canonical name reachable in the option title', () => {
+    render(
+      <SecurityLevelControl
+        complianceOptions={DISPLAY_LEVELS}
+        complianceRequired={false}
+        value="Public"
+        onChange={vi.fn()}
+        lock={unlocked}
+      />
+    )
+    const select = screen.getByLabelText('Security level')
+    const [cuiOption, publicOption] = [...select.options].filter(o => o.value !== '')
+    expect(cuiOption.title).toBe('CUI_no_ECI_no_ITAR_no_PII — CUI excluding ECI, ITAR, and PII')
+    // No display name: the title stays the description alone.
+    expect(publicOption.title).toBe('')
+  })
+
+  it('falls back to the name for a synthetic option without display_name', () => {
+    const synthetic = [...LEVELS, { name: 'Retired', description: 'Not defined by this deployment' }]
+    render(
+      <SecurityLevelControl
+        complianceOptions={synthetic}
+        complianceRequired={false}
+        value="Retired"
+        onChange={vi.fn()}
+        lock={unlocked}
+      />
+    )
+    const select = screen.getByLabelText('Security level')
+    expect([...select.options].some(o => o.textContent === 'Retired')).toBe(true)
+  })
+})

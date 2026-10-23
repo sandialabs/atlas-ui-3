@@ -83,11 +83,21 @@ export function SecurityLevelControl({
         : complianceRequired
           ? !value && <option value="" disabled>Select a level</option>
           : <option value="">All Levels</option>}
-      {complianceOptions.map(level => (
-        <option key={level.name} value={level.name} title={level.description || undefined}>
-          {level.name}
-        </option>
-      ))}
+      {complianceOptions.map(level => {
+        const label = level.display_name || level.name
+        // The canonical name stays identifiable wherever a friendly label
+        // could be ambiguous (issue #1117): the hover title names the
+        // identifier, then the level's description.
+        const title = [
+          label !== level.name ? level.name : null,
+          level.description || null,
+        ].filter(Boolean).join(' — ')
+        return (
+          <option key={level.name} value={level.name} title={title || undefined}>
+            {label}
+          </option>
+        )
+      })}
     </select>
   )
 

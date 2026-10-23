@@ -5,6 +5,8 @@ import MCPServerManager from '../components/admin/MCPServerManager.jsx'
 
 const isCI = process.env.CI || process.env.ENVIRONMENT === 'cicd'
 
+let serverFetchQueue
+
 describe('MCPServerManager', () => {
   if (!isCI) {
     const addNotification = vi.fn()
@@ -12,7 +14,26 @@ describe('MCPServerManager', () => {
 
     beforeEach(() => {
       vi.clearAllMocks()
-      global.fetch = vi.fn()
+      // Route by URL: the manager also fetches /api/compliance-levels for
+      // friendly classification labels (issue #1117), which must not consume
+      // a queued admin response.
+      const queue = vi.fn()
+      serverFetchQueue = queue
+      global.fetch = vi.fn(async (url, options) => {
+        if (String(url).includes('/api/compliance-levels')) {
+          return {
+            ok: true,
+            json: async () => ({
+              levels: [{
+                name: 'Public',
+                display_name: 'Public (Unclassified)',
+                aliases: [],
+              }],
+            }),
+          }
+        }
+        return queue(url, options)
+      })
     })
 
     afterEach(() => {
@@ -23,7 +44,7 @@ describe('MCPServerManager', () => {
       const serverName = 'example-server'
 
       // Initial load: available then active
-      global.fetch
+      serverFetchQueue
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({
