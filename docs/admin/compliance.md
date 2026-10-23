@@ -41,9 +41,11 @@ Canonical level names double as identifiers in `allowed_data_classifications`, t
   "display_name": "CUI (Restricted)",
   "description": "CUI excluding ECI, ITAR, and PII",
   "aliases": ["CUI_RESTRICTED"],
-  "banner": { "label": "CUI (Restricted)" }
+  "banner": { "background_color": "#502B85" }
 }
 ```
+
+The level's identifier, its aliases, and its friendly label are three separate things: `CUI_no_ECI_no_ITAR_no_PII` stays the key, `CUI_RESTRICTED` (an alias) also resolves to it, and `CUI (Restricted)` is only what users see. The banner above deliberately omits `label`, so the marking reads `CUI (Restricted)` through the `display_name` fallback described below. A `banner` needs a valid `background_color` to be shown at all (see [Classification Banner](#classification-banner-optional)); `{"label": "..."}` alone is dropped at load.
 
 Semantics:
 

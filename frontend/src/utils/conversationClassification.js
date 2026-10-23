@@ -109,13 +109,23 @@ export function classificationLabel(conv, levels = []) {
 // this only stops the UI from offering a transition the server would refuse.
 // Returns the level to display when locked, a placeholder label for a record
 // with no usable level, and the guidance shown to the user.
-export function classificationLock({ complianceEnabled, activeConversationClassification, conversationAccepted = true }) {
+export function classificationLock({
+  complianceEnabled,
+  activeConversationClassification,
+  conversationAccepted = true,
+  levels = [],
+}) {
   const state = activeConversationClassification?.state
   if (!complianceEnabled || !state || !conversationAccepted) {
     return { locked: false, level: null, placeholder: null, guidance: null }
   }
   if (state === 'classified' && activeConversationClassification.level) {
-    const level = activeConversationClassification.level
+    // A record may hold an alias; resolve it to the canonical value the
+    // selector's options carry, so the locked option matches (and renders the
+    // friendly label, issue #1117). An undefined level keeps its recorded
+    // name, which the header shows as a synthetic option.
+    const recorded = activeConversationClassification.level
+    const level = canonicalLevel(recorded, levels) || recorded
     return {
       locked: true,
       level,

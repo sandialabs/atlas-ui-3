@@ -96,6 +96,9 @@ describe('MCPServerManager', () => {
         expect(screen.getByText(serverName)).toBeInTheDocument()
       })
 
+      // The classification badge renders the friendly label (issue #1117).
+      expect(await screen.findByText('Public (Unclassified)')).toBeInTheDocument()
+
       const addButton = screen.getByRole('button', { name: /add/i })
       fireEvent.click(addButton)
 

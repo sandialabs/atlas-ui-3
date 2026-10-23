@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Plus, Minus, RefreshCw, Server, CheckCircle, XCircle, AlertCircle, Search } from 'lucide-react'
+import { complianceDisplayName } from '../../utils/complianceDisplay'
 
 const MCPServerManager = ({ addNotification }) => {
   const [availableServers, setAvailableServers] = useState({})
@@ -240,8 +241,10 @@ const MCPServerManager = ({ addNotification }) => {
                     <h3 className="font-medium text-gray-50">{serverName}</h3>
                     {serverInfo?.compliance_level && (() => {
                       const levelName = serverInfo.compliance_level
-                      const level = complianceLevels.find(l => l?.name === levelName || (Array.isArray(l?.aliases) && l.aliases.includes(levelName)))
-                      const label = (level?.display_name && String(level.display_name).trim()) || levelName
+                      // Shared resolution (issue #1117): display_name ?? name,
+                      // aliases included. The admin page is outside the chat
+                      // providers, so these levels come from its own fetch.
+                      const label = complianceDisplayName(complianceLevels, levelName)
                       return (
                         <span
                           className={`px-2 py-0.5 rounded text-xs font-medium ${getComplianceLevelColor(levelName)}`}

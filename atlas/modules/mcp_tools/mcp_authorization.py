@@ -217,10 +217,12 @@ async def authorize_mcp_server(
 
     if compliance_level:
         permitted = False
+        compliance_mgr = None
         try:
             from atlas.core.compliance import get_compliance_manager
 
-            permitted = get_compliance_manager().classification_permits(
+            compliance_mgr = get_compliance_manager()
+            permitted = compliance_mgr.classification_permits(
                 compliance_level, declared_classifications(config)
             )
         except Exception:
@@ -231,13 +233,20 @@ async def authorize_mcp_server(
                 exc_info=True,
             )
         if not permitted:
+            # The user reads this level name, so show its configured friendly
+            # label (issue #1117); the check above compared canonical names.
+            level_label = (
+                compliance_mgr.get_display_name(compliance_level)
+                if compliance_mgr is not None
+                else None
+            ) or compliance_level
             return _deny(
                 operation,
                 server_name,
                 normalized_user,
                 McpDenialKind.CLASSIFICATION,
                 f"MCP {operation.value} '{server_name}' is not approved for "
-                f"{compliance_level} data",
+                f"{level_label} data",
             )
 
     if model_name:

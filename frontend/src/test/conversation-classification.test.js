@@ -144,6 +144,26 @@ describe('friendly display names (issue #1117)', () => {
     })
     expect(lock.level).toBe('CUI_no_ECI_no_ITAR_no_PII')
   })
+
+  it('resolves an alias-recorded level to the canonical option value', () => {
+    // The selector's options carry canonical values; a record written with
+    // an alias must still match one so it renders its friendly label.
+    const lock = classificationLock({
+      complianceEnabled: true,
+      activeConversationClassification: { state: 'classified', level: 'CUI_RESTRICTED' },
+      levels,
+    })
+    expect(lock.level).toBe('CUI_no_ECI_no_ITAR_no_PII')
+  })
+
+  it('keeps an undefined recorded level as-is', () => {
+    const lock = classificationLock({
+      complianceEnabled: true,
+      activeConversationClassification: { state: 'classified', level: 'Retired' },
+      levels,
+    })
+    expect(lock.level).toBe('Retired')
+  })
 })
 
 describe('classificationLock (issue #1044)', () => {

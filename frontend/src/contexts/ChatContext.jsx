@@ -2079,7 +2079,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			const replacement = firstCompliantModel(configModels, complianceLevels, activeComplianceFilter)
 			if (replacement) {
 				configSetCurrentModel(replacement)
-				toast.info(`Switched model to ${replacement} for the ${activeComplianceFilter} security level`)
+				const levelLabel = complianceDisplayName(complianceLevels, activeComplianceFilter) || activeComplianceFilter
+				toast.info(`Switched model to ${replacement} for the ${levelLabel} security level`)
 			}
 		}
 	}, [activeComplianceFilter, complianceLevels, config.tools, config.prompts, selectedTools, selectedPrompts, selectedDataSources, mcpKeyLevel, ragKeyLevel, pruneTools, prunePrompts, pruneDataSources, activePromptKey, personas.personas, clearActivePrompt, configModels, configSetCurrentModel, currentModel, toast])

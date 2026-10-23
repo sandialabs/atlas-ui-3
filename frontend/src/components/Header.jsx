@@ -104,6 +104,9 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
     complianceEnabled: !!features?.compliance_levels,
     activeConversationClassification,
     conversationAccepted,
+    // Resolve an alias-recorded level so the locked option matches a defined
+    // level and renders its friendly label (issue #1117).
+    levels: complianceLevels,
   })
   const displayLevel = lock.locked ? lock.level : complianceLevelFilter
   // A saved level stays selectable even if the definitions failed to load or
