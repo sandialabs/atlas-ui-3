@@ -142,6 +142,10 @@ async def authorize_mcp_server(
     access is enforced as well.
     """
     normalized_user = normalize_user_email(user_email)
+    # `is_user_in_group` forwards the identity to an external authorizer as
+    # received; only whitespace is stripped here. Lowercasing is correct for
+    # our own comparisons but could change an external service's answer.
+    policy_user = user_email.strip() if user_email else ""
     config = _server_config(server_name, servers_config, available_tools)
 
     if config is None:
@@ -194,7 +198,7 @@ async def authorize_mcp_server(
 
         try:
             checks = [
-                await group_check(normalized_user, group) for group in required_groups
+                await group_check(policy_user, group) for group in required_groups
             ]
         except Exception:
             logger.warning(
@@ -243,11 +247,22 @@ async def authorize_mcp_server(
 
     if model_name:
         # A server must not be able to pick a model outside the requester's
-        # per-model ACL. An unknown model is left to the LLM caller to reject,
-        # matching chat's own model gate; a *configured* restricted model is
-        # denied here before any work is attributed to the server.
+        # per-model ACL. Without a readable model catalogue the check cannot
+        # be made, so it denies rather than failing open. A *configured* model
+        # the user may not use is denied immediately; an unknown name in an
+        # otherwise readable catalogue is left to the LLM caller to reject,
+        # matching chat's own model gate.
+        if models is None:
+            return _deny(
+                operation,
+                server_name,
+                normalized_user,
+                McpDenialKind.MODEL,
+                f"MCP {operation.value} '{server_name}' cannot verify the "
+                "selected model",
+            )
         decision = await check_model_access(
-            models, model_name, normalized_user, context=f"MCP {operation.value}"
+            models, model_name, policy_user, context=f"MCP {operation.value}"
         )
         if decision is ModelAccessDecision.DENIED:
             return _deny(

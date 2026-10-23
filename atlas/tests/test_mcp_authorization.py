@@ -177,6 +177,42 @@ async def test_central_policy_classification_is_uniform():
 
 
 @pytest.mark.asyncio
+async def test_central_policy_preserves_identity_case_for_external_group_check():
+    """External authorizers receive the identity as the user presented it."""
+    seen = []
+
+    async def recording_check(user_email: str, group: str) -> bool:
+        seen.append(user_email)
+        return True
+
+    decision = await authorize_mcp_server(
+        "srv",
+        operation=McpOperation.TOOL,
+        servers_config={"srv": {"enabled": True, "groups": ["allowed"]}},
+        user_email="  Alice@Example.com  ",
+        group_check=recording_check,
+    )
+    assert decision.allowed is True
+    assert seen == ["Alice@Example.com"]
+    # Logged/attributed identity stays normalized.
+    assert decision.user_email == "alice@example.com"
+
+
+@pytest.mark.asyncio
+async def test_central_policy_fails_closed_when_model_catalogue_unavailable():
+    decision = await authorize_mcp_server(
+        "srv",
+        operation=McpOperation.PROMPT,
+        servers_config={"srv": {"enabled": True, "groups": []}},
+        user_email="alice@example.com",
+        model_name="any-model",
+        models=None,
+    )
+    assert decision.allowed is False
+    assert decision.denial is McpDenialKind.MODEL
+
+
+@pytest.mark.asyncio
 async def test_central_policy_model_acl_denies_restricted_and_tolerates_unknown_models():
     models = {"restricted": SimpleNamespace(groups=["admin"])}
 
@@ -422,6 +458,33 @@ async def test_prompt_override_applies_authorized_prompt():
 
     assert result[0] == {"role": "system", "content": "restricted prompt text"}
     assert result[1] == {"role": "user", "content": "Hello"}
+
+
+@pytest.mark.asyncio
+async def test_prompt_override_forwards_trusted_level_and_model():
+    """The turn's classification and model reach the authorization call."""
+    tool_manager = AsyncMock()
+    tool_manager.available_prompts = {}
+    tool_manager.get_prompt.return_value = "prompt"
+    service = PromptOverrideService(tool_manager=tool_manager)
+
+    await service.apply_prompt_override(
+        [{"role": "user", "content": "Hello"}],
+        ["srv_prompt"],
+        user_email="alice@example.com",
+        compliance_level="ITAR",
+        model_name="restricted-model",
+    )
+
+    tool_manager.get_prompt.assert_awaited_once_with(
+        "srv",
+        "prompt",
+        meta={"user_email": "alice@example.com"},
+        user_email="alice@example.com",
+        conversation_id=None,
+        compliance_level="ITAR",
+        model_name="restricted-model",
+    )
 
 
 # --- sampling removal -------------------------------------------------------

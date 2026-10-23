@@ -81,6 +81,18 @@ async def test_selected_mcp_prompt_overrides_system_prompt(monkeypatch):
     import uuid
     session_id = uuid.uuid4()
 
+    captured_override = {}
+    orchestrator = chat_service._get_orchestrator()
+    original_apply = orchestrator.prompt_override.apply_prompt_override
+
+    async def spy_apply(*args, **kwargs):
+        captured_override.update(kwargs)
+        return await original_apply(*args, **kwargs)
+
+    monkeypatch.setattr(
+        orchestrator.prompt_override, "apply_prompt_override", spy_apply
+    )
+
     # Send a message with selected prompt
     await chat_service.handle_chat_message(
         session_id=session_id,
@@ -102,3 +114,30 @@ async def test_selected_mcp_prompt_overrides_system_prompt(monkeypatch):
     # The expert_dog_trainer prompt includes key phrase "expert dog trainer"
     first_content = msgs[0]["content"].lower()
     assert "dog trainer" in first_content or "canine" in first_content, "Injected system prompt content not found"
+
+    # The orchestrator must hand the trusted turn model to prompt retrieval so
+    # the central MCP model ACL is enforced before prompt text enters context.
+    assert captured_override.get("model_name") == "test-model"
+
+    # And the trusted active classification, resolved once for the turn, must
+    # reach prompt retrieval too (never a client-supplied prompt argument).
+    monkeypatch.setattr(
+        chat_service, "_resolve_active_classification", lambda raw: "ITAR"
+    )
+    monkeypatch.setattr(
+        chat_service, "_enforce_data_classifications", lambda *a, **k: None
+    )
+    captured_override.clear()
+    await chat_service.handle_chat_message(
+        session_id=uuid.uuid4(),
+        content="Hello again",
+        model="test-model",
+        selected_tools=None,
+        selected_prompts=["prompts_expert_dog_trainer"],
+        selected_data_sources=None,
+        user_email="tester@example.com",
+        only_rag=False,
+        agent_mode=False,
+        temperature=0.7,
+    )
+    assert captured_override.get("compliance_level") == "ITAR"
