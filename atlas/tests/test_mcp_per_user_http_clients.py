@@ -39,7 +39,6 @@ def manager():
         mgr._user_client_close_tasks = set()
         mgr._user_clients_lock = asyncio.Lock()
         mgr._elicitation_routing = {}
-        mgr._sampling_routing = {}
         return mgr
 
 

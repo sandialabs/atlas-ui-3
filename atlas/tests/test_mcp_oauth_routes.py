@@ -642,7 +642,6 @@ class TestClientFactoryRefresh:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
         return manager
 
     @pytest.mark.asyncio

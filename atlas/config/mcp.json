@@ -45,21 +45,6 @@
     "help_email": "support@chatui.example.com",
     "compliance_level": "Public"
   },
-  "tool_planner": {
-    "command": [
-      "python",
-      "mcp/tool_planner/main.py"
-    ],
-    "cwd": "atlas",
-    "groups": [
-      "users"
-    ],
-    "description": "Generate bash scripts that accomplish tasks by calling the Atlas CLI with appropriate tools, using MCP sampling for planning",
-    "author": "Chat UI Team",
-    "short_description": "Task-to-script planner",
-    "help_email": "support@chatui.example.com",
-    "compliance_level": "Public"
-  },
   "elicitation_demo": {
     "command": ["python", "mcp/elicitation_demo/main.py"],
     "cwd": "atlas",

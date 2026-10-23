@@ -65,7 +65,6 @@ class TestImageContentHandling:
         """Test extraction of a single ImageContent item."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
-        manager._sampling_routing = {}
         manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object
@@ -118,7 +117,6 @@ class TestImageContentHandling:
         """Test extraction of multiple ImageContent items."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
-        manager._sampling_routing = {}
         manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object
@@ -167,7 +165,6 @@ class TestImageContentHandling:
         """Test extraction when both TextContent and ImageContent are present."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
-        manager._sampling_routing = {}
         manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object
@@ -232,7 +229,6 @@ class TestImageContentHandling:
         """Test that non-image content doesn't create artifacts."""
         manager = MCPToolManager.__new__(MCPToolManager)
         manager._elicitation_routing = {}
-        manager._sampling_routing = {}
         manager.servers_config = {"test-server": {"enabled": True}}
 
         # Mock tool object

@@ -46,8 +46,8 @@ def docs(monkeypatch, tmp_path):
         "## Authentication\n\nUse a jwt or api_key for authentication.\n",
         encoding="utf-8",
     )
-    (root / "developer" / "sampling.md").write_text(
-        "# LLM Sampling\n\nTools can call back into the LLM. MCP is mentioned once.\n",
+    (root / "developer" / "llm-guide.md").write_text(
+        "# LLM Guide\n\nTools can call into the LLM. MCP is mentioned once.\n",
         encoding="utf-8",
     )
     (root / "archive" / "old-auth-plan.md").write_text(
@@ -68,7 +68,7 @@ def test_search_ranks_title_and_heading_matches_first(monkeypatch, docs):
 
     paths = [m["path"] for m in res["matches"]]
     assert paths[0] == "admin/mcp-servers.md"
-    assert "developer/sampling.md" in paths
+    assert "developer/llm-guide.md" in paths
     top = res["matches"][0]
     assert top["title"] == "MCP Servers"
     assert top["matched_terms"] == ["authentication", "mcp"]
@@ -189,7 +189,7 @@ def test_iter_docs_skips_bad_symlinks_and_unreadable_dirs(monkeypatch, docs):
     locked.chmod(0)
     try:
         ds = _load_module(monkeypatch)
-        expected = {"README.md", "admin/mcp-servers.md", "developer/sampling.md"}
+        expected = {"README.md", "admin/mcp-servers.md", "developer/llm-guide.md"}
         if os.access(locked, os.R_OK | os.X_OK):  # root ignores chmod 0
             expected.add("locked/hidden.md")
         paths = {d["path"] for d in ds.list_docs()["results"]["documents"]}
@@ -324,7 +324,7 @@ def test_list_docs_all_and_by_section(monkeypatch, docs):
     ds = _load_module(monkeypatch)
     everything = ds.list_docs()["results"]
     assert {d["path"] for d in everything["documents"]} == {
-        "README.md", "admin/mcp-servers.md", "developer/sampling.md",
+        "README.md", "admin/mcp-servers.md", "developer/llm-guide.md",
     }
 
     admin = ds.list_docs(section="admin")["results"]["documents"]

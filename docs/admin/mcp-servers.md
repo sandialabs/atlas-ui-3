@@ -232,7 +232,9 @@ export MY_API_KEY="your-secret-api-key"
 
 ## Access Control with Groups
 
-You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. Group checks run at both request time (when tools are listed or selected) and at the single tool-execution choke point inside `MCPToolManager.execute_tool`, keyed on the authenticated user's identity from the request context. A missing user context, a disabled server, an unreachable authorization service, or membership that does not satisfy the `groups` list will all fail closed and deny execution. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
+You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. Group checks run at both request time (when tools are listed or selected) and at the single authorization choke point inside `MCPToolManager`, keyed on the authenticated user's identity from the request context. A missing user context, a disabled server, an unreachable authorization service, or membership that does not satisfy the `groups` list will all fail closed and deny access. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
+
+The same central policy covers **tools, prompts, and resources**. Prompt text and resource contents are injected into model context, so they are never fetched from a server the requesting user may not use. Prompt and resource operations require an authenticated identity even on a server with no `groups`; when an MCP operation selects a model, the user's per-model `groups` ACL is enforced as well. An active data classification must be declared by the server (`allowed_data_classifications`) before any of the three capabilities can run under that level. MCP sampling (server-initiated LLM calls) is not supported.
 
 ## A Note on the `_atlas_user` Argument
 
@@ -244,10 +246,6 @@ As a security measure, if a tool is designed to accept an `_atlas_user` argument
 ### User Elicitation
 
 MCP tools can request structured input from users during tool execution. See the [Elicitation Documentation](../developer/elicitation.md) for details.
-
-### LLM Sampling
-
-MCP tools can request LLM text generation during tool execution, enabling agentic workflows. See the [Sampling Documentation](../developer/sampling.md) for details.
 
 ### Progress Updates
 

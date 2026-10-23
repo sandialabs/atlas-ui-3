@@ -1003,8 +1003,6 @@ class TestMCPServerRefresh:
         ), mock_patch.object(
             manager, "_create_elicitation_handler", return_value=None
         ), mock_patch.object(
-            manager, "_create_sampling_handler", return_value=None
-        ), mock_patch.object(
             manager, "_build_wormhole_headers", return_value={}
         ):
             client = await manager._get_or_create_user_http_client("srv", "u1@example.com", "c1")

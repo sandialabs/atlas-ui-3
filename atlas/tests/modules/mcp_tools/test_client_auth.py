@@ -37,7 +37,6 @@ class TestMCPClientAuthentication:
             auth="secret-token-123",
             log_handler=ANY,
             elicitation_handler=ANY,
-            sampling_handler=ANY,
         )
 
     @pytest.mark.asyncio
@@ -67,7 +66,6 @@ class TestMCPClientAuthentication:
             auth="direct-token-456",
             log_handler=ANY,
             elicitation_handler=ANY,
-            sampling_handler=ANY,
         )
 
     @pytest.mark.asyncio
@@ -96,7 +94,6 @@ class TestMCPClientAuthentication:
             auth=None,
             log_handler=ANY,
             elicitation_handler=ANY,
-            sampling_handler=ANY,
         )
 
     @pytest.mark.asyncio
@@ -126,7 +123,6 @@ class TestMCPClientAuthentication:
             auth="sse-token-789",
             log_handler=ANY,
             elicitation_handler=ANY,
-            sampling_handler=ANY,
         )
 
     @pytest.mark.asyncio
@@ -222,5 +218,4 @@ class TestMCPClientAuthentication:
             auth="",
             log_handler=ANY,
             elicitation_handler=ANY,
-            sampling_handler=ANY,
         )
