@@ -65,6 +65,10 @@ Models that declare `allowed_data_classifications` show the labels in their pick
 
 ![The model picker badge reads "CUI (Restricted) +1"](compliance-display-name-model-badge.png)
 
+RAG corpora carry their labels in the data-source picker the same way:
+
+![The data source rows for Company Policies and Technical Documentation carry an "Internal (Company IP)" badge](compliance-display-name-data-sources.png)
+
 > **Upgrade note:** define every classification you use in `config/compliance-levels.json` (for example, `CUI` is not in the bundled defaults). A component whose only classification is undefined -- in `allowed_data_classifications` or a legacy `compliance_level` -- ends up declaring nothing, so it is unavailable in **every** classified session.
 
 ## The Rule
