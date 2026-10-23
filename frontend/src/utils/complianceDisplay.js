@@ -18,7 +18,7 @@
 // never fetched them) fall back to the raw name, which is exactly how the UI
 // behaved before display_name existed.
 
-import { classificationsOf } from './complianceAccess'
+import { classificationsOf, findComplianceLevel } from './complianceAccess'
 
 /** The label a level definition renders as: its `display_name`, else `name`. */
 export const levelDisplayLabel = level => {
@@ -36,11 +36,7 @@ export const levelDisplayLabel = level => {
  */
 export const complianceDisplayName = (levels, name) => {
   if (!name) return null
-  const list = Array.isArray(levels) ? levels : []
-  const level = list.find(l => l && (
-    l.name === name ||
-    (Array.isArray(l.aliases) && l.aliases.includes(name))
-  ))
+  const level = findComplianceLevel(levels, name)
   return (level && levelDisplayLabel(level)) || name
 }
 

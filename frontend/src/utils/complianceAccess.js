@@ -23,14 +23,22 @@
  * convenience, not the boundary.
  */
 
-const canonicalName = (levels, name) => {
-  if (!name) return name
-  for (const level of levels) {
-    if (level.name === name) return level.name
-    if (Array.isArray(level.aliases) && level.aliases.includes(name)) return level.name
-  }
-  return name
+/**
+ * The level definition whose canonical `name` — or one of its `aliases` —
+ * equals `name`, or null. The one name/alias lookup so surfaces cannot
+ * drift; presentation code resolves labels through
+ * ``complianceDisplay.js``, which uses this.
+ */
+export const findComplianceLevel = (levels, name) => {
+  if (!name) return null
+  const list = Array.isArray(levels) ? levels : []
+  return list.find(level => level && (
+    level.name === name ||
+    (Array.isArray(level.aliases) && level.aliases.includes(name))
+  )) || null
 }
+
+const canonicalName = (levels, name) => findComplianceLevel(levels, name)?.name ?? name
 
 /**
  * The classifications a resource (model, MCP server or prompt entry, RAG

@@ -14,6 +14,7 @@
 // would refuse.
 
 import { complianceDisplayName } from './complianceDisplay'
+import { findComplianceLevel } from './complianceAccess'
 
 export const CLASSIFICATION_ERROR_TYPE = 'conversation_classification'
 
@@ -41,10 +42,10 @@ export function classificationOf(conv) {
 
 // Canonical level name: aliases resolve through the deployment's definitions
 // (`levels` from /api/compliance-levels), as the server's comparison does.
+// The lookup itself is the shared `findComplianceLevel`.
 function canonicalLevel(name, levels) {
   if (!name) return null
-  const match = (levels || []).find(l => l?.name === name || (l?.aliases || []).includes(name))
-  return match ? match.name : name
+  return findComplianceLevel(levels, name)?.name ?? name
 }
 
 // Friendly label for a level name or alias: display_name ?? canonical name,

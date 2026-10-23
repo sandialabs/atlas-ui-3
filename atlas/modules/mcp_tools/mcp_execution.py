@@ -1099,13 +1099,18 @@ class ExecutionMixin:
             if decision.denial is McpDenialKind.CLASSIFICATION:
                 # The user reads this level name, so show the configured
                 # friendly label (issue #1117); authorization itself compared
-                # canonical names and is untouched.
-                from atlas.core.compliance import get_compliance_manager
+                # canonical names and is untouched. A broken lookup must not
+                # turn the denial into an exception: fall back to the raw
+                # level like the fail-closed check above does.
+                try:
+                    from atlas.core.compliance import get_compliance_manager
 
-                level_label = (
-                    get_compliance_manager().get_display_name(active_level)
-                    or active_level
-                )
+                    level_label = (
+                        get_compliance_manager().get_display_name(active_level)
+                        or active_level
+                    )
+                except Exception:
+                    level_label = active_level
                 error_msg = (
                     f"Tool '{tool_call.name}' is not approved for {level_label} data"
                 )

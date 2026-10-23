@@ -481,10 +481,14 @@ class ChatService:
         from atlas.core.compliance import get_compliance_manager
 
         # User-facing level names use the configured friendly label (issue
-        # #1117); the checks above stay on canonical names.
-        level_label = (
-            get_compliance_manager().get_display_name(active_level) or active_level
-        )
+        # #1117); the checks above stay on canonical names. A broken lookup
+        # falls back to the raw level rather than masking the refusal.
+        try:
+            level_label = (
+                get_compliance_manager().get_display_name(active_level) or active_level
+            )
+        except Exception:
+            level_label = active_level
         parts = []
         if unapproved:
             parts.append(f"Not approved for {level_label} data: data source {', '.join(unapproved)}.")

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Check, ChevronDown, CircleHelp, Lock, Plus, Shield } from 'lucide-react'
 import { SAVE_MODE_CHOICES, saveModeChoice } from '../utils/saveModePresentation'
+import { levelDisplayLabel } from '../utils/complianceDisplay'
 
 /**
  * Conversation setup: security level, save mode, and New Chat in one place.
@@ -84,17 +85,21 @@ export function SecurityLevelControl({
           ? !value && <option value="" disabled>Select a level</option>
           : <option value="">All Levels</option>}
       {complianceOptions.map(level => {
-        const label = level.display_name || level.name
-        // The canonical name stays identifiable wherever a friendly label
-        // could be ambiguous (issue #1117): the hover title names the
-        // identifier, then the level's description.
+        const label = levelDisplayLabel(level)
+        // When two levels share a display name, keep the canonical key
+        // visible in the rendered text (issue #1117): native selects and
+        // screen readers do not show the option title.
+        const duplicated = complianceOptions.some(
+          other => other !== level && levelDisplayLabel(other) === label
+        )
+        const shown = duplicated ? `${label} (${level.name})` : label
         const title = [
-          label !== level.name ? level.name : null,
+          shown !== level.name ? level.name : null,
           level.description || null,
         ].filter(Boolean).join(' — ')
         return (
           <option key={level.name} value={level.name} title={title || undefined}>
-            {label}
+            {shown}
           </option>
         )
       })}

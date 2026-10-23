@@ -6,6 +6,12 @@
 // classification, and a marking that cannot be trusted never degrades into a
 // less restrictive one.
 
+// The one level lookup lives in complianceAccess.js; imported for the
+// resolution below and re-exported so banner callers (and tests) keep their
+// import path.
+import { findComplianceLevel } from './complianceAccess'
+export { findComplianceLevel }
+
 export const NEUTRAL_BANNER = {
   key: '__unavailable__',
   label: 'CLASSIFICATION UNAVAILABLE',
@@ -18,15 +24,6 @@ export const NEUTRAL_BANNER = {
 // Edge stripes are drawn as narrow bands; bound the band height so the stripes
 // cannot overwhelm the compact banner regardless of configured stripe width.
 export const EDGE_STRIPE_BAND_HEIGHT = 6
-
-export function findComplianceLevel(levels, name) {
-  if (!name) return null
-  const list = Array.isArray(levels) ? levels : []
-  return list.find(level => level && (
-    level.name === name ||
-    (Array.isArray(level.aliases) && level.aliases.includes(name))
-  )) || null
-}
 
 // Whether any defined level opts into a banner. Without one the feature is
 // unused and the shell renders nothing, so unconfigured deployments keep their

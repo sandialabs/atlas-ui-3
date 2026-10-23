@@ -293,4 +293,30 @@ describe('friendly compliance labels (issue #1117)', () => {
     const select = screen.getByLabelText('Security level')
     expect([...select.options].some(o => o.textContent === 'Retired')).toBe(true)
   })
+
+  it('marks levels that share a display name with their canonical key', () => {
+    const colliding = [
+      { name: 'TeamAlpha', display_name: 'Team Data', description: '', aliases: [] },
+      { name: 'TeamBeta', display_name: 'Team Data', description: '', aliases: [] },
+      { name: 'Public', description: '', aliases: [] },
+    ]
+    render(
+      <SecurityLevelControl
+        complianceOptions={colliding}
+        complianceRequired={false}
+        value="Public"
+        onChange={vi.fn()}
+        lock={unlocked}
+      />
+    )
+    const select = screen.getByLabelText('Security level')
+    const labels = [...select.options].filter(o => o.value !== '').map(o => o.textContent)
+    // Native selects and screen readers do not show option titles, so a
+    // shared label is disambiguated in the visible text.
+    expect(labels).toEqual([
+      'Team Data (TeamAlpha)',
+      'Team Data (TeamBeta)',
+      'Public',
+    ])
+  })
 })

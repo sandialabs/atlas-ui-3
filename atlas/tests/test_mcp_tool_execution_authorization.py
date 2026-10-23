@@ -289,3 +289,25 @@ async def test_execute_tool_denies_undeclared_server_under_a_level():
         )
     assert result.success is False
     mock_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_denial_survives_a_broken_lookup():
+    """A broken compliance lookup must not turn the denial into an
+    exception: the message falls back to the raw level name."""
+    manager = _manager({
+        "google_search": {"enabled": True, "groups": [], "allowed_data_classifications": ["UUR"]},
+    })
+    manager._tool_index = _tool_index("google_search", "query")
+
+    def broken():
+        raise RuntimeError("broken config")
+
+    with patch("atlas.core.compliance.get_compliance_manager", side_effect=broken):
+        denied = await manager.execute_tool(
+            ToolCall(id="c1", name="google_search_query", arguments={}),
+            context={"user_email": "user@example.com", "compliance_level": "ITAR"},
+        )
+
+    assert denied.success is False
+    assert "not approved for ITAR data" in denied.error
