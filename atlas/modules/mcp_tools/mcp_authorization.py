@@ -83,19 +83,15 @@ class McpAuthorizationDecision:
 def _server_config(
     server_name: str,
     servers_config: Optional[Mapping[str, Any]],
-    available_tools: Optional[Mapping[str, Any]],
 ) -> Optional[Mapping[str, Any]]:
-    """Resolve a server's config, falling back to its discovery entry.
+    """Resolve a server's config from the authoritative configuration.
 
-    ``servers_config`` is authoritative. ``available_tools`` carries the config
-    a server was discovered with, which keeps authorization working for a
-    partially initialised manager (tests, hot reload windows).
+    Discovery entries are deliberately not used as a fallback: during a config
+    reload or after a server is disabled/removed, a stale discovery snapshot
+    could still carry the old ACL and let authorization pass for a server that
+    no longer exists. A missing entry fails closed.
     """
     config = (servers_config or {}).get(server_name)
-    if config is not None:
-        return config
-    entry = (available_tools or {}).get(server_name) or {}
-    config = entry.get("config") if isinstance(entry, Mapping) else None
     return config if isinstance(config, Mapping) else None
 
 
@@ -123,7 +119,6 @@ async def authorize_mcp_server(
     servers_config: Optional[Mapping[str, Any]],
     user_email: Optional[str],
     compliance_level: Optional[str] = None,
-    available_tools: Optional[Mapping[str, Any]] = None,
     group_check: Optional[GroupCheck] = None,
     model_name: Optional[str] = None,
     models: Any = None,
@@ -146,7 +141,7 @@ async def authorize_mcp_server(
     # received; only whitespace is stripped here. Lowercasing is correct for
     # our own comparisons but could change an external service's answer.
     policy_user = user_email.strip() if user_email else ""
-    config = _server_config(server_name, servers_config, available_tools)
+    config = _server_config(server_name, servers_config)
 
     if config is None:
         return _deny(

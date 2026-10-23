@@ -630,6 +630,7 @@ class ChatOrchestrator:
             conversation_id=session.context.get("conversation_id", str(session_id)),
             compliance_level=session.context.get("compliance_level"),
             model_name=model,
+            warning_callback=self.event_publisher.publish_warning,
         )
 
         # Strip tools / agent mode and warn if the model does not support tool/function calling

@@ -297,11 +297,63 @@ class ExecutionMixin:
             server_name,
             operation=operation,
             servers_config=getattr(self, "servers_config", {}) or {},
-            available_tools=getattr(self, "available_tools", {}) or {},
             user_email=user_email,
             compliance_level=compliance_level,
             model_name=model_name,
             models=models,
+        )
+
+    async def _authorized_client(
+        self,
+        server_name: str,
+        operation: McpOperation,
+        *,
+        user_email: Optional[str],
+        conversation_id: Optional[str],
+        compliance_level: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> Any:
+        """Authorize an attributed MCP operation and return its client.
+
+        Prompts and resources share this sequence so their gate cannot drift:
+        a credential-bearing server without an identity raises the reconnect
+        error, the central policy decides access, and only then is a client
+        selected/opened.
+        """
+        if self._requires_user_auth(server_name) and not user_email:
+            # Preserve the reconnect flow: a credential-bearing server invoked
+            # without an identity is an authentication problem, not a generic
+            # authorization denial, and the UI needs its OAuth start URL.
+            await self._client_for_operation(
+                server_name,
+                user_email=user_email,
+                conversation_id=conversation_id,
+            )
+
+        decision = await self._authorize_mcp_operation(
+            server_name,
+            operation,
+            user_email=user_email,
+            compliance_level=compliance_level,
+            model_name=model_name,
+        )
+        if not decision.allowed:
+            logger.warning(
+                "Denied MCP %s on server '%s' for user '%s': %s",
+                operation.value,
+                sanitize_for_logging(server_name),
+                sanitize_for_logging(decision.user_email or "<anonymous>"),
+                sanitize_for_logging(decision.reason),
+            )
+            raise AuthorizationError(
+                decision.reason,
+                code=f"MCP_{operation.value.upper()}_DENIED",
+            )
+
+        return await self._client_for_operation(
+            server_name,
+            user_email=user_email,
+            conversation_id=conversation_id,
         )
 
     async def _client_for_operation(
@@ -631,49 +683,13 @@ class ExecutionMixin:
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Any:
         """One client-selection + tool-call attempt, without 401 recovery."""
-        # Determine which client to use
-        client = None
-
-        # Check if this server requires per-user authentication
-        if self._requires_user_auth(server_name):
-            logger.debug(f"Server '{server_name}' requires user auth, user_email={user_email}")
-            if user_email:
-                client = await self._get_user_client(server_name, user_email, conversation_id)
-                logger.debug(f"_get_user_client for '{server_name}' returned client: {client is not None}")
-                if client is None:
-                    # Get auth type and build OAuth URL if applicable
-                    server_config = self.servers_config.get(server_name, {})
-                    auth_type = server_config.get("auth_type", "oauth")
-                    oauth_start_url = None
-                    if auth_type == "oauth":
-                        # Build OAuth start URL for automatic redirect
-                        oauth_start_url = f"/api/mcp/auth/{server_name}/oauth/start"
-                    raise AuthenticationRequiredException(
-                        server_name=server_name,
-                        auth_type=auth_type,
-                        message=f"Server '{server_name}' requires authentication.",
-                        oauth_start_url=oauth_start_url,
-                    )
-            else:
-                server_config = self.servers_config.get(server_name, {})
-                auth_type = server_config.get("auth_type", "oauth")
-                raise AuthenticationRequiredException(
-                    server_name=server_name,
-                    auth_type=auth_type,
-                    message=f"Server '{server_name}' requires authentication but no user context.",
-                    oauth_start_url=f"/api/mcp/auth/{server_name}/oauth/start" if auth_type == "oauth" else None,
-                )
-        elif self._is_http_server(server_name) and user_email:
-            # HTTP servers get per-user/per-conversation clients for session
-            # state isolation and to avoid FastMCP nesting-counter leaks.
-            client = await self._get_or_create_user_http_client(
-                server_name, user_email, conversation_id
-            )
-        else:
-            # STDIO servers use shared client (safe: BlockedStateStore prevents state use)
-            if server_name not in self.clients:
-                raise ValueError(f"No client available for server: {server_name}")
-            client = self.clients[server_name]
+        # Client routing is shared with prompt/resource access so the three
+        # capability paths cannot drift on the per-user auth boundary.
+        client = await self._client_for_operation(
+            server_name,
+            user_email=user_email,
+            conversation_id=conversation_id,
+        )
 
         call_timeout = _client().config_manager.app_settings.mcp_call_timeout
         try:
@@ -847,37 +863,13 @@ class ExecutionMixin:
         token. Other HTTP servers fall through to the per-conversation plain
         HTTP client.
         """
-        if self._requires_user_auth(server_name) and not user_email:
-            # Preserve the reconnect flow: a credential-bearing server invoked
-            # without an identity is an authentication problem, not a generic
-            # authorization denial, and the UI needs its OAuth start URL.
-            await self._client_for_operation(
-                server_name,
-                user_email=user_email,
-                conversation_id=conversation_id,
-            )
-
-        decision = await self._authorize_mcp_operation(
+        client = await self._authorized_client(
             server_name,
             McpOperation.PROMPT,
             user_email=user_email,
+            conversation_id=conversation_id,
             compliance_level=compliance_level,
             model_name=model_name,
-        )
-        if not decision.allowed:
-            logger.warning(
-                "Denied MCP prompt '%s' on server '%s' for user '%s': %s",
-                sanitize_for_logging(prompt_name),
-                sanitize_for_logging(server_name),
-                sanitize_for_logging(decision.user_email or "<anonymous>"),
-                sanitize_for_logging(decision.reason),
-            )
-            raise AuthorizationError(decision.reason, code="MCP_PROMPT_DENIED")
-
-        client = await self._client_for_operation(
-            server_name,
-            user_email=user_email,
-            conversation_id=conversation_id,
         )
         try:
             async with client:
@@ -908,32 +900,12 @@ class ExecutionMixin:
         their metadata is authorized identically rather than being treated as
         harmless inventory.
         """
-        if self._requires_user_auth(server_name) and not user_email:
-            await self._client_for_operation(
-                server_name,
-                user_email=user_email,
-                conversation_id=conversation_id,
-            )
-
-        decision = await self._authorize_mcp_operation(
+        client = await self._authorized_client(
             server_name,
             McpOperation.RESOURCE,
             user_email=user_email,
-            compliance_level=compliance_level,
-        )
-        if not decision.allowed:
-            logger.warning(
-                "Denied MCP resource listing on server '%s' for user '%s': %s",
-                sanitize_for_logging(server_name),
-                sanitize_for_logging(decision.user_email or "<anonymous>"),
-                sanitize_for_logging(decision.reason),
-            )
-            raise AuthorizationError(decision.reason, code="MCP_RESOURCE_DENIED")
-
-        client = await self._client_for_operation(
-            server_name,
-            user_email=user_email,
             conversation_id=conversation_id,
+            compliance_level=compliance_level,
         )
         async with client:
             return await client.list_resources()
@@ -954,33 +926,13 @@ class ExecutionMixin:
         The gate runs before the client is opened, so an unauthorized caller
         cannot cause the server to read or return the resource at all.
         """
-        if self._requires_user_auth(server_name) and not user_email:
-            await self._client_for_operation(
-                server_name,
-                user_email=user_email,
-                conversation_id=conversation_id,
-            )
-
-        decision = await self._authorize_mcp_operation(
+        client = await self._authorized_client(
             server_name,
             McpOperation.RESOURCE,
             user_email=user_email,
+            conversation_id=conversation_id,
             compliance_level=compliance_level,
             model_name=model_name,
-        )
-        if not decision.allowed:
-            logger.warning(
-                "Denied MCP resource read on server '%s' for user '%s': %s",
-                sanitize_for_logging(server_name),
-                sanitize_for_logging(decision.user_email or "<anonymous>"),
-                sanitize_for_logging(decision.reason),
-            )
-            raise AuthorizationError(decision.reason, code="MCP_RESOURCE_DENIED")
-
-        client = await self._client_for_operation(
-            server_name,
-            user_email=user_email,
-            conversation_id=conversation_id,
         )
         kwargs = {}
         if meta is not None:

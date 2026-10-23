@@ -1,8 +1,9 @@
 """Prompt override service - handles MCP system prompt injection."""
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.errors import AuthorizationError
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class PromptOverrideService:
         conversation_id: Optional[str] = None,
         compliance_level: Optional[str] = None,
         model_name: Optional[str] = None,
+        warning_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Apply MCP prompt overrides for all selected prompts.
@@ -50,6 +52,8 @@ class PromptOverrideService:
                 context, enforced by the central MCP policy before retrieval
             model_name: Model this turn is running, enforced against the
                 per-model group ACL before prompt text enters its context
+            warning_callback: Optional async publisher for a user-visible
+                notice when a selected prompt is denied
 
         Returns:
             Messages with prompt overrides prepended (if applicable)
@@ -97,15 +101,26 @@ class PromptOverrideService:
                     )
 
             except AuthorizationError as exc:
-                # A denied prompt must not reach model context, and the reason
-                # belongs in the log: silently treating it as "server down"
-                # hides an ACL or classification decision from the operator.
+                # A denied prompt must not reach model context. Tell the user
+                # (a selected prompt silently disappearing looks like a bug),
+                # and keep the decision in the log with sanitized values.
+                reason = getattr(exc, "message", str(exc))
                 logger.warning(
                     "Denied MCP prompt '%s' for user '%s': %s",
-                    key,
-                    user_email or "<anonymous>",
-                    getattr(exc, "message", str(exc)),
+                    sanitize_for_logging(key),
+                    sanitize_for_logging(user_email or "<anonymous>"),
+                    sanitize_for_logging(reason),
                 )
+                if warning_callback is not None:
+                    try:
+                        await warning_callback(
+                            f"MCP prompt `{key}` was not applied: {reason}"
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Could not publish denied-prompt warning",
+                            exc_info=True,
+                        )
             except Exception:
                 logger.debug("Failed retrieving MCP prompt %s", key, exc_info=True)
 

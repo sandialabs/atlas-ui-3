@@ -305,6 +305,22 @@ async def test_prompt_requires_user_identity_even_on_open_server():
 
 
 @pytest.mark.asyncio
+async def test_prompt_denied_when_server_removed_even_if_discovery_snapshot_remains():
+    """A removed/disabled server cannot authorize from its stale discovery ACL."""
+    client = _FakeClient()
+    manager = _manager({}, client)
+    manager.available_tools = {
+        "srv": {"config": {"enabled": True, "groups": [], "command": ["python"]}}
+    }
+
+    with pytest.raises(AuthorizationError) as exc_info:
+        await manager.get_prompt("srv", "prompt", user_email="alice@example.com")
+
+    assert "not configured" in exc_info.value.message
+    client.get_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_prompt_denied_when_classification_not_declared():
     client = _FakeClient()
     manager = _manager(
@@ -436,6 +452,28 @@ async def test_prompt_override_does_not_inject_denied_prompt():
 
     assert result == messages
     client.get_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prompt_override_publishes_denied_warning():
+    client = _FakeClient()
+    manager = _manager(
+        {"srv": {"enabled": True, "groups": ["allowed"], "command": ["python"]}},
+        client,
+    )
+    service = PromptOverrideService(tool_manager=manager)
+    warnings = AsyncMock()
+
+    with patch("atlas.core.auth.is_user_in_group", _deny_all):
+        await service.apply_prompt_override(
+            [{"role": "user", "content": "Hello"}],
+            ["srv_restricted_prompt"],
+            user_email="alice@example.com",
+            warning_callback=warnings,
+        )
+
+    warnings.assert_awaited_once()
+    assert "srv_restricted_prompt" in warnings.await_args.args[0]
 
 
 @pytest.mark.asyncio
