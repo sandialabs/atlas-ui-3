@@ -246,6 +246,39 @@ async def test_execute_tool_denies_server_not_approved_for_active_level():
 
 
 @pytest.mark.asyncio
+async def test_execute_tool_denial_names_the_display_name(tmp_path):
+    """A classification denial spells the level with its display_name
+    (issue #1117); authorization still compares canonical names."""
+    import json
+
+    from atlas.core.compliance import ComplianceLevelManager
+
+    path = tmp_path / "compliance-levels.json"
+    path.write_text(json.dumps({"levels": [
+        {
+            "name": "ITAR",
+            "display_name": "ITAR (Export Controlled)",
+            "allowed_with": ["ITAR"],
+        },
+        {"name": "UUR", "allowed_with": ["UUR"]},
+    ]}))
+    levels = ComplianceLevelManager(path)
+    manager = _manager({
+        "google_search": {"enabled": True, "groups": [], "allowed_data_classifications": ["UUR"]},
+    })
+    manager._tool_index = _tool_index("google_search", "query")
+
+    with patch("atlas.core.compliance.get_compliance_manager", return_value=levels):
+        denied = await manager.execute_tool(
+            ToolCall(id="c1", name="google_search_query", arguments={}),
+            context={"user_email": "user@example.com", "compliance_level": "ITAR"},
+        )
+
+    assert denied.success is False
+    assert "not approved for ITAR (Export Controlled) data" in denied.error
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_denies_undeclared_server_under_a_level():
     manager = _manager({"bare": {"enabled": True, "groups": []}})
     manager._tool_index = _tool_index("bare", "run")
