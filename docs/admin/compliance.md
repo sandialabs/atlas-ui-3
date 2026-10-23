@@ -57,6 +57,14 @@ Semantics:
 
 `GET /api/compliance-levels` returns `name` plus the resolved `display_name` (the configured label, or `name` when none is set) for each level; components such as models and MCP servers keep returning canonical classification strings, which the UI resolves through the level definitions.
 
+In the header the selected level renders its friendly label, and the classification banner at the top of the page falls back to it when the level's `banner` carries no `label` of its own:
+
+![The security selector reads "CUI (Rest..." and the banner reads "CUI (RESTRICTED)" for a level whose canonical name is CUI_no_ECI_no_ITAR_no_PII](compliance-display-name-ui.png)
+
+Models that declare `allowed_data_classifications` show the labels in their picker badge:
+
+![The model picker badge reads "CUI (Restricted) +1"](compliance-display-name-model-badge.png)
+
 > **Upgrade note:** define every classification you use in `config/compliance-levels.json` (for example, `CUI` is not in the bundled defaults). A component whose only classification is undefined -- in `allowed_data_classifications` or a legacy `compliance_level` -- ends up declaring nothing, so it is unavailable in **every** classified session.
 
 ## The Rule
