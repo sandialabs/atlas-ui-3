@@ -19,6 +19,7 @@ from atlas.domain.chat.citation_register import (
     CITATION_REGISTER_KEY,
     CitationRegister,
 )
+from atlas.domain.errors import AuthorizationError
 from atlas.domain.messages.models import ToolCall, ToolResult
 from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.mcp_tools.atlas_server import (
@@ -37,6 +38,12 @@ from atlas.modules.mcp_tools.atlas_server import (
 )
 from atlas.modules.mcp_tools.atlas_server import (
     SLEEP_TOOL_NAME as ATLAS_SLEEP_TOOL_NAME,
+)
+from atlas.modules.mcp_tools.mcp_authorization import (
+    McpAuthorizationDecision,
+    McpDenialKind,
+    McpOperation,
+    authorize_mcp_server,
 )
 from atlas.modules.mcp_tools.mcp_discovery import (
     _ATLAS_RAG_QUERY_TOOL,
@@ -261,49 +268,150 @@ class ExecutionMixin:
             return context.get("user_email") or None
         return None
 
-    async def _is_server_authorized_for_user(
+    async def _authorize_mcp_operation(
         self,
         server_name: str,
+        operation: McpOperation,
+        *,
         user_email: Optional[str],
-    ) -> bool:
-        """Fail-closed group ACL check for an MCP server.
+        compliance_level: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> McpAuthorizationDecision:
+        """Run the central MCP policy for one server capability.
 
-        Mirrors ``MCPToolManager.get_authorized_servers`` but is designed to be
-        called at the single execution choke point with the trusted user
-        identity from the request context. Missing user context, disabled
-        servers, or any error in the authorization check all deny access.
+        Every MCP entry point (tool, prompt, resource) calls this instead of
+        growing its own ACL. ``compliance_level`` must come from the trusted
+        request context, never from tool or prompt arguments.
         """
-        server_config = getattr(self, "servers_config", {}).get(server_name)
-        if server_config is None:
-            logger.warning(
-                "No configuration found for server '%s'; denying tool execution",
-                sanitize_for_logging(server_name),
+        models = None
+        if model_name:
+            try:
+                models = _client().config_manager.llm_config
+            except Exception:
+                # A missing/unreadable model catalogue is not permission to
+                # skip the check; authorize_mcp_server denies an unverifiable
+                # model selection.
+                models = None
+
+        return await authorize_mcp_server(
+            server_name,
+            operation=operation,
+            servers_config=getattr(self, "servers_config", {}) or {},
+            user_email=user_email,
+            compliance_level=compliance_level,
+            model_name=model_name,
+            models=models,
+        )
+
+    async def _authorized_client(
+        self,
+        server_name: str,
+        operation: McpOperation,
+        *,
+        user_email: Optional[str],
+        conversation_id: Optional[str],
+        compliance_level: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> Any:
+        """Authorize an attributed MCP operation and return its client.
+
+        Prompts and resources share this sequence so their gate cannot drift:
+        a credential-bearing server without an identity raises the reconnect
+        error, the central policy decides access, and only then is a client
+        selected/opened.
+        """
+        if self._requires_user_auth(server_name) and not user_email:
+            # Preserve the reconnect flow: a credential-bearing server invoked
+            # without an identity is an authentication problem, not a generic
+            # authorization denial, and the UI needs its OAuth start URL.
+            await self._client_for_operation(
+                server_name,
+                user_email=user_email,
+                conversation_id=conversation_id,
             )
-            return False
 
-        if not server_config.get("enabled", True):
-            return False
-
-        required_groups = server_config.get("groups", [])
-        if not required_groups:
-            return True
-
-        if not user_email:
-            return False
-
-        # Import locally to avoid a module-level import cycle with core.auth.
-        from atlas.core.auth import is_user_in_group
-        try:
-            group_checks = [await is_user_in_group(user_email, group) for group in required_groups]
-            return any(group_checks)
-        except Exception:
+        decision = await self._authorize_mcp_operation(
+            server_name,
+            operation,
+            user_email=user_email,
+            compliance_level=compliance_level,
+            model_name=model_name,
+        )
+        if not decision.allowed:
             logger.warning(
-                "Group check failed for server '%s' user '%s'; failing closed",
+                "Denied MCP %s on server '%s' for user '%s': %s",
+                operation.value,
                 sanitize_for_logging(server_name),
-                sanitize_for_logging(user_email),
-                exc_info=True,
+                sanitize_for_logging(decision.user_email or "<anonymous>"),
+                sanitize_for_logging(decision.reason),
             )
-            return False
+            raise AuthorizationError(
+                decision.reason,
+                code=f"MCP_{operation.value.upper()}_DENIED",
+            )
+
+        return await self._client_for_operation(
+            server_name,
+            user_email=user_email,
+            conversation_id=conversation_id,
+        )
+
+    async def _client_for_operation(
+        self,
+        server_name: str,
+        *,
+        user_email: Optional[str],
+        conversation_id: Optional[str],
+    ) -> Any:
+        """Select the FastMCP client for a prompt/resource/tool operation.
+
+        Per-user auth servers must use the user's own credential; a server that
+        requires one but has no identity fails with the reconnect signal rather
+        than falling back to a shared/admin client. Other HTTP servers get the
+        per-user/per-conversation client for session isolation, and STDIO
+        servers use the shared client.
+        """
+        if self._requires_user_auth(server_name):
+            if not user_email:
+                server_config = self.servers_config.get(server_name, {})
+                auth_type = server_config.get("auth_type", "oauth")
+                raise AuthenticationRequiredException(
+                    server_name=server_name,
+                    auth_type=auth_type,
+                    message=(
+                        f"Server '{server_name}' requires authentication "
+                        "but no user context."
+                    ),
+                    oauth_start_url=(
+                        f"/api/mcp/auth/{server_name}/oauth/start"
+                        if auth_type == "oauth" else None
+                    ),
+                )
+            client = await self._get_user_client(
+                server_name, user_email, conversation_id
+            )
+            if client is None:
+                server_config = self.servers_config.get(server_name, {})
+                auth_type = server_config.get("auth_type", "oauth")
+                raise AuthenticationRequiredException(
+                    server_name=server_name,
+                    auth_type=auth_type,
+                    message=f"Server '{server_name}' requires authentication.",
+                    oauth_start_url=(
+                        f"/api/mcp/auth/{server_name}/oauth/start"
+                        if auth_type == "oauth" else None
+                    ),
+                )
+            return client
+
+        if self._is_http_server(server_name) and user_email:
+            return await self._get_or_create_user_http_client(
+                server_name, user_email, conversation_id
+            )
+
+        if server_name not in self.clients:
+            raise ValueError(f"No client available for server: {server_name}")
+        return self.clients[server_name]
 
     async def call_tool(
         self,
@@ -575,49 +683,13 @@ class ExecutionMixin:
         update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Any:
         """One client-selection + tool-call attempt, without 401 recovery."""
-        # Determine which client to use
-        client = None
-
-        # Check if this server requires per-user authentication
-        if self._requires_user_auth(server_name):
-            logger.debug(f"Server '{server_name}' requires user auth, user_email={user_email}")
-            if user_email:
-                client = await self._get_user_client(server_name, user_email, conversation_id)
-                logger.debug(f"_get_user_client for '{server_name}' returned client: {client is not None}")
-                if client is None:
-                    # Get auth type and build OAuth URL if applicable
-                    server_config = self.servers_config.get(server_name, {})
-                    auth_type = server_config.get("auth_type", "oauth")
-                    oauth_start_url = None
-                    if auth_type == "oauth":
-                        # Build OAuth start URL for automatic redirect
-                        oauth_start_url = f"/api/mcp/auth/{server_name}/oauth/start"
-                    raise AuthenticationRequiredException(
-                        server_name=server_name,
-                        auth_type=auth_type,
-                        message=f"Server '{server_name}' requires authentication.",
-                        oauth_start_url=oauth_start_url,
-                    )
-            else:
-                server_config = self.servers_config.get(server_name, {})
-                auth_type = server_config.get("auth_type", "oauth")
-                raise AuthenticationRequiredException(
-                    server_name=server_name,
-                    auth_type=auth_type,
-                    message=f"Server '{server_name}' requires authentication but no user context.",
-                    oauth_start_url=f"/api/mcp/auth/{server_name}/oauth/start" if auth_type == "oauth" else None,
-                )
-        elif self._is_http_server(server_name) and user_email:
-            # HTTP servers get per-user/per-conversation clients for session
-            # state isolation and to avoid FastMCP nesting-counter leaks.
-            client = await self._get_or_create_user_http_client(
-                server_name, user_email, conversation_id
-            )
-        else:
-            # STDIO servers use shared client (safe: BlockedStateStore prevents state use)
-            if server_name not in self.clients:
-                raise ValueError(f"No client available for server: {server_name}")
-            client = self.clients[server_name]
+        # Client routing is shared with prompt/resource access so the three
+        # capability paths cannot drift on the per-user auth boundary.
+        client = await self._client_for_operation(
+            server_name,
+            user_email=user_email,
+            conversation_id=conversation_id,
+        )
 
         call_timeout = _client().config_manager.app_settings.mcp_call_timeout
         try:
@@ -773,52 +845,32 @@ class ExecutionMixin:
         user_email: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
         conversation_id: Optional[str] = None,
+        compliance_level: Optional[str] = None,
+        model_name: Optional[str] = None,
     ) -> Any:
         """Get a specific prompt from an MCP server.
 
-        Mirrors ``call_tool``'s auth routing: servers that declare an
-        ``auth_type`` of oauth/jwt/bearer/api_key route through
-        ``_get_user_client`` so the request is sent under the user's
-        stored token. Other HTTP servers fall through to the
-        per-conversation plain HTTP client.
+        The request is authorized through the central MCP policy before any
+        client is opened: the server must be configured/enabled, the user must
+        satisfy its group ACL, the active classification must be declared by
+        the server, and -- when ``model_name`` is supplied -- the user must be
+        allowed to use that model. Prompt text is injected into model context,
+        so an unauthorized server must never be able to supply it.
+
+        Client selection mirrors ``call_tool``: servers that declare an
+        ``auth_type`` of oauth/jwt/bearer/api_key/delegated route through
+        ``_get_user_client`` so the request is sent under the user's stored
+        token. Other HTTP servers fall through to the per-conversation plain
+        HTTP client.
         """
-        if self._requires_user_auth(server_name):
-            if not user_email:
-                server_config = self.servers_config.get(server_name, {})
-                auth_type = server_config.get("auth_type", "oauth")
-                raise AuthenticationRequiredException(
-                    server_name=server_name,
-                    auth_type=auth_type,
-                    message=(
-                        f"Server '{server_name}' requires authentication "
-                        "but no user context."
-                    ),
-                    oauth_start_url=(
-                        f"/api/mcp/auth/{server_name}/oauth/start"
-                        if auth_type == "oauth" else None
-                    ),
-                )
-            client = await self._get_user_client(server_name, user_email, conversation_id)
-            if client is None:
-                server_config = self.servers_config.get(server_name, {})
-                auth_type = server_config.get("auth_type", "oauth")
-                raise AuthenticationRequiredException(
-                    server_name=server_name,
-                    auth_type=auth_type,
-                    message=f"Server '{server_name}' requires authentication.",
-                    oauth_start_url=(
-                        f"/api/mcp/auth/{server_name}/oauth/start"
-                        if auth_type == "oauth" else None
-                    ),
-                )
-        elif self._is_http_server(server_name) and user_email:
-            client = await self._get_or_create_user_http_client(
-                server_name, user_email, conversation_id
-            )
-        elif server_name not in self.clients:
-            raise ValueError(f"No client available for server: {server_name}")
-        else:
-            client = self.clients[server_name]
+        client = await self._authorized_client(
+            server_name,
+            McpOperation.PROMPT,
+            user_email=user_email,
+            conversation_id=conversation_id,
+            compliance_level=compliance_level,
+            model_name=model_name,
+        )
         try:
             async with client:
                 kwargs = {}
@@ -834,23 +886,59 @@ class ExecutionMixin:
             logger.error(f"Error getting prompt {prompt_name} from {server_name}: {e}")
             raise
 
-    def _server_classification_permits(self, server_name: str, active_level: str) -> bool:
-        """Whether ``server_name`` lists ``active_level`` (fails closed)."""
-        try:
-            from atlas.core.compliance import declared_classifications, get_compliance_manager
+    async def list_resources(
+        self,
+        server_name: str,
+        *,
+        user_email: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        compliance_level: Optional[str] = None,
+    ) -> Any:
+        """List an MCP server's resources under the central policy.
 
-            config = (getattr(self, "servers_config", {}) or {}).get(server_name)
-            if config is None:
-                config = (self.available_tools.get(server_name) or {}).get("config")
-            return get_compliance_manager().classification_permits(
-                active_level, declared_classifications(config)
-            )
-        except Exception:
-            logger.warning(
-                "Could not check the classification of server '%s'; denying",
-                sanitize_for_logging(server_name),
-            )
-            return False
+        Resources can carry the same data as prompts and tools, so listing
+        their metadata is authorized identically rather than being treated as
+        harmless inventory.
+        """
+        client = await self._authorized_client(
+            server_name,
+            McpOperation.RESOURCE,
+            user_email=user_email,
+            conversation_id=conversation_id,
+            compliance_level=compliance_level,
+        )
+        async with client:
+            return await client.list_resources()
+
+    async def read_resource(
+        self,
+        server_name: str,
+        uri: Any,
+        *,
+        user_email: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
+        compliance_level: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> Any:
+        """Read one MCP resource under the central policy.
+
+        The gate runs before the client is opened, so an unauthorized caller
+        cannot cause the server to read or return the resource at all.
+        """
+        client = await self._authorized_client(
+            server_name,
+            McpOperation.RESOURCE,
+            user_email=user_email,
+            conversation_id=conversation_id,
+            compliance_level=compliance_level,
+            model_name=model_name,
+        )
+        kwargs = {}
+        if meta is not None:
+            kwargs["meta"] = meta
+        async with client:
+            return await client.read_resource(uri, **kwargs)
 
     async def execute_tool(
         self,
@@ -997,37 +1085,29 @@ class ExecutionMixin:
         # closes the agent-mode ACL bypass (where selected_tools reach the loop
         # without request-time filtering) and blocks hallucinated or prompt-
         # injected tool names from executing against group-restricted servers.
+        # The same central policy also covers prompt/resource access, so the
+        # order and the failure mode cannot drift between MCP capabilities.
         user_email = self._is_user_present(context)
-        if not await self._is_server_authorized_for_user(server_name, user_email):
-            error_msg = f"Tool '{tool_call.name}' is not authorized for this user"
+        active_level = context.get("compliance_level") if isinstance(context, dict) else None
+        decision = await self._authorize_mcp_operation(
+            server_name,
+            McpOperation.TOOL,
+            user_email=user_email,
+            compliance_level=active_level,
+        )
+        if not decision.allowed:
+            if decision.denial is McpDenialKind.CLASSIFICATION:
+                error_msg = (
+                    f"Tool '{tool_call.name}' is not approved for {active_level} data"
+                )
+            else:
+                error_msg = f"Tool '{tool_call.name}' is not authorized for this user"
             logger.warning(
-                "Denied execution of tool '%s' on server '%s' for user '%s'",
+                "Denied execution of tool '%s' on server '%s' for user '%s': %s",
                 sanitize_for_logging(tool_call.name),
                 sanitize_for_logging(server_name),
                 sanitize_for_logging(user_email or "<anonymous>"),
-            )
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                content=error_msg,
-                success=False,
-                error=error_msg,
-            )
-
-        # Classification check at the same choke point (issue #1032). The turn
-        # gate covers the tools the user selected; this covers a call the model
-        # makes to any other tool (hallucinated or prompt-injected). The level
-        # comes from the trusted session context, never tool arguments, and is
-        # only set when the compliance feature is on.
-        active_level = context.get("compliance_level") if isinstance(context, dict) else None
-        if active_level and not self._server_classification_permits(server_name, active_level):
-            error_msg = (
-                f"Tool '{tool_call.name}' is not approved for {active_level} data"
-            )
-            logger.warning(
-                "Denied execution of tool '%s' on server '%s': not approved for the "
-                "active classification",
-                sanitize_for_logging(tool_call.name),
-                sanitize_for_logging(server_name),
+                sanitize_for_logging(decision.reason),
             )
             return ToolResult(
                 tool_call_id=tool_call.id,
@@ -1094,20 +1174,6 @@ class ExecutionMixin:
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
                     async with self._use_elicitation_context(server_name, tool_call, update_cb, user_email or ""):
-                        async with self._use_sampling_context(server_name, tool_call, update_cb):
-                            raw_result = await self.call_tool(
-                                server_name,
-                                actual_tool_name,
-                                tool_call.arguments,
-                                progress_handler=_progress_handler,
-                                user_email=user_email,
-                                meta={"tool_call_id": tool_call.id},
-                                conversation_id=conversation_id,
-                                update_cb=update_cb,
-                            )
-            else:
-                async with self._use_elicitation_context(server_name, tool_call, update_cb, user_email or ""):
-                    async with self._use_sampling_context(server_name, tool_call, update_cb):
                         raw_result = await self.call_tool(
                             server_name,
                             actual_tool_name,
@@ -1118,6 +1184,18 @@ class ExecutionMixin:
                             conversation_id=conversation_id,
                             update_cb=update_cb,
                         )
+            else:
+                async with self._use_elicitation_context(server_name, tool_call, update_cb, user_email or ""):
+                    raw_result = await self.call_tool(
+                        server_name,
+                        actual_tool_name,
+                        tool_call.arguments,
+                        progress_handler=_progress_handler,
+                        user_email=user_email,
+                        meta={"tool_call_id": tool_call.id},
+                        conversation_id=conversation_id,
+                        update_cb=update_cb,
+                    )
             normalized_content = self._normalize_mcp_tool_result(raw_result)
             content_str = json.dumps(normalized_content, ensure_ascii=False, default=str)
 

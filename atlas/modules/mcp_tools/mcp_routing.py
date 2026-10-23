@@ -1,9 +1,13 @@
-"""Elicitation / sampling / log routing for MCPToolManager.
+"""Elicitation / log routing for MCPToolManager.
 
 Holds the per-request routing context classes and the RoutingMixin that
-creates per-server log/elicitation/sampling handlers. Routing uses
-dictionaries keyed by (server_name, tool_call_id) rather than contextvars
-because the MCP receive loop runs in a different task than the tool call.
+creates per-server log/elicitation handlers. Routing uses dictionaries keyed
+by (server_name, tool_call_id) rather than contextvars because the MCP receive
+loop runs in a different task than the tool call.
+
+MCP sampling was removed deliberately: a server-initiated LLM call ran under
+an arbitrary configured model without the requesting user's identity or model
+ACL, which is not a boundary this application can delegate to a tool server.
 """
 import asyncio
 import contextvars
@@ -54,18 +58,6 @@ class _AmbiguousRouting:
 
 AMBIGUOUS_ROUTING = _AmbiguousRouting()
 
-class _SamplingRoutingContext:
-    """Context for routing sampling requests to the correct tool execution."""
-    def __init__(
-        self,
-        server_name: str,
-        tool_call: ToolCall,
-        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
-    ):
-        self.server_name = server_name
-        self.tool_call = tool_call
-        self.update_cb = update_cb
-
 # Mapping from MCP log levels to Python logging levels
 MCP_TO_PYTHON_LOG_LEVEL = {
     "debug": logging.DEBUG,
@@ -81,7 +73,7 @@ MCP_TO_PYTHON_LOG_LEVEL = {
 
 
 class RoutingMixin:
-    """Log/elicitation/sampling handler creation and routing resolution."""
+    """Log/elicitation handler creation and routing resolution."""
 
     def _create_log_handler(self, server_name: str):
         """Create a log handler for an MCP server.
@@ -286,150 +278,6 @@ class RoutingMixin:
             except Exception as e:
                 logger.error(f"Error handling elicitation for server '{server_name}': {e}", exc_info=True)
                 return ElicitResult(action="cancel", content=None)
-
-        return handler
-
-    @asynccontextmanager
-    async def _use_sampling_context(
-        self,
-        server_name: str,
-        tool_call: ToolCall,
-        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
-    ) -> AsyncIterator[None]:
-        """
-        Set up sampling routing for a tool call.
-        Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
-        Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
-        """
-        routing = _SamplingRoutingContext(server_name, tool_call, update_cb)
-        routing_key = (server_name, tool_call.id)
-        self._sampling_routing[routing_key] = routing
-        try:
-            yield
-        finally:
-            self._sampling_routing.pop(routing_key, None)
-
-    def _create_sampling_handler(self, server_name: str):
-        """
-        Create a sampling handler for a specific MCP server.
-
-        This handler intercepts MCP sampling requests and routes them to the LLM.
-        Returns a handler function that captures the server_name for routing.
-        """
-        async def handler(messages, params=None, context=None):
-            """Per-server sampling handler with captured server_name."""
-            from mcp.types import CreateMessageResult, SamplingMessage, TextContent
-
-            # Find routing context for this server (keyed by (server_name, tool_call_id))
-            routing = self._resolve_routing(self._sampling_routing, server_name, context)
-
-            if routing is AMBIGUOUS_ROUTING:
-                raise Exception(f"Ambiguous sampling routing for server '{server_name}'")
-
-            if routing is None:
-                logger.warning(
-                    f"Sampling request for server '{server_name}' but no routing context - "
-                    f"sampling cancelled."
-                )
-                raise Exception("No routing context for sampling request")
-
-            try:
-                message_dicts = []
-                for msg in messages:
-                    if isinstance(msg, SamplingMessage):
-                        text = ""
-                        if isinstance(msg.content, TextContent):
-                            text = msg.content.text
-                        elif isinstance(msg.content, list):
-                            for item in msg.content:
-                                if isinstance(item, TextContent):
-                                    text += item.text
-                        else:
-                            text = str(msg.content)
-                        message_dicts.append({
-                            "role": msg.role,
-                            "content": text
-                        })
-                    elif isinstance(msg, str):
-                        message_dicts.append({
-                            "role": "user",
-                            "content": msg
-                        })
-                    else:
-                        message_dicts.append(msg)
-
-                system_prompt = getattr(params, 'systemPrompt', None) if params else None
-                temperature = getattr(params, 'temperature', None) if params else None
-                max_tokens = getattr(params, 'maxTokens', 512) if params else 512
-                model_preferences_raw = getattr(params, 'modelPreferences', None) if params else None
-
-                model_preferences = None
-                if model_preferences_raw:
-                    if isinstance(model_preferences_raw, str):
-                        model_preferences = [model_preferences_raw]
-                    elif isinstance(model_preferences_raw, list):
-                        model_preferences = model_preferences_raw
-
-                if system_prompt:
-                    message_dicts.insert(0, {
-                        "role": "system",
-                        "content": system_prompt
-                    })
-
-                logger.info(
-                    f"Sampling request from server '{server_name}' tool '{routing.tool_call.name}': "
-                    f"{len(message_dicts)} messages, temperature={temperature}, max_tokens={max_tokens}"
-                )
-
-                from atlas.modules.config import config_manager
-                from atlas.modules.llm.litellm_caller import LiteLLMCaller
-
-                llm_caller = LiteLLMCaller()
-
-                llm_config = config_manager.llm_config
-                model_name = None
-
-                if model_preferences:
-                    for pref in model_preferences:
-                        if pref in llm_config.models:
-                            model_name = pref
-                            break
-                        for name, model_config in llm_config.models.items():
-                            if model_config.model_name == pref:
-                                model_name = name
-                                break
-                        if model_name:
-                            break
-
-                if not model_name:
-                    model_name = next(iter(llm_config.models.keys()))
-
-                logger.debug(
-                    f"Using model '{model_name}' for sampling "
-                    f"(preferences: {model_preferences})"
-                )
-
-                response = await llm_caller.call_plain(
-                    model_name=model_name,
-                    messages=message_dicts,
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
-
-                logger.info(
-                    f"Sampling completed for server '{server_name}': "
-                    f"response_length={len(response) if response else 0}"
-                )
-
-                return CreateMessageResult(
-                    role="assistant",
-                    content=TextContent(type="text", text=response),
-                    model=model_name
-                )
-
-            except Exception as e:
-                logger.error(f"Error handling sampling for server '{server_name}': {e}", exc_info=True)
-                raise
 
         return handler
 

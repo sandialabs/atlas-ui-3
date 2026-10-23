@@ -21,7 +21,6 @@ def _manager(server_config: dict) -> MCPToolManager:
     manager = MCPToolManager.__new__(MCPToolManager)
     manager.servers_config = server_config
     manager._elicitation_routing = {}
-    manager._sampling_routing = {}
     manager._server_task_support = {}
     manager._tool_task_forbidden = set()
     return manager

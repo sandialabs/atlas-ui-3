@@ -1,7 +1,10 @@
 """Prompt override service - handles MCP system prompt injection."""
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+
+from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.domain.errors import AuthorizationError
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,9 @@ class PromptOverrideService:
         *,
         user_email: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        compliance_level: Optional[str] = None,
+        model_name: Optional[str] = None,
+        warning_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Apply MCP prompt overrides for all selected prompts.
@@ -42,6 +48,12 @@ class PromptOverrideService:
             selected_prompts: List of prompt keys (format: "server_promptname")
             user_email: User's email for per-user HTTP session isolation and meta context
             conversation_id: Optional conversation ID for meta context
+            compliance_level: Active data classification from the trusted turn
+                context, enforced by the central MCP policy before retrieval
+            model_name: Model this turn is running, enforced against the
+                per-model group ACL before prompt text enters its context
+            warning_callback: Optional async publisher for a user-visible
+                notice when a selected prompt is denied
 
         Returns:
             Messages with prompt overrides prepended (if applicable)
@@ -65,12 +77,20 @@ class PromptOverrideService:
                 if conversation_id:
                     meta["conversation_id"] = conversation_id
 
+                prompt_kwargs = {
+                    "meta": meta if meta else None,
+                    "user_email": user_email,
+                    "conversation_id": conversation_id,
+                }
+                if compliance_level is not None:
+                    prompt_kwargs["compliance_level"] = compliance_level
+                if model_name is not None:
+                    prompt_kwargs["model_name"] = model_name
+
                 prompt_obj = await self.tool_manager.get_prompt(
                     server,
                     prompt_name,
-                    meta=meta if meta else None,
-                    user_email=user_email,
-                    conversation_id=conversation_id,
+                    **prompt_kwargs,
                 )
                 prompt_text = self._extract_prompt_text(prompt_obj)
 
@@ -80,6 +100,27 @@ class PromptOverrideService:
                         "Applied MCP prompt '%s' (len=%d)", key, len(prompt_text)
                     )
 
+            except AuthorizationError as exc:
+                # A denied prompt must not reach model context. Tell the user
+                # (a selected prompt silently disappearing looks like a bug),
+                # and keep the decision in the log with sanitized values.
+                reason = getattr(exc, "message", str(exc))
+                logger.warning(
+                    "Denied MCP prompt '%s' for user '%s': %s",
+                    sanitize_for_logging(key),
+                    sanitize_for_logging(user_email or "<anonymous>"),
+                    sanitize_for_logging(reason),
+                )
+                if warning_callback is not None:
+                    try:
+                        await warning_callback(
+                            f"MCP prompt `{key}` was not applied: {reason}"
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Could not publish denied-prompt warning",
+                            exc_info=True,
+                        )
             except Exception:
                 logger.debug("Failed retrieving MCP prompt %s", key, exc_info=True)
 

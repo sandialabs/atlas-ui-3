@@ -65,7 +65,6 @@ def manager():
         mgr._tool_task_forbidden = set()
         mgr._task_timeout = 1
         mgr._elicitation_routing = {}
-        mgr._sampling_routing = {}
         mgr._default_log_callback = None
         mgr._min_log_level = 20
         return mgr
