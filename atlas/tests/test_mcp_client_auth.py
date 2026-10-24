@@ -101,7 +101,6 @@ class TestGetUserClient:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
         return manager
 
     @pytest.mark.asyncio
@@ -166,7 +165,6 @@ class TestGetUserClient:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
 
         with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
              patch("atlas.modules.mcp_tools.client.Client") as mock_client_class:
@@ -210,7 +208,6 @@ class TestGetUserClient:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
 
         with patch("atlas.modules.mcp_tools.token_storage.get_token_storage") as mock_storage, \
              patch("atlas.modules.mcp_tools.client.Client") as mock_client_class, \
@@ -399,7 +396,6 @@ class TestGetPromptAuthRouting:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
         return manager
 
     @pytest.mark.asyncio
@@ -503,7 +499,6 @@ class TestGetPromptAuthRouting:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
 
         plain_client = MagicMock()
         plain_client.__aenter__ = AsyncMock(return_value=plain_client)
@@ -552,7 +547,6 @@ class TestSilentOAuthRefreshCallSite:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
         return manager
 
     @pytest.mark.asyncio
@@ -626,7 +620,6 @@ class TestTokenRotationInvalidatesCachedClient:
         manager._user_clients_lock = asyncio.Lock()
         manager._create_log_handler = MagicMock(return_value=None)
         manager._create_elicitation_handler = MagicMock(return_value=None)
-        manager._create_sampling_handler = MagicMock(return_value=None)
         return manager
 
     @pytest.mark.asyncio

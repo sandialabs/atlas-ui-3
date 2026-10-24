@@ -1,6 +1,6 @@
 # Authentication & Authorization
 
-Last updated: 2026-10-04
+Last updated: 2026-10-21
 
 This page describes Atlas's **default** authentication mode: the application
 operates behind a reverse proxy and trusts an identity header injected by an
@@ -10,6 +10,11 @@ Atlas can alternatively terminate login itself as an OpenID Connect relying
 party -- see [OIDC Login & Delegated Credentials](oidc-authentication.md). That
 mode is opt-in (`FEATURE_OIDC_AUTH_ENABLED`), works with or without a reverse
 proxy, and leaves everything on this page unchanged when it is off.
+
+Header auth itself can be switched off with `FEATURE_HEADER_AUTH_ENABLED=false`
+(default `true`) to run OIDC-only: the identity header is then ignored
+everywhere, and startup fails unless OIDC login is enabled and fully
+configured. See [OIDC-only mode](oidc-authentication.md#oidc-only-mode).
 
 ## Production Authentication Flow
 

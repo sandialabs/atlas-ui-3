@@ -36,7 +36,6 @@ from atlas.modules.mcp_tools.mcp_routing import (
     LogCallback,
     RoutingMixin,
     _ElicitationRoutingContext,
-    _SamplingRoutingContext,
 )
 from atlas.modules.mcp_tools.mcp_user_client_cache import (
     _DEFAULT_USER_CLIENT_CACHE_IDLE_TTL_SECONDS,
@@ -226,10 +225,6 @@ class MCPToolManager(
         # Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
         # Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
         self._elicitation_routing: Dict[tuple, _ElicitationRoutingContext] = {}
-
-        # Dictionary-based routing for sampling requests (similar to elicitation)
-        # Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
-        self._sampling_routing: Dict[tuple, "_SamplingRoutingContext"] = {}
 
         # Session manager for per-conversation session persistence
         from atlas.modules.mcp_tools.session_manager import MCPSessionManager

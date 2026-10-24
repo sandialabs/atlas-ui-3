@@ -279,11 +279,11 @@ name:
    and refuse key uploads for them, so a user cannot register a key against a
    model they may not use.
 
-Note: model selection for MCP *sampling* requests (a server-initiated
-`sampling/createMessage` during a tool call) is matched against the configured
-models without a per-user group check, because no user identity is attached to
-the sampling context. Restrict access to such MCP servers with the server's own
-`groups` ACL rather than relying on per-model groups alone.
+MCP server-initiated LLM sampling is not supported: it has been removed so an
+MCP server can never choose and invoke a model outside the requesting user's
+per-model authorization. MCP prompts and resources are authorized through the
+same central policy as tools (server groups, active data classification, and the
+per-model ACL when a model is involved).
 
 ## Configuration Fields Explained
 

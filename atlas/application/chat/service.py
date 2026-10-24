@@ -430,8 +430,11 @@ class ChatService:
                 "classification",
                 len(violations),
             )
+            # The user reads this level name, so show its configured friendly
+            # label (issue #1117); the check itself stays on canonical names.
+            level_label = compliance_mgr.get_display_name(active_level) or active_level
             raise ValidationError(
-                f"Not approved for {active_level} data: {', '.join(violations)}. "
+                f"Not approved for {level_label} data: {', '.join(violations)}. "
                 "Switch the model or deselect the tools and data sources named, "
                 "or choose a compliance level they are approved for, then send "
                 "the message again."
@@ -482,16 +485,27 @@ class ChatService:
             len(unapproved),
             len(unverified),
         )
+        from atlas.core.compliance import get_compliance_manager
+
+        # User-facing level names use the configured friendly label (issue
+        # #1117); the checks above stay on canonical names. A broken lookup
+        # falls back to the raw level rather than masking the refusal.
+        try:
+            level_label = (
+                get_compliance_manager().get_display_name(active_level) or active_level
+            )
+        except Exception:
+            level_label = active_level
         parts = []
         if unapproved:
-            parts.append(f"Not approved for {active_level} data: data source {', '.join(unapproved)}.")
+            parts.append(f"Not approved for {level_label} data: data source {', '.join(unapproved)}.")
         if unverified:
             # The backend did not answer, or offers the user nothing on that
             # server (for example a group restriction): approval cannot be
             # confirmed either way, so neither is claimed.
             parts.append(
                 f"Could not confirm that data source {', '.join(unverified)} is approved "
-                f"for {active_level} data (its RAG backend did not answer, or you do not "
+                f"for {level_label} data (its RAG backend did not answer, or you do not "
                 "have access to it)."
             )
         raise ValidationError(

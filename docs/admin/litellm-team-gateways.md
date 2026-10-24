@@ -259,8 +259,8 @@ completion. Validate that path in staging before relying on it.
   request reaches LiteLLM. With a shared service key this check is what keeps
   users inside their teams, so removing a user from a team takes effect within
   `discovery_cache_seconds`.
-- **Not yet covered:** `atlas_launch` sub-conversations and MCP sampling
-  choose from the statically configured models only.
+- **Not yet covered:** `atlas_launch` sub-conversations choose from the
+  statically configured models only.
 - **Access control** (`groups`) and **compliance** (`compliance_level`) apply
   to every gateway model exactly as they do to configured models. A gateway a
   user may not use is absent from `/api/config` and its endpoints answer 404.

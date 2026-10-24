@@ -17,7 +17,6 @@ built live under [design-notes/](design-notes/README.md).
 - [MCP Tool Outputs](mcp-tool-outputs.md) - How tool results are rendered (canvas, files, text)
 - [MCP Tool File I/O Guide](mcp-file-io.md) - Reading and writing files from MCP tools
 - [MCP Server Logging](mcp-server-logging.md) - Emitting and surfacing MCP server logs
-- [LLM Sampling in MCP Tools](sampling.md) - Letting tools call back into the LLM
 - [Interactive Tool Elicitation](elicitation.md) - Tools that prompt the user mid-execution
 - [Progress Updates and Intermediate Results](progress-updates.md) - Streaming progress from long-running tools
 - [Adding Custom Canvas Renderers](canvas-renderers.md) - Extending the canvas with new viewers

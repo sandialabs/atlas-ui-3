@@ -2,7 +2,8 @@ import { useMemo, useState, useCallback } from 'react'
 import { X, Search, CheckSquare, Square } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
-import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
+import { classificationsOf } from '../utils/complianceAccess'
+import { classificationsDisplayLabel } from '../utils/complianceDisplay'
 
 /**
  * The data source (RAG corpus) picker.
@@ -208,9 +209,9 @@ const DataSourcesSelector = () => {
                     <span className="font-medium text-sm min-w-0 break-words">
                       {displayLabel}
                     </span>
-                    {complianceLevelsEnabled && classificationLabel(dataSource) && (
+                    {complianceLevelsEnabled && classificationsDisplayLabel(dataSource, complianceLevels) && (
                       <span className={`px-1.5 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap flex-shrink-0 ${getComplianceBadgeColor(classificationsOf(dataSource)[0])}`}>
-                        {classificationLabel(dataSource)}
+                        {classificationsDisplayLabel(dataSource, complianceLevels)}
                       </span>
                     )}
                   </div>

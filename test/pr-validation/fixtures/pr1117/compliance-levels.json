@@ -1,0 +1,49 @@
+{
+  "version": "2.0",
+  "description": "PR #1117 fixture: optional display_name next to canonical names",
+  "levels": [
+    {
+      "name": "CUI_no_ECI_no_ITAR_no_PII",
+      "display_name": "CUI (Restricted)",
+      "description": "CUI excluding ECI, ITAR, and PII",
+      "aliases": ["CUI_RESTRICTED"],
+      "allowed_with": ["CUI_no_ECI_no_ITAR_no_PII"],
+      "banner": {
+        "background_color": "#502B85",
+        "text_color": "#FFFFFF"
+      }
+    },
+    {
+      "name": "UUR",
+      "description": "Unclassified releasable",
+      "aliases": [],
+      "allowed_with": ["UUR"],
+      "banner": {
+        "label": "Unclassified Releasable",
+        "background_color": "#007A33",
+        "text_color": "#FFFFFF"
+      }
+    },
+    {
+      "name": "Plain",
+      "description": "No display_name configured",
+      "aliases": [],
+      "allowed_with": ["Plain"]
+    },
+    {
+      "name": "TeamAlpha",
+      "display_name": "Team Data",
+      "description": "First level under a shared label",
+      "aliases": [],
+      "allowed_with": ["TeamAlpha"]
+    },
+    {
+      "name": "TeamBeta",
+      "display_name": "Team Data",
+      "description": "Second level under a shared label",
+      "aliases": [],
+      "allowed_with": ["TeamBeta"]
+    }
+  ],
+  "mode": "explicit_allowlist"
+}

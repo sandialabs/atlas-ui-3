@@ -713,12 +713,17 @@ class ChatOrchestrator:
             custom_system_prompt=kwargs.get("custom_system_prompt"),
         )
 
-        # Apply MCP prompt override
+        # Apply MCP prompt override. The active classification and model come
+        # from the trusted turn state, so the prompt fetch runs the same MCP
+        # authorization as tool execution before its text can enter context.
         messages = await self.prompt_override.apply_prompt_override(
             messages=messages,
             selected_prompts=selected_prompts,
             user_email=user_email,
             conversation_id=session.context.get("conversation_id", str(session_id)),
+            compliance_level=session.context.get("compliance_level"),
+            model_name=model,
+            warning_callback=self.event_publisher.publish_warning,
         )
 
         # Strip tools / agent mode and warn if the model does not support tool/function calling

@@ -105,18 +105,13 @@ The `_` prefix on `_mcp_data` signals that this is a system-injected parameter, 
 
 ## Servers Using _mcp_data
 
-### tool_planner (recommended reference)
+### username-override-demo (reference)
 
-The `tool_planner` MCP server (`atlas/mcp/tool_planner/main.py`) is the primary example of `_mcp_data` in action. It combines `_mcp_data` injection with MCP sampling to generate runnable bash scripts:
+The `username-override-demo` MCP server includes a `plan_with_tools` tool that demonstrates basic `_mcp_data` injection. See `atlas/mcp/username-override-demo/main.py`.
 
-1. Receives `_mcp_data` with all available tool metadata
-2. Converts it into a human-readable CLI reference via `format_tools_for_llm()`
-3. Uses `ctx.sample()` to ask the LLM to write a bash script using `atlas_chat_cli.py` (optionally with `--env-file` and config overrides like `--config-overrides`, `--llm-config`, `--mcp-config`, and `--rag-sources-config` for repeatable testing)
-4. Returns the generated script
-
-### username-override-demo
-
-The `username-override-demo` MCP server includes a simpler `plan_with_tools` tool that demonstrates basic `_mcp_data` injection without sampling. See `atlas/mcp/username-override-demo/main.py`.
+The former `tool_planner` server was removed on 2026-10-23 together with MCP
+sampling: its plan generation depended on a server-initiated LLM call that ran
+without the requesting user's identity or per-model authorization.
 
 ## Related
 

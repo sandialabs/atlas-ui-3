@@ -561,21 +561,24 @@ class DiscoveryMixin:
         return available_prompts
 
     async def get_authorized_servers(self, user_email: str, auth_check_func) -> List[str]:
-        """Get list of servers the user is authorized to use."""
+        """Get list of servers the user is authorized to use.
+
+        Goes through the central MCP policy so the servers offered to the UI are
+        filtered by the same group/identity rules that later guard tool, prompt,
+        and resource access.
+        """
+        from .mcp_authorization import McpOperation, authorize_mcp_server
+
         authorized_servers = []
-        for server_name, server_config in self.servers_config.items():
-            if not server_config.get("enabled", True):
-                continue
-
-            required_groups = server_config.get("groups", [])
-            if not required_groups:
-                authorized_servers.append(server_name)
-                continue
-
-            # Check if user is in any of the required groups
-            # We need to await each call and collect results before using any()
-            group_checks = [await auth_check_func(user_email, group) for group in required_groups]
-            if any(group_checks):
+        for server_name in self.servers_config:
+            decision = await authorize_mcp_server(
+                server_name,
+                operation=McpOperation.TOOL,
+                servers_config=self.servers_config,
+                user_email=user_email,
+                group_check=auth_check_func,
+            )
+            if decision.allowed:
                 authorized_servers.append(server_name)
         return authorized_servers
 

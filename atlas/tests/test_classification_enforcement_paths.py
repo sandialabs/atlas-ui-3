@@ -210,6 +210,37 @@ async def test_narrower_corpus_refuses_the_turn(use_manager, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_refusal_names_the_levels_display_name(tmp_path, monkeypatch):
+    """The user-facing refusal spells the level with its display_name
+    (issue #1117) while the check itself compares the canonical name."""
+    path = tmp_path / "compliance-levels.json"
+    path.write_text(json.dumps({"levels": [
+        {"name": "UUR", "allowed_with": ["UUR"]},
+        {
+            "name": "ITAR",
+            "display_name": "ITAR (Export Controlled)",
+            "allowed_with": ["ITAR"],
+        },
+    ]}))
+    display_manager = ComplianceLevelManager(path)
+    for target in (
+        "atlas.core.compliance.get_compliance_manager",
+        "atlas.domain.rag_mcp_service.get_compliance_manager",
+        "atlas.domain.unified_rag_service.get_compliance_manager",
+    ):
+        monkeypatch.setattr(target, lambda: display_manager)
+
+    discovery = _HttpDiscovery(sources=["open"])
+    service, repo = _service(monkeypatch, unified_rag=discovery)
+    with pytest.raises(
+        ValidationError,
+        match=r"Not approved for ITAR \(Export Controlled\) data: data source docs:uur_only",
+    ):
+        await _send(service, ["docs:open", "docs:uur_only"])
+    repo.get.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_unanswered_discovery_is_not_reported_as_unapproved(use_manager, monkeypatch):
     service, repo = _service(monkeypatch, unified_rag=_HttpDiscovery(fail=True))
     with pytest.raises(ValidationError) as exc:

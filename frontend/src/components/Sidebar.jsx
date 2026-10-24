@@ -540,7 +540,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
                         isGroupCollapsed={isGroupCollapsed}
                         shownRun={shownRun}
                         refusal={refusal}
-                        classification={classificationLabel(conv)}
+                        classification={classificationLabel(conv, complianceLevels)}
                         showClassification={!!(complianceEnabled || refusal)}
                         formatDate={formatDate}
                         onOpen={() => handleLoadConversation(conv)}

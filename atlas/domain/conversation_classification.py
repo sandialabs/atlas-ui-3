@@ -163,6 +163,20 @@ def _canonical(compliance_mgr: Any, level: Optional[str]) -> Optional[str]:
     return None if compliance_mgr.levels else level
 
 
+def _display_label(compliance_mgr: Any, level: Optional[str]) -> Optional[str]:
+    """The level's configured friendly label (issue #1117), or None.
+
+    ``None`` means "no configured label for this name" -- the caller falls
+    back to the canonical name it already holds. Refusal messages name only
+    classifications, never content, and authorization keeps comparing
+    canonical names; this only changes how a defined level is spelled.
+    """
+    if not level:
+        return None
+    getter = getattr(compliance_mgr, "get_display_name", None)
+    return getter(level) if callable(getter) else None
+
+
 def describe(binding: Any) -> str:
     """A short, content-free description for messages and the UI."""
     binding = normalize_binding(binding)
@@ -188,7 +202,11 @@ def resume_refusal(
     """
     binding = normalize_binding(binding)
     state = binding["state"]
-    active_label = active_level or "no compliance level"
+    active_label = (
+        _display_label(compliance_mgr, active_level)
+        or active_level
+        or "no compliance level"
+    )
 
     if state == STATE_LEGACY:
         if not compliance_enabled:
@@ -222,8 +240,9 @@ def resume_refusal(
     recorded = binding["level"]
     if not compliance_enabled:
         return (
-            f"This conversation was saved under {recorded}, and compliance levels "
-            "are not enabled, so it cannot be continued."
+            f"This conversation was saved under "
+            f"{_display_label(compliance_mgr, recorded) or recorded}, and compliance "
+            "levels are not enabled, so it cannot be continued."
         )
     recorded_canonical = _canonical(compliance_mgr, recorded)
     if recorded_canonical is None:
@@ -233,10 +252,11 @@ def resume_refusal(
         )
     if recorded_canonical == _canonical(compliance_mgr, active_level):
         return None
+    recorded_label = _display_label(compliance_mgr, recorded_canonical) or recorded_canonical
     return (
-        f"This conversation was saved under {recorded_canonical} and cannot be "
+        f"This conversation was saved under {recorded_label} and cannot be "
         f"continued under {active_label}. Switch the compliance level to "
-        f"{recorded_canonical} to continue it, or start a new conversation."
+        f"{recorded_label} to continue it, or start a new conversation."
     )
 
 

@@ -78,13 +78,17 @@ When a STDIO server process crashes between tool calls, the persistent session b
 | `MCP_REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (only when `MCP_STATE_BACKEND=redis`) |
 | `MCP_TASK_TIMEOUT` | `10` | Seconds to wait synchronously before switching to background task polling |
 
-## Elicitation/Sampling Routing
+## Elicitation Routing
 
-Concurrent tool calls are routed via composite `(server_name, tool_call_id)` keys on the `MCPToolManager` instance. When a server sends an elicitation or sampling request:
+Concurrent tool calls are routed via composite `(server_name, tool_call_id)` keys on the `MCPToolManager` instance. When a server sends an elicitation request:
 
 1. **O(1) lookup**: Check `(server_name, tool_call_id)` via `context.meta`
 2. **Fallback**: If meta unavailable, scan for single match on `server_name`
-3. **Ambiguous**: If multiple matches without meta, cancel (elicitation) or raise (sampling)
+3. **Ambiguous**: If multiple matches without meta, cancel the elicitation.
+
+MCP sampling used the same routing until it was removed on 2026-10-23: a
+server-initiated LLM call is not a capability Atlas can authorize against the
+requesting user's model access.
 
 ## Writing New MCP Servers
 

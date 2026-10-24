@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, Wrench, Shield, Key, Eye, Info } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
-import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
+import { classificationsOf } from '../utils/complianceAccess'
+import { complianceDisplayName, classificationsDisplayLabel } from '../utils/complianceDisplay'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { useLLMAuthStatus } from '../hooks/useLLMAuthStatus'
 import TokenInputModal from './TokenInputModal'
@@ -27,9 +28,13 @@ const ModelSelector = () => {
     setCurrentModel,
     features,
     complianceLevelFilter,
+    complianceLevels,
   } = useChat()
   const marketplace = useOptionalMarketplace()
   const isComplianceAccessible = marketplace?.isComplianceAccessible
+  // The selected level renders as its friendly label where one is configured
+  // (issue #1117); filtering keeps comparing the canonical value.
+  const filterLabel = complianceDisplayName(complianceLevels, complianceLevelFilter)
   const llmAuth = useLLMAuthStatus()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [expandedModelInfo, setExpandedModelInfo] = useState(null)
@@ -83,7 +88,7 @@ const ModelSelector = () => {
     !isComplianceAccessible(complianceLevelFilter, classificationsOf(currentObj))
   const buttonTitle = currentModel
     ? (currentOutsideFilter
-      ? `Model: ${currentLabel} is outside the ${complianceLevelFilter} security level; choose a compliant model`
+      ? `Model: ${currentLabel} is outside the ${filterLabel} security level; choose a compliant model`
       : `Model: ${currentLabel}`)
     : 'Select a model'
 
@@ -100,7 +105,7 @@ const ModelSelector = () => {
         }`}
         title={buttonTitle}
         aria-label={currentModel
-          ? `Select chat model, currently ${currentLabel}${currentOutsideFilter ? `, outside the ${complianceLevelFilter} security level` : ''}`
+          ? `Select chat model, currently ${currentLabel}${currentOutsideFilter ? `, outside the ${filterLabel} security level` : ''}`
           : 'Select chat model'}
         aria-expanded={dropdownOpen}
         aria-haspopup="true"
@@ -125,7 +130,7 @@ const ModelSelector = () => {
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
             ) : visibleListedModels.length === 0 && visibleGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">
-                No models match the {complianceLevelFilter} security level
+                No models match the {filterLabel} security level
               </div>
             ) : (
               visibleListedModels.map(m => {
@@ -159,7 +164,7 @@ const ModelSelector = () => {
                             <CapabilityIcons vision={model.supports_vision} tools={model.supports_tools} />
                           </span>
                         </span>
-                        {complianceEnabled && <ClassificationBadge resource={model} />}
+                        {complianceEnabled && <ClassificationBadge resource={model} levels={complianceLevels} />}
                       </button>
                       {needsUserKey && (
                         <button
@@ -202,10 +207,10 @@ const ModelSelector = () => {
                             <Wrench className="w-3 h-3" />
                             Tools {model.supports_tools !== false ? '' : '(no)'}
                           </span>
-                          {complianceEnabled && classificationLabel(model) && (
+                          {complianceEnabled && classificationsDisplayLabel(model, complianceLevels) && (
                             <span className="inline-flex items-start gap-1 min-w-0 max-w-full px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-600 text-white [overflow-wrap:anywhere]">
                               <Shield className="w-3 h-3 flex-shrink-0 mt-px" />
-                              {classificationLabel(model)}
+                              {classificationsDisplayLabel(model, complianceLevels)}
                             </span>
                           )}
                         </div>
@@ -224,6 +229,7 @@ const ModelSelector = () => {
                 user={user}
                 isModelVisible={isGatewayModelVisible}
                 showCompliance={complianceEnabled}
+                complianceLevels={complianceLevels}
               />
             ))}
           </div>
