@@ -1,6 +1,6 @@
 # Context Tracking and Compaction
 
-Last updated: 2026-10-21
+Last updated: 2026-10-24
 
 Issue #877.
 
@@ -13,7 +13,7 @@ model.
 
 ## What the user sees
 
-- **Context meter** next to the composer: `Context ~82K / 128K`. The value is
+- **Context meter** on the control row under the composer, with the model and prompt: `Context ~82K / 128K`. On a narrow screen the label shortens to the gauge and the estimate. The value is
   the server's estimate of the next request -- system prompt, the conversation
   after any checkpoint, tool definitions and results, inline images -- against
   the model's context window. A `?` after the window means the window is

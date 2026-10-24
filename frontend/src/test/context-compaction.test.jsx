@@ -189,7 +189,12 @@ describe('ContextUsageMeter', () => {
 
   it('labels the value as an estimate against the window', () => {
     meter()
-    expect(screen.getByTestId('context-usage-meter')).toHaveTextContent('Context ~82K / 128K')
+    const button = screen.getByTestId('context-usage-meter')
+    expect(button).toHaveTextContent('Context ~82K / 128K')
+    expect(button).toHaveAccessibleName(/Context ~82K \/ 128K/)
+    // Narrow screens keep the estimate only; sm and up show the full fraction.
+    expect(screen.getByText('~82K').className).toContain('sm:hidden')
+    expect(screen.getByText('Context ~82K / 128K').className).toContain('sm:inline')
   })
 
   it('marks an assumed window', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Gauge, Loader2 } from 'lucide-react'
 import { FOCUS_RING } from '../utils/focusRing'
 import { formatTokens, meterLevel, WINDOW_SOURCE_LABEL } from '../utils/contextUsage'
@@ -17,23 +17,45 @@ const LEVEL_BAR = {
   over: 'bg-red-500',
 }
 
+const LEVEL_ICON = {
+  ok: 'text-emerald-400',
+  warn: 'text-amber-400',
+  high: 'text-orange-400',
+  over: 'text-red-400',
+}
+
 const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
   const [open, setOpen] = useState(false)
   const [focus, setFocus] = useState('')
+  // Which edge of the button the details panel hangs from, so a meter near
+  // the right of a narrow row does not paint the panel off screen.
+  const [panelSide, setPanelSide] = useState('left')
   const panelRef = useRef(null)
+  const buttonRef = useRef(null)
   const { usage, isCompacting, autoCompact, setAutoCompact, compactNow, enabled } = contextCompaction || {}
+
+  const placePanel = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const roomRight = window.innerWidth - rect.left
+    const roomLeft = rect.right
+    setPanelSide(roomRight >= roomLeft ? 'left' : 'right')
+  }, [])
 
   useEffect(() => {
     if (!open) return undefined
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
     const onClick = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false) }
+    placePanel()
     document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onClick)
+    window.addEventListener('resize', placePanel)
     return () => {
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onClick)
+      window.removeEventListener('resize', placePanel)
     }
-  }, [open])
+  }, [open, placePanel])
 
   if (!enabled || (!usage && !isCompacting)) return null
 
@@ -54,23 +76,32 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
     }
   }
 
+  // The full "Context ~2K / 6K" readout shares the model/prompt row. Below
+  // the sm breakpoint only the gauge and the estimate stay, so the chip
+  // fits that row on a phone. The accessible name keeps the whole fraction.
+  const fullLabel = `Context ${label}`
+  const shortLabel = usage ? `~${formatTokens(used)}${assumed ? '?' : ''}` : '…'
+
   return (
-    <div className="relative" ref={panelRef}>
+    <div className="relative shrink-0" ref={panelRef}>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        ref={buttonRef}
+        onClick={() => { placePanel(); setOpen(!open) }}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-label={`${fullLabel}. Estimated context of the next request. Click for details and compaction.`}
         title="Estimated context of the next request. Click for details and compaction."
-        className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 ${FOCUS_RING}`}
+        className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 whitespace-nowrap ${FOCUS_RING}`}
         data-testid="context-usage-meter"
       >
         {isCompacting
           ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-          : <Gauge className="w-3.5 h-3.5" aria-hidden="true" />}
-        <span>Context {label}</span>
+          : <Gauge className={`w-3.5 h-3.5 shrink-0 ${LEVEL_ICON[level]}`} aria-hidden="true" />}
+        <span className="sm:hidden">{shortLabel}</span>
+        <span className="hidden sm:inline">{fullLabel}</span>
         {usage && (
-          <span className="hidden sm:block w-12 h-1.5 rounded bg-gray-600 overflow-hidden" aria-hidden="true">
+          <span className="hidden md:block w-12 h-1.5 rounded bg-gray-600 overflow-hidden shrink-0" aria-hidden="true">
             <span className={`block h-full ${LEVEL_BAR[level]}`} style={{ width: `${percent}%` }} />
           </span>
         )}
@@ -80,7 +111,9 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
         <div
           role="dialog"
           aria-label="Context usage and compaction"
-          className="absolute bottom-full right-0 mb-2 w-80 max-w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto rounded-lg border border-gray-600 bg-gray-800 p-3 text-xs text-gray-300 shadow-xl z-30"
+          className={`absolute bottom-full mb-2 w-80 max-w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto rounded-lg border border-gray-600 bg-gray-800 p-3 text-xs text-gray-300 shadow-xl z-30 ${
+            panelSide === 'right' ? 'right-0' : 'left-0'
+          }`}
         >
           {usage ? (
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">

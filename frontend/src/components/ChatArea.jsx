@@ -1043,14 +1043,6 @@ const ChatArea = () => {
           {/* Enabled data sources, as pills (issue #839 review) */}
           <EnabledDataSourcesIndicator />
 
-          {/* Estimated context and compaction controls (issue #877) */}
-          <div className="flex justify-end mb-2 empty:hidden">
-            <ContextUsageMeter
-              contextCompaction={contextCompaction}
-              disabled={!isConnected || isThinking || isStreaming || isAgentRunning}
-            />
-          </div>
-
           {/* Warning: WebSocket disconnected - sending is blocked until reconnected */}
           {!isConnected && (
             <div
@@ -1473,6 +1465,12 @@ const ChatArea = () => {
               <ToolSelector />
               {features?.workspaces && <WorkspaceSelector placement="up" />}
               <PromptSelector />
+              {/* Context meter (issue #877) sits on this row with the model
+                  and prompt. */}
+              <ContextUsageMeter
+                contextCompaction={contextCompaction}
+                disabled={!isConnected || isThinking || isStreaming || isAgentRunning}
+              />
               <span className="hidden sm:inline">Press Shift + Enter for new line</span>
             </div>
             {Object.keys(uploadedFiles).length > 0 && (
