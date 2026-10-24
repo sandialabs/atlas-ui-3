@@ -62,6 +62,8 @@ export function cleanupStreamState() {
  * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
  * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
  * @param {Function} [deps.onConversationSaved] - Called with the id when the conversation on screen is persisted.
+ * @param {Function} [deps.onContextUsage] - Receives `context_usage` estimates (issue #877).
+ * @param {Function} [deps.onContextCompaction] - Receives `context_compaction` progress frames (issue #877).
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
 export function createWebSocketHandler(deps) {
@@ -91,6 +93,8 @@ export function createWebSocketHandler(deps) {
     getVisibleConversationId,
     onRunStatus,
     onConversationSaved,
+    onContextUsage,
+    onContextCompaction,
   } = deps
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
@@ -573,6 +577,47 @@ export function createWebSocketHandler(deps) {
           _pendingCitations = null
           break
         }
+        case 'context_usage': {
+          if (typeof onContextUsage === 'function') onContextUsage(data)
+          break
+        }
+        case 'context_compaction': {
+          if (typeof onContextCompaction === 'function') onContextCompaction(data)
+          // A compaction finishing in a conversation the user has left must
+          // not write its checkpoint into the one on screen. The hook still
+          // hears the frame, so a lock held for that compaction can release.
+          const visibleId = typeof getVisibleConversationId === 'function' ? getVisibleConversationId() : null
+          if (data.conversation_id && visibleId && data.conversation_id !== visibleId) break
+          if (data.status === 'completed' && data.content) {
+            // The live twin of the stored checkpoint row: same role, type and
+            // content, so a joined-run refresh aligns the two (issue #959).
+            addMessage({
+              role: 'system',
+              type: 'context_checkpoint',
+              content: data.content,
+              context_checkpoint: {
+                scope: data.scope,
+                trigger: data.trigger,
+                summary: data.summary || null,
+                before_tokens: data.before_tokens,
+                after_tokens: data.after_tokens,
+              },
+              timestamp: new Date().toISOString(),
+            })
+          } else if (!data.silent && (data.status === 'failed' || (data.status === 'skipped' && data.trigger === 'manual'))) {
+            // An automatic attempt that found nothing to do is not news; a
+            // failure, or the user's own request coming to nothing, is.
+            addMessage({
+              role: 'system',
+              type: 'warning',
+              content: data.status === 'failed'
+                ? (data.error || 'Context compaction failed.')
+                : (data.reason || 'Nothing to compact.'),
+              timestamp: new Date().toISOString(),
+            })
+          }
+          break
+        }
         case 'conversation_saved': {
           if (data.conversation_id && typeof setActiveConversationId === 'function') {
             setActiveConversationId(data.conversation_id)
@@ -649,6 +694,12 @@ export function createWebSocketHandler(deps) {
           setCurrentAgentStep(0)
           if (typeof setAgentPendingQuestion === 'function') setAgentPendingQuestion(null)
           endTokenStream()
+          // Whatever was pending -- a manual compaction included -- has ended,
+          // except when the error is the refusal of a message sent while that
+          // compaction is still running.
+          if (typeof onContextCompaction === 'function' && data.error_type !== 'compaction_in_progress') {
+            onContextCompaction({ status: 'failed', silent: true })
+          }
           addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
           break
         case 'agent_step_update':

@@ -36,6 +36,10 @@ class AgentContext:
     # honour it -- ``atlas_launch`` refuses to start a sub-conversation, whose
     # transcript is saved by definition (#925).
     incognito: bool = False
+    # Context compaction for this run (issue #877): a RunCompactionGuard that
+    # keeps the working transcript inside the model's window at step
+    # boundaries and recovers from a context-length error. None disables it.
+    compaction: Optional[Any] = None
 
 
 @dataclass

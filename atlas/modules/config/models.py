@@ -108,6 +108,10 @@ class ModelConfig(BaseModel):
     api_key: str = ""
     description: Optional[str] = None
     max_tokens: Optional[int] = 10000
+    # The model's context window in tokens (issue #877). Needed for custom
+    # endpoints and aliases LiteLLM cannot look up; when unset the window is
+    # taken from LiteLLM's model map, then CONTEXT_FALLBACK_WINDOW_TOKENS.
+    context_window: Optional[int] = Field(default=None, gt=0)
     temperature: Optional[float] = 0.7
     request_timeout_seconds: Optional[float] = Field(
         default=None, gt=0, allow_inf_nan=False,

@@ -119,8 +119,14 @@ function readCachedConfig() {
  */
 const SAFE_CACHE_FIELDS = [
   'app_name', 'models', 'features', 'file_extraction', 'file_upload',
-  'banner_enabled', 'agent_mode_available', 'agent_max_steps', 'help'
+  'banner_enabled', 'agent_mode_available', 'agent_max_steps', 'help',
+  'context_compaction'
 ]
+
+// Context meter and compaction controls (issue #877). Shown only once the
+// server has reported a context estimate, so these defaults never surface a
+// control the deployment has switched off.
+export const DEFAULT_CONTEXT_COMPACTION = { enabled: true, auto_default: true, threshold_percent: 80 }
 
 /**
  * Per-user fields that must be stripped from model objects before caching.
@@ -217,6 +223,9 @@ export function useChatConfig() {
   // from the ceiling until a current response confirms it (#849 review).
   const [agentCeilingConfirmed, setAgentCeilingConfirmed] = useState(false)
   const [isInAdminGroup, setIsInAdminGroup] = useState(false)
+  const [contextCompaction, setContextCompaction] = useState(
+    () => ({ ...DEFAULT_CONTEXT_COMPACTION, ...(cached.current?.context_compaction || {}) })
+  )
   // Tracks whether we have received at least one config response (cache or network)
   const [configReady, setConfigReady] = useState(!!cached.current)
   const configReadyRef = useRef(!!cached.current)
@@ -249,6 +258,9 @@ export function useChatConfig() {
       setAgentCeilingConfirmed(true)
     }
     setIsInAdminGroup(!!cfg.is_in_admin_group)
+    if (cfg.context_compaction && typeof cfg.context_compaction === 'object') {
+      setContextCompaction({ ...DEFAULT_CONTEXT_COMPACTION, ...cfg.context_compaction })
+    }
 
     if (!isShell) {
       const uniqueTools = (cfg.tools || []).map(server => ({
@@ -409,6 +421,7 @@ export function useChatConfig() {
     agentModeAvailable,
     agentMaxStepsLimit,
     agentCeilingConfirmed,
+    contextCompaction,
     isInAdminGroup,
     fileExtraction,
     fileUpload,

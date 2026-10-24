@@ -11,7 +11,7 @@ from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
 from atlas.modules.config.models import qualified_tool_name
-from atlas.modules.config.settings import configured_agent_max_steps
+from atlas.modules.config.settings import configured_agent_max_steps, context_compaction_config
 from atlas.modules.help.help_config import resolve_help_config
 from atlas.modules.help.local_content import load_local_help_content
 from atlas.modules.mcp_tools.atlas_server import (
@@ -221,6 +221,7 @@ async def get_config_shell(
 "agent_mode_available": app_settings.agent_mode_available,
         # Mirrors the orchestrator's clamp: int() with a fallback, floor of 1.
         "agent_max_steps": configured_agent_max_steps(app_settings),
+        "context_compaction": context_compaction_config(app_settings),
         "banner_enabled": app_settings.banner_enabled,
         "help": help_public,
         "features": {
@@ -528,6 +529,7 @@ async def get_config(
         "authorized_servers": authorized_servers,  # Optional: expose for debugging
         "agent_mode_available": app_settings.agent_mode_available,  # Whether agent mode UI should be shown
         "agent_max_steps": configured_agent_max_steps(app_settings),  # Ceiling for the agent loop (bounds the Max Agent Iterations slider)
+        "context_compaction": context_compaction_config(app_settings),  # Context meter and compaction controls (issue #877)
         "banner_enabled": app_settings.banner_enabled,  # Whether banner system is enabled
         "help_content": help_content,  # Help page content from help.md
         # How the Help page gets its content (issue #1107): the local

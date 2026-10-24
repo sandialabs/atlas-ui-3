@@ -29,6 +29,7 @@ del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, TypeVar
@@ -88,7 +89,7 @@ from atlas.infrastructure.sessions.codec import decode_session, encode_session
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
-from atlas.modules.help.help_config import resolve_help_config, report_help_config_problem
+from atlas.modules.help.help_config import report_help_config_problem, resolve_help_config
 from atlas.routes.admin_routes import admin_router
 
 # Import essential routes
@@ -952,6 +953,20 @@ def _record_run_conversation(connection_session, conversation_id) -> None:
     known.append(conversation_id)
     if len(known) > _MAX_RUN_CONVERSATIONS:
         del known[:-_MAX_RUN_CONVERSATIONS]
+
+
+def _compaction_refused(conversation_id: Optional[str]) -> dict:
+    """Ends a client's pending manual compaction after a refusal (issue #877).
+
+    ``silent``: the error frame sent alongside already tells the user why.
+    """
+    return {
+        "type": "context_compaction",
+        "status": "failed",
+        "trigger": "manual",
+        "silent": True,
+        "conversation_id": conversation_id,
+    }
 
 
 def _normalize_conversation_id(raw: Any) -> Optional[str]:
@@ -1890,7 +1905,12 @@ async def websocket_endpoint(websocket: WebSocket):
     # turn (which would race on the same session history), its content is
     # pushed onto the running loop's channel and injected as a normal user turn
     # at the next iteration boundary.
-    active_chat_task = {"task": None, "steering": None, "conversation_id": None}
+    active_chat_task = {"task": None, "steering": None, "conversation_id": None, "kind": None}
+    # Issue #877: when this connection last answered a context_usage_request.
+    # The meter asks on conversation open and model change. Requests inside
+    # the window are coalesced: only the newest is answered, once the window
+    # ends, so a quick switch still gets the estimate for where it landed.
+    last_usage_request = {"at": 0.0, "pending": None, "timer": None}
 
     # Parallel conversation runs (issue #884). The registry is process-wide and
     # outlives this socket; ``connection_run_ids`` is just this connection's
@@ -1946,6 +1966,22 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
             if message_type == "chat":
+                # Issue #877: a manual compaction rewrites what this
+                # conversation's next request carries and saves the session;
+                # a turn started under it would race on the same history.
+                compacting = active_chat_task.get("task")
+                if (
+                    active_chat_task.get("kind") == "compact"
+                    and compacting is not None
+                    and not compacting.done()
+                ):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "The conversation is being compacted. Send your message once it has finished.",
+                        "error_type": "compaction_in_progress",
+                        "conversation_id": data.get("conversation_id"),
+                    })
+                    continue
                 # Issue #824: if an agent loop is already running for this
                 # connection, steer it instead of starting a second concurrent
                 # turn (which would race on the same session history). The
@@ -2352,6 +2388,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             # that does not send it.
                             workspace_id=data.get("workspace_id", UNSET),
                             steering=steering_channel,
+                            # Per-conversation automatic compaction toggle
+                            # (issue #877); a non-bool means the default.
+                            auto_compact=data.get("auto_compact"),
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
@@ -2606,8 +2645,142 @@ async def websocket_endpoint(websocket: WebSocket):
                 chat_task = asyncio.create_task(handle_chat_guarded())
                 if run_record is None:
                     active_chat_task["task"] = chat_task
+                    active_chat_task["kind"] = "chat"
                 else:
                     run_registry.attach_task(run_record.run_id, chat_task)
+
+            elif message_type == "context_usage_request":
+                # Issue #877: the context meter's estimate for a conversation
+                # just opened (or a model just switched to), before its next
+                # turn. Read-only, and skipped while a turn is running: that
+                # turn reports its own usage when it ends.
+                async def answer_usage(request: dict) -> None:
+                    running = active_chat_task.get("task")
+                    if running is not None and not running.done():
+                        return
+                    last_usage_request["at"] = time.monotonic()
+                    try:
+                        await chat_service.report_context_usage(
+                            session_id,
+                            request.get("model", ""),
+                            user_email,
+                            auto_compact=request.get("auto_compact"),
+                            conversation_id=_normalize_conversation_id(request.get("conversation_id")),
+                        )
+                    except DomainError as e:
+                        logger.info("Context usage estimate refused: %s", type(e).__name__)
+                    except Exception as e:
+                        # A read-only meter request must never end the socket
+                        # or leave an unretrieved task error behind.
+                        logger.warning("Context usage estimate failed: %s", type(e).__name__)
+
+                async def answer_later(delay: float) -> None:
+                    await asyncio.sleep(delay)
+                    request, last_usage_request["pending"] = last_usage_request["pending"], None
+                    if request is not None:
+                        await answer_usage(request)
+
+                wait = 1.0 - (time.monotonic() - last_usage_request["at"])
+                timer = last_usage_request["timer"]
+                if wait <= 0 and (timer is None or timer.done()):
+                    await answer_usage(data)
+                else:
+                    last_usage_request["pending"] = data
+                    if timer is None or timer.done():
+                        last_usage_request["timer"] = asyncio.create_task(answer_later(max(wait, 0.0)))
+
+            elif message_type == "compact_context":
+                # Issue #877: manual compaction between turns. It runs through
+                # handle_chat_message (compact_only) so it gets every check a
+                # turn gets -- required level, conversation classification and
+                # ownership, model authorization -- and is saved the same way.
+                # It never starts while a turn or run is executing in the
+                # conversation: compaction rewrites what the next request
+                # carries, and a running turn owns that.
+                compact_conversation_id = _normalize_conversation_id(data.get("conversation_id"))
+                running = active_chat_task.get("task")
+                busy = (running is not None and not running.done()) or (
+                    compact_conversation_id
+                    and run_registry.active_for_conversation_any_owner(compact_conversation_id)
+                )
+                if busy:
+                    await websocket.send_json({
+                        "type": "context_compaction",
+                        "status": "failed",
+                        "trigger": "manual",
+                        "error": "The conversation is still running. Compact it once the turn has finished.",
+                        "conversation_id": compact_conversation_id,
+                    })
+                    continue
+                if compact_conversation_id:
+                    refusal = _conversation_access_error(
+                        chat_service, compact_conversation_id, user_email
+                    )
+                    if refusal is not None:
+                        await websocket.send_json(refusal)
+                        await websocket.send_json(_compaction_refused(compact_conversation_id))
+                        continue
+
+                async def handle_compact(data=data, conversation_id=compact_conversation_id):
+                    # Every refusal below also ends the client's pending
+                    # compaction; the error frame says why.
+                    refused = _compaction_refused(conversation_id)
+                    try:
+                        await chat_service.handle_chat_message(
+                            session_id=session_id,
+                            content="",
+                            model=data.get("model", ""),
+                            user_email=user_email,
+                            compact_only=True,
+                            compact_focus=data.get("focus"),
+                            auto_compact=data.get("auto_compact"),
+                            compliance_level=data.get("compliance_level_filter"),
+                            update_callback=lambda message: websocket_update_callback(websocket, message),
+                            incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
+                            conversation_id=conversation_id,
+                        )
+                    except asyncio.CancelledError:
+                        # Stopped before it finished: end the client's pending
+                        # state, best effort, then unwind as cancelled.
+                        try:
+                            await asyncio.wait_for(websocket_update_callback(websocket, refused), timeout=1.0)
+                        except (Exception, asyncio.CancelledError):
+                            # The socket is already gone, or this task is being
+                            # cancelled again. The frame is best-effort; the
+                            # cancellation still propagates below.
+                            pass
+                        raise
+                    except ValidationError as e:
+                        await websocket_update_callback(websocket, {
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, "message") else e),
+                            "error_type": (
+                                e.code
+                                if getattr(e, "code", None) == CONVERSATION_CLASSIFICATION_ERROR
+                                else "validation"
+                            ),
+                        })
+                        await websocket_update_callback(websocket, refused)
+                    except DomainError as e:
+                        await websocket_update_callback(websocket, {
+                            "type": "error",
+                            "message": str(e.message if hasattr(e, "message") else e),
+                            "error_type": "authorization" if isinstance(e, AuthorizationError) else "domain",
+                        })
+                        await websocket_update_callback(websocket, refused)
+                    except Exception as e:
+                        logger.error("Unexpected error compacting a conversation: %s", e, exc_info=True)
+                        await websocket_update_callback(websocket, {
+                            "type": "context_compaction",
+                            "status": "failed",
+                            "trigger": "manual",
+                            "error": "Context compaction failed unexpectedly.",
+                        })
+
+                active_chat_task["steering"] = None
+                active_chat_task["conversation_id"] = compact_conversation_id
+                active_chat_task["task"] = asyncio.create_task(handle_compact())
+                active_chat_task["kind"] = "compact"
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection).
@@ -2952,6 +3125,9 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
+        usage_timer = last_usage_request.get("timer")
+        if usage_timer is not None and not usage_timer.done():
+            usage_timer.cancel()
         # Tear down on every exit, not only a clean disconnect: a handler
         # error that ends the socket must still end its session, or a shared
         # store keeps it marked active and owned by a dead connection, and

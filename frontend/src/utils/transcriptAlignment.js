@@ -12,7 +12,9 @@
 // An allowlist, deliberately: as a denylist of view-only types, every type
 // minted elsewhere that nobody remembered to add silently degraded the
 // refresh into the full reload it exists to avoid.
-export const STORED_ROW_TYPES = new Set(['chat', 'tool_call', 'agent_intermediate'])
+// 'context_checkpoint' is the compaction record (issue #877); the live row the
+// `context_compaction` frame adds carries the same role and content.
+export const STORED_ROW_TYPES = new Set(['chat', 'tool_call', 'agent_intermediate', 'context_checkpoint'])
 
 // Agent narration is one row wearing two type names: the loop persists the
 // pre-tool narration as 'agent_intermediate' while the streamed row in the

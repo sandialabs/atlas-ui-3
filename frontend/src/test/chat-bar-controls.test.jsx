@@ -339,6 +339,20 @@ describe('WorkspaceSelector in the chat bar', () => {
     answerAgentQuestion: vi.fn(),
     followUpSuggestions: [],
     setFollowUpSuggestions: vi.fn(),
+    contextCompaction: {
+      enabled: true,
+      usage: {
+        estimated_tokens: 2000,
+        context_window: 6000,
+        usable_tokens: 5000,
+        threshold_tokens: 4800,
+        window_source: 'config',
+        estimate_method: 'tokenizer',
+      },
+      autoCompact: true,
+      setAutoCompact: vi.fn(),
+      compactNow: vi.fn(),
+    },
     // WorkspaceSelector's state/actions come from the same shared useChat()
     // path the header selector uses.
     workspaces: [],
@@ -358,6 +372,18 @@ describe('WorkspaceSelector in the chat bar', () => {
       </BrowserRouter>
     )
   }
+
+  it('places the context meter on the control row under the composer', () => {
+    renderChatArea({})
+    const meter = screen.getByTestId('context-usage-meter')
+    const controls = meter.closest('[aria-label="Chat controls"]')
+    expect(controls).not.toBeNull()
+    const composer = screen.getByPlaceholderText(/Type a message/)
+    expect(composer.compareDocumentPosition(meter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // A chip in the wrapping row, not a stretched line of its own.
+    expect(meter.className).toContain('whitespace-nowrap')
+    expect(meter.parentElement.className).not.toContain('w-full')
+  })
 
   it('renders the workspace control in the chat bar when the workspaces feature is on', () => {
     renderChatArea({ workspaces: true })
