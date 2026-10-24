@@ -22,6 +22,7 @@ import { resolveAutoApproved } from '../utils/toolApproval'
 import { useIsPrinting } from '../hooks/useIsPrinting'
 import ToolApprovalMessage from './ToolApprovalMessage'
 import ToolElapsedTime from './ToolElapsedTime'
+import ContextCheckpointRow from './ContextCheckpointRow'
 
 // Feature flag: Perplexity-style inline citations & references for RAG.
 // Off by default; enable at Vite build time with VITE_FEATURE_RAG_CITATIONS=true.
@@ -83,7 +84,8 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     message.type === 'agent_reason' ||
     message.type === 'agent_observe' ||
     isSystem
-  const isCompact = compactMessages && isCompactType
+  // A compaction marker is a divider in the transcript, never a bubble.
+  const isCompact = (compactMessages && isCompactType) || message.type === 'context_checkpoint'
 
   const handleCopyMessage = (event) => {
     event.preventDefault()
@@ -566,6 +568,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     }
 
     if (isUser || isSystem) {
+      if (message.type === 'context_checkpoint') {
+        return <ContextCheckpointRow message={message} />
+      }
+
       if (message.type === 'agent_status') {
         // Issue #849: the run-start marker arrives with no text, so render
         // just the small "Agent" box; other agent_status rows keep their copy.

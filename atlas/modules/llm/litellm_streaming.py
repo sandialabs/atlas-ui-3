@@ -24,6 +24,7 @@ from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
     tool_call_function_field,
 )
+from .usage_tracking import record_response_usage
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +158,7 @@ class LiteLLMStreamingMixin:
 
                         async for chunk in response:
                             total_chunks_seen += 1
+                            record_response_usage(chunk)
                             delta = chunk.choices[0].delta if chunk.choices else None
                             if total_chunks_seen <= 3:
                                 logger.debug(
@@ -426,6 +428,8 @@ class LiteLLMStreamingMixin:
                         )
 
                         async for chunk in response:
+                            # Some providers report usage on the final chunk.
+                            record_response_usage(chunk)
                             choice = chunk.choices[0] if chunk.choices else None
                             if choice is not None:
                                 # Providers send the reason on the final chunk; keep the

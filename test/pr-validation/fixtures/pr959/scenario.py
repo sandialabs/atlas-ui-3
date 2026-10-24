@@ -80,7 +80,7 @@ PROSE_ROW_TYPES = {"chat", "agent_intermediate"}
 # writes to a tracked run's transcript. Everything else on screen -- agent
 # status lines, the approval row the run paused on, canvas errors -- is view
 # chrome with no stored counterpart, and is skipped during alignment.
-STORED_ROW_TYPES = {"chat", "tool_call", "agent_intermediate"}
+STORED_ROW_TYPES = {"chat", "tool_call", "agent_intermediate", "context_checkpoint"}
 
 
 def row_key_client(msg):

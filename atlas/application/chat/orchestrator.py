@@ -15,6 +15,7 @@ from atlas.interfaces.sessions import SessionRepository
 from atlas.interfaces.tools import ToolManagerProtocol
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 from atlas.modules.config.settings import agent_mode_available, configured_agent_max_steps
+from atlas.modules.llm.usage_tracking import usage_scope
 from atlas.modules.mcp_tools.atlas_server import (
     SEARCH_TOOL_NAME,
     is_builtin_tool,
@@ -23,6 +24,8 @@ from atlas.modules.mcp_tools.atlas_server import (
 )
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
+from .context.compaction_controller import ContextCompactor
+from .context.turn_context import TurnContext
 from .modes.agent import AgentModeRunner
 from .modes.plain import PlainModeRunner
 from .modes.rag import RagModeRunner
@@ -129,6 +132,17 @@ class ChatOrchestrator:
             artifact_processor=artifact_processor,
         )
         self.agent_mode = agent_mode
+
+        # Context tracking and compaction (issue #877).
+        self.turn_context = TurnContext(
+            compactor=ContextCompactor(
+                llm=llm, config_manager=config_manager, event_publisher=event_publisher,
+            ),
+            message_builder=self.message_builder,
+            tool_manager=tool_manager,
+            supports_vision=self._model_supports_vision,
+            supports_pdf=self._model_supports_pdf,
+        )
 
     def _model_supports_vision(self, model: str) -> bool:
         """Return True if the named model is configured with supports_vision=True."""
@@ -370,6 +384,51 @@ class ChatOrchestrator:
         content: str,
         model: str,
         user_email: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Execute a chat request, then report the context it leaves behind.
+
+        Every LLM call of the turn runs inside a usage scope, so the
+        provider-reported token counts reach the ``context_usage`` frame sent
+        once the turn completes (issue #877). See :meth:`_execute_turn` for the
+        arguments.
+        """
+        turn_state: Dict[str, Any] = {}
+        with usage_scope() as sink:
+            result = await self._execute_turn(
+                session_id, content, model, user_email=user_email,
+                _turn_state=turn_state, **kwargs,
+            )
+        session = turn_state.get("session")
+        if session is not None:
+            await self.turn_context.report_usage(
+                session, model, user_email,
+                turn_state.get("tools"),
+                kwargs.get("auto_compact"),
+                kwargs.get("custom_system_prompt"),
+                sink=sink,
+            )
+        return result
+
+    async def report_context_usage(
+        self, session: Session, model: str, user_email: Optional[str], auto_compact: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Publish the estimated next request of ``session`` (issue #877).
+
+        The model comes from the client, so it is authorized exactly as for
+        a turn before anything is measured against it.
+        """
+        await self._ensure_model_authorized(model, user_email)
+        return await self.turn_context.report_usage(
+            session, model, user_email, None, auto_compact, None,
+        )
+
+    async def _execute_turn(
+        self,
+        session_id: UUID,
+        content: str,
+        model: str,
+        user_email: Optional[str] = None,
         selected_tools: Optional[List[str]] = None,
         selected_prompts: Optional[List[str]] = None,
         selected_data_sources: Optional[List[str]] = None,
@@ -414,7 +473,12 @@ class ChatOrchestrator:
                 object whatever the repository returns on a fresh ``get``
                 (a shared store returns copies; issue #1091). Looked up by
                 ``session_id`` when omitted.
-            **kwargs: Additional parameters
+            **kwargs: Additional parameters. Context compaction (issue #877)
+                reads ``compact_only`` (compact between turns instead of
+                running one; ``content`` is ignored and no user turn is
+                added), ``compact_focus`` (the user's focus for it) and
+                ``auto_compact`` (the conversation's auto toggle; a non-bool
+                means the configured default).
 
         Returns:
             Response dictionary
@@ -428,6 +492,25 @@ class ChatOrchestrator:
         # string comes straight off the client, so listing-layer filtering alone
         # is bypassable -- a crafted request must be rejected here too.
         await self._ensure_model_authorized(model, user_email)
+
+        turn_state = kwargs.pop("_turn_state", None)
+        if turn_state is None:
+            turn_state = {}
+        turn_state["session"] = session
+        auto_compact = kwargs.get("auto_compact")
+
+        # Manual compaction (issue #877) runs after every check a turn gets --
+        # the caller's classification and ownership checks, and the model
+        # authorization just above -- and summarizes with that same model, so
+        # the checkpoint never reaches a model the conversation is not cleared
+        # for. It adds no user message and waits for the user's next turn.
+        if kwargs.get("compact_only"):
+            outcome = await self.turn_context.compact_manually(
+                session, model, user_email,
+                kwargs.get("compact_focus"), kwargs.get("custom_system_prompt"),
+            )
+            await self.event_publisher.publish_response_complete()
+            return outcome
 
         # Rewind/edit-and-resubmit: drop the targeted prompt and everything after
         # it so the new content takes its place in a single linear thread.
@@ -610,6 +693,16 @@ class ChatOrchestrator:
             event_publisher=self.event_publisher,
         )
 
+        # Automatic compaction before the turn (issue #877): the user message
+        # is in history, so the estimate is of the request this turn would
+        # really send. A checkpoint written here is applied by the build
+        # below; a failure leaves history untouched and the turn runs as is.
+        turn_state["tools"] = list(effective_tools) if model_supports_tools else []
+        await self.turn_context.compact_before_turn(
+            session, model, user_email, turn_state["tools"], auto_compact,
+            kwargs.get("custom_system_prompt"),
+        )
+
         # Build messages with history and files manifest. A user-selected custom
         # prompt (issue #153) replaces the default system prompt for this turn.
         messages = await self.message_builder.build_messages(
@@ -722,6 +815,7 @@ class ChatOrchestrator:
                 temperature=temperature,
                 agent_loop_strategy=kwargs.get("agent_loop_strategy"),
                 steering=steering,
+                compaction=self.turn_context.run_guard(session, model, user_email, auto_compact),
             )
 
         # The tools branch applies tool authorization first, so the routing
@@ -760,6 +854,7 @@ class ChatOrchestrator:
                     )
                     sources_warning_published = True
 
+        turn_state["tools"] = authorized_tools
         if authorized_tools:
             # After filtering: authorization can strip ``atlas_search`` (the
             # deployment has the search tool switched off), which would

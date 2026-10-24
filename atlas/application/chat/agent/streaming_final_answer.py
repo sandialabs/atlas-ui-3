@@ -5,6 +5,7 @@ import logging
 from atlas.application.chat.utilities.error_handler import classify_llm_error
 from atlas.domain.errors import (
     LLM_BUDGET_EXCEEDED_MESSAGE,
+    ContextWindowExceededError,
     DomainError,
     LLMBudgetExceededError,
 )
@@ -51,6 +52,10 @@ async def stream_final_answer(
                 model, messages, temperature=temperature, user_email=user_email,
             )
     except Exception as exc:
+        if not accumulated and isinstance(exc, ContextWindowExceededError):
+            # Nothing reached the client. The agent loop compacts and retries
+            # this call; turning the error into the answer would skip that.
+            raise
         if not isinstance(exc, LLMBudgetExceededError):
             logger.exception("Error streaming final answer")
         await event_publisher.publish_token_stream(
@@ -76,6 +81,10 @@ async def stream_final_answer(
                     model, messages, temperature=temperature, user_email=user_email,
                 )
                 return accumulated
+            except ContextWindowExceededError:
+                # The plain retry hit the window. Let the loop compact it
+                # rather than storing the error text as the answer.
+                raise
             except Exception as fallback_exc:
                 if raise_on_stream_error:
                     # CLI failure policy: both the stream and the non-streaming

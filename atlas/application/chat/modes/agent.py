@@ -120,6 +120,7 @@ class AgentModeRunner:
         temperature: float = 0.7,
         agent_loop_strategy: Optional[str] = None,
         steering: Optional[SteeringChannel] = None,
+        compaction: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Execute agent mode.
@@ -139,6 +140,8 @@ class AgentModeRunner:
                 boundary so the user can steer a running agent. Activated here
                 (not by the transport) so the channel only accepts messages
                 while a loop is genuinely consuming it.
+            compaction: Optional RunCompactionGuard (issue #877) that keeps
+                the run's working transcript inside the model's context.
 
         Returns:
             Response dictionary
@@ -168,6 +171,7 @@ class AgentModeRunner:
             # interrupted turn unwinds out of ``run()`` and the sources the
             # agent already read still have to reach the closing message.
             citation_register=new_register(session.history.messages),
+            compaction=compaction,
         )
 
         # Artifact processor wrapper for handling tool results.
