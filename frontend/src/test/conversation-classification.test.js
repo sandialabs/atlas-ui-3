@@ -69,6 +69,103 @@ describe('classificationRefusal', () => {
   })
 })
 
+describe('friendly display names (issue #1117)', () => {
+  const levels = [
+    {
+      name: 'CUI_no_ECI_no_ITAR_no_PII',
+      display_name: 'CUI (Restricted)',
+      aliases: ['CUI_RESTRICTED'],
+    },
+    { name: 'UUR', aliases: [] },
+  ]
+  const longCui = {
+    data_classification: 'CUI_no_ECI_no_ITAR_no_PII',
+    data_classification_state: 'classified',
+  }
+  const withLevels = level => ({ complianceEnabled: true, activeLevel: level, levels })
+
+  it('renders the recorded level with its display name', () => {
+    const refusal = classificationRefusal(longCui, withLevels('UUR'))
+    expect(refusal).toMatch(/saved under CUI \(Restricted\)/)
+    expect(refusal).not.toMatch(/CUI_no_ECI_no_ITAR_no_PII/)
+    expect(refusal).toMatch(/Switch the security level to CUI \(Restricted\)/)
+  })
+
+  it('resolves a recorded alias to the display name', () => {
+    const aliasRow = {
+      data_classification: 'CUI_RESTRICTED',
+      data_classification_state: 'classified',
+    }
+    expect(classificationRefusal(aliasRow, withLevels('UUR')))
+      .toMatch(/saved under CUI \(Restricted\)/)
+  })
+
+  it('keeps the canonical name when no display_name is configured', () => {
+    const plain = { data_classification: 'UUR', data_classification_state: 'classified' }
+    const refusal = classificationRefusal(plain, withLevels('CUI_no_ECI_no_ITAR_no_PII'))
+    // The recorded level (no display_name) renders as its canonical name;
+    // the active level (one configured) renders as its friendly label.
+    expect(refusal).toMatch(/saved under UUR/)
+    expect(refusal).toMatch(/cannot be continued under CUI \(Restricted\)/)
+  })
+
+  it('keeps the recorded name for a level the deployment no longer defines', () => {
+    const retired = { data_classification: 'Retired', data_classification_state: 'classified' }
+    expect(classificationRefusal(retired, withLevels('UUR')))
+      .toMatch(/saved under Retired/)
+  })
+
+  it('renders without loaded definitions exactly as before', () => {
+    expect(classificationRefusal(longCui, enforced('UUR'))).toMatch(/saved under CUI_no_ECI_no_ITAR_no_PII/)
+  })
+
+  it('still refuses a mismatch when two levels share a display name', () => {
+    // Presentation only: the comparison stays on canonical names, so the
+    // identical labels do not make the levels interchangeable.
+    const colliding = [
+      { name: 'Alpha', display_name: 'Team Data', aliases: [] },
+      { name: 'Beta', display_name: 'Team Data', aliases: [] },
+    ]
+    const row = { data_classification: 'Beta', data_classification_state: 'classified' }
+    expect(classificationRefusal(row, {
+      complianceEnabled: true, activeLevel: 'Alpha', levels: colliding,
+    })).toMatch(/saved under Team Data/)
+  })
+
+  it('labels sidebar rows with the display name', () => {
+    expect(classificationLabel(longCui, levels)).toBe('CUI (Restricted)')
+    expect(classificationLabel(longCui)).toBe('CUI_no_ECI_no_ITAR_no_PII')
+  })
+
+  it('keeps the locked selector value canonical', () => {
+    const lock = classificationLock({
+      complianceEnabled: true,
+      activeConversationClassification: { state: 'classified', level: 'CUI_no_ECI_no_ITAR_no_PII' },
+    })
+    expect(lock.level).toBe('CUI_no_ECI_no_ITAR_no_PII')
+  })
+
+  it('resolves an alias-recorded level to the canonical option value', () => {
+    // The selector's options carry canonical values; a record written with
+    // an alias must still match one so it renders its friendly label.
+    const lock = classificationLock({
+      complianceEnabled: true,
+      activeConversationClassification: { state: 'classified', level: 'CUI_RESTRICTED' },
+      levels,
+    })
+    expect(lock.level).toBe('CUI_no_ECI_no_ITAR_no_PII')
+  })
+
+  it('keeps an undefined recorded level as-is', () => {
+    const lock = classificationLock({
+      complianceEnabled: true,
+      activeConversationClassification: { state: 'classified', level: 'Retired' },
+      levels,
+    })
+    expect(lock.level).toBe('Retired')
+  })
+})
+
 describe('classificationLock (issue #1044)', () => {
   it('leaves a new conversation unlocked until a level is bound', () => {
     expect(classificationLock({ complianceEnabled: true, activeConversationClassification: null }))

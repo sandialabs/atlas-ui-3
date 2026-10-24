@@ -72,7 +72,7 @@ const LoadError = ({ prefix, error }) => (
  * `isModelVisible` (optional) hides models outside the active compliance
  * filter; each model carries its own level when the admin set one.
  */
-const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisible, showCompliance }) => {
+const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisible, showCompliance, complianceLevels }) => {
   const current = parseGatewayModelKey(currentModel, [gateway])
   const [teams, setTeams] = useState(null)
   const [teamsError, setTeamsError] = useState(null)
@@ -220,7 +220,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                         <CapabilityIcons vision={vision} tools={tools} />
                       </span>
                     </span>
-                    {showCompliance && <ClassificationBadge resource={model} />}
+                    {showCompliance && <ClassificationBadge resource={model} levels={complianceLevels} />}
                   </button>
                 )
               })}

@@ -321,6 +321,39 @@ class TestChatServiceRefusesTheTurn:
         assert "internal_search" not in str(exc.value)
         repo.get.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_static_refusal_names_the_display_name(self, config_manager, tmp_path, monkeypatch):
+        """The most common refusal (a component outside the level) spells the
+        level with its display_name (issue #1117); the check compares
+        canonical names."""
+        import json
+        from uuid import uuid4
+
+        from atlas.domain.errors import ValidationError
+
+        path = tmp_path / "compliance-levels.json"
+        path.write_text(json.dumps({"levels": [
+            {
+                "name": "ITAR",
+                "display_name": "ITAR (Export Controlled)",
+                "allowed_with": ["ITAR"],
+            },
+            {"name": "UUR", "allowed_with": ["UUR"]},
+        ]}))
+        display_manager = ComplianceLevelManager(path)
+        monkeypatch.setattr(
+            "atlas.core.compliance.get_compliance_manager", lambda: display_manager
+        )
+        service, repo = self._service(
+            config_manager, {name: s.model_dump() for name, s in config_manager.mcp_config.servers.items()}
+        )
+        with pytest.raises(ValidationError, match=r"Not approved for ITAR \(Export Controlled\) data: the selected model \(model-y\)"):
+            await service.handle_chat_message(
+                session_id=uuid4(), content="hi", model="model-y", user_email="u@test.com",
+                compliance_level="ITAR",
+            )
+        repo.get.assert_not_called()
+
 
 class TestPerCorpusClassifications:
     """A corpus can declare narrower classifications than its server."""

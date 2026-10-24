@@ -1,5 +1,7 @@
 import { Shield } from 'lucide-react'
 import { classificationsOf } from '../utils/complianceAccess'
+import { complianceDisplayName } from '../utils/complianceDisplay'
+import { useOptionalMarketplace } from '../contexts/MarketplaceContext'
 
 /**
  * A model's data classifications on their own line under the model name in a
@@ -9,9 +11,17 @@ import { classificationsOf } from '../utils/complianceAccess'
  * first classification plus "+N" for the rest. Hovering the row or focusing it
  * with the keyboard (the row carries Tailwind's `group`) swaps in the full,
  * wrapping list, and the full list is always part of the row's accessible name.
+ *
+ * Each classification renders as its friendly label where the deployment
+ * defines one (issue #1117): `display_name ?? name`, aliases resolved. The
+ * declared values themselves stay canonical identifiers; without loaded
+ * definitions the raw names render, exactly as before.
  */
-const ClassificationBadge = ({ resource }) => {
-  const list = classificationsOf(resource)
+const ClassificationBadge = ({ resource, levels: levelsProp }) => {
+  const marketplace = useOptionalMarketplace()
+  const levels = levelsProp ?? marketplace?.complianceLevels
+  const list = (classificationsOf(resource) || [])
+    .map(name => complianceDisplayName(levels, name))
   if (!list || list.length === 0) return null
   const full = list.join(', ')
   const extra = list.length - 1

@@ -131,12 +131,39 @@ def normalize_banner_pattern(raw: Any, level_name: str = "") -> Optional[Dict[st
     }
 
 
-def normalize_banner(raw: Any, level_name: str = "") -> Optional[Dict[str, Any]]:
+def normalize_display_name(raw: Any, level_name: str = "") -> Optional[str]:
+    """Validate a level's optional ``display_name`` (issue #1117).
+
+    A presentation-only friendly label: it never replaces ``name`` as the
+    identifier in policies, APIs or persistence. Accepts a non-empty string
+    (stripped); ``None``/absent means "not configured" and the level renders
+    its ``name``. Anything else (wrong type, empty after strip) is ignored
+    with a warning for the same reason a malformed banner is: a broken label
+    must never become a broken level.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    logger.warning(
+        "compliance-levels.json: display_name for %s is not a non-empty "
+        "string; the level will be shown by its name.",
+        _level_ref(level_name),
+    )
+    return None
+
+
+def normalize_banner(
+    raw: Any,
+    level_name: str = "",
+    display_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """Validate a level's optional ``banner`` object.
 
     Returns the normalized banner, or ``None`` when there is none or it is too
     malformed to present. ``background_color`` is required (a banner with no
-    color would be invisible); ``label`` falls back to the level name and
+    color would be invisible); ``label`` falls back to the level's
+    ``display_name`` (issue #1117), then to the level name, and
     ``text_color`` to white. Validation only ever omits presentation -- it
     never touches enforcement.
     """
@@ -162,11 +189,13 @@ def normalize_banner(raw: Any, level_name: str = "") -> Optional[Dict[str, Any]]
     if isinstance(label, str) and label.strip():
         label = label.strip()
     else:
-        logger.warning(
-            "compliance-levels.json: banner for %s has no label; using the level name.",
-            _level_ref(level_name),
-        )
-        label = level_name
+        if label is not None:
+            logger.warning(
+                "compliance-levels.json: banner for %s has a malformed label; "
+                "using the level's display name or name.",
+                _level_ref(level_name),
+            )
+        label = display_name or level_name
 
     text_color = raw.get("text_color", BANNER_DEFAULT_TEXT_COLOR)
     if not _is_hex_color(text_color):
@@ -225,6 +254,10 @@ class ComplianceLevel:
     description: str
     aliases: List[str]
     allowed_with: List[str]  # List of compliance levels that can be used together
+    # Optional presentation-only friendly label (issue #1117). Never a
+    # classification identifier: policies, APIs and persistence keep ``name``.
+    # Absent (None) means the level is shown by its name.
+    display_name: Optional[str] = None
     # Optional presentation-only banner (issue #1045). Never affects access.
     banner: Optional[Dict[str, Any]] = None
 
@@ -262,12 +295,18 @@ class ComplianceLevelManager:
             self.mode = config.get('mode', 'explicit_allowlist')
 
             for level_data in config.get('levels', []):
+                display_name = normalize_display_name(
+                    level_data.get('display_name'), level_data['name']
+                )
                 level = ComplianceLevel(
                     name=level_data['name'],
                     description=level_data.get('description', ''),
                     aliases=level_data.get('aliases', []),
                     allowed_with=level_data.get('allowed_with', [level_data['name']]),
-                    banner=normalize_banner(level_data.get('banner'), level_data['name']),
+                    display_name=display_name,
+                    banner=normalize_banner(
+                        level_data.get('banner'), level_data['name'], display_name
+                    ),
                 )
                 self.levels[level.name] = level
 
@@ -277,6 +316,8 @@ class ComplianceLevelManager:
                 # Map aliases to canonical name
                 for alias in level.aliases:
                     self._name_to_canonical[alias] = level.name
+
+            self._warn_on_duplicate_display_names()
 
             widening = [
                 name for name, level in self.levels.items()
@@ -300,6 +341,28 @@ class ComplianceLevelManager:
             logger.error(f"Error loading compliance-levels.json: {e}")
             # Continue with empty config for permissive validation
 
+    def _warn_on_duplicate_display_names(self) -> None:
+        """Warn when configured display names collide (issue #1117).
+
+        Display names are presentation only, so a collision is legal: every
+        authorization decision still uses the canonical ``name``. But two
+        levels rendered under one label are easy to confuse in the UI, so the
+        operator gets a warning naming the levels (in definition order) that
+        share each duplicated label.
+        """
+        by_label: Dict[str, List[str]] = {}
+        for name, level in self.levels.items():
+            if level.display_name:
+                by_label.setdefault(level.display_name, []).append(name)
+        for label, names in by_label.items():
+            if len(names) > 1:
+                logger.warning(
+                    "compliance-levels.json: display_name %r is shared by "
+                    "levels %s; they stay distinct by their canonical names.",
+                    sanitize_for_logging(label),
+                    ", ".join(sanitize_for_logging(n) for n in names),
+                )
+
     def get_canonical_name(self, name: Optional[str]) -> Optional[str]:
         """Get the canonical name for a compliance level (resolves aliases).
 
@@ -312,6 +375,31 @@ class ComplianceLevelManager:
         if not name:
             return None
         return self._name_to_canonical.get(name)
+
+    def get_display_name(self, name: Optional[str]) -> Optional[str]:
+        """The user-facing label for a level or alias (issue #1117).
+
+        Resolves ``name`` (aliases included) to its canonical level and
+        returns the level's ``display_name`` when configured, else the
+        canonical ``name``. Returns ``None`` for a name no loaded level
+        defines; with no definitions loaded (permissive mode) the name is
+        returned unchanged, since there is nothing to resolve against.
+
+        Presentation only: never send this value where a classification
+        identifier is expected -- policies, allowlists and persistence
+        compare canonical names.
+        """
+        if not name:
+            return None
+        canonical = self.get_canonical_name(name)
+        if canonical is None:
+            if not self.levels:
+                return name  # permissive mode: no definitions loaded
+            return None
+        level = self.levels.get(canonical)
+        if level is None:
+            return canonical
+        return level.display_name or canonical
 
     def is_valid_level(self, level_name: Optional[str]) -> bool:
         """Whether ``level_name`` names a defined level or alias.

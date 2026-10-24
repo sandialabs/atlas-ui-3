@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useMarketplace } from '../contexts/MarketplaceContext'
-import { classificationsOf, classificationLabel } from '../utils/complianceAccess'
+import { classificationsOf } from '../utils/complianceAccess'
+import { classificationsDisplayLabel } from '../utils/complianceDisplay'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
@@ -179,7 +180,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
     currentModel,
     models
   } = useChat()
-  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts, isComplianceAccessible } = useMarketplace()
+  const { getComplianceFilteredTools, getComplianceFilteredPrompts, getFilteredTools, getFilteredPrompts, isComplianceAccessible, complianceLevels } = useMarketplace()
   
   // Local state for pending changes
   const [pendingSelectedTools, setPendingSelectedTools] = useState(new Set())
@@ -1066,10 +1067,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                   Exclusive
                                 </span>
                               )}
-                              {complianceEnabled && classificationLabel(server) && (
+                              {complianceEnabled && classificationsDisplayLabel(server, complianceLevels) && (
                                 <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
                                   <Shield className="w-3 h-3" />
-                                  {classificationLabel(server)}
+                                  {classificationsDisplayLabel(server, complianceLevels)}
                                 </span>
                               )}
                               {/* Auth status indicator. An oauth server is connected by

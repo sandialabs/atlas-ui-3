@@ -1,6 +1,6 @@
 # Compliance and Data Security
 
-Last updated: 2026-10-20
+Last updated: 2026-10-23
 
 The compliance system is designed to prevent the unintentional mixing of data from different security environments. This is essential for organizations that handle sensitive information.
 
@@ -30,6 +30,44 @@ models:
 ```
 
 Names are resolved through the level aliases at load. A name that matches no defined level is dropped with a warning, so a typo can only narrow what a component is approved for, never widen it.
+
+## Friendly Display Names (optional)
+
+Canonical level names double as identifiers in `allowed_data_classifications`, the APIs and saved-conversation records, so they can get long -- `CUI_no_ECI_no_ITAR_no_PII` is a fine key and a poor label. A level may carry a presentation-only `display_name` in `compliance-levels.json`:
+
+```json
+{
+  "name": "CUI_no_ECI_no_ITAR_no_PII",
+  "display_name": "CUI (Restricted)",
+  "description": "CUI excluding ECI, ITAR, and PII",
+  "aliases": ["CUI_RESTRICTED"],
+  "banner": { "background_color": "#502B85" }
+}
+```
+
+The level's identifier, its aliases, and its friendly label are three separate things: `CUI_no_ECI_no_ITAR_no_PII` stays the key, `CUI_RESTRICTED` (an alias) also resolves to it, and `CUI (Restricted)` is only what users see. The banner above deliberately omits `label`, so the marking reads `CUI (Restricted)` through the `display_name` fallback described below. A `banner` needs a valid `background_color` to be shown at all (see [Classification Banner](#classification-banner-optional)); `{"label": "..."}` alone is dropped at load.
+
+Semantics:
+
+- **`display_name` is presentation only.** Wherever ATLAS shows a compliance level -- the header security selector, model and data-source badges, MCP server badges, the conversation banner, history rows, and refusal/warning messages from the server -- it renders `display_name ?? name`. Canonical `name` stays the identifier: policies, allowlists, aliases, the session's classification, and every persisted record compare `name`, never the label. A display name is not an alias: a label that happens to spell another level's name matches nothing.
+- **The banner label still wins on the banner.** A level's `banner.label` (issue #1045) overrides the wording on the banner itself; without one the banner falls back to `display_name`, then `name`.
+- **Old configurations are unchanged.** A level without `display_name` renders `name`, exactly as before. A malformed value (wrong type, empty) is ignored with a warning.
+- **Duplicate labels are legal but warned about.** Two levels may share a `display_name`; access still distinguishes them by `name`, and a WARNING at startup names the levels that share each label. Hovering a selector option shows the canonical name (then the description) whenever the label differs, so distinct levels stay identifiable.
+- **Saved conversations keep resolving by their stored canonical key.** History records store `name`; reopening or listing them renders the level's current configured label. Records are never rewritten.
+
+`GET /api/compliance-levels` returns `name` plus the resolved `display_name` (the configured label, or `name` when none is set) for each level; components such as models and MCP servers keep returning canonical classification strings, which the UI resolves through the level definitions.
+
+In the header the selected level renders its friendly label, and the classification banner at the top of the page falls back to it when the level's `banner` carries no `label` of its own:
+
+![The security selector reads "CUI (Rest..." and the banner reads "CUI (RESTRICTED)" for a level whose canonical name is CUI_no_ECI_no_ITAR_no_PII](compliance-display-name-ui.png)
+
+Models that declare `allowed_data_classifications` show the labels in their picker badge:
+
+![The model picker badge reads "CUI (Restricted) +1"](compliance-display-name-model-badge.png)
+
+RAG corpora carry their labels in the data-source picker the same way:
+
+![The data source rows for Company Policies and Technical Documentation carry an "Internal (Company IP)" badge](compliance-display-name-data-sources.png)
 
 > **Upgrade note:** define every classification you use in `config/compliance-levels.json` (for example, `CUI` is not in the bundled defaults). A component whose only classification is undefined -- in `allowed_data_classifications` or a legacy `compliance_level` -- ends up declaring nothing, so it is unavailable in **every** classified session.
 
@@ -163,7 +201,7 @@ A level may carry a presentation-only `banner` object in `compliance-levels.json
 | `width` | Stripe width in pixels, between 2 and 32. Defaults to 8. |
 | `angle` | Stripe angle in degrees (0-360), used by `diagonal_stripes` and `edge_stripes`. Defaults to 45. |
 
-Stripes use CSS gradients, not image assets. Invalid presentation is dropped safely: an unknown `type`, a non-hex `color`, or a `width` outside the range renders the banner solid (with a warning at startup); a malformed `angle` falls back to 45. A missing or malformed `label` falls back to the level name and a missing or malformed `text_color` to white. A malformed banner is omitted from `/api/compliance-levels` and never changes enforcement.
+Stripes use CSS gradients, not image assets. Invalid presentation is dropped safely: an unknown `type`, a non-hex `color`, or a `width` outside the range renders the banner solid (with a warning at startup); a malformed `angle` falls back to 45. A missing or malformed `label` falls back to the level's `display_name`, then the level name (see [Friendly Display Names](#friendly-display-names-optional)), and a missing or malformed `text_color` to white. A malformed banner is omitted from `/api/compliance-levels` and never changes enforcement.
 
 The marking follows the conversation, not the selector:
 

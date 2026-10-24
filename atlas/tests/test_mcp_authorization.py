@@ -177,6 +177,40 @@ async def test_central_policy_classification_is_uniform():
 
 
 @pytest.mark.asyncio
+async def test_classification_denial_names_the_display_name(tmp_path):
+    """The denial reason spells the level with its display_name (issue
+    #1117); the check itself compares the canonical name."""
+    import json
+
+    path = tmp_path / "compliance-levels.json"
+    path.write_text(json.dumps({"levels": [
+        {
+            "name": "ITAR",
+            "display_name": "ITAR (Export Controlled)",
+            "allowed_with": ["ITAR"],
+        },
+        {"name": "UUR", "allowed_with": ["UUR"]},
+    ]}))
+    levels = ComplianceLevelManager(path)
+    config = {
+        "enabled": True,
+        "groups": [],
+        "allowed_data_classifications": ["UUR"],
+    }
+    with patch("atlas.core.compliance.get_compliance_manager", return_value=levels):
+        denied = await authorize_mcp_server(
+            "srv",
+            operation=McpOperation.PROMPT,
+            servers_config={"srv": config},
+            user_email="alice@example.com",
+            compliance_level="ITAR",
+        )
+    assert denied.allowed is False
+    assert denied.denial is McpDenialKind.CLASSIFICATION
+    assert "not approved for ITAR (Export Controlled) data" in denied.reason
+
+
+@pytest.mark.asyncio
 async def test_central_policy_preserves_identity_case_for_external_group_check():
     """External authorizers receive the identity as the user presented it."""
     seen = []

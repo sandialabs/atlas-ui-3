@@ -342,6 +342,36 @@ describe('compliance filter: persona, active prompt and model', () => {
     expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/outside the Internal security level/))
   })
 
+  it('names the display label in the model-switch notice (issue #1117)', () => {
+    h.levels = LEVELS.map(level => (
+      level.name === 'HIPAA' ? { ...level, display_name: 'HIPAA (PHI)' } : level
+    ))
+    h.currentModel = 'public-model'
+    renderChat()
+
+    expect(h.setCurrentModel).toHaveBeenCalledWith('soc2-hipaa-model')
+    expect(h.toastInfo).toHaveBeenCalledWith(
+      'Switched model to soc2-hipaa-model for the HIPAA (PHI) security level'
+    )
+  })
+
+  it('names the display label when refusing an excluded model (issue #1117)', () => {
+    h.levels = [
+      ...LEVELS,
+      { name: 'Internal', display_name: 'Internal (Company)', aliases: [], allowed_with: ['Internal'] },
+    ]
+    h.filter = 'Internal'
+    h.currentModel = 'public-model'
+    const { result } = renderChat()
+    let sent
+    act(() => { sent = result.current.sendChatMessage('hi') })
+
+    expect(sent).toBe(false)
+    expect(h.toastError).toHaveBeenCalledWith(
+      expect.stringMatching(/outside the Internal \(Company\) security level/)
+    )
+  })
+
   it('does nothing to the persona or model without a filter', () => {
     h.filter = null
     h.currentModel = 'public-model'
