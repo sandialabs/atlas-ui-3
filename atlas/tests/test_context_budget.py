@@ -72,6 +72,24 @@ class TestContextWindow:
         with pytest.raises(ValueError):
             ModelConfig(model_name="x", model_url="http://x", context_window=0)
 
+    def test_catalog_output_cap_is_not_the_window(self):
+        # max_tokens in LiteLLM's map is the output cap. Treating it as the
+        # window compacts every turn.
+        config = _llm_config(m={"model_name": "custom-output-capped"})
+        fake = {"custom-output-capped": {"max_tokens": 4096, "max_output_tokens": 4096}}
+        with patch("litellm.model_cost", fake):
+            window = resolve_context_window(config, "m")
+        assert window.source == SOURCE_FALLBACK
+        assert window.total == 128000
+
+    def test_catalog_max_input_tokens_is_the_window(self):
+        config = _llm_config(m={"model_name": "custom-wide"})
+        fake = {"custom-wide": {"max_input_tokens": 200000, "max_tokens": 8192}}
+        with patch("litellm.model_cost", fake):
+            window = resolve_context_window(config, "m")
+        assert window.source == SOURCE_LITELLM
+        assert window.total == 200000
+
 
 class TestTokenEstimation:
     def test_tokenizer_path(self):

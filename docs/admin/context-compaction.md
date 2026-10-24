@@ -112,7 +112,9 @@ The window is resolved per model (`atlas/modules/llm/context_window.py`):
    gateway's `model_defaults` or per-model `models` entries). Set it for custom
    endpoints and aliases.
 2. LiteLLM's bundled model catalog, looked up by the configured `model_name`
-   with and without its provider prefix. No network calls are made.
+   with and without its provider prefix. No network calls are made. The value
+   used is `max_input_tokens`; `max_tokens` in that catalog is the output cap
+   and is not treated as the window.
 3. `CONTEXT_FALLBACK_WINDOW_TOKENS`, shown in the UI as assumed.
 
 The usable context is the window minus a reply reserve (the model's

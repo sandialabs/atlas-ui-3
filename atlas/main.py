@@ -89,7 +89,7 @@ from atlas.infrastructure.sessions.codec import decode_session, encode_session
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
 from atlas.modules.file_storage.manager import FileManager
-from atlas.modules.help.help_config import resolve_help_config, report_help_config_problem
+from atlas.modules.help.help_config import report_help_config_problem, resolve_help_config
 from atlas.routes.admin_routes import admin_router
 
 # Import essential routes
@@ -2745,6 +2745,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         try:
                             await asyncio.wait_for(websocket_update_callback(websocket, refused), timeout=1.0)
                         except (Exception, asyncio.CancelledError):
+                            # The socket is already gone, or this task is being
+                            # cancelled again. The frame is best-effort; the
+                            # cancellation still propagates below.
                             pass
                         raise
                     except ValidationError as e:

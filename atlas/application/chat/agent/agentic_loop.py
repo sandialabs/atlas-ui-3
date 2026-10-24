@@ -181,19 +181,14 @@ class AgenticLoop(AgentLoopProtocol):
             await recorder.unwind(context.history)
             raise
 
-        # Max steps exhausted without a text-only response
+        # Max steps exhausted without a text-only response. The last step's
+        # tool results are already in the transcript, so this call gets the
+        # same compaction and overflow recovery as a step. It sends no tools.
         if final_answer is None:
-            if use_streaming:
-                final_answer = await stream_final_answer(
-                    self.llm, event_publisher, model, messages,
-                    temperature, context.user_email,
-                    raise_on_stream_error=raise_on_stream_error,
-                )
-            else:
-                final_answer = await self.llm.call_plain(
-                    model, messages, temperature=temperature,
-                    user_email=context.user_email,
-                )
+            final_answer = await self._final_answer_within_context(
+                model, messages, context, temperature,
+                use_streaming, event_publisher, raise_on_stream_error,
+            )
 
         await event_handler(AgentEvent(
             type="agent_completion", payload={"steps": steps},
@@ -405,6 +400,47 @@ class AgenticLoop(AgentLoopProtocol):
 
         return steps, final_answer
 
+    async def _final_answer_within_context(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        context: AgentContext,
+        temperature: float,
+        use_streaming: bool,
+        event_publisher,
+        raise_on_stream_error: bool,
+    ) -> str:
+        """Closing answer after the step budget, kept inside the context window.
+
+        The call is tool-free, so the estimate does not charge tool definitions.
+        A context-length error before any token is compacted and retried; tools
+        that already ran are not executed again.
+        """
+        guard = context.compaction
+        if guard is not None:
+            await guard.before_llm_call(messages, None)
+        attempt = 0
+        while True:
+            try:
+                if use_streaming:
+                    return await stream_final_answer(
+                        self.llm, event_publisher, model, messages,
+                        temperature, context.user_email,
+                        raise_on_stream_error=raise_on_stream_error,
+                    )
+                return await self.llm.call_plain(
+                    model, messages, temperature=temperature,
+                    user_email=context.user_email,
+                )
+            except ContextWindowExceededError:
+                if guard is None or not await guard.recover_from_overflow(messages, None, attempt):
+                    raise
+                attempt += 1
+                logger.info(
+                    "Retrying the final answer after compacting its context (attempt %d)",
+                    attempt,
+                )
+
     async def _call_llm_within_context(
         self,
         model: str,
@@ -418,11 +454,12 @@ class AgenticLoop(AgentLoopProtocol):
     ) -> LLMResponse:
         """Call the LLM at a step boundary, compacting the context if needed.
 
-        This is the only point where compaction runs (issue #877): every tool
-        call of the previous step already has its result in ``messages``, so
-        nothing in flight can be cut off, and no tool is ever re-executed --
-        only the request is rebuilt. After compaction the step simply goes on
-        with its LLM call, so the run continues without a new user message.
+        Compaction runs here, at a step boundary (issue #877): every tool call
+        of the previous step already has its result in ``messages``, so nothing
+        in flight can be cut off, and no tool is ever re-executed -- only the
+        request is rebuilt. The closing answer after the step budget uses the
+        same guard. After compaction the step simply goes on with its LLM call,
+        so the run continues without a new user message.
 
         A context-length error raised before any token streamed is retried
         after a harder compaction, a bounded number of times; past that bound

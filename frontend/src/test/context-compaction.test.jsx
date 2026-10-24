@@ -130,6 +130,16 @@ describe('websocket handler', () => {
     expect(deps.addMessage).not.toHaveBeenCalled()
   })
 
+  it('does not write another conversation\'s checkpoint into the one on screen', () => {
+    const { deps, handle } = handler({ getVisibleConversationId: () => 'c1' })
+    handle({
+      type: 'context_compaction', status: 'completed', conversation_id: 'c2',
+      trigger: 'manual', content: 'Context compacted', summary: 'x',
+    })
+    expect(deps.onContextCompaction).toHaveBeenCalled()
+    expect(deps.addMessage).not.toHaveBeenCalled()
+  })
+
   it('adds the checkpoint row on completion', () => {
     const { deps, handle } = handler()
     handle({
@@ -295,6 +305,37 @@ describe('third review follow-ups', () => {
     act(() => { result.current.compactNow() })
     act(() => { handle({ type: 'error', message: 'busy', error_type: 'compaction_in_progress' }) })
     expect(result.current.isManualCompacting).toBe(true)
+  })
+})
+
+describe('conversation switch during a manual compaction', () => {
+  it('keeps the send lock until that compaction ends', () => {
+    const sendMessage = vi.fn(() => true)
+    const props = { config: {}, activeConversationId: 'c1', sendMessage }
+    const { result, rerender } = renderHook((p) => useContextCompaction(p), { initialProps: props })
+    act(() => { result.current.compactNow() })
+    expect(result.current.isManualCompacting).toBe(true)
+    rerender({ ...props, activeConversationId: 'c2' })
+    expect(result.current.isManualCompacting).toBe(true)
+    act(() => {
+      result.current.handleCompaction({ status: 'started', trigger: 'auto', scope: 'run', conversation_id: 'c2' })
+    })
+    expect(result.current.isManualCompacting).toBe(true)
+    act(() => {
+      result.current.handleCompaction({
+        status: 'completed', trigger: 'manual', scope: 'conversation', conversation_id: 'c1',
+      })
+    })
+    expect(result.current.isManualCompacting).toBe(false)
+  })
+
+  it('a failure with no conversation id still ends the lock after a switch', () => {
+    const props = { config: {}, activeConversationId: 'c1', sendMessage: vi.fn(() => true) }
+    const { result, rerender } = renderHook((p) => useContextCompaction(p), { initialProps: props })
+    act(() => { result.current.compactNow() })
+    rerender({ ...props, activeConversationId: 'c2' })
+    act(() => { result.current.handleCompaction({ status: 'failed', silent: true }) })
+    expect(result.current.isManualCompacting).toBe(false)
   })
 })
 

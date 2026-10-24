@@ -583,6 +583,11 @@ export function createWebSocketHandler(deps) {
         }
         case 'context_compaction': {
           if (typeof onContextCompaction === 'function') onContextCompaction(data)
+          // A compaction finishing in a conversation the user has left must
+          // not write its checkpoint into the one on screen. The hook still
+          // hears the frame, so a lock held for that compaction can release.
+          const visibleId = typeof getVisibleConversationId === 'function' ? getVisibleConversationId() : null
+          if (data.conversation_id && visibleId && data.conversation_id !== visibleId) break
           if (data.status === 'completed' && data.content) {
             // The live twin of the stored checkpoint row: same role, type and
             // content, so a joined-run refresh aligns the two (issue #959).

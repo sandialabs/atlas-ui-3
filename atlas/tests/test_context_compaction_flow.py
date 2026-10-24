@@ -3,7 +3,7 @@
 import uuid
 from types import SimpleNamespace
 from typing import List
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,6 +11,7 @@ from atlas.application.chat.agent.agentic_loop import AgenticLoop
 from atlas.application.chat.agent.protocols import AgentContext
 from atlas.application.chat.context.compaction_controller import ContextCompactor
 from atlas.application.chat.context.compaction_policy import CompactionPolicy
+from atlas.application.chat.context.run_compaction_guard import RunCompactionGuard
 from atlas.application.chat.orchestrator import ChatOrchestrator
 from atlas.domain.errors import ContextWindowExceededError
 from atlas.domain.messages.models import (
@@ -85,7 +86,7 @@ def _long_messages():
     return messages
 
 
-async def _run_loop(llm, executions, auto=True, retries=2, window=8000):
+async def _run_loop(llm, executions, auto=True, retries=2, window=8000, max_steps=5, streaming=False, publisher=None):
     history = ConversationHistory()
     compactor = ContextCompactor(llm=llm, config_manager=_config(window), event_publisher=None)
     guard = compactor.run_guard(
@@ -102,7 +103,8 @@ async def _run_loop(llm, executions, auto=True, retries=2, window=8000):
     messages = _long_messages()
     result = await loop.run(
         model="m", messages=messages, context=context, selected_tools=["grep"],
-        data_sources=None, max_steps=5, temperature=0.7, event_handler=handler,
+        data_sources=None, max_steps=max_steps, temperature=0.7, event_handler=handler,
+        streaming=streaming, event_publisher=publisher,
     )
     return result, messages, history
 
@@ -150,6 +152,104 @@ class TestAgentLoopRecovery:
         assert result.final_answer == "fine"
         assert llm.summaries >= 1
         assert messages[0] == {"role": "system", "content": "SYS"}
+
+
+class _FinalAnswerLLM:
+    """One tool step, then a scripted plain or streamed closing answer."""
+
+    def __init__(self, plain, stream=None):
+        self._plain = list(plain)
+        self._stream = list(stream or [])
+        self.tool_calls = 0
+        self.plain_calls = 0
+        self.stream_calls = 0
+
+    async def call_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                              temperature=0.7, user_email=None):
+        self.tool_calls += 1
+        return LLMResponse(content="checking", tool_calls=[_call("c1")])
+
+    async def call_plain(self, model, messages, temperature=None, max_tokens=None, user_email=None):
+        self.plain_calls += 1
+        item = self._plain.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    async def stream_plain(self, model, messages, temperature=0.7, user_email=None):
+        self.stream_calls += 1
+        item = self._stream.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        yield item
+
+    async def stream_with_tools(self, model, messages, tools_schema, tool_choice="auto",
+                                temperature=0.7, user_email=None):
+        resp = await self.call_with_tools(
+            model, messages, tools_schema, tool_choice, temperature, user_email,
+        )
+        yield resp
+
+
+class TestFinalAnswerRecovery:
+    @pytest.mark.asyncio
+    async def test_step_budget_final_answer_compacts_after_overflow(self):
+        llm = _FinalAnswerLLM([
+            ContextWindowExceededError("too long"),
+            "## Goal\nwrap up\n## Accomplished\nchecked",
+            "Wrapped up.",
+        ])
+        executions: List[str] = []
+        result, messages, history = await _run_loop(llm, executions, window=40000, max_steps=1)
+        assert result.final_answer == "Wrapped up."
+        assert executions == ["c1"]
+        assert llm.tool_calls == 1
+        assert llm.plain_calls == 3
+        records = [m for m in history.messages if m.metadata.get("message_type") == CONTEXT_CHECKPOINT_MESSAGE_TYPE]
+        assert records and records[-1].metadata[CONTEXT_CHECKPOINT_KEY]["trigger"] == "overflow"
+        assert any(m.get("role") == "tool" and m.get("tool_call_id") == "c1" for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_streamed_final_answer_retries_after_overflow(self):
+        llm = _FinalAnswerLLM(
+            ["## Goal\nwrap up\n## Accomplished\nchecked"],
+            [ContextWindowExceededError("too long"), "Done now"],
+        )
+        publisher = MagicMock()
+        publisher.publish_token_stream = AsyncMock()
+        result, _, _ = await _run_loop(
+            llm, [], window=40000, max_steps=1, streaming=True, publisher=publisher,
+        )
+        assert result.final_answer == "Done now"
+        assert llm.stream_calls == 2
+        assert llm.plain_calls == 1
+        assert llm.tool_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_final_answer_calls_the_guard(self):
+        calls = []
+        original = RunCompactionGuard.before_llm_call
+
+        async def wrapped(self, messages, tools_schema):
+            calls.append(tools_schema)
+            return await original(self, messages, tools_schema)
+
+        llm = _FinalAnswerLLM(["synthesis"])
+        with patch.object(RunCompactionGuard, "before_llm_call", wrapped):
+            result, _, _ = await _run_loop(llm, [], window=40000, max_steps=1)
+        assert result.final_answer == "synthesis"
+        # The tool step and the closing answer each pass through the guard.
+        # The closing call sends no tools.
+        assert calls[-1] is None
+        assert len(calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_final_answer_overflow_surfaces_when_auto_off(self):
+        llm = _FinalAnswerLLM([ContextWindowExceededError("too long")])
+        with pytest.raises(ContextWindowExceededError):
+            await _run_loop(llm, [], auto=False, window=40000, max_steps=1)
+        assert llm.plain_calls == 1
+        assert llm.tool_calls == 1
 
 
 def _orchestrator(window=3000):

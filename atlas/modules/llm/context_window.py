@@ -8,7 +8,9 @@ comes from, in order:
 2. LiteLLM's bundled model map, looked up by the configured model id with and
    without its provider prefix. The map is read directly rather than through
    ``litellm.get_model_info``, which prints to stderr on a miss; nothing here
-   touches the network.
+   touches the network. Only ``max_input_tokens`` is the window.
+   ``max_tokens`` in that map is the output cap, and using it as the window
+   makes compaction fire on every turn.
 3. ``CONTEXT_FALLBACK_WINDOW_TOKENS``, reported as ``"fallback"`` so the UI can
    say the limit is assumed rather than known.
 """
@@ -78,7 +80,10 @@ def _litellm_window(model_id: str) -> Optional[int]:
         info = model_map.get(candidate)
         if not isinstance(info, dict):
             continue
-        window = info.get("max_input_tokens") or info.get("max_tokens")
+        # max_tokens here is the output cap (gpt-4o: 16384 against a 128000
+        # input window). A missing input window falls through to the
+        # configured fallback rather than that cap.
+        window = info.get("max_input_tokens")
         if isinstance(window, int) and window > 0:
             return window
     return None

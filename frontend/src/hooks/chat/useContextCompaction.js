@@ -72,10 +72,15 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
     if (previous !== activeConversationId) setDraftAuto(null)
   }, [activeConversationId, defaultAuto]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A different conversation has a different context.
+  // A different conversation has a different context. A manual compaction
+  // still owns this connection after the switch: the server refuses every
+  // chat frame until it finishes, so dropping the lock here would send a
+  // message the server then discards.
   useEffect(() => {
     setUsage(null)
-    setCompaction(null)
+    setCompaction(current => (
+      current?.status === 'started' && current.trigger === 'manual' ? current : null
+    ))
   }, [activeConversationId])
 
   const setAutoCompact = useCallback((value) => {
@@ -94,9 +99,26 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
 
   const handleCompaction = useCallback((frame) => {
     if (!frame || !frame.status) return
-    // A run compacting in another conversation leaves this one's state alone.
-    if (frame.conversation_id && activeConversationId && frame.conversation_id !== activeConversationId) return
-    setCompaction(frame)
+    setCompaction(current => {
+      const manualInFlight = current?.status === 'started' && current.trigger === 'manual'
+      if (manualInFlight) {
+        // Only a frame that ends this compaction may replace it. A run frame
+        // for the conversation now on screen, or a busy refusal for a
+        // different one, must not drop the lock while the server is still
+        // compacting.
+        const terminal = frame.status === 'completed' || frame.status === 'failed' || frame.status === 'skipped'
+        const sameConversation = !frame.conversation_id || !current.conversation_id
+          || frame.conversation_id === current.conversation_id
+        const manualTrigger = !frame.trigger || frame.trigger === 'manual'
+        if (terminal && sameConversation && manualTrigger) return frame
+        return current
+      }
+      // A run compacting in another conversation leaves this one's state alone.
+      if (frame.conversation_id && activeConversationId && frame.conversation_id !== activeConversationId) {
+        return current
+      }
+      return frame
+    })
   }, [activeConversationId])
 
   // Stop or a dropped connection ends a compaction whose result frame may
@@ -106,9 +128,10 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
   }, [])
 
   const isCompacting = compaction?.status === 'started'
-  // A manual compaction owns the conversation until it ends: a message sent
-  // meanwhile would race it. (An agent run's own compaction does not block
-  // steering; the run drains steering at its next step.)
+  // A manual compaction owns this connection until it ends. The server refuses
+  // every chat frame meanwhile, including after a switch to another
+  // conversation. (An agent run's own compaction does not block steering; the
+  // run drains steering at its next step.)
   const isManualCompacting = isCompacting && compaction?.trigger === 'manual'
 
   const compactNow = useCallback((focus = '') => {
@@ -119,9 +142,16 @@ export function useContextCompaction({ config, activeConversationId, sendMessage
       auto_compact: autoCompact,
       ...(typeof buildRequestFields === 'function' ? buildRequestFields() : {}),
     })
-    if (sent) setCompaction({ status: 'started', trigger: 'manual', scope: 'conversation' })
+    if (sent) {
+      setCompaction({
+        status: 'started',
+        trigger: 'manual',
+        scope: 'conversation',
+        ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
+      })
+    }
     return sent
-  }, [enabled, sendMessage, autoCompact, buildRequestFields])
+  }, [enabled, sendMessage, autoCompact, buildRequestFields, activeConversationId])
 
   const requestUsage = useCallback(() => {
     if (!enabled || typeof sendMessage !== 'function') return false
