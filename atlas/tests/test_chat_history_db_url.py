@@ -8,6 +8,8 @@ on every install path.
 """
 
 import pytest
+from sqlalchemy.dialects.postgresql.psycopg import PGDialect_psycopg
+from sqlalchemy.engine import make_url
 
 from atlas.modules.chat_history import database as chat_history_database
 from atlas.modules.config.config_manager import (
@@ -249,38 +251,90 @@ class TestExternalPoolerConnectArgs:
     transaction-mode PgBouncer below 1.21 cannot route. When an external pooler
     does the pooling, the engine passes ``prepare_threshold=None`` so no named
     statements are created. psycopg2 has no such setting and would reject the
-    keyword, so it must only reach the psycopg 3 driver.
+    keyword, so it must only reach the psycopg 3 driver. A ``prepare_threshold``
+    in the URL query wins in either pool mode, re-typed (SQLAlchemy passes query
+    values as strings, and psycopg compares the threshold against an int).
     """
 
     @pytest.mark.parametrize(
-        ("db_url", "expect_prepare_threshold"),
+        ("db_url", "expected_threshold"),
         [
-            ("postgresql://atlas:pw@db.example.com:5432/atlas", True),
-            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas", True),
-            ("postgresql+psycopg2://atlas:pw@db.example.com:5432/atlas", False),
+            ("postgresql://atlas:pw@db.example.com:5432/atlas", None),
+            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas", None),
+            ("postgresql+psycopg2://atlas:pw@db.example.com:5432/atlas", "absent"),
             # A prepare_threshold the operator set in the URL query wins over
-            # the disable_pooling default, like connect_timeout does.
-            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0", False),
+            # the disable_pooling default, like connect_timeout does, but it
+            # must reach the driver typed: SQLAlchemy hands query values over
+            # as strings and psycopg would raise TypeError comparing "0" >= 0.
+            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0", 0),
+            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas?prepare_threshold=none", None),
         ],
     )
-    def test_disable_pooling_disables_auto_prepare_for_psycopg3(self, db_url, expect_prepare_threshold):
-        url = normalize_postgres_driver_url(db_url)
-        kwargs = chat_history_database._postgres_engine_kwargs(
-            url, chat_history_database.PoolSettings(disable_pooling=True)
+    def test_disable_pooling_disables_auto_prepare_for_psycopg3(self, db_url, expected_threshold):
+        url, kwargs = chat_history_database._postgres_engine_kwargs(
+            normalize_postgres_driver_url(db_url),
+            chat_history_database.PoolSettings(disable_pooling=True),
         )
         assert kwargs["poolclass"] is chat_history_database.NullPool
         connect_args = kwargs["connect_args"]
         assert connect_args["connect_timeout"] == chat_history_database.PoolSettings().connect_timeout
-        if expect_prepare_threshold:
-            assert connect_args["prepare_threshold"] is None
-        else:
+        if expected_threshold == "absent":
             assert "prepare_threshold" not in connect_args
+        else:
+            assert connect_args["prepare_threshold"] == expected_threshold
+            assert connect_args["prepare_threshold"] is None or isinstance(
+                connect_args["prepare_threshold"], int
+            )
+        if "prepare_threshold=" in db_url:
+            # The untyped query value must not reach the driver twice.
+            assert "prepare_threshold" not in make_url(url).query
+        # The returned URL must still carry the real password: a plain str(url)
+        # masks it with "***", and the engine is created from this string.
+        assert make_url(url).password not in (None, "***")
 
     def test_pooled_engine_keeps_auto_prepare(self):
-        url = normalize_postgres_driver_url("postgresql://atlas:pw@db.example.com:5432/atlas")
-        kwargs = chat_history_database._postgres_engine_kwargs(url, chat_history_database.PoolSettings())
+        url, kwargs = chat_history_database._postgres_engine_kwargs(
+            normalize_postgres_driver_url("postgresql://atlas:pw@db.example.com:5432/atlas"),
+            chat_history_database.PoolSettings(),
+        )
         assert "prepare_threshold" not in kwargs.get("connect_args", {})
         assert "poolclass" not in kwargs
+
+    def test_pooled_engine_url_query_threshold_is_retyped(self):
+        # The re-typing applies whenever the operator sets the threshold in the
+        # URL, pooled or not: the raw string would break psycopg either way.
+        url, kwargs = chat_history_database._postgres_engine_kwargs(
+            normalize_postgres_driver_url("postgresql://atlas:pw@db.example.com:5432/atlas?prepare_threshold=2"),
+            chat_history_database.PoolSettings(),
+        )
+        assert kwargs["connect_args"]["prepare_threshold"] == 2
+        assert isinstance(kwargs["connect_args"]["prepare_threshold"], int)
+        assert "prepare_threshold" not in make_url(url).query
+
+    def test_effective_connect_args_are_typed(self):
+        # What SQLAlchemy hands psycopg: dialect.create_connect_args on the
+        # final URL, with the engine's connect_args merged over it (create_engine
+        # performs cparams.update(connect_args)). The URL query value must arrive
+        # re-typed, not as the raw string, since psycopg compares the threshold
+        # against an int.
+        final_url, engine_kwargs = chat_history_database._postgres_engine_kwargs(
+            normalize_postgres_driver_url(
+                "postgresql://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0"
+            ),
+            chat_history_database.PoolSettings(disable_pooling=True),
+        )
+        cparams = PGDialect_psycopg().create_connect_args(make_url(final_url))[1]
+        cparams.update(engine_kwargs["connect_args"])
+        assert cparams["prepare_threshold"] == 0
+        assert isinstance(cparams["prepare_threshold"], int)
+
+        final_url, engine_kwargs = chat_history_database._postgres_engine_kwargs(
+            normalize_postgres_driver_url("postgresql://atlas:pw@db.example.com:5432/atlas"),
+            chat_history_database.PoolSettings(disable_pooling=True),
+        )
+        cparams = PGDialect_psycopg().create_connect_args(make_url(final_url))[1]
+        cparams.update(engine_kwargs["connect_args"])
+        assert cparams["prepare_threshold"] is None
 
 
 class TestResolveMigrationDbUrl:
