@@ -16,6 +16,7 @@ from atlas.modules.config.config_manager import (
     AppSettings,
     build_db_url_from_parts,
     normalize_postgres_driver_url,
+    pop_prepare_threshold_query,
     resolve_migration_db_url,
 )
 
@@ -256,6 +257,14 @@ class TestExternalPoolerConnectArgs:
     values as strings, and psycopg compares the threshold against an int).
     """
 
+    @pytest.fixture(autouse=True)
+    def _fresh_engine(self):
+        # get_engine caches one global engine; earlier tests may have left a
+        # duckdb engine behind, which would shadow the postgres URL below.
+        chat_history_database.reset_engine()
+        yield
+        chat_history_database.reset_engine()
+
     @pytest.mark.parametrize(
         ("db_url", "expected_threshold"),
         [
@@ -299,6 +308,86 @@ class TestExternalPoolerConnectArgs:
         )
         assert "prepare_threshold" not in kwargs.get("connect_args", {})
         assert "poolclass" not in kwargs
+
+    def test_get_engine_strips_query_and_keeps_password(self):
+        # Regression guard at the call site (helper-only tests cannot catch one
+        # there): the URL the engine keeps must lose the untyped query key and
+        # must not lose the password (a plain str(url) masks it with "***").
+        engine = chat_history_database.get_engine(
+            "postgresql://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0",
+            chat_history_database.PoolSettings(disable_pooling=True),
+        )
+        assert "prepare_threshold" not in engine.url.query
+        assert engine.url.password == "pw"
+
+
+class TestPopPrepareThresholdQuery:
+    """pop_prepare_threshold_query is the shared strip-and-convert step.
+
+    Both the app engine (database.py) and the Alembic migrations (env.py) run
+    it, so a URL like ``postgresql://...?prepare_threshold=0`` reaches psycopg
+    as the int 0 rather than the raw string that raises TypeError on the first
+    statement.
+    """
+
+    def test_absent_key_leaves_url_untouched(self):
+        url, prepare_args = pop_prepare_threshold_query(
+            "postgresql://atlas:pw@db.example.com:5432/atlas"
+        )
+        assert url == "postgresql://atlas:pw@db.example.com:5432/atlas"
+        assert prepare_args == {}
+
+    def test_value_is_retyped_and_removed_from_url(self):
+        url, prepare_args = pop_prepare_threshold_query(
+            "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0"
+        )
+        assert prepare_args == {"prepare_threshold": 0}
+        assert "prepare_threshold" not in make_url(url).query
+        # The rebuilt URL must keep the real password, not str()'s "***".
+        assert make_url(url).password == "pw"
+
+    def test_none_and_space_map_to_unlimited(self):
+        # An empty value cannot be tested through a URL: SQLAlchemy drops empty
+        # query values entirely (make_url("?prepare_threshold=") loses the key).
+        for raw in ("none", "%20"):
+            url, prepare_args = pop_prepare_threshold_query(
+                f"postgresql+psycopg://atlas:pw@db/atlas?prepare_threshold={raw}"
+            )
+            assert prepare_args == {"prepare_threshold": None}, raw
+            assert "prepare_threshold" not in make_url(url).query
+
+    def test_repeated_key_uses_last_value(self):
+        _, prepare_args = pop_prepare_threshold_query(
+            "postgresql+psycopg://atlas:pw@db/atlas?prepare_threshold=0&prepare_threshold=none"
+        )
+        assert prepare_args == {"prepare_threshold": None}
+
+    def test_invalid_value_fails_loudly(self):
+        with pytest.raises(ValueError, match="prepare_threshold"):
+            pop_prepare_threshold_query("postgresql+psycopg://atlas:pw@db/atlas?prepare_threshold=abc")
+
+    def test_psycopg2_url_is_left_untouched(self):
+        # psycopg2 has no prepare_threshold setting; the pop must not rewrite
+        # such a URL (and does not put the kwarg in connect args either).
+        url, prepare_args = pop_prepare_threshold_query(
+            "postgresql+psycopg2://atlas:pw@db/atlas?prepare_threshold=0"
+        )
+        assert "prepare_threshold" in make_url(url).query
+        assert prepare_args == {}
+
+    def test_migration_url_flow_matches_env_py(self, monkeypatch):
+        # The composition alembic/env.py performs: resolve the URL, then pop.
+        monkeypatch.setenv(
+            "CHAT_HISTORY_DB_URL",
+            "postgresql://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0",
+        )
+        url, prepare_args = pop_prepare_threshold_query(resolve_migration_db_url())
+        assert "prepare_threshold" not in make_url(url).query
+        assert prepare_args == {"prepare_threshold": 0}
+
+
+class TestEngineKwargsPrepareThreshold:
+    """prepare_threshold handling inside _postgres_engine_kwargs."""
 
     def test_pooled_engine_url_query_threshold_is_retyped(self):
         # The re-typing applies whenever the operator sets the threshold in the

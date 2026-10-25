@@ -43,14 +43,16 @@ print("chat-history driver checks OK")
 EOF
 print_result $? "get_engine: bare postgresql:// -> psycopg v3, explicit drivers preserved"
 
-# 2. Alembic: env.py normalizes the URL before handing it to SQLAlchemy; mirror its
-#    online engine_from_config path for both the DB_* parts source and an explicit
-#    driver URL.
+# 2. Alembic: env.py normalizes the URL before handing it to SQLAlchemy and pops a
+#    URL-query prepare_threshold into connect_args; mirror its online
+#    engine_from_config path for both the DB_* parts source and an explicit
+#    driver URL with a prepare_threshold in the query.
 PYTHONPATH="$PROJECT_ROOT" python - <<'EOF'
 from sqlalchemy import engine_from_config
 from atlas.modules.config.config_manager import (
     build_db_url_from_parts,
     normalize_postgres_driver_url,
+    pop_prepare_threshold_query,
 )
 
 url = build_db_url_from_parts(
@@ -61,12 +63,24 @@ url = build_db_url_from_parts(
     db_user="atlas",
     db_password="pw",
 )
-engine = engine_from_config({"sqlalchemy.url": normalize_postgres_driver_url(url)})
+url, prepare_args = pop_prepare_threshold_query(normalize_postgres_driver_url(url))
+assert prepare_args == {}, prepare_args
+engine = engine_from_config({"sqlalchemy.url": url}, **{"connect_args": prepare_args})
 assert engine.dialect.name == "postgresql", engine.dialect.name
 assert engine.dialect.driver == "psycopg", engine.dialect.driver
 
-engine = engine_from_config({"sqlalchemy.url": "postgresql+psycopg2://atlas:pw@db/atlas"})
+url = normalize_postgres_driver_url("postgresql+psycopg2://atlas:pw@db/atlas")
+engine = engine_from_config({"sqlalchemy.url": url})
 assert engine.dialect.driver == "psycopg2", engine.dialect.driver
+
+# A URL-query prepare_threshold must come out re-typed (SQLAlchemy hands query
+# values to the driver as strings, which psycopg compares against an int).
+url = normalize_postgres_driver_url("postgresql://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0")
+url, prepare_args = pop_prepare_threshold_query(url)
+assert prepare_args == {"prepare_threshold": 0}, prepare_args
+assert "prepare_threshold" not in url
+engine = engine_from_config({"sqlalchemy.url": url}, **{"connect_args": prepare_args})
+assert engine.dialect.driver == "psycopg", engine.dialect.driver
 print("alembic engine_from_config checks OK")
 EOF
 print_result $? "alembic engine path: normalized URL resolves to psycopg v3"
@@ -82,9 +96,9 @@ grep -q "CREATE TABLE" "$SQL_FILE"
 print_result $? "generated migration SQL contains DDL"
 
 SQL_FILE2="$(mktemp)"
-CHAT_HISTORY_DB_URL="postgresql://atlas:pw@db.example.com:5432/atlas_chat_history" \
+CHAT_HISTORY_DB_URL="postgresql://atlas:pw@db.example.com:5432/atlas_chat_history?prepare_threshold=0" \
     alembic upgrade head --sql > "$SQL_FILE2" 2>&1
-print_result $? "alembic upgrade --sql with explicit bare CHAT_HISTORY_DB_URL"
+print_result $? "alembic upgrade --sql with explicit bare CHAT_HISTORY_DB_URL incl. URL-query prepare_threshold"
 grep -q "CREATE TABLE" "$SQL_FILE2"
 print_result $? "generated migration SQL contains DDL"
 rm -f "$SQL_FILE" "$SQL_FILE2"

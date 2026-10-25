@@ -6,6 +6,7 @@ from typing import Dict, FrozenSet, Optional
 
 from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings
+from sqlalchemy.engine import make_url
 
 from atlas.core.security_config import validate_capability_secret
 
@@ -143,6 +144,38 @@ def normalize_postgres_driver_url(db_url: str) -> str:
     if db_url.startswith("postgresql://"):
         return f"postgresql+psycopg://{db_url.removeprefix('postgresql://')}"
     return db_url
+
+
+def pop_prepare_threshold_query(db_url: str) -> tuple[str, Dict[str, Optional[int]]]:
+    """Pop ``prepare_threshold`` from a psycopg URL's query, re-typed.
+
+    SQLAlchemy passes URL query values to the driver untyped (as strings) and
+    psycopg compares the threshold against an int, so a raw ``"0"`` would raise
+    ``TypeError`` on the first statement. Returns the URL without the key and
+    ``create_engine`` connect args carrying the re-typed value: ``none`` or an
+    empty value maps to ``None`` (unlimited), anything else must be an int.
+    Repeated query keys use the last value. Returns the URL unchanged and an
+    empty dict when the key is absent or the driver is not psycopg (v3).
+    """
+    url = make_url(db_url)
+    if url.get_driver_name() != "psycopg" or "prepare_threshold" not in url.query:
+        return db_url, {}
+    raw = url.query["prepare_threshold"]
+    if isinstance(raw, tuple):
+        raw = raw[-1]
+    if raw is None or str(raw).strip().lower() in ("", "none"):
+        threshold: Optional[int] = None
+    else:
+        try:
+            threshold = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"prepare_threshold in the database URL must be an integer or 'none', got {raw!r}"
+            ) from None
+    url = url.difference_update_query(["prepare_threshold"])
+    # render_as_string, not str(): str() masks the password with "***", and the
+    # caller builds the engine from the returned URL.
+    return url.render_as_string(hide_password=False), {"prepare_threshold": threshold}
 
 
 def resolve_migration_db_url() -> Optional[str]:

@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from atlas.core.duckdb_indexes import drop_duckdb_secondary_indexes
-from atlas.modules.config.settings import normalize_postgres_driver_url
+from atlas.modules.config.settings import normalize_postgres_driver_url, pop_prepare_threshold_query
 
 from .models import Base
 
@@ -91,34 +91,24 @@ def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> tuple[str, Dict[
     plus the ``create_engine`` keyword arguments.
     """
     kwargs: Dict[str, Any] = {"pool_pre_ping": pool.pool_pre_ping, "echo": False}
+    db_url, prepare_args = pop_prepare_threshold_query(db_url)
     url = make_url(db_url)
     # Only libpq drivers understand connect_timeout (pg8000 or asyncpg would
     # reject it). A connect_timeout already in the URL query wins over the
     # setting, since the driver would otherwise receive the setting's value.
     if url.get_driver_name() in _LIBPQ_DRIVERS and "connect_timeout" not in url.query:
         kwargs["connect_args"] = {"connect_timeout": pool.connect_timeout}
-    # psycopg (v3) re-types a prepare_threshold set in the URL query: SQLAlchemy
-    # passes query values to the driver untyped (as strings) and psycopg compares
-    # the threshold against an int, so a raw "0" would raise TypeError on the
-    # first statement. Re-type the operator's value and strip it from the URL;
-    # psycopg spells an unlimited threshold "none".
-    if url.get_driver_name() == "psycopg" and "prepare_threshold" in url.query:
-        raw = url.query["prepare_threshold"]
-        if raw is None or str(raw).strip().lower() in ("", "none"):
-            threshold: Optional[int] = None
-        else:
-            threshold = int(raw)
-        url = url.difference_update_query(["prepare_threshold"])
-        kwargs.setdefault("connect_args", {})["prepare_threshold"] = threshold
+    if prepare_args:
+        kwargs.setdefault("connect_args", {}).update(prepare_args)
     if pool.disable_pooling:
         kwargs["poolclass"] = NullPool
         # psycopg (v3) auto-prepares statements after a few executions, which
         # transaction-mode PgBouncer below 1.21 cannot route. When an external
         # pooler does the pooling, keep statements unnamed; psycopg2 has no
         # such setting and would reject the keyword, so scope it to psycopg 3.
-        # An operator-set URL query threshold (handled above) wins.
-        if url.get_driver_name() == "psycopg" and "prepare_threshold" not in kwargs.get("connect_args", {}):
-            kwargs.setdefault("connect_args", {})["prepare_threshold"] = None
+        # An operator-set URL query threshold (popped above) wins.
+        if url.get_driver_name() == "psycopg":
+            kwargs.setdefault("connect_args", {}).setdefault("prepare_threshold", None)
     else:
         kwargs.update(
             pool_size=pool.pool_size,
