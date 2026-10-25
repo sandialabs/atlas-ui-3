@@ -102,10 +102,13 @@ keep their own connect behavior.
 
 `CHAT_HISTORY_DB_DISABLE_POOLING=true` ignores the pool size, overflow,
 timeout and recycle settings; only pre-ping and the connect timeout still
-apply. It also passes `prepare_threshold=None` to the psycopg (v3) driver, so
-statements are never named server-side: auto-prepared statements are what
-break transaction-mode PgBouncer before 1.21. psycopg2 has no such setting
-and is unaffected.
+apply. The chat-history engine also passes `prepare_threshold=None` to the
+psycopg (v3) driver in that mode, so statements are never named server-side:
+auto-prepared statements are what break transaction-mode PgBouncer before
+1.21 (a `prepare_threshold` in the URL query wins over the default). psycopg2
+has no such setting and is unaffected. Alembic migrations build their own
+engine from the URL without these pool settings, so run them against the
+database directly rather than through a transaction pooler.
 
 Some chat-history routes call the database directly on the event loop, so a
 request waiting for a pooled connection stalls every request on that worker
@@ -122,10 +125,11 @@ For many replicas, an external pooler keeps the server-side connection count
 flat as replicas scale. With PgBouncer in `transaction` mode, either keep a
 small Atlas pool (bounded by PgBouncer's `default_pool_size`) or set
 `CHAT_HISTORY_DB_DISABLE_POOLING=true` and let PgBouncer pool. With pooling
-disabled, Atlas also keeps psycopg 3 from naming prepared statements, so
-`transaction` mode works on any PgBouncer release. When the Atlas pool stays
-enabled, the psycopg driver can still auto-prepare statements: use PgBouncer
-1.21 or later (`max_prepared_statements` set) or `session` mode.
+disabled, the chat-history engine also keeps psycopg 3 from naming prepared
+statements, so `transaction` mode works on any PgBouncer release. When the
+Atlas pool stays enabled, the psycopg driver can still auto-prepare
+statements: use PgBouncer 1.21 or later (`max_prepared_statements` set) or
+`session` mode.
 
 Run schema migrations once per deployment, before any replica starts (for
 example a Kubernetes Job or init step that runs `alembic upgrade head`), not

@@ -7,8 +7,6 @@ postgresql:// URLs to postgresql+psycopg:// so the psycopg (v3) driver is used
 on every install path.
 """
 
-from pathlib import Path
-
 import pytest
 
 from atlas.modules.chat_history import database as chat_history_database
@@ -16,6 +14,7 @@ from atlas.modules.config.config_manager import (
     AppSettings,
     build_db_url_from_parts,
     normalize_postgres_driver_url,
+    resolve_migration_db_url,
 )
 
 
@@ -259,6 +258,9 @@ class TestExternalPoolerConnectArgs:
             ("postgresql://atlas:pw@db.example.com:5432/atlas", True),
             ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas", True),
             ("postgresql+psycopg2://atlas:pw@db.example.com:5432/atlas", False),
+            # A prepare_threshold the operator set in the URL query wins over
+            # the disable_pooling default, like connect_timeout does.
+            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0", False),
         ],
     )
     def test_disable_pooling_disables_auto_prepare_for_psycopg3(self, db_url, expect_prepare_threshold):
@@ -281,25 +283,46 @@ class TestExternalPoolerConnectArgs:
         assert "poolclass" not in kwargs
 
 
-class TestAlembicEnvNormalization:
-    """alembic/env.py builds its own URL and must normalize it like the app.
+class TestResolveMigrationDbUrl:
+    """Behavioral coverage for the URL resolution alembic/env.py performs.
 
-    Guards the env.py wiring for issue #991: the URL override is passed through
-    ``normalize_postgres_driver_url`` before it reaches ``sqlalchemy.url``. The
-    end-to-end offline migration proof for both URL sources (DB_* parts and an
-    explicit CHAT_HISTORY_DB_URL) lives in
+    env.py resolves CHAT_HISTORY_DB_URL (winner) or the DB_* parts through
+    ``resolve_migration_db_url``, which also normalizes bare postgresql://
+    URLs to the psycopg (v3) driver (issue #991). These tests exercise the
+    same importable function, so the guard holds everywhere the suite runs;
+    the offline end-to-end proof for both URL sources lives in
     test/pr-validation/test_pr991_psycopg_driver.sh.
     """
 
-    def test_env_py_passes_url_through_normalization(self):
-        env_path = Path(__file__).resolve().parents[2] / "alembic" / "env.py"
-        if not env_path.is_file():
-            # The CI test image ships the package and its tests without the
-            # repo's alembic/ tree (/app/tests, no /app/alembic); the guard
-            # only applies where the repo tree is present.
-            pytest.skip("alembic/env.py not present (packaged test tree)")
-        env_source = env_path.read_text(encoding="utf-8")
-        assert "normalize_postgres_driver_url(db_url)" in env_source
+    def test_explicit_url_wins_and_is_normalized(self, monkeypatch):
+        monkeypatch.setenv("CHAT_HISTORY_DB_URL", "postgresql://atlas:pw@db.example.com:5432/atlas")
+        monkeypatch.setenv("DB_HOST", "other.example.com")
+        assert resolve_migration_db_url() == "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas"
+
+    def test_db_parts_are_assembled_and_normalized(self, monkeypatch):
+        monkeypatch.setenv("DB_HOST", "db.example.com")
+        monkeypatch.setenv("DB_PORT", "5432")
+        monkeypatch.setenv("DB_NAME", "atlas")
+        monkeypatch.setenv("DB_USER", "atlas")
+        monkeypatch.setenv("DB_PASSWORD", "pw")
+        assert resolve_migration_db_url() == "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas"
+
+    def test_explicit_driver_url_passes_through(self, monkeypatch):
+        monkeypatch.setenv("CHAT_HISTORY_DB_URL", "postgresql+psycopg2://atlas:pw@db.example.com/atlas")
+        assert resolve_migration_db_url() == "postgresql+psycopg2://atlas:pw@db.example.com/atlas"
+
+    def test_db_parts_driver_is_honored(self, monkeypatch):
+        monkeypatch.setenv("DB_DRIVER", "postgresql+psycopg2")
+        monkeypatch.setenv("DB_HOST", "db.example.com")
+        monkeypatch.setenv("DB_NAME", "atlas")
+        assert resolve_migration_db_url() == "postgresql+psycopg2://db.example.com/atlas"
+
+    def test_nothing_set_resolves_to_none(self, monkeypatch):
+        monkeypatch.delenv("CHAT_HISTORY_DB_URL", raising=False)
+        monkeypatch.delenv("DB_HOST", raising=False)
+        monkeypatch.delenv("DB_NAME", raising=False)
+        monkeypatch.delenv("DB_USER", raising=False)
+        assert resolve_migration_db_url() is None
 
 
 class TestNormalizePostgresDriverUrl:

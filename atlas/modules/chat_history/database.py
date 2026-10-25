@@ -98,7 +98,8 @@ def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> Dict[str, Any]:
         # transaction-mode PgBouncer below 1.21 cannot route. When an external
         # pooler does the pooling, keep statements unnamed; psycopg2 has no
         # such setting and would reject the keyword, so scope it to psycopg 3.
-        if url.get_driver_name() == "psycopg":
+        # A prepare_threshold the operator set in the URL query wins.
+        if url.get_driver_name() == "psycopg" and "prepare_threshold" not in url.query:
             kwargs.setdefault("connect_args", {})["prepare_threshold"] = None
     else:
         kwargs.update(

@@ -32,13 +32,14 @@ from .models import (
     ToolApprovalsConfig,
     resolve_env_var,
 )
-from .settings import AppSettings, build_db_url_from_parts, normalize_postgres_driver_url
+from .settings import AppSettings, build_db_url_from_parts, normalize_postgres_driver_url, resolve_migration_db_url
 
 __all__ = [
     # Helpers
     "resolve_env_var",
     "build_db_url_from_parts",
     "normalize_postgres_driver_url",
+    "resolve_migration_db_url",
     # Models
     "ModelConfig",
     "LLMConfig",

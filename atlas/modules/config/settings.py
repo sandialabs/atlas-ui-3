@@ -145,6 +145,28 @@ def normalize_postgres_driver_url(db_url: str) -> str:
     return db_url
 
 
+def resolve_migration_db_url() -> Optional[str]:
+    """Resolve the chat-history URL for Alembic from the environment.
+
+    ``CHAT_HISTORY_DB_URL`` wins over the ``DB_*`` components, mirroring the
+    runtime ``AppSettings`` behavior, and the result is normalized to the
+    psycopg (v3) driver so migrations use the same driver as the app
+    (issue #991). Returns ``None`` when nothing is set, like
+    ``build_db_url_from_parts``.
+    """
+    db_url = os.environ.get("CHAT_HISTORY_DB_URL") or build_db_url_from_parts(
+        db_driver=os.environ.get("DB_DRIVER", "postgresql"),
+        db_host=os.environ.get("DB_HOST"),
+        db_port=os.environ.get("DB_PORT"),
+        db_name=os.environ.get("DB_NAME"),
+        db_user=os.environ.get("DB_USER"),
+        db_password=os.environ.get("DB_PASSWORD"),
+    )
+    if db_url is None:
+        return None
+    return normalize_postgres_driver_url(db_url)
+
+
 def configured_agent_max_steps(settings) -> int:
     """Return the agent loop step ceiling with the orchestrator's coercion.
 
