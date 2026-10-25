@@ -126,16 +126,16 @@ class TestPostgresEngine:
         # The bare scheme is what Compose and the docs use; it resolves to a
         # libpq driver (psycopg or psycopg2, depending on SQLAlchemy version).
         url = f"{scheme}://atlas:pw@db.example.com:5432/atlas"
-        kwargs = _postgres_engine_kwargs(url, PoolSettings(connect_timeout=4))
+        _, kwargs = _postgres_engine_kwargs(url, PoolSettings(connect_timeout=4))
         assert kwargs["connect_args"] == {"connect_timeout": 4}
 
     def test_connect_timeout_in_url_wins(self):
-        kwargs = _postgres_engine_kwargs(f"{_PG_URL}?connect_timeout=30", PoolSettings(connect_timeout=4))
+        _, kwargs = _postgres_engine_kwargs(f"{_PG_URL}?connect_timeout=30", PoolSettings(connect_timeout=4))
         assert "connect_args" not in kwargs
 
     def test_connect_timeout_only_for_libpq_drivers(self):
         # pg8000 is not libpq-based and rejects a connect_timeout argument.
-        kwargs = _postgres_engine_kwargs("postgresql+pg8000://atlas:pw@db.example.com/atlas", PoolSettings())
+        _, kwargs = _postgres_engine_kwargs("postgresql+pg8000://atlas:pw@db.example.com/atlas", PoolSettings())
         assert "connect_args" not in kwargs
 
     def test_existing_engine_warns_on_different_pool(self, caplog):
@@ -165,7 +165,7 @@ class TestPostgresEngine:
 
     def test_null_pool_omits_queue_pool_arguments(self):
         # NullPool rejects pool_size/max_overflow, so they must not be passed.
-        kwargs = _postgres_engine_kwargs(_PG_URL, PoolSettings(disable_pooling=True))
+        _, kwargs = _postgres_engine_kwargs(_PG_URL, PoolSettings(disable_pooling=True))
         assert kwargs["poolclass"] is NullPool
         assert not {"pool_size", "max_overflow", "pool_timeout", "pool_recycle"} & kwargs.keys()
 
