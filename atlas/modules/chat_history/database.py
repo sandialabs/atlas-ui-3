@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from atlas.core.duckdb_indexes import drop_duckdb_secondary_indexes
+from atlas.modules.config.settings import normalize_postgres_driver_url
 
 from .models import Base
 
@@ -93,6 +94,13 @@ def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> Dict[str, Any]:
         kwargs["connect_args"] = {"connect_timeout": pool.connect_timeout}
     if pool.disable_pooling:
         kwargs["poolclass"] = NullPool
+        # psycopg (v3) auto-prepares statements after a few executions, which
+        # transaction-mode PgBouncer below 1.21 cannot route. When an external
+        # pooler does the pooling, keep statements unnamed; psycopg2 has no
+        # such setting and would reject the keyword, so scope it to psycopg 3.
+        # A prepare_threshold the operator set in the URL query wins.
+        if url.get_driver_name() == "psycopg" and "prepare_threshold" not in url.query:
+            kwargs.setdefault("connect_args", {})["prepare_threshold"] = None
     else:
         kwargs.update(
             pool_size=pool.pool_size,
@@ -126,6 +134,10 @@ def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None
         db_url = os.environ.get("CHAT_HISTORY_DB_URL", "duckdb:///data/chat_history.db")
 
     db_url = _resolve_db_url(db_url)
+    # Name the psycopg (v3) driver on bare postgresql:// URLs so the driver does
+    # not depend on the installed SQLAlchemy version (issue #991). URLs that
+    # already name a driver are left as the operator wrote them.
+    db_url = normalize_postgres_driver_url(db_url)
 
     if db_url.startswith("postgresql"):
         pool = pool or PoolSettings()

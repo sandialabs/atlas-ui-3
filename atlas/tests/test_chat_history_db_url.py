@@ -1,17 +1,21 @@
 """Tests for assembling chat_history_db_url from individual DB_* env vars.
 
 Covers the behavior added for issue #581: support DB_HOST, DB_PORT, DB_NAME,
-DB_USER, DB_PASSWORD, DB_DRIVER as an alternative to a full CHAT_HISTORY_DB_URL.
+DB_USER, DB_PASSWORD, DB_DRIVER as an alternative to a full CHAT_HISTORY_DB_URL,
+and the driver normalization added for issue #991: get_engine rewrites bare
+postgresql:// URLs to postgresql+psycopg:// so the psycopg (v3) driver is used
+on every install path.
 """
 
 import pytest
-import sqlalchemy
 
 from atlas.modules.chat_history import database as chat_history_database
-from atlas.modules.config.config_manager import AppSettings, build_db_url_from_parts
-
-# SQLAlchemy 2.1 made psycopg (v3) the default driver for postgresql:// URLs.
-_SQLALCHEMY_2_1 = tuple(int(part) for part in sqlalchemy.__version__.split(".")[:2]) >= (2, 1)
+from atlas.modules.config.config_manager import (
+    AppSettings,
+    build_db_url_from_parts,
+    normalize_postgres_driver_url,
+    resolve_migration_db_url,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -191,9 +195,10 @@ class TestChatHistoryDbUrlPrecedenceFromAllSources:
 class TestPostgresDriverInstalled:
     """The driver SQLAlchemy picks for a postgresql URL must be installed (issue #988).
 
-    SQLAlchemy 2.1 changed the default driver for ``postgresql://`` from psycopg2
-    to psycopg (v3). ``get_engine`` loads the driver module without connecting,
-    so a missing driver fails here instead of at chat-history startup.
+    ``get_engine`` names the psycopg (v3) driver on bare ``postgresql://`` URLs
+    (issue #991), so the driver no longer depends on the installed SQLAlchemy
+    version. ``get_engine`` loads the driver module without connecting, so a
+    missing driver fails here instead of at chat-history startup.
     """
 
     @pytest.fixture(autouse=True)
@@ -205,8 +210,9 @@ class TestPostgresDriverInstalled:
     @pytest.mark.parametrize(
         ("scheme", "expected_driver"),
         [
-            # A bare postgresql:// URL uses SQLAlchemy's default driver.
-            ("postgresql", "psycopg" if _SQLALCHEMY_2_1 else "psycopg2"),
+            # A bare postgresql:// URL is normalized to postgresql+psycopg://
+            # before the engine is created, whatever SQLAlchemy is installed.
+            ("postgresql", "psycopg"),
             ("postgresql+psycopg", "psycopg"),
             ("postgresql+psycopg2", "psycopg2"),
         ],
@@ -218,3 +224,146 @@ class TestPostgresDriverInstalled:
         engine = chat_history_database.get_engine(url)
         assert engine.dialect.name == "postgresql"
         assert engine.dialect.driver == expected_driver
+        # Assert the rewritten URL, not just the loaded dialect: on SQLAlchemy
+        # 2.1 a bare postgresql:// URL loads psycopg even without the
+        # normalization, so the drivername is what fails if get_engine stops
+        # rewriting (issue #991).
+        assert engine.url.drivername == f"postgresql+{expected_driver}"
+
+    def test_explicit_url_from_env_is_normalized(self):
+        # The CHAT_HISTORY_DB_URL path: app_factory hands the setting straight
+        # to init_database/get_engine, so a bare URL the operator wrote must be
+        # normalized too, not just assembled DB_* parts.
+        engine = chat_history_database.get_engine(
+            "postgresql://atlas:pw@db.example.com:5432/atlas_chat_history"
+        )
+        assert engine.dialect.name == "postgresql"
+        assert engine.dialect.driver == "psycopg"
+        assert engine.url.drivername == "postgresql+psycopg"
+
+
+class TestExternalPoolerConnectArgs:
+    """CHAT_HISTORY_DB_DISABLE_POOLING keeps psycopg 3 statements unnamed.
+
+    psycopg (v3) auto-prepares statements after a few executions, which
+    transaction-mode PgBouncer below 1.21 cannot route. When an external pooler
+    does the pooling, the engine passes ``prepare_threshold=None`` so no named
+    statements are created. psycopg2 has no such setting and would reject the
+    keyword, so it must only reach the psycopg 3 driver.
+    """
+
+    @pytest.mark.parametrize(
+        ("db_url", "expect_prepare_threshold"),
+        [
+            ("postgresql://atlas:pw@db.example.com:5432/atlas", True),
+            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas", True),
+            ("postgresql+psycopg2://atlas:pw@db.example.com:5432/atlas", False),
+            # A prepare_threshold the operator set in the URL query wins over
+            # the disable_pooling default, like connect_timeout does.
+            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas?prepare_threshold=0", False),
+        ],
+    )
+    def test_disable_pooling_disables_auto_prepare_for_psycopg3(self, db_url, expect_prepare_threshold):
+        url = normalize_postgres_driver_url(db_url)
+        kwargs = chat_history_database._postgres_engine_kwargs(
+            url, chat_history_database.PoolSettings(disable_pooling=True)
+        )
+        assert kwargs["poolclass"] is chat_history_database.NullPool
+        connect_args = kwargs["connect_args"]
+        assert connect_args["connect_timeout"] == chat_history_database.PoolSettings().connect_timeout
+        if expect_prepare_threshold:
+            assert connect_args["prepare_threshold"] is None
+        else:
+            assert "prepare_threshold" not in connect_args
+
+    def test_pooled_engine_keeps_auto_prepare(self):
+        url = normalize_postgres_driver_url("postgresql://atlas:pw@db.example.com:5432/atlas")
+        kwargs = chat_history_database._postgres_engine_kwargs(url, chat_history_database.PoolSettings())
+        assert "prepare_threshold" not in kwargs.get("connect_args", {})
+        assert "poolclass" not in kwargs
+
+
+class TestResolveMigrationDbUrl:
+    """Behavioral coverage for the URL resolution alembic/env.py performs.
+
+    env.py resolves CHAT_HISTORY_DB_URL (winner) or the DB_* parts through
+    ``resolve_migration_db_url``, which also normalizes bare postgresql://
+    URLs to the psycopg (v3) driver (issue #991). These tests exercise the
+    same importable function, so the guard holds everywhere the suite runs;
+    the offline end-to-end proof for both URL sources lives in
+    test/pr-validation/test_pr991_psycopg_driver.sh.
+    """
+
+    def test_explicit_url_wins_and_is_normalized(self, monkeypatch):
+        monkeypatch.setenv("CHAT_HISTORY_DB_URL", "postgresql://atlas:pw@db.example.com:5432/atlas")
+        monkeypatch.setenv("DB_HOST", "other.example.com")
+        assert resolve_migration_db_url() == "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas"
+
+    def test_db_parts_are_assembled_and_normalized(self, monkeypatch):
+        monkeypatch.setenv("DB_HOST", "db.example.com")
+        monkeypatch.setenv("DB_PORT", "5432")
+        monkeypatch.setenv("DB_NAME", "atlas")
+        monkeypatch.setenv("DB_USER", "atlas")
+        monkeypatch.setenv("DB_PASSWORD", "pw")
+        assert resolve_migration_db_url() == "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas"
+
+    def test_explicit_driver_url_passes_through(self, monkeypatch):
+        monkeypatch.setenv("CHAT_HISTORY_DB_URL", "postgresql+psycopg2://atlas:pw@db.example.com/atlas")
+        assert resolve_migration_db_url() == "postgresql+psycopg2://atlas:pw@db.example.com/atlas"
+
+    def test_db_parts_driver_is_honored(self, monkeypatch):
+        monkeypatch.setenv("DB_DRIVER", "postgresql+psycopg2")
+        monkeypatch.setenv("DB_HOST", "db.example.com")
+        monkeypatch.setenv("DB_NAME", "atlas")
+        assert resolve_migration_db_url() == "postgresql+psycopg2://db.example.com/atlas"
+
+    def test_nothing_set_resolves_to_none(self, monkeypatch):
+        monkeypatch.delenv("CHAT_HISTORY_DB_URL", raising=False)
+        monkeypatch.delenv("DB_HOST", raising=False)
+        monkeypatch.delenv("DB_NAME", raising=False)
+        monkeypatch.delenv("DB_USER", raising=False)
+        assert resolve_migration_db_url() is None
+
+
+class TestNormalizePostgresDriverUrl:
+    """Only bare postgresql:// URLs are rewritten to name the psycopg driver (issue #991).
+
+    A bare ``postgresql://`` URL picks SQLAlchemy's default driver, which changed
+    from psycopg2 to psycopg (v3) between SQLAlchemy 2.0 and 2.1 -- so ``uv sync``
+    from the lockfile and the Docker/pip install paths could disagree. Naming the
+    driver in the URL makes the choice independent of the installed version.
+    """
+
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            (
+                "postgresql://atlas:pw@db.example.com:5432/atlas_chat_history",
+                "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas_chat_history",
+            ),
+            ("postgresql://db", "postgresql+psycopg://db"),
+            # Anything after the scheme (path, query string) survives the rewrite.
+            (
+                "postgresql://db/atlas?sslmode=require",
+                "postgresql+psycopg://db/atlas?sslmode=require",
+            ),
+            # URLs that already name a driver pass through untouched.
+            ("postgresql+psycopg://db/atlas", "postgresql+psycopg://db/atlas"),
+            (
+                "postgresql+psycopg2://atlas:pw@db/atlas",
+                "postgresql+psycopg2://atlas:pw@db/atlas",
+            ),
+            (
+                "postgresql+asyncpg://atlas:pw@db/atlas",
+                "postgresql+asyncpg://atlas:pw@db/atlas",
+            ),
+            # Only the exact bare scheme is rewritten; legacy "postgres://" is
+            # not something SQLAlchemy accepts, so it is not rewritten either.
+            ("postgres://db/atlas", "postgres://db/atlas"),
+            # Non-postgres URLs are untouched.
+            ("duckdb:///data/chat_history.db", "duckdb:///data/chat_history.db"),
+            ("sqlite:///data/chat_history.db", "sqlite:///data/chat_history.db"),
+        ],
+    )
+    def test_rewrites_only_bare_postgresql_urls(self, url, expected):
+        assert normalize_postgres_driver_url(url) == expected

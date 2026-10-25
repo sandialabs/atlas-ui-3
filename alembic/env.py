@@ -1,6 +1,5 @@
 """Alembic environment configuration for chat history migrations."""
 
-import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -13,20 +12,16 @@ from alembic import context
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from atlas.modules.chat_history.models import Base
-from atlas.modules.config.config_manager import build_db_url_from_parts
+from atlas.modules.config.config_manager import resolve_migration_db_url
 
 config = context.config
 
 # Override sqlalchemy.url from environment variables if set. CHAT_HISTORY_DB_URL
 # wins; otherwise DB_* components mirror the runtime AppSettings behavior.
-db_url = os.environ.get("CHAT_HISTORY_DB_URL") or build_db_url_from_parts(
-    db_driver=os.environ.get("DB_DRIVER", "postgresql"),
-    db_host=os.environ.get("DB_HOST"),
-    db_port=os.environ.get("DB_PORT"),
-    db_name=os.environ.get("DB_NAME"),
-    db_user=os.environ.get("DB_USER"),
-    db_password=os.environ.get("DB_PASSWORD"),
-)
+# Bare postgresql:// URLs are normalized to postgresql+psycopg:// so migrations
+# use the same psycopg (v3) driver as the app regardless of the installed
+# SQLAlchemy version (issue #991); resolve_migration_db_url does both.
+db_url = resolve_migration_db_url()
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 
