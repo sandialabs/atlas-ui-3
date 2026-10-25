@@ -132,13 +132,13 @@ def build_db_url_from_parts(
 def normalize_postgres_driver_url(db_url: str) -> str:
     """Name the psycopg (v3) driver explicitly on a bare ``postgresql://`` URL.
 
-    SQLAlchemy changed the default driver for bare ``postgresql://`` URLs from
-    psycopg2 to psycopg (v3) in 2.1, so which driver a bare URL gets depends on
-    the installed SQLAlchemy, which differs between the lockfile sync and the
-    Docker/pip install paths (issue #991). Naming the driver in the URL makes
-    every install path use psycopg 3. URLs that already name a driver
-    (``postgresql+psycopg2://``, ``postgresql+asyncpg://``, ...) and
-    non-postgres URLs are returned unchanged.
+    The default driver SQLAlchemy picks for a bare ``postgresql://`` URL
+    changed from psycopg2 to psycopg (v3) in 2.1, which pyproject.toml now
+    requires. Naming the driver in the URL keeps the choice fixed even when an
+    environment provides an older SQLAlchemy anyway (issue #991). URLs that
+    already name a driver (``postgresql+psycopg2://``,
+    ``postgresql+asyncpg://``, ...) and non-postgres URLs are returned
+    unchanged.
     """
     if db_url.startswith("postgresql://"):
         return f"postgresql+psycopg://{db_url.removeprefix('postgresql://')}"

@@ -94,6 +94,12 @@ def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> Dict[str, Any]:
         kwargs["connect_args"] = {"connect_timeout": pool.connect_timeout}
     if pool.disable_pooling:
         kwargs["poolclass"] = NullPool
+        # psycopg (v3) auto-prepares statements after a few executions, which
+        # transaction-mode PgBouncer below 1.21 cannot route. When an external
+        # pooler does the pooling, keep statements unnamed; psycopg2 has no
+        # such setting and would reject the keyword, so scope it to psycopg 3.
+        if url.get_driver_name() == "psycopg":
+            kwargs.setdefault("connect_args", {})["prepare_threshold"] = None
     else:
         kwargs.update(
             pool_size=pool.pool_size,

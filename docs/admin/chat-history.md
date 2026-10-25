@@ -67,7 +67,7 @@ For production, provision a separately secured database with backups and
 least-privilege credentials. Compose also persists DuckDB history in the
 `atlas-data` named volume, which the container's nonroot user owns.
 
-Atlas connects to PostgreSQL with the psycopg (v3) driver on every install path: a bare `postgresql://` URL (and the default `DB_DRIVER=postgresql`) is normalized to `postgresql+psycopg://` before the app or Alembic creates a SQLAlchemy engine, so the driver does not depend on the installed SQLAlchemy version. URLs that already name a driver — `postgresql+psycopg2://`, `postgresql+asyncpg://`, and so on — are honored as written; both `psycopg` and `psycopg2` packages ship so explicit `postgresql+psycopg2://` URLs keep working.
+Atlas connects to PostgreSQL with the psycopg (v3) driver on every install path: a bare `postgresql://` URL (and the default `DB_DRIVER=postgresql`) is normalized to `postgresql+psycopg://` before the app or Alembic creates a SQLAlchemy engine, so the driver does not depend on the installed SQLAlchemy version. Install paths that previously resolved a bare `postgresql://` URL to psycopg2 — `uv sync` from a lockfile pinned to SQLAlchemy 2.0 — now use psycopg 3. URLs that already name a driver — `postgresql+psycopg2://`, `postgresql+asyncpg://`, and so on — are honored as written; both `psycopg` and `psycopg2` packages ship so explicit `postgresql+psycopg2://` URLs keep working.
 
 #### PostgreSQL connection pool
 
@@ -102,7 +102,10 @@ keep their own connect behavior.
 
 `CHAT_HISTORY_DB_DISABLE_POOLING=true` ignores the pool size, overflow,
 timeout and recycle settings; only pre-ping and the connect timeout still
-apply.
+apply. It also passes `prepare_threshold=None` to the psycopg (v3) driver, so
+statements are never named server-side: auto-prepared statements are what
+break transaction-mode PgBouncer before 1.21. psycopg2 has no such setting
+and is unaffected.
 
 Some chat-history routes call the database directly on the event loop, so a
 request waiting for a pooled connection stalls every request on that worker
@@ -118,9 +121,11 @@ base `atlas-ui` service lists its environment explicitly.
 For many replicas, an external pooler keeps the server-side connection count
 flat as replicas scale. With PgBouncer in `transaction` mode, either keep a
 small Atlas pool (bounded by PgBouncer's `default_pool_size`) or set
-`CHAT_HISTORY_DB_DISABLE_POOLING=true` and let PgBouncer pool. Use PgBouncer
-1.21 or later (`max_prepared_statements` set) or `session` mode, since the
-psycopg driver can use server-side prepared statements.
+`CHAT_HISTORY_DB_DISABLE_POOLING=true` and let PgBouncer pool. With pooling
+disabled, Atlas also keeps psycopg 3 from naming prepared statements, so
+`transaction` mode works on any PgBouncer release. When the Atlas pool stays
+enabled, the psycopg driver can still auto-prepare statements: use PgBouncer
+1.21 or later (`max_prepared_statements` set) or `session` mode.
 
 Run schema migrations once per deployment, before any replica starts (for
 example a Kubernetes Job or init step that runs `alembic upgrade head`), not

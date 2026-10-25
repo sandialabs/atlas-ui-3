@@ -7,6 +7,8 @@ postgresql:// URLs to postgresql+psycopg:// so the psycopg (v3) driver is used
 on every install path.
 """
 
+from pathlib import Path
+
 import pytest
 
 from atlas.modules.chat_history import database as chat_history_database
@@ -223,6 +225,11 @@ class TestPostgresDriverInstalled:
         engine = chat_history_database.get_engine(url)
         assert engine.dialect.name == "postgresql"
         assert engine.dialect.driver == expected_driver
+        # Assert the rewritten URL, not just the loaded dialect: on SQLAlchemy
+        # 2.1 a bare postgresql:// URL loads psycopg even without the
+        # normalization, so the drivername is what fails if get_engine stops
+        # rewriting (issue #991).
+        assert engine.url.drivername == f"postgresql+{expected_driver}"
 
     def test_explicit_url_from_env_is_normalized(self):
         # The CHAT_HISTORY_DB_URL path: app_factory hands the setting straight
@@ -233,6 +240,60 @@ class TestPostgresDriverInstalled:
         )
         assert engine.dialect.name == "postgresql"
         assert engine.dialect.driver == "psycopg"
+        assert engine.url.drivername == "postgresql+psycopg"
+
+
+class TestExternalPoolerConnectArgs:
+    """CHAT_HISTORY_DB_DISABLE_POOLING keeps psycopg 3 statements unnamed.
+
+    psycopg (v3) auto-prepares statements after a few executions, which
+    transaction-mode PgBouncer below 1.21 cannot route. When an external pooler
+    does the pooling, the engine passes ``prepare_threshold=None`` so no named
+    statements are created. psycopg2 has no such setting and would reject the
+    keyword, so it must only reach the psycopg 3 driver.
+    """
+
+    @pytest.mark.parametrize(
+        ("db_url", "expect_prepare_threshold"),
+        [
+            ("postgresql://atlas:pw@db.example.com:5432/atlas", True),
+            ("postgresql+psycopg://atlas:pw@db.example.com:5432/atlas", True),
+            ("postgresql+psycopg2://atlas:pw@db.example.com:5432/atlas", False),
+        ],
+    )
+    def test_disable_pooling_disables_auto_prepare_for_psycopg3(self, db_url, expect_prepare_threshold):
+        url = normalize_postgres_driver_url(db_url)
+        kwargs = chat_history_database._postgres_engine_kwargs(
+            url, chat_history_database.PoolSettings(disable_pooling=True)
+        )
+        assert kwargs["poolclass"] is chat_history_database.NullPool
+        connect_args = kwargs["connect_args"]
+        assert connect_args["connect_timeout"] == chat_history_database.PoolSettings().connect_timeout
+        if expect_prepare_threshold:
+            assert connect_args["prepare_threshold"] is None
+        else:
+            assert "prepare_threshold" not in connect_args
+
+    def test_pooled_engine_keeps_auto_prepare(self):
+        url = normalize_postgres_driver_url("postgresql://atlas:pw@db.example.com:5432/atlas")
+        kwargs = chat_history_database._postgres_engine_kwargs(url, chat_history_database.PoolSettings())
+        assert "prepare_threshold" not in kwargs.get("connect_args", {})
+        assert "poolclass" not in kwargs
+
+
+class TestAlembicEnvNormalization:
+    """alembic/env.py builds its own URL and must normalize it like the app.
+
+    Guards the env.py wiring for issue #991: the URL override is passed through
+    ``normalize_postgres_driver_url`` before it reaches ``sqlalchemy.url``. The
+    end-to-end offline migration proof for both URL sources (DB_* parts and an
+    explicit CHAT_HISTORY_DB_URL) lives in
+    test/pr-validation/test_pr991_psycopg_driver.sh.
+    """
+
+    def test_env_py_passes_url_through_normalization(self):
+        env_source = (Path(__file__).resolve().parents[2] / "alembic" / "env.py").read_text(encoding="utf-8")
+        assert "normalize_postgres_driver_url(db_url)" in env_source
 
 
 class TestNormalizePostgresDriverUrl:

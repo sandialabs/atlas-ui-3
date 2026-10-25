@@ -42,8 +42,8 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.48b0,<1.0.0",
     "opentelemetry-sdk>=1.43.0,<2.0.0",
     "Pillow>=12.3.0,<14.0.0",
-    # SQLAlchemy 2.1+ uses psycopg (v3) for postgresql:// URLs; 2.0 used psycopg2.
-    # Keep both so either SQLAlchemy line, and an explicit postgresql+psycopg2 URL, work.
+    # SQLAlchemy 2.1 (the required minimum) uses psycopg (v3) for postgresql:// URLs.
+    # psycopg2-binary stays for explicit postgresql+psycopg2:// URLs.
     "psycopg[binary]>=3.3.0,<4.0.0",
     "psycopg2-binary>=2.9.12,<3.0.0",
     "pydantic>=2.0.0,<3.0.0",
