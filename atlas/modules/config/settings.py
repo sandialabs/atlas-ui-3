@@ -129,6 +129,22 @@ def build_db_url_from_parts(
     return f"{db_driver}://{user_part}{host_part}{port_part}{name_part}"
 
 
+def normalize_postgres_driver_url(db_url: str) -> str:
+    """Name the psycopg (v3) driver explicitly on a bare ``postgresql://`` URL.
+
+    SQLAlchemy changed the default driver for bare ``postgresql://`` URLs from
+    psycopg2 to psycopg (v3) in 2.1, so which driver a bare URL gets depends on
+    the installed SQLAlchemy, which differs between the lockfile sync and the
+    Docker/pip install paths (issue #991). Naming the driver in the URL makes
+    every install path use psycopg 3. URLs that already name a driver
+    (``postgresql+psycopg2://``, ``postgresql+asyncpg://``, ...) and
+    non-postgres URLs are returned unchanged.
+    """
+    if db_url.startswith("postgresql://"):
+        return f"postgresql+psycopg://{db_url.removeprefix('postgresql://')}"
+    return db_url
+
+
 def configured_agent_max_steps(settings) -> int:
     """Return the agent loop step ceiling with the orchestrator's coercion.
 

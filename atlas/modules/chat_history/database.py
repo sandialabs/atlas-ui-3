@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from atlas.core.duckdb_indexes import drop_duckdb_secondary_indexes
+from atlas.modules.config.settings import normalize_postgres_driver_url
 
 from .models import Base
 
@@ -126,6 +127,10 @@ def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None
         db_url = os.environ.get("CHAT_HISTORY_DB_URL", "duckdb:///data/chat_history.db")
 
     db_url = _resolve_db_url(db_url)
+    # Name the psycopg (v3) driver on bare postgresql:// URLs so the driver does
+    # not depend on the installed SQLAlchemy version (issue #991). URLs that
+    # already name a driver are left as the operator wrote them.
+    db_url = normalize_postgres_driver_url(db_url)
 
     if db_url.startswith("postgresql"):
         pool = pool or PoolSettings()

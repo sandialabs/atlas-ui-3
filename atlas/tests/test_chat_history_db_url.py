@@ -1,17 +1,20 @@
 """Tests for assembling chat_history_db_url from individual DB_* env vars.
 
 Covers the behavior added for issue #581: support DB_HOST, DB_PORT, DB_NAME,
-DB_USER, DB_PASSWORD, DB_DRIVER as an alternative to a full CHAT_HISTORY_DB_URL.
+DB_USER, DB_PASSWORD, DB_DRIVER as an alternative to a full CHAT_HISTORY_DB_URL,
+and the driver normalization added for issue #991: get_engine rewrites bare
+postgresql:// URLs to postgresql+psycopg:// so the psycopg (v3) driver is used
+on every install path.
 """
 
 import pytest
-import sqlalchemy
 
 from atlas.modules.chat_history import database as chat_history_database
-from atlas.modules.config.config_manager import AppSettings, build_db_url_from_parts
-
-# SQLAlchemy 2.1 made psycopg (v3) the default driver for postgresql:// URLs.
-_SQLALCHEMY_2_1 = tuple(int(part) for part in sqlalchemy.__version__.split(".")[:2]) >= (2, 1)
+from atlas.modules.config.config_manager import (
+    AppSettings,
+    build_db_url_from_parts,
+    normalize_postgres_driver_url,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -191,9 +194,10 @@ class TestChatHistoryDbUrlPrecedenceFromAllSources:
 class TestPostgresDriverInstalled:
     """The driver SQLAlchemy picks for a postgresql URL must be installed (issue #988).
 
-    SQLAlchemy 2.1 changed the default driver for ``postgresql://`` from psycopg2
-    to psycopg (v3). ``get_engine`` loads the driver module without connecting,
-    so a missing driver fails here instead of at chat-history startup.
+    ``get_engine`` names the psycopg (v3) driver on bare ``postgresql://`` URLs
+    (issue #991), so the driver no longer depends on the installed SQLAlchemy
+    version. ``get_engine`` loads the driver module without connecting, so a
+    missing driver fails here instead of at chat-history startup.
     """
 
     @pytest.fixture(autouse=True)
@@ -205,8 +209,9 @@ class TestPostgresDriverInstalled:
     @pytest.mark.parametrize(
         ("scheme", "expected_driver"),
         [
-            # A bare postgresql:// URL uses SQLAlchemy's default driver.
-            ("postgresql", "psycopg" if _SQLALCHEMY_2_1 else "psycopg2"),
+            # A bare postgresql:// URL is normalized to postgresql+psycopg://
+            # before the engine is created, whatever SQLAlchemy is installed.
+            ("postgresql", "psycopg"),
             ("postgresql+psycopg", "psycopg"),
             ("postgresql+psycopg2", "psycopg2"),
         ],
@@ -218,3 +223,57 @@ class TestPostgresDriverInstalled:
         engine = chat_history_database.get_engine(url)
         assert engine.dialect.name == "postgresql"
         assert engine.dialect.driver == expected_driver
+
+    def test_explicit_url_from_env_is_normalized(self):
+        # The CHAT_HISTORY_DB_URL path: app_factory hands the setting straight
+        # to init_database/get_engine, so a bare URL the operator wrote must be
+        # normalized too, not just assembled DB_* parts.
+        engine = chat_history_database.get_engine(
+            "postgresql://atlas:pw@db.example.com:5432/atlas_chat_history"
+        )
+        assert engine.dialect.name == "postgresql"
+        assert engine.dialect.driver == "psycopg"
+
+
+class TestNormalizePostgresDriverUrl:
+    """Only bare postgresql:// URLs are rewritten to name the psycopg driver (issue #991).
+
+    A bare ``postgresql://`` URL picks SQLAlchemy's default driver, which changed
+    from psycopg2 to psycopg (v3) between SQLAlchemy 2.0 and 2.1 -- so ``uv sync``
+    from the lockfile and the Docker/pip install paths could disagree. Naming the
+    driver in the URL makes the choice independent of the installed version.
+    """
+
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            (
+                "postgresql://atlas:pw@db.example.com:5432/atlas_chat_history",
+                "postgresql+psycopg://atlas:pw@db.example.com:5432/atlas_chat_history",
+            ),
+            ("postgresql://db", "postgresql+psycopg://db"),
+            # Anything after the scheme (path, query string) survives the rewrite.
+            (
+                "postgresql://db/atlas?sslmode=require",
+                "postgresql+psycopg://db/atlas?sslmode=require",
+            ),
+            # URLs that already name a driver pass through untouched.
+            ("postgresql+psycopg://db/atlas", "postgresql+psycopg://db/atlas"),
+            (
+                "postgresql+psycopg2://atlas:pw@db/atlas",
+                "postgresql+psycopg2://atlas:pw@db/atlas",
+            ),
+            (
+                "postgresql+asyncpg://atlas:pw@db/atlas",
+                "postgresql+asyncpg://atlas:pw@db/atlas",
+            ),
+            # Only the exact bare scheme is rewritten; legacy "postgres://" is
+            # not something SQLAlchemy accepts, so it is not rewritten either.
+            ("postgres://db/atlas", "postgres://db/atlas"),
+            # Non-postgres URLs are untouched.
+            ("duckdb:///data/chat_history.db", "duckdb:///data/chat_history.db"),
+            ("sqlite:///data/chat_history.db", "sqlite:///data/chat_history.db"),
+        ],
+    )
+    def test_rewrites_only_bare_postgresql_urls(self, url, expected):
+        assert normalize_postgres_driver_url(url) == expected
