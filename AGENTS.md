@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-10-08
+Last updated: 2026-10-25
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -395,3 +395,22 @@ bash agent_start.sh
 - **Test users:** `test@test.com` (all corpora), `alice@example.com`, `bob@example.com`, `charlie@example.com`, `guest@example.com` (public only)
 - **Data:** `mocks/atlas-rag-api-mock/mock_data.json` — edit to add documents or corpora
 - **Endpoints:** `GET /discover/datasources?as_user=`, `POST /rag/completions`, `POST /rag/search`
+
+## Horizontal Scaling (PR Acceptance Gate)
+
+Atlas is deployed as multiple backend replicas behind a load balancer with **PostgreSQL** and **Redis** enabled. Reviewers must consider horizontal scaling in **every PR**, on the same footing as the test, lint, and other quality gates above: a change that silently assumes a single instance is a PR acceptance failure, not a follow-up ticket.
+
+The standing assumption for review:
+
+- **PostgreSQL** holds durable state (chat history via `CHAT_HISTORY_DB_URL`; bundled container in `docker-compose.postgres.yml`). It is the source of truth.
+- **Redis** holds shared coordination state (live session snapshots via `SESSION_REPOSITORY_TYPE=redis` + `REDIS_URL`, issue #760; shared client in `atlas/infrastructure/redis/`, issue #1091). Redis is not the source of truth -- anything that must survive a Redis restart lives in PostgreSQL.
+
+Concretely, a PR fails the gate if it introduces any of the following single-instance assumptions:
+
+- **In-process state as source of truth**: module-level globals, in-memory dicts, or per-worker caches holding anything that must survive across requests or be visible to other replicas (sessions, conversations, tokens, rate-limit counters, canvas content, background task state). Use PostgreSQL or Redis instead.
+- **Same-replica delivery assumptions**: any broadcast, notification, or stream that only reaches clients attached to the replica that originated it. Cross-replica delivery must go through Redis pub/sub or a DB-backed mechanism.
+- **Unsynchronized shared mutation**: two replicas handling the same request concurrently must not corrupt or duplicate state; use database transactions/constraints or a Redis-based lock.
+- **Ephemeral local disk as durable storage**: local files are per-replica and vanish on reschedule; anything another replica, worker, or browser needs later goes to S3/MinIO or the database.
+- **Cross-replica cache warmth**: a cache written by one replica must live in Redis or be safe to miss everywhere else; never assume a replica can read another's local cache.
+
+If a change cannot meet these requirements, call the limitation out explicitly in the PR description with a scaling justification. Do not merge single-instance assumptions silently.
