@@ -8,22 +8,25 @@
 ![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-Atlas UI 3 is an open-source platform for deploying AI assistants and agentic workflows in high-trust engineering environments. Developed by Sandia National Laboratories -- a U.S. Department of Energy national laboratory -- Atlas connects securely to leading LLMs, external tools, enterprise data sources, and MCP (Model Context Protocol) servers so teams can build AI applications that do more than answer questions.
+Atlas UI 3 is an open-source AI agent platform for secure enterprise and engineering environments. Developed by Sandia National Laboratories -- a U.S. Department of Energy national laboratory -- Atlas connects securely to leading LLMs, external tools, enterprise data sources, and MCP (Model Context Protocol) servers so teams can deploy AI agents that do more than answer questions.
 
-It is designed for regulated and security-conscious organizations that need more than a chatbot: configurable model access, group-based authorization, tool approval controls, compliance levels, RAG, auditable workflows, and containerized deployment options to help teams understand, govern, and operate the full AI application stack.
+It is designed for regulated and security-conscious organizations that need more than a chatbot: configurable model access, delegated authentication, group-based authorization, tool approval controls, data classification controls, RAG, auditable workflows, and containerized deployment options to help teams understand, govern, and operate the full AI application stack.
 
 ![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)
 
 ## About the Project
 
-**Atlas UI 3** is a full-stack platform for AI assistants and agentic workflows with support for multiple models, including OpenAI, Anthropic, and Google. Its core integration with the Model Context Protocol (MCP) allows assistants to connect to external tools and data sources, enabling complex, real-time workflows in environments where control and traceability matter.
+**Atlas UI 3** is a full-stack platform for building and deploying AI agents with support for multiple models, including OpenAI, Anthropic, and Google. Its core integration with the Model Context Protocol (MCP) allows agents to connect to external tools and data sources, enabling complex, real-time workflows in environments where control and traceability matter.
 
 ### Features
 
 *   **Multi-LLM Support**: Connect to various LLM providers with configurable model access.
-*   **MCP Integration**: Connect assistants to MCP servers, custom tools, and external data sources.
+*   **MCP Integration**: Connect agents to MCP servers, custom tools, and external data sources.
 *   **RAG Support**: Enhance responses with Retrieval-Augmented Generation.
-*   **Governance and Access Control**: Features group-based authorization, compliance levels, and a tool approval system.
+*   **Delegated Authentication**: Use the identity your authenticating reverse proxy injects, per-user model API keys, and OAuth delegation (e.g., Globus) for endpoints that need scoped tokens.
+*   **Data Classification Controls**: Data classification (compliance) levels gate which models, tools, prompts, and data sources each conversation can use; resources that declare nothing fail closed.
+*   **Parallel Agents**: The native agent loop executes every tool call in a step concurrently, letting agents fan out work across tools in a single turn.
+*   **Governance and Access Control**: Group-based authorization and a tool approval system.
 *   **Containerized Deployment**: Run Atlas in Docker or Podman-based environments.
 *   **Modern Stack**: Built with React 19, FastAPI, and WebSockets.
 *   **Python Package**: Install and use as a library or CLI tool.
@@ -233,6 +236,10 @@ podman run -p 127.0.0.1:8000:8000 \
 ### Container Images
 
 Pre-built container images are available at `quay.io/agarlan-snl/atlas-ui-3:latest` (pushes automatically from main branch).
+
+### Horizontal Scaling
+
+Atlas is designed to run as multiple backend replicas behind a load balancer. PostgreSQL holds durable state (`CHAT_HISTORY_DB_URL`; bundled container in `docker-compose.postgres.yml`) and Redis holds shared coordination state such as live session snapshots (`SESSION_REPOSITORY_TYPE=redis` plus `REDIS_URL`). Nothing that must survive a replica restart lives in process memory or on local disk.
 
 ## For AI Agent Contributors
 
