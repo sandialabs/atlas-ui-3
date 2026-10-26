@@ -233,7 +233,7 @@ wheels = [
 
 [[package]]
 name = "atlas-chat"
-version = "0.9.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
@@ -368,9 +368,9 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.48b0,<1.0.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.43.0,<2.0.0" },
     { name = "pandas", marker = "extra == 'mcp-demos'", specifier = ">=2.0.0,<4.0.0" },
-    { name = "pillow", specifier = ">=12.3.0,<13.0.0" },
-    { name = "pillow", marker = "extra == 'mcp-demos'", specifier = ">=12.3.0,<13.0.0" },
-    { name = "pillow", marker = "extra == 'pptx'", specifier = ">=12.3.0,<13.0.0" },
+    { name = "pillow", specifier = ">=12.3.0,<14.0.0" },
+    { name = "pillow", marker = "extra == 'mcp-demos'", specifier = ">=12.3.0,<14.0.0" },
+    { name = "pillow", marker = "extra == 'pptx'", specifier = ">=12.3.0,<14.0.0" },
     { name = "podman-compose", marker = "extra == 'dev'", specifier = ">=1.0.0,<2.0.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.0,<4.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.12,<3.0.0" },
@@ -410,7 +410,7 @@ dev = [
     { name = "numpy", specifier = ">=2.4.6,<3.0.0" },
     { name = "openpyxl", specifier = ">=3.1.0,<4.0.0" },
     { name = "pandas", specifier = ">=2.0.0,<4.0.0" },
-    { name = "pillow", specifier = ">=12.3.0,<13.0.0" },
+    { name = "pillow", specifier = ">=12.3.0,<14.0.0" },
     { name = "podman-compose", specifier = ">=1.0.0,<2.0.0" },
     { name = "pypdf", specifier = ">=5.0.0,<7.0.0" },
     { name = "pytest", specifier = ">=9.1.1,<10.0.0" },
@@ -431,7 +431,7 @@ mcp-demos = [
     { name = "numpy", specifier = ">=2.4.6,<3.0.0" },
     { name = "openpyxl", specifier = ">=3.1.0,<4.0.0" },
     { name = "pandas", specifier = ">=2.0.0,<4.0.0" },
-    { name = "pillow", specifier = ">=12.3.0,<13.0.0" },
+    { name = "pillow", specifier = ">=12.3.0,<14.0.0" },
     { name = "pypdf", specifier = ">=5.0.0,<7.0.0" },
     { name = "python-pptx", specifier = ">=0.6.21,<2.0.0" },
     { name = "reportlab", specifier = ">=5.0.0,<6.0.0" },
@@ -440,7 +440,7 @@ mcp-demos = [
     { name = "seaborn", specifier = ">=0.13.2,<1.0.0" },
 ]
 pptx = [
-    { name = "pillow", specifier = ">=12.3.0,<13.0.0" },
+    { name = "pillow", specifier = ">=12.3.0,<14.0.0" },
     { name = "python-pptx", specifier = ">=0.6.21,<2.0.0" },
 ]
 
