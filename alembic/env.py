@@ -12,7 +12,10 @@ from alembic import context
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from atlas.modules.chat_history.models import Base
-from atlas.modules.config.config_manager import resolve_migration_db_url
+from atlas.modules.config.config_manager import (
+    pop_prepare_threshold_query,
+    resolve_migration_db_url,
+)
 
 config = context.config
 
@@ -20,10 +23,14 @@ config = context.config
 # wins; otherwise DB_* components mirror the runtime AppSettings behavior.
 # Bare postgresql:// URLs are normalized to postgresql+psycopg:// so migrations
 # use the same psycopg (v3) driver as the app regardless of the installed
-# SQLAlchemy version (issue #991); resolve_migration_db_url does both.
+# SQLAlchemy version (issue #991); resolve_migration_db_url does both, and
+# pop_prepare_threshold_query re-types a URL-query prepare_threshold the same
+# way the app engine does, handing it to the engine via connect_args.
 db_url = resolve_migration_db_url()
 if db_url:
+    db_url, prepare_args = pop_prepare_threshold_query(db_url)
     config.set_main_option("sqlalchemy.url", db_url)
+    config.attributes["connect_args"] = prepare_args
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -51,6 +58,7 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        **config.attributes.get("connect_args", {}),
     )
 
     with connectable.connect() as connection:

@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from atlas.core.duckdb_indexes import drop_duckdb_secondary_indexes
-from atlas.modules.config.settings import normalize_postgres_driver_url
+from atlas.modules.config.settings import normalize_postgres_driver_url, pop_prepare_threshold_query
 
 from .models import Base
 
@@ -83,24 +83,32 @@ class PoolSettings:
         return self.pool_size + self.max_overflow
 
 
-def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> Dict[str, Any]:
-    """Build ``create_engine`` keyword arguments for a PostgreSQL URL."""
+def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> tuple[str, Dict[str, Any]]:
+    """Build ``create_engine`` arguments for a PostgreSQL URL.
+
+    Returns the URL to create the engine with — a ``prepare_threshold`` from
+    the URL query is re-typed into ``connect_args`` and stripped from the URL —
+    plus the ``create_engine`` keyword arguments.
+    """
     kwargs: Dict[str, Any] = {"pool_pre_ping": pool.pool_pre_ping, "echo": False}
+    db_url, prepare_args = pop_prepare_threshold_query(db_url)
     url = make_url(db_url)
     # Only libpq drivers understand connect_timeout (pg8000 or asyncpg would
     # reject it). A connect_timeout already in the URL query wins over the
     # setting, since the driver would otherwise receive the setting's value.
     if url.get_driver_name() in _LIBPQ_DRIVERS and "connect_timeout" not in url.query:
         kwargs["connect_args"] = {"connect_timeout": pool.connect_timeout}
+    if prepare_args:
+        kwargs.setdefault("connect_args", {}).update(prepare_args)
     if pool.disable_pooling:
         kwargs["poolclass"] = NullPool
         # psycopg (v3) auto-prepares statements after a few executions, which
         # transaction-mode PgBouncer below 1.21 cannot route. When an external
         # pooler does the pooling, keep statements unnamed; psycopg2 has no
         # such setting and would reject the keyword, so scope it to psycopg 3.
-        # A prepare_threshold the operator set in the URL query wins.
-        if url.get_driver_name() == "psycopg" and "prepare_threshold" not in url.query:
-            kwargs.setdefault("connect_args", {})["prepare_threshold"] = None
+        # An operator-set URL query threshold (popped above) wins.
+        if url.get_driver_name() == "psycopg":
+            kwargs.setdefault("connect_args", {}).setdefault("prepare_threshold", None)
     else:
         kwargs.update(
             pool_size=pool.pool_size,
@@ -108,7 +116,9 @@ def _postgres_engine_kwargs(db_url: str, pool: PoolSettings) -> Dict[str, Any]:
             pool_timeout=pool.pool_timeout,
             pool_recycle=pool.pool_recycle,
         )
-    return kwargs
+    # render_as_string, not str(): str() masks the password with "***", and the
+    # engine is created from the rendered URL.
+    return url.render_as_string(hide_password=False), kwargs
 
 
 def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None) -> Engine:
@@ -142,7 +152,7 @@ def get_engine(db_url: Optional[str] = None, pool: Optional[PoolSettings] = None
     if db_url.startswith("postgresql"):
         pool = pool or PoolSettings()
         _engine_pool = pool
-        engine_kwargs = _postgres_engine_kwargs(db_url, pool)
+        db_url, engine_kwargs = _postgres_engine_kwargs(db_url, pool)
         _engine = create_engine(db_url, **engine_kwargs)
         connect_args = engine_kwargs.get("connect_args", {})
         # Not set here when the URL carries its own value or the driver is not libpq.
