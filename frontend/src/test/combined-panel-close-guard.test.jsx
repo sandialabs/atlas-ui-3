@@ -8,7 +8,7 @@
  * exercised end to end rather than against a mock.
  */
 import { render, screen, fireEvent, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import SettingsPanel from '../components/SettingsPanel'
 import { ThemeProvider } from '../contexts/ThemeContext'
@@ -86,11 +86,21 @@ const renderPanel = (props = {}, chatOverrides = {}) => {
 }
 
 describe('combined panel close guard, against the real ToolsPanel', () => {
+  let rectsSpy
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
     // The admin tab fetches system status on mount.
     global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+    // The shared useFocusTrap filters focusable elements on getClientRects()
+    // for visibility; jsdom has no layout and returns none, so pretend every
+    // element renders -- the same stub the drawer suite uses.
+    rectsSpy = vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}])
+  })
+
+  afterEach(() => {
+    rectsSpy.mockRestore()
   })
 
   it('raises the unsaved-changes dialog when closing with staged selections', () => {
@@ -127,6 +137,23 @@ describe('combined panel close guard, against the real ToolsPanel', () => {
     // Escape while the prompt is up must not tear the whole panel down.
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Tools and Settings' }), { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('keeps Tab inside the nested unsaved-changes dialog while it is up', () => {
+    // #1039: the shared trap scopes Tab to the innermost open dialog. Before
+    // the unification the panel stood down whenever a nested dialog was the
+    // topmost modal, so nothing trapped Tab and focus could walk straight
+    // out of the guard into the panel behind it.
+    renderPanel()
+
+    fireEvent.click(screen.getByRole('button', { name: 'fetch' }))
+    fireEvent.click(screen.getByRole('button', { name: /Close tools and settings/ }))
+    const guard = screen.getByRole('dialog', { name: /Unsaved Changes/ })
+
+    const guardButtons = within(guard).getAllByRole('button')
+    guardButtons[guardButtons.length - 1].focus()
+    fireEvent.keyDown(guard, { key: 'Tab' })
+    expect(document.activeElement).toBe(guardButtons[0])
   })
 
   it('lets Escape dismiss the nested dialog without closing the panel', () => {

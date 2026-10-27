@@ -6,7 +6,7 @@
  * and admins get a quick-controls tab.
  */
 import { render, screen, fireEvent } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import SettingsPanel from '../components/SettingsPanel'
 import PromptSelector from '../components/PromptSelector'
 import { ThemeProvider } from '../contexts/ThemeContext'
@@ -190,9 +190,20 @@ describe('PromptSelector quick access to custom prompts', () => {
  * needs now that it is the only route to tools, theme, and admin controls.
  */
 describe('SettingsPanel review follow-ups', () => {
+  let rectsSpy
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    // The shared useFocusTrap filters focusable elements on getClientRects()
+    // for visibility; jsdom has no layout and returns none, so pretend every
+    // element renders. Without this the trap's rotation is empty and the
+    // focus assertions below would pass or fail vacuously.
+    rectsSpy = vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}])
+  })
+
+  afterEach(() => {
+    rectsSpy.mockRestore()
   })
 
   it('applies a requested tab once its feature flag arrives', () => {
@@ -253,14 +264,54 @@ describe('SettingsPanel review follow-ups', () => {
 
   it('pulls focus back into the panel when Tab is pressed from the body', () => {
     renderPanel()
-    document.body.focus()
+    // blur() is what actually moves activeElement to <body> in jsdom (a
+    // .focus() on body is a no-op); from there a Tab must be pulled back in
+    // rather than walking the covered page behind the panel.
+    screen.getByRole('button', { name: /Close tools and settings/ }).blur()
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(false)
+
     fireEvent.keyDown(document.body, { key: 'Tab' })
     expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true)
+  })
+
+  it('wraps Tab inside the panel: forward from the last control to the first', () => {
+    renderPanel()
+    const dialog = screen.getByRole('dialog')
+    const tabs = screen.getAllByRole('tab')
+    tabs[tabs.length - 1].focus()
+
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+
+    // The close button is the dialog's first focusable element.
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: /Close tools and settings/ })
+    )
   })
 
   it('moves focus into the panel when it opens', () => {
     renderPanel()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: /Close tools and settings/ }))
+  })
+
+  it('returns focus to the previous element when it closes', () => {
+    // The panel is the only route to tools, theme and admin controls; when
+    // it closes, focus must hand back to whoever opened it (the header
+    // wrench button), not fall on the body.
+    const opener = document.createElement('button')
+    opener.textContent = 'opener'
+    document.body.appendChild(opener)
+    opener.focus()
+
+    const { rerender } = renderPanel()
+    expect(document.activeElement).not.toBe(opener)
+
+    rerender(
+      <ThemeProvider>
+        <SettingsPanel isOpen={false} onClose={vi.fn()} />
+      </ThemeProvider>
+    )
+    expect(document.activeElement).toBe(opener)
+    opener.remove()
   })
 
   it('moves between tabs with the arrow keys', () => {
