@@ -1,7 +1,7 @@
 # Keep the builder and runtime Python ABI identical.
 FROM docker.io/library/python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS python-base
 
-FROM docker.io/library/node:26-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS frontend-build
+FROM docker.io/library/node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 ENV NPM_CONFIG_CACHE=/app/.npm
