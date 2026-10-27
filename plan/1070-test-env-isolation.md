@@ -1,0 +1,121 @@
+# Plan: Isolate backend tests from exported shell environment variables (#1070)
+
+Issue: https://github.com/sandialabs/atlas-ui-3/issues/1070
+Branch: `fix/1070-test-env-isolation`
+
+## Problem
+
+`atlas/tests/conftest.py` isolates the suite from the developer's `.env`
+(`AppSettings.model_config["env_file"] = None`) and from a handful of
+specifically-pinned variables, but any settings-derived variable **exported in
+the invoking shell** still reaches `AppSettings`, because pydantic-settings
+reads the process environment for every field that is not passed explicitly.
+A terminal that inherits a deployment's environment (tmux server started from a
+deployment context, sourced env file, IDE terminal) therefore changes test
+results with the code under test untouched.
+
+## Evidence (reproduced on this branch, 2026-10-27)
+
+```bash
+export AUTH_STATIC_GROUPS="somegroup:user@example.com"
+export ADMIN_USERS="deployadmin@example.com"
+export ADMIN_GROUP="deploy_admins"
+export APP_CONFIG_DIR="/tmp/deploy-config"
+export ATLAS_ENV_FILE="/tmp/deploy.env"
+bash test/atlas_tests.sh
+```
+
+The two tests the issue names fail:
+
+```
+FAILED tests/test_core_auth.py::test_admin_users_sugar_targets_the_configured_admin_group
+FAILED tests/test_core_auth.py::test_warns_when_no_authorization_source_is_configured
+```
+
+(the exported `AUTH_STATIC_GROUPS`/`ADMIN_USERS` leak into the `AppSettings`
+instances those tests construct). Full-suite baseline with the same exports is
+captured in `/tmp/atlas_tests_exported_before.log` during development; the same
+run without exports passes.
+
+A second, related crash found while reproducing: an exported-but-empty
+`DEBUG_MODE=` (empty string) fails **collection** outright with
+`ValidationError: debug_mode / Input should be a valid boolean` — pydantic
+cannot parse `""` as a bool.
+
+## Chosen isolation point
+
+`atlas/tests/conftest.py`, at import time, before any app module import and
+before conftest's own forced pins. This is where every other session-level
+isolation guard lives, it runs before test-module collection in every runner
+(`test/atlas_tests.sh`, `test/run_tests.sh`, IDEs, pytest-xdist workers), and
+the existing regression tests in `atlas/tests/test_env_isolation.py` lock
+conftest guards in place.
+
+## Fix
+
+1. **Derived scrub (conftest).** Pop from `os.environ` every environment
+   variable name that maps to an `AppSettings` field, derived from the model
+   itself (`model_fields[*].validation_alias`, else upper-cased field name) so
+   newly added settings cannot silently reopen the channel. Tests opt back in
+   with `monkeypatch.setenv`, matching the existing conftest-guard model.
+   Factor the scrub into a module-level helper so the guard is unit-testable.
+
+2. **Keep-list.** `DEBUG_MODE`, `ENVIRONMENT`, `MCP_CONFIG_FILE` are
+   deliberately provided by the test harness and must survive:
+   - `ci.yml` runs the debug leg with `docker run -e DEBUG_MODE=true` and the
+     xdist leg with `-e DEBUG_MODE=false` ("pydantic BaseSettings reads the OS
+     env var with higher priority than .env, so `docker run -e DEBUG_MODE=...`
+     overrides it without rebuilding");
+   - `ci.yml`'s xdist leg comment: `run_tests.sh` provides
+     `MCP_CONFIG_FILE=mcp-test.json`, which "keeps a worker entering the shared
+     app lifespan from discovering and starting every bundled MCP server";
+   - `test/run_tests.sh` exports `ENVIRONMENT` and `MCP_CONFIG_FILE` for the
+     whole `all`/`atlas` run.
+   Scrubbing these would change what the harness is deliberately configuring,
+   so they are excluded. An exported-but-**empty** value for a keep-listed var
+   (e.g. `DEBUG_MODE=`) is popped: the harness never sets empty values and the
+   empty string crashes `AppSettings` for bool fields.
+
+3. **Extras.** `ATLAS_ENV_FILE` (read by `server_cli`/`init_cli`, not an
+   `AppSettings` field) is popped outright. `PYTHONPATH` is filtered, not
+   popped: entries that resolve inside the project root are kept absolute
+   (this preserves `PYTHONPATH=$ROOT:$ROOT/scripts` per
+   `docs/developer/test-isolation.md` and CI's reverse-order leg), foreign
+   checkout entries are dropped so test-spawned subprocesses cannot resolve
+   `import atlas` to another checkout (the suite installs the checkout
+   editable, so nothing else needs PYTHONPATH).
+
+4. **Regression tests** (`atlas/tests/test_env_isolation.py`):
+   - in-process: the scrub helper removes planted deployment-style vars
+     (including empty keep-list values) and keeps harness values;
+   - in-process: the derived name set covers the variables issue #1070 names
+     and the keep-list stays exactly the three harness vars;
+   - end-to-end subprocess: run the two issue-named tests under
+     `python -m pytest` with the deployment exports present in the child
+     environment and assert they pass — the acceptance criterion, encoded as a
+     test. (Without the conftest scrub this child fails, so the guard cannot be
+     silently removed.)
+
+5. **`test/atlas_tests.sh`:** warn when `PYTHONPATH` is exported, per the
+   issue's suggestion, since the value is visible to tooling outside pytest.
+
+6. **Docs:** add the guard to the table in
+   `docs/developer/test-isolation.md`; changelog fragment `changes/1070.fix.md`.
+
+## Non-goals / known limits
+
+- No product/runtime behavior changes: the scrub lives only in the test
+  session's process environment.
+- The scrub runs at conftest import; `atlas.main` later calls
+  `load_dotenv("../.env", override=False)`, which refills keys that are absent
+  from `os.environ` from a developer's `.env`. That pre-existing channel is
+  independent of the shell (same result with or without exports, so the
+  acceptance criterion holds) and is intentionally left alone here.
+- Vars not consumed via `AppSettings` and not named by the issue (e.g.
+  `OPENAI_API_KEY`, `AWS_*`) are out of scope.
+
+## Acceptance check
+
+`bash test/atlas_tests.sh` must pass identically with and without
+`AUTH_STATIC_GROUPS`, `ADMIN_USERS`, `ADMIN_GROUP`, `APP_CONFIG_DIR`,
+`ATLAS_ENV_FILE` exported. Verify both directions before opening the PR.
