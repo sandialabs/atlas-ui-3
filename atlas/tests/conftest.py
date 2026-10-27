@@ -113,6 +113,43 @@ def _scrub_session_environment() -> None:
 
 _scrub_session_environment()
 
+# --- dotenv import-window guard ------------------------------------------
+# Imports executed by this conftest itself must not be able to load a .env
+# into ``os.environ``: ``litellm`` calls bare ``load_dotenv()`` at import
+# (``litellm/__init__.py``), and python-dotenv's ``find_dotenv`` then walks
+# up parent directories -- finding whatever foreign ``.env`` a worktree's or
+# sibling checkout's parent directory happens to contain. Values loaded that
+# way re-enter ``os.environ`` *after* the scrub above (a foreign
+# ``CAPABILITY_TOKEN_SECRET`` failed conftest import outright this way), so
+# the scrub alone cannot hold.
+#
+# While conftest is importing, every ``load_dotenv`` call is a no-op. The
+# real function is restored at the bottom of this module, before any test
+# module is imported, so tests that exercise dotenv behavior (CLI env-file
+# handling) keep the real implementation. This is a test-isolation guard, not
+# a product behavior change.
+import dotenv  # noqa: E402
+
+_real_load_dotenv = dotenv.main.load_dotenv
+
+
+def _dotenv_noop(*args, **kwargs):
+    """Swallow ``load_dotenv`` calls made while conftest is importing."""
+    return False
+
+
+def _block_dotenv_loads() -> None:
+    dotenv.main.load_dotenv = _dotenv_noop
+    dotenv.load_dotenv = _dotenv_noop
+
+
+def _restore_dotenv_loads() -> None:
+    dotenv.main.load_dotenv = _real_load_dotenv
+    dotenv.load_dotenv = _real_load_dotenv
+
+
+_block_dotenv_loads()
+
 # --- Telemetry isolation -------------------------------------------------
 # OpenTelemetry's ``trace.set_tracer_provider`` is first-writer-wins: once
 # a provider has been registered (e.g. by ``OpenTelemetryConfig`` during
@@ -283,6 +320,12 @@ _ = atlas.modules.llm.litellm_caller.LiteLLMCaller  # noqa: E402
 import pytest  # noqa: E402
 
 from atlas.modules.config.config_manager import config_manager as _config_manager  # noqa: E402
+
+# Conftest's own imports are done: hand dotenv back to the suite. Everything
+# imported below this line -- and every test module after collection starts --
+# sees the real ``load_dotenv``, so dotenv behavior tests and the CLI env-file
+# tests exercise the real implementation.
+_restore_dotenv_loads()
 
 # ConfigManager caches each lazily-built config on a private (underscore-prefixed)
 # instance attribute. Rather than hand-maintain a list that silently drifts when a

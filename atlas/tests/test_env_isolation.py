@@ -329,3 +329,46 @@ def test_deployment_shell_exports_do_not_change_test_results(tmp_path):
         f"shell-environment scrub regressed:\n{result.stdout}\n{result.stderr}"
     )
     assert "2 passed" in result.stdout
+
+
+def test_conftest_import_window_guard_is_restored():
+    """After conftest import, dotenv must be the real implementation again.
+
+    conftest no-ops ``load_dotenv`` only while its own imports run (litellm
+    loads whatever ``find_dotenv`` walks up to at import time); the guard must
+    be lifted before test modules import, so CLI env-file tests and anything
+    else exercising dotenv see the real behavior.
+    """
+    import dotenv
+    from conftest import _dotenv_noop  # the suite's own conftest
+
+    assert dotenv.main.load_dotenv is not _dotenv_noop
+    assert dotenv.load_dotenv is not _dotenv_noop
+
+
+def test_dotenv_block_covers_the_import_window(tmp_path):
+    """The guard itself must swallow dotenv loads and restore cleanly.
+
+    With the guard installed, a poisoned ``.env`` must not reach ``os.environ``
+    (this is exactly what litellm's import-time bare ``load_dotenv()`` does
+    when ``find_dotenv`` walks up to a foreign file); after restore, the same
+    load works normally.
+    """
+    import dotenv
+    from conftest import _block_dotenv_loads, _restore_dotenv_loads
+
+    poison = tmp_path / "poison.env"
+    poison.write_text("AUTH_STATIC_GROUPS=evil:evil@example.com\n")
+
+    with mock.patch.dict(os.environ):
+        _block_dotenv_loads()
+        try:
+            # Resolve through the module like litellm's import-time call does
+            # (``import dotenv as _dotenv; _dotenv.load_dotenv()``).
+            assert dotenv.load_dotenv(dotenv_path=poison) is False
+            assert os.environ.get("AUTH_STATIC_GROUPS") is None
+        finally:
+            _restore_dotenv_loads()
+
+        assert dotenv.load_dotenv(dotenv_path=poison) is True
+        assert os.environ.get("AUTH_STATIC_GROUPS") == "evil:evil@example.com"

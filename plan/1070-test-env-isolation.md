@@ -60,6 +60,18 @@ conftest guards in place.
    with `monkeypatch.setenv`, matching the existing conftest-guard model.
    Factor the scrub into a module-level helper so the guard is unit-testable.
 
+1b. **dotenv import-window guard (conftest).** Found while verifying in a
+   clean worktree: `litellm/__init__.py` calls bare `load_dotenv()` at import,
+   and python-dotenv's `find_dotenv` walks up parent directories — a worktree
+   without its own `.env` picked up `/home/garlan/git/atlas/.env`
+   (`CAPABILITY_TOKEN_SECRET=blablah`), which refilled scrubbed variables
+   *after* the scrub and failed conftest import with a pydantic ValidationError
+   (exit 4, zero tests collected). conftest now no-ops `load_dotenv` while its
+   own imports run and restores the real function before the first test module
+   imports, so dotenv-behavior tests keep the real implementation. The main
+   checkout masked the bug because `find_dotenv` found the checkout's own
+   `.env` first; CI is safe for the same reason (`/app/.env` exists).
+
 2. **Keep-list.** `DEBUG_MODE`, `ENVIRONMENT`, `MCP_CONFIG_FILE` are
    deliberately provided by the test harness and must survive:
    - `ci.yml` runs the debug leg with `docker run -e DEBUG_MODE=true` and the

@@ -21,6 +21,7 @@ guards are in place even for state that app code establishes at *import* time.
 | --- | --- |
 | `AppSettings.model_config["env_file"] = None` | The developer's `.env` changing results from machine to machine |
 | Settings-derived env vars scrubbed (`_scrub_session_environment`) | Deployment-style variables exported in the invoking shell (`AUTH_STATIC_GROUPS`, `ADMIN_USERS`, `ADMIN_GROUP`, `APP_CONFIG_DIR`, `OIDC_*`, `FEATURE_*`, ...) changing test results (issue #1070) |
+| `load_dotenv` no-oped while conftest imports | Import-time dotenv loads (bare `load_dotenv()` in `litellm`) pulling a foreign `.env` found by `find_dotenv`'s parent-directory walk back into the session after the scrub |
 | `APP_LOG_DIR` -> temp dir | Test spans and security-risk records landing in the repository's `logs/` |
 | `CHAT_HISTORY_DB_URL`, `RUNTIME_FEEDBACK_DIR`, `RUNTIME_CAPTURE_DIR`, `MCP_TOKEN_STORAGE_DIR` -> temp dirs | Tests reading and writing the developer's real `data/`, `runtime/` and `config/secure/` state |
 | `AUTH_GROUP_CHECK_URL` / `AUTH_GROUP_CHECK_API_KEY` cleared | Authorization tests calling a live external authorizer |
@@ -62,6 +63,15 @@ pin.
 **The scrub is per session, not per test.** Like the `.env` guard, it runs
 once when conftest is imported; it cannot undo variables a test sets, and
 nothing a test does re-triggers it.
+
+**Imports made by conftest itself cannot load a .env.** `litellm` calls bare
+`load_dotenv()` at import time, and python-dotenv's `find_dotenv` walks up
+parent directories — a worktree without its own `.env` picks up whatever
+`.env` an ancestor directory contains (observed live: a sibling project's
+`.env` with a placeholder `CAPABILITY_TOKEN_SECRET` failed conftest import
+outright). Conftest therefore no-ops `load_dotenv` while its own imports run
+and restores the real function before the first test module is imported, so
+dotenv behavior tests keep the real implementation.
 
 ## Rules for test authors
 
