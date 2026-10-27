@@ -37,6 +37,16 @@ def _get_repo():
     return repo
 
 
+def _chat_history_error() -> str:
+    """User-facing error when the repository is unset (issue #992).
+
+    Distinguishes a disabled feature from one that is enabled but failed to
+    initialize; the underlying error stays server-side.
+    """
+    from atlas.infrastructure.app_factory import app_factory
+    return app_factory.chat_history_unavailable_reason()
+
+
 @router.get("")
 async def list_conversations(
     limit: int = Query(default=50, ge=1, le=200),
@@ -61,7 +71,7 @@ async def list_conversations(
             "conversations": [],
             "has_more": False,
             "total": 0,
-            "error": "Chat history is not enabled",
+            "error": _chat_history_error(),
         }
 
     conversations = repo.list_conversations(
@@ -87,7 +97,7 @@ async def search_conversations(
     """Search conversations by content or title."""
     repo = _get_repo()
     if repo is None:
-        return {"conversations": [], "error": "Chat history is not enabled"}
+        return {"conversations": [], "error": _chat_history_error()}
 
     conversations = repo.search_conversations(
         user_email=current_user,
@@ -108,7 +118,7 @@ async def export_all_conversations(
     """
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     conversations = repo.export_all_conversations(current_user)
     export_data = {
@@ -142,7 +152,7 @@ async def get_conversation(
     """
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     # A conversation with a run in flight (issue #884) is ahead of its stored
     # record: the run's session holds the prompt that started the turn and
@@ -217,7 +227,7 @@ async def delete_conversation(
     """Delete a single conversation."""
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     deleted = repo.delete_conversation(conversation_id, current_user)
     return {"deleted": deleted}
@@ -231,7 +241,7 @@ async def delete_multiple_conversations(
     """Delete multiple conversations."""
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     count = repo.delete_conversations(body.ids, current_user)
     return {"deleted_count": count}
@@ -244,7 +254,7 @@ async def delete_all_conversations(
     """Delete all conversations for the authenticated user."""
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     count = repo.delete_all_conversations(current_user)
     return {"deleted_count": count}
@@ -259,7 +269,7 @@ async def add_tag(
     """Add a tag to a conversation."""
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     tag_id = repo.add_tag(conversation_id, body.name, current_user)
     if tag_id is None:
@@ -276,7 +286,7 @@ async def remove_tag(
     """Remove a tag from a conversation."""
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     removed = repo.remove_tag(conversation_id, tag_id, current_user)
     return {"removed": removed}
@@ -291,7 +301,7 @@ async def update_title(
     """Update the title of a conversation."""
     repo = _get_repo()
     if repo is None:
-        return {"error": "Chat history is not enabled"}
+        return {"error": _chat_history_error()}
 
     updated = repo.update_title(conversation_id, body.title, current_user)
     return {"updated": updated}
@@ -304,7 +314,7 @@ async def list_tags(
     """List all tags for the authenticated user."""
     repo = _get_repo()
     if repo is None:
-        return {"tags": [], "error": "Chat history is not enabled"}
+        return {"tags": [], "error": _chat_history_error()}
 
     tags = repo.list_tags(current_user)
     return {"tags": tags}
