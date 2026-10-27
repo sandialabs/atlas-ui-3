@@ -141,16 +141,31 @@ conftest guards in place.
 
 ## Verification-environment notes (recorded 2026-10-27)
 
-- Verification runs in a detached worktree (`atlas-ui-3-wt-1070-verify`) with
-  its own venv, because the shared checkout is being concurrently modified by
-  another task's in-progress work (issue #992 files).
-- First clean run in the worktree failed 17 subprocess-heavy tests plus
-  collection at the BASE commit: the worktree had no `.env`, and litellm's
-  bare `load_dotenv()` (via `find_dotenv`'s parent-directory walk) reached the
-  foreign `/home/garlan/git/atlas/.env` (`CAPABILITY_TOKEN_SECRET=blablah`).
-  At the BASE commit the suite cannot even collect under this ambient
-  condition; after this branch's fix the suite collects and runs, and the
-  remaining failures are subprocess tests that (correctly) bypass conftest.
-  CI is unaffected because `Dockerfile-test` bakes `/app/.env`. Copying the
-  checkout's own `.env` into the worktree (as CI's baked copy does) resolves
-  it; the failures are ambient, not a regression of this branch.
+- Verification runs in detached worktrees (`atlas-ui-3-wt-1070-verify`,
+  `atlas-ui-3-wt-1070-base`) with their own venvs, because the shared checkout
+  is being concurrently modified by another task's in-progress work (issue
+  #992 files).
+- First clean run in the worktree (no `.env`) failed collection at BASE:
+  litellm's bare `load_dotenv()` reached the foreign
+  `/home/garlan/git/atlas/.env` (`CAPABILITY_TOKEN_SECRET=blablah`) via
+  `find_dotenv`'s parent-directory walk — the ambient condition that
+  motivated guard 1b. CI is unaffected because `Dockerfile-test` bakes
+  `/app/.env`; the worktree gets a copy of the checkout's `.env` for parity.
+
+## Verification results (final, 2026-10-27)
+
+Identical conditions: detached worktree, own venv, checkout's own `.env`
+present (as CI's baked `/app/.env`), issue exports = `AUTH_STATIC_GROUPS`,
+`ADMIN_USERS`, `ADMIN_GROUP`, `APP_CONFIG_DIR`, `ATLAS_ENV_FILE`.
+
+| Run | Result |
+| --- | --- |
+| Base `d4b29b31`, with exports | **29 failed, 4820 passed**, exit 1 |
+| This branch, clean | **4856 passed, 79 skipped**, exit 0 |
+| This branch, with exports | **4856 passed, 79 skipped**, exit 0 — identical to clean |
+| This branch, CI xdist path (`run_tests.sh atlas -n 2`) with exports + foreign-checkout `PYTHONPATH` | backend suite **4856 passed** |
+| Base, `e2e_tests_live.sh` (auto-run by `run_tests.sh` when a dev `.env` has an API key) | 3 passed, 2 failed |
+| This branch, same live script, same env | 3 passed, 2 failed — identical (the live script honors its environment by design; CI never runs it, its container `.env` has no API key) |
+
+Base collected 4849 tests; this branch adds 7 regression tests → 4856, and
+every one of base's 29 exported-env failures now passes.
