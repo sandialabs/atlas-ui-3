@@ -114,33 +114,63 @@ def _scrub_session_environment() -> None:
 _scrub_session_environment()
 
 # --- dotenv import-window guard ------------------------------------------
-# Imports executed by this conftest itself must not be able to load a .env
-# into ``os.environ``: ``litellm`` calls bare ``load_dotenv()`` at import
-# (``litellm/__init__.py``), and python-dotenv's ``find_dotenv`` then walks
-# up parent directories -- finding whatever foreign ``.env`` a worktree's or
-# sibling checkout's parent directory happens to contain. Values loaded that
-# way re-enter ``os.environ`` *after* the scrub above (a foreign
+# Imports executed by this conftest itself must not be able to load a FOREIGN
+# .env into ``os.environ``: ``litellm`` calls bare ``load_dotenv()`` at import
+# (``litellm/__init__.py``), and python-dotenv's ``find_dotenv`` then walks up
+# parent directories -- so a checkout (or worktree) without its own ``.env``
+# picks up whatever ``.env`` an ancestor directory happens to contain. Values
+# loaded that way re-enter ``os.environ`` *after* the scrub above (a foreign
 # ``CAPABILITY_TOKEN_SECRET`` failed conftest import outright this way), so
 # the scrub alone cannot hold.
 #
-# While conftest is importing, every ``load_dotenv`` call is a no-op. The
-# real function is restored at the bottom of this module, before any test
-# module is imported, so tests that exercise dotenv behavior (CLI env-file
-# handling) keep the real implementation. This is a test-isolation guard, not
-# a product behavior change.
+# The guard is deliberately selective rather than a blanket block: the
+# checkout's own ``.env`` stays load-bearing exactly as before (CI bakes
+# ``/app/.env``, and the app-import chain inside conftest reads its values --
+# e.g. ``DEBUG_MODE`` -- during these imports, because ``AppSettings`` itself
+# has env-file loading disabled). Only a resolved path OUTSIDE the checkout
+# under test is refused. The real function is restored at the bottom of this
+# module, before any test module is imported, so tests that exercise dotenv
+# behavior (CLI env-file handling) keep the real implementation. This is a
+# test-isolation guard, not a product behavior change.
 import dotenv  # noqa: E402
 
 _real_load_dotenv = dotenv.main.load_dotenv
+_real_find_dotenv = dotenv.main.find_dotenv
 
 
-def _dotenv_noop(*args, **kwargs):
-    """Swallow ``load_dotenv`` calls made while conftest is importing."""
-    return False
+def _dotenv_path_is_inside_checkout(path) -> bool:
+    resolved = Path(path).resolve()
+    root = project_root.resolve()
+    return resolved == root or root in resolved.parents
 
 
-def _block_dotenv_loads() -> None:
-    dotenv.main.load_dotenv = _dotenv_noop
-    dotenv.load_dotenv = _dotenv_noop
+def _guarded_load_dotenv(*args, **kwargs):
+    """Refuse ``load_dotenv`` calls that would load a .env from outside the
+    checkout; pass everything else through to the real implementation.
+
+    A call with no path (the bare ``load_dotenv()`` litellm makes) resolves
+    the file the same walk python-dotenv would do, then applies the same
+    inside-the-checkout rule.
+    """
+    if kwargs.get("stream") is not None:
+        return _real_load_dotenv(*args, **kwargs)
+    dotenv_path = kwargs.get("dotenv_path")
+    if dotenv_path is None and args:
+        dotenv_path = args[0]
+    if dotenv_path is None:
+        dotenv_path = _real_find_dotenv(usecwd=False)
+        if not dotenv_path:
+            return False
+        if not args:
+            kwargs["dotenv_path"] = dotenv_path
+    if not _dotenv_path_is_inside_checkout(dotenv_path):
+        return False
+    return _real_load_dotenv(*args, **kwargs)
+
+
+def _block_foreign_dotenv_loads() -> None:
+    dotenv.main.load_dotenv = _guarded_load_dotenv
+    dotenv.load_dotenv = _guarded_load_dotenv
 
 
 def _restore_dotenv_loads() -> None:
@@ -148,7 +178,7 @@ def _restore_dotenv_loads() -> None:
     dotenv.load_dotenv = _real_load_dotenv
 
 
-_block_dotenv_loads()
+_block_foreign_dotenv_loads()
 
 # --- Telemetry isolation -------------------------------------------------
 # OpenTelemetry's ``trace.set_tracer_provider`` is first-writer-wins: once

@@ -334,34 +334,34 @@ def test_deployment_shell_exports_do_not_change_test_results(tmp_path):
 def test_conftest_import_window_guard_is_restored():
     """After conftest import, dotenv must be the real implementation again.
 
-    conftest no-ops ``load_dotenv`` only while its own imports run (litellm
+    conftest guards ``load_dotenv`` only while its own imports run (litellm
     loads whatever ``find_dotenv`` walks up to at import time); the guard must
     be lifted before test modules import, so CLI env-file tests and anything
     else exercising dotenv see the real behavior.
     """
     import dotenv
-    from conftest import _dotenv_noop  # the suite's own conftest
+    from conftest import _guarded_load_dotenv  # the suite's own conftest
 
-    assert dotenv.main.load_dotenv is not _dotenv_noop
-    assert dotenv.load_dotenv is not _dotenv_noop
+    assert dotenv.main.load_dotenv is not _guarded_load_dotenv
+    assert dotenv.load_dotenv is not _guarded_load_dotenv
 
 
-def test_dotenv_block_covers_the_import_window(tmp_path):
-    """The guard itself must swallow dotenv loads and restore cleanly.
+def test_foreign_dotenv_is_refused_during_the_import_window(tmp_path):
+    """A .env outside the checkout must not load while conftest imports.
 
-    With the guard installed, a poisoned ``.env`` must not reach ``os.environ``
-    (this is exactly what litellm's import-time bare ``load_dotenv()`` does
-    when ``find_dotenv`` walks up to a foreign file); after restore, the same
-    load works normally.
+    This is what litellm's import-time bare ``load_dotenv()`` does when
+    ``find_dotenv``'s parent-directory walk leaves the checkout; values loaded
+    that way re-enter ``os.environ`` after the scrub (observed live: a foreign
+    ``CAPABILITY_TOKEN_SECRET`` failed conftest import outright).
     """
     import dotenv
-    from conftest import _block_dotenv_loads, _restore_dotenv_loads
+    from conftest import _block_foreign_dotenv_loads, _restore_dotenv_loads
 
     poison = tmp_path / "poison.env"
     poison.write_text("AUTH_STATIC_GROUPS=evil:evil@example.com\n")
 
     with mock.patch.dict(os.environ):
-        _block_dotenv_loads()
+        _block_foreign_dotenv_loads()
         try:
             # Resolve through the module like litellm's import-time call does
             # (``import dotenv as _dotenv; _dotenv.load_dotenv()``).
@@ -370,5 +370,28 @@ def test_dotenv_block_covers_the_import_window(tmp_path):
         finally:
             _restore_dotenv_loads()
 
-        assert dotenv.load_dotenv(dotenv_path=poison) is True
-        assert os.environ.get("AUTH_STATIC_GROUPS") == "evil:evil@example.com"
+
+def test_checkout_dotenv_still_loads_during_the_import_window(tmp_path, monkeypatch):
+    """The checkout's own .env stays load-bearing while conftest imports.
+
+    CI bakes ``/app/.env`` and the app-import chain inside conftest reads
+    values like ``DEBUG_MODE`` from it during those imports (``AppSettings``
+    itself has env-file loading disabled, so the dotenv refill is the only
+    path that reaches settings). Point the guard's checkout root at tmp_path
+    and confirm an in-root file still loads while the guard is installed.
+    """
+    import conftest
+    import dotenv
+    from conftest import _block_foreign_dotenv_loads, _restore_dotenv_loads
+
+    in_root = tmp_path / ".env"
+    in_root.write_text("FEATURE_BANNER_ENABLED=true\n")
+    monkeypatch.setattr(conftest, "project_root", tmp_path)
+
+    with mock.patch.dict(os.environ):
+        _block_foreign_dotenv_loads()
+        try:
+            assert dotenv.load_dotenv(dotenv_path=in_root) is True
+            assert os.environ.get("FEATURE_BANNER_ENABLED") == "true"
+        finally:
+            _restore_dotenv_loads()

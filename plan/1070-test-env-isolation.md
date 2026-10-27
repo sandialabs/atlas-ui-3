@@ -60,17 +60,24 @@ conftest guards in place.
    with `monkeypatch.setenv`, matching the existing conftest-guard model.
    Factor the scrub into a module-level helper so the guard is unit-testable.
 
-1b. **dotenv import-window guard (conftest).** Found while verifying in a
+1b. **Foreign-dotenv import-window guard (conftest).** Found while verifying in a
    clean worktree: `litellm/__init__.py` calls bare `load_dotenv()` at import,
    and python-dotenv's `find_dotenv` walks up parent directories — a worktree
    without its own `.env` picked up `/home/garlan/git/atlas/.env`
    (`CAPABILITY_TOKEN_SECRET=blablah`), which refilled scrubbed variables
    *after* the scrub and failed conftest import with a pydantic ValidationError
-   (exit 4, zero tests collected). conftest now no-ops `load_dotenv` while its
-   own imports run and restores the real function before the first test module
-   imports, so dotenv-behavior tests keep the real implementation. The main
-   checkout masked the bug because `find_dotenv` found the checkout's own
-   `.env` first; CI is safe for the same reason (`/app/.env` exists).
+   (exit 4, zero tests collected). The first cut (blocking ALL dotenv loads
+   during conftest's imports) broke the load-bearing in-checkout channel: CI
+   bakes `/app/.env` and the app-import chain inside conftest reads values like
+   `DEBUG_MODE` from it during those imports (AppSettings itself has env-file
+   loading disabled), so a total block flipped `debug_mode` to its default and
+   failed the mock-admin tests. The guard is therefore selective: a
+   `load_dotenv` whose resolved path is outside the checkout under test is
+   refused; the checkout's own `.env` passes through exactly as before. The
+   real function is restored before the first test module imports. The main
+   checkout masked the foreign-walk-up bug because `find_dotenv` found the
+   checkout's own `.env` first; CI is safe for the same reason (`/app/.env`
+   exists).
 
 2. **Keep-list.** `DEBUG_MODE`, `ENVIRONMENT`, `MCP_CONFIG_FILE` are
    deliberately provided by the test harness and must survive:
@@ -131,3 +138,19 @@ conftest guards in place.
 `bash test/atlas_tests.sh` must pass identically with and without
 `AUTH_STATIC_GROUPS`, `ADMIN_USERS`, `ADMIN_GROUP`, `APP_CONFIG_DIR`,
 `ATLAS_ENV_FILE` exported. Verify both directions before opening the PR.
+
+## Verification-environment notes (recorded 2026-10-27)
+
+- Verification runs in a detached worktree (`atlas-ui-3-wt-1070-verify`) with
+  its own venv, because the shared checkout is being concurrently modified by
+  another task's in-progress work (issue #992 files).
+- First clean run in the worktree failed 17 subprocess-heavy tests plus
+  collection at the BASE commit: the worktree had no `.env`, and litellm's
+  bare `load_dotenv()` (via `find_dotenv`'s parent-directory walk) reached the
+  foreign `/home/garlan/git/atlas/.env` (`CAPABILITY_TOKEN_SECRET=blablah`).
+  At the BASE commit the suite cannot even collect under this ambient
+  condition; after this branch's fix the suite collects and runs, and the
+  remaining failures are subprocess tests that (correctly) bypass conftest.
+  CI is unaffected because `Dockerfile-test` bakes `/app/.env`. Copying the
+  checkout's own `.env` into the worktree (as CI's baked copy does) resolves
+  it; the failures are ambient, not a regression of this branch.
