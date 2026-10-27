@@ -10,9 +10,18 @@ fail depending on whether the developer happened to have
 ``tests/conftest.py`` disables env-file loading for the whole session
 (``AppSettings.model_config["env_file"] = None``). These tests lock that
 guard in place so it cannot be silently removed.
+
+Issue #1070 added the second half of that isolation: variables *exported in
+the invoking shell* (a terminal that inherited a deployment's environment)
+reach ``AppSettings`` just as a .env would. ``conftest`` scrubs every
+settings-derived variable at import time; the tests here lock that scrub in
+place too, including an end-to-end subprocess run with the issue's exports
+present.
 """
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -172,3 +181,151 @@ def test_isolated_singletons_name_real_module_globals():
             missing.append(f"{module_name}.{attr}")
 
     assert not missing, f"conftest isolates nonexistent globals: {missing}"
+
+
+# --- Shell-environment scrub (issue #1070) --------------------------------
+
+# The variables the issue's reproduce block exports, plus representative
+# members of each family conftest derives from the AppSettings model.
+_DEPLOYMENT_STYLE_VARS = (
+    "AUTH_STATIC_GROUPS",
+    "ADMIN_USERS",
+    "ADMIN_GROUP",
+    "ADMIN_TEST_USER",
+    "APP_CONFIG_DIR",
+    "AUTH_GROUP_CHECK_URL",
+    "AUTH_USER_HEADER",
+    "OIDC_ISSUER",
+    "OIDC_CLIENT_SECRET",
+    "FEATURE_HEADER_AUTH_ENABLED",
+    "FEATURE_PROXY_SECRET_ENABLED",
+    "SKIP_AUTHORIZATION_CHECKS",
+    "CHAT_HISTORY_DB_URL",
+    "MCP_TOKEN_ENCRYPTION_KEY",
+)
+
+
+def test_scrub_derived_names_cover_deployment_style_variables():
+    """The model-derived name set must include the variables #1070 names.
+
+    The scrub list is derived from ``AppSettings.model_fields`` rather than
+    hand-maintained, so it cannot drift as settings are added — but the
+    derivation itself could regress (e.g. an ``AliasChoices`` variant that
+    stops being unwrapped). Assert the named offenders and one representative
+    of each alias form are all covered, and that the keep-list stays exactly
+    the three variables the test harness deliberately provides.
+    """
+    from conftest import (  # the suite's own conftest
+        _HARNESS_PROVIDED_ENV_VARS,
+        _appsettings_env_names,
+    )
+
+    names = _appsettings_env_names()
+    uncovered = [var for var in _DEPLOYMENT_STYLE_VARS if var not in names]
+    assert not uncovered, f"AppSettings env-name derivation misses: {uncovered}"
+
+    assert _HARNESS_PROVIDED_ENV_VARS == {"DEBUG_MODE", "ENVIRONMENT", "MCP_CONFIG_FILE"}
+
+
+def test_scrub_removes_planted_deployment_variables():
+    """Re-running the scrub must remove planted deployment-style variables.
+
+    Runs the conftest guard's helper over a planted environment — including
+    the issue's exports and an exported-but-empty harness variable, which
+    otherwise fails collection with a pydantic bool-parse error — and asserts
+    every planted value is gone while a harness-provided value survives.
+    """
+    from conftest import _scrub_session_environment  # the suite's own conftest
+
+    planted = {var: f"leaked-{var.lower()}" for var in _DEPLOYMENT_STYLE_VARS}
+    planted.update(
+        {
+            "ATLAS_ENV_FILE": "/srv/atlas/deployment.env",
+            "DEBUG_MODE": "",
+            "ENVIRONMENT": "",
+            "MCP_CONFIG_FILE": "",
+        }
+    )
+    with mock.patch.dict(os.environ, planted):
+        _scrub_session_environment()
+
+        for var in _DEPLOYMENT_STYLE_VARS:
+            assert os.environ.get(var) is None, f"{var} survived the scrub"
+        assert os.environ.get("ATLAS_ENV_FILE") is None
+        assert os.environ.get("DEBUG_MODE") is None
+        assert os.environ.get("ENVIRONMENT") is None
+        assert os.environ.get("MCP_CONFIG_FILE") is None
+
+    # Outside the patch the session's own state is untouched: the harness
+    # values CI/run_tests.sh provide are still in place.
+    assert os.environ.get("MCP_TOKEN_ENCRYPTION_KEY"), "conftest's test key vanished"
+    assert os.environ.get("CHAT_HISTORY_DB_URL"), "conftest's store redirect vanished"
+
+
+def test_scrub_keeps_project_root_pythonpath_entries_and_drops_foreign():
+    """PYTHONPATH entries inside the checkout survive; foreign ones do not.
+
+    ``docs/developer/test-isolation.md`` tells contributors to export
+    ``$ROOT:$ROOT/scripts`` for the order/parallel runs, so filtering must keep
+    those; an entry pointing at another checkout is exactly what must not reach
+    test-spawned subprocesses.
+    """
+    from conftest import _scrub_session_environment  # the suite's own conftest
+
+    project_root = str(Path(__file__).resolve().parents[2])
+    foreign = "/opt/some-other-atlas-checkout"
+    with mock.patch.dict(
+        os.environ,
+        {"PYTHONPATH": os.pathsep.join([foreign, project_root, f"{project_root}/scripts"])},
+    ):
+        _scrub_session_environment()
+
+        entries = os.environ["PYTHONPATH"].split(os.pathsep)
+        assert foreign not in entries
+        assert str(Path(project_root).resolve()) in entries
+        assert str(Path(project_root, "scripts").resolve()) in entries
+
+    with mock.patch.dict(os.environ, {"PYTHONPATH": foreign}):
+        _scrub_session_environment()
+
+        assert os.environ.get("PYTHONPATH") is None
+
+
+def test_deployment_shell_exports_do_not_change_test_results(tmp_path):
+    """End-to-end acceptance for #1070: the issue's exports must not matter.
+
+    Runs the two tests the issue observed failing under a child pytest whose
+    environment carries the deployment-style exports. The child imports the
+    suite's conftest, so this passes only while the scrub is in place —
+    removing the guard fails here, with the same assertions the issue reported.
+    """
+    deployment_exports = {
+        "AUTH_STATIC_GROUPS": "somegroup:user@example.com",
+        "ADMIN_USERS": "deployadmin@example.com",
+        "ADMIN_GROUP": "deploy_admins",
+        "APP_CONFIG_DIR": str(tmp_path / "deploy-config"),
+        "ATLAS_ENV_FILE": str(tmp_path / "deploy.env"),
+    }
+    env = {**os.environ, **deployment_exports}
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "tests/test_core_auth.py::test_admin_users_sugar_targets_the_configured_admin_group",
+            "tests/test_core_auth.py::test_warns_when_no_authorization_source_is_configured",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, (
+        "the issue's exported variables changed test results; the conftest "
+        f"shell-environment scrub regressed:\n{result.stdout}\n{result.stderr}"
+    )
+    assert "2 passed" in result.stdout

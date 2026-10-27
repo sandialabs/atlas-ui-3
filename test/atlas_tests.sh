@@ -22,6 +22,17 @@ ATLAS_DIR="$PROJECT_ROOT/atlas"
 
 echo "Atlas directory: $ATLAS_DIR"
 
+# Issue #1070: a PYTHONPATH exported in the invoking shell (e.g. inherited from
+# a deployment context) can point subprocess-spawned tools at another checkout.
+# atlas/tests/conftest.py filters it to entries inside this checkout for the
+# pytest session; the warning below is so the operator notices their shell
+# carries it at all.
+if [ -n "${PYTHONPATH:-}" ]; then
+    echo "WARNING: PYTHONPATH is exported in the invoking shell: ${PYTHONPATH}"
+    echo "The test session filters it to entries inside this checkout; a foreign"
+    echo "entry here can still affect tooling outside pytest."
+fi
+
 # Activate project virtual environment if available (per CLAUDE.md: use uv-managed venv)
 if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     echo "Activating virtual environment at $PROJECT_ROOT/.venv"

@@ -1,6 +1,6 @@
 # Test Isolation
 
-Last updated: 2026-10-14
+Last updated: 2026-10-27
 
 The Python suite runs in a single process, in one pass, with no per-test
 forking, and is also supported under `pytest-xdist` for parallel execution
@@ -20,6 +20,7 @@ guards are in place even for state that app code establishes at *import* time.
 | Guard | What it prevents |
 | --- | --- |
 | `AppSettings.model_config["env_file"] = None` | The developer's `.env` changing results from machine to machine |
+| Settings-derived env vars scrubbed (`_scrub_session_environment`) | Deployment-style variables exported in the invoking shell (`AUTH_STATIC_GROUPS`, `ADMIN_USERS`, `ADMIN_GROUP`, `APP_CONFIG_DIR`, `OIDC_*`, `FEATURE_*`, ...) changing test results (issue #1070) |
 | `APP_LOG_DIR` -> temp dir | Test spans and security-risk records landing in the repository's `logs/` |
 | `CHAT_HISTORY_DB_URL`, `RUNTIME_FEEDBACK_DIR`, `RUNTIME_CAPTURE_DIR`, `MCP_TOKEN_STORAGE_DIR` -> temp dirs | Tests reading and writing the developer's real `data/`, `runtime/` and `config/secure/` state |
 | `AUTH_GROUP_CHECK_URL` / `AUTH_GROUP_CHECK_API_KEY` cleared | Authorization tests calling a live external authorizer |
@@ -39,6 +40,28 @@ they do not make each test's store empty. A test that needs a store of its own
 should build one against `tmp_path` and pin it for the duration, or reset the
 relevant singleton (see `reset_engine` in
 `atlas/modules/chat_history/database.py`).
+
+### Shell-environment scrub
+
+The `.env` guard only stops the *file*; pydantic-settings also reads the
+process environment, so a terminal that inherited a deployment's environment
+(a tmux server launched from a deployment context, a sourced env file) would
+otherwise change results with the code under test untouched. At import time
+conftest pops every variable that maps to an `AppSettings` field, derived from
+the model itself so newly added settings cannot silently reopen the channel
+(issue #1070). Three variables are keep-listed because the test harness
+provides them deliberately: `DEBUG_MODE` (CI's per-leg `docker run -e
+DEBUG_MODE=...`), `ENVIRONMENT`, and `MCP_CONFIG_FILE` (`run_tests.sh` points
+it at an absent `mcp-test.json` so the shared app lifespan does not start
+every bundled MCP server). `ATLAS_ENV_FILE` is popped as well, and
+`PYTHONPATH` is filtered to entries inside the checkout so test-spawned
+subprocesses cannot resolve `import atlas` to another checkout. Tests opt
+back in per test via `monkeypatch.setenv`, as with every other session-level
+pin.
+
+**The scrub is per session, not per test.** Like the `.env` guard, it runs
+once when conftest is imported; it cannot undo variables a test sets, and
+nothing a test does re-triggers it.
 
 ## Rules for test authors
 

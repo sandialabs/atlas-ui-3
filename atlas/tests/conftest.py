@@ -17,6 +17,102 @@ if str(atlas_root) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# --- Shell-environment isolation -----------------------------------------
+# The guards below pin specific variables, but ``AppSettings`` reads the whole
+# process environment, so *any* settings-derived variable exported in the
+# invoking shell reaches it (issue #1070). A terminal that inherited a
+# deployment's environment (a tmux server launched from a deployment context,
+# a sourced env file) then changes test results -- e.g. an exported
+# ``AUTH_STATIC_GROUPS`` adds a group to every ``static_group_members``
+# assertion, and an exported ``ADMIN_USERS`` suppresses the "no authorization
+# source" warning -- with the code under test untouched.
+#
+# Scrub every variable that maps to an ``AppSettings`` field, derived from the
+# model itself so a newly added setting cannot silently reopen the channel.
+# Tests that need a value opt in via ``monkeypatch.setenv``, exactly like the
+# session-level pins below. This is a test-isolation guard, not a product
+# behavior change -- the scrub only touches the test session's process
+# environment.
+from pydantic import AliasChoices  # noqa: E402
+
+from atlas.modules.config.settings import AppSettings  # noqa: E402
+
+# Variables the test harness itself provides deliberately, which must survive
+# the scrub: CI's debug/production legs set ``DEBUG_MODE`` per run with
+# ``docker run -e`` (higher priority than .env, which is the point),
+# ``test/run_tests.sh`` exports ``ENVIRONMENT`` and points
+# ``MCP_CONFIG_FILE`` at an absent ``mcp-test.json`` so the shared app lifespan
+# does not discover and start every bundled MCP server (issue #1057).
+_HARNESS_PROVIDED_ENV_VARS = frozenset({"DEBUG_MODE", "ENVIRONMENT", "MCP_CONFIG_FILE"})
+
+# Deployment-style variables consumed outside ``AppSettings``: the CLI
+# entry points resolve their .env via ``ATLAS_ENV_FILE``, so an exported value
+# would leak a deployment's file into CLI tests that spawn subprocesses.
+_EXTRA_ISOLATED_ENV_VARS = ("ATLAS_ENV_FILE",)
+
+
+def _appsettings_env_names() -> frozenset:
+    """Every environment variable name ``AppSettings`` could read.
+
+    pydantic-settings matches a field by its ``validation_alias`` when one is
+    declared and by the upper-cased field name otherwise (``case_sensitive``
+    defaults to false), so mirror exactly that.
+    """
+    names = set()
+    for name, field in AppSettings.model_fields.items():
+        alias = field.validation_alias
+        if alias is None:
+            names.add(name.upper())
+        elif isinstance(alias, str):
+            names.add(alias)
+        elif isinstance(alias, AliasChoices):
+            names.update(choice for choice in alias.choices if isinstance(choice, str))
+    return frozenset(names)
+
+
+def _scrub_session_environment() -> None:
+    """Remove deployment-style variables from ``os.environ`` (idempotent).
+
+    A module-level function rather than inline statements so the guard is
+    unit-testable: ``test_env_isolation.py`` plants variables and re-runs it
+    under ``mock.patch.dict`` to prove the coverage stays complete.
+    """
+    for var in sorted(_appsettings_env_names() - _HARNESS_PROVIDED_ENV_VARS):
+        os.environ.pop(var, None)
+    for var in _EXTRA_ISOLATED_ENV_VARS:
+        os.environ.pop(var, None)
+    # An exported-but-empty harness value (``DEBUG_MODE=``) is never what the
+    # harness sets, and pydantic cannot parse '' as a bool -- it fails
+    # collection outright. Drop the empty form too.
+    for var in _HARNESS_PROVIDED_ENV_VARS:
+        if os.environ.get(var) == "":
+            os.environ.pop(var, None)
+    # ``PYTHONPATH`` is filtered rather than dropped: entries inside the
+    # checkout under test are legitimate (docs/developer/test-isolation.md
+    # tells contributors to export ``$ROOT:$ROOT/scripts`` for the
+    # order/parallel runs, and CI's reverse-order leg needs the scripts dir to
+    # load ``-p pytest_test_order``), while an entry pointing at *another*
+    # checkout makes test-spawned subprocesses import that checkout instead of
+    # this one -- the editable install already resolves ``atlas`` here without
+    # any PYTHONPATH, so foreign entries buy nothing and are dropped.
+    kept = []
+    for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        if not entry.strip():
+            continue
+        try:
+            resolved = Path(entry).resolve()
+        except OSError:  # pragma: no cover - unresolvable entry, drop it
+            continue
+        if resolved == project_root.resolve() or project_root.resolve() in resolved.parents:
+            kept.append(str(resolved))
+    if kept:
+        os.environ["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(kept))
+    else:
+        os.environ.pop("PYTHONPATH", None)
+
+
+_scrub_session_environment()
+
 # --- Telemetry isolation -------------------------------------------------
 # OpenTelemetry's ``trace.set_tracer_provider`` is first-writer-wins: once
 # a provider has been registered (e.g. by ``OpenTelemetryConfig`` during
@@ -77,8 +173,8 @@ os.environ["MCP_TOKEN_STORAGE_DIR"] = f"{_STATE_TMPDIR}/tokens"
 # Disable env-file loading for the whole test session so AppSettings reads
 # only the process environment, which tests fully control via monkeypatch /
 # os.environ. This is a test-isolation guard, not a product behavior change.
-from atlas.modules.config.settings import AppSettings  # noqa: E402
-
+# (``AppSettings`` is imported above, before the scrub, purely to derive the
+# field-to-env-var mapping; importing it does not read the environment.)
 AppSettings.model_config["env_file"] = None
 
 # --- Compliance-feature isolation ----------------------------------------
