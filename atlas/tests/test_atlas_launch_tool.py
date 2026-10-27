@@ -1680,6 +1680,209 @@ async def test_a_follow_up_only_gets_tools_the_caller_is_still_authorized_for():
     assert "Pick a workspace" not in str(refused.value)
 
 
+# The saved workspace is re-checked before a follow-up is admitted (issue
+# #1079): resolved by id against the caller's access *now*, because the chat
+# service treats workspace_id as advisory and would never reject a child turn
+# on a workspace that has been deleted or reassigned since the launch.
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_runs_while_the_saved_workspace_is_accessible():
+    registry = _install_registry()
+    _start_parent(registry)
+    rows = [dict(WORKSPACE)]
+    factory, _ = _follow_up_factory(workspaces=_Workspaces(rows=rows))
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+    )
+
+    assert follow["workspace"] == "Research"
+    service = factory.services[-1]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    assert service.calls[0]["workspace_id"] == "ws-1"
+    service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_is_refused_once_the_workspace_is_deleted():
+    registry = _install_registry()
+    _start_parent(registry)
+    rows = [dict(WORKSPACE)]
+    factory, _ = _follow_up_factory(workspaces=_Workspaces(rows=rows))
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    rows.clear()  # deleted between the launch and the follow-up
+
+    with pytest.raises(LaunchRefused, match="no longer available to you") as refused:
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+        )
+    # The saved name is the caller's own (it is in the launch handle); the
+    # refusal says to launch anew rather than picking another workspace.
+    assert "Research" in str(refused.value)
+    assert "Launch a new sub-conversation" in str(refused.value)
+    # Refused before a chat service was built or a run admitted for the turn.
+    assert len(factory.services) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_is_refused_when_the_workspace_belongs_to_someone_else():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    # The workspace was reassigned between launch and follow-up: the
+    # caller-scoped lookup now finds nothing, exactly as for a deletion.
+    factory.workspace_repository = _Workspaces(owner="someone-else@example.com")
+
+    with pytest.raises(LaunchRefused, match="no longer available to you"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+        )
+    assert len(factory.services) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_does_not_fall_back_to_a_same_named_workspace():
+    """Deleted and recreated under the same name: a different id, so refused.
+
+    The follow-up resolves the saved workspace by id and never by name, so a
+    workspace that now happens to share the child's workspace name cannot be
+    silently substituted for the one the child was launched under.
+    """
+    registry = _install_registry()
+    _start_parent(registry)
+    rows = [dict(WORKSPACE)]
+    factory, _ = _follow_up_factory(workspaces=_Workspaces(rows=rows))
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    rows[0] = {**WORKSPACE, "id": "ws-2"}
+
+    with pytest.raises(LaunchRefused, match="no longer available to you"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+        )
+    assert len(factory.services) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_keeps_working_after_the_workspace_is_renamed():
+    """A rename keeps the id, so the association is unchanged.
+
+    The boundary of "changed association": identity is the id, not the name,
+    so a renamed workspace still continues -- and the follow-up carries the
+    current name forward.
+    """
+    registry = _install_registry()
+    _start_parent(registry)
+    rows = [dict(WORKSPACE)]
+    factory, _ = _follow_up_factory(workspaces=_Workspaces(rows=rows))
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    rows[0] = {**WORKSPACE, "name": "Deep Research"}
+
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+    )
+    assert follow["workspace"] == "Deep Research"
+    factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_does_not_inherit_tools_added_to_the_workspace():
+    """The workspace is re-checked for access, not re-read for capability.
+
+    A workspace is a saved bookmark; selections added to it since the launch
+    must not widen the sub-conversation, whose tools come from the (already
+    narrowed) launch spec.
+    """
+    registry = _install_registry()
+    _start_parent(registry)
+    access = _Access()
+    rows = [dict(WORKSPACE)]
+    factory, _ = _follow_up_factory(access, workspaces=_Workspaces(rows=rows))
+    handle = await _launch_and_finish(factory, registry, _context())
+    assert handle["tools"] == ["math_add", "filesystem_read"]
+
+    rows[0]["config"]["selected_tools"] = ["math_add", "filesystem_read", "extra_tool"]
+    access.tools = ["math_add", "extra_tool"]
+
+    follow = await follow_up_sub_conversation(
+        {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+    )
+    assert follow["tools"] == ["math_add"]
+    factory.services[-1].release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_fails_closed_when_the_workspace_lookup_errors():
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    class _Broken:
+        def get_workspace(self, workspace_id, user_email):
+            raise RuntimeError("storage unavailable")
+
+    factory.workspace_repository = _Broken()
+
+    with pytest.raises(LaunchRefused, match="could not be checked"):
+        await follow_up_sub_conversation(
+            {"run_id": handle["run_id"], "message": "again"}, _context(), factory=factory
+        )
+    assert len(factory.services) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_without_a_saved_workspace_id_fails_closed():
+    """A spec that does not name a workspace cannot have the guarantee checked.
+
+    No launch path produces this; a hand-made or future-broken spec must not
+    continue onto an unverifiable workspace.
+    """
+    registry = _install_registry()
+    parent = _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    child = registry.start(
+        conversation_id="child", user_email="user@example.com",
+        parent_run_id=parent.run_id, depth=1,
+    )
+    registry.set_status(child.run_id, RunStatus.COMPLETED)
+    registry.get(child.run_id).launch_spec = {"model": "gpt-4o", "tools": ["math_add"]}
+
+    with pytest.raises(LaunchRefused, match="no longer known"):
+        await follow_up_sub_conversation(
+            {"run_id": child.run_id, "message": "hi"}, _context(), factory=factory
+        )
+    assert len(factory.services) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_workspace_refusal_is_a_failed_tool_result():
+    registry = _install_registry()
+    _start_parent(registry)
+    rows = [dict(WORKSPACE)]
+    factory, _ = _follow_up_factory(workspaces=_Workspaces(rows=rows))
+    handle = await _launch_and_finish(factory, registry, _context())
+    rows.clear()
+
+    result = await execute_follow_up_tool(
+        ToolCall(
+            id="call-1",
+            name=FOLLOW_UP_TOOL_NAME,
+            arguments={"run_id": handle["run_id"], "message": "again"},
+        ),
+        _context(factory=factory),
+    )
+
+    assert result.success is False
+    assert "no longer available to you" in result.content
+
+
 @pytest.mark.asyncio
 async def test_a_follow_up_is_refused_once_the_model_is_no_longer_available():
     registry = _install_registry()

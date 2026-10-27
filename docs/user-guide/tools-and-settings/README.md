@@ -238,7 +238,9 @@ The conversation that launched a sub-conversation can also talk back to it. Tick
 next message -- a correction, a clarifying question, the next step -- instead of
 starting a fresh one that has forgotten everything. The follow-up and its reply
 appear in the sub-conversation's own transcript, and it carries on with the same
-workspace and model it was launched with. Approving the `atlas_follow_up` call
+workspace and model it was launched with: if that workspace has since been
+deleted or is no longer available to you, the follow-up is refused rather than
+quietly moved to a different one. Approving the `atlas_follow_up` call
 approves that turn's tool calls, the same way approving a launch does.
 
 A sub-conversation can never use a tool, model or data source you could not use

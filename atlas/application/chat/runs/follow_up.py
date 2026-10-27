@@ -39,6 +39,68 @@ __all__ = ["execute_follow_up_tool", "follow_up_sub_conversation"]
 logger = logging.getLogger(__name__)
 
 
+def _revalidate_saved_workspace(
+    factory: Any, spec: Dict[str, Any], user_email: str
+) -> Dict[str, Any]:
+    """The child's saved workspace, resolved against the caller's access *now*.
+
+    A follow-up runs on the workspace the child was launched under -- the model
+    never re-chooses one -- so the saved id is re-resolved here the way
+    ``atlas_launch`` resolves the workspace it is handed: scoped to the caller
+    at the repository, so a workspace deleted, revoked, or reassigned since the
+    launch is simply not found. Unlike the launch lookup there is no name
+    fallback: a follow-up continues the child under its saved workspace or not
+    at all, and a workspace deleted and recreated under the same name is a
+    *different* workspace (a different id) that must not be picked up silently.
+
+    Only the resolved identity is returned. The workspace's current *config* is
+    deliberately not read: the follow-up's tools and data sources come from the
+    saved launch spec, re-filtered through the caller's access, so selections
+    added to the workspace since the launch cannot widen the child.
+    """
+    repository = getattr(factory, "workspace_repository", None)
+    if repository is None:
+        raise LaunchRefused(
+            "Sub-conversations are unavailable: workspaces are not configured."
+        )
+    workspace_id = spec.get("workspace_id")
+    if not isinstance(workspace_id, str) or not workspace_id.strip():
+        # Every launch records the workspace id, so a spec without one cannot
+        # have this guarantee checked -- fail closed rather than continue on an
+        # unverifiable workspace.
+        raise LaunchRefused(
+            "That sub-conversation cannot be continued: the workspace it was "
+            "launched under is no longer known. Launch a new sub-conversation "
+            "instead."
+        )
+    saved_name = spec.get("workspace_name") or workspace_id
+    try:
+        workspace = repository.get_workspace(workspace_id, user_email)
+    except Exception:
+        logger.warning(
+            "Workspace re-validation failed during atlas_follow_up", exc_info=True
+        )
+        raise LaunchRefused(
+            f"The workspace '{saved_name}' that sub-conversation was launched "
+            "under could not be checked just now, so it cannot be continued. "
+            "Try again, or launch a new sub-conversation."
+        )
+    if workspace is None:
+        # The saved name is not a leak: it is in the launch/follow-up handle
+        # the caller already saw, and the lookup is scoped to this caller, so
+        # "not found" covers deleted, revoked, and reassigned alike without
+        # revealing which.
+        raise LaunchRefused(
+            f"The workspace '{saved_name}' that sub-conversation was launched "
+            "under is no longer available to you -- it was deleted, or its "
+            "access was revoked, since the launch -- so the sub-conversation "
+            "cannot be continued. Launch a new sub-conversation with a "
+            "workspace you can currently access (atlas_discover_launch_options "
+            "lists them)."
+        )
+    return workspace
+
+
 async def follow_up_sub_conversation(
     arguments: Dict[str, Any],
     context: Optional[Dict[str, Any]],
@@ -159,6 +221,14 @@ async def follow_up_sub_conversation(
         )
 
     model_name = spec["model"]
+    # The workspace is the one part of the launch spec nothing downstream
+    # re-checks (the chat service treats ``workspace_id`` as advisory), so the
+    # saved id is resolved against the caller's access *now* -- the same
+    # caller-scoped lookup a launch goes through. It is the capability surface
+    # the child continues to run under, and it must still exist and still be
+    # this user's; otherwise the follow-up is refused here, before anything is
+    # admitted.
+    workspace = _revalidate_saved_workspace(factory, spec, user_email)
     await resolve_model(config_manager, model_name, user_email)
 
     record, new_spec, admin_gated = await _start_child_run(
@@ -173,8 +243,8 @@ async def follow_up_sub_conversation(
         data_sources=list(
             spec.get("requested_data_sources", spec.get("data_sources")) or []
         ),
-        workspace_id=spec.get("workspace_id"),
-        workspace_name=spec.get("workspace_name"),
+        workspace_id=workspace.get("id") or spec.get("workspace_id"),
+        workspace_name=workspace.get("name") or spec.get("workspace_name"),
         # The conversation keeps the name its launch prompt gave it.
         title=target.title,
         no_tools_message=(
