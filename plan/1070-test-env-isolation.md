@@ -63,8 +63,8 @@ conftest guards in place.
 1b. **Foreign-dotenv import-window guard (conftest).** Found while verifying in a
    clean worktree: `litellm/__init__.py` calls bare `load_dotenv()` at import,
    and python-dotenv's `find_dotenv` walks up parent directories — a worktree
-   without its own `.env` picked up `/home/garlan/git/atlas/.env`
-   (`CAPABILITY_TOKEN_SECRET=blablah`), which refilled scrubbed variables
+   without its own `.env` picked up an ancestor directory's `.env`
+   (containing a placeholder `CAPABILITY_TOKEN_SECRET`), which refilled scrubbed variables
    *after* the scrub and failed conftest import with a pydantic ValidationError
    (exit 4, zero tests collected). The first cut (blocking ALL dotenv loads
    during conftest's imports) broke the load-bearing in-checkout channel: CI
@@ -147,7 +147,8 @@ conftest guards in place.
   #992 files).
 - First clean run in the worktree (no `.env`) failed collection at BASE:
   litellm's bare `load_dotenv()` reached the foreign
-  `/home/garlan/git/atlas/.env` (`CAPABILITY_TOKEN_SECRET=blablah`) via
+  `.env` of an ancestor directory outside the checkout (placeholder
+  `CAPABILITY_TOKEN_SECRET`) via
   `find_dotenv`'s parent-directory walk — the ambient condition that
   motivated guard 1b. CI is unaffected because `Dockerfile-test` bakes
   `/app/.env`; the worktree gets a copy of the checkout's `.env` for parity.
