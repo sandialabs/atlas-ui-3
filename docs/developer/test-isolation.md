@@ -50,15 +50,32 @@ process environment, so a terminal that inherited a deployment's environment
 otherwise change results with the code under test untouched. At import time
 conftest pops every variable that maps to an `AppSettings` field, derived from
 the model itself so newly added settings cannot silently reopen the channel
-(issue #1070). Three variables are keep-listed because the test harness
+(issue #1070). The pop matches `os.environ` keys case-insensitively, because
+pydantic-settings matches them case-insensitively too: an exported
+`auth_static_groups` reaches `AppSettings` exactly as `AUTH_STATIC_GROUPS`
+would. Three variables are keep-listed because the test harness
 provides them deliberately: `DEBUG_MODE` (CI's per-leg `docker run -e
 DEBUG_MODE=...`), `ENVIRONMENT`, and `MCP_CONFIG_FILE` (`run_tests.sh` points
 it at an absent `mcp-test.json` so the shared app lifespan does not start
-every bundled MCP server). `ATLAS_ENV_FILE` is popped as well, and
+every bundled MCP server). The keep-list is exact-case — the harness provides
+those spellings, so any other case variant of those names is a foreign export
+and is dropped, as is an exported-but-empty value (`DEBUG_MODE=` fails
+pydantic's bool parsing outright). `ATLAS_ENV_FILE` is popped as well, and
 `PYTHONPATH` is filtered to entries inside the checkout so test-spawned
 subprocesses cannot resolve `import atlas` to another checkout. Tests opt
 back in per test via `monkeypatch.setenv`, as with every other session-level
 pin.
+
+**The `PYTHONPATH` filter protects subprocesses, not the pytest process
+itself.** A Python interpreter builds `sys.path` from `PYTHONPATH` at
+startup, before conftest runs, so an entry exported in the invoking shell is
+already importable inside the pytest process no matter what conftest pops
+later (conftest does put this checkout first on `sys.path`, which keeps
+`import atlas` resolving here). `test/atlas_tests.sh` closes that window for
+the wrapper path by applying the same checkout-local filter before Python
+starts. A bare `python -m pytest` keeps only conftest's subprocess
+protection — prefer the wrapper, or clear `PYTHONPATH` yourself, when a
+foreign entry is exported.
 
 **The scrub is per session, not per test.** Like the `.env` guard, it runs
 once when conftest is imported; it cannot undo variables a test sets, and

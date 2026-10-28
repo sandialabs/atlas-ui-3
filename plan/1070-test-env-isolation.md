@@ -169,3 +169,37 @@ present (as CI's baked `/app/.env`), issue exports = `AUTH_STATIC_GROUPS`,
 
 Base collected 4849 tests; this branch adds 7 regression tests → 4856, and
 every one of base's 29 exported-env failures now passes.
+
+## Review response (2026-10-28)
+
+The #1132 review flagged two residual channels; both are closed here.
+
+1. **Case-insensitive scrub bypass (P2).** pydantic-settings matches
+   environment keys case-insensitively — verified live: an exported
+   `auth_static_groups` was read exactly as `AUTH_STATIC_GROUPS`, and a
+   lowercase `debug_mode=not-a-bool` failed `AppSettings()` like the
+   upper-case form does — but the scrub popped only exact upper-case names.
+   `_scrub_session_environment` now matches `os.environ` keys
+   case-insensitively. The harness keep-list stays exact-case: the harness
+   provides `DEBUG_MODE`/`ENVIRONMENT`/`MCP_CONFIG_FILE` spelled exactly as
+   listed, so case variants of those names are foreign exports and are
+   dropped, as are exported-but-empty values in any case. New unit test
+   (`test_scrub_removes_case_variant_exports`) plants lower/mixed-case
+   exports; the end-to-end subprocess test now carries its exports as case
+   variants. Both fail when the scrub is reverted to exact-case matching
+   (checked by stashing the conftest change).
+
+2. **`PYTHONPATH` scrub happens after interpreter startup (P2).**
+   `sys.path` is built from `PYTHONPATH` before conftest runs, so the
+   session filter protects only test-spawned subprocesses, not the pytest
+   process itself. `test/atlas_tests.sh` now applies the same
+   checkout-local filter before Python starts (verified: foreign entries
+   dropped, checkout root/`scripts`/`atlas` entries kept, unset stays
+   unset), and `docs/developer/test-isolation.md` states the limitation for
+   a bare `python -m pytest` run. Conftest's filter is unchanged and still
+   authoritative for subprocesses.
+
+Local verification of this response: `test_env_isolation.py` 16 passed,
+`test_core_auth.py` 38 passed, config/compliance slice 123 passed — all
+with lower/mixed-case deployment exports planted in the invoking shell;
+ruff clean on both changed test files.

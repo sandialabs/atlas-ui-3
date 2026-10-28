@@ -56,7 +56,10 @@ def _appsettings_env_names() -> frozenset:
 
     pydantic-settings matches a field by its ``validation_alias`` when one is
     declared and by the upper-cased field name otherwise (``case_sensitive``
-    defaults to false), so mirror exactly that.
+    defaults to false), so mirror exactly that. Consumers must compare these
+    names against ``os.environ`` keys case-insensitively: pydantic-settings
+    reads ``auth_static_groups`` or ``Auth_Static_Groups`` exactly as it reads
+    ``AUTH_STATIC_GROUPS``.
     """
     names = set()
     for name, field in AppSettings.model_fields.items():
@@ -77,16 +80,29 @@ def _scrub_session_environment() -> None:
     unit-testable: ``test_env_isolation.py`` plants variables and re-runs it
     under ``mock.patch.dict`` to prove the coverage stays complete.
     """
-    for var in sorted(_appsettings_env_names() - _HARNESS_PROVIDED_ENV_VARS):
-        os.environ.pop(var, None)
-    for var in _EXTRA_ISOLATED_ENV_VARS:
-        os.environ.pop(var, None)
-    # An exported-but-empty harness value (``DEBUG_MODE=``) is never what the
-    # harness sets, and pydantic cannot parse '' as a bool -- it fails
-    # collection outright. Drop the empty form too.
-    for var in _HARNESS_PROVIDED_ENV_VARS:
-        if os.environ.get(var) == "":
-            os.environ.pop(var, None)
+    # Compare keys case-insensitively: pydantic-settings matches environment
+    # keys regardless of case (``case_sensitive`` defaults to false), so an
+    # exported ``auth_static_groups`` or ``Auth_Static_Groups`` reaches
+    # ``AppSettings`` exactly as ``AUTH_STATIC_GROUPS`` would (observed live).
+    scrub_names = {name.lower() for name in _appsettings_env_names() - _HARNESS_PROVIDED_ENV_VARS}
+    scrub_names.update(name.lower() for name in _EXTRA_ISOLATED_ENV_VARS)
+    harness_names = {name.lower() for name in _HARNESS_PROVIDED_ENV_VARS}
+    for key in list(os.environ):
+        lowered = key.lower()
+        if lowered in scrub_names:
+            os.environ.pop(key, None)
+        elif lowered in harness_names and (
+            key not in _HARNESS_PROVIDED_ENV_VARS or os.environ.get(key) == ""
+        ):
+            # The keep-list stays exact-case: the harness provides
+            # ``DEBUG_MODE``/``ENVIRONMENT``/``MCP_CONFIG_FILE`` spelled
+            # exactly as listed (CI's ``docker run -e``, run_tests.sh's
+            # exports), so any other case variant of those names is a foreign
+            # export and is dropped. An exported-but-empty value
+            # (``DEBUG_MODE=``) is never what the harness sets, and pydantic
+            # cannot parse '' as a bool -- it fails collection outright. Drop
+            # both forms.
+            os.environ.pop(key, None)
     # ``PYTHONPATH`` is filtered rather than dropped: entries inside the
     # checkout under test are legitimate (docs/developer/test-isolation.md
     # tells contributors to export ``$ROOT:$ROOT/scripts`` for the

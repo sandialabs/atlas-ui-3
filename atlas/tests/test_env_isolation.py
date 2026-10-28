@@ -262,6 +262,46 @@ def test_scrub_removes_planted_deployment_variables():
     assert os.environ.get("CHAT_HISTORY_DB_URL"), "conftest's store redirect vanished"
 
 
+def test_scrub_removes_case_variant_exports():
+    """Lowercase/mixed-case exports must not bypass the scrub.
+
+    pydantic-settings matches environment keys case-insensitively (observed
+    live: an exported ``auth_static_groups`` was read as
+    ``AUTH_STATIC_GROUPS``, and a lowercase ``debug_mode=not-a-bool`` failed
+    ``AppSettings()`` the same way an empty upper-case one does), so matching
+    only the exact upper-case names leaves a case-variant export live. The
+    keep-list, in contrast, stays exact-case: the harness provides
+    ``DEBUG_MODE``/``ENVIRONMENT``/``MCP_CONFIG_FILE`` spelled exactly as
+    listed, so a case variant of those is a foreign export and must go.
+    """
+    from conftest import _scrub_session_environment  # the suite's own conftest
+
+    planted = {
+        "auth_static_groups": "leakgroup:leak@example.com",
+        "Admin_Users": "leakadmin@example.com",
+        "app_config_dir": "/srv/deploy-config",
+        "aTlAs_eNv_fIlE": "/srv/atlas/deployment.env",
+        "chat_history_db_url": "duckdb:///srv/deploy/history.duckdb",
+        # Case variants of the keep-listed harness variables, both shapes.
+        "debug_mode": "true",
+        "Environment": "production",
+        "mcp_config_file": "/srv/deploy/mcp.json",
+    }
+    with mock.patch.dict(os.environ, planted):
+        _scrub_session_environment()
+
+        for var in planted:
+            assert os.environ.get(var) is None, f"{var} survived the scrub"
+
+    # A harness-provided value in the exact keep-listed spelling survives the
+    # same scrub that removes its case-variant shadow.
+    with mock.patch.dict(os.environ, {"ENVIRONMENT": "cicd", "Environment": "production"}):
+        _scrub_session_environment()
+
+        assert os.environ.get("ENVIRONMENT") == "cicd"
+        assert os.environ.get("Environment") is None
+
+
 def test_scrub_keeps_project_root_pythonpath_entries_and_drops_foreign():
     """PYTHONPATH entries inside the checkout survive; foreign ones do not.
 
@@ -298,13 +338,19 @@ def test_deployment_shell_exports_do_not_change_test_results(tmp_path):
     environment carries the deployment-style exports. The child imports the
     suite's conftest, so this passes only while the scrub is in place —
     removing the guard fails here, with the same assertions the issue reported.
+
+    Two of the exports are planted as lowercase/mixed-case variants:
+    pydantic-settings matches environment keys case-insensitively, so those
+    reach ``AppSettings`` exactly as the upper-case forms would and the scrub
+    must remove them just the same (removing the scrub, or regressing it to
+    exact-case matching, fails here).
     """
     deployment_exports = {
-        "AUTH_STATIC_GROUPS": "somegroup:user@example.com",
-        "ADMIN_USERS": "deployadmin@example.com",
         "ADMIN_GROUP": "deploy_admins",
         "APP_CONFIG_DIR": str(tmp_path / "deploy-config"),
         "ATLAS_ENV_FILE": str(tmp_path / "deploy.env"),
+        "auth_static_groups": "somegroup:user@example.com",
+        "Admin_Users": "deployadmin@example.com",
     }
     env = {**os.environ, **deployment_exports}
     result = subprocess.run(
