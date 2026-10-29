@@ -391,6 +391,10 @@ def test_conftest_import_window_guard_is_restored():
 
     assert dotenv.main.load_dotenv is not _guarded_load_dotenv
     assert dotenv.load_dotenv is not _guarded_load_dotenv
+    # Not merely "not the guard": the genuine python-dotenv function, so a
+    # test that swapped in a stand-in cannot leave it installed unnoticed.
+    assert dotenv.load_dotenv is dotenv.main.load_dotenv
+    assert dotenv.load_dotenv.__module__ == "dotenv.main"
 
 
 def test_stale_guard_binding_passes_through_after_the_window(tmp_path):
@@ -503,6 +507,14 @@ def test_bare_load_dotenv_resolves_the_checkout_env_from_any_caller(tmp_path, mo
     (tmp_path / ".env").write_text("ATLAS_1070_FOREIGN_SENTINEL=loaded\n")
     caller_file = foreign / "__init__.py"
     caller_file.write_text("")
+    import dotenv
+
+    real_load_dotenv = dotenv.main.load_dotenv
+    # ``_restore_dotenv_loads`` reinstalls ``conftest._real_load_dotenv``, which
+    # is the recorder below while this test runs -- register the real dotenv
+    # attributes with monkeypatch first so its (LIFO) teardown puts them back.
+    monkeypatch.setattr(dotenv, "load_dotenv", real_load_dotenv)
+    monkeypatch.setattr(dotenv.main, "load_dotenv", real_load_dotenv)
     loaded = []
     monkeypatch.setattr(
         conftest, "_real_load_dotenv", lambda *a, **kw: loaded.append(kw.get("dotenv_path")) or True
