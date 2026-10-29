@@ -583,6 +583,21 @@ def _stamp(meta, from_run: bool):
     return {**bare, _MERGED_FROM_RUN: True}
 
 
+async def _release_conversation_mcp_sessions(chat_service, conversation_id, user_email) -> None:
+    """Release a conversation's MCP sessions on the manager that serves chat.
+
+    Issue #1013: this used to import a package-level ``mcp_tool_manager``
+    singleton -- a second ``MCPToolManager`` no client was ever served by -- so
+    releasing here cleared the wrong instance's state and the live manager's
+    sessions and per-user clients leaked. Every release path now goes through
+    the DI-managed runtime manager this chat service was built with, the same
+    one ``handle_reset_session`` releases on.
+    """
+    release_sessions = getattr(chat_service.tool_manager, "release_sessions", None)
+    if release_sessions is not None:
+        await release_sessions(conversation_id, user_email=user_email)
+
+
 async def _release_finished_run(
     chat_service,
     run_registry,
@@ -632,8 +647,7 @@ async def _release_finished_run(
         if conversation_id and run_registry.active_for_conversation(
             conversation_id, user_email
         ) is None:
-            from atlas.modules.mcp_tools import mcp_tool_manager
-            await mcp_tool_manager.release_sessions(conversation_id, user_email=user_email)
+            await _release_conversation_mcp_sessions(chat_service, conversation_id, user_email)
     except Exception as e:  # pragma: no cover - defensive
         logger.debug("Error releasing MCP sessions for run %s: %s", run_id, e)
 
@@ -1175,8 +1189,7 @@ async def cleanup_disconnected_session(
             )
         else:
             try:
-                from atlas.modules.mcp_tools import mcp_tool_manager
-                await mcp_tool_manager.release_sessions(conv_id, user_email=user_email)
+                await _release_conversation_mcp_sessions(chat_service, conv_id, user_email)
             except Exception as e:
                 logger.warning("Error releasing MCP sessions on disconnect: %s", e)
     await chat_service.end_session(session_id)
@@ -2843,8 +2856,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         )
                     elif old_conv_id:
                         try:
-                            from atlas.modules.mcp_tools import mcp_tool_manager
-                            await mcp_tool_manager.release_sessions(old_conv_id, user_email=user_email)
+                            await _release_conversation_mcp_sessions(chat_service, old_conv_id, user_email)
                         except Exception as e:
                             logger.debug("Error releasing MCP sessions on restore: %s", e)
 
