@@ -32,9 +32,11 @@ def _redis_repo(server):
 
 
 def _service(repo, connection_id):
+    tool_manager = MagicMock()
+    tool_manager.release_sessions = AsyncMock()
     service = ChatService(
         llm=MagicMock(),
-        tool_manager=MagicMock(),
+        tool_manager=tool_manager,
         connection=MagicMock(),
         config_manager=MagicMock(),
         session_repository=repo,
@@ -73,8 +75,7 @@ async def _turn(service, session_id, content, seen):
 
 async def _disconnect(service, session_id):
     """The old socket closing: its normal teardown ends the session."""
-    with patch("atlas.modules.mcp_tools.mcp_tool_manager.release_sessions", new=AsyncMock()):
-        await main.cleanup_disconnected_session(service, session_id, USER, {"task": None})
+    await main.cleanup_disconnected_session(service, session_id, USER, {"task": None})
 
 
 @pytest.fixture
@@ -292,10 +293,13 @@ async def test_same_process_takeover_detaches_the_old_connection():
     # second teardown, and a New Chat are all kept off the resumed session.
     old_object.history.add_message(Message(role=MessageRole.ASSISTANT, content="stale"))
     assert await old.persist_session(old_object) is False
-    release = AsyncMock()
-    with patch("atlas.modules.mcp_tools.mcp_tool_manager.release_sessions", new=release):
-        await main.cleanup_disconnected_session(old, session_id, USER, {"task": None})
-    release.assert_not_called()
+    # The first disconnect already released the conversation's sessions (issue
+    # #1013: that release now targets the service's tool manager, not the
+    # package-level singleton). Reset the mock so this assertion is about the
+    # second teardown only.
+    old.tool_manager.release_sessions.reset_mock()
+    await main.cleanup_disconnected_session(old, session_id, USER, {"task": None})
+    old.tool_manager.release_sessions.assert_not_called()
     with pytest.raises(SessionConflictError):
         await old.create_session(session_id, USER)
 

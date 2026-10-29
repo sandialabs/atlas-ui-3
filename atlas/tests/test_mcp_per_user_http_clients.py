@@ -153,6 +153,39 @@ async def test_get_or_create_user_http_client_rejects_missing_conversation_id(ma
 
 
 @pytest.mark.asyncio
+async def test_release_sessions_does_not_evict_a_client_opened_during_release(manager):
+    """A client registered while release awaits must survive the release.
+
+    Issue #1013 follow-up: the per-conversation keys must be popped before
+    any awaited close. ``release_all`` awaits session closes, and a turn
+    starting in that window can open a fresh client for the same (user,
+    server, conversation) -- scanning after the awaits would close that
+    fresh client out from under its turn.
+    """
+    stale = MagicMock()
+    stale.__aexit__ = AsyncMock(return_value=False)
+    fresh = MagicMock()
+    fresh.__aexit__ = AsyncMock(return_value=False)
+    manager._user_clients[("alice@test.com", "state_server", "conv-1")] = stale
+
+    async def _release_all(_conversation_id, user_email=None):
+        # Simulates the concurrent acquire: a new turn registers a fresh
+        # client for the same scope while the release is still awaiting.
+        assert user_email == "alice@test.com"
+        manager._user_clients[("alice@test.com", "state_server", "conv-1")] = fresh
+
+    manager._session_manager = MagicMock()
+    manager._session_manager.release_all = _release_all
+
+    await manager.release_sessions("conv-1", user_email="alice@test.com")
+
+    # The fresh client survived; only the pre-release entry was closed.
+    assert manager._user_clients[("alice@test.com", "state_server", "conv-1")] is fresh
+    stale.__aexit__.assert_awaited()
+    fresh.__aexit__.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_release_sessions_evicts_only_target_conversation(manager):
     """release_sessions must evict only entries scoped to the target
     conversation_id, leaving other conversations for the same user

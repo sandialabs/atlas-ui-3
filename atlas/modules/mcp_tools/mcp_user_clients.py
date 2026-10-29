@@ -691,18 +691,21 @@ class UserClientMixin:
         FastMCP clients scoped to this (user, conversation) so the next
         conversation on the same user gets fresh clients.
         """
-        await self._session_manager.release_all(
-            conversation_id, user_email=user_email
-        )
-
         # Evict cached clients scoped to this conversation. PR #565 narrowed
         # the cache key to (user, server, conversation), so per-conversation
         # eviction is now safe to scope by user too. When user_email is
         # missing we fall back to conversation_id-only eviction (e.g. internal
-        # callers without auth context) and rely on the upstream
-        # release_all/session-manager teardown above to bound any cross-user
+        # callers without auth context) and rely on the
+        # release_all/session-manager teardown below to bound any cross-user
         # exposure. Closing uses PR #564's pop-then-close pattern so each
         # FastMCP client is properly torn down.
+        #
+        # The keys are popped *before* any awaited close (issue #1013
+        # follow-up): release_all below awaits session closes, and a turn
+        # starting in that window may open a fresh client for this (user,
+        # server, conversation). Scanning after the awaits could pop and close
+        # that fresh client out from under its turn; anything registered after
+        # the pop survives.
         user_lc = normalize_user_email(user_email) if user_email else None
         async with self._user_clients_lock:
             keys_to_remove = [
@@ -715,6 +718,10 @@ class UserClientMixin:
                     "Evicted %d per-conversation HTTP client(s) for conversation=%s",
                     len(keys_to_remove), conversation_id,
                 )
+
+        await self._session_manager.release_all(
+            conversation_id, user_email=user_email
+        )
 
         await self._close_user_client_entries(removed, release_session=False)
 

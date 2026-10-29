@@ -178,6 +178,44 @@ class TestManagedSession:
         mock_client.__aexit__.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_close_is_bounded_when_the_server_hangs(self, mock_client):
+        """A hung MCP server must not stall the release path (issue #1013).
+
+        Release paths run on live transports now -- inline in the restore
+        handler, on disconnect, at run finish -- so the close awaits under
+        the same timeout the user-client cache teardown uses. The timeout is
+        injectable; production sessions get the shared default.
+        """
+        import asyncio
+        import time
+
+        async def _hang(*_args):
+            await asyncio.sleep(30)
+
+        mock_client.__aexit__ = _hang
+        session = ManagedSession(mock_client, close_timeout=0.05)
+        await session.open()
+
+        start = time.monotonic()
+        await session.close()  # must not wait for the 30s hang
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 2, f"close() took {elapsed:.2f}s despite the timeout"
+        assert not session.is_open
+
+    @pytest.mark.asyncio
+    async def test_close_uses_the_shared_default_timeout(self, mock_client):
+        """Without an injected timeout, the cache teardown default applies."""
+        from atlas.modules.mcp_tools.mcp_user_client_cache import (
+            _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS,
+        )
+        from atlas.modules.mcp_tools.session_manager import SESSION_CLOSE_TIMEOUT_SECONDS
+
+        session = ManagedSession(mock_client)
+        assert session._close_timeout == SESSION_CLOSE_TIMEOUT_SECONDS
+        assert session._close_timeout == _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS
+
+    @pytest.mark.asyncio
     async def test_close_idempotent(self, mock_client):
         session = ManagedSession(mock_client)
         await session.open()

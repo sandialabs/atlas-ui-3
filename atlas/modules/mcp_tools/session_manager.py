@@ -12,8 +12,18 @@ from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
+from atlas.modules.mcp_tools.mcp_user_client_cache import (
+    _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
+
+# Shared with the user-client cache teardown (issue #1013 follow-up): the
+# release paths now run on live transports -- inline in the restore handler,
+# on disconnect, at run finish -- so a hung MCP server must not stall the
+# socket. ManagedSession takes a per-instance override for tests and for a
+# manager with its own configured timeout.
+SESSION_CLOSE_TIMEOUT_SECONDS = _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS
 
 
 class SessionStore(Protocol):
@@ -33,10 +43,18 @@ class SessionStore(Protocol):
 class ManagedSession:
     """Wraps an open FastMCP client context for reuse across tool calls."""
 
-    def __init__(self, client: Client):
+    def __init__(self, client: Client, close_timeout: Optional[float] = None):
         self._client = client
         self._opened = False
         self._closed = False
+        # Close timeout, shared with the user-client cache teardown (issue
+        # #1013 follow-up): release paths run on live transports -- inline in
+        # the restore handler, on disconnect, at run finish -- so a hung MCP
+        # server must not stall the socket. Injectable so tests (and a
+        # manager with its own configured timeout) can bound it tightly.
+        self._close_timeout = (
+            SESSION_CLOSE_TIMEOUT_SECONDS if close_timeout is None else close_timeout
+        )
 
     @property
     def client(self) -> Client:
@@ -62,7 +80,15 @@ class ManagedSession:
         if self._opened and not self._closed:
             self._closed = True
             try:
-                await self._client.__aexit__(None, None, None)
+                await asyncio.wait_for(
+                    self._client.__aexit__(None, None, None),
+                    timeout=self._close_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Timed out closing MCP session after %.1fs",
+                    self._close_timeout,
+                )
             except Exception as e:
                 logger.debug("Error closing MCP session: %s", e)
 

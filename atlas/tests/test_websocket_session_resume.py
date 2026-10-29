@@ -33,19 +33,18 @@ def mock_app_factory(repo):
         factory.get_config_manager.return_value = config
 
         def _service(_connection):
+            tool_manager = MagicMock()
+            tool_manager.release_sessions = AsyncMock()
             return ChatService(
                 llm=MagicMock(),
-                tool_manager=MagicMock(),
+                tool_manager=tool_manager,
                 connection=MagicMock(),
                 config_manager=MagicMock(),
                 session_repository=repo,
             )
 
         factory.create_chat_service.side_effect = _service
-        with patch(
-            "atlas.modules.mcp_tools.mcp_tool_manager.release_sessions", new=AsyncMock()
-        ):
-            yield factory
+        yield factory
 
 
 def test_opt_in_without_an_id_reports_a_fresh_session(mock_app_factory):

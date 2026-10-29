@@ -289,9 +289,11 @@ def _make_real_chat_service(sessions, conversation_repo):
     mock_session_repo.create = AsyncMock(side_effect=_create)
     mock_session_repo.update = AsyncMock(side_effect=_update)
 
+    tool_manager = MagicMock()
+    tool_manager.release_sessions = AsyncMock()
     service = ChatService(
         llm=MagicMock(),
-        tool_manager=MagicMock(),
+        tool_manager=tool_manager,
         connection=MagicMock(),
         config_manager=MagicMock(),
         session_repository=mock_session_repo,
@@ -356,13 +358,12 @@ async def test_disconnect_persists_in_flight_turn():
         )
         await started.wait()
 
-        # Mock MCP release so cleanup_disconnected_session can run end-to-end.
-        with patch("atlas.modules.mcp_tools.mcp_tool_manager.release_sessions",
-                   new=AsyncMock()):
-            await cleanup_disconnected_session(
-                service, session_id, "alice@example.com",
-                {"task": chat_task},
-            )
+        # Release lands on the service's tool_manager (AsyncMock), so cleanup
+        # can run end-to-end without any MCP plumbing.
+        await cleanup_disconnected_session(
+            service, session_id, "alice@example.com",
+            {"task": chat_task},
+        )
 
     # cleanup_disconnected_session does not await the cancelled task, so let
     # the CancelledError handler finish committing.
