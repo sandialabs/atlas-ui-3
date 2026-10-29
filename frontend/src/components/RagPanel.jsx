@@ -1,8 +1,7 @@
 import { useRef } from 'react'
 import { X } from 'lucide-react'
 import DataSourcesSelector from './DataSourcesSelector'
-import { useEscapeKey } from '../hooks/useEscapeKey'
-import { isTopmostModalDialog, useFocusTrap } from '../utils/focusTrap'
+import { useFocusTrap } from '../utils/focusTrap'
 
 /**
  * Left-hand Data Sources drawer.
@@ -24,14 +23,14 @@ const RagPanel = ({ isOpen, onClose }) => {
 
   // The Tools and Settings modal can be layered on top of an open drawer.
   // Ownership goes to the topmost modal dialog -- the drawer stands down
-  // when it is not it. useEscapeKey consults the predicate BEFORE stopping
-  // propagation, so the modal's own (bubble-phase) Escape handler still
-  // receives the key.
-  useEscapeKey(isOpen, onClose, {
-    shouldHandle: () => isTopmostModalDialog(drawerRef.current)
+  // when it is not it, for Escape and the Tab trap alike, so the modal's
+  // own handlers still receive keys while it is up (#1039: both behaviors
+  // now live in the one shared hook).
+  useFocusTrap({
+    containerRef: drawerRef,
+    active: isOpen,
+    onEscape: onClose,
   })
-
-  useFocusTrap({ containerRef: drawerRef, active: isOpen })
 
   return (
     <>
@@ -77,4 +76,4 @@ const RagPanel = ({ isOpen, onClose }) => {
   )
 }
 
-export default RagPanel
+export default RagPanel

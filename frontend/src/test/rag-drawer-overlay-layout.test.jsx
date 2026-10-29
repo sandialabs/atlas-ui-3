@@ -338,11 +338,11 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
   })
 
   it('lets the Escape key through to bubble-phase listeners when standing down', () => {
-    // The drawer's own Escape listener sits in the capture phase and stops
-    // propagation -- but ONLY once its stand-down predicate has passed. This
-    // is the regression: stopping propagation first swallowed the key before
-    // the Settings modal's bubble-phase handler could see it, so Escape
-    // closed neither overlay.
+    // The drawer's Escape handler (via useFocusTrap, #1039) checks its
+    // stand-down ownership BEFORE stopping propagation -- in either phase,
+    // the regression this pins is stopping propagation first and swallowing
+    // the key before the Tools and Settings modal's own handler could see
+    // it, so Escape closed neither overlay.
     const { onClose } = setup({ isOpen: true })
 
     const insideOther = addOtherDialog()
@@ -360,6 +360,40 @@ describe('RagPanel - modal semantics of the overlay drawer', () => {
     } finally {
       document.removeEventListener('keydown', bubbleListener)
     }
+  })
+
+  it('stops propagation when it handles Escape', () => {
+    // Window-level listeners (the prompt/confirm dialog host) must not also
+    // react to an Escape the drawer already handled.
+    const { onClose } = setup({ isOpen: true })
+
+    const windowSawEscape = vi.fn()
+    window.addEventListener('keydown', windowSawEscape)
+    try {
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(onClose).toHaveBeenCalledTimes(1)
+      expect(windowSawEscape).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('keydown', windowSawEscape)
+    }
+  })
+
+  it('does not close on Escape aimed at an unrelated outside element', () => {
+    // Escape is scoped by target (useEscapeKey never scoped it; the shared
+    // trap does): a keydown aimed at an element outside the drawer -- and
+    // not at one of the "focus fell out entirely" targets -- belongs to
+    // something else and must not close the drawer.
+    const { onClose } = setup({ isOpen: true })
+
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    fireEvent.keyDown(outside, { key: 'Escape' })
+
+    expect(onClose).not.toHaveBeenCalled()
+
+    // A bare <body> target is the fallen-out case and still closes.
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('skips focus restore when the drawer closed under a different dialog', () => {

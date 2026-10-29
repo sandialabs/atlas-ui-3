@@ -10,7 +10,7 @@ import DataSourcesSelector from './DataSourcesSelector'
 import AdminQuickPanel from './admin/AdminQuickPanel'
 import CaptureConsentSection from './CaptureConsentSection'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
-import { getFocusableElements, isTopmostModalDialog } from '../utils/focusTrap'
+import { useFocusTrap } from '../utils/focusTrap'
 import { describeAutoApprove } from '../utils/toolApproval'
 import { FOCUS_RING } from '../utils/focusRing'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
@@ -48,7 +48,6 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // soon as the user picks a tab themselves.
   const pendingTabRef = useRef(null)
   const dialogRef = useRef(null)
-  const closeButtonRef = useRef(null)
   // The admin tab is mounted on first visit and kept mounted after that: it
   // fetches on mount (so mounting it eagerly would cost every admin an admin
   // config fetch), but unmounting it on a tab switch throws away the save-result
@@ -372,82 +371,22 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   }
 
   // This panel is now the only route to tools, theme and admin controls, so it
-  // carries proper dialog semantics: focus moves in on open, Escape closes
-  // (through the same unsaved guard as the X), and Tab is trapped inside.
+  // carries proper dialog semantics (issue #839, unified into the shared hook
+  // in #1039): focus moves in on open -- the close button is the dialog's
+  // first focusable -- Escape closes through the same unsaved-work guard as
+  // the X, and Tab is trapped inside, scoped to the innermost open dialog so
+  // a nested prompt (unsaved changes, token input, admin config editor)
+  // keeps both keys until it is answered. Focus returns to whoever had it
+  // before the panel opened once it closes.
   //
-  // Nested modals (the unsaved-changes prompt, token input, the admin config
-  // editor) render inside this one and mark themselves `role="dialog"`. While
-  // one is up it owns both Escape and the trap -- closing the whole panel out
-  // from under a half-entered token, or letting Tab wander behind a prompt the
-  // user has to answer, would destroy their input.
-  const innermostDialog = useCallback(() => {
-    const node = dialogRef.current
-    if (!node) return null
-    const nested = node.querySelectorAll('[role="dialog"]')
-    return nested.length > 0 ? nested[nested.length - 1] : node
-  }, [])
-
-  // Keyed on isOpen alone: requestClose changes whenever the tools tab goes
-  // dirty, and re-running this would yank focus to Close mid-edit.
-  useEffect(() => {
-    if (!isOpen) return
-    closeButtonRef.current?.focus()
-  }, [isOpen])
-
-  useEffect(() => {
-    if (!isOpen) return undefined
-
-    const onKeyDown = (event) => {
-      const node = dialogRef.current
-      if (!node) return
-      // A modal layered on top of this panel -- the elicitation prompt --
-      // owns Escape and Tab while it is up. Without this, Escape with focus
-      // on <body> (clicking non-focusable text drops it there) closed this
-      // panel underneath the prompt.
-      if (!isTopmostModalDialog(node)) return
-      const scope = innermostDialog()
-      // Clicking non-focusable text drops focus to document.body, so the
-      // listener has to live on the document; scope by target instead, and
-      // treat "focus fell out of the panel entirely" as still ours.
-      if (event.target instanceof Node && node.contains(event.target) === false
-          && event.target !== document.body && event.target !== document.documentElement) {
-        return
-      }
-
-      if (event.key === 'Escape') {
-        // A nested overlay owns its own Escape (see useEscapeKey, which listens
-        // in the capture phase and stops propagation), so reaching here means
-        // none did -- this one is ours.
-        if (scope !== node) return
-        event.stopPropagation()
-        requestClose()
-        return
-      }
-      // Tab is trapped inside the innermost open dialog rather than switched
-      // off: standing down would let focus walk out of the overlay entirely.
-      if (event.key !== 'Tab') return
-      const focusable = getFocusableElements(scope)
-      if (focusable.length === 0) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      // Focus is outside the trapped scope (the body, after a click on plain
-      // text): pull it back in rather than letting Tab walk the page behind.
-      if (!scope.contains(document.activeElement)) {
-        event.preventDefault()
-        ;(event.shiftKey ? last : first).focus()
-        return
-      }
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [isOpen, requestClose, innermostDialog])
+  // The hook keys its effect on isOpen alone and reads onEscape through a
+  // latest ref: requestClose changes whenever a tab goes dirty, and
+  // re-running the effect would yank focus to Close mid-edit.
+  useFocusTrap({
+    containerRef: dialogRef,
+    active: isOpen,
+    onEscape: requestClose,
+  })
 
   if (!isOpen) return null
 
@@ -471,7 +410,6 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             Tools and Settings
           </h2>
           <button
-            ref={closeButtonRef}
             onClick={requestClose}
             className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
             aria-label="Close tools and settings"
