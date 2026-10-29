@@ -12,8 +12,17 @@ from fastmcp import Client
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
+from atlas.modules.mcp_tools.mcp_user_client_cache import (
+    _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
+
+# Shared with the user-client cache teardown (issue #1013 follow-up): the
+# release paths now run on live transports -- inline in the restore handler,
+# on disconnect, at run finish -- so a hung MCP server must not stall the
+# socket. Patchable in tests via monkeypatch of this module attribute.
+SESSION_CLOSE_TIMEOUT_SECONDS = _DEFAULT_USER_CLIENT_CLOSE_TIMEOUT_SECONDS
 
 
 class SessionStore(Protocol):
@@ -62,7 +71,15 @@ class ManagedSession:
         if self._opened and not self._closed:
             self._closed = True
             try:
-                await self._client.__aexit__(None, None, None)
+                await asyncio.wait_for(
+                    self._client.__aexit__(None, None, None),
+                    timeout=SESSION_CLOSE_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Timed out closing MCP session after %.1fs",
+                    SESSION_CLOSE_TIMEOUT_SECONDS,
+                )
             except Exception as e:
                 logger.debug("Error closing MCP session: %s", e)
 
