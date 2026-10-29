@@ -393,6 +393,25 @@ def test_conftest_import_window_guard_is_restored():
     assert dotenv.load_dotenv is not _guarded_load_dotenv
 
 
+def test_stale_guard_binding_passes_through_after_the_window(tmp_path):
+    """A ``from dotenv import load_dotenv`` binding made during the window is inert.
+
+    Restoring ``dotenv.load_dotenv`` cannot reach a module that copied the
+    guarded function into its own namespace while conftest imported
+    (``litellm.proxy.proxy_cli`` does), so the guard itself must stop refusing
+    once the window has closed.
+    """
+    from conftest import _guarded_load_dotenv  # the suite's own conftest
+
+    foreign = tmp_path / "foreign.env"
+    foreign.write_text("ATLAS_1070_STALE_BINDING_SENTINEL=loaded\n")
+
+    with mock.patch.dict(os.environ):
+        os.environ.pop("ATLAS_1070_STALE_BINDING_SENTINEL", None)
+        assert _guarded_load_dotenv(dotenv_path=foreign) is True
+        assert os.environ.get("ATLAS_1070_STALE_BINDING_SENTINEL") == "loaded"
+
+
 def test_foreign_dotenv_is_refused_during_the_import_window(tmp_path):
     """A .env outside the checkout must not load while conftest imports.
 
@@ -460,7 +479,7 @@ def _call_bare_load_dotenv_from(caller_file: Path):
     return namespace["result"]
 
 
-def test_bare_load_dotenv_resolves_the_checkout_env_from_any_caller(tmp_path):
+def test_bare_load_dotenv_resolves_the_checkout_env_from_any_caller(tmp_path, monkeypatch):
     """A no-argument ``load_dotenv()`` resolves the checkout's ``.env``.
 
     The guard's ``find_dotenv`` walk starts at conftest's directory, not the
@@ -468,50 +487,60 @@ def test_bare_load_dotenv_resolves_the_checkout_env_from_any_caller(tmp_path):
     elsewhere) still gets the checkout's own ``.env`` -- which the mock-admin
     tests rely on for ``DEBUG_MODE``. A caller-origin walk would instead pick
     up the caller's nearest ancestor ``.env``; pin the current behavior.
+
+    The real loader is replaced by a recorder, so the test asserts which file
+    the guard resolved without depending on what the developer's ``.env``
+    contains.
     """
     from conftest import _block_foreign_dotenv_loads, _restore_dotenv_loads
 
-    checkout = Path(sys.modules["conftest"].project_root)
-    checkout_env = checkout / ".env"
+    conftest = sys.modules["conftest"]
+    checkout_env = Path(conftest.project_root) / ".env"
     if not checkout_env.is_file():
         pytest.skip("checkout has no .env to resolve")
     foreign = tmp_path / "site-packages" / "lib"
     foreign.mkdir(parents=True)
-    (tmp_path / ".env").write_text("AUTH_STATIC_GROUPS=evil:evil@example.com\n")
+    (tmp_path / ".env").write_text("ATLAS_1070_FOREIGN_SENTINEL=loaded\n")
     caller_file = foreign / "__init__.py"
     caller_file.write_text("")
+    loaded = []
+    monkeypatch.setattr(
+        conftest, "_real_load_dotenv", lambda *a, **kw: loaded.append(kw.get("dotenv_path")) or True
+    )
 
-    with mock.patch.dict(os.environ):
-        os.environ.pop("AUTH_STATIC_GROUPS", None)
-        _block_foreign_dotenv_loads()
-        try:
-            assert _call_bare_load_dotenv_from(caller_file) is True
-            assert os.environ.get("AUTH_STATIC_GROUPS") is None
-        finally:
-            _restore_dotenv_loads()
+    _block_foreign_dotenv_loads()
+    try:
+        assert _call_bare_load_dotenv_from(caller_file) is True
+    finally:
+        _restore_dotenv_loads()
+    assert [Path(p).resolve() for p in loaded] == [checkout_env.resolve()]
 
 
 def test_bare_load_dotenv_refuses_an_ancestor_env_outside_the_checkout(tmp_path, monkeypatch):
     """Without a checkout ``.env``, a bare call's walk lands outside and is refused.
 
     This is the clean-worktree case the guard exists for: the upward walk
-    passes the checkout root and finds a foreign ancestor's ``.env``.
+    passes the checkout root and finds a foreign ancestor's ``.env``. The walk
+    result is pinned to a planted foreign file so the refusal is exercised on
+    every machine, whether or not a real ancestor ``.env`` exists.
     """
     from conftest import _block_foreign_dotenv_loads, _restore_dotenv_loads
 
-    tests_dir = Path(sys.modules["conftest"].__file__).resolve().parent
-    # Treat a directory *below* conftest as the checkout, so every ``.env``
-    # the walk can find (from atlas/tests upward) lies outside it.
-    monkeypatch.setattr(sys.modules["conftest"], "project_root", tmp_path / "checkout")
+    conftest = sys.modules["conftest"]
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    foreign_env = tmp_path / ".env"
+    foreign_env.write_text("ATLAS_1070_FOREIGN_SENTINEL=loaded\n")
     caller_file = tmp_path / "caller.py"
     caller_file.write_text("")
-    assert (tmp_path / "checkout") not in tests_dir.parents
+    monkeypatch.setattr(conftest, "project_root", checkout)
+    monkeypatch.setattr(conftest, "_real_find_dotenv", lambda **kw: str(foreign_env))
 
     with mock.patch.dict(os.environ):
+        os.environ.pop("ATLAS_1070_FOREIGN_SENTINEL", None)
         _block_foreign_dotenv_loads()
         try:
-            before = dict(os.environ)
             assert _call_bare_load_dotenv_from(caller_file) is False
-            assert dict(os.environ) == before
         finally:
             _restore_dotenv_loads()
+        assert os.environ.get("ATLAS_1070_FOREIGN_SENTINEL") is None

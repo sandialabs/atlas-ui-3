@@ -176,8 +176,13 @@ def _guarded_load_dotenv(*args, **kwargs):
     imports -- starting from the caller was tried and failed them. The
     conftest origin therefore resolves the checkout's own ``.env`` when there
     is one, and an ancestor's (refused) when there is not.
+
+    Once the window closes the guard is a pure pass-through: a module that
+    bound the name with ``from dotenv import load_dotenv`` during the window
+    (``litellm.proxy.proxy_cli`` does) keeps this function object for the
+    whole session, and must see the real behavior from then on.
     """
-    if kwargs.get("stream") is not None:
+    if not _dotenv_guard_active or kwargs.get("stream") is not None:
         return _real_load_dotenv(*args, **kwargs)
     dotenv_path = kwargs.get("dotenv_path")
     if dotenv_path is None and args:
@@ -193,12 +198,19 @@ def _guarded_load_dotenv(*args, **kwargs):
     return _real_load_dotenv(*args, **kwargs)
 
 
+_dotenv_guard_active = False
+
+
 def _block_foreign_dotenv_loads() -> None:
+    global _dotenv_guard_active
+    _dotenv_guard_active = True
     dotenv.main.load_dotenv = _guarded_load_dotenv
     dotenv.load_dotenv = _guarded_load_dotenv
 
 
 def _restore_dotenv_loads() -> None:
+    global _dotenv_guard_active
+    _dotenv_guard_active = False
     dotenv.main.load_dotenv = _real_load_dotenv
     dotenv.load_dotenv = _real_load_dotenv
 
