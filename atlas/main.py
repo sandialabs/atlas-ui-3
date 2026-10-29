@@ -618,6 +618,16 @@ async def _release_finished_run(
     disconnect no longer tear those down while work is in flight, and this must
     not reintroduce that by the back door.
 
+    That per-run release is deliberate (issue #1013 made it real): a
+    conversation's MCP sessions and per-user clients are treated as owned by
+    the runs executing against it, not by the wall-clock lifetime of the tab.
+    A stateful MCP server therefore starts each turn with fresh sessions
+    whenever the previous turn's run was the last one in that conversation;
+    state that must survive across turns belongs in the server's own durable
+    store keyed by the conversation, not in the MCP session handle. Stateless
+    servers are unaffected. The next turn reopens sessions transparently, so
+    only server-side state carried in the session itself is lost.
+
     Never raises: this runs in the cleanup path of a task that may already be
     unwinding from a cancellation, and a failure to tidy up must not replace
     the outcome the user is waiting to see.

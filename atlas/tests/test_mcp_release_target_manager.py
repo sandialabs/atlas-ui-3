@@ -9,16 +9,20 @@ process.
 
 These tests pin:
 - the package-level singletons are gone (``mcp_tool_manager``, ``llm_caller``);
-- every release path targets the chat service's own ``tool_manager``; and
+- every release path targets the chat service's own ``tool_manager``;
 - a released conversation's entries are actually gone from the live
-  manager's ``_session_manager`` and ``_user_clients``.
+  manager's ``_session_manager`` and ``_user_clients``, with the underlying
+  clients closed; and
+- the restore path releases over a real WebSocket connection.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 
 import atlas.modules.llm as llm_package
 import atlas.modules.mcp_tools as mcp_tools_package
@@ -67,7 +71,7 @@ class _FakeSessionRepo:
         self.deleted.append(session_id)
 
 
-def _live_manager_with_entries():
+def _live_manager_with_entries() -> SimpleNamespace:
     """A real MCPToolManager holding one session and one cached client.
 
     Built via ``__new__`` (the established pattern in
@@ -81,20 +85,45 @@ def _live_manager_with_entries():
 
     user_key = normalize_user_email(USER)
     session_key = (user_key, CONVERSATION_ID, "server-a")
+    client_key = (user_key, "server-a", CONVERSATION_ID)
 
     mcp_client = MagicMock()
     mcp_client.__aexit__ = AsyncMock(return_value=False)
     managed = ManagedSession(mcp_client)
     managed._opened = True
-
     manager._session_manager._sessions[session_key] = managed
     manager._session_manager._conv_index[CONVERSATION_ID] = {session_key}
 
     http_client = MagicMock()
     http_client.__aexit__ = AsyncMock(return_value=False)
-    manager._user_clients[(user_key, "server-a", CONVERSATION_ID)] = http_client
+    manager._user_clients[client_key] = http_client
 
-    return manager, session_key, (user_key, "server-a", CONVERSATION_ID)
+    return SimpleNamespace(
+        manager=manager,
+        session_key=session_key,
+        client_key=client_key,
+        mcp_client=mcp_client,
+        http_client=http_client,
+    )
+
+
+def _assert_released(entries: SimpleNamespace) -> None:
+    """The conversation's entries are gone and both clients were closed."""
+    manager = entries.manager
+    assert entries.session_key not in manager._session_manager._sessions
+    assert CONVERSATION_ID not in manager._session_manager._conv_index
+    assert entries.client_key not in manager._user_clients
+    # Closed, not merely dropped from the dicts.
+    assert entries.mcp_client.__aexit__.await_count >= 1
+    assert entries.http_client.__aexit__.await_count >= 1
+
+
+def _assert_intact(entries: SimpleNamespace) -> None:
+    """The conversation's entries are still held by the runtime manager."""
+    manager = entries.manager
+    assert entries.session_key in manager._session_manager._sessions
+    assert CONVERSATION_ID in manager._session_manager._conv_index
+    assert entries.client_key in manager._user_clients
 
 
 def _service_for(manager):
@@ -126,15 +155,13 @@ async def test_cleanup_releases_on_service_tool_manager():
     """
     from main import cleanup_disconnected_session
 
-    manager, session_key, client_key = _live_manager_with_entries()
-    service = _service_for(manager)
+    entries = _live_manager_with_entries()
+    service = _service_for(entries.manager)
     session_id = uuid4()
 
     await cleanup_disconnected_session(service, session_id, USER, {"task": None})
 
-    assert session_key not in manager._session_manager._sessions
-    assert CONVERSATION_ID not in manager._session_manager._conv_index
-    assert client_key not in manager._user_clients
+    _assert_released(entries)
 
 
 @pytest.mark.asyncio
@@ -142,9 +169,9 @@ async def test_cleanup_release_failure_does_not_break_teardown():
     """A release error is swallowed; ``end_session`` still runs."""
     from main import cleanup_disconnected_session
 
-    manager, _session_key, _client_key = _live_manager_with_entries()
-    manager.release_sessions = AsyncMock(side_effect=RuntimeError("boom"))
-    service = _service_for(manager)
+    entries = _live_manager_with_entries()
+    entries.manager.release_sessions = AsyncMock(side_effect=RuntimeError("boom"))
+    service = _service_for(entries.manager)
     session_id = uuid4()
 
     # Must not raise, and the session must still be ended.
@@ -157,11 +184,17 @@ async def test_cleanup_release_failure_does_not_break_teardown():
 
 @pytest.mark.asyncio
 async def test_release_finished_run_releases_on_service_tool_manager():
-    """``_release_finished_run`` must release on the chat service's manager."""
+    """``_release_finished_run`` must release on the chat service's manager.
+
+    Per-run teardown is the documented #884 contract: a conversation's MCP
+    sessions and per-user clients are owned by the runs executing against
+    them, so the last run of a conversation releases them. Pinned here so the
+    behaviour stays visible (stateful MCP servers start each turn fresh).
+    """
     from main import _release_finished_run
 
-    manager, session_key, client_key = _live_manager_with_entries()
-    service = _service_for(manager)
+    entries = _live_manager_with_entries()
+    service = _service_for(entries.manager)
     session_id = uuid4()
 
     registry = MagicMock()
@@ -177,9 +210,7 @@ async def test_release_finished_run_releases_on_service_tool_manager():
         connection_session_id=None,
     )
 
-    assert session_key not in manager._session_manager._sessions
-    assert CONVERSATION_ID not in manager._session_manager._conv_index
-    assert client_key not in manager._user_clients
+    _assert_released(entries)
 
 
 @pytest.mark.asyncio
@@ -187,8 +218,8 @@ async def test_release_finished_run_keeps_sessions_while_a_run_owns_the_conversa
     """No release while another run still owns the conversation (issue #884)."""
     from main import _release_finished_run
 
-    manager, session_key, client_key = _live_manager_with_entries()
-    service = _service_for(manager)
+    entries = _live_manager_with_entries()
+    service = _service_for(entries.manager)
     session_id = uuid4()
 
     registry = MagicMock()
@@ -204,8 +235,7 @@ async def test_release_finished_run_keeps_sessions_while_a_run_owns_the_conversa
         connection_session_id=None,
     )
 
-    assert session_key in manager._session_manager._sessions
-    assert client_key in manager._user_clients
+    _assert_intact(entries)
 
 
 # --- the shared helper ---------------------------------------------------------
@@ -248,6 +278,166 @@ async def test_helper_tolerates_a_missing_tool_manager():
         config_manager=MagicMock(),
     )
     await _release_conversation_mcp_sessions(service, CONVERSATION_ID, USER)
+
+
+# --- restore, over a real WebSocket --------------------------------------------
+#
+# The restore release lives inline in ``websocket_endpoint``, so these tests
+# drive the real handler: a resumed session whose context holds a previous
+# conversation id, then a ``restore_conversation`` frame. A MagicMock release
+# would silently swallow a broken path (the handler wraps it in try/except),
+# so the service's tool manager is an AsyncMock and the test asserts the
+# await directly.
+
+
+class _RestoreRepo:
+    """In-memory session repository for the restore round trips."""
+
+    def __init__(self):
+        self._sessions = {}
+
+    async def get(self, session_id):
+        return self._sessions.get(str(session_id))
+
+    async def create(self, session):
+        self._sessions[str(session.id)] = session
+        return session
+
+    async def update(self, session):
+        self._sessions[str(session.id)] = session
+        return session
+
+
+class _RunRegistryMock:
+    """Run registry double: configurable ownership, everything else empty."""
+
+    def __init__(self, active_conversations=()):
+        self._active = set(active_conversations)
+
+    def set_max_concurrent_runs_per_user(self, _limit):
+        return None
+
+    max_concurrent_runs_per_user = 3
+
+    def add_listener(self, _user_email, _callback):
+        return lambda: None
+
+    def snapshot_for_user(self, _user_email):
+        return []
+
+    def active_for_user(self, _user_email):
+        return []
+
+    def active_for_conversation(self, conversation_id, _user_email):
+        return MagicMock() if conversation_id in self._active else None
+
+    def pending_requests_for_conversation(self, _conversation_id, _user_email):
+        return []
+
+
+@pytest.fixture
+def mock_app_factory():
+    """``main.app_factory`` mocked, handing back a real ChatService."""
+    from atlas.application.chat.service import ChatService
+
+    repo = _RestoreRepo()
+    with patch("main.app_factory") as factory:
+        config = MagicMock()
+        config.app_settings.debug_mode = False
+        config.app_settings.auth_user_header = "X-User-Email"
+        config.app_settings.feature_proxy_secret_enabled = False
+        factory.get_config_manager.return_value = config
+
+        created = []
+
+        def _service(_connection):
+            tool_manager = MagicMock()
+            tool_manager.release_sessions = AsyncMock()
+            service = ChatService(
+                llm=MagicMock(),
+                tool_manager=tool_manager,
+                connection=MagicMock(),
+                config_manager=MagicMock(),
+                session_repository=repo,
+            )
+            created.append(service)
+            return service
+
+        factory.create_chat_service.side_effect = _service
+        with patch("main.get_run_registry", return_value=_RunRegistryMock()):
+            yield SimpleNamespace(factory=factory, repo=repo, created=created)
+
+
+def _restorable_session(conv_id):
+    """A resumable session whose context still points at ``conv_id``."""
+    session = Session(id=uuid4(), user_email=USER, active=False)
+    session.context["conversation_id"] = conv_id
+    return session
+
+
+def _read_terminal_frame(ws, max_frames=10):
+    """Read frames until the restore answers with a non-streaming frame."""
+    for _ in range(max_frames):
+        frame = ws.receive_json()
+        if frame.get("type") not in ("token_stream", "intermediate_update"):
+            return frame
+    raise AssertionError("restore never answered with a terminal frame")
+
+
+def test_restore_releases_the_previous_conversation(mock_app_factory):
+    """Restoring another conversation releases the old conversation's sessions.
+
+    Issue #1013: this path used to release on the package-level singleton, so
+    the live manager's entries survived the conversation switch.
+    """
+    from main import app
+
+    session = _restorable_session("conv-old")
+    mock_app_factory.repo._sessions[str(session.id)] = session
+
+    client = TestClient(app)
+    with client.websocket_connect(f"/ws?resume_session={session.id}", headers={"X-User-Email": USER}) as ws:
+        assert ws.receive_json()["type"] == "connection_session"
+        ws.send_json(
+            {
+                "type": "restore_conversation",
+                "conversation_id": "conv-new",
+                "messages": [],
+            }
+        )
+        _read_terminal_frame(ws)
+
+        tool_manager = mock_app_factory.created[-1].tool_manager
+        tool_manager.release_sessions.assert_awaited_once_with("conv-old", user_email=USER)
+
+
+def test_restore_keeps_sessions_while_a_run_owns_the_old_conversation(mock_app_factory):
+    """No release when a run still owns the old conversation (issue #884)."""
+    from main import app
+
+    session = _restorable_session("conv-old")
+    mock_app_factory.repo._sessions[str(session.id)] = session
+
+    registry = _RunRegistryMock(active_conversations={"conv-old"})
+    with patch("main.get_run_registry", return_value=registry):
+        client = TestClient(app)
+        with client.websocket_connect(f"/ws?resume_session={session.id}", headers={"X-User-Email": USER}) as ws:
+            assert ws.receive_json()["type"] == "connection_session"
+            ws.send_json(
+                {
+                    "type": "restore_conversation",
+                    "conversation_id": "conv-new",
+                    "messages": [],
+                }
+            )
+            _read_terminal_frame(ws)
+
+            tool_manager = mock_app_factory.created[-1].tool_manager
+            # Asserted inside the connection: the restore block itself must
+            # not release while the run owns the old conversation. (After the
+            # restore succeeds the disconnect teardown legitimately releases
+            # conv-new -- the connection now holds it and nothing runs there.)
+            tool_manager.release_sessions.assert_not_called()
 
 
 # --- guard against the old bug shape -------------------------------------------
