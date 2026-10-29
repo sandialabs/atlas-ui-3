@@ -134,7 +134,14 @@ soon as it is admitted -- like `atlas_launch`, it never waits for the reply, whi
   model, tools, data sources, workspace and compliance level -- on its `RunRecord` (server-side
   only, never in the public dict). A follow-up reuses it, but re-checks every part against the
   caller now: the model through `check_model_access`, the tools through tool authorization, the
-  data sources through RAG discovery. For tools the follow-up records the narrowed list, so a
+  data sources through RAG discovery, and the workspace by re-resolving the saved id through the
+  caller-scoped workspace repository (#1079). The workspace check exists because nothing
+  downstream re-examines it: `ChatService` treats `workspace_id` as advisory metadata. Resolution
+  is by id and never by name, so a workspace deleted and recreated under the same name is not
+  substituted for the one the child was launched under; a rename is fine (the id still resolves,
+  and the follow-up carries the current name); and only the workspace's *identity* is carried
+  forward -- its current config is not read, so selections added to the workspace since the
+  launch cannot widen the child. For tools the follow-up records the narrowed list, so a
   tool lost between turns stays lost for that sub-conversation even if access comes back later.
   Data sources are the exception: each follow-up re-authorizes the *launch-time* list, because
   a source is authorized again whenever the child queries it (carrying the list forward widens
@@ -159,7 +166,10 @@ soon as it is admitted -- like `atlas_launch`, it never waits for the reply, whi
   (failed or cancelled before its first save) is refused too: there is no transcript to
   continue. A
   follow-up from an incognito turn, or from a turn whose compliance level differs from the one
-  the child was launched under, is refused for the same reasons a launch is.
+  the child was launched under, is refused for the same reasons a launch is. A follow-up whose
+  saved workspace is gone -- deleted, or no longer owned or visible to the caller -- is refused
+  too (#1079), before anything is admitted, with a refusal that says to launch a new
+  sub-conversation rather than naming a replacement workspace.
 - **Limits and approval** go through the same `_start_child_run` helper as a launch, so the
   follow-up counts against the per-run child cap while it runs, admission stays atomic, and
   approving the `atlas_follow_up` call pre-approves the turn's user-level tools.
