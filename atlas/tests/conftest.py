@@ -17,6 +17,206 @@ if str(atlas_root) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# --- Shell-environment isolation -----------------------------------------
+# The guards below pin specific variables, but ``AppSettings`` reads the whole
+# process environment, so *any* settings-derived variable exported in the
+# invoking shell reaches it (issue #1070). A terminal that inherited a
+# deployment's environment (a tmux server launched from a deployment context,
+# a sourced env file) then changes test results -- e.g. an exported
+# ``AUTH_STATIC_GROUPS`` adds a group to every ``static_group_members``
+# assertion, and an exported ``ADMIN_USERS`` suppresses the "no authorization
+# source" warning -- with the code under test untouched.
+#
+# Scrub every variable that maps to an ``AppSettings`` field, derived from the
+# model itself so a newly added setting cannot silently reopen the channel.
+# Tests that need a value opt in via ``monkeypatch.setenv``, exactly like the
+# session-level pins below. This is a test-isolation guard, not a product
+# behavior change -- the scrub only touches the test session's process
+# environment.
+from pydantic import AliasChoices  # noqa: E402
+
+from atlas.modules.config.settings import AppSettings  # noqa: E402
+
+# Variables the test harness itself provides deliberately, which must survive
+# the scrub: CI's debug/production legs set ``DEBUG_MODE`` per run with
+# ``docker run -e`` (higher priority than .env, which is the point),
+# ``test/run_tests.sh`` exports ``ENVIRONMENT`` and points
+# ``MCP_CONFIG_FILE`` at an absent ``mcp-test.json`` so the shared app lifespan
+# does not discover and start every bundled MCP server (issue #1057).
+_HARNESS_PROVIDED_ENV_VARS = frozenset({"DEBUG_MODE", "ENVIRONMENT", "MCP_CONFIG_FILE"})
+
+# Deployment-style variables consumed outside ``AppSettings``: the CLI
+# entry points resolve their .env via ``ATLAS_ENV_FILE``, so an exported value
+# would leak a deployment's file into CLI tests that spawn subprocesses.
+_EXTRA_ISOLATED_ENV_VARS = ("ATLAS_ENV_FILE",)
+
+
+def _appsettings_env_names() -> frozenset:
+    """Every environment variable name ``AppSettings`` could read.
+
+    pydantic-settings matches a field by its ``validation_alias`` when one is
+    declared and by the upper-cased field name otherwise (``case_sensitive``
+    defaults to false), so mirror exactly that. Consumers must compare these
+    names against ``os.environ`` keys case-insensitively: pydantic-settings
+    reads ``auth_static_groups`` or ``Auth_Static_Groups`` exactly as it reads
+    ``AUTH_STATIC_GROUPS``.
+    """
+    names = set()
+    for name, field in AppSettings.model_fields.items():
+        alias = field.validation_alias
+        if alias is None:
+            names.add(name.upper())
+        elif isinstance(alias, str):
+            names.add(alias)
+        elif isinstance(alias, AliasChoices):
+            names.update(choice for choice in alias.choices if isinstance(choice, str))
+    return frozenset(names)
+
+
+def _scrub_session_environment() -> None:
+    """Remove deployment-style variables from ``os.environ`` (idempotent).
+
+    A module-level function rather than inline statements so the guard is
+    unit-testable: ``test_env_isolation.py`` plants variables and re-runs it
+    under ``mock.patch.dict`` to prove the coverage stays complete.
+    """
+    # Compare keys case-insensitively: pydantic-settings matches environment
+    # keys regardless of case (``case_sensitive`` defaults to false), so an
+    # exported ``auth_static_groups`` or ``Auth_Static_Groups`` reaches
+    # ``AppSettings`` exactly as ``AUTH_STATIC_GROUPS`` would (observed live).
+    scrub_names = {name.lower() for name in _appsettings_env_names() - _HARNESS_PROVIDED_ENV_VARS}
+    scrub_names.update(name.lower() for name in _EXTRA_ISOLATED_ENV_VARS)
+    harness_names = {name.lower() for name in _HARNESS_PROVIDED_ENV_VARS}
+    for key in list(os.environ):
+        lowered = key.lower()
+        if lowered in scrub_names:
+            os.environ.pop(key, None)
+        elif lowered in harness_names and (
+            key not in _HARNESS_PROVIDED_ENV_VARS or os.environ.get(key) == ""
+        ):
+            # The keep-list stays exact-case: the harness provides
+            # ``DEBUG_MODE``/``ENVIRONMENT``/``MCP_CONFIG_FILE`` spelled
+            # exactly as listed (CI's ``docker run -e``, run_tests.sh's
+            # exports), so any other case variant of those names is a foreign
+            # export and is dropped. An exported-but-empty value
+            # (``DEBUG_MODE=``) is never what the harness sets, and pydantic
+            # cannot parse '' as a bool -- it fails collection outright. Drop
+            # both forms.
+            os.environ.pop(key, None)
+    # ``PYTHONPATH`` is filtered rather than dropped: entries inside the
+    # checkout under test are legitimate (docs/developer/test-isolation.md
+    # tells contributors to export ``$ROOT:$ROOT/scripts`` for the
+    # order/parallel runs, and CI's reverse-order leg needs the scripts dir to
+    # load ``-p pytest_test_order``), while an entry pointing at *another*
+    # checkout makes test-spawned subprocesses import that checkout instead of
+    # this one -- the editable install already resolves ``atlas`` here without
+    # any PYTHONPATH, so foreign entries buy nothing and are dropped.
+    kept = []
+    for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        if not entry.strip():
+            continue
+        try:
+            resolved = Path(entry).resolve()
+        except OSError:  # pragma: no cover - unresolvable entry, drop it
+            continue
+        if resolved == project_root.resolve() or project_root.resolve() in resolved.parents:
+            kept.append(str(resolved))
+    if kept:
+        os.environ["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(kept))
+    else:
+        os.environ.pop("PYTHONPATH", None)
+
+
+_scrub_session_environment()
+
+# --- dotenv import-window guard ------------------------------------------
+# Imports executed by this conftest itself must not be able to load a FOREIGN
+# .env into ``os.environ``: ``litellm`` calls bare ``load_dotenv()`` at import
+# (``litellm/__init__.py``), and python-dotenv's ``find_dotenv`` then walks up
+# parent directories -- so a checkout (or worktree) without its own ``.env``
+# picks up whatever ``.env`` an ancestor directory happens to contain. Values
+# loaded that way re-enter ``os.environ`` *after* the scrub above (a foreign
+# ``CAPABILITY_TOKEN_SECRET`` failed conftest import outright this way), so
+# the scrub alone cannot hold.
+#
+# The guard is deliberately selective rather than a blanket block: the
+# checkout's own ``.env`` stays load-bearing exactly as before (CI bakes
+# ``/app/.env``, and the app-import chain inside conftest reads its values --
+# e.g. ``DEBUG_MODE`` -- during these imports, because ``AppSettings`` itself
+# has env-file loading disabled). Only a resolved path OUTSIDE the checkout
+# under test is refused. The real function is restored at the bottom of this
+# module, before any test module is imported, so tests that exercise dotenv
+# behavior (CLI env-file handling) keep the real implementation. This is a
+# test-isolation guard, not a product behavior change.
+import dotenv  # noqa: E402
+
+_real_load_dotenv = dotenv.main.load_dotenv
+_real_find_dotenv = dotenv.main.find_dotenv
+
+
+def _dotenv_path_is_inside_checkout(path) -> bool:
+    resolved = Path(path).resolve()
+    root = project_root.resolve()
+    return resolved == root or root in resolved.parents
+
+
+def _guarded_load_dotenv(*args, **kwargs):
+    """Refuse ``load_dotenv`` calls that would load a .env from outside the
+    checkout; pass everything else through to the real implementation.
+
+    A call with no path (the bare ``load_dotenv()`` litellm makes) resolves
+    the file with python-dotenv's upward walk, then applies the same
+    inside-the-checkout rule. Note the walk's origin: ``find_dotenv`` starts
+    from the first stack frame outside python-dotenv, which with this guard in
+    between is *this file*, so the walk starts at ``atlas/tests/`` rather than
+    at the real caller (e.g. ``site-packages/litellm/``). That is deliberate:
+    a venv outside the checkout (or a worktree's symlinked ``.venv``) means a
+    caller-origin walk never reaches the checkout's ``.env``, and the suite's
+    mock-admin tests depend on the ``DEBUG_MODE`` it supplies during these
+    imports -- starting from the caller was tried and failed them. The
+    conftest origin therefore resolves the checkout's own ``.env`` when there
+    is one, and an ancestor's (refused) when there is not.
+
+    Once the window closes the guard is a pure pass-through: a module that
+    bound the name with ``from dotenv import load_dotenv`` during the window
+    (``litellm.proxy.proxy_cli`` does) keeps this function object for the
+    whole session, and must see the real behavior from then on.
+    """
+    if not _dotenv_guard_active or kwargs.get("stream") is not None:
+        return _real_load_dotenv(*args, **kwargs)
+    dotenv_path = kwargs.get("dotenv_path")
+    if dotenv_path is None and args:
+        dotenv_path = args[0]
+    if dotenv_path is None:
+        dotenv_path = _real_find_dotenv(usecwd=False)
+        if not dotenv_path:
+            return False
+        if not args:
+            kwargs["dotenv_path"] = dotenv_path
+    if not _dotenv_path_is_inside_checkout(dotenv_path):
+        return False
+    return _real_load_dotenv(*args, **kwargs)
+
+
+_dotenv_guard_active = False
+
+
+def _block_foreign_dotenv_loads() -> None:
+    global _dotenv_guard_active
+    _dotenv_guard_active = True
+    dotenv.main.load_dotenv = _guarded_load_dotenv
+    dotenv.load_dotenv = _guarded_load_dotenv
+
+
+def _restore_dotenv_loads() -> None:
+    global _dotenv_guard_active
+    _dotenv_guard_active = False
+    dotenv.main.load_dotenv = _real_load_dotenv
+    dotenv.load_dotenv = _real_load_dotenv
+
+
+_block_foreign_dotenv_loads()
+
 # --- Telemetry isolation -------------------------------------------------
 # OpenTelemetry's ``trace.set_tracer_provider`` is first-writer-wins: once
 # a provider has been registered (e.g. by ``OpenTelemetryConfig`` during
@@ -77,8 +277,8 @@ os.environ["MCP_TOKEN_STORAGE_DIR"] = f"{_STATE_TMPDIR}/tokens"
 # Disable env-file loading for the whole test session so AppSettings reads
 # only the process environment, which tests fully control via monkeypatch /
 # os.environ. This is a test-isolation guard, not a product behavior change.
-from atlas.modules.config.settings import AppSettings  # noqa: E402
-
+# (``AppSettings`` is imported above, before the scrub, purely to derive the
+# field-to-env-var mapping; importing it does not read the environment.)
 AppSettings.model_config["env_file"] = None
 
 # --- Compliance-feature isolation ----------------------------------------
@@ -187,6 +387,12 @@ _ = atlas.modules.llm.litellm_caller.LiteLLMCaller  # noqa: E402
 import pytest  # noqa: E402
 
 from atlas.modules.config.config_manager import config_manager as _config_manager  # noqa: E402
+
+# Conftest's own imports are done: hand dotenv back to the suite. Everything
+# imported below this line -- and every test module after collection starts --
+# sees the real ``load_dotenv``, so dotenv behavior tests and the CLI env-file
+# tests exercise the real implementation.
+_restore_dotenv_loads()
 
 # ConfigManager caches each lazily-built config on a private (underscore-prefixed)
 # instance attribute. Rather than hand-maintain a list that silently drifts when a

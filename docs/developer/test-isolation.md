@@ -1,6 +1,6 @@
 # Test Isolation
 
-Last updated: 2026-10-14
+Last updated: 2026-10-27
 
 The Python suite runs in a single process, in one pass, with no per-test
 forking, and is also supported under `pytest-xdist` for parallel execution
@@ -20,6 +20,8 @@ guards are in place even for state that app code establishes at *import* time.
 | Guard | What it prevents |
 | --- | --- |
 | `AppSettings.model_config["env_file"] = None` | The developer's `.env` changing results from machine to machine |
+| Settings-derived env vars scrubbed (`_scrub_session_environment`) | Deployment-style variables exported in the invoking shell (`AUTH_STATIC_GROUPS`, `ADMIN_USERS`, `ADMIN_GROUP`, `APP_CONFIG_DIR`, `OIDC_*`, `FEATURE_*`, ...) changing test results (issue #1070) |
+| Foreign `.env` refused during conftest imports (`_guarded_load_dotenv`) | Import-time dotenv loads (bare `load_dotenv()` in `litellm`) pulling a foreign `.env` found by `find_dotenv`'s parent-directory walk back into the session after the scrub; the checkout's own `.env` stays load-bearing |
 | `APP_LOG_DIR` -> temp dir | Test spans and security-risk records landing in the repository's `logs/` |
 | `CHAT_HISTORY_DB_URL`, `RUNTIME_FEEDBACK_DIR`, `RUNTIME_CAPTURE_DIR`, `MCP_TOKEN_STORAGE_DIR` -> temp dirs | Tests reading and writing the developer's real `data/`, `runtime/` and `config/secure/` state |
 | `AUTH_GROUP_CHECK_URL` / `AUTH_GROUP_CHECK_API_KEY` cleared | Authorization tests calling a live external authorizer |
@@ -39,6 +41,61 @@ they do not make each test's store empty. A test that needs a store of its own
 should build one against `tmp_path` and pin it for the duration, or reset the
 relevant singleton (see `reset_engine` in
 `atlas/modules/chat_history/database.py`).
+
+### Shell-environment scrub
+
+The `.env` guard only stops the *file*; pydantic-settings also reads the
+process environment, so a terminal that inherited a deployment's environment
+(a tmux server launched from a deployment context, a sourced env file) would
+otherwise change results with the code under test untouched. At import time
+conftest pops every variable that maps to an `AppSettings` field, derived from
+the model itself so newly added settings cannot silently reopen the channel
+(issue #1070). The pop matches `os.environ` keys case-insensitively, because
+pydantic-settings matches them case-insensitively too: an exported
+`auth_static_groups` reaches `AppSettings` exactly as `AUTH_STATIC_GROUPS`
+would. Three variables are keep-listed because the test harness
+provides them deliberately: `DEBUG_MODE` (CI's per-leg `docker run -e
+DEBUG_MODE=...`), `ENVIRONMENT`, and `MCP_CONFIG_FILE` (`run_tests.sh` points
+it at an absent `mcp-test.json` so the shared app lifespan does not start
+every bundled MCP server). The keep-list is exact-case — the harness provides
+those spellings, so any other case variant of those names is a foreign export
+and is dropped, as is an exported-but-empty value (`DEBUG_MODE=` fails
+pydantic's bool parsing outright). `ATLAS_ENV_FILE` is popped as well, and
+`PYTHONPATH` is filtered to entries inside the checkout so test-spawned
+subprocesses cannot resolve `import atlas` to another checkout. Tests opt
+back in per test via `monkeypatch.setenv`, as with every other session-level
+pin.
+
+**The `PYTHONPATH` filter protects subprocesses, not the pytest process
+itself.** A Python interpreter builds `sys.path` from `PYTHONPATH` at
+startup, before conftest runs, so an entry exported in the invoking shell is
+already importable inside the pytest process no matter what conftest pops
+later (conftest does put this checkout first on `sys.path`, which keeps
+`import atlas` resolving here). `test/atlas_tests.sh` closes that window for
+the wrapper path by applying the same checkout-local filter before Python
+starts. A bare `python -m pytest` keeps only conftest's subprocess
+protection — prefer the wrapper, or clear `PYTHONPATH` yourself, when a
+foreign entry is exported.
+
+**The scrub is per session, not per test.** Like the `.env` guard, it runs
+once when conftest is imported; it cannot undo variables a test sets, and
+nothing a test does re-triggers it.
+
+**Imports made by conftest itself cannot load a foreign .env.** `litellm` calls
+bare `load_dotenv()` at import time, and python-dotenv's `find_dotenv` walks up
+parent directories — a checkout without its own `.env` picks up whatever
+`.env` an ancestor directory contains (observed live: a sibling project's
+`.env` with a placeholder `CAPABILITY_TOKEN_SECRET` failed conftest import
+outright). While conftest's own imports run, `load_dotenv` refuses any file
+that resolves outside the checkout under test and passes everything else
+(including the checkout's own `.env`, which CI's baked `/app/.env` relies on)
+through to the real implementation; the real function is restored before the
+first test module is imported. A bare `load_dotenv()` that goes through the
+guard walks up from `atlas/tests/` (the guard's own file), not from the real
+caller's directory. This is deliberate: when the venv lives outside the
+checkout (or a worktree symlinks `.venv`), a walk from `site-packages/litellm/`
+never reaches the checkout's `.env`, and the mock-admin tests need the
+`DEBUG_MODE` it supplies during these imports.
 
 ## Rules for test authors
 

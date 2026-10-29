@@ -32,6 +32,53 @@ else
     echo "If tests fail due to missing packages, run: uv venv && source .venv/bin/activate && uv pip install -e '.[dev]'"
 fi
 
+# Issue #1070: filter PYTHONPATH to entries inside this checkout BEFORE the
+# interpreter starts, not only inside conftest. sys.path is built from
+# PYTHONPATH at startup, so an entry still exported here is already importable
+# inside the pytest process itself; conftest's session filter (which this does
+# not replace) protects only the subprocesses pytest spawns. The filter runs
+# with `python -I` so it is not itself exposed to the foreign paths it strips
+# (PYTHONPATH entries precede the stdlib on sys.path and could shadow it).
+# The warning fires only when entries are actually dropped, and lists just
+# those: a checkout-local PYTHONPATH ($ROOT:$ROOT/scripts) is a documented,
+# legitimate setup. A bare `python -m pytest` run keeps conftest's subprocess
+# protection only -- see docs/developer/test-isolation.md.
+if [ -n "${PYTHONPATH:-}" ]; then
+    FILTER_RESULT="$(PROJECT_ROOT="$PROJECT_ROOT" python -I - <<'PYEOF'
+import os
+from pathlib import Path
+
+root = Path(os.environ["PROJECT_ROOT"]).resolve()
+kept, dropped = [], []
+for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+    if not entry.strip():
+        continue
+    try:
+        resolved = Path(entry).resolve()
+    except OSError:
+        dropped.append(entry)
+        continue
+    if resolved == root or root in resolved.parents:
+        kept.append(str(resolved))
+    else:
+        dropped.append(entry)
+print(os.pathsep.join(dict.fromkeys(kept)))
+print(os.pathsep.join(dropped))
+PYEOF
+)"
+    KEPT_PYTHONPATH="$(printf '%s\n' "$FILTER_RESULT" | sed -n '1p')"
+    DROPPED_PYTHONPATH="$(printf '%s\n' "$FILTER_RESULT" | sed -n '2p')"
+    if [ -n "$KEPT_PYTHONPATH" ]; then
+        export PYTHONPATH="$KEPT_PYTHONPATH"
+    else
+        unset PYTHONPATH
+    fi
+    if [ -n "$DROPPED_PYTHONPATH" ]; then
+        echo "WARNING: dropped PYTHONPATH entries outside $PROJECT_ROOT:"
+        printf '%s\n' "$DROPPED_PYTHONPATH" | tr ':' '\n' | sed 's/^/  /'
+    fi
+fi
+
 # Change to atlas directory
 cd "$ATLAS_DIR"
 
