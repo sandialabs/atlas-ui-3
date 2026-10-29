@@ -77,8 +77,18 @@ def _require_enabled() -> None:
 def _require_repo():
     repo = _get_repo()
     if repo is None:
-        raise HTTPException(status_code=503, detail="Chat history is not enabled")
+        raise HTTPException(status_code=503, detail=_chat_history_error())
     return repo
+
+
+def _chat_history_error() -> str:
+    """User-facing error when the repository is unset (issue #992).
+
+    Distinguishes a disabled feature from one that is enabled but failed to
+    initialize; the underlying error stays server-side.
+    """
+    from atlas.infrastructure.app_factory import app_factory
+    return app_factory.chat_history_unavailable_reason()
 
 
 def _config_payload(config: Optional[WorkspaceConfig]) -> Optional[Any]:
@@ -91,7 +101,7 @@ async def list_workspaces(current_user: str = Depends(get_current_user)):
     _require_enabled()
     repo = _get_repo()
     if repo is None:
-        return {"workspaces": [], "error": "Chat history is not enabled"}
+        return {"workspaces": [], "error": _chat_history_error()}
     return {"workspaces": repo.list_workspaces(user_email=current_user)}
 
 

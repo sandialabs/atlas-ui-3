@@ -1,6 +1,6 @@
 # Logging and Monitoring
 
-Last updated: 2026-02-21
+Last updated: 2026-10-27
 
 The application produces structured logs in JSON Lines format (`.jsonl`), which makes them easy to parse and analyze.
 
@@ -81,6 +81,8 @@ A minimal endpoint that returns `{"status": "ok"}`. Use this for high-frequency 
 
 Returns a richer JSON response containing the service status, name, version, git commit hash, and current timestamp in ISO-8601 format. Use this for readiness probes or dashboards that need version and deployment information. The `git_commit` field is resolved from the `GIT_COMMIT` environment variable (set during Docker builds) or by running `git rev-parse --short HEAD` at startup.
 
-You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks database connectivity or external dependencies.
+The response also carries a `checks` object with the startup outcome of optional features (issue #992), for example `"checks": {"chat_history": "ok"}`. Possible outcomes are `ok`, `failed` (the feature is enabled but could not start) and `disabled` (the feature flag is off). When an enabled feature failed, or a shared session store is unreachable, `status` becomes `"degraded"`. Degraded responses keep HTTP 200 on purpose: the replica still answers, and a readiness probe that pulled every replica during a database outage would turn a degraded feature into a full outage. Error detail stays in the server logs, since this endpoint is unauthenticated.
+
+You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks database connectivity or external dependencies beyond the startup outcomes and session-store reachability reported above.
 
 For more detailed system status information that includes configuration and component health, admin users can access the `/admin/system-status` endpoint, which requires authentication and admin group membership.

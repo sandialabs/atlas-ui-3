@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-10-20
+Last updated: 2026-10-27
 
 ## Overview
 
@@ -148,6 +148,26 @@ When using `agent_start.sh`, the script automatically:
 - If PostgreSQL URL is configured, starts the container if not running
 - If DuckDB URL is configured, ensures the `data/` directory exists
 - Tables are created automatically on first startup (via `Base.metadata.create_all`)
+
+### Failed initialization (issue #992)
+
+Chat history is optional: if it is enabled but cannot start (missing driver,
+unreachable database, bad credentials), the server still comes up — it just
+carries no history. The failure is no longer silent:
+
+- The error is logged at ERROR, including a prominent
+  `Chat history is ENABLED but UNAVAILABLE …` line.
+- `GET /api/health` reports `"status": "degraded"` with
+  `"checks": {"chat_history": "failed"}`. It still returns HTTP 200 so
+  liveness probes do not restart replicas over a database outage; see
+  [Monitoring](logging-monitoring.md). The error detail stays in the server
+  logs, never in the unauthenticated response.
+- The conversation, workspace, and custom-prompt APIs report
+  `"Chat history failed to initialize"` instead of the misleading
+  `"Chat history is not enabled"` (the latter still appears when the feature
+  flag is genuinely off).
+- Nothing is saved or served: the repositories stay unset, so chat turns run
+  without persistence until the database is fixed and the server restarted.
 
 ### Secondary Indexes on DuckDB
 

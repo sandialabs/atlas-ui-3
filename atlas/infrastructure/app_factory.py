@@ -92,34 +92,74 @@ class AppFactory:
             session_ttl_seconds=app_settings.session_ttl_seconds,
         )
 
+        # Outcomes of optional startup steps (issue #992): "ok", "failed" or
+        # "disabled" per feature, reported by /api/health. A failure's detail
+        # stays server-side, in ``startup_errors`` -- the health endpoint is
+        # unauthenticated, so it carries the outcome only.
+        self.startup_outcomes: Dict[str, str] = {}
+        self.startup_errors: Dict[str, str] = {}
+
         # Chat history persistence (feature-flagged)
         self.conversation_repository = None
         self.user_prompt_repository = None
         self.workspace_repository = None
-        if self.config_manager.app_settings.feature_chat_history_enabled:
-            try:
-                from atlas.modules.chat_history import (
-                    ConversationRepository,
-                    PoolSettings,
-                    UserPromptRepository,
-                    WorkspaceRepository,
-                    get_session_factory,
-                    init_database,
-                )
-                app_settings = self.config_manager.app_settings
-                init_database(
-                    app_settings.chat_history_db_url,
-                    PoolSettings.from_app_settings(app_settings),
-                )
-                session_factory = get_session_factory()
-                self.conversation_repository = ConversationRepository(session_factory)
-                self.user_prompt_repository = UserPromptRepository(session_factory)
-                self.workspace_repository = WorkspaceRepository(session_factory)
-                logger.info("Chat history persistence initialized")
-            except Exception as e:
-                logger.error("Failed to initialize chat history: %s", e, exc_info=True)
+        self._init_chat_history()
 
         logger.info("AppFactory initialized")
+
+    def _init_chat_history(self) -> None:
+        """Initialize chat history persistence, recording the outcome (issue #992).
+
+        A failed initialization keeps the server up without history: the
+        repositories stay None, so nothing is read or saved, but the process
+        is otherwise healthy. The outcome lands in ``startup_outcomes`` for
+        /api/health and the error detail in ``startup_errors``.
+        """
+        if not self.config_manager.app_settings.feature_chat_history_enabled:
+            self.startup_outcomes["chat_history"] = "disabled"
+            return
+        try:
+            from atlas.modules.chat_history import (
+                ConversationRepository,
+                PoolSettings,
+                UserPromptRepository,
+                WorkspaceRepository,
+                get_session_factory,
+                init_database,
+            )
+            app_settings = self.config_manager.app_settings
+            init_database(
+                app_settings.chat_history_db_url,
+                PoolSettings.from_app_settings(app_settings),
+            )
+            session_factory = get_session_factory()
+            self.conversation_repository = ConversationRepository(session_factory)
+            self.user_prompt_repository = UserPromptRepository(session_factory)
+            self.workspace_repository = WorkspaceRepository(session_factory)
+            self.startup_outcomes["chat_history"] = "ok"
+            logger.info("Chat history persistence initialized")
+        except Exception as e:  # noqa: BLE001
+            self.startup_outcomes["chat_history"] = "failed"
+            self.startup_errors["chat_history"] = str(e)
+            logger.error("Failed to initialize chat history: %s", e, exc_info=True)
+            logger.error(
+                'Chat history is ENABLED but UNAVAILABLE: conversations will not be '
+                'saved or served, and /api/health reports status "degraded" until '
+                "the database is fixed and the server restarted."
+            )
+
+    def chat_history_unavailable_reason(self) -> str:
+        """Why the chat-history repositories are unset, for route error payloads.
+
+        Both a disabled feature and a failed initialization leave the
+        repositories None (issue #992), but the messages must differ: disabled
+        is a deliberate deployment choice, while a failure means the feature is
+        enabled yet its database is unusable. The underlying error stays
+        server-side (``startup_errors``); routes return this message only.
+        """
+        if self.startup_outcomes.get("chat_history") == "failed":
+            return "Chat history failed to initialize"
+        return "Chat history is not enabled"
 
     async def initialize(self) -> None:
         """Initialize async resources (MCP clients, tool discovery) for headless use."""

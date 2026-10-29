@@ -49,13 +49,23 @@ def _require_enabled() -> None:
         raise HTTPException(status_code=404, detail="Feature not enabled")
 
 
+def _chat_history_error() -> str:
+    """User-facing error when the repository is unset (issue #992).
+
+    Distinguishes a disabled feature from one that is enabled but failed to
+    initialize; the underlying error stays server-side.
+    """
+    from atlas.infrastructure.app_factory import app_factory
+    return app_factory.chat_history_unavailable_reason()
+
+
 @router.get("")
 async def list_prompts(current_user: str = Depends(get_current_user)):
     """List all custom prompts for the authenticated user."""
     _require_enabled()
     repo = _get_repo()
     if repo is None:
-        return {"prompts": [], "error": "Chat history is not enabled"}
+        return {"prompts": [], "error": _chat_history_error()}
     return {"prompts": repo.list_prompts(user_email=current_user)}
 
 
@@ -68,7 +78,7 @@ async def create_prompt(
     _require_enabled()
     repo = _get_repo()
     if repo is None:
-        raise HTTPException(status_code=503, detail="Chat history is not enabled")
+        raise HTTPException(status_code=503, detail=_chat_history_error())
     if not body.title.strip():
         raise HTTPException(status_code=400, detail="Title cannot be empty")
     if not body.content.strip():
@@ -89,7 +99,7 @@ async def update_prompt(
     _require_enabled()
     repo = _get_repo()
     if repo is None:
-        raise HTTPException(status_code=503, detail="Chat history is not enabled")
+        raise HTTPException(status_code=503, detail=_chat_history_error())
     if body.title is not None and not body.title.strip():
         raise HTTPException(status_code=400, detail="Title cannot be empty")
     # Reject blank content on update too — create requires non-empty content, and
@@ -116,7 +126,7 @@ async def delete_prompt(
     _require_enabled()
     repo = _get_repo()
     if repo is None:
-        raise HTTPException(status_code=503, detail="Chat history is not enabled")
+        raise HTTPException(status_code=503, detail=_chat_history_error())
     deleted = repo.delete_prompt(prompt_id=prompt_id, user_email=current_user)
     if not deleted:
         raise HTTPException(status_code=404, detail="Prompt not found")

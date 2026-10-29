@@ -67,15 +67,21 @@ async def health_check() -> Dict[str, Any]:
 
     Returns:
         Dictionary containing:
-        - status: Service health status ("healthy")
+        - status: Service health status ("healthy" or "degraded")
         - service: Service name
         - version: Service version
         - timestamp: Current UTC timestamp in ISO-8601 format
+        - checks: Startup outcomes of optional features (issue #992), e.g.
+          ``{"chat_history": "ok" | "failed" | "disabled"}``
         - session_store: Only with a shared session store (issue #1091):
-          its backend, reachability and latency. An unreachable
-          store reports status "degraded" (HTTP 200: the replica still
-          answers, and a readiness probe that pulled every replica during a
-          Redis outage would turn it into a full outage).
+          its backend, reachability and latency.
+
+    "degraded" means an enabled feature failed to start (chat history) or a
+    shared dependency is unreachable (session store). It still returns
+    HTTP 200, matching the session-store convention: the replica answers,
+    and a readiness probe that pulled every replica during a database
+    outage would turn a degraded feature into a full outage. Error detail
+    stays in the server logs; this endpoint is unauthenticated.
     """
     report: Dict[str, Any] = {
         "status": "healthy",
@@ -85,6 +91,15 @@ async def health_check() -> Dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     from atlas.infrastructure.app_factory import app_factory
+
+    # Startup outcomes of optional features (issue #992). A feature that is
+    # enabled but failed to initialize degrades the report without failing
+    # the endpoint; the error detail stays in the startup logs and in
+    # ``app_factory.startup_errors`` (server-side).
+    outcomes = getattr(app_factory, "startup_outcomes", {})
+    report["checks"] = {"chat_history": outcomes.get("chat_history", "disabled")}
+    if report["checks"]["chat_history"] == "failed":
+        report["status"] = "degraded"
 
     if getattr(app_factory, "redis", None) is not None:
         store = await app_factory.session_store_health()
