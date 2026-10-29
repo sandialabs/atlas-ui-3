@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from dotenv import load_dotenv
 
 from atlas.modules.config.settings import AppSettings
@@ -426,10 +427,12 @@ def test_checkout_dotenv_still_loads_during_the_import_window(tmp_path, monkeypa
     path that reaches settings). Point the guard's checkout root at tmp_path
     and confirm an in-root file still loads while the guard is installed.
     """
-    import conftest
     import dotenv
     from conftest import _block_foreign_dotenv_loads, _restore_dotenv_loads
 
+    # Patch via the module object; ``import conftest`` alongside the
+    # ``from conftest import`` lines trips CodeQL's mixed-import check.
+    conftest = sys.modules["conftest"]
     in_root = tmp_path / ".env"
     in_root.write_text("FEATURE_BANNER_ENABLED=true\n")
     monkeypatch.setattr(conftest, "project_root", tmp_path)
@@ -439,5 +442,76 @@ def test_checkout_dotenv_still_loads_during_the_import_window(tmp_path, monkeypa
         try:
             assert dotenv.load_dotenv(dotenv_path=in_root) is True
             assert os.environ.get("FEATURE_BANNER_ENABLED") == "true"
+        finally:
+            _restore_dotenv_loads()
+
+
+def _call_bare_load_dotenv_from(caller_file: Path):
+    """Run ``dotenv.load_dotenv()`` with no path from code attributed to *caller_file*.
+
+    The call is compiled with that filename, so it looks to python-dotenv
+    exactly like litellm's import-time bare call from inside ``site-packages``.
+    """
+    import dotenv
+
+    code = compile("result = dotenv.load_dotenv()", str(caller_file), "exec")
+    namespace = {"dotenv": dotenv}
+    exec(code, namespace)
+    return namespace["result"]
+
+
+def test_bare_load_dotenv_resolves_the_checkout_env_from_any_caller(tmp_path):
+    """A no-argument ``load_dotenv()`` resolves the checkout's ``.env``.
+
+    The guard's ``find_dotenv`` walk starts at conftest's directory, not the
+    caller's, so a caller outside the checkout (litellm in a venv that lives
+    elsewhere) still gets the checkout's own ``.env`` -- which the mock-admin
+    tests rely on for ``DEBUG_MODE``. A caller-origin walk would instead pick
+    up the caller's nearest ancestor ``.env``; pin the current behavior.
+    """
+    from conftest import _block_foreign_dotenv_loads, _restore_dotenv_loads
+
+    checkout = Path(sys.modules["conftest"].project_root)
+    checkout_env = checkout / ".env"
+    if not checkout_env.is_file():
+        pytest.skip("checkout has no .env to resolve")
+    foreign = tmp_path / "site-packages" / "lib"
+    foreign.mkdir(parents=True)
+    (tmp_path / ".env").write_text("AUTH_STATIC_GROUPS=evil:evil@example.com\n")
+    caller_file = foreign / "__init__.py"
+    caller_file.write_text("")
+
+    with mock.patch.dict(os.environ):
+        os.environ.pop("AUTH_STATIC_GROUPS", None)
+        _block_foreign_dotenv_loads()
+        try:
+            assert _call_bare_load_dotenv_from(caller_file) is True
+            assert os.environ.get("AUTH_STATIC_GROUPS") is None
+        finally:
+            _restore_dotenv_loads()
+
+
+def test_bare_load_dotenv_refuses_an_ancestor_env_outside_the_checkout(tmp_path, monkeypatch):
+    """Without a checkout ``.env``, a bare call's walk lands outside and is refused.
+
+    This is the clean-worktree case the guard exists for: the upward walk
+    passes the checkout root and finds a foreign ancestor's ``.env``.
+    """
+    from conftest import _block_foreign_dotenv_loads, _restore_dotenv_loads
+
+    tests_dir = Path(sys.modules["conftest"].__file__).resolve().parent
+    # Treat a directory *below* conftest as the checkout, so every ``.env``
+    # the walk can find (from atlas/tests upward) lies outside it.
+    monkeypatch.setattr(sys.modules["conftest"], "project_root", tmp_path / "checkout")
+    caller_file = tmp_path / "caller.py"
+    caller_file.write_text("")
+    assert (tmp_path / "checkout") not in tests_dir.parents
+
+    with mock.patch.dict(os.environ):
+        _block_foreign_dotenv_loads()
+        try:
+            before = dict(os.environ)
+            assert _call_bare_load_dotenv_from(caller_file) is False
+            assert dict(os.environ) == before
         finally:
             _restore_dotenv_loads()

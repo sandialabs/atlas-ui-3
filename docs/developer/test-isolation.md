@@ -90,7 +90,12 @@ outright). While conftest's own imports run, `load_dotenv` refuses any file
 that resolves outside the checkout under test and passes everything else
 (including the checkout's own `.env`, which CI's baked `/app/.env` relies on)
 through to the real implementation; the real function is restored before the
-first test module is imported.
+first test module is imported. A bare `load_dotenv()` that goes through the
+guard walks up from `atlas/tests/` (the guard's own file), not from the real
+caller's directory. This is deliberate: when the venv lives outside the
+checkout (or a worktree symlinks `.venv`), a walk from `site-packages/litellm/`
+never reaches the checkout's `.env`, and the mock-admin tests need the
+`DEBUG_MODE` it supplies during these imports.
 
 ## Rules for test authors
 

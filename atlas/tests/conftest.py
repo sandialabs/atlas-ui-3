@@ -165,8 +165,17 @@ def _guarded_load_dotenv(*args, **kwargs):
     checkout; pass everything else through to the real implementation.
 
     A call with no path (the bare ``load_dotenv()`` litellm makes) resolves
-    the file the same walk python-dotenv would do, then applies the same
-    inside-the-checkout rule.
+    the file with python-dotenv's upward walk, then applies the same
+    inside-the-checkout rule. Note the walk's origin: ``find_dotenv`` starts
+    from the first stack frame outside python-dotenv, which with this guard in
+    between is *this file*, so the walk starts at ``atlas/tests/`` rather than
+    at the real caller (e.g. ``site-packages/litellm/``). That is deliberate:
+    a venv outside the checkout (or a worktree's symlinked ``.venv``) means a
+    caller-origin walk never reaches the checkout's ``.env``, and the suite's
+    mock-admin tests depend on the ``DEBUG_MODE`` it supplies during these
+    imports -- starting from the caller was tried and failed them. The
+    conftest origin therefore resolves the checkout's own ``.env`` when there
+    is one, and an ancestor's (refused) when there is not.
     """
     if kwargs.get("stream") is not None:
         return _real_load_dotenv(*args, **kwargs)
