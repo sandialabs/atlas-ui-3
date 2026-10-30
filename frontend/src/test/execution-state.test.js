@@ -223,6 +223,21 @@ describe('reconcileExecution — poll patches', () => {
   })
 })
 
+describe('reconcileExecution — decided approval cards', () => {
+  it('keeps approved, rejected, and run-less cards when the snapshot has no pending set', () => {
+    const current = [
+      { type: 'tool_approval_request', invocation_id: 'run-1:0:call_0', tool_call_id: 'call_0', run_id: 'run-1', status: 'approved' },
+      { type: 'tool_approval_request', invocation_id: 'run-1:0:call_1', tool_call_id: 'call_1', run_id: 'run-1', status: 'rejected' },
+      { type: 'tool_approval_request', tool_call_id: 'call_2', status: 'pending' },
+      { type: 'tool_approval_request', invocation_id: 'run-1:0:call_3', tool_call_id: 'call_3', run_id: 'run-1', status: 'pending' },
+    ]
+    const next = reconcileExecution(current, {
+      revision: 5, run_id: 'run-1', status: 'running', invocations: [], pending_requests: [],
+    }, null)
+    expect(next.map(row => row.tool_call_id)).toEqual(['call_0', 'call_1', 'call_2'])
+  })
+})
+
 describe('invocation identity helpers', () => {
   it('matches a legacy row only when the frame has no invocation id', () => {
     const legacy = { tool_call_id: 'call_0' }

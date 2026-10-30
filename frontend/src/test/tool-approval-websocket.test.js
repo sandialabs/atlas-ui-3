@@ -455,5 +455,35 @@ describe('Tool Approval WebSocket Tests', () => {
       expect(messages[0].status).toBe('in_progress')
       expect(pending).toBeNull()
     })
+
+    it('renders a new bare call_0 approval after an earlier bare call_0 was approved', () => {
+      // Untracked turns carry no invocation id, and providers reuse call_0.
+      let messages = [{ type: 'tool_approval_request', tool_call_id: 'call_0', status: 'approved' }]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      handler = createWebSocketHandler(deps)
+      const request = { type: 'tool_approval_request', tool_call_id: 'call_0', tool_name: 'search', arguments: {} }
+      handler(request)
+      expect(messages.filter(m => m.type === 'tool_approval_request')).toHaveLength(2)
+      expect(messages[1].status).toBe('pending')
+      // A repeat of the still-pending request does not stack a third card.
+      handler(request)
+      expect(messages.filter(m => m.type === 'tool_approval_request')).toHaveLength(2)
+    })
+
+    it('gives a later bare call_0 its own row and keeps the earlier completed one', () => {
+      let messages = [{ type: 'tool_call', tool_call_id: 'call_0', tool_name: 'search', status: 'completed', result: 'turn 1' }]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      handler = createWebSocketHandler(deps)
+      handler({ type: 'tool_start', tool_call_id: 'call_0', tool_name: 'search', arguments: {} })
+      expect(messages).toHaveLength(2)
+      handler({ type: 'tool_complete', tool_call_id: 'call_0', tool_name: 'search', success: true, result: 'turn 2' })
+      expect(messages[0].result).toBe('turn 1')
+      expect(messages[1].status).toBe('completed')
+      expect(messages[1].result).toBe('turn 2')
+    })
   })
 })

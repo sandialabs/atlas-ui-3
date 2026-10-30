@@ -27,11 +27,23 @@ function settledApprovalStatus(data) {
   return data.approved ? 'approved' : 'rejected'
 }
 
+// A repeated request for a card already on screen. Without an invocation id
+// (untracked turns: incognito, history off, local save) providers reuse
+// call_0, so only a card that is still pending is the same request; a settled
+// call_0 card is an earlier one, and hiding the new request would hang the
+// turn until the approval timed out.
+function samePendingApproval(row, data) {
+  if (!sameApproval(row, data)) return false
+  if (row.invocation_id || row.elicitation_id) return true
+  return row.status === 'pending'
+}
+
 function sameToolStart(row, data) {
   if (!row || row.type !== 'tool_call') return false
   if (data.invocation_id && row.invocation_id) return row.invocation_id === data.invocation_id
   if (data.invocation_id || row.invocation_id) return false
-  return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
+  // Bare: only an open row is this call. A finished call_0 is an earlier turn's.
+  return isOpenLegacyRow(row) && !!data.tool_call_id && row.tool_call_id === data.tool_call_id
 }
 
 // Existence check and append are one reducer update. A flag set inside
@@ -66,21 +78,26 @@ function mapToolRows(prev, data, patch, insert) {
   const exact = !!(data.invocation_id && list.some(
     msg => isToolRow(msg) && msg.invocation_id === data.invocation_id
   ))
-  let found = false
-  const next = list.map(msg => {
-    if (!isToolRow(msg)) return msg
-    // An identified frame falls back only to an open legacy row; a settled
-    // legacy call_0 belongs to an earlier turn.
-    const legacyHit = data.invocation_id ? isOpenLegacyRow(msg) : !msg.invocation_id
-    const hit = exact
-      ? msg.invocation_id === data.invocation_id
-      : legacyHit && !!data.tool_call_id && msg.tool_call_id === data.tool_call_id
-    if (!hit) return msg
-    found = true
-    return { ...msg, ...patch }
-  })
-  if (!found && insert) return next.concat(insert)
-  return next
+  if (exact) {
+    return list.map(msg => (
+      isToolRow(msg) && msg.invocation_id === data.invocation_id ? { ...msg, ...patch } : msg
+    ))
+  }
+  // No exact row: fall back to the most recent open legacy row with this
+  // tool_call_id. A settled call_0 belongs to an earlier turn, and an older
+  // open one is not this frame's either when a newer one exists.
+  let target = -1
+  if (data.tool_call_id) {
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const msg = list[i]
+      if (isToolRow(msg) && isOpenLegacyRow(msg) && msg.tool_call_id === data.tool_call_id) {
+        target = i
+        break
+      }
+    }
+  }
+  if (target === -1) return insert ? list.concat(insert) : list
+  return list.map((msg, i) => (i === target ? { ...msg, ...patch } : msg))
 }
 
 // Default sandbox permissions for iframes (restrictive by default)
@@ -906,7 +923,7 @@ export function createWebSocketHandler(deps) {
               status: 'pending',
               timestamp: new Date().toISOString()
             }, data),
-            msg => sameApproval(msg, data),
+            msg => samePendingApproval(msg, data),
           )
           break
         case 'tool_approval_settled':

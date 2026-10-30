@@ -206,7 +206,11 @@ export function reconcileExecution(messages, execution, previousRevision) {
   const dropped = new Set()
   source.forEach((message, index) => {
     if (message.type !== 'tool_approval_request') return
-    if (execution.run_id && message.run_id && message.run_id !== execution.run_id) return
+    // Only a card still awaiting an answer can go stale. An approved or
+    // rejected card is the user's decision on record, and a card with no run
+    // is not part of any snapshot.
+    if (message.status !== 'pending' || !message.run_id) return
+    if (execution.run_id && message.run_id !== execution.run_id) return
     const key = requestIdentity(message)
     if (key && !pendingKeys.has(key)) dropped.add(index)
   })
