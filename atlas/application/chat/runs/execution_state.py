@@ -545,30 +545,34 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
 
     A replica that did not start the run still has the projection, so the
     snapshot it serves carries the same status and activity.
+
+    Every local run is kept. A conversation can hold a finished turn and a
+    running one at once (both retained in the registry), so the projection is
+    matched to the local run with its run_id, never by conversation alone.
     """
-    merged = {run.get("conversation_id"): dict(run) for run in local_runs if run.get("conversation_id")}
+    merged = [dict(run) for run in local_runs]
+    by_run = {run.get("run_id"): run for run in merged if run.get("run_id")}
+    active_conversations = {
+        run.get("conversation_id") for run in merged
+        if run.get("conversation_id") and run.get("status") not in _TERMINAL_RUN
+    }
+    local_conversations = {run.get("conversation_id") for run in merged if run.get("conversation_id")}
     for projection in shared:
         conversation_id = projection.get("conversation_id")
         if not conversation_id:
             continue
-        existing = merged.get(conversation_id)
         projection_status = projection.get("status")
-        # A projection of an earlier run says nothing about the run this
-        # replica is executing now. Turn 1's finished document must not mark
-        # turn 2 completed before turn 2 writes its first frame.
-        if (
-            existing is not None
-            and existing.get("run_id")
-            and projection.get("run_id")
-            and existing["run_id"] != projection["run_id"]
-        ):
-            continue
-        # A finished projection is not a new active run. Keeping it for the
-        # document TTL would leave "Needs approval" on a run that already ended.
+        existing = by_run.get(projection.get("run_id"))
         if existing is None:
-            if projection_status in _TERMINAL_RUN:
+            # A projection of an earlier run says nothing about a run this
+            # replica holds for the conversation. A finished projection is
+            # not a new active run either: keeping it for the document TTL
+            # would leave "Needs approval" on a run that already ended.
+            if projection_status in _TERMINAL_RUN or conversation_id in active_conversations:
                 continue
-            merged[conversation_id] = {
+            if conversation_id in local_conversations and not projection.get("run_id"):
+                continue
+            merged.append({
                 "run_id": projection.get("run_id"),
                 "conversation_id": conversation_id,
                 "status": projection_status or "running",
@@ -576,7 +580,8 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
                 "activity": projection.get("activity"),
                 "execution_revision": projection.get("revision"),
                 "detached": True,
-            }
+            })
+            active_conversations.add(conversation_id)
             continue
         existing["execution_revision"] = projection.get("revision")
         # The registry already recorded the outcome. A projection that has not
@@ -599,7 +604,7 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
             existing["activity"] = (
                 "waiting_for_approval" if existing.get("status") == "waiting_for_input" else "executing"
             )
-    return list(merged.values())
+    return merged
 
 
 class ExecutionStore:

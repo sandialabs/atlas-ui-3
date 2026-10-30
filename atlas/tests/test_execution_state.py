@@ -690,3 +690,19 @@ async def test_memory_invocation_index_is_swept_after_the_outcome_ttl(monkeypatc
     await store.apply_event(_event(0, conversation_id="fresh"))
     assert key not in store._invocation_index
     assert (EMAIL, "fresh") in store._invocation_index
+
+
+def test_a_finished_turn_does_not_hide_the_running_turn_of_the_same_conversation():
+    # Found in a browser pass: list_runs keyed runs by conversation, so a
+    # conversation's finished turn 1 replaced its running turn 2, and the
+    # reopened view showed no busy indicator.
+    local = [
+        {"run_id": "run-1", "conversation_id": CONV, "status": "completed"},
+        {"run_id": "run-2", "conversation_id": CONV, "status": "running"},
+    ]
+    shared = [{"run_id": "run-2", "conversation_id": CONV, "status": "running", "activity": "sleeping", "revision": 9}]
+    merged = {row["run_id"]: row for row in merge_run_snapshots(local, shared)}
+    assert set(merged) == {"run-1", "run-2"}
+    assert merged["run-1"]["status"] == "completed"
+    assert merged["run-2"]["status"] == "running"
+    assert merged["run-2"]["activity"] == "sleeping"
