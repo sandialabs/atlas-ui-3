@@ -22,7 +22,7 @@ from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
-Kind = str  # "accepted" | "duplicate" | "unknown"
+Kind = str  # "accepted" | "recorded" | "duplicate" | "unknown"
 
 
 def _frame(outcome: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
@@ -136,8 +136,9 @@ async def _pending_matches(user_email: str, data: Dict[str, Any]):
 async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[Kind, Optional[Dict[str, Any]]]:
     """Classify one approval response.
 
-    ``accepted`` means this response woke a local future or recorded the
-    outcome for the executor replica to observe. ``duplicate`` carries the
+    ``accepted`` means this response woke a local future. ``recorded`` means
+    it only wrote the shared outcome for the executor replica to observe, so
+    nothing local resumes. ``duplicate`` carries the
     settled frame and must not resume the run. ``unknown`` carries the error
     frame.
     """
@@ -240,4 +241,4 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
         return "unknown", _unknown(data)
     if stored.get("already_resolved"):
         return "duplicate", _frame(stored, data)
-    return "accepted", None
+    return "recorded", None

@@ -152,7 +152,10 @@ class AgenticLoop(AgentLoopProtocol):
         # Issue #684 covered tools mode by wrapping its update callback; agent
         # mode executes tools through this loop's own callback, so it needs the
         # same wrapper here.
-        recorder = ToolCallRecorder(self.connection.send_json if self.connection else None)
+        recorder = ToolCallRecorder(
+            self.connection.send_json if self.connection else None,
+            user_email=context.user_email,
+        )
         launch_discovery: Dict[str, Any] = {}
 
         try:

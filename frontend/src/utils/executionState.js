@@ -10,6 +10,13 @@ const SLEEP_TOOLS = new Set(['atlas_sleep', 'atlas_agent_sleep'])
 const TERMINAL_TOOL_STATUS = new Set(['completed', 'failed', 'interrupted', 'expired', 'rejected'])
 const TERMINAL_RUN_STATUS = new Set(['completed', 'failed', 'cancelled'])
 
+// A legacy row (no invocation id) can stand in for an identified invocation
+// only while it is still open. A settled legacy call_0 is an earlier turn's
+// row, and a new turn's call_0 must be added beside it, not written over it.
+export function isOpenLegacyRow(row) {
+  return !!row && !row.invocation_id && !TERMINAL_TOOL_STATUS.has(row.status)
+}
+
 export function isTerminalRun(execution) {
   return !!execution && TERMINAL_RUN_STATUS.has(execution.status)
 }
@@ -42,7 +49,7 @@ export function sameInvocation(row, data) {
   if (!row || !data) return false
   if (data.invocation_id) {
     if (row.invocation_id) return row.invocation_id === data.invocation_id
-    return !row.invocation_id && !!data.tool_call_id && row.tool_call_id === data.tool_call_id
+    return isOpenLegacyRow(row) && !!data.tool_call_id && row.tool_call_id === data.tool_call_id
   }
   if (row.invocation_id) return false
   return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
@@ -139,7 +146,9 @@ export function reconcileExecution(messages, execution, previousRevision) {
   source.forEach((message, index) => {
     if (message.type !== 'tool_call' && message.role !== 'tool') return
     if (message.invocation_id) byInvocation.set(message.invocation_id, index)
-    else if (message.tool_call_id && !legacy.has(message.tool_call_id)) legacy.set(message.tool_call_id, index)
+    else if (message.tool_call_id && !legacy.has(message.tool_call_id) && isOpenLegacyRow(message)) {
+      legacy.set(message.tool_call_id, index)
+    }
   })
 
   const patches = new Map()

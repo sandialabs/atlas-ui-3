@@ -131,6 +131,11 @@ class ToolCallRecorder:
             "tool_start", "tool_complete", "tool_error", "auth_required",
         ):
             return
+        if event_type == "tool_error" and payload.get("elicitation_id"):
+            # An elicitation timeout: the tool is still running and reports
+            # its own result. Recording it here would save the row as expired,
+            # and a later Stop could not close it as interrupted.
+            return
         # The canvas tool renders into the canvas panel, not the transcript; the
         # UI suppresses it as a chat row, so it must not be persisted as one.
         if normalize_tool_name(payload.get("tool_name")) == CANVAS_TOOL_NAME:

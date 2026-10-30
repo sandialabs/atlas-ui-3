@@ -406,5 +406,54 @@ describe('Tool Approval WebSocket Tests', () => {
       expect(messages[0].result).toBe('done')
       expect(messages[1].status).toBe('interrupted')
     })
+
+    it('adds a new turn\'s rejected call_0 beside an earlier turn\'s settled legacy row', () => {
+      let messages = [
+        { type: 'tool_call', tool_call_id: 'call_0', status: 'completed', result: 'old turn' },
+      ]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'tool_error',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-2:0:call_0',
+        run_id: 'run-2',
+        tool_name: 'search',
+        status: 'rejected',
+        error: 'User rejected the tool call',
+      })
+      expect(messages).toHaveLength(2)
+      expect(messages[0].status).toBe('completed')
+      expect(messages[0].result).toBe('old turn')
+      expect(messages[1].status).toBe('rejected')
+      expect(messages[1].invocation_id).toBe('run-2:0:call_0')
+    })
+
+    it('settles only the dialog on an elicitation timeout, not the running tool row', () => {
+      let messages = [
+        { type: 'tool_call', tool_call_id: 'call_0', invocation_id: 'run-1:0:call_0', status: 'in_progress' },
+      ]
+      let pending = { elicitation_id: 'e1', tool_call_id: 'call_0' }
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      deps.setPendingElicitation = vi.fn(next => {
+        pending = typeof next === 'function' ? next(pending) : next
+      })
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'tool_error',
+        elicitation_id: 'e1',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+        tool_name: 'ask',
+        status: 'expired',
+        error: 'Elicitation timed out',
+      })
+      expect(messages[0].status).toBe('in_progress')
+      expect(pending).toBeNull()
+    })
   })
 })

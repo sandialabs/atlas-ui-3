@@ -144,6 +144,21 @@ describe('reconcileExecution — settled rows and finished runs', () => {
   })
 })
 
+describe('reconcileExecution — legacy rows from earlier turns', () => {
+  it('appends a new invocation instead of claiming a settled legacy call_0', () => {
+    const current = [{ type: 'tool_call', tool_call_id: 'call_0', status: 'completed', result: 'old turn' }]
+    const next = reconcileExecution(current, {
+      revision: 1,
+      run_id: 'run-2',
+      status: 'running',
+      invocations: [invocation('run-2:0:call_0', { run_id: 'run-2', status: 'expired' })],
+    }, null)
+    expect(next).toHaveLength(2)
+    expect(next[0]).toBe(current[0])
+    expect(next[1].invocation_id).toBe('run-2:0:call_0')
+  })
+})
+
 describe('invocation identity helpers', () => {
   it('matches a legacy row only when the frame has no invocation id', () => {
     const legacy = { tool_call_id: 'call_0' }

@@ -1,7 +1,7 @@
 // Handlers extracted from original ChatContext to keep provider lean
 
 import { isCanvasTool } from '../../constants/atlasTools'
-import { isSleepTool, toolStatusFromEvent } from '../../utils/executionState'
+import { isOpenLegacyRow, isSleepTool, toolStatusFromEvent } from '../../utils/executionState'
 
 function withIdentity(message, data) {
   const next = { ...message }
@@ -69,9 +69,12 @@ function mapToolRows(prev, data, patch, insert) {
   let found = false
   const next = list.map(msg => {
     if (!isToolRow(msg)) return msg
+    // An identified frame falls back only to an open legacy row; a settled
+    // legacy call_0 belongs to an earlier turn.
+    const legacyHit = data.invocation_id ? isOpenLegacyRow(msg) : !msg.invocation_id
     const hit = exact
       ? msg.invocation_id === data.invocation_id
-      : !msg.invocation_id && !!data.tool_call_id && msg.tool_call_id === data.tool_call_id
+      : legacyHit && !!data.tool_call_id && msg.tool_call_id === data.tool_call_id
     if (!hit) return msg
     found = true
     return { ...msg, ...patch }
@@ -612,6 +615,17 @@ export function createWebSocketHandler(deps) {
           break
         }
         case 'tool_error': {
+          // An elicitation timeout settles the question, not the tool: the
+          // tool keeps running with a cancelled answer and reports its own
+          // result. Close the dialog and leave the row alone.
+          if (data.elicitation_id) {
+            if (typeof setPendingElicitation === 'function') {
+              setPendingElicitation(prev => (
+                prev && prev.elicitation_id === data.elicitation_id ? null : prev
+              ))
+            }
+            break
+          }
           if (isCanvasTool(data.tool_name)) {
             addMessage({
               role: 'system',

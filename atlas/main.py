@@ -1101,6 +1101,11 @@ def _resume_waiting_run(run_registry, user_email: str, data: dict) -> None:
         record = run_registry.active_for_conversation(
             data.get("conversation_id"), user_email
         )
+    if record is None and (data.get("run_id") or data.get("conversation_id")):
+        # The response named its run and that run is not on this replica.
+        # Guessing the user's one waiting run here would answer a different
+        # conversation's request that happens to share call_0 (issue #1122).
+        return
     if record is None:
         waiting = [
             r
@@ -3036,9 +3041,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 if kind == "accepted":
                     # The run that was paused on this approval is working
                     # again -- or still paused on its other parallel tools.
-                    # A response that only recorded a shared outcome (the
-                    # executor lives on another replica) resumes nothing here.
                     _resume_waiting_run(run_registry, user_email, data)
+                elif kind == "recorded":
+                    # Only a shared outcome was written; the executor lives on
+                    # another replica and observes it there. Nothing on this
+                    # replica was waiting on this request.
+                    pass
                 elif frame is not None:
                     # Duplicate: the settled outcome, not an error that ends
                     # the turn. Unknown: the error frame, which names the

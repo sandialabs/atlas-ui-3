@@ -68,6 +68,15 @@ exact invocation and never falls back to its `tool_call_id`. A shared outcome
 is written only for a pending request the caller owns, under that request's
 own invocation id.
 
+A response that only writes the shared outcome, because the executor is on
+another replica, resumes nothing locally. A response that names a run or
+conversation this replica does not hold does not fall back to guessing the
+user's single waiting run.
+
+An elicitation timeout settles the question, not the tool. The dialog closes
+and the card leaves the pending set, but the tool row keeps its status until
+the tool reports its own result.
+
 Stop closes every open row, including `sleeping` and `in_progress` ones. The
 `tool_interrupted` notice carries the invocation identity and is written into
 the document, so the live row, a reload, and a joined tab all show it stopped.
@@ -105,4 +114,6 @@ ignored.
 The joined-view poll and a saved-conversation load reconcile `execution` into
 the messages on screen (`frontend/src/utils/executionState.js`). Tool frames
 update the invocation they name. A frame that only has `tool_call_id` updates
-legacy rows that have no invocation id.
+legacy rows that have no invocation id. An identified frame falls back to a
+legacy row only while that row is still open; a settled legacy `call_0` from
+an earlier turn is left alone and the new row is added beside it.

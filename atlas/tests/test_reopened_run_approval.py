@@ -349,7 +349,9 @@ async def test_decide_on_a_replica_without_the_future_writes_the_outcome(store):
         "reason": "no",
     }
     kind, frame = await decide_tool_approval(data, EMAIL)
-    assert kind == "accepted" and frame is None
+    # Recorded, not accepted: nothing on this replica was waiting, so the
+    # websocket handler must not resume a local run for it.
+    assert kind == "recorded" and frame is None
     stored = await store.read_resolution(approval_storage_key(invocation, "call_9", EMAIL))
     assert stored["approved"] is False
     kind, frame = await decide_tool_approval(data, EMAIL)
@@ -673,3 +675,54 @@ async def test_stop_closes_sleeping_and_running_rows_by_invocation(store):
     assert all(n["run_id"] == RUN and n["step"] == 1 for n in notices)
     rows = public_projection(await store.get(CONV, EMAIL))["invocations"]
     assert {row["invocation_id"]: row["status"] for row in rows} == statuses
+
+
+def test_resume_does_not_guess_when_the_named_run_is_elsewhere():
+    # Answering conversation A's call_0 on a replica that does not run A must
+    # not clear the same user's paused call_0 in conversation B.
+    from atlas.main import _resume_waiting_run
+
+    registry = RunRegistry()
+    other = registry.start(conversation_id="conv-b", user_email=EMAIL)
+    registry.set_status(other.run_id, RunStatus.RUNNING)
+    registry.note_event(other.run_id, {"type": "tool_approval_request", "tool_call_id": "call_0"})
+    assert registry.get(other.run_id).status == RunStatus.WAITING_FOR_INPUT
+    _resume_waiting_run(registry, EMAIL, {
+        "tool_call_id": "call_0", "run_id": "run-on-another-replica", "conversation_id": "conv-a",
+    })
+    current = registry.get(other.run_id)
+    assert current.status == RunStatus.WAITING_FOR_INPUT
+    assert len(current.pending_requests) == 1
+    # A response that names nothing keeps the old single-waiting-run fallback.
+    _resume_waiting_run(registry, EMAIL, {"tool_call_id": "call_0"})
+    assert registry.get(other.run_id).status == RunStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_elicitation_timeout_does_not_settle_the_running_tool(store):
+    from atlas.application.chat.utilities.tool_history import ToolCallRecorder
+    from atlas.domain.messages.models import ConversationHistory
+
+    set_current_run(RUN, CONV)
+    inv = invocation_id(RUN, 0, "call_0")
+    base = {
+        "tool_call_id": "call_0", "tool_name": "ask", "run_id": RUN,
+        "conversation_id": CONV, "step": 0, "invocation_id": inv,
+    }
+    recorder = ToolCallRecorder(None, user_email=EMAIL)
+    for frame in (
+        {**base, "type": "tool_start", "arguments": {}},
+        {**base, "type": "elicitation_request", "elicitation_id": "e1"},
+        {**base, "type": "tool_error", "elicitation_id": "e1", "status": "expired",
+         "error": "Elicitation timed out"},
+    ):
+        await store.apply_event({**frame, "user_email": EMAIL})
+        await recorder(frame)
+    projection = public_projection(await store.get(CONV, EMAIL))
+    assert projection["pending_requests"] == []
+    assert projection["invocations"][0]["status"] == "in_progress"
+    assert projection["activity"] == "executing"
+    # A later Stop closes the row as interrupted, not expired.
+    history = ConversationHistory()
+    recorder.flush(history, mark_incomplete=True)
+    assert history.messages[0].metadata["status"] == "interrupted"

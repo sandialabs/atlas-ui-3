@@ -1,4 +1,5 @@
 import { useReducer, useCallback } from 'react'
+import { isOpenLegacyRow } from '../../utils/executionState'
 
 function messagesReducer(state, action) {
   switch (action.type) {
@@ -12,7 +13,7 @@ function messagesReducer(state, action) {
         const exact = state.some(m => m.invocation_id === patch.invocation_id)
         return state.map(m => {
           if (m.invocation_id === patch.invocation_id) return { ...m, ...patch }
-          if (!exact && !m.invocation_id && m.tool_call_id === action.tool_call_id) return { ...m, ...patch }
+          if (!exact && isOpenLegacyRow(m) && m.tool_call_id === action.tool_call_id) return { ...m, ...patch }
           return m
         })
       }

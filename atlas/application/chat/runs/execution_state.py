@@ -359,11 +359,20 @@ def apply_event_to_document(doc: dict, event: dict) -> bool:
         return True
     if doc.get("status") in _TERMINAL_RUN:
         return False
+    if event.get("type") == "tool_error" and event.get("elicitation_id"):
+        # An elicitation timeout settles the question, not the tool. The tool
+        # keeps running with a cancelled answer and reports its own result.
+        _drop_settled(doc, event)
+        doc["updated_at"] = time.time()
+        _refresh_activity(doc)
+        return True
     status = _status_for(event)
     if status or event.get("invocation_id"):
         _touch_invocation(doc, event, status)
     if event.get("type") in _INPUT_EVENTS:
-        _touch_invocation(doc, event, "calling")
+        # A new row starts as calling. An elicitation raised by a tool that is
+        # already running must not rewind that row to calling.
+        _touch_invocation(doc, event, None)
         doc["pending_requests"][_request_key(event)] = _public_event(event)
     elif event.get("type") in _SETTLED_EVENTS:
         _drop_settled(doc, event)

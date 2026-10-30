@@ -44,4 +44,16 @@ describe('useMessages invocation updates', () => {
     expect(result.current.messages[0].status).toBe('completed')
     expect(result.current.messages[1].status).toBe('failed')
   })
+
+  it('does not patch an earlier turn\'s settled legacy row with a new invocation', () => {
+    const { result } = renderHook(() => useMessages())
+    act(() => {
+      result.current.addMessage({ tool_call_id: 'call_0', status: 'completed', result: 'old turn' })
+    })
+    act(() => {
+      result.current.updateToolResult('call_0', { invocation_id: 'run-2:0:call_0', status: 'rejected' })
+    })
+    expect(result.current.messages[0].status).toBe('completed')
+    expect(result.current.messages[0].invocation_id).toBeUndefined()
+  })
 })
