@@ -541,3 +541,24 @@ def test_projection_adds_sleeping_activity_to_a_running_local_run():
     local = [{"run_id": "run-1", "conversation_id": CONV, "status": "running"}]
     shared = [{"run_id": "run-1", "conversation_id": CONV, "status": "running", "activity": "sleeping", "revision": 4}]
     assert merge_run_snapshots(local, shared)[0]["activity"] == "sleeping"
+
+
+@pytest.mark.asyncio
+async def test_a_finished_projection_gets_the_short_ttl():
+    from atlas.application.chat.runs import execution_state
+
+    server = fakeredis.FakeServer()
+    store = _redis_store(server)
+    await store.apply_event(_event(0, type="tool_start"))
+    doc_key = store._doc_key(EMAIL, CONV)
+    assert await store._client().ttl(doc_key) > execution_state.TERMINAL_PROJECTION_TTL_SECONDS
+    await store.apply_event({"type": "run_status", "status": "completed", "run_id": "run-1",
+                             "conversation_id": CONV, "user_email": EMAIL})
+    assert 0 < await store._client().ttl(doc_key) <= execution_state.TERMINAL_PROJECTION_TTL_SECONDS
+
+    memory = MemoryExecutionStore()
+    await memory.apply_event(_event(0, type="tool_start"))
+    await memory.apply_event({"type": "run_status", "status": "completed", "run_id": "run-1",
+                              "conversation_id": CONV, "user_email": EMAIL})
+    memory._docs[(EMAIL, CONV)]["updated_at"] -= execution_state.TERMINAL_PROJECTION_TTL_SECONDS + 1
+    assert await memory.get(CONV, EMAIL) is None

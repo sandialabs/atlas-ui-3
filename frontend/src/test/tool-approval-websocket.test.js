@@ -331,7 +331,12 @@ describe('Tool Approval WebSocket Tests', () => {
         tool_call_id: 'call_0',
         invocation_id: 'run-1:0:call_0',
       })
-      expect(messages).toEqual([])
+      // The card is replaced by a notice, so a vanished card does not read
+      // as a successful approval.
+      expect(messages.filter(m => m.type === 'tool_approval_request')).toEqual([])
+      expect(messages).toHaveLength(1)
+      expect(messages[0].role).toBe('system')
+      expect(messages[0].content).toMatch(/no longer active.*did not run/)
       expect(deps.addMessage).not.toHaveBeenCalled()
       expect(deps.setIsThinking).not.toHaveBeenCalled()
       expect(deps.clearAgentRunning).not.toHaveBeenCalled()

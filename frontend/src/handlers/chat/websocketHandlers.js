@@ -819,13 +819,26 @@ export function createWebSocketHandler(deps) {
           // generic error path and end the joined-view poll. Drop the card
           // and leave the run alone (issue #1122).
           if (data.error_type === 'unknown_tool_approval' || data.error_type === 'unknown_elicitation') {
-            mapMessages(prev => prev.filter(msg => {
-              if (data.error_type === 'unknown_elicitation') {
-                return !(msg.elicitation_id && msg.elicitation_id === data.elicitation_id)
+            mapMessages(prev => {
+              const list = Array.isArray(prev) ? prev : []
+              const kept = list.filter(msg => {
+                if (data.error_type === 'unknown_elicitation') {
+                  return !(msg.elicitation_id && msg.elicitation_id === data.elicitation_id)
+                }
+                return !sameApproval(msg, data)
+              })
+              // A card that silently vanishes after Approve reads as success.
+              // Say what happened in its place.
+              if (data.error_type === 'unknown_tool_approval' && kept.length !== list.length) {
+                const card = list.find(msg => sameApproval(msg, data))
+                kept.push({
+                  role: 'system',
+                  content: `Approval for ${card?.tool_name || 'this tool'} is no longer active. The tool did not run from this answer.`,
+                  timestamp: new Date().toISOString(),
+                })
               }
-              if (!sameApproval(msg, data)) return true
-              return false
-            }))
+              return kept
+            })
             break
           }
           setIsThinking(false)

@@ -178,6 +178,12 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
                 run_id=run_id or request.run_id,
             )
             if result is False:
+                if stored is not None:
+                    # This response's outcome is the one recorded. The local
+                    # request went away in between because the executor saw
+                    # that record through the shared-store poll and moved on,
+                    # so the tool runs with this answer.
+                    return "accepted", None
                 return "unknown", _unknown(data)
             return "accepted", None
         remembered = manager.handle_approval_response(

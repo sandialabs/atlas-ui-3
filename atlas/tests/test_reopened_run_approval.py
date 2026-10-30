@@ -754,3 +754,28 @@ async def test_a_late_answer_to_a_timed_out_approval_says_expired(store):
         assert frame["approved"] is False
     finally:
         manager.cleanup_request(request.storage_key)
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_answer_is_accepted_when_the_executor_moved_on_first(store, monkeypatch):
+    # The shared-store poll can see this response's outcome and clean up the
+    # local request before handle_approval_response runs. The tool runs with
+    # this answer, so the user must not get unknown_tool_approval.
+    from atlas.application.chat.approval_manager import get_approval_manager
+    manager = get_approval_manager()
+    inv = invocation_id(RUN, 0, "call_race")
+    request = manager.create_approval_request(
+        "call_race", TOOL, {}, user_email=EMAIL, invocation_id=inv, run_id=RUN,
+    )
+
+    def gone(*_args, **_kwargs):
+        manager.cleanup_request(request.storage_key)
+        return False
+
+    monkeypatch.setattr(manager, "handle_approval_response", gone)
+    kind, frame = await decide_tool_approval({
+        "tool_call_id": "call_race", "invocation_id": inv, "run_id": RUN, "approved": True,
+    }, EMAIL)
+    assert kind == "accepted" and frame is None
+    stored = await store.read_resolution(approval_storage_key(inv, "call_race", EMAIL))
+    assert stored["approved"] is True

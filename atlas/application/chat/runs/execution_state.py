@@ -38,6 +38,9 @@ from atlas.core.user_identity import normalize_user_email
 logger = logging.getLogger(__name__)
 
 PROJECTION_TTL_SECONDS = 24 * 60 * 60
+# A finished run's document only has to outlive the clients still reconciling
+# it. Its rows are in history, so it is not kept for the full day.
+TERMINAL_PROJECTION_TTL_SECONDS = 15 * 60
 _MAX_STR_CHARS = 8000
 _MAX_DEPTH = 6
 _TERMINAL_INVOCATION = frozenset(
@@ -597,6 +600,12 @@ class ExecutionStore:
         raise NotImplementedError
 
 
+def _ttl_for(doc: dict) -> int:
+    if doc.get("status") in _TERMINAL_RUN:
+        return TERMINAL_PROJECTION_TTL_SECONDS
+    return PROJECTION_TTL_SECONDS
+
+
 def _prepare(event: dict) -> Optional[tuple]:
     conversation_id = event.get("conversation_id")
     run_id = event.get("run_id")
@@ -678,7 +687,7 @@ class MemoryExecutionStore(ExecutionStore):
         if doc is None:
             return
         updated = doc.get("updated_at") or 0
-        if time.time() - updated <= PROJECTION_TTL_SECONDS:
+        if time.time() - updated <= _ttl_for(doc):
             return
         self._docs.pop(key, None)
         members = self._by_user.get(user_email)
@@ -791,7 +800,7 @@ class RedisExecutionStore(ExecutionStore):
                 try:
                     wrote = await self._compare_and_set(
                         client, rev_key, doc_key, user_key,
-                        current, next_rev, payload, conversation_id,
+                        current, next_rev, payload, conversation_id, _ttl_for(doc),
                     )
                 except WatchError:
                     wrote = False
@@ -802,7 +811,7 @@ class RedisExecutionStore(ExecutionStore):
 
     async def _compare_and_set(
         self, client, rev_key, doc_key, user_key,
-        current, next_rev, payload, conversation_id,
+        current, next_rev, payload, conversation_id, ttl=PROJECTION_TTL_SECONDS,
     ) -> bool:
         async with client.pipeline() as pipe:
             await pipe.watch(rev_key)
@@ -811,8 +820,10 @@ class RedisExecutionStore(ExecutionStore):
                 await pipe.unwatch()
                 return False
             pipe.multi()
+            # The revision key keeps the full TTL, so a later run of this
+            # conversation still counts up from it after the document expired.
             pipe.set(rev_key, next_rev, ex=PROJECTION_TTL_SECONDS)
-            pipe.set(doc_key, payload, ex=PROJECTION_TTL_SECONDS)
+            pipe.set(doc_key, payload, ex=ttl)
             pipe.sadd(user_key, conversation_id)
             pipe.expire(user_key, PROJECTION_TTL_SECONDS)
             await pipe.execute()
