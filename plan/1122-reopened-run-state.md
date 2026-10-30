@@ -144,3 +144,13 @@ Verification after that review, same worktree, `atlas.__file__` this tree:
 - `bash scripts/check-docs.sh`: OK (123 markdown files, 19 indexes).
 
 A browser pass of a live sleep or approval turn was still not run.
+
+A later browser pass of an unapproved `atlas_sleep` showed a wake-up timer beside the Approve/Reject card. The invocation stayed `calling` until `tool_start`, and a reload shows the card without a tool row until the tool starts. After start the row is `sleeping` and the card is gone.
+
+Verified for that fix, worktree, `atlas.__file__` this tree:
+
+- `ruff check` on `execution_state.py` and the two test modules: all checks passed.
+- `pytest` `test_execution_state.py` `test_execution_state_routes.py`: 33 passed.
+- Vitest `execution-state.test.js`: 13 passed.
+- `npx eslint` on `executionState.js` and `execution-state.test.js`: clean.
+- `bash scripts/check-docs.sh`: OK.
