@@ -1,0 +1,99 @@
+# Plan: Authoritative run state for reopened conversations (#1122)
+
+Issue: https://github.com/sandialabs/atlas-ui-3/issues/1122
+Branch: `fix/1122-reopened-run-state`
+
+## Problem
+
+A conversation does not show the same execution state after navigate-away /
+reconnect as it does while the user watches it. Live state is split across
+the process-local run registry, the session history (flushed only at a step
+boundary), and the open token segment. Approval timeout and rejection never
+emit a settle frame, so the run stays `waiting_for_input` and the card is
+replayed forever. Pending cards are delivered twice (restore and `list_runs`).
+Provider `tool_call_id`s are reused across steps and runs, and both the
+approval manager and the client treat that id as a global key. `atlas_sleep`
+is shown as thinking or as a pending approval.
+
+## Contract
+
+One serializable execution projection per conversation, owned by the run:
+
+- `revision` — monotonic, incremented on every mutation, compared only within
+  a run.
+- `invocations[]` — one row per call, identity `run_id:step:tool_call_id`,
+  status `calling | in_progress | sleeping | completed | failed | interrupted
+  | expired | rejected`.
+- `pending_requests[]` — approval and elicitation frames still outstanding,
+  each carrying `run_id`, `conversation_id`, and `invocation_id`.
+- `activity` — `executing | sleeping | waiting_for_approval`.
+- `status` — the run lifecycle the sidebar already understands. Sleep stays
+  `running` with `activity=sleeping`. Approval stays `waiting_for_input`.
+
+The projection is coordination state. When `SESSION_REPOSITORY_TYPE=redis` it
+is stored in the shared Redis pool (`atlas:exec:{email}:{conversation_id}`),
+so any replica can answer `GET /api/conversations/{id}`. Durable tool rows
+still flush into chat history at the step boundary. With the memory session
+repository the same store is process-local; that is the single-instance mode,
+the same boundary the session repository already has. `RunRegistry` and
+`ToolApprovalManager` stay the in-process wait/cancel machinery. They are not
+the source of truth for a fetch.
+
+Approval outcomes are a separate Redis key, first write wins, so a duplicate
+or cross-replica response returns the outcome already recorded.
+
+## Changes
+
+1. `atlas/application/chat/runs/execution_state.py` — projection, reducer,
+   memory store, Redis store, merge into a conversation payload.
+2. Publish an invocation at the start of `execute_single_tool` (before the
+   step waits), and fold every tool frame into the projection. Stamp
+   `invocation_id`, `run_id`, `step` on frames. Pass `agent_step` from both
+   tool loops.
+3. Timeout and rejection emit `tool_error` (status `expired` / `rejected`)
+   before the approval request is dropped, so the registry leaves
+   `waiting_for_input` and the recorder persists the row. Elicitation timeout
+   emits the same kind of settle frame.
+4. Approval manager keys by `invocation_id` when the call has one, and a bare
+   `tool_call_id` resolves only when exactly one pending request has it.
+   A second response returns the stored outcome instead of "unknown".
+   Responses that land on another replica are written to Redis; the executor
+   waits on the local future or that record.
+5. `list_runs` stops replaying pending cards. Restore still replays them
+   once. The client dedupes by request identity and upserts tool rows by
+   invocation identity. `unknown_tool_approval` drops the stale card and does
+   not end the turn or the joined-view poll.
+6. `atlas_sleep` / `atlas_agent_sleep` is status `sleeping`. The busy
+   indicator says so. A snapshot with no pending request removes a phantom
+   approval card. Earlier invocations stay in the projection.
+
+`GET /api/conversations/{id}` attaches `execution` and merges invocation rows
+into `messages`, including a stored conversation whose run is executing on
+another replica.
+
+## Tests
+
+- Reducer: ten parallel invocations mid-step (running, completed, one
+  pending) and an `atlas_sleep` that does not look like an approval.
+- Two Redis stores, one fakeredis server: a write on one is the read on the
+  other.
+- Executor timeout and rejection drive `RunRegistry.note_event` and leave the
+  run running, with a failed transcript row.
+- Elicitation timeout emits a settle frame.
+- Two `call_0` approvals do not clobber each other. A duplicate response is
+  the stored outcome.
+- Frontend: approval dedupe, stale-card error does not end the stream,
+  reused `tool_call_id` updates only its invocation, reconnect prefers a
+  newer revision, sleep label.
+
+## Out of scope
+
+Live push to every socket and session resume stay #760. Run leases and orphan
+detection stay #1091. This change makes the snapshot they will build on
+authoritative and readable from any replica that shares Redis.
+
+## Verification
+
+Recorded after the implementation commits. Commands and results go below.
+
+<!-- verification:pending -->
