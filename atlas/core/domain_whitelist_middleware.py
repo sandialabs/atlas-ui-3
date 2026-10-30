@@ -11,8 +11,8 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from atlas.core.agent_runs_paths import is_agent_runs_path
 from atlas.core.domain_whitelist import DomainWhitelistManager
-from atlas.routes.agent_run_routes import is_agent_runs_path
 
 logger = logging.getLogger(__name__)
 

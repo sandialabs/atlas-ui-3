@@ -95,6 +95,10 @@ class _IdempotencyEntry:
     fingerprint: str
     created_at: float
     handle: Optional[Dict[str, Any]] = None  # None while the first request is admitting
+    # A follow-up's addressed run and conversation, so a retry can still be
+    # replayed after that run has been reaped from the registry.
+    addressed_run_id: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 _idempotency: Dict[Tuple[str, str], _IdempotencyEntry] = {}
@@ -125,8 +129,26 @@ def _prune_idempotency(now: float) -> None:
                 del _idempotency[key]
 
 
+def _replay_or_refuse(entry: _IdempotencyEntry, fingerprint: str) -> Dict[str, Any]:
+    if entry.fingerprint != fingerprint:
+        raise LaunchRefused(
+            "This idempotency_key was already used for a different request.",
+            code="idempotency_conflict",
+        )
+    if entry.handle is None:
+        raise LaunchRefused(
+            "A request with this idempotency_key is still being admitted. "
+            "Retry shortly.",
+            code="idempotency_in_progress",
+        )
+    return _replayed(entry.handle)
+
+
 def _reserve(
-    user_email: str, key: Optional[str], payload: Dict[str, Any]
+    user_email: str,
+    key: Optional[str],
+    payload: Dict[str, Any],
+    addressed_run_id: Optional[str] = None,
 ) -> Tuple[Optional[Tuple[str, str]], Optional[Dict[str, Any]]]:
     """Claim ``key`` for this request, or return the handle it already produced.
 
@@ -141,20 +163,50 @@ def _reserve(
     fingerprint = _fingerprint(payload)
     entry = _idempotency.get(slot)
     if entry is not None:
-        if entry.fingerprint != fingerprint:
-            raise LaunchRefused(
-                "This idempotency_key was already used for a different request.",
-                code="idempotency_conflict",
-            )
-        if entry.handle is None:
-            raise LaunchRefused(
-                "A request with this idempotency_key is still being admitted. "
-                "Retry shortly.",
-                code="idempotency_in_progress",
-            )
-        return slot, _replayed(entry.handle)
-    _idempotency[slot] = _IdempotencyEntry(fingerprint=fingerprint, created_at=now)
+        return slot, _replay_or_refuse(entry, fingerprint)
+    _idempotency[slot] = _IdempotencyEntry(
+        fingerprint=fingerprint,
+        created_at=now,
+        addressed_run_id=addressed_run_id,
+        conversation_id=payload.get("conversation_id"),
+    )
     return slot, None
+
+
+def _follow_up_payload(
+    conversation_id: Optional[str], message: str, allow_approval_pause: bool
+) -> Dict[str, Any]:
+    return {
+        "op": "follow_up",
+        "conversation_id": conversation_id,
+        "message": message,
+        "allow_approval_pause": allow_approval_pause,
+    }
+
+
+def _replay_follow_up_of_reaped_run(
+    config_manager: Any,
+    run_id: str,
+    key: Optional[str],
+    message: str,
+    allow_approval_pause: bool,
+) -> Optional[Dict[str, Any]]:
+    """The remembered reply to a follow-up whose addressed run is gone.
+
+    The slot is keyed by the run's owner, which can no longer be read from a
+    reaped run, so the entry is found by the run id it addressed instead.
+    """
+    if not key:
+        return None
+    _prune_idempotency(time.time())
+    for (owner, entry_key), entry in _idempotency.items():
+        if entry_key == key and entry.addressed_run_id == run_id:
+            _check_user_allowed(config_manager, owner)
+            fingerprint = _fingerprint(
+                _follow_up_payload(entry.conversation_id, message, allow_approval_pause)
+            )
+            return _replay_or_refuse(entry, fingerprint)
+    return None
 
 
 def _replayed(handle: Dict[str, Any]) -> Dict[str, Any]:
@@ -445,19 +497,23 @@ async def follow_up_api_run(
     """
     config_manager = _require_ground(factory)
     message = _check_message(message)
-    addressed = _api_record(run_id)
+    try:
+        addressed = _api_record(run_id)
+    except LaunchRefused:
+        replay = _replay_follow_up_of_reaped_run(
+            config_manager, run_id, idempotency_key, message, allow_approval_pause
+        )
+        if replay is not None:
+            return replay
+        raise
     user_email = addressed.user_email
     _check_user_allowed(config_manager, user_email)
 
     slot, replay = _reserve(
         user_email,
         idempotency_key,
-        {
-            "op": "follow_up",
-            "conversation_id": addressed.conversation_id,
-            "message": message,
-            "allow_approval_pause": allow_approval_pause,
-        },
+        _follow_up_payload(addressed.conversation_id, message, allow_approval_pause),
+        addressed_run_id=addressed.run_id,
     )
     if replay is not None:
         return replay

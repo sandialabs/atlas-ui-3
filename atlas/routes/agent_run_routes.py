@@ -35,10 +35,10 @@ from atlas.application.chat.runs.external_runs import (
     list_api_runs,
 )
 from atlas.application.chat.runs.launcher import LaunchRefused
+from atlas.core.agent_runs_paths import AGENT_RUNS_PREFIX
 
 logger = logging.getLogger(__name__)
 
-AGENT_RUNS_PREFIX = "/api/agent-runs"
 MIN_API_KEY_CHARS = 32
 
 # Refusal code -> HTTP status. Anything unlisted is a 400.
@@ -60,10 +60,6 @@ _STATUS_FOR_CODE = {
     "persistence_unavailable": 503,
     "unavailable": 503,
 }
-
-
-def is_agent_runs_path(path: str) -> bool:
-    return path == AGENT_RUNS_PREFIX or path.startswith(AGENT_RUNS_PREFIX + "/")
 
 
 def get_factory() -> Any:

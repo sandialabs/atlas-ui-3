@@ -18,8 +18,9 @@ from fastapi import FastAPI
 from atlas.application.chat.runs.context import clear_current_run
 from atlas.application.chat.runs.external_runs import reset_idempotency_cache
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry, reset_run_registry
+from atlas.core.agent_runs_paths import is_agent_runs_path
 from atlas.domain.errors import ValidationError
-from atlas.routes.agent_run_routes import get_factory, is_agent_runs_path
+from atlas.routes.agent_run_routes import get_factory
 from atlas.routes.agent_run_routes import router as agent_run_router
 
 KEY = "k" * 40
@@ -560,6 +561,27 @@ async def test_follow_up_continues_the_same_conversation_on_its_launch_spec(fact
     # The classification is the conversation's, not the caller's to change.
     assert call["compliance_level"] == "Internal"
     assert call["user_email"] == USER
+
+
+async def test_follow_up_retry_replays_after_the_addressed_run_is_reaped(factory):
+    async with _client(factory) as client:
+        first = await _completed_launch(client, factory)
+        body = {"message": "Now list the flaky tests", "idempotency_key": "turn-2"}
+        url = f"/api/agent-runs/{first['run_id']}/follow-up"
+        original = await client.post(url, json=body, headers=AUTH)
+        get_run_registry().remove(first["run_id"])
+        retry = await client.post(url, json=body, headers=AUTH)
+        conflict = await client.post(
+            url, json={**body, "message": "something else"}, headers=AUTH
+        )
+        unkeyed = await client.post(url, json={"message": "more"}, headers=AUTH)
+    assert original.status_code == 202
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == original.json()["run_id"]
+    assert retry.json()["idempotent_replay"] is True
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_conflict"
+    assert unkeyed.status_code == 404
 
 
 async def test_follow_up_is_refused_while_the_conversation_is_busy(factory):

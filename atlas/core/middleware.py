@@ -9,10 +9,10 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from atlas.core.agent_runs_paths import is_agent_runs_path
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.capabilities import verify_file_token
 from atlas.infrastructure.app_factory import app_factory
-from atlas.routes.agent_run_routes import is_agent_runs_path
 
 logger = logging.getLogger(__name__)
 
