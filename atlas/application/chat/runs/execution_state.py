@@ -510,8 +510,9 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
             by_invocation[inv] = index
         elif tool_call_id and meta.get("status") not in _TERMINAL_INVOCATION:
             # A finished legacy row is an earlier turn's call_0, not this
-            # run's. Only an open row can be the one this run is filling in.
-            by_legacy.setdefault(tool_call_id, index)
+            # run's. Only an open row can be the one this run is filling in,
+            # and of several, the most recent, as the live client picks.
+            by_legacy[tool_call_id] = index
     awaiting = _awaiting_approval(projection)
     for invocation in projection.get("invocations") or []:
         inv_id = invocation.get("invocation_id")
@@ -668,8 +669,11 @@ class MemoryExecutionStore(ExecutionStore):
         self._by_user: Dict[str, set] = {}
         self._resolutions: Dict[str, dict] = {}
         # Invocation ids each conversation ever projected, so a delete finds
-        # every approval outcome, not only the current run's.
+        # every approval outcome, not only the current run's. It outlives the
+        # document on purpose and is swept once its outcomes would have
+        # expired too.
         self._invocation_index: Dict[tuple, set] = {}
+        self._index_touched: Dict[tuple, float] = {}
         self._writes = 0
 
     async def apply_event(self, event: dict) -> Optional[dict]:
@@ -693,6 +697,7 @@ class MemoryExecutionStore(ExecutionStore):
             self._by_user.setdefault(user_email, set()).add(conversation_id)
             if doc["invocations"]:
                 self._invocation_index.setdefault(key, set()).update(doc["invocations"].keys())
+                self._index_touched[key] = time.time()
             self._writes += 1
             if self._writes % _SWEEP_EVERY == 0 or len(self._docs) > _DOC_CAP:
                 self._sweep(keep=key)
@@ -705,6 +710,7 @@ class MemoryExecutionStore(ExecutionStore):
         async with self._lock:
             doc = self._docs.pop((email, str(conversation_id)), None)
             indexed = self._invocation_index.pop((email, str(conversation_id)), set())
+            self._index_touched.pop((email, str(conversation_id)), None)
             members = self._by_user.get(email)
             if members is not None:
                 members.discard(str(conversation_id))
@@ -722,6 +728,11 @@ class MemoryExecutionStore(ExecutionStore):
         """Drop expired documents, then the oldest past the cap."""
         for email, conversation_id in list(self._docs):
             self._drop_expired(email, conversation_id)
+        cutoff = time.time() - PROJECTION_TTL_SECONDS
+        for key, touched in list(self._index_touched.items()):
+            if touched < cutoff:
+                self._index_touched.pop(key, None)
+                self._invocation_index.pop(key, None)
         overflow = len(self._docs) - _DOC_CAP
         if overflow <= 0:
             return
@@ -732,6 +743,7 @@ class MemoryExecutionStore(ExecutionStore):
         for email, conversation_id in oldest[:overflow]:
             self._docs.pop((email, conversation_id), None)
             self._invocation_index.pop((email, conversation_id), None)
+            self._index_touched.pop((email, conversation_id), None)
             self._by_user.get(email, set()).discard(conversation_id)
 
     async def get(self, conversation_id: str, user_email: str) -> Optional[dict]:

@@ -193,7 +193,9 @@ export function reconcileExecution(messages, execution, previousRevision) {
   source.forEach((message, index) => {
     if (message.type !== 'tool_call' && message.role !== 'tool') return
     if (message.invocation_id) byInvocation.set(message.invocation_id, index)
-    else if (message.tool_call_id && !legacy.has(message.tool_call_id) && isOpenLegacyRow(message)) {
+    // Of several open legacy rows with one id, the most recent: the same row
+    // the live handlers and the server merge pick.
+    else if (message.tool_call_id && isOpenLegacyRow(message)) {
       legacy.set(message.tool_call_id, index)
     }
   })

@@ -266,6 +266,22 @@ describe('reconcileExecution — a poll answered from before the latest frame', 
   })
 })
 
+describe('reconcileExecution — several open legacy rows', () => {
+  it('fills the most recent open legacy row, as the live handlers do', () => {
+    const current = [
+      { type: 'tool_call', tool_call_id: 'call_0', status: 'calling' },
+      { type: 'tool_call', tool_call_id: 'call_0', status: 'calling' },
+    ]
+    const next = reconcileExecution(current, {
+      revision: 2, run_id: 'run-1', status: 'running',
+      invocations: [invocation('run-1:0:call_0', { status: 'in_progress' })],
+    }, null)
+    expect(next[0].status).toBe('calling')
+    expect(next[1].status).toBe('in_progress')
+    expect(next[1].invocation_id).toBe('run-1:0:call_0')
+  })
+})
+
 describe('currentTurnIsSleeping', () => {
   it('counts only rows after the last user message', () => {
     const stale = { type: 'tool_call', tool_name: 'atlas_sleep', status: 'sleeping' }

@@ -662,3 +662,31 @@ async def test_a_progress_heartbeat_with_no_change_writes_nothing():
     revision = first["revision"]
     again = await store.apply_event(_event(0, type="tool_progress"))
     assert again["revision"] == revision
+
+
+def test_merge_fills_the_most_recent_open_legacy_row():
+    # The live client updates the most recent open legacy row for a bare id;
+    # a reload must pick the same one.
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_complete", success=True, result="done"))
+    older = _history_row(tool_call_id="call_0", status="calling")
+    newer = _history_row(tool_call_id="call_0", status="calling")
+    merged = merge_execution_into_messages([older, newer], public_projection(doc))
+    assert merged[0]["metadata"]["status"] == "calling"
+    assert merged[1]["metadata"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_memory_invocation_index_is_swept_after_the_outcome_ttl(monkeypatch):
+    from atlas.application.chat.runs import execution_state
+
+    monkeypatch.setattr(execution_state, "_SWEEP_EVERY", 1)
+    store = MemoryExecutionStore()
+    await store.apply_event(_event(0, conversation_id="gone"))
+    key = (EMAIL, "gone")
+    assert key in store._invocation_index
+    store._docs[key]["updated_at"] = 0
+    store._index_touched[key] = 0
+    await store.apply_event(_event(0, conversation_id="fresh"))
+    assert key not in store._invocation_index
+    assert (EMAIL, "fresh") in store._invocation_index
