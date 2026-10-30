@@ -100,6 +100,9 @@ capabilities are the ones carried forward.
 
 `POST /api/agent-runs/{run_id}/cancel` stops the run (and any sub-conversations it launched with
 `atlas_launch`), exactly like the stop button. `cancelled` says whether anything was still live.
+As with follow-ups, any of the conversation's run ids may be used: if the run named has already
+finished, the conversation's in-progress API run (a later follow-up) is stopped instead, and the
+response describes that run. A turn the user started themselves in ATLAS is never stopped.
 
 ### Errors
 

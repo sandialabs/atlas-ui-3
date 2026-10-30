@@ -373,7 +373,7 @@ async def launch_api_run(
     handle: Optional[Dict[str, Any]] = None
     try:
         resolved = resolve_workspace(factory.workspace_repository, workspace, user_email)
-        await resolve_model(config_manager, model, user_email)
+        await _resolve_api_model(config_manager, model, user_email)
         workspace_config = resolved.get("config") or {}
         data_sources = (
             list(workspace_config.get("selected_data_sources") or [])
@@ -393,6 +393,11 @@ async def launch_api_run(
             workspace_id=resolved.get("id"),
             workspace_name=resolved.get("name"),
             title=message,
+            no_tools_message=(
+                "That workspace has no tools the user is currently authorized to "
+                "use, so a run under it would have nothing to work with. Choose "
+                "a workspace with tools."
+            ),
             top_level=True,
             refuse_approval_gated=not allow_approval_pause,
             source=API_SOURCE,
@@ -404,6 +409,20 @@ async def launch_api_run(
         return handle
     finally:
         _release(slot, handle)
+
+
+async def _resolve_api_model(config_manager: Any, model: str, user_email: str) -> None:
+    """``resolve_model``, with a refusal worded for a REST caller, not a chat."""
+    try:
+        await resolve_model(config_manager, model, user_email)
+    except LaunchRefused as exc:
+        if getattr(exc, "code", None) != "model_not_available":
+            raise
+        raise LaunchRefused(
+            f"Model '{model}' is not available to that user. "
+            "GET /api/agent-runs/options lists the models they may use.",
+            code="model_not_available",
+        ) from exc
 
 
 def _api_record(run_id: str) -> Any:
@@ -546,8 +565,14 @@ async def follow_up_api_run(
                 code="not_continuable",
             )
         spec = target.launch_spec or {}
+        if not spec.get("model"):
+            raise LaunchRefused(
+                "That run has no recorded launch settings to continue from. "
+                "Launch a new run instead.",
+                code="not_continuable",
+            )
         workspace = _revalidate_saved_workspace(factory, spec, user_email)
-        await resolve_model(config_manager, spec["model"], user_email)
+        await _resolve_api_model(config_manager, spec["model"], user_email)
         record, new_spec, admin_gated = await _start_child_run(
             factory=factory,
             config_manager=config_manager,
@@ -585,11 +610,21 @@ async def follow_up_api_run(
 
 
 def cancel_api_run(run_id: str) -> Dict[str, Any]:
-    """Stop an API run (and anything it launched), as the UI's stop does."""
+    """Stop an API run (and anything it launched), as the UI's stop does.
+
+    Like a follow-up, any of the conversation's run ids addresses it: when the
+    run named has already finished, the conversation's in-progress API run
+    (a later follow-up) is the one stopped, and the response describes it.
+    A turn the user started themselves in ATLAS is never touched.
+    """
     record = _api_record(run_id)
     registry = get_run_registry()
+    if record.is_terminal:
+        live = [r for r in _api_runs_for_conversation(record) if not r.is_terminal]
+        if live:
+            record = max(live, key=lambda r: r.created_at)
     cancelled = registry.cancel(record.run_id, record.user_email)
     _audit("cancel", record, record.launch_spec or {}, cancelled=cancelled)
-    payload = _status(registry.get(run_id) or record)
+    payload = _status(registry.get(record.run_id) or record)
     payload["cancelled"] = cancelled
     return payload

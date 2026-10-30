@@ -307,6 +307,16 @@ async def test_invalid_launches_are_refused_with_structured_errors(factory, over
     assert get_run_registry().all_records() == []
 
 
+async def test_model_refusal_is_worded_for_the_api_caller(factory):
+    async with _client(factory) as client:
+        response = await client.post(
+            "/api/agent-runs", json={**LAUNCH, "model": "secret-model"}, headers=AUTH
+        )
+    message = response.json()["detail"]["message"]
+    assert "/api/agent-runs/options" in message
+    assert "conversation" not in message
+
+
 async def test_another_users_workspace_is_not_found_rather_than_forbidden(factory):
     """Impersonating the wrong user reveals nothing about the right one's workspaces."""
     async with _client(factory) as client:
@@ -525,6 +535,25 @@ async def test_cancel_stops_the_run(factory):
     assert again.json()["cancelled"] is False
 
 
+async def test_cancel_by_the_launch_id_stops_the_live_follow_up(factory):
+    async with _client(factory) as client:
+        first = await _completed_launch(client, factory)
+        follow_up = (
+            await client.post(
+                f"/api/agent-runs/{first['run_id']}/follow-up",
+                json={"message": "more"},
+                headers=AUTH,
+            )
+        ).json()
+        await factory.services[-1].started.wait()
+        response = await client.post(f"/api/agent-runs/{first['run_id']}/cancel", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json()["run_id"] == follow_up["run_id"]
+    assert response.json()["cancelled"] is True
+    assert get_run_registry().get(follow_up["run_id"]).status is RunStatus.CANCELLED
+    assert get_run_registry().get(first["run_id"]).status is RunStatus.COMPLETED
+
+
 # ---------------------------------------------------------------------------
 # Follow-up
 # ---------------------------------------------------------------------------
@@ -582,6 +611,17 @@ async def test_follow_up_retry_replays_after_the_addressed_run_is_reaped(factory
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_conflict"
     assert unkeyed.status_code == 404
+
+
+async def test_follow_up_without_a_recorded_model_is_refused_cleanly(factory):
+    async with _client(factory) as client:
+        first = await _completed_launch(client, factory)
+        get_run_registry().get(first["run_id"]).launch_spec.pop("model")
+        response = await client.post(
+            f"/api/agent-runs/{first['run_id']}/follow-up", json={"message": "more"}, headers=AUTH
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "not_continuable"
 
 
 async def test_follow_up_is_refused_while_the_conversation_is_busy(factory):
