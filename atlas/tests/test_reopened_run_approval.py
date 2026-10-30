@@ -779,3 +779,21 @@ async def test_a_recorded_answer_is_accepted_when_the_executor_moved_on_first(st
     assert kind == "accepted" and frame is None
     stored = await store.read_resolution(approval_storage_key(inv, "call_race", EMAIL))
     assert stored["approved"] is True
+
+
+@pytest.mark.asyncio
+async def test_parallel_calls_with_one_call_id_do_not_share_a_future():
+    manager = ToolApprovalManager()
+    inv = invocation_id(RUN, 0, "call_dup")
+    first = manager.create_approval_request(
+        "call_dup", TOOL, {"value": "a"}, user_email=EMAIL, invocation_id=inv, run_id=RUN,
+    )
+    second = manager.create_approval_request(
+        "call_dup", TOOL, {"value": "b"}, user_email=EMAIL, invocation_id=inv, run_id=RUN,
+    )
+    assert first is not second and first.future is not second.future
+    # A true repeat (same arguments) still reuses the one request.
+    again = manager.create_approval_request(
+        "call_dup", TOOL, {"value": "a"}, user_email=EMAIL, invocation_id=inv, run_id=RUN,
+    )
+    assert again is first

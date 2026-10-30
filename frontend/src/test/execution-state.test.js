@@ -238,6 +238,34 @@ describe('reconcileExecution — decided approval cards', () => {
   })
 })
 
+describe('reconcileExecution — a poll answered from before the latest frame', () => {
+  it('keeps a card and a row that live frames made newer than the snapshot', () => {
+    const current = [
+      { type: 'tool_call', invocation_id: 'run-1:0:call_0', tool_call_id: 'call_0', run_id: 'run-1', status: 'in_progress', execution_revision: 6 },
+      { type: 'tool_approval_request', invocation_id: 'run-1:0:call_1', tool_call_id: 'call_1', run_id: 'run-1', status: 'pending', execution_revision: 7 },
+    ]
+    const next = reconcileExecution(current, {
+      revision: 5,
+      run_id: 'run-1',
+      status: 'running',
+      invocations: [invocation('run-1:0:call_0', { status: 'calling', result: 'stale' })],
+      pending_requests: [],
+    }, { revision: 4, run_id: 'run-1' })
+    expect(next).toBe(current)
+  })
+
+  it('never moves a row backwards even without a revision stamp', () => {
+    const current = [
+      { type: 'tool_call', invocation_id: 'run-1:0:call_0', tool_call_id: 'call_0', run_id: 'run-1', step: 0, tool_name: 'search', status: 'sleeping' },
+    ]
+    const next = reconcileExecution(current, {
+      revision: 5, run_id: 'run-1', status: 'running',
+      invocations: [invocation('run-1:0:call_0', { status: 'calling' })],
+    }, { revision: 4, run_id: 'run-1' })
+    expect(next).toBe(current)
+  })
+})
+
 describe('invocation identity helpers', () => {
   it('matches a legacy row only when the frame has no invocation id', () => {
     const legacy = { tool_call_id: 'call_0' }

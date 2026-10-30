@@ -17,6 +17,19 @@ export function isOpenLegacyRow(row) {
   return !!row && !row.invocation_id && !TERMINAL_TOOL_STATUS.has(row.status)
 }
 
+// Progress order of a tool row. A snapshot never moves a row backwards: a
+// poll can be answered with a document from before the row's last frame.
+function statusRank(status) {
+  if (TERMINAL_TOOL_STATUS.has(status)) return 2
+  if (status === 'in_progress' || status === 'sleeping') return 1
+  return 0
+}
+
+function newerThan(row, revision) {
+  return typeof row.execution_revision === 'number' && typeof revision === 'number'
+    && row.execution_revision > revision
+}
+
 export function isTerminalRun(execution) {
   return !!execution && TERMINAL_RUN_STATUS.has(execution.status)
 }
@@ -197,8 +210,11 @@ export function reconcileExecution(messages, execution, previousRevision) {
       return
     }
     // A row that already settled keeps what it has. The projection can lag
-    // the live frame, and its result is a shortened copy.
+    // the live frame, and its result is a shortened copy. A row a live frame
+    // updated after this snapshot was taken is newer than it, too.
     if (TERMINAL_TOOL_STATUS.has(source[index].status)) return
+    if (newerThan(source[index], execution.revision)) return
+    if (statusRank(row.status) < statusRank(source[index].status)) row.status = undefined
     const patch = rowPatch(source[index], row)
     if (patch) patches.set(index, patch)
   })
@@ -210,6 +226,8 @@ export function reconcileExecution(messages, execution, previousRevision) {
     // rejected card is the user's decision on record, and a card with no run
     // is not part of any snapshot.
     if (message.status !== 'pending' || !message.run_id) return
+    // A card a live frame added after this snapshot was taken is not stale.
+    if (newerThan(message, execution.revision)) return
     if (execution.run_id && message.run_id !== execution.run_id) return
     const key = requestIdentity(message)
     if (key && !pendingKeys.has(key)) dropped.add(index)

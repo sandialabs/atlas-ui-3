@@ -153,7 +153,10 @@ class ToolApprovalManager:
                 or not user_email
                 or normalize_user_email(existing.user_email) == normalize_user_email(user_email)
             )
-            if same_owner and existing.tool_name == tool_name:
+            # Same arguments too: a malformed step can carry two parallel
+            # calls with one tool_call_id, and they must not share a future,
+            # or the second call runs with the first call's arguments.
+            if same_owner and existing.tool_name == tool_name and existing.arguments == arguments:
                 return existing
             key = None
         if not key:

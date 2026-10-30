@@ -9,6 +9,7 @@ function withIdentity(message, data) {
   if (data.run_id) next.run_id = data.run_id
   if (data.conversation_id) next.conversation_id = data.conversation_id
   if (data.step != null) next.step = data.step
+  if (typeof data.execution_revision === 'number') next.execution_revision = data.execution_revision
   return next
 }
 
@@ -78,6 +79,11 @@ function mapToolRows(prev, data, patch, insert) {
   const exact = !!(data.invocation_id && list.some(
     msg => isToolRow(msg) && msg.invocation_id === data.invocation_id
   ))
+  // The frame's projection revision rides along, so a later poll of an older
+  // snapshot knows this row is newer than what it saw.
+  if (typeof data.execution_revision === 'number') {
+    patch = { ...patch, execution_revision: data.execution_revision }
+  }
   if (exact) {
     return list.map(msg => (
       isToolRow(msg) && msg.invocation_id === data.invocation_id ? { ...msg, ...patch } : msg

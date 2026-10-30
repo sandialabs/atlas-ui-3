@@ -53,6 +53,7 @@ _INPUT_EVENTS = frozenset({"tool_approval_request", "elicitation_request"})
 # A late terminal or settlement frame from the previous run must not erase the
 # run that has already started.
 _OPENING_EVENTS = frozenset({
+    "run_started",
     "invocation",
     "tool_start",
     "tool_progress",
@@ -369,6 +370,11 @@ def apply_event_to_document(doc: dict, event: dict) -> bool:
         fresh["closed_runs"] = (list(closed) + [current_run])[-50:]
         doc.clear()
         doc.update(fresh)
+        if event.get("type") == "run_started":
+            return True
+    if event.get("type") == "run_started":
+        # Already this run's document: nothing to change.
+        return False
     if _apply_run_status(doc, event):
         return True
     if doc.get("status") in _TERMINAL_RUN:
@@ -642,6 +648,10 @@ class MemoryExecutionStore(ExecutionStore):
             key = (user_email, conversation_id)
             self._drop_expired(user_email, conversation_id)
             stored = self._docs.get(key)
+            if stored is None and event.get("type") == "run_started":
+                # Only an earlier run's document needs replacing. A run that
+                # never projects anything does not create one.
+                return None
             doc = _blank(run_id, conversation_id, user_email) if stored is None else copy.deepcopy(stored)
             if not apply_event_to_document(doc, event):
                 return public_projection(stored) if stored is not None else None
@@ -793,6 +803,8 @@ class RedisExecutionStore(ExecutionStore):
                 raw = await client.get(doc_key)
                 if raw:
                     doc = json.loads(_text(raw))
+                elif event.get("type") == "run_started":
+                    return None
                 else:
                     doc = _blank(run_id, conversation_id, user_email)
                 if not apply_event_to_document(doc, event):
@@ -905,12 +917,16 @@ def reset_execution_store() -> None:
     set_execution_store(None)
 
 
-async def publish_execution_event(event: dict) -> None:
-    """Record one frame. A store error must not fail the tool call."""
+async def publish_execution_event(event: dict) -> Optional[dict]:
+    """Record one frame. A store error must not fail the tool call.
+
+    Returns the projection after the write, or None when nothing was stored.
+    """
     try:
-        await get_execution_store().apply_event(event)
+        return await get_execution_store().apply_event(event)
     except Exception:
         logger.warning("execution projection update failed", exc_info=True)
+        return None
 
 
 async def attach_execution(conversation: Optional[dict], user_email: Optional[str]) -> Optional[dict]:
@@ -1006,7 +1022,12 @@ def observe_tool_callback(inner, identity: dict):
                 merged.setdefault(key, value)
             event = dict(merged)
             event["user_email"] = identity.get("user_email")
-            await publish_execution_event(event)
+            projection = await publish_execution_event(event)
+            # The revision this frame produced. A client compares it with a
+            # polled snapshot's revision, so a poll sent before this frame
+            # cannot drop its card or roll its row back.
+            if projection and projection.get("run_id") == merged.get("run_id"):
+                merged["execution_revision"] = projection.get("revision")
             payload = merged
         if inner is not None:
             await inner(payload)

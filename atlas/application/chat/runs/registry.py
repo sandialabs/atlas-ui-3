@@ -45,6 +45,10 @@ from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
+# Projection writes the registry has scheduled and not yet finished. Holding
+# them here keeps each task alive until its write lands.
+_PROJECTION_TASKS: "set[asyncio.Task]" = set()
+
 # How long a run that reached a terminal state stays queryable. Long enough
 # that a browser reopened a few minutes later still learns "that finished" /
 # "that failed" instead of silently showing nothing; short enough that an
@@ -420,6 +424,16 @@ class RunRegistry:
             sanitize_for_logging(str(conversation_id)),
             len(active) + 1,
         )
+        # A previous run's projection may never have received its terminal
+        # write (a lost publish, a dead replica). This run replaces it, so a
+        # text-only run that publishes no tool frame still clears a stale
+        # pending card. The store ignores it when there is no document.
+        self._publish_projection({
+            "type": "run_started",
+            "run_id": record.run_id,
+            "conversation_id": record.conversation_id,
+            "user_email": record.user_email,
+        })
         self._notify(record)
         return record
 
@@ -499,6 +513,17 @@ class RunRegistry:
         }
         if record.error:
             event["error"] = record.error
+        self._publish_projection(event)
+
+    @staticmethod
+    def _publish_projection(event: Dict[str, Any]) -> None:
+        """Write one run-lifecycle event to the shared projection, best effort.
+
+        The registry is synchronous, so the write runs as a task. The task is
+        kept in ``_PROJECTION_TASKS`` until it finishes: the event loop only
+        holds a weak reference, and an unreferenced task can be collected
+        before the write lands.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -510,9 +535,11 @@ class RunRegistry:
 
                 await publish_execution_event(payload)
             except Exception:
-                logger.warning("terminal execution projection update failed", exc_info=True)
+                logger.warning("execution projection lifecycle update failed", exc_info=True)
 
-        loop.create_task(_send())
+        task = loop.create_task(_send())
+        _PROJECTION_TASKS.add(task)
+        task.add_done_callback(_PROJECTION_TASKS.discard)
 
     def note_stream_token(
         self, run_id: Optional[str], token: str, is_first: bool, is_last: bool

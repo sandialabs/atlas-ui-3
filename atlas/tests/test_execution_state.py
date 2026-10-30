@@ -573,3 +573,45 @@ def test_sleep_progress_keeps_the_live_tool_name():
     row = public_projection(doc)["invocations"][0]
     assert row["tool_name"] == "atlas_sleep"
     assert row["status"] == "sleeping"
+
+
+@pytest.mark.asyncio
+async def test_a_new_run_clears_a_stale_card_even_without_tool_frames():
+    # Run 1's terminal write was lost, so its card is still pending. Run 2 is
+    # text-only and publishes no tool frame; its start must still replace it.
+    for store in (MemoryExecutionStore(), _redis_store(fakeredis.FakeServer())):
+        await store.apply_event(_event(0, type="tool_approval_request", arguments={}))
+        assert public_projection(await store.get(CONV, EMAIL))["pending_requests"]
+        started = {"type": "run_started", "run_id": "run-2", "conversation_id": CONV, "user_email": EMAIL}
+        await store.apply_event(started)
+        projection = public_projection(await store.get(CONV, EMAIL))
+        assert projection["run_id"] == "run-2"
+        assert projection["pending_requests"] == []
+        assert projection["status"] == "running"
+        # The superseded run's late frames stay dropped.
+        await store.apply_event(_event(1, type="tool_approval_request", arguments={}))
+        assert public_projection(await store.get(CONV, EMAIL))["pending_requests"] == []
+
+
+@pytest.mark.asyncio
+async def test_run_started_creates_no_document_on_its_own():
+    for store in (MemoryExecutionStore(), _redis_store(fakeredis.FakeServer())):
+        await store.apply_event({"type": "run_started", "run_id": "run-1", "conversation_id": CONV, "user_email": EMAIL})
+        assert await store.get(CONV, EMAIL) is None
+
+
+@pytest.mark.asyncio
+async def test_registry_start_publishes_and_retains_the_write():
+    from atlas.application.chat.runs import registry as registry_module
+
+    store = MemoryExecutionStore()
+    set_execution_store(store)
+    await store.apply_event(_event(0, type="tool_approval_request", arguments={}))
+    registry = RunRegistry()
+    record = registry.start(conversation_id=CONV, user_email=EMAIL)
+    assert registry_module._PROJECTION_TASKS
+    await asyncio.gather(*list(registry_module._PROJECTION_TASKS))
+    projection = public_projection(await store.get(CONV, EMAIL))
+    assert projection["run_id"] == record.run_id
+    assert projection["pending_requests"] == []
+    assert not registry_module._PROJECTION_TASKS
