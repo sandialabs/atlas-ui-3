@@ -180,7 +180,8 @@ def _alignment_failures():
     That module starts a live server scenario at import time.
     """
     path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "pr959", "scenario.py"))
-    source = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as handle:
+        source = handle.read()
     start = source.index("PROSE_ROW_TYPES =")
     end = source.index("\nasync def main")
     namespace = {"os": os, "json": json, "__file__": path}

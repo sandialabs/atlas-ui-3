@@ -3020,9 +3020,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     "Received tool approval response: %s",
                     summarize_tool_approval_response_for_logging(data),
                 )
+                # Constants only. CodeQL traces the raw flag and the call id
+                # into this line, and does not treat sanitize_for_logging as
+                # a log-injection sanitizer.
+                safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
+                approved_label = "yes" if approved is True else "no"
                 logger.info(
                     "Processing approval: tool_call_id=%s, approved=%s",
-                    sanitize_for_logging(tool_call_id), approved,
+                    safe_tool_call_id, approved_label,
                 )
 
                 from atlas.application.chat.approval_resolution import decide_tool_approval

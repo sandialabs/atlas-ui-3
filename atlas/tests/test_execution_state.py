@@ -14,7 +14,9 @@ from atlas.application.chat.runs.execution_state import (
     merge_run_snapshots,
     public_projection,
     reset_execution_store,
+    set_execution_store,
 )
+from atlas.application.chat.runs.registry import RunRegistry, RunStatus
 from atlas.infrastructure.redis import RedisClientManager, RedisSettings
 
 EMAIL = "owner@example.com"
@@ -170,6 +172,114 @@ def test_reducer_does_not_clear_a_different_invocations_card():
         invocation_id=invocation_id("run-1", 1, "call_0"),
     ))
     assert invocation_id("run-1", 0, "call_0") in doc["pending_requests"]
+
+
+def _blank_doc():
+    return {
+        "run_id": "run-1",
+        "conversation_id": CONV,
+        "user_email": EMAIL,
+        "revision": 0,
+        "status": "running",
+        "activity": "executing",
+        "invocations": {},
+        "pending_requests": {},
+        "seq": 0,
+        "updated_at": 0,
+    }
+
+
+def test_pending_approval_arguments_are_not_truncated():
+    doc = _blank_doc()
+    body = "a" * 9000
+    apply_event_to_document(doc, _event(0, type="tool_approval_request", arguments={"body": body}))
+    stored = doc["pending_requests"][invocation_id("run-1", 0, "call_0")]
+    assert stored["arguments"]["body"] == body
+
+
+def test_terminal_run_status_clears_pending_and_ignores_a_later_tool_start():
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_approval_request", arguments={"q": "x"}))
+    apply_event_to_document(doc, {
+        "type": "run_status",
+        "status": "completed",
+        "run_id": "run-1",
+        "error": "done",
+    })
+    assert doc["status"] == "completed"
+    assert doc["pending_requests"] == {}
+    assert doc["waiting_on"] is None
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    assert doc["status"] == "completed"
+    assert doc["activity"] == "completed"
+    apply_event_to_document(doc, {"type": "run_status", "status": "failed", "run_id": "run-1"})
+    assert doc["status"] == "completed"
+
+
+def test_merge_run_snapshots_does_not_resurrect_a_finished_run():
+    local = [{"run_id": "run-1", "conversation_id": CONV, "status": "completed"}]
+    shared = [{
+        "run_id": "run-1",
+        "conversation_id": CONV,
+        "status": "waiting_for_input",
+        "activity": "waiting_for_approval",
+        "waiting_on": "tool_approval_request",
+        "revision": 8,
+    }]
+    merged = merge_run_snapshots(local, shared)
+    assert len(merged) == 1
+    assert merged[0]["status"] == "completed"
+    assert merged[0]["execution_revision"] == 8
+    assert "activity" not in merged[0]
+
+
+def test_finished_projection_without_a_local_run_is_omitted():
+    shared = [{
+        "run_id": "run-9",
+        "conversation_id": "conv-done",
+        "status": "failed",
+        "revision": 2,
+    }]
+    assert merge_run_snapshots([], shared) == []
+
+
+def test_terminal_projection_finishes_a_local_running_run():
+    local = [{"run_id": "run-1", "conversation_id": CONV, "status": "running"}]
+    shared = [{
+        "run_id": "run-1",
+        "conversation_id": CONV,
+        "status": "cancelled",
+        "activity": "cancelled",
+        "revision": 5,
+    }]
+    merged = merge_run_snapshots(local, shared)[0]
+    assert merged["status"] == "cancelled"
+    assert merged["activity"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_set_status_publishes_a_terminal_projection():
+    store = MemoryExecutionStore()
+    set_execution_store(store)
+    registry = RunRegistry()
+    record = registry.start(conversation_id=CONV, user_email=EMAIL)
+    registry.set_status(record.run_id, RunStatus.RUNNING)
+    await store.apply_event({
+        "type": "tool_approval_request",
+        "run_id": record.run_id,
+        "conversation_id": CONV,
+        "user_email": EMAIL,
+        "step": 0,
+        "tool_call_id": "call_0",
+        "tool_name": "tool_0",
+        "invocation_id": invocation_id(record.run_id, 0, "call_0"),
+        "arguments": {"q": "x"},
+    })
+    registry.set_status(record.run_id, RunStatus.COMPLETED, error="done")
+    await asyncio.sleep(0)
+    projection = public_projection(await store.get(CONV, EMAIL))
+    assert projection["status"] == "completed"
+    assert projection["pending_requests"] == []
 
 
 def test_merge_run_snapshots_surfaces_a_detached_run():

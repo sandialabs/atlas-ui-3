@@ -1,6 +1,6 @@
 # Execution State
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 How a reopened conversation reconstructs an in-progress run (issue #1122).
 Related: [Interrupted Turns](interrupted-turns.md), [Interactive Tool Elicitation](elicitation.md).
@@ -60,6 +60,16 @@ providers reuse `call_0` across steps and runs.
 `atlas_sleep` is `activity=sleeping` and a tool row with status `sleeping`.
 Earlier tool rows stay visible. It is not an approval and it is not
 "Agent thinking...".
+
+When the run completes, fails, or is cancelled, that status is written into
+the same document and the pending set is cleared. A later tool frame for
+that run does not bring it back. A run list keeps a local terminal status
+when the shared document has not caught up, and it does not add a finished
+projection as a new active run.
+
+Pending approval `arguments` are stored in full. Approving the card sends
+those arguments. Other fields in the document are shortened so a fetch stays
+bounded.
 
 ## Client
 

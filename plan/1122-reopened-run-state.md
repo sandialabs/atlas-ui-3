@@ -105,3 +105,27 @@ Recorded 2026-10-29 from this worktree. `atlas.__file__` resolved to this tree, 
 - `bash scripts/check-docs.sh`: OK (123 markdown files, 19 indexes, no orphans or broken links).
 
 A browser pass of a live sleep or approval turn was not run. No browser tool was available, and that turn needs a model. The labels and the reconcile rules are covered by the vitest files above.
+
+## Review follow-up (2026-10-30)
+
+CI on the first push failed `websocketHandlers.test.js`: a stopped tool row with no `type` stayed `calling`. Tool-row matching now treats a typeless `tool_call_id` row as a tool row and leaves typed non-tool rows alone.
+
+The review also required four behavior fixes, all in this follow-up:
+
+- A terminal `run_status` is published from `RunRegistry.set_status` into the shared projection. `merge_run_snapshots` does not overlay a non-terminal projection onto a finished local run, and it does not list a finished projection as a detached active run.
+- An approval response claims the shared outcome before it resolves the local future. A rejection that already won is what the local future returns.
+- Pending approval arguments are not truncated.
+- Approval cards and tool rows are deduped inside one `mapMessages` updater.
+
+CodeQL notes in the same change: newline-strip the approval log fields, close the alignment scenario file, and drop the unused bindings in the race test. The `await task` expression that CodeQL called effectless now assigns its outcome and asserts cancellation.
+
+Follow-up verification, same worktree, `atlas.__file__` still this tree:
+
+- `ruff check` on the touched modules: all checks passed.
+- `pytest` `test_execution_state.py` `test_reopened_run_approval.py` `test_approval_manager.py` `test_tool_approval_cleanup.py` `test_parallel_run_transport.py` `test_run_in_flight_conversation.py` `test_run_stream_replay.py`: 118 passed.
+- `bash test/pr-validation/test_pr1122_reopened_run_state.sh`: Passed 2, Failed 0, then 53 pytest passed.
+- Vitest: `websocketHandlers.test.js` 24, `tool-approval-websocket.test.js` 15, `execution-state` 8, `transcript-alignment` 17, `use-messages-invocation` 3. All passed. The previously failing stopped-tool assertion is in the 24.
+- `npx eslint` on `websocketHandlers.js` and `tool-approval-websocket.test.js`: clean.
+- `bash scripts/check-docs.sh`: OK (123 markdown files, 19 indexes).
+
+A browser pass was still not run.

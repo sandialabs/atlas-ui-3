@@ -477,8 +477,42 @@ class RunRegistry:
             # turn's text is in the stored transcript now, and a stale buffer
             # would replay a finished answer over a reopen's fresh one.
             record.stream.clear()
+            self._publish_terminal(record)
         self._notify(record)
         return record
+
+    def _publish_terminal(self, record: "RunRecord") -> None:
+        """Tell every replica this run finished.
+
+        The registry stays process-local. The shared projection is what
+        another replica's run list would otherwise keep showing as active
+        until the document expired.
+        """
+        if not record.status.is_terminal:
+            return
+        event = {
+            "type": "run_status",
+            "status": record.status.value,
+            "run_id": record.run_id,
+            "conversation_id": record.conversation_id,
+            "user_email": record.user_email,
+        }
+        if record.error:
+            event["error"] = record.error
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def _send(payload=event):
+            try:
+                from atlas.application.chat.runs.execution_state import publish_execution_event
+
+                await publish_execution_event(payload)
+            except Exception:
+                logger.warning("terminal execution projection update failed", exc_info=True)
+
+        loop.create_task(_send())
 
     def note_stream_token(
         self, run_id: Optional[str], token: str, is_first: bool, is_last: bool

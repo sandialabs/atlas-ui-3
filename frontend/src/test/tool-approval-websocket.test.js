@@ -13,11 +13,17 @@ describe('Tool Approval WebSocket Tests', () => {
   describe('createWebSocketHandler - Tool Approval Messages', () => {
     let deps
     let handler
+    let messages
 
     beforeEach(() => {
+      messages = []
       deps = {
-        addMessage: vi.fn(),
-        mapMessages: vi.fn(),
+        addMessage: vi.fn(message => {
+          messages = messages.concat(message)
+        }),
+        mapMessages: vi.fn(mapper => {
+          messages = mapper(messages.slice())
+        }),
         setIsThinking: vi.fn(),
         setCurrentAgentStep: vi.fn(),
         setCanvasContent: vi.fn(),
@@ -45,7 +51,7 @@ describe('Tool Approval WebSocket Tests', () => {
 
       handler(message)
 
-      expect(deps.addMessage).toHaveBeenCalledWith({
+      expect(messages).toEqual([{
         role: 'system',
         content: 'Tool Approval Required: dangerous_tool',
         type: 'tool_approval_request',
@@ -56,7 +62,7 @@ describe('Tool Approval WebSocket Tests', () => {
         admin_required: false,
         status: 'pending',
         timestamp: expect.any(String)
-      })
+      }])
     })
 
     it('should handle tool_approval_request with allow_edit=false', () => {
@@ -71,7 +77,7 @@ describe('Tool Approval WebSocket Tests', () => {
 
       handler(message)
 
-      expect(deps.addMessage).toHaveBeenCalledWith({
+      expect(messages).toEqual([{
         role: 'system',
         content: 'Tool Approval Required: restricted_tool',
         type: 'tool_approval_request',
@@ -82,7 +88,7 @@ describe('Tool Approval WebSocket Tests', () => {
         admin_required: true,
         status: 'pending',
         timestamp: expect.any(String)
-      })
+      }])
     })
 
     it('should handle tool_approval_request with empty arguments', () => {
@@ -97,7 +103,7 @@ describe('Tool Approval WebSocket Tests', () => {
 
       handler(message)
 
-      expect(deps.addMessage).toHaveBeenCalledWith({
+      expect(messages).toEqual([{
         role: 'system',
         content: 'Tool Approval Required: no_args_tool',
         type: 'tool_approval_request',
@@ -108,7 +114,7 @@ describe('Tool Approval WebSocket Tests', () => {
         admin_required: false,
         status: 'pending',
         timestamp: expect.any(String)
-      })
+      }])
     })
 
     it('should handle tool_approval_request with complex nested arguments', () => {
@@ -131,7 +137,7 @@ describe('Tool Approval WebSocket Tests', () => {
 
       handler(message)
 
-      expect(deps.addMessage).toHaveBeenCalledWith({
+      expect(messages).toEqual([{
         role: 'system',
         content: 'Tool Approval Required: complex_tool',
         type: 'tool_approval_request',
@@ -142,7 +148,7 @@ describe('Tool Approval WebSocket Tests', () => {
         admin_required: false,
         status: 'pending',
         timestamp: expect.any(String)
-      })
+      }])
     })
 
     it('should handle tool_start message after approval', () => {
@@ -156,7 +162,7 @@ describe('Tool Approval WebSocket Tests', () => {
 
       handler(message)
 
-      expect(deps.addMessage).toHaveBeenCalledWith({
+      expect(messages).toEqual([{
         role: 'system',
         content: '**Tool Call: approved_tool**',
         type: 'tool_call',
@@ -167,7 +173,7 @@ describe('Tool Approval WebSocket Tests', () => {
         status: 'calling',
         timestamp: expect.any(String),
         agent_mode: false
-      })
+      }])
     })
 
     it('should handle tool_complete message', () => {
@@ -234,15 +240,52 @@ describe('Tool Approval WebSocket Tests', () => {
       handler(message1)
       handler(message2)
 
-      expect(deps.addMessage).toHaveBeenCalledTimes(2)
-      expect(deps.addMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      expect(messages).toHaveLength(2)
+      expect(messages[0]).toEqual(expect.objectContaining({
         tool_call_id: 'test_1',
         tool_name: 'tool_1'
       }))
-      expect(deps.addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      expect(messages[1]).toEqual(expect.objectContaining({
         tool_call_id: 'test_2',
         tool_name: 'tool_2'
       }))
+    })
+
+    it('does not add a second card when the updater already has the request', () => {
+      const updates = []
+      deps.mapMessages = vi.fn(mapper => { updates.push(mapper) })
+      deps.addMessage = vi.fn()
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'tool_approval_request',
+        tool_call_id: 'test_123',
+        tool_name: 'dangerous_tool',
+        arguments: { code: 'rm -rf /' },
+      })
+      const prior = [{
+        type: 'tool_approval_request',
+        tool_call_id: 'test_123',
+        status: 'pending',
+      }]
+      expect(deps.addMessage).not.toHaveBeenCalled()
+      expect(updates.at(-1)(prior)).toBe(prior)
+    })
+
+    it('appends a tool row once inside the updater', () => {
+      const updates = []
+      deps.mapMessages = vi.fn(mapper => { updates.push(mapper) })
+      deps.addMessage = vi.fn()
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'tool_start',
+        tool_call_id: 'test_123',
+        tool_name: 'approved_tool',
+        invocation_id: 'run-1:0:test_123',
+      })
+      expect(deps.addMessage).not.toHaveBeenCalled()
+      const next = updates.at(-1)([])
+      expect(next).toHaveLength(1)
+      expect(updates.at(-1)(next)).toBe(next)
     })
 
     it('marks atlas_sleep as sleeping and does not add the same invocation twice', () => {

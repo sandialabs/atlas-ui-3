@@ -209,9 +209,12 @@ class ToolApprovalManager:
             and (not run_id or not record.get("run_id") or record.get("run_id") == run_id)
         ]
         if len(remembered_matches) != 1:
+            # Inline CR/LF strip: CodeQL treats that as a log-injection
+            # sanitizer and does not treat sanitize_for_logging as one.
+            safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
             logger.warning(
                 "Received approval response for unknown tool call: %s",
-                sanitize_for_logging(tool_call_id),
+                safe_tool_call_id,
             )
             return False
         record = remembered_matches[0]

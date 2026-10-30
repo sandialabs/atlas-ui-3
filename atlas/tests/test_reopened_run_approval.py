@@ -168,7 +168,6 @@ async def test_rejection_settles_with_a_failed_row(store, approval_gate, monkeyp
 
 @pytest.mark.asyncio
 async def test_timeout_uses_an_approval_that_won_the_race(store, approval_gate):
-    registry, _record = _registry()
     frames = []
 
     async def update_callback(message):
@@ -222,8 +221,12 @@ async def test_cancel_still_drops_the_approval_request(store, monkeypatch):
     ))
     await asyncio.wait_for(seen.wait(), timeout=5)
     task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    outcome = None
+    try:
+        outcome = await task
+    except asyncio.CancelledError:
+        outcome = "cancelled"
+    assert outcome == "cancelled"
     assert manager.find_open_request("call_cancel", invocation_id(RUN, 2, "call_cancel"), RUN) is None
 
 
@@ -281,6 +284,40 @@ async def test_decide_accepts_locally_and_dedupes(store):
     assert frame["type"] == "tool_approval_settled"
     assert frame["already_resolved"] is True
     assert frame["approved"] is True
+    manager.cleanup_request(invocation)
+
+
+@pytest.mark.asyncio
+async def test_shared_rejection_wins_over_a_later_local_approval(store):
+    from atlas.application.chat.approval_manager import get_approval_manager
+    manager = get_approval_manager()
+    invocation = invocation_id(RUN, 0, "call_race")
+    manager.cleanup_request(invocation)
+    request = manager.create_approval_request(
+        "call_race", TOOL, {"value": "original"}, user_email=EMAIL,
+        invocation_id=invocation, run_id=RUN,
+    )
+    await store.put_resolution(invocation, {
+        "approved": False,
+        "arguments": {"value": "original"},
+        "reason": "nope",
+        "status": "rejected",
+        "invocation_id": invocation,
+        "tool_call_id": "call_race",
+        "run_id": RUN,
+    })
+    kind, frame = await decide_tool_approval({
+        "tool_call_id": "call_race",
+        "invocation_id": invocation,
+        "run_id": RUN,
+        "conversation_id": CONV,
+        "approved": True,
+        "arguments": {"value": "edited"},
+    }, EMAIL)
+    assert kind == "duplicate"
+    assert frame["approved"] is False
+    assert request.future.done()
+    assert request.future.result()["approved"] is False
     manager.cleanup_request(invocation)
 
 

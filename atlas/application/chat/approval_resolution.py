@@ -18,6 +18,7 @@ from atlas.application.chat.runs.execution_state import (
     list_execution_snapshots,
     public_projection,
 )
+from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,12 @@ async def _read(key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _owns(owner: Optional[str], user_email: str) -> bool:
+    if not owner:
+        return True
+    return normalize_user_email(owner) == normalize_user_email(user_email)
+
+
 async def _pending_matches(user_email: str, data: Dict[str, Any]):
     invocation_id = data.get("invocation_id")
     tool_call_id = data.get("tool_call_id")
@@ -124,6 +131,51 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
     tool_call_id = data.get("tool_call_id")
     invocation_id = data.get("invocation_id")
     run_id = data.get("run_id")
+    request = manager.find_open_request(tool_call_id, invocation_id, run_id)
+    if request is not None:
+        # A user who does not own the local request must not fall through to
+        # the projection scan and write the shared outcome.
+        if not _owns(request.user_email, user_email):
+            return "unknown", _unknown(data)
+        if not request.future.done():
+            # The shared outcome is claimed before the local future. A rejection
+            # that already won on another replica is what this future resolves
+            # to, including when this response said approved.
+            outcome = _outcome(data, request)
+            key = approval_storage_key(outcome.get("invocation_id"), outcome.get("tool_call_id"))
+            stored = await _put(key, outcome)
+            if stored and stored.get("already_resolved"):
+                request.set_response(
+                    bool(stored.get("approved")),
+                    stored.get("arguments"),
+                    stored.get("reason"),
+                )
+                return "duplicate", _frame(stored, data)
+            result = manager.handle_approval_response(
+                tool_call_id=tool_call_id or request.tool_call_id or "",
+                approved=bool(data.get("approved")),
+                arguments=data.get("arguments"),
+                reason=data.get("reason"),
+                user_email=user_email,
+                invocation_id=invocation_id or request.invocation_id,
+                run_id=run_id or request.run_id,
+            )
+            if result is False:
+                return "unknown", _unknown(data)
+            return "accepted", None
+        remembered = manager.handle_approval_response(
+            tool_call_id=tool_call_id or request.tool_call_id or "",
+            approved=bool(data.get("approved")),
+            arguments=data.get("arguments"),
+            reason=data.get("reason"),
+            user_email=user_email,
+            invocation_id=invocation_id or request.invocation_id,
+            run_id=run_id or request.run_id,
+        )
+        if isinstance(remembered, dict) and remembered.get("already_resolved"):
+            return "duplicate", _frame(remembered, data)
+        return "unknown", _unknown(data)
+
     result = manager.handle_approval_response(
         tool_call_id=tool_call_id or "",
         approved=bool(data.get("approved")),
@@ -134,8 +186,8 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
         run_id=run_id,
     )
     if result is True:
-        request = manager.find_open_request(tool_call_id, invocation_id, run_id)
-        outcome = _outcome(data, request)
+        found = manager.find_open_request(tool_call_id, invocation_id, run_id)
+        outcome = _outcome(data, found)
         key = approval_storage_key(outcome.get("invocation_id"), outcome.get("tool_call_id"))
         await _put(key, outcome)
         return "accepted", None

@@ -20,17 +20,48 @@ function sameApproval(row, data) {
   return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
 }
 
+function sameToolStart(row, data) {
+  if (!row || row.type !== 'tool_call') return false
+  if (data.invocation_id && row.invocation_id) return row.invocation_id === data.invocation_id
+  if (data.invocation_id || row.invocation_id) return false
+  return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
+}
+
+// Existence check and append are one reducer update. A flag set inside
+// mapMessages is still false when React defers the updater, so a following
+// addMessage would insert a second card.
+function appendOnce(mapMessages, addMessage, row, matches) {
+  if (typeof mapMessages === 'function') {
+    mapMessages(prev => {
+      const list = Array.isArray(prev) ? prev : []
+      return list.some(matches) ? list : list.concat(row)
+    })
+    return
+  }
+  addMessage(row)
+}
+
+function isToolRow(msg) {
+  if (!msg) return false
+  if (msg.type === 'tool_call') return true
+  // Older rows and the handler fixtures identify a tool by tool_call_id
+  // alone. A typed row that is not a tool call (an approval card) is not one.
+  if (msg.type) return false
+  return !!msg.tool_call_id
+}
+
 // Update the invocation this frame belongs to. A bare tool_call_id still
 // updates legacy rows that have no invocation id. When no row matches and
 // `insert` is set, the frame becomes a new row (a settlement that arrived
 // before tool_start, or after a reload that dropped it).
 function mapToolRows(prev, data, patch, insert) {
-  const exact = !!(data.invocation_id && prev.some(
-    msg => msg.type === 'tool_call' && msg.invocation_id === data.invocation_id
+  const list = Array.isArray(prev) ? prev : []
+  const exact = !!(data.invocation_id && list.some(
+    msg => isToolRow(msg) && msg.invocation_id === data.invocation_id
   ))
   let found = false
-  const next = prev.map(msg => {
-    if (msg.type !== 'tool_call') return msg
+  const next = list.map(msg => {
+    if (!isToolRow(msg)) return msg
     const hit = exact
       ? msg.invocation_id === data.invocation_id
       : !msg.invocation_id && !!data.tool_call_id && msg.tool_call_id === data.tool_call_id
@@ -300,7 +331,11 @@ export function createWebSocketHandler(deps) {
           const stopped = updateData.status === 'interrupted'
           const label = stopped ? 'Stopped' : updateData.success ? 'Success' : 'Failed'
           const status = stopped ? 'interrupted' : updateData.success ? 'completed' : 'failed'
-          mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${label}`, status, result: updateData.result || updateData.error || null } : msg))
+          mapMessages(prev => mapToolRows(prev, updateData, {
+            content: `**Tool: ${updateData.tool_name}** - ${label}`,
+            status,
+            result: updateData.result || updateData.error || null,
+          }))
           break
         }
         case 'tool_log':
@@ -515,30 +550,23 @@ export function createWebSocketHandler(deps) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {
           if (isCanvasTool(data.tool_name)) break; // Suppress any chat message for canvas
-          let duplicate = false
-          if (typeof mapMessages === 'function') {
-            mapMessages(prev => {
-              duplicate = prev.some(msg => msg.type === 'tool_call' && (
-                data.invocation_id
-                  ? msg.invocation_id === data.invocation_id
-                  : !msg.invocation_id && msg.tool_call_id === data.tool_call_id
-              ))
-              return prev
-            })
-          }
-          if (duplicate) break
-          addMessage(withIdentity({
-            role: 'system',
-            content: `**Tool Call: ${data.tool_name}**`,
-            type: 'tool_call',
-            tool_call_id: data.tool_call_id,
-            tool_name: data.tool_name,
-            server_name: data.server_name || 'tool',
-            arguments: data.arguments || {},
-            status: isSleepTool(data.tool_name) ? 'sleeping' : 'calling',
-            timestamp: new Date().toISOString(),
-            agent_mode: false
-          }, data))
+          appendOnce(
+            mapMessages,
+            addMessage,
+            withIdentity({
+              role: 'system',
+              content: `**Tool Call: ${data.tool_name}**`,
+              type: 'tool_call',
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              server_name: data.server_name || 'tool',
+              arguments: data.arguments || {},
+              status: isSleepTool(data.tool_name) ? 'sleeping' : 'calling',
+              timestamp: new Date().toISOString(),
+              agent_mode: false
+            }, data),
+            msg => sameToolStart(msg, data),
+          )
           break
         }
         case 'tool_progress': {
@@ -842,29 +870,23 @@ export function createWebSocketHandler(deps) {
             // Handle tool approval request - stop thinking and add as a message in the chat.
             // Restore and a second copy of the same request must not stack cards.
             try { setIsThinking(false) } catch { /* no-op */ }
-          {
-            let duplicate = false
-            if (typeof mapMessages === 'function') {
-              mapMessages(prev => {
-                duplicate = prev.some(msg => sameApproval(msg, data))
-                return prev
-              })
-            }
-            if (!duplicate) {
-              addMessage(withIdentity({
-                role: 'system',
-                content: `Tool Approval Required: ${data.tool_name}`,
-                type: 'tool_approval_request',
-                tool_call_id: data.tool_call_id,
-                tool_name: data.tool_name,
-                arguments: data.arguments || {},
-                allow_edit: data.allow_edit !== false,
-                admin_required: data.admin_required || false,
-                status: 'pending',
-                timestamp: new Date().toISOString()
-              }, data))
-            }
-          }
+          appendOnce(
+            mapMessages,
+            addMessage,
+            withIdentity({
+              role: 'system',
+              content: `Tool Approval Required: ${data.tool_name}`,
+              type: 'tool_approval_request',
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              arguments: data.arguments || {},
+              allow_edit: data.allow_edit !== false,
+              admin_required: data.admin_required || false,
+              status: 'pending',
+              timestamp: new Date().toISOString()
+            }, data),
+            msg => sameApproval(msg, data),
+          )
           break
         case 'tool_approval_settled':
           // The request was already answered, on this tab or another. Mark the

@@ -42,6 +42,7 @@ _MAX_DEPTH = 6
 _TERMINAL_INVOCATION = frozenset(
     {"completed", "failed", "interrupted", "expired", "rejected"}
 )
+_TERMINAL_RUN = frozenset({"completed", "failed", "cancelled"})
 _SLEEP_TOOLS = frozenset({"atlas_sleep", "atlas_agent_sleep"})
 _INPUT_EVENTS = frozenset({"tool_approval_request", "elicitation_request"})
 _SETTLED_EVENTS = frozenset(
@@ -166,11 +167,24 @@ def _request_key(event: dict) -> str:
 
 
 def _public_event(event: dict) -> dict:
-    return {
-        key: _elide(value)
-        for key, value in event.items()
-        if key not in _HIDDEN_EVENT_KEYS and not str(key).startswith("_")
-    }
+    """Client-facing copy of one frame.
+
+    Pending approval ``arguments`` stay intact. Approving the card sends those
+    arguments back, and a truncated copy would run as an edited payload.
+    Other fields are shortened so one document stays bounded.
+    """
+    public = {}
+    for key, value in event.items():
+        if key in _HIDDEN_EVENT_KEYS or str(key).startswith("_"):
+            continue
+        if key == "arguments":
+            try:
+                public[key] = copy.deepcopy(value)
+            except Exception:
+                public[key] = value
+            continue
+        public[key] = _elide(value)
+    return public
 
 
 def _touch_invocation(doc: dict, event: dict, status: Optional[str]) -> None:
@@ -244,12 +258,37 @@ def _refresh_activity(doc: dict) -> None:
         doc["status"] = "running"
 
 
+def _apply_run_status(doc: dict, event: dict) -> bool:
+    """Record a terminal run transition. Returns True when ``event`` is consumed.
+
+    Terminal is sticky. A late tool frame must not bring a finished run back
+    to running or waiting_for_input.
+    """
+    if event.get("type") != "run_status":
+        return False
+    status = event.get("status")
+    if status not in _TERMINAL_RUN or doc.get("status") in _TERMINAL_RUN:
+        return True
+    doc["status"] = status
+    doc["activity"] = status
+    doc["waiting_on"] = None
+    doc["pending_requests"] = {}
+    if event.get("error"):
+        doc["error"] = _elide(event.get("error"))
+    doc["updated_at"] = time.time()
+    return True
+
+
 def apply_event_to_document(doc: dict, event: dict) -> None:
-    """Fold one tool or approval frame into ``doc``. Does not bump the revision."""
+    """Fold one tool, approval, or terminal frame into ``doc``. Does not bump the revision."""
     if event.get("run_id") and doc.get("run_id") and event["run_id"] != doc["run_id"]:
         fresh = _blank(str(event["run_id"]), doc["conversation_id"], doc["user_email"])
         doc.clear()
         doc.update(fresh)
+    if _apply_run_status(doc, event):
+        return
+    if doc.get("status") in _TERMINAL_RUN:
+        return
     status = _status_for(event)
     if status or event.get("invocation_id"):
         _touch_invocation(doc, event, status)
@@ -353,21 +392,30 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
         if not conversation_id:
             continue
         existing = merged.get(conversation_id)
+        projection_status = projection.get("status")
+        # A finished projection is not a new active run. Keeping it for the
+        # document TTL would leave "Needs approval" on a run that already ended.
         if existing is None:
+            if projection_status in _TERMINAL_RUN:
+                continue
             merged[conversation_id] = {
                 "run_id": projection.get("run_id"),
                 "conversation_id": conversation_id,
-                "status": projection.get("status") or "running",
+                "status": projection_status or "running",
                 "waiting_on": projection.get("waiting_on"),
                 "activity": projection.get("activity"),
                 "execution_revision": projection.get("revision"),
                 "detached": True,
             }
             continue
-        existing["activity"] = projection.get("activity")
         existing["execution_revision"] = projection.get("revision")
-        if projection.get("status"):
-            existing["status"] = projection["status"]
+        # The registry already recorded the outcome. A projection that has not
+        # yet seen run_status must not put that run back to running.
+        if existing.get("status") in _TERMINAL_RUN:
+            continue
+        existing["activity"] = projection.get("activity")
+        if projection_status:
+            existing["status"] = projection_status
         existing["waiting_on"] = projection.get("waiting_on")
     return list(merged.values())
 
