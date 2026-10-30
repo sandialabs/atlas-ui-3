@@ -43,6 +43,19 @@ export function liveInvocationCount(messages, runId) {
   )).length
 }
 
+// Whether the turn in progress is sleeping. Only rows after the last user
+// message count: an earlier turn's row left open (a lost frame, a legacy
+// transcript) must not label every later run as sleeping.
+export function currentTurnIsSleeping(messages) {
+  const list = Array.isArray(messages) ? messages : []
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const message = list[i]
+    if (message && message.role === 'user') return false
+    if (message && message.type === 'tool_call' && message.status === 'sleeping') return true
+  }
+  return false
+}
+
 export function isSleepTool(name) {
   return SLEEP_TOOLS.has(name)
 }

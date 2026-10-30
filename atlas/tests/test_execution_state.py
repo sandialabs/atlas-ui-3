@@ -636,3 +636,29 @@ async def test_store_delete_drops_the_document_and_its_outcomes():
         await forget_conversations(EMAIL)
         assert await store.get("conv-keep", EMAIL) is None
         assert await store.list_for_user(EMAIL) == []
+
+
+@pytest.mark.asyncio
+async def test_delete_finds_outcomes_from_a_replaced_run():
+    from atlas.application.chat.runs.execution_state import approval_storage_key, forget_conversations
+
+    for store in (MemoryExecutionStore(), _redis_store(fakeredis.FakeServer())):
+        set_execution_store(store)
+        await store.apply_event(_event(0, type="tool_approval_request", arguments={"q": "edited"}))
+        old_key = approval_storage_key(invocation_id("run-1", 0, "call_0"), "call_0", EMAIL)
+        await store.put_resolution(old_key, {"approved": True, "arguments": {"q": "edited"}, "user_email": EMAIL})
+        # Run 2 replaces the document; run 1's invocation is no longer listed.
+        await store.apply_event(_event(0, run_id="run-2", invocation_id=invocation_id("run-2", 0, "call_0")))
+        await forget_conversations(EMAIL, [CONV])
+        assert await store.read_resolution(old_key) is None
+
+
+@pytest.mark.asyncio
+async def test_a_progress_heartbeat_with_no_change_writes_nothing():
+    store = MemoryExecutionStore()
+    await store.apply_event(_event(0, type="tool_start"))
+    first = await store.apply_event(_event(0, type="tool_progress"))
+    assert first["invocations"][0]["status"] == "in_progress"
+    revision = first["revision"]
+    again = await store.apply_event(_event(0, type="tool_progress"))
+    assert again["revision"] == revision

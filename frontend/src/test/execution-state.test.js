@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { liveInvocationCount, reconcileExecution, sameInvocation, toolStatusFromEvent } from '../utils/executionState'
+import { currentTurnIsSleeping, liveInvocationCount, reconcileExecution, sameInvocation, toolStatusFromEvent } from '../utils/executionState'
 
 function invocation(id, overrides = {}) {
   return {
@@ -263,6 +263,15 @@ describe('reconcileExecution — a poll answered from before the latest frame', 
       invocations: [invocation('run-1:0:call_0', { status: 'calling' })],
     }, { revision: 4, run_id: 'run-1' })
     expect(next).toBe(current)
+  })
+})
+
+describe('currentTurnIsSleeping', () => {
+  it('counts only rows after the last user message', () => {
+    const stale = { type: 'tool_call', tool_name: 'atlas_sleep', status: 'sleeping' }
+    expect(currentTurnIsSleeping([stale, { role: 'user', content: 'next' }])).toBe(false)
+    expect(currentTurnIsSleeping([{ role: 'user', content: 'go' }, stale])).toBe(true)
+    expect(currentTurnIsSleeping([{ role: 'user', content: 'go' }, { ...stale, status: 'completed' }])).toBe(false)
   })
 })
 

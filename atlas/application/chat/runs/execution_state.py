@@ -387,6 +387,12 @@ def apply_event_to_document(doc: dict, event: dict) -> bool:
         _refresh_activity(doc)
         return True
     status = _status_for(event)
+    if event.get("type") == "tool_progress":
+        # A heartbeat for a row already in that status changes nothing the
+        # projection keeps (it does not store progress), so it costs no write.
+        entry = doc["invocations"].get(event.get("invocation_id"))
+        if entry is not None and entry.get("status") == status:
+            return False
     if status or event.get("invocation_id"):
         _touch_invocation(doc, event, status)
     if event.get("type") in _INPUT_EVENTS:
@@ -621,12 +627,17 @@ class ExecutionStore:
         raise NotImplementedError
 
 
-def _outcome_keys(doc: Optional[dict], email: str) -> List[str]:
-    """Outcome keys for the invocations a projection still lists."""
-    if not doc:
-        return []
+def _outcome_keys(doc: Optional[dict], email: str, indexed=()) -> List[str]:
+    """Outcome keys for every invocation the conversation has projected.
+
+    ``indexed`` is the per-conversation index of invocation ids, which
+    outlives a document a later run replaced or the terminal TTL expired.
+    """
+    ids = set(indexed or ())
+    if doc:
+        ids.update((doc.get("invocations") or {}).keys())
     keys = []
-    for inv in (doc.get("invocations") or {}):
+    for inv in sorted(ids):
         key = approval_storage_key(inv, None, email)
         if key:
             keys.append(key)
@@ -656,6 +667,9 @@ class MemoryExecutionStore(ExecutionStore):
         self._docs: Dict[tuple, dict] = {}
         self._by_user: Dict[str, set] = {}
         self._resolutions: Dict[str, dict] = {}
+        # Invocation ids each conversation ever projected, so a delete finds
+        # every approval outcome, not only the current run's.
+        self._invocation_index: Dict[tuple, set] = {}
         self._writes = 0
 
     async def apply_event(self, event: dict) -> Optional[dict]:
@@ -677,6 +691,8 @@ class MemoryExecutionStore(ExecutionStore):
             doc["revision"] = int(doc.get("revision") or 0) + 1
             self._docs[key] = doc
             self._by_user.setdefault(user_email, set()).add(conversation_id)
+            if doc["invocations"]:
+                self._invocation_index.setdefault(key, set()).update(doc["invocations"].keys())
             self._writes += 1
             if self._writes % _SWEEP_EVERY == 0 or len(self._docs) > _DOC_CAP:
                 self._sweep(keep=key)
@@ -688,12 +704,13 @@ class MemoryExecutionStore(ExecutionStore):
             return
         async with self._lock:
             doc = self._docs.pop((email, str(conversation_id)), None)
+            indexed = self._invocation_index.pop((email, str(conversation_id)), set())
             members = self._by_user.get(email)
             if members is not None:
                 members.discard(str(conversation_id))
                 if not members:
                     self._by_user.pop(email, None)
-            for key in _outcome_keys(doc, email):
+            for key in _outcome_keys(doc, email, indexed):
                 self._resolutions.pop(key, None)
 
     async def conversation_ids(self, user_email: str) -> List[str]:
@@ -714,6 +731,7 @@ class MemoryExecutionStore(ExecutionStore):
         )
         for email, conversation_id in oldest[:overflow]:
             self._docs.pop((email, conversation_id), None)
+            self._invocation_index.pop((email, conversation_id), None)
             self._by_user.get(email, set()).discard(conversation_id)
 
     async def get(self, conversation_id: str, user_email: str) -> Optional[dict]:
@@ -823,6 +841,9 @@ class RedisExecutionStore(ExecutionStore):
     def _user_key(self, email: str) -> str:
         return self._redis.key("exec-user", email)
 
+    def _index_key(self, email: str, conversation_id: str) -> str:
+        return self._redis.key("exec-invs", email, conversation_id)
+
     def _resolution_key(self, request_key: str) -> str:
         return self._redis.key("approval-result", request_key)
 
@@ -859,6 +880,8 @@ class RedisExecutionStore(ExecutionStore):
                     wrote = await self._compare_and_set(
                         client, rev_key, doc_key, user_key,
                         current, next_rev, payload, conversation_id, _ttl_for(doc),
+                        index_key=self._index_key(user_email, conversation_id),
+                        invocation_ids=list(doc["invocations"].keys()),
                     )
                 except WatchError:
                     wrote = False
@@ -870,6 +893,7 @@ class RedisExecutionStore(ExecutionStore):
     async def _compare_and_set(
         self, client, rev_key, doc_key, user_key,
         current, next_rev, payload, conversation_id, ttl=PROJECTION_TTL_SECONDS,
+        index_key=None, invocation_ids=(),
     ) -> bool:
         async with client.pipeline() as pipe:
             await pipe.watch(rev_key)
@@ -884,6 +908,11 @@ class RedisExecutionStore(ExecutionStore):
             pipe.set(doc_key, payload, ex=ttl)
             pipe.sadd(user_key, conversation_id)
             pipe.expire(user_key, PROJECTION_TTL_SECONDS)
+            if index_key and invocation_ids:
+                # Outlives the document (outcomes keep the full TTL), so a
+                # delete still finds every outcome this conversation wrote.
+                pipe.sadd(index_key, *invocation_ids)
+                pipe.expire(index_key, PROJECTION_TTL_SECONDS)
             await pipe.execute()
         return True
 
@@ -920,8 +949,10 @@ class RedisExecutionStore(ExecutionStore):
         doc_key = self._doc_key(email, str(conversation_id))
         raw = await client.get(doc_key)
         doc = json.loads(_text(raw)) if raw else None
-        keys = [doc_key, self._rev_key(email, str(conversation_id))]
-        keys.extend(self._resolution_key(key) for key in _outcome_keys(doc, email))
+        index_key = self._index_key(email, str(conversation_id))
+        indexed = [_text(member) for member in (await client.smembers(index_key)) or []]
+        keys = [doc_key, self._rev_key(email, str(conversation_id)), index_key]
+        keys.extend(self._resolution_key(key) for key in _outcome_keys(doc, email, indexed))
         await client.delete(*keys)
         await client.srem(self._user_key(email), str(conversation_id))
 

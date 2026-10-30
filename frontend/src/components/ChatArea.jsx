@@ -25,6 +25,7 @@ import AgentRunStatus from './AgentRunStatus'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useToast } from './ui/toastContext'
 import { computeMessageChangeScroll } from '../utils/scrollDecision'
+import { currentTurnIsSleeping } from '../utils/executionState'
 
 const DEFAULT_MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024
 
@@ -997,7 +998,7 @@ const ChatArea = () => {
           isThinking={isThinking}
           isStreaming={isStreaming}
           currentAgentStep={currentAgentStep}
-          activity={messages.some(m => m.type === 'tool_call' && m.status === 'sleeping') ? 'sleeping' : undefined}
+          activity={currentTurnIsSleeping(messages) ? 'sleeping' : undefined}
           appName={appName}
         />
         {/* Sentinel for auto-scroll */}
