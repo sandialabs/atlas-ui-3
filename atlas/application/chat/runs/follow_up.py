@@ -61,7 +61,8 @@ def _revalidate_saved_workspace(
     repository = getattr(factory, "workspace_repository", None)
     if repository is None:
         raise LaunchRefused(
-            "Sub-conversations are unavailable: workspaces are not configured."
+            "Sub-conversations are unavailable: workspaces are not configured.",
+            code="unavailable",
         )
     workspace_id = spec.get("workspace_id")
     if not isinstance(workspace_id, str) or not workspace_id.strip():
@@ -71,7 +72,8 @@ def _revalidate_saved_workspace(
         raise LaunchRefused(
             "That sub-conversation cannot be continued: the workspace it was "
             "launched under is no longer known. Launch a new sub-conversation "
-            "instead."
+            "instead.",
+            code="not_continuable",
         )
     saved_name = spec.get("workspace_name") or workspace_id
     try:
@@ -83,7 +85,8 @@ def _revalidate_saved_workspace(
         raise LaunchRefused(
             f"The workspace '{saved_name}' that sub-conversation was launched "
             "under could not be checked just now, so it cannot be continued. "
-            "Try again, or launch a new sub-conversation."
+            "Try again, or launch a new sub-conversation.",
+            code="unavailable",
         )
     if workspace is None:
         # The saved name is not a leak: it is in the launch/follow-up handle
@@ -96,7 +99,8 @@ def _revalidate_saved_workspace(
             "access was revoked, since the launch -- so the sub-conversation "
             "cannot be continued. Launch a new sub-conversation with a "
             "workspace you can currently access (atlas_discover_launch_options "
-            "lists them)."
+            "lists them).",
+            code="workspace_not_found",
         )
     return workspace
 

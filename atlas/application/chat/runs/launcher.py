@@ -62,6 +62,7 @@ from atlas.modules.mcp_tools.atlas_server import (
 __all__ = [
     "LaunchRefused",
     "execute_launch_discovery_tool",
+    "list_launch_options",
     "execute_launch_tool",
     "launch_sub_conversation",
     "launch_tool_enabled",
@@ -78,6 +79,9 @@ MAX_RESULT_CHARS = 20000
 # default interactive budget: a sub-conversation is a peer of a normal agent
 # turn, not a longer-running species of one.
 LAUNCH_AGENT_MAX_STEPS = 10
+
+# Sentinel for "take the compliance level from the launching turn's context".
+_FROM_CONTEXT = object()
 
 
 def _has_discovered_launch_options(state: Any) -> bool:
@@ -99,13 +103,23 @@ class LaunchRefused(Exception):
     Raised for every refusal -- unknown workspace, unusable model, depth or
     concurrency cap -- because the model's next move depends on knowing which,
     and the text is written to be actionable rather than apologetic.
+
+    ``code`` is a stable machine-readable reason. The tools ignore it (the
+    model reads the message); the agent-runs REST API (#1105) maps it onto an
+    HTTP status and returns it to the caller as a structured error.
     """
+
+    def __init__(self, message: str, code: str = "launch_refused"):
+        super().__init__(message)
+        self.code = code
 
 
 def _require_text(arguments: Dict[str, Any], key: str) -> str:
     value = arguments.get(key)
     if not isinstance(value, str) or not value.strip():
-        raise LaunchRefused(f"'{key}' is required and must be a non-empty string.")
+        raise LaunchRefused(
+            f"'{key}' is required and must be a non-empty string.", code="invalid_request"
+        )
     return value.strip()
 
 
@@ -139,7 +153,8 @@ def resolve_workspace(repository: Any, workspace: str, user_email: str) -> Dict[
     names = ", ".join(sorted(str(c.get("name", "")) for c in available if c.get("name")))
     raise LaunchRefused(
         f"No workspace named '{workspace}'. "
-        + (f"Available workspaces: {names}." if names else "You have no saved workspaces yet.")
+        + (f"Available workspaces: {names}." if names else "You have no saved workspaces yet."),
+        code="workspace_not_found",
     )
 
 
@@ -157,8 +172,59 @@ async def resolve_model(config_manager: Any, model: str, user_email: str) -> str
         return model
     raise LaunchRefused(
         f"Model '{model}' is not available to you. Choose one of the models "
-        "offered in this conversation."
+        "offered in this conversation.",
+        code="model_not_available",
     )
+
+
+async def list_launch_options(factory: Any, user_email: str) -> Dict[str, Any]:
+    """The workspaces and models ``user_email`` may launch with right now.
+
+    The ungated core of launch discovery: the feature check and the per-turn
+    bookkeeping belong to the caller (the discovery tool, or the agent-runs
+    REST API), so both read the same lists through the same ACL filters.
+    """
+    config_manager = factory.get_config_manager()
+    repository = getattr(factory, "workspace_repository", None)
+    if repository is None:
+        raise LaunchRefused(
+            "Launch discovery failed: workspaces are not configured.", code="unavailable"
+        )
+    try:
+        workspaces = await asyncio.to_thread(repository.list_workspaces, user_email) or []
+    except Exception as exc:
+        logger.warning("Launch option discovery failed for workspaces", exc_info=True)
+        raise LaunchRefused(
+            "Launch discovery failed while loading workspaces. Try again.", code="unavailable"
+        ) from exc
+    auth_cache: Dict[str, bool] = {}
+
+    async def _cached_group_auth(email: str, group: str) -> bool:
+        if group in auth_cache:
+            return auth_cache[group]
+        allowed = await is_user_in_group(email, group)
+        auth_cache[group] = allowed
+        return allowed
+
+    try:
+        models = await filter_authorized_models(
+            getattr(getattr(config_manager, "llm_config", None), "models", None) or {},
+            user_email,
+            auth_check_func=_cached_group_auth,
+        )
+    except Exception as exc:
+        logger.warning("Launch option discovery failed for models", exc_info=True)
+        raise LaunchRefused(
+            "Launch discovery failed while loading models. Try again.", code="unavailable"
+        ) from exc
+    return {
+        "workspaces": [
+            {"id": str(item.get("id")), "name": str(item.get("name"))}
+            for item in workspaces
+            if item.get("id") and item.get("name")
+        ],
+        "models": [{"name": name} for name in sorted(models)],
+    }
 
 
 async def discover_launch_options(
@@ -183,41 +249,13 @@ async def discover_launch_options(
     if not user_email:
         _mark_discovery_failed(context)
         raise LaunchRefused("Launch discovery requires an authenticated user.")
-    repository = getattr(factory, "workspace_repository", None)
-    if repository is None:
-        _mark_discovery_failed(context)
-        raise LaunchRefused("Launch discovery failed: workspaces are not configured.")
     try:
-        workspaces = await asyncio.to_thread(repository.list_workspaces, user_email) or []
-    except Exception as exc:
-        logger.warning("Launch option discovery failed for workspaces", exc_info=True)
+        options = await list_launch_options(factory, user_email)
+    except LaunchRefused:
         _mark_discovery_failed(context)
-        raise LaunchRefused("Launch discovery failed while loading workspaces. Try again.") from exc
-    auth_cache: Dict[str, bool] = {}
-
-    async def _cached_group_auth(email: str, group: str) -> bool:
-        if group in auth_cache:
-            return auth_cache[group]
-        allowed = await is_user_in_group(email, group)
-        auth_cache[group] = allowed
-        return allowed
-
-    try:
-        models = await filter_authorized_models(
-            getattr(getattr(config_manager, "llm_config", None), "models", None) or {},
-            user_email,
-            auth_check_func=_cached_group_auth,
-        )
-    except Exception as exc:
-        logger.warning("Launch option discovery failed for models", exc_info=True)
-        _mark_discovery_failed(context)
-        raise LaunchRefused("Launch discovery failed while loading models. Try again.") from exc
-    workspace_options = [
-        {"id": str(item.get("id")), "name": str(item.get("name"))}
-        for item in workspaces
-        if item.get("id") and item.get("name")
-    ]
-    model_options = [{"name": name} for name in sorted(models)]
+        raise
+    workspace_options = options["workspaces"]
+    model_options = options["models"]
     if not workspace_options or not model_options:
         missing = []
         if not workspace_options:
@@ -230,10 +268,6 @@ async def discover_launch_options(
             + " or ".join(missing)
             + ". Configure an available option before launching."
         )
-    options = {
-        "workspaces": workspace_options,
-        "models": model_options,
-    }
     if context is not None:
         state = context.get("launch_discovery")
         if state is None:
@@ -288,7 +322,8 @@ async def resolve_child_tools(
     authorization = getattr(chat_service, "tool_authorization", None)
     if authorization is None:
         raise LaunchRefused(
-            "Sub-conversations are unavailable: tool authorization is not configured."
+            "Sub-conversations are unavailable: tool authorization is not configured.",
+            code="unavailable",
         )
     authorized = await authorization.filter_authorized_tools(list(selected), user_email)
     if not authorized:
@@ -296,7 +331,8 @@ async def resolve_child_tools(
             no_tools_message
             or "That workspace has no tools you are currently authorized to use, so "
             "a sub-conversation started under it would have nothing to work with. "
-            "Pick a workspace with tools, or do the work in this conversation."
+            "Pick a workspace with tools, or do the work in this conversation.",
+            code="no_authorized_tools",
         )
     return authorized
 
@@ -479,6 +515,37 @@ async def resolve_child_data_sources(
                 if server_name and source.get("id")
             )
     return [source for source in selected if source in authorized]
+
+
+async def _check_turn_admission(
+    chat_service: Any,
+    model: str,
+    tools: List[str],
+    data_sources: List[str],
+    compliance_level: Any,
+    user_email: str,
+) -> None:
+    """Run the chat service's classification gates before a run is admitted.
+
+    The same checks ``handle_chat_message`` applies at the start of the turn;
+    running them here turns a mismatch into a structured refusal instead of a
+    run that is admitted and then fails.
+    """
+    check = getattr(chat_service, "check_turn_admission", None)
+    if check is None:
+        return
+    from atlas.domain.errors import ValidationError
+
+    try:
+        await check(
+            model=model,
+            selected_tools=tools,
+            selected_data_sources=data_sources,
+            compliance_level=compliance_level,
+            user_email=user_email,
+        )
+    except ValidationError as e:
+        raise LaunchRefused(str(e), code="classification_refused") from e
 
 
 def _content_text(content: Any) -> str:
@@ -709,6 +776,11 @@ async def _start_child_run(
     workspace_name: Optional[str],
     title: Optional[str],
     no_tools_message: Optional[str] = None,
+    top_level: bool = False,
+    refuse_approval_gated: bool = False,
+    source: str = "atlas_launch",
+    actor: Optional[str] = None,
+    compliance_level: Any = _FROM_CONTEXT,
 ) -> Tuple[Any, Dict[str, Any], List[str]]:
     """Admit a child run on ``conversation_id`` and schedule its task.
 
@@ -717,13 +789,28 @@ async def _start_child_run(
     sources against the caller's access *now*, apply the same approval rule,
     and go through the same atomic admission. Returns the admitted record,
     the launch spec it was given, and the tools that will still prompt.
+
+    The agent-runs REST API (#1105) is the third caller, and the reason for
+    the keyword-only options: ``top_level`` admits a root run (depth 0, no
+    parent, no fan-out cap -- the per-user cap still applies) because there
+    is no launching conversation; ``refuse_approval_gated`` refuses, before
+    admission, a run that would pause on an admin-mandated approval nobody is
+    watching for; ``compliance_level`` comes from the request rather than a
+    parent turn, and is checked against the run's model, tools and sources
+    up front so a mismatch is a refusal rather than a run that fails on its
+    first step. ``source`` and ``actor`` are recorded on the launch spec for
+    scoping and audit.
     """
     app_settings = getattr(config_manager, "app_settings", None)
     registry = get_run_registry()
     from atlas.application.chat.runs.context import get_current_run
 
-    run_context = get_current_run()
-    parent_run_id, parent_depth = _parent_run_identity(registry, run_context)
+    if top_level:
+        run_context = None
+        parent_run_id, parent_depth = None, -1
+    else:
+        run_context = get_current_run()
+        parent_run_id, parent_depth = _parent_run_identity(registry, run_context)
 
     connection = _ChildConnection(
         (context or {}).get("update_callback"), "pending", conversation_id
@@ -744,9 +831,18 @@ async def _start_child_run(
     # pinned to mandatory approval are exempt: those keep prompting inside
     # the child, which pauses it until the user opens that conversation.
     admin_gated = _admin_gated_tools(tools, config_manager)
+    if admin_gated and refuse_approval_gated:
+        raise LaunchRefused(
+            "These tools require an administrator-mandated approval that an "
+            f"unattended run cannot give: {', '.join(admin_gated)}. Use a "
+            "workspace without them, or allow the run to pause until the user "
+            "approves them in the conversation.",
+            code="approval_required",
+        )
     if not admin_gated and not _preapprove_child_tools(chat_service):
         logger.warning("Could not pre-approve tools for launched run")
-    compliance_level = (context or {}).get("compliance_level")
+    if compliance_level is _FROM_CONTEXT:
+        compliance_level = (context or {}).get("compliance_level")
     requested_sources = list(data_sources)
     data_sources = await resolve_child_data_sources(
         factory,
@@ -754,6 +850,10 @@ async def _start_child_run(
         user_email,
         compliance_level,
     )
+    if top_level:
+        await _check_turn_admission(
+            chat_service, model, tools, data_sources, compliance_level, user_email
+        )
 
     # Admission is check-then-insert, and it must be atomic: several
     # ``atlas_launch`` calls in one agent step run concurrently, and a check
@@ -761,7 +861,8 @@ async def _start_child_run(
     # one. Everything from here to ``start`` is synchronous, which on a single
     # event loop is exactly that atomicity -- so no await may be introduced
     # between these two lines.
-    _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
+    if not top_level:
+        _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
     try:
         record = registry.start(
             conversation_id=conversation_id,
@@ -771,8 +872,10 @@ async def _start_child_run(
             depth=parent_depth + 1,
             title=title,
         )
-    except (ConcurrencyLimitError, ConversationBusyError) as e:
-        raise LaunchRefused(str(e)) from e
+    except ConcurrencyLimitError as e:
+        raise LaunchRefused(str(e), code="concurrency_limit") from e
+    except ConversationBusyError as e:
+        raise LaunchRefused(str(e), code="conversation_busy") from e
     except RunRegistryError as e:  # pragma: no cover - defensive
         raise LaunchRefused(f"The sub-conversation could not be started: {e}") from e
 
@@ -789,6 +892,8 @@ async def _start_child_run(
         "workspace_id": workspace_id,
         "workspace_name": workspace_name,
         "compliance_level": compliance_level,
+        "source": source,
+        "actor": actor,
     }
     record.launch_spec = spec
     connection.bind_run(record.run_id)

@@ -968,6 +968,27 @@ class AppSettings(BaseSettings):
         ),
         validation_alias=AliasChoices("ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN"),
     )
+    # External agent-runs REST API (#1105). One master key for one trusted
+    # service, which may launch and continue runs on behalf of any user. Off
+    # by default, and fail-closed: enabled without a strong key, every request
+    # is refused rather than served unauthenticated.
+    feature_agent_runs_api_enabled: bool = Field(
+        False,
+        description=(
+            "Expose /api/agent-runs, which lets a trusted service holding "
+            "AGENT_RUNS_API_KEY launch, follow up, observe and cancel agent "
+            "runs on behalf of any user. Requires chat history and agent mode."
+        ),
+        validation_alias=AliasChoices("FEATURE_AGENT_RUNS_API_ENABLED"),
+    )
+    agent_runs_api_key: Optional[str] = Field(
+        default=None,
+        description=(
+            "Master bearer key for /api/agent-runs (at least 32 characters). "
+            "Grants launching runs as any user; treat it like a root credential."
+        ),
+        validation_alias=AliasChoices("AGENT_RUNS_API_KEY"),
+    )
     tool_approval_timeout_seconds: int = Field(
         300,
         ge=0,

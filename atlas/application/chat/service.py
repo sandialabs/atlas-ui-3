@@ -440,6 +440,31 @@ class ChatService:
                 "the message again."
             )
 
+    async def check_turn_admission(
+        self,
+        *,
+        model: str,
+        selected_tools: Optional[List[str]],
+        selected_data_sources: Optional[List[str]],
+        compliance_level: Any,
+        user_email: Optional[str],
+    ) -> None:
+        """The classification gates ``handle_chat_message`` opens with, alone.
+
+        For callers that admit a run before its turn starts -- the agent-runs
+        REST API (#1105) -- so a level the deployment does not define, or a
+        model/tool/source not approved for it, is refused at admission rather
+        than discovered when the turn fails. Raises ``ValidationError``.
+        """
+        self._enforce_required_compliance_level(compliance_level)
+        active = self._resolve_active_classification(compliance_level)
+        self._enforce_data_classifications(
+            active, model, selected_tools, selected_data_sources
+        )
+        await self._enforce_corpus_classifications(
+            active, user_email, selected_data_sources
+        )
+
     async def _enforce_corpus_classifications(
         self,
         active_level: Optional[str],
