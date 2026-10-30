@@ -100,8 +100,7 @@ async def require_service_key(request: Request, factory: Any = Depends(get_facto
     if len(expected) < MIN_API_KEY_CHARS:
         logger.error(
             "Agent-runs API is enabled but AGENT_RUNS_API_KEY is unset or shorter "
-            "than %d characters; refusing request",
-            MIN_API_KEY_CHARS,
+            "than the 32-character minimum; refusing request"
         )
         raise _error(503, "not_configured", "The agent-runs API is not configured.")
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
