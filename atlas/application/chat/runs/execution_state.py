@@ -221,6 +221,14 @@ def _public_event(event: dict) -> dict:
     return public
 
 
+def _tool_name(event: dict) -> Optional[str]:
+    # The sleep tool's own progress frames carry its legacy alias. The row
+    # keeps the name the live view shows (atlas_sleep).
+    from atlas.modules.mcp_tools.atlas_server import normalize_tool_name
+
+    return normalize_tool_name(event.get("tool_name"))
+
+
 def _touch_invocation(doc: dict, event: dict, status: Optional[str]) -> None:
     inv_id = event.get("invocation_id")
     if not inv_id:
@@ -234,13 +242,13 @@ def _touch_invocation(doc: dict, event: dict, status: Optional[str]) -> None:
             "conversation_id": event.get("conversation_id"),
             "step": event.get("step") or 0,
             "tool_call_id": event.get("tool_call_id"),
-            "tool_name": event.get("tool_name"),
+            "tool_name": _tool_name(event),
             "status": status or "calling",
             "seq": doc["seq"],
         }
         doc["invocations"][inv_id] = entry
     if event.get("tool_name"):
-        entry["tool_name"] = event["tool_name"]
+        entry["tool_name"] = _tool_name(event)
     if event.get("arguments") is not None:
         entry["arguments"] = _elide(event.get("arguments"))
     if status and not (entry.get("status") in _TERMINAL_INVOCATION and status not in _TERMINAL_INVOCATION):

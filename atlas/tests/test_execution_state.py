@@ -562,3 +562,14 @@ async def test_a_finished_projection_gets_the_short_ttl():
                               "conversation_id": CONV, "user_email": EMAIL})
     memory._docs[(EMAIL, CONV)]["updated_at"] -= execution_state.TERMINAL_PROJECTION_TTL_SECONDS + 1
     assert await memory.get(CONV, EMAIL) is None
+
+
+def test_sleep_progress_keeps_the_live_tool_name():
+    # Found in the browser pass: the sleep tool's progress frames carry the
+    # legacy alias, and the reopened row read atlas_agent_sleep.
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start", tool_name="atlas_sleep"))
+    apply_event_to_document(doc, _event(0, type="tool_progress", tool_name="atlas_agent_sleep"))
+    row = public_projection(doc)["invocations"][0]
+    assert row["tool_name"] == "atlas_sleep"
+    assert row["status"] == "sleeping"
