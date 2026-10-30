@@ -242,7 +242,10 @@ def _touch_invocation(doc: dict, event: dict, status: Optional[str]) -> None:
         entry["arguments"] = _elide(event.get("arguments"))
     if status and not (entry.get("status") in _TERMINAL_INVOCATION and status not in _TERMINAL_INVOCATION):
         entry["status"] = status
-    if _is_sleep(entry.get("tool_name")) and entry.get("status") in ("calling", "in_progress"):
+    # Only a started sleep is sleeping. A sleep call still waiting on its
+    # approval (status calling) has not slept yet, and showing a wake-up timer
+    # beside its Approve/Reject card would say the run is not waiting on input.
+    if _is_sleep(entry.get("tool_name")) and entry.get("status") == "in_progress":
         entry["status"] = "sleeping"
     if event.get("type") == "tool_complete":
         entry["result"] = _elide(event.get("result"))
@@ -444,6 +447,20 @@ def _merge_row_metadata(stored: dict, projected: dict) -> dict:
     return meta
 
 
+def _awaiting_approval(projection: dict) -> set:
+    """Invocations whose approval card is still pending and not yet started."""
+    pending = {
+        request.get("invocation_id")
+        for request in projection.get("pending_requests") or []
+        if request.get("type") == "tool_approval_request" and request.get("invocation_id")
+    }
+    return {
+        invocation.get("invocation_id")
+        for invocation in projection.get("invocations") or []
+        if invocation.get("invocation_id") in pending and invocation.get("status") == "calling"
+    }
+
+
 def merge_execution_into_messages(messages: Optional[list], projection: dict) -> list:
     """Upsert projection rows into a conversation message list.
 
@@ -472,8 +489,14 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
             # A finished legacy row is an earlier turn's call_0, not this
             # run's. Only an open row can be the one this run is filling in.
             by_legacy.setdefault(tool_call_id, index)
+    awaiting = _awaiting_approval(projection)
     for invocation in projection.get("invocations") or []:
         inv_id = invocation.get("invocation_id")
+        if inv_id in awaiting and inv_id not in by_invocation:
+            # A client that stayed on the conversation sees only the approval
+            # card until the tool starts. A row beside it would run a timer
+            # for a call that has not run.
+            continue
         index = by_invocation.get(inv_id)
         if index is None:
             legacy = by_legacy.pop(invocation.get("tool_call_id"), None)

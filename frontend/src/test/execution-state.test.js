@@ -159,6 +159,33 @@ describe('reconcileExecution — legacy rows from earlier turns', () => {
   })
 })
 
+describe('reconcileExecution — calls waiting on approval', () => {
+  it('shows only the card for a call that has not started, then the row once it does', () => {
+    const waiting = {
+      revision: 2,
+      run_id: 'run-1',
+      status: 'waiting_for_input',
+      invocations: [invocation('run-1:0:call_0', { tool_name: 'atlas_sleep', status: 'calling' })],
+      pending_requests: [{
+        type: 'tool_approval_request', tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0', run_id: 'run-1', tool_name: 'atlas_sleep',
+      }],
+    }
+    const first = reconcileExecution([], waiting, null)
+    expect(first.map(row => row.type)).toEqual(['tool_approval_request'])
+
+    const started = reconcileExecution(first, {
+      ...waiting,
+      revision: 3,
+      status: 'running',
+      invocations: [invocation('run-1:0:call_0', { tool_name: 'atlas_sleep', status: 'sleeping' })],
+      pending_requests: [],
+    }, { revision: 2, run_id: 'run-1' })
+    expect(started.map(row => row.type)).toEqual(['tool_call'])
+    expect(started[0].status).toBe('sleeping')
+  })
+})
+
 describe('invocation identity helpers', () => {
   it('matches a legacy row only when the frame has no invocation id', () => {
     const legacy = { tool_call_id: 'call_0' }

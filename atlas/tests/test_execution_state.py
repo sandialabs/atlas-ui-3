@@ -495,3 +495,28 @@ def test_registry_clears_an_approval_when_its_tool_starts():
     current = registry.get(record.run_id)
     assert current.status == RunStatus.RUNNING
     assert current.pending_requests == []
+
+
+def test_a_sleep_waiting_on_approval_is_not_sleeping():
+    # Found in a browser pass: a reopened view showed a wake-up timer and
+    # "Sleeping" beside the Approve/Reject card of an unapproved atlas_sleep.
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="invocation", tool_name="atlas_sleep"))
+    apply_event_to_document(doc, _event(0, type="tool_approval_request", tool_name="atlas_sleep", arguments={"seconds": 45}))
+    projection = public_projection(doc)
+    assert projection["invocations"][0]["status"] == "calling"
+    assert projection["activity"] == "waiting_for_approval"
+    apply_event_to_document(doc, _event(0, type="tool_start", tool_name="atlas_sleep"))
+    projection = public_projection(doc)
+    assert projection["invocations"][0]["status"] == "sleeping"
+    assert projection["activity"] == "sleeping"
+    assert projection["pending_requests"] == []
+
+
+def test_merge_leaves_out_a_call_still_waiting_on_approval():
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    apply_event_to_document(doc, _event(1, type="invocation"))
+    apply_event_to_document(doc, _event(1, type="tool_approval_request", arguments={}))
+    merged = merge_execution_into_messages([], public_projection(doc))
+    assert [m["metadata"]["tool_call_id"] for m in merged] == ["call_0"]

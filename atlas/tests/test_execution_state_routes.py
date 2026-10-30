@@ -87,17 +87,22 @@ def test_mid_step_fetch_shows_rows_and_the_pending_card(client, store, owner):
     assert execution["run_id"] == RUN
     assert execution["activity"] == "waiting_for_approval"
     assert [r["tool_call_id"] for r in execution["pending_requests"]] == ["call_1"]
+    # The call waiting on approval shows as its card only, as it does for a
+    # client that stayed on the conversation.
+    tool_rows = [m for m in data["messages"] if m.get("message_type") == "tool_call"]
+    assert [m["metadata"]["invocation_id"] for m in tool_rows] == [invocation_id(RUN, 0, "call_0")]
+
+    # The approval was answered (possibly on another replica) and the tool
+    # started. A reload no longer offers Approve/Reject, and the row appears.
+    _apply(store, owner, "call_1", "tool_start", arguments={"q": "b"})
+    data = _get(client, owner).json()
+    execution = data["execution"]
+    assert execution["pending_requests"] == []
+    assert execution["activity"] == "executing"
     tool_rows = [m for m in data["messages"] if m.get("message_type") == "tool_call"]
     assert [m["metadata"]["invocation_id"] for m in tool_rows] == [
         invocation_id(RUN, 0, "call_0"), invocation_id(RUN, 0, "call_1"),
     ]
-
-    # The approval was answered (possibly on another replica) and the tool
-    # started. A reload no longer offers Approve/Reject.
-    _apply(store, owner, "call_1", "tool_start", arguments={"q": "b"})
-    execution = _get(client, owner).json()["execution"]
-    assert execution["pending_requests"] == []
-    assert execution["activity"] == "executing"
 
 
 def test_finished_run_merges_no_rows(client, store, owner):

@@ -86,9 +86,11 @@ the projection and in the executor's run registry. The answer may have landed
 on another replica, and the tool starting is what proves it was approved, so
 a reload while the tool runs does not offer Approve/Reject again.
 
-`atlas_sleep` is `activity=sleeping` and a tool row with status `sleeping`.
-Earlier tool rows stay visible. It is not an approval and it is not
-"Agent thinking...".
+`atlas_sleep` is `activity=sleeping` and a tool row with status `sleeping`
+only after the tool has started. While it is still waiting for approval the
+invocation stays `calling`, the view shows the approval card and not a row,
+and the activity stays `waiting_for_approval`. Earlier tool rows stay visible.
+It is not "Agent thinking...".
 
 When the run completes, fails, or is cancelled, that status is written into
 the same document, the pending set is cleared, and any invocation still open

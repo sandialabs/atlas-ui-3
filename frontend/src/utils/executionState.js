@@ -151,9 +151,20 @@ export function reconcileExecution(messages, execution, previousRevision) {
     }
   })
 
+  // A call still waiting on its approval card has no row yet: a client that
+  // stayed on the conversation shows only the card until the tool starts.
+  const awaitingApproval = new Set(pending
+    .filter(request => request.type === 'tool_approval_request' && request.invocation_id)
+    .map(request => request.invocation_id))
+
   const patches = new Map()
   const appended = []
   invocations.forEach((invocation) => {
+    if (
+      awaitingApproval.has(invocation.invocation_id)
+      && invocation.status === 'calling'
+      && !byInvocation.has(invocation.invocation_id)
+    ) return
     let index = invocation.invocation_id ? byInvocation.get(invocation.invocation_id) : undefined
     if (index == null && invocation.tool_call_id && legacy.has(invocation.tool_call_id)) {
       index = legacy.get(invocation.tool_call_id)
