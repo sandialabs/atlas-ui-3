@@ -129,3 +129,5 @@ Follow-up verification, same worktree, `atlas.__file__` still this tree:
 - `bash scripts/check-docs.sh`: OK (123 markdown files, 19 indexes).
 
 A browser pass was still not run.
+
+The next `ci-test` run failed `parallel-conversation-runs.test.js`: a visible `tool_start` is now applied with `mapMessages`, and that test still expected `addMessage`. The assertion follows the reducer. A background `tool_start` still must not call `mapMessages`.

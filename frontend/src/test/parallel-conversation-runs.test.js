@@ -32,7 +32,18 @@ describe('event routing by conversation', () => {
 
     handler({ type: 'tool_start', tool_name: 'search', tool_call_id: 't1', conversation_id: 'conv-a', run_id: 'run-a' })
 
-    expect(deps.addMessage).toHaveBeenCalled()
+    // A visible tool row is appended inside the message reducer, so a deferred
+    // update still dedupes. addMessage is only the fallback when that reducer
+    // is absent.
+    expect(deps.mapMessages).toHaveBeenCalled()
+    const next = deps.mapMessages.mock.calls.at(-1)[0]([])
+    expect(next).toEqual([expect.objectContaining({
+      type: 'tool_call',
+      tool_call_id: 't1',
+      tool_name: 'search',
+      conversation_id: 'conv-a',
+      run_id: 'run-a',
+    })])
   })
 
   it('drops events belonging to a background conversation', () => {
@@ -43,6 +54,7 @@ describe('event routing by conversation', () => {
     handler({ type: 'tool_start', tool_name: 'search', tool_call_id: 't1', conversation_id: 'conv-b', run_id: 'run-b' })
 
     expect(deps.addMessage).not.toHaveBeenCalled()
+    expect(deps.mapMessages).not.toHaveBeenCalled()
     expect(onRunStatus).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'background_activity', conversation_id: 'conv-b' })
     )
