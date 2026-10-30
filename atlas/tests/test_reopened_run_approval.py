@@ -726,3 +726,31 @@ async def test_elicitation_timeout_does_not_settle_the_running_tool(store):
     history = ConversationHistory()
     recorder.flush(history, mark_incomplete=True)
     assert history.messages[0].metadata["status"] == "interrupted"
+
+
+@pytest.mark.asyncio
+async def test_a_late_answer_to_a_timed_out_approval_says_expired(store):
+    # The timeout cancels the local future. A response landing in that window
+    # must report the expired outcome the timeout recorded, not "rejected".
+    from atlas.application.chat.approval_manager import get_approval_manager
+    manager = get_approval_manager()
+    inv = invocation_id(RUN, 0, "call_late")
+    request = manager.create_approval_request(
+        "call_late", TOOL, {}, user_email=EMAIL, invocation_id=inv, run_id=RUN,
+    )
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await request.wait_for_response(timeout=0.01)
+        assert request.future.cancelled()
+        await store.put_resolution(approval_storage_key(inv, "call_late", EMAIL), {
+            "approved": False, "status": "expired", "user_email": EMAIL,
+            "invocation_id": inv, "tool_call_id": "call_late", "run_id": RUN,
+        })
+        kind, frame = await decide_tool_approval({
+            "tool_call_id": "call_late", "invocation_id": inv, "run_id": RUN, "approved": True,
+        }, EMAIL)
+        assert kind == "duplicate"
+        assert frame["status"] == "expired"
+        assert frame["approved"] is False
+    finally:
+        manager.cleanup_request(request.storage_key)

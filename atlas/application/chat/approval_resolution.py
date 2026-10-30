@@ -191,6 +191,12 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
         )
         if isinstance(remembered, dict) and remembered.get("already_resolved"):
             return "duplicate", _frame(remembered, data)
+        # A cancelled wait (timeout race) has no local outcome. The shared
+        # store holds what the timeout claimed, normally `expired`.
+        key = approval_storage_key(request.invocation_id, request.tool_call_id, user_email)
+        existing = await _read(key)
+        if existing and _owns(existing.get("user_email"), user_email):
+            return "duplicate", _frame(existing, data)
         return "unknown", _unknown(data)
 
     result = manager.handle_approval_response(

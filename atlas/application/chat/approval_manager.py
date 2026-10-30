@@ -249,6 +249,11 @@ class ToolApprovalManager:
             remembered = self._resolved.get(key)
             if remembered is not None:
                 return self._public(remembered)
+            if request.future.cancelled():
+                # The wait timed out or was cancelled; nobody answered. That is
+                # not a rejection. The caller falls through to the shared
+                # store, where the timeout recorded `expired`.
+                return False
             return self._public(self._record_from_future(request))
         request.set_response(approved, arguments, reason)
         record = {

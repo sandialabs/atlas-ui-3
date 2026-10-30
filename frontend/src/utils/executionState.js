@@ -113,10 +113,31 @@ function approvalRow(request) {
   }
 }
 
-function rowChanged(current, next) {
-  return ['status', 'result', 'invocation_id', 'arguments', 'tool_name'].some(
-    (key) => next[key] !== undefined && current[key] !== next[key]
-  )
+const PATCH_FIELDS = ['status', 'result', 'invocation_id', 'run_id', 'step', 'arguments', 'tool_name']
+
+function sameValue(a, b) {
+  if (a === b) return true
+  if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
+// Only the fields the projection actually knows and that differ. A null
+// result or an empty arguments object is "not known yet", not a value, and
+// the projection has no server_name, so neither overwrites what the row has.
+// Arguments compare structurally: every poll returns fresh objects.
+function rowPatch(current, next) {
+  const patch = {}
+  PATCH_FIELDS.forEach((key) => {
+    const value = next[key]
+    if (value === undefined || value === null) return
+    if (key === 'arguments' && typeof value === 'object' && Object.keys(value).length === 0) return
+    if (!sameValue(current[key], value)) patch[key] = value
+  })
+  return Object.keys(patch).length > 0 ? patch : null
 }
 
 /**
@@ -178,7 +199,8 @@ export function reconcileExecution(messages, execution, previousRevision) {
     // A row that already settled keeps what it has. The projection can lag
     // the live frame, and its result is a shortened copy.
     if (TERMINAL_TOOL_STATUS.has(source[index].status)) return
-    if (rowChanged(source[index], row)) patches.set(index, row)
+    const patch = rowPatch(source[index], row)
+    if (patch) patches.set(index, patch)
   })
 
   const dropped = new Set()
@@ -212,13 +234,7 @@ export function reconcileExecution(messages, execution, previousRevision) {
     if (dropped.has(index)) return
     if (patches.has(index)) {
       const patch = patches.get(index)
-      next.push({
-        ...message,
-        ...patch,
-        role: message.role || patch.role,
-        timestamp: message.timestamp || patch.timestamp,
-        content: message.content || patch.content,
-      })
+      next.push({ ...message, ...patch })
       return
     }
     next.push(message)

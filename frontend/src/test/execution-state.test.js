@@ -186,6 +186,43 @@ describe('reconcileExecution — calls waiting on approval', () => {
   })
 })
 
+describe('reconcileExecution — poll patches', () => {
+  it('returns the same array when a poll only brings fresh copies of the same arguments', () => {
+    const current = [{
+      type: 'tool_call', invocation_id: 'run-1:0:call_0', tool_call_id: 'call_0', run_id: 'run-1', step: 0,
+      tool_name: 'search', server_name: 'web', status: 'in_progress', arguments: { q: 'x' }, result: null,
+    }]
+    const poll = (revision) => reconcileExecution(current, {
+      revision,
+      run_id: 'run-1',
+      status: 'running',
+      invocations: [invocation('run-1:0:call_0', { arguments: { q: 'x' } })],
+    }, { revision: revision - 1, run_id: 'run-1' })
+    expect(poll(2)).toBe(current)
+    expect(poll(3)).toBe(current)
+  })
+
+  it('patches only changed fields and keeps server_name and a known result', () => {
+    const current = [{
+      type: 'tool_call', invocation_id: 'run-1:0:call_0', tool_call_id: 'call_0', run_id: 'run-1', step: 0,
+      tool_name: 'search', server_name: 'web', status: 'calling', arguments: { q: 'x' }, result: 'partial',
+      content: '**Tool: search**',
+    }]
+    const next = reconcileExecution(current, {
+      revision: 2,
+      run_id: 'run-1',
+      status: 'running',
+      invocations: [invocation('run-1:0:call_0', { status: 'in_progress', result: null, arguments: {} })],
+    }, { revision: 1, run_id: 'run-1' })
+    expect(next).not.toBe(current)
+    expect(next[0].status).toBe('in_progress')
+    expect(next[0].server_name).toBe('web')
+    expect(next[0].result).toBe('partial')
+    expect(next[0].arguments).toEqual({ q: 'x' })
+    expect(next[0].content).toBe('**Tool: search**')
+  })
+})
+
 describe('invocation identity helpers', () => {
   it('matches a legacy row only when the frame has no invocation id', () => {
     const legacy = { tool_call_id: 'call_0' }
