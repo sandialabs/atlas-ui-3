@@ -559,10 +559,22 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
         # yet seen run_status must not put that run back to running.
         if existing.get("status") in _TERMINAL_RUN:
             continue
-        existing["activity"] = projection.get("activity")
-        if projection_status:
+        if projection_status in _TERMINAL_RUN:
             existing["status"] = projection_status
-        existing["waiting_on"] = projection.get("waiting_on")
+            existing["activity"] = projection.get("activity")
+            existing["waiting_on"] = None
+            continue
+        # The local registry is authoritative for a run this replica holds.
+        # It sees an approval answered before the projection does (that
+        # catches up at tool_start), so a non-terminal projection status must
+        # not put the run back to waiting_for_input. The projection only adds
+        # the finer activity (sleeping) when the two agree on the status.
+        if not projection_status or projection_status == existing.get("status"):
+            existing["activity"] = projection.get("activity")
+        else:
+            existing["activity"] = (
+                "waiting_for_approval" if existing.get("status") == "waiting_for_input" else "executing"
+            )
     return list(merged.values())
 
 

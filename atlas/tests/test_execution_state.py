@@ -520,3 +520,24 @@ def test_merge_leaves_out_a_call_still_waiting_on_approval():
     apply_event_to_document(doc, _event(1, type="tool_approval_request", arguments={}))
     merged = merge_execution_into_messages([], public_projection(doc))
     assert [m["metadata"]["tool_call_id"] for m in merged] == ["call_0"]
+
+
+def test_local_resume_wins_over_a_projection_still_waiting():
+    # The approval resumed the local run; the projection catches up only at
+    # tool_start. list_runs must not report the run waiting in between.
+    local = [{"run_id": "run-1", "conversation_id": CONV, "status": "running", "waiting_on": None}]
+    shared = [{
+        "run_id": "run-1", "conversation_id": CONV, "status": "waiting_for_input",
+        "activity": "waiting_for_approval", "waiting_on": "tool_approval_request", "revision": 3,
+    }]
+    merged = merge_run_snapshots(local, shared)[0]
+    assert merged["status"] == "running"
+    assert merged["waiting_on"] is None
+    assert merged["activity"] == "executing"
+    assert merged["execution_revision"] == 3
+
+
+def test_projection_adds_sleeping_activity_to_a_running_local_run():
+    local = [{"run_id": "run-1", "conversation_id": CONV, "status": "running"}]
+    shared = [{"run_id": "run-1", "conversation_id": CONV, "status": "running", "activity": "sleeping", "revision": 4}]
+    assert merge_run_snapshots(local, shared)[0]["activity"] == "sleeping"

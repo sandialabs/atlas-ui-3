@@ -97,7 +97,9 @@ the same document, the pending set is cleared, and any invocation still open
 is marked `interrupted`. A later tool frame for
 that run does not bring it back. A run list keeps a local terminal status
 when the shared document has not caught up, ignores a document from a
-different run than the one this replica is executing, and it does not add a finished
+different run than the one this replica is executing, keeps its own
+non-terminal status over the document's (an approval resumes the local run
+before the document sees `tool_start`), and it does not add a finished
 projection as a new active run.
 
 Pending approval `arguments` are stored in full. Approving the card sends
