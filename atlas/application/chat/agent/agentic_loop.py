@@ -152,7 +152,10 @@ class AgenticLoop(AgentLoopProtocol):
         # Issue #684 covered tools mode by wrapping its update callback; agent
         # mode executes tools through this loop's own callback, so it needs the
         # same wrapper here.
-        recorder = ToolCallRecorder(self.connection.send_json if self.connection else None)
+        recorder = ToolCallRecorder(
+            self.connection.send_json if self.connection else None,
+            user_email=context.user_email,
+        )
         launch_discovery: Dict[str, Any] = {}
 
         try:
@@ -349,6 +352,9 @@ class AgenticLoop(AgentLoopProtocol):
                     # scoping) so direct callers that omit conversation_id still
                     # get one stable persistent session instead of None.
                     "conversation_id": context.conversation_id or str(context.session_id),
+                    # Step the invocation id is scoped to. Providers reuse
+                    # tool_call_id across steps; the step keeps them apart.
+                    "agent_step": steps,
                     "factory": getattr(self.tool_manager, "app_factory", None),
                     "launch_discovery": launch_discovery,
                     # Mutable, one per turn: atlas_agent_sleep accumulates the

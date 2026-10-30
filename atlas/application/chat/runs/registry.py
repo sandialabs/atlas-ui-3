@@ -45,6 +45,10 @@ from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
+# Projection writes the registry has scheduled and not yet finished. Holding
+# them here keeps each task alive until its write lands.
+_PROJECTION_TASKS: "set[asyncio.Task]" = set()
+
 # How long a run that reached a terminal state stays queryable. Long enough
 # that a browser reopened a few minutes later still learns "that finished" /
 # "that failed" instead of silently showing nothing; short enough that an
@@ -420,6 +424,16 @@ class RunRegistry:
             sanitize_for_logging(str(conversation_id)),
             len(active) + 1,
         )
+        # A previous run's projection may never have received its terminal
+        # write (a lost publish, a dead replica). This run replaces it, so a
+        # text-only run that publishes no tool frame still clears a stale
+        # pending card. The store ignores it when there is no document.
+        self._publish_projection({
+            "type": "run_started",
+            "run_id": record.run_id,
+            "conversation_id": record.conversation_id,
+            "user_email": record.user_email,
+        })
         self._notify(record)
         return record
 
@@ -477,8 +491,55 @@ class RunRegistry:
             # turn's text is in the stored transcript now, and a stale buffer
             # would replay a finished answer over a reopen's fresh one.
             record.stream.clear()
+            self._publish_terminal(record)
         self._notify(record)
         return record
+
+    def _publish_terminal(self, record: "RunRecord") -> None:
+        """Tell every replica this run finished.
+
+        The registry stays process-local. The shared projection is what
+        another replica's run list would otherwise keep showing as active
+        until the document expired.
+        """
+        if not record.status.is_terminal:
+            return
+        event = {
+            "type": "run_status",
+            "status": record.status.value,
+            "run_id": record.run_id,
+            "conversation_id": record.conversation_id,
+            "user_email": record.user_email,
+        }
+        if record.error:
+            event["error"] = record.error
+        self._publish_projection(event)
+
+    @staticmethod
+    def _publish_projection(event: Dict[str, Any]) -> None:
+        """Write one run-lifecycle event to the shared projection, best effort.
+
+        The registry is synchronous, so the write runs as a task. The task is
+        kept in ``_PROJECTION_TASKS`` until it finishes: the event loop only
+        holds a weak reference, and an unreferenced task can be collected
+        before the write lands.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def _send(payload=event):
+            try:
+                from atlas.application.chat.runs.execution_state import publish_execution_event
+
+                await publish_execution_event(payload)
+            except Exception:
+                logger.warning("execution projection lifecycle update failed", exc_info=True)
+
+        task = loop.create_task(_send())
+        _PROJECTION_TASKS.add(task)
+        task.add_done_callback(_PROJECTION_TASKS.discard)
 
     def note_stream_token(
         self, run_id: Optional[str], token: str, is_first: bool, is_last: bool
@@ -528,6 +589,8 @@ class RunRegistry:
                 return
             self.set_status(run_id, RunStatus.WAITING_FOR_INPUT, waiting_on=event_type)
             self.set_pending_request(run_id, frame)
+        elif event_type == "tool_start":
+            self._drop_started_approval(run_id, frame)
         elif event_type in TOOL_SETTLED_EVENTS:
             record = self.get(run_id)
             if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
@@ -567,6 +630,38 @@ class RunRegistry:
             and request.get("elicitation_id") == frame.get("elicitation_id")
             for request in pending_requests
         )
+
+    def _drop_started_approval(self, run_id: str, frame: Dict[str, Any]) -> None:
+        """A tool that starts was approved, on this replica or another.
+
+        An answer recorded through the shared store (issue #1122) never goes
+        through ``answer_pending_request`` here, so the start frame is what
+        clears the card. Only approval requests match: an elicitation is
+        raised after its tool has started.
+        """
+        record = self.get(run_id)
+        if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
+            return
+        invocation = frame.get("invocation_id")
+        tool_call_id = frame.get("tool_call_id")
+        if not invocation and not tool_call_id:
+            return
+
+        def _started(request: Dict[str, Any]) -> bool:
+            if request.get("type") != "tool_approval_request":
+                return False
+            if invocation and request.get("invocation_id"):
+                return request["invocation_id"] == invocation
+            return bool(tool_call_id) and request.get("tool_call_id") == tool_call_id
+
+        remaining = [request for request in record.pending_requests if not _started(request)]
+        if len(remaining) == len(record.pending_requests):
+            return
+        record.pending_requests = remaining
+        if not remaining:
+            self.set_status(run_id, RunStatus.RUNNING)
+        else:
+            self._notify(record)
 
     def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
         """Remember a request the run is blocked on, for later replay."""

@@ -211,6 +211,7 @@ class RoutingMixin:
             if isinstance(params, ElicitRequestFormParams):
                 response_schema = params.requestedSchema or {}
 
+            elicitation_id = None
             try:
                 import uuid
 
@@ -274,6 +275,23 @@ class RoutingMixin:
 
             except asyncio.TimeoutError:
                 logger.warning(f"Elicitation timeout for server '{server_name}'")
+                # A settle frame is what clears the pause. Without it the run
+                # stays waiting_for_input and the card is replayed on reopen.
+                if elicitation_id is not None and routing.update_cb is not None:
+                    try:
+                        await routing.update_cb({
+                            "type": "tool_error",
+                            "elicitation_id": elicitation_id,
+                            "tool_call_id": routing.tool_call.id,
+                            "tool_name": routing.tool_call.name,
+                            "error": "Elicitation timed out",
+                            "status": "expired",
+                        })
+                    except Exception:
+                        logger.warning(
+                            "Could not publish elicitation timeout for server '%s'",
+                            server_name, exc_info=True,
+                        )
                 return ElicitResult(action="cancel", content=None)
             except Exception as e:
                 logger.error(f"Error handling elicitation for server '{server_name}': {e}", exc_info=True)

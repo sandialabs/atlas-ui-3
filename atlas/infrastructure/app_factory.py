@@ -91,6 +91,16 @@ class AppFactory:
             redis=self.redis,
             session_ttl_seconds=app_settings.session_ttl_seconds,
         )
+        # The execution projection shares the session pool. Binding it only
+        # when Redis exists leaves a test-injected memory store in place for
+        # the single-instance path.
+        if self.redis is not None:
+            from atlas.application.chat.runs.execution_state import (
+                RedisExecutionStore,
+                set_execution_store,
+            )
+
+            set_execution_store(RedisExecutionStore(self.redis))
 
         # Outcomes of optional startup steps (issue #992): "ok", "failed" or
         # "disabled" per feature, reported by /api/health. A failure's detail

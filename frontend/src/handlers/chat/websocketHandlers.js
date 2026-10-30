@@ -1,6 +1,127 @@
 // Handlers extracted from original ChatContext to keep provider lean
 
 import { isCanvasTool } from '../../constants/atlasTools'
+import { isOpenLegacyRow, isSleepTool, toolStatusFromEvent } from '../../utils/executionState'
+
+function withIdentity(message, data) {
+  const next = { ...message }
+  if (data.invocation_id) next.invocation_id = data.invocation_id
+  if (data.run_id) next.run_id = data.run_id
+  if (data.conversation_id) next.conversation_id = data.conversation_id
+  if (data.step != null) next.step = data.step
+  if (typeof data.execution_revision === 'number') next.execution_revision = data.execution_revision
+  return next
+}
+
+function sameApproval(row, data) {
+  if (!row || row.type !== 'tool_approval_request') return false
+  if (data.invocation_id && row.invocation_id) return row.invocation_id === data.invocation_id
+  if (data.elicitation_id && row.elicitation_id) return row.elicitation_id === data.elicitation_id
+  if (data.invocation_id || row.invocation_id) return false
+  return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
+}
+
+// The card a settle or unknown frame addresses. An identified frame matches
+// its one card. A bare call_0 (untracked turns) matches only the most recent
+// card with that id, preferring one still pending: earlier call_0 cards are
+// earlier requests and keep their own outcome.
+function addressedApprovalIndex(list, data) {
+  if (data.invocation_id || data.elicitation_id) {
+    return list.findIndex(msg => sameApproval(msg, data))
+  }
+  let fallback = -1
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (!sameApproval(list[i], data)) continue
+    if (list[i].status === 'pending') return i
+    if (fallback === -1) fallback = i
+  }
+  return fallback
+}
+
+const SETTLED_APPROVAL_STATUS = new Set(['approved', 'rejected', 'expired'])
+
+function settledApprovalStatus(data) {
+  if (SETTLED_APPROVAL_STATUS.has(data.status)) return data.status
+  return data.approved ? 'approved' : 'rejected'
+}
+
+// A repeated request for a card already on screen. Without an invocation id
+// (untracked turns: incognito, history off, local save) providers reuse
+// call_0, so only a card that is still pending is the same request; a settled
+// call_0 card is an earlier one, and hiding the new request would hang the
+// turn until the approval timed out.
+function samePendingApproval(row, data) {
+  if (!sameApproval(row, data)) return false
+  if (row.invocation_id || row.elicitation_id) return true
+  return row.status === 'pending'
+}
+
+function sameToolStart(row, data) {
+  if (!row || row.type !== 'tool_call') return false
+  if (data.invocation_id && row.invocation_id) return row.invocation_id === data.invocation_id
+  if (data.invocation_id || row.invocation_id) return false
+  // Bare: only an open row is this call. A finished call_0 is an earlier turn's.
+  return isOpenLegacyRow(row) && !!data.tool_call_id && row.tool_call_id === data.tool_call_id
+}
+
+// Existence check and append are one reducer update. A flag set inside
+// mapMessages is still false when React defers the updater, so a following
+// addMessage would insert a second card.
+function appendOnce(mapMessages, addMessage, row, matches) {
+  if (typeof mapMessages === 'function') {
+    mapMessages(prev => {
+      const list = Array.isArray(prev) ? prev : []
+      return list.some(matches) ? list : list.concat(row)
+    })
+    return
+  }
+  addMessage(row)
+}
+
+function isToolRow(msg) {
+  if (!msg) return false
+  if (msg.type === 'tool_call') return true
+  // Older rows and the handler fixtures identify a tool by tool_call_id
+  // alone. A typed row that is not a tool call (an approval card) is not one.
+  if (msg.type) return false
+  return !!msg.tool_call_id
+}
+
+// Update the invocation this frame belongs to. A bare tool_call_id still
+// updates legacy rows that have no invocation id. When no row matches and
+// `insert` is set, the frame becomes a new row (a settlement that arrived
+// before tool_start, or after a reload that dropped it).
+function mapToolRows(prev, data, patch, insert) {
+  const list = Array.isArray(prev) ? prev : []
+  const exact = !!(data.invocation_id && list.some(
+    msg => isToolRow(msg) && msg.invocation_id === data.invocation_id
+  ))
+  // The frame's projection revision rides along, so a later poll of an older
+  // snapshot knows this row is newer than what it saw.
+  if (typeof data.execution_revision === 'number') {
+    patch = { ...patch, execution_revision: data.execution_revision }
+  }
+  if (exact) {
+    return list.map(msg => (
+      isToolRow(msg) && msg.invocation_id === data.invocation_id ? { ...msg, ...patch } : msg
+    ))
+  }
+  // No exact row: fall back to the most recent open legacy row with this
+  // tool_call_id. A settled call_0 belongs to an earlier turn, and an older
+  // open one is not this frame's either when a newer one exists.
+  let target = -1
+  if (data.tool_call_id) {
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const msg = list[i]
+      if (isToolRow(msg) && isOpenLegacyRow(msg) && msg.tool_call_id === data.tool_call_id) {
+        target = i
+        break
+      }
+    }
+  }
+  if (target === -1) return insert ? list.concat(insert) : list
+  return list.map((msg, i) => (i === target ? { ...msg, ...patch } : msg))
+}
 
 // Default sandbox permissions for iframes (restrictive by default)
 const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
@@ -260,7 +381,11 @@ export function createWebSocketHandler(deps) {
           const stopped = updateData.status === 'interrupted'
           const label = stopped ? 'Stopped' : updateData.success ? 'Success' : 'Failed'
           const status = stopped ? 'interrupted' : updateData.success ? 'completed' : 'failed'
-          mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === updateData.tool_call_id ? { ...msg, content: `**Tool: ${updateData.tool_name}** - ${label}`, status, result: updateData.result || updateData.error || null } : msg))
+          mapMessages(prev => mapToolRows(prev, updateData, {
+            content: `**Tool: ${updateData.tool_name}** - ${label}`,
+            status,
+            result: updateData.result || updateData.error || null,
+          }))
           break
         }
         case 'tool_log':
@@ -475,30 +600,35 @@ export function createWebSocketHandler(deps) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {
           if (isCanvasTool(data.tool_name)) break; // Suppress any chat message for canvas
-          addMessage({
-            role: 'system',
-            content: `**Tool Call: ${data.tool_name}**`,
-            type: 'tool_call',
-            tool_call_id: data.tool_call_id,
-            tool_name: data.tool_name,
-            server_name: data.server_name || 'tool',
-            arguments: data.arguments || {},
-            status: 'calling',
-            timestamp: new Date().toISOString(),
-            agent_mode: false
-          })
+          appendOnce(
+            mapMessages,
+            addMessage,
+            withIdentity({
+              role: 'system',
+              content: `**Tool Call: ${data.tool_name}**`,
+              type: 'tool_call',
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              server_name: data.server_name || 'tool',
+              arguments: data.arguments || {},
+              status: isSleepTool(data.tool_name) ? 'sleeping' : 'calling',
+              timestamp: new Date().toISOString(),
+              agent_mode: false
+            }, data),
+            msg => sameToolStart(msg, data),
+          )
           break
         }
         case 'tool_progress': {
           // Update the in-flight tool message with progress
-          const { tool_call_id, progress, total, percentage, message } = data
-          mapMessages(prev => prev.map(msg => msg.tool_call_id === tool_call_id ? {
-            ...msg,
-            status: 'in_progress',
+          const { progress, total, percentage, message } = data
+          const sleeping = isSleepTool(data.tool_name)
+          mapMessages(prev => mapToolRows(prev, data, {
+            status: sleeping ? 'sleeping' : 'in_progress',
             progress: typeof percentage === 'number' ? percentage : undefined,
             progressRaw: { progress, total },
             progressMessage: message || ''
-          } : msg))
+          }))
           break
         }
         case 'tool_complete': {
@@ -506,27 +636,36 @@ export function createWebSocketHandler(deps) {
             // No update needed; canvas_content event handles display
             break
           }
-          mapMessages(prev => prev.map(msg => msg.tool_call_id === data.tool_call_id ? {
-              ...msg,
-              status: data.success ? 'completed' : 'failed',
-              result: data.result || null,
-              content: `**Tool: ${data.tool_name}** - ${data.success ? 'Success' : 'Failed'}`
-            } : msg))
+          mapMessages(prev => mapToolRows(prev, data, {
+            status: data.success ? 'completed' : 'failed',
+            result: data.result || null,
+            content: `**Tool: ${data.tool_name}** - ${data.success ? 'Success' : 'Failed'}`
+          }))
           break
         }
         case 'tool_interrupted': {
           // The turn was stopped while this call was still running (#755).
           // Without this the row spins as CALLING until a reload replaces it
           // with the persisted interrupted row.
-          mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === data.tool_call_id ? {
-              ...msg,
-              status: 'interrupted',
-              result: data.result || null,
-              content: `**Tool: ${data.tool_name}** - Stopped`
-            } : msg))
+          mapMessages(prev => mapToolRows(prev, data, {
+            status: 'interrupted',
+            result: data.result || null,
+            content: `**Tool: ${data.tool_name}** - Stopped`
+          }))
           break
         }
         case 'tool_error': {
+          // An elicitation timeout settles the question, not the tool: the
+          // tool keeps running with a cancelled answer and reports its own
+          // result. Close the dialog and leave the row alone.
+          if (data.elicitation_id) {
+            if (typeof setPendingElicitation === 'function') {
+              setPendingElicitation(prev => (
+                prev && prev.elicitation_id === data.elicitation_id ? null : prev
+              ))
+            }
+            break
+          }
           if (isCanvasTool(data.tool_name)) {
             addMessage({
               role: 'system',
@@ -536,12 +675,23 @@ export function createWebSocketHandler(deps) {
             })
             break
           }
-          mapMessages(prev => prev.map(msg => msg.tool_call_id === data.tool_call_id ? {
-              ...msg,
-              status: 'failed',
-              result: data.error || 'Unknown error',
-              content: `**Tool: ${data.tool_name}** - Failed`
-            } : msg))
+          const status = toolStatusFromEvent(data, 'failed')
+          mapMessages(prev => mapToolRows(prev, data, {
+            status,
+            result: data.error || 'Unknown error',
+            content: `**Tool: ${data.tool_name}** - Failed`
+          }, withIdentity({
+            role: 'system',
+            content: `**Tool: ${data.tool_name}** - Failed`,
+            type: 'tool_call',
+            tool_call_id: data.tool_call_id,
+            tool_name: data.tool_name,
+            server_name: data.server_name || 'tool',
+            arguments: data.arguments || {},
+            status,
+            result: data.error || 'Unknown error',
+            timestamp: new Date().toISOString(),
+          }, data)))
           break
         }
         case 'tool_synthesis_start': {
@@ -688,6 +838,35 @@ export function createWebSocketHandler(deps) {
             addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
             break
           }
+          // A stale approval card's "no matching request" used to take the
+          // generic error path and end the joined-view poll. Drop the card
+          // and leave the run alone (issue #1122).
+          if (data.error_type === 'unknown_tool_approval' || data.error_type === 'unknown_elicitation') {
+            mapMessages(prev => {
+              const list = Array.isArray(prev) ? prev : []
+              const target = data.error_type === 'unknown_tool_approval'
+                ? addressedApprovalIndex(list, data)
+                : -1
+              const kept = list.filter((msg, i) => {
+                if (data.error_type === 'unknown_elicitation') {
+                  return !(msg.elicitation_id && msg.elicitation_id === data.elicitation_id)
+                }
+                return i !== target
+              })
+              // A card that silently vanishes after Approve reads as success.
+              // Say what happened in its place.
+              if (data.error_type === 'unknown_tool_approval' && target !== -1) {
+                const card = list[target]
+                kept.push({
+                  role: 'system',
+                  content: `Approval for ${card?.tool_name || 'this tool'} is no longer active. The tool did not run from this answer.`,
+                  timestamp: new Date().toISOString(),
+                })
+              }
+              return kept
+            })
+            break
+          }
           setIsThinking(false)
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
@@ -765,19 +944,40 @@ export function createWebSocketHandler(deps) {
           }
           break
         case 'tool_approval_request':
-            // Handle tool approval request - stop thinking and add as a message in the chat
+            // Handle tool approval request - stop thinking and add as a message in the chat.
+            // Restore and a second copy of the same request must not stack cards.
             try { setIsThinking(false) } catch { /* no-op */ }
-          addMessage({
-            role: 'system',
-            content: `Tool Approval Required: ${data.tool_name}`,
-            type: 'tool_approval_request',
-            tool_call_id: data.tool_call_id,
-            tool_name: data.tool_name,
-            arguments: data.arguments || {},
-            allow_edit: data.allow_edit !== false,
-            admin_required: data.admin_required || false,
-            status: 'pending',
-            timestamp: new Date().toISOString()
+          appendOnce(
+            mapMessages,
+            addMessage,
+            withIdentity({
+              role: 'system',
+              content: `Tool Approval Required: ${data.tool_name}`,
+              type: 'tool_approval_request',
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              arguments: data.arguments || {},
+              allow_edit: data.allow_edit !== false,
+              admin_required: data.admin_required || false,
+              status: 'pending',
+              timestamp: new Date().toISOString()
+            }, data),
+            msg => samePendingApproval(msg, data),
+          )
+          break
+        case 'tool_approval_settled':
+          // The request was already answered, on this tab or another. Mark the
+          // card and leave the turn running.
+          // An expired approval says so; it is not a rejection by the user.
+          mapMessages(prev => {
+            const list = Array.isArray(prev) ? prev : []
+            const target = addressedApprovalIndex(list, data)
+            if (target === -1) return list
+            return list.map((msg, i) => (i === target ? {
+              ...msg,
+              status: settledApprovalStatus(data),
+              already_resolved: true,
+            } : msg))
           })
           break
         case 'elicitation_request':

@@ -1101,6 +1101,11 @@ def _resume_waiting_run(run_registry, user_email: str, data: dict) -> None:
         record = run_registry.active_for_conversation(
             data.get("conversation_id"), user_email
         )
+    if record is None and (data.get("run_id") or data.get("conversation_id")):
+        # The response named its run and that run is not on this replica.
+        # Guessing the user's one waiting run here would answer a different
+        # conversation's request that happens to share call_0 (issue #1122).
+        return
     if record is None:
         waiting = [
             r
@@ -3012,49 +3017,43 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "tool_approval_response":
-                # Handle tool approval response
-                from atlas.application.chat.approval_manager import get_approval_manager
-                approval_manager = get_approval_manager()
-
+                # Handle tool approval response. Arguments stay out of the
+                # info log: they may include sensitive user data.
                 tool_call_id = data.get("tool_call_id")
                 approved = data.get("approved", False)
-                arguments = data.get("arguments")
-                reason = data.get("reason")
-
-                # SECURITY: Never log tool arguments at INFO level (they may include sensitive user data).
-                # Log a conservative summary instead.
                 logger.info(
                     "Received tool approval response: %s",
                     summarize_tool_approval_response_for_logging(data),
                 )
-
-                logger.info(f"Processing approval: tool_call_id={sanitize_for_logging(tool_call_id)}, approved={approved}")
-
-                result = approval_manager.handle_approval_response(
-                    tool_call_id=tool_call_id,
-                    approved=approved,
-                    arguments=arguments,
-                    reason=reason,
-                    user_email=user_email,
+                # Constants only. CodeQL traces the raw flag and the call id
+                # into this line, and does not treat sanitize_for_logging as
+                # a log-injection sanitizer.
+                safe_tool_call_id = str(tool_call_id).replace("\r", "").replace("\n", "")
+                approved_label = "yes" if approved is True else "no"
+                logger.info(
+                    "Processing approval: tool_call_id=%s, approved=%s",
+                    safe_tool_call_id, approved_label,
                 )
 
-                if result:
+                from atlas.application.chat.approval_resolution import decide_tool_approval
+
+                kind, frame = await decide_tool_approval(data, user_email)
+                if kind == "accepted":
                     # The run that was paused on this approval is working
                     # again -- or still paused on its other parallel tools.
                     _resume_waiting_run(run_registry, user_email, data)
-                else:
-                    # The response was refused (unknown id, or a user who
-                    # does not own the request). Resuming the run here would
-                    # clear a pause the answer never addressed, so say so
-                    # instead of silently ignoring the frame.
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "No matching pending tool approval",
-                        "error_type": "unknown_tool_approval",
-                        "tool_call_id": tool_call_id,
-                    })
+                elif kind == "recorded":
+                    # Only a shared outcome was written; the executor lives on
+                    # another replica and observes it there. Nothing on this
+                    # replica was waiting on this request.
+                    pass
+                elif frame is not None:
+                    # Duplicate: the settled outcome, not an error that ends
+                    # the turn. Unknown: the error frame, which names the
+                    # request so the client can drop that card only.
+                    await websocket.send_json(frame)
 
-                logger.info(f"Approval response handled: result={sanitize_for_logging(result)}")
+                logger.info("Approval response handled: kind=%s", sanitize_for_logging(kind))
                 # No response needed - the approval will unblock the waiting tool execution
 
             elif message_type == "stop_streaming":
@@ -3125,17 +3124,26 @@ async def websocket_endpoint(websocket: WebSocket):
                 # user who closed the tab while an agent was running would
                 # reopen to a history list with no indication that anything is
                 # in flight.
+                # Pending cards are not replayed here. Restore already sends
+                # them once, and sending them again stacked a second card for
+                # the same request (issue #1122). A replica that did not start
+                # the run still overlays the shared projection, so the sidebar
+                # shows the same activity.
+                runs = run_registry.snapshot_for_user(user_email)
+                try:
+                    from atlas.application.chat.runs.execution_state import (
+                        list_execution_snapshots,
+                        merge_run_snapshots,
+                    )
+
+                    runs = merge_run_snapshots(runs, await list_execution_snapshots(user_email))
+                except Exception:
+                    logger.warning("execution snapshot merge failed", exc_info=True)
                 await websocket.send_json({
                     "type": "runs_snapshot",
-                    "runs": run_registry.snapshot_for_user(user_email),
+                    "runs": runs,
                     "max_concurrent_runs_per_user": run_registry.max_concurrent_runs_per_user,
                 })
-                # Replay whatever the currently open conversation is blocked on,
-                # so a reconnect into that conversation can answer it.
-                for pending in run_registry.pending_requests_for_conversation(
-                    data.get("conversation_id"), user_email
-                ):
-                    await websocket.send_json(pending)
 
             else:
                 logger.warning(f"Unknown message type: {sanitize_for_logging(message_type)}")

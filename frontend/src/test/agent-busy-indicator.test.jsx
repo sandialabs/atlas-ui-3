@@ -39,6 +39,20 @@ describe('AgentBusyIndicator', () => {
     expect(screen.queryByTestId('agent-busy-indicator')).toBeNull()
   })
 
+  it('names a sleep instead of thinking', () => {
+    render(
+      <AgentBusyIndicator
+        isAgentRunning
+        isThinking={false}
+        isStreaming={false}
+        currentAgentStep={2}
+        activity="sleeping"
+      />
+    )
+    expect(screen.getByText('Sleeping until the scheduled wake-up...')).toBeTruthy()
+    expect(screen.queryByText('Agent working on step 2...')).toBeNull()
+  })
+
   it('shows the app name above the spinner', () => {
     render(<AgentBusyIndicator isAgentRunning isThinking={false} isStreaming={false} appName="Atlas" />)
     expect(screen.getByText('Atlas')).toBeTruthy()

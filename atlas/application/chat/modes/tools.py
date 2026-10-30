@@ -268,7 +268,7 @@ class ToolsModeRunner:
 
         # Record tool input/output across every round so they persist in the
         # saved conversation and re-render on reload (issue #684).
-        recorder = ToolCallRecorder(effective_callback)
+        recorder = ToolCallRecorder(effective_callback, user_email=session_context.get("user_email"))
         effective_callback = recorder
 
         # Bounded tool-calling loop. The initial response is round 0; the model
@@ -350,6 +350,9 @@ class ToolsModeRunner:
                         })
                     break
 
+                # extra_round is incremented after this call, so the first
+                # round is step 0, matching the agent loop's step counter.
+                session_context["agent_step"] = extra_round
                 results = await tool_executor.execute_multiple_tools(
                     tool_calls=fresh,
                     session_context=session_context,

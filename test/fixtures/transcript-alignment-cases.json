@@ -262,6 +262,51 @@
         {"role": "assistant", "content": "Done", "message_type": "chat"}
       ],
       "expect": 2
+    },
+    {
+      "name": "same tool_call_id with different invocation ids refuses (issue #1122)",
+      "view": [
+        {
+          "role": "system",
+          "content": "Tool call: search",
+          "message_type": "tool_call",
+          "metadata": {"message_type": "tool_call", "tool_call_id": "call_0", "invocation_id": "run-a:0:call_0"}
+        }
+      ],
+      "stored": [
+        {
+          "role": "tool",
+          "content": "Tool call: search",
+          "message_type": "tool_call",
+          "metadata": {"message_type": "tool_call", "tool_call_id": "call_0", "invocation_id": "run-a:1:call_0"}
+        }
+      ],
+      "expect": null
+    },
+    {
+      "name": "the same invocation id aligns across a reused tool_call_id (issue #1122)",
+      "view": [
+        {
+          "role": "system",
+          "content": "Tool call: search",
+          "message_type": "tool_call",
+          "metadata": {"message_type": "tool_call", "tool_call_id": "call_0", "invocation_id": "run-a:1:call_0"}
+        }
+      ],
+      "stored": [
+        {
+          "role": "tool",
+          "content": "Tool call: search",
+          "message_type": "tool_call",
+          "metadata": {"message_type": "tool_call", "tool_call_id": "call_0", "invocation_id": "run-a:1:call_0"}
+        },
+        {
+          "role": "assistant",
+          "content": "done",
+          "message_type": "chat"
+        }
+      ],
+      "expect": 1
     }
   ]
 }

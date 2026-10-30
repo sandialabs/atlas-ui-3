@@ -32,7 +32,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.application.chat.runs.context import get_current_run
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
-from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
+from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, SLEEP_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,10 @@ _NOTIFY_BUDGET_SECONDS = 2.0
 # Shown in the stopped tool row, live and after a reload.
 _INTERRUPTED_RESULT = "Stopped before the tool result was recorded."
 
+# Statuses a Stop closes out. A sleeping or in-progress call never reported a
+# result either, and left open it would reload as still running.
+_OPEN_STATUSES = (None, "calling", "in_progress", "sleeping")
+
 
 def _elide_for_storage(value: Any, depth: int = 0) -> Any:
     """Recursively cap large string values so persisted tool I/O stays bounded."""
@@ -76,8 +80,12 @@ def _elide_for_storage(value: Any, depth: int = 0) -> Any:
 class ToolCallRecorder:
     """Wrap an update callback and capture tool-call events for persistence."""
 
-    def __init__(self, inner: Optional[UpdateCallback]):
+    def __init__(self, inner: Optional[UpdateCallback], user_email: Optional[str] = None):
         self._inner = inner
+        # Owner of the shared execution projection (issue #1122). The
+        # interrupted notices are published there too, so a reload or a
+        # joined tab stops spinning the rows a Stop closed.
+        self._user_email = user_email
         # The run this recorder belongs to, captured at construction. Since
         # issue #925 a turn's callback can carry frames that are not this
         # turn's: a sub-conversation launched by ``atlas_launch`` emits over
@@ -123,25 +131,43 @@ class ToolCallRecorder:
             "tool_start", "tool_complete", "tool_error", "auth_required",
         ):
             return
+        if event_type == "tool_error" and payload.get("elicitation_id"):
+            # An elicitation timeout: the tool is still running and reports
+            # its own result. Recording it here would save the row as expired,
+            # and a later Stop could not close it as interrupted.
+            return
         # The canvas tool renders into the canvas panel, not the transcript; the
         # UI suppresses it as a chat row, so it must not be persisted as one.
         if normalize_tool_name(payload.get("tool_name")) == CANVAS_TOOL_NAME:
             return
 
-        entry = self._calls.setdefault(tool_call_id, {"tool_call_id": tool_call_id})
+        # invocation_id keeps a later step's reused tool_call_id from
+        # overwriting the row this step already recorded.
+        storage_key = payload.get("invocation_id") or tool_call_id
+        entry = self._calls.setdefault(storage_key, {"tool_call_id": tool_call_id})
         if payload.get("tool_name"):
             entry["tool_name"] = payload["tool_name"]
+        for field in ("invocation_id", "run_id", "step", "conversation_id"):
+            if payload.get(field) is not None:
+                entry[field] = payload[field]
 
         if event_type == "tool_start":
             entry["server_name"] = payload.get("server_name")
             entry["arguments"] = payload.get("arguments")
-            entry.setdefault("status", "calling")
+            if normalize_tool_name(payload.get("tool_name")) == SLEEP_TOOL_NAME:
+                if entry.get("status") not in ("completed", "failed", "interrupted", "expired", "rejected"):
+                    entry["status"] = "sleeping"
+            else:
+                entry.setdefault("status", "calling")
         elif event_type == "tool_complete":
             entry["result"] = payload.get("result")
             entry["status"] = "completed" if payload.get("success") else "failed"
         elif event_type == "tool_error":
             entry["result"] = payload.get("error")
-            entry["status"] = "failed"
+            status = payload.get("status") or "failed"
+            if status not in ("failed", "expired", "rejected", "interrupted"):
+                status = "failed"
+            entry["status"] = status
         elif event_type == "auth_required":
             # The executor aborts the call after emitting this (no
             # tool_complete/tool_error follows), so treat it as terminal:
@@ -167,6 +193,9 @@ class ToolCallRecorder:
                 "result": _elide_for_storage(entry.get("result")),
                 "status": entry.get("status") or "completed",
             }
+            for field in ("invocation_id", "run_id", "step"):
+                if entry.get(field) is not None:
+                    metadata[field] = entry[field]
             out.append(Message(
                 role=MessageRole.TOOL,
                 content=f"Tool call: {tool_name}",
@@ -203,7 +232,7 @@ class ToolCallRecorder:
                 )
                 return
             try:
-                await asyncio.wait_for(self._inner(payload), timeout=remaining)
+                await asyncio.wait_for(self._announce(payload), timeout=remaining)
             except (Exception, asyncio.CancelledError):
                 # CancelledError is listed explicitly because it is not an
                 # Exception: the frontend sends stop_streaming then
@@ -219,6 +248,15 @@ class ToolCallRecorder:
                     exc_info=True,
                 )
                 continue
+
+    async def _announce(self, payload: Dict[str, Any]) -> None:
+        """Send one interrupted notice to the client and the projection."""
+        await self._inner(payload)
+        if not (payload.get("invocation_id") and payload.get("conversation_id") and self._user_email):
+            return
+        from atlas.application.chat.runs.execution_state import publish_execution_event
+
+        await publish_execution_event({**payload, "user_email": self._user_email})
 
     async def unwind(self, history: ConversationHistory) -> None:
         """Close out a turn that is being cancelled: persist, then announce.
@@ -248,17 +286,23 @@ class ToolCallRecorder:
         """
         if mark_incomplete:
             for entry in self._calls.values():
-                if entry.get("status") in (None, "calling"):
+                if entry.get("status") in _OPEN_STATUSES:
                     if entry.get("tool_name"):
                         # Queued for notify_incomplete(), which the caller
-                        # awaits once persistence is safely done.
-                        self._interrupted_notices.append({
+                        # awaits once persistence is safely done. The
+                        # invocation identity lets the client close this row
+                        # and not another step's row that reused call_0.
+                        notice = {
                             "type": "tool_interrupted",
                             "tool_call_id": entry["tool_call_id"],
                             "tool_name": entry["tool_name"],
                             "status": "interrupted",
                             "result": _INTERRUPTED_RESULT,
-                        })
+                        }
+                        for field in ("invocation_id", "run_id", "step", "conversation_id"):
+                            if entry.get(field) is not None:
+                                notice[field] = entry[field]
+                        self._interrupted_notices.append(notice)
                     # A distinct status, not "failed": the user stopping their
                     # own turn is not a tool error, and the UI renders the two
                     # differently.
