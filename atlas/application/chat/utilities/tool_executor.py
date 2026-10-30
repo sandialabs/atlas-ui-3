@@ -144,6 +144,20 @@ async def execute_multiple_tools(
     return final
 
 
+def _same_arguments(edited: Any, original: Any) -> bool:
+    """Whether an approval sent back the arguments it was shown.
+
+    Both sides go through JSON so tuples and lists compare alike, then compare
+    as values, so key order does not matter and ``3`` equals ``3.0``. The
+    browser's JSON turns a schema-coerced ``3.0`` into ``3``, and a string
+    comparison reported every such approval to the model as a user edit.
+    """
+    try:
+        return json.loads(json.dumps(edited, default=str)) == json.loads(json.dumps(original, default=str))
+    except (TypeError, ValueError):
+        return edited == original
+
+
 def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]:
     """
     Check if a tool requires approval before execution.
@@ -733,8 +747,7 @@ async def execute_single_tool(
                 if allow_edit and response.get("arguments"):
                     edited_args = response["arguments"]
                     # Check if arguments actually changed by comparing with what we sent (display_args)
-                    # Use json comparison to avoid false positives from dict ordering
-                    if json.dumps(edited_args, sort_keys=True) != json.dumps(original_display_args, sort_keys=True):
+                    if not _same_arguments(edited_args, original_display_args):
                         arguments_were_edited = True
                         logger.info(f"User edited arguments for tool {tool_call.function.name}")
 

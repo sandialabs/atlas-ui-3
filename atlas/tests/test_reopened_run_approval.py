@@ -828,3 +828,14 @@ async def test_a_repeated_call_id_in_one_step_is_refused(store, monkeypatch):
     assert results[1].success is False
     assert results[1].error == "duplicate_tool_call_id"
     assert len(ran) == 1
+
+
+def test_an_unchanged_number_is_not_an_edit():
+    # Found in a browser pass: the schema coerces seconds to 3.0, the browser
+    # sends back 3, and every approved sleep was reported as user-edited.
+    from atlas.application.chat.utilities.tool_executor import _same_arguments
+
+    assert _same_arguments({"seconds": 3, "reason": "r"}, {"reason": "r", "seconds": 3.0})
+    assert _same_arguments({"items": [1, 2]}, {"items": (1, 2)})
+    assert not _same_arguments({"seconds": 4}, {"seconds": 3.0})
+    assert not _same_arguments({"seconds": 3, "extra": True}, {"seconds": 3})
