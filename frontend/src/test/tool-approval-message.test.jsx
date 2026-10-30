@@ -396,6 +396,30 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
   })
 })
 
+describe('ToolApprovalMessage — server-settled outcome', () => {
+  it('shows EXPIRED for an approval the server settled as expired', () => {
+    setChat()
+    render(<ToolApprovalMessage message={{ ...baseMessage, status: 'expired', already_resolved: true }} compact={true} />)
+    expect(screen.getByText('EXPIRED')).toBeInTheDocument()
+    expect(screen.queryByText('APPROVED')).not.toBeInTheDocument()
+  })
+
+  it('lets the settled outcome override a local approve that lost', () => {
+    setChat()
+    const { rerender } = render(<ToolApprovalMessage message={baseMessage} compact={true} />)
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(screen.getByText('APPROVED')).toBeInTheDocument()
+    rerender(<ToolApprovalMessage message={{ ...baseMessage, status: 'rejected', already_resolved: true }} compact={true} />)
+    expect(screen.getByText('REJECTED')).toBeInTheDocument()
+  })
+
+  it('shows EXPIRED in the classic layout too', () => {
+    setChat()
+    render(<ToolApprovalMessage message={{ ...baseMessage, status: 'expired', already_resolved: true }} compact={false} />)
+    expect(screen.getByText('EXPIRED')).toBeInTheDocument()
+  })
+})
+
 describe('ToolApprovalMessage — classic (compact off) layout', () => {
   it('renders the full-bubble review-required layout with the arguments expanded', () => {
     setChat()

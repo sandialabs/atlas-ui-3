@@ -56,6 +56,10 @@ _NOTIFY_BUDGET_SECONDS = 2.0
 # Shown in the stopped tool row, live and after a reload.
 _INTERRUPTED_RESULT = "Stopped before the tool result was recorded."
 
+# Statuses a Stop closes out. A sleeping or in-progress call never reported a
+# result either, and left open it would reload as still running.
+_OPEN_STATUSES = (None, "calling", "in_progress", "sleeping")
+
 
 def _elide_for_storage(value: Any, depth: int = 0) -> Any:
     """Recursively cap large string values so persisted tool I/O stays bounded."""
@@ -76,8 +80,12 @@ def _elide_for_storage(value: Any, depth: int = 0) -> Any:
 class ToolCallRecorder:
     """Wrap an update callback and capture tool-call events for persistence."""
 
-    def __init__(self, inner: Optional[UpdateCallback]):
+    def __init__(self, inner: Optional[UpdateCallback], user_email: Optional[str] = None):
         self._inner = inner
+        # Owner of the shared execution projection (issue #1122). The
+        # interrupted notices are published there too, so a reload or a
+        # joined tab stops spinning the rows a Stop closed.
+        self._user_email = user_email
         # The run this recorder belongs to, captured at construction. Since
         # issue #925 a turn's callback can carry frames that are not this
         # turn's: a sub-conversation launched by ``atlas_launch`` emits over
@@ -134,7 +142,7 @@ class ToolCallRecorder:
         entry = self._calls.setdefault(storage_key, {"tool_call_id": tool_call_id})
         if payload.get("tool_name"):
             entry["tool_name"] = payload["tool_name"]
-        for field in ("invocation_id", "run_id", "step"):
+        for field in ("invocation_id", "run_id", "step", "conversation_id"):
             if payload.get(field) is not None:
                 entry[field] = payload[field]
 
@@ -219,7 +227,7 @@ class ToolCallRecorder:
                 )
                 return
             try:
-                await asyncio.wait_for(self._inner(payload), timeout=remaining)
+                await asyncio.wait_for(self._announce(payload), timeout=remaining)
             except (Exception, asyncio.CancelledError):
                 # CancelledError is listed explicitly because it is not an
                 # Exception: the frontend sends stop_streaming then
@@ -235,6 +243,15 @@ class ToolCallRecorder:
                     exc_info=True,
                 )
                 continue
+
+    async def _announce(self, payload: Dict[str, Any]) -> None:
+        """Send one interrupted notice to the client and the projection."""
+        await self._inner(payload)
+        if not (payload.get("invocation_id") and payload.get("conversation_id") and self._user_email):
+            return
+        from atlas.application.chat.runs.execution_state import publish_execution_event
+
+        await publish_execution_event({**payload, "user_email": self._user_email})
 
     async def unwind(self, history: ConversationHistory) -> None:
         """Close out a turn that is being cancelled: persist, then announce.
@@ -264,17 +281,23 @@ class ToolCallRecorder:
         """
         if mark_incomplete:
             for entry in self._calls.values():
-                if entry.get("status") in (None, "calling"):
+                if entry.get("status") in _OPEN_STATUSES:
                     if entry.get("tool_name"):
                         # Queued for notify_incomplete(), which the caller
-                        # awaits once persistence is safely done.
-                        self._interrupted_notices.append({
+                        # awaits once persistence is safely done. The
+                        # invocation identity lets the client close this row
+                        # and not another step's row that reused call_0.
+                        notice = {
                             "type": "tool_interrupted",
                             "tool_call_id": entry["tool_call_id"],
                             "tool_name": entry["tool_name"],
                             "status": "interrupted",
                             "result": _INTERRUPTED_RESULT,
-                        })
+                        }
+                        for field in ("invocation_id", "run_id", "step", "conversation_id"):
+                            if entry.get(field) is not None:
+                                notice[field] = entry[field]
+                        self._interrupted_notices.append(notice)
                     # A distinct status, not "failed": the user stopping their
                     # own turn is not a tool error, and the UI renders the two
                     # differently.

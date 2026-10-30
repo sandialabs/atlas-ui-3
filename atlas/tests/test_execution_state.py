@@ -330,3 +330,107 @@ def test_merge_run_snapshots_surfaces_a_detached_run():
     assert merged["conv-other"]["detached"] is True
     assert merged["conv-other"]["activity"] == "waiting_for_approval"
     assert merged["conv-other"]["execution_revision"] == 4
+
+
+def _history_row(**metadata):
+    meta = {"message_type": "tool_call", **metadata}
+    return {"role": "tool", "message_type": "tool_call", "metadata": meta}
+
+
+def test_merge_keeps_a_terminal_history_row_intact():
+    # History is the durable copy. A projection that lags it (in_progress) or
+    # holds a shortened result must not overwrite a settled row.
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start", arguments={"q": "short"}))
+    projection = public_projection(doc)
+    full = "r" * 9000
+    stored = _history_row(
+        tool_call_id="call_0", invocation_id=invocation_id("run-1", 0, "call_0"),
+        status="completed", result=full, arguments={"q": "full"},
+    )
+    merged = merge_execution_into_messages([stored], projection)
+    assert len(merged) == 1
+    meta = merged[0]["metadata"]
+    assert meta["status"] == "completed"
+    assert meta["result"] == full
+    assert meta["arguments"] == {"q": "full"}
+
+
+def test_merge_does_not_blank_an_open_rows_result():
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_progress"))
+    stored = _history_row(
+        tool_call_id="call_0", invocation_id=invocation_id("run-1", 0, "call_0"),
+        status="calling", result="partial",
+    )
+    meta = merge_execution_into_messages([stored], public_projection(doc))[0]["metadata"]
+    assert meta["status"] == "in_progress"
+    assert meta["result"] == "partial"
+
+
+def test_merge_ignores_a_finished_run():
+    # A finished run's rows are in history. Merging its projection back would
+    # resurrect rows a rewind or edit removed.
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    apply_event_to_document(doc, {"type": "run_status", "status": "completed", "run_id": "run-1"})
+    assert merge_execution_into_messages([], public_projection(doc)) == []
+
+
+def test_finished_legacy_row_is_not_claimed_by_a_new_invocation():
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    earlier = _history_row(tool_call_id="call_0", status="completed", result="old turn")
+    merged = merge_execution_into_messages([earlier], public_projection(doc))
+    assert len(merged) == 2
+    assert merged[0]["metadata"] == earlier["metadata"]
+    assert merged[1]["metadata"]["invocation_id"] == invocation_id("run-1", 0, "call_0")
+
+
+def test_run_end_closes_open_invocations():
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start", tool_name="atlas_sleep"))
+    apply_event_to_document(doc, _event(1, type="tool_start"))
+    apply_event_to_document(doc, _event(2, type="tool_complete", success=True, result="ok"))
+    apply_event_to_document(doc, {"type": "run_status", "status": "cancelled", "run_id": "run-1"})
+    statuses = {row["tool_call_id"]: row["status"] for row in public_projection(doc)["invocations"]}
+    assert statuses == {"call_0": "interrupted", "call_1": "interrupted", "call_2": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_memory_store_evicts_past_its_cap(monkeypatch):
+    from atlas.application.chat.runs import execution_state
+
+    monkeypatch.setattr(execution_state, "_DOC_CAP", 3)
+    store = MemoryExecutionStore()
+    for index in range(6):
+        await store.apply_event(_event(0, conversation_id=f"conv-{index}"))
+    assert len(store._docs) == 3
+    assert await store.get("conv-5", EMAIL) is not None
+    assert await store.get("conv-0", EMAIL) is None
+    assert {conv for conv in store._by_user[EMAIL]} == {"conv-3", "conv-4", "conv-5"}
+
+
+@pytest.mark.asyncio
+async def test_memory_store_sweeps_expired_documents(monkeypatch):
+    from atlas.application.chat.runs import execution_state
+
+    monkeypatch.setattr(execution_state, "_SWEEP_EVERY", 1)
+    store = MemoryExecutionStore()
+    await store.apply_event(_event(0, conversation_id="stale"))
+    store._docs[(EMAIL, "stale")]["updated_at"] = 0
+    await store.apply_event(_event(0, conversation_id="fresh"))
+    assert (EMAIL, "stale") not in store._docs
+    assert store._by_user[EMAIL] == {"fresh"}
+
+
+@pytest.mark.asyncio
+async def test_redis_locks_are_per_conversation_and_released():
+    store = _redis_store(fakeredis.FakeServer())
+    await asyncio.gather(*(
+        store.apply_event(_event(i, type="tool_start", conversation_id=f"conv-{i % 2}"))
+        for i in range(10)
+    ))
+    assert len(public_projection(await store.get("conv-0", EMAIL))["invocations"]) == 5
+    assert len(public_projection(await store.get("conv-1", EMAIL))["invocations"]) == 5
+    assert store._locks == {}

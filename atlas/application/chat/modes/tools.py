@@ -268,7 +268,7 @@ class ToolsModeRunner:
 
         # Record tool input/output across every round so they persist in the
         # saved conversation and re-render on reload (issue #684).
-        recorder = ToolCallRecorder(effective_callback)
+        recorder = ToolCallRecorder(effective_callback, user_email=session_context.get("user_email"))
         effective_callback = recorder
 
         # Bounded tool-calling loop. The initial response is round 0; the model

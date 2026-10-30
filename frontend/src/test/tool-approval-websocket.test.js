@@ -360,5 +360,51 @@ describe('Tool Approval WebSocket Tests', () => {
       expect(deps.setIsThinking).not.toHaveBeenCalled()
       expect(deps.addMessage).not.toHaveBeenCalled()
     })
+
+    it('labels a settled expired approval as expired, not rejected', () => {
+      let messages = [{
+        type: 'tool_approval_request',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+        status: 'pending',
+      }]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'tool_approval_settled',
+        approved: false,
+        already_resolved: true,
+        status: 'expired',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+      })
+      expect(messages[0].status).toBe('expired')
+    })
+
+    it('closes only the interrupted invocation when call_0 was reused', () => {
+      let messages = [
+        { type: 'tool_call', tool_call_id: 'call_0', invocation_id: 'run-1:0:call_0', status: 'completed', result: 'done' },
+        { type: 'tool_call', tool_call_id: 'call_0', invocation_id: 'run-1:1:call_0', status: 'sleeping' },
+      ]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'tool_interrupted',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:1:call_0',
+        run_id: 'run-1',
+        step: 1,
+        tool_name: 'atlas_sleep',
+        status: 'interrupted',
+        result: 'Stopped before the tool result was recorded.',
+      })
+      expect(messages[0].status).toBe('completed')
+      expect(messages[0].result).toBe('done')
+      expect(messages[1].status).toBe('interrupted')
+    })
   })
 })

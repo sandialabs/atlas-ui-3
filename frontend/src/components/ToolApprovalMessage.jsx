@@ -55,7 +55,12 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   // it, so deps can re-fire; this ref + the `auto_approved` gate stop a second
   // `tool_approval_response` for the same call.
   const autoApprovalSentRef = useRef(false)
-  const resolvedStatus = decision || message.status
+  // A server-settled outcome (tool_approval_settled) is the decision that won,
+  // so it overrides a local click that lost, e.g. an approval after the
+  // request expired.
+  const resolvedStatus = message.already_resolved && message.status !== 'pending'
+    ? message.status
+    : (decision || message.status)
   const resolvedReason = message.rejection_reason || (decision === 'rejected' ? reason : '')
   const autoApproved = resolveAutoApproved({ ...message, status: resolvedStatus }, settings)
   // The backend reuses this tool_call_id for the execution lifecycle: once the
@@ -65,7 +70,9 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
   // Approve/Reject controls must stay gone (even if this row remounts and loses
   // the local `decision` mirror). Only an explicit 'rejected' is a denial.
   const isPending = resolvedStatus === 'pending'
-  const isRejected = resolvedStatus === 'rejected'
+  const isExpired = resolvedStatus === 'expired'
+  const isRejected = resolvedStatus === 'rejected' || isExpired
+  const settledLabel = isExpired ? 'EXPIRED' : (isRejected ? 'REJECTED' : 'APPROVED')
   // Calls that need human review always open expanded — a reviewer shouldn't
   // have to expand to see what they're approving. Since #762 the only rows this
   // component renders are review-required ones (auto-approved calls render
@@ -212,7 +219,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             <span className={`px-2 py-1 rounded text-xs font-medium ${
               isRejected ? 'bg-red-600' : 'bg-green-600'
             }`}>
-              {isRejected ? 'REJECTED' : 'APPROVED'}
+              {settledLabel}
             </span>
             <span className="font-medium">{message.tool_name}</span>
           </div>
@@ -316,7 +323,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
           isRejected ? 'bg-red-600' : 'bg-green-600'
         }`}>
-          {isRejected ? 'REJECTED' : 'APPROVED'}
+          {settledLabel}
         </span>
         <span className="font-medium text-sm">{message.tool_name}</span>
         {isRejected && resolvedReason && (

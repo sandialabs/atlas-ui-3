@@ -114,6 +114,36 @@ describe('reconcileExecution', () => {
   })
 })
 
+describe('reconcileExecution — settled rows and finished runs', () => {
+  it('does not patch a settled row with a lagging or shortened projection copy', () => {
+    const current = [{
+      type: 'tool_call', invocation_id: 'run-1:0:call_0', tool_call_id: 'call_0',
+      run_id: 'run-1', status: 'completed', result: 'full result',
+    }]
+    const next = reconcileExecution(current, {
+      revision: 3,
+      run_id: 'run-1',
+      status: 'running',
+      invocations: [invocation('run-1:0:call_0', { status: 'in_progress', result: null })],
+    }, { revision: 2, run_id: 'run-1' })
+    expect(next).toBe(current)
+  })
+
+  it('adds no rows from a finished run but still drops its stale cards', () => {
+    const current = [
+      { type: 'tool_approval_request', invocation_id: 'run-1:1:call_0', tool_call_id: 'call_0', run_id: 'run-1', status: 'pending' },
+    ]
+    const next = reconcileExecution(current, {
+      revision: 9,
+      run_id: 'run-1',
+      status: 'cancelled',
+      invocations: [invocation('run-1:0:call_9', { status: 'interrupted' })],
+      pending_requests: [],
+    }, null)
+    expect(next).toEqual([])
+  })
+})
+
 describe('invocation identity helpers', () => {
   it('matches a legacy row only when the frame has no invocation id', () => {
     const legacy = { tool_call_id: 'call_0' }

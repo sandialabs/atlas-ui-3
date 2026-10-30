@@ -21,7 +21,7 @@ import { useContextCompaction } from '../hooks/chat/useContextCompaction'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
-import { liveInvocationCount, reconcileExecution } from '../utils/executionState'
+import { isTerminalRun, liveInvocationCount, reconcileExecution } from '../utils/executionState'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
@@ -1643,7 +1643,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		}
 		const liveInvocations = liveInvocationCount(latestMessagesRef.current, execution?.run_id)
 		const storedInvocations = Array.isArray(execution?.invocations) ? execution.invocations.length : 0
-		if (execution && liveInvocations > storedInvocations) return false
+		// Only a running snapshot can lag the view. A finished one carries no
+		// rows to compare, and the stored transcript decides below.
+		if (execution && !isTerminalRun(execution) && liveInvocations > storedInvocations) return false
 		if (isRunActive(runsByConversationRef.current[id])) return true
 		if (data.in_flight === true) return true
 		const stored = Array.isArray(data.messages) ? data.messages : []
@@ -1750,7 +1752,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			const reconciled = reconcileExecution(
 				viewMessages, execution, executionRevisionRef.current[conversationData.id],
 			)
-			if (reconciled === null) return true
+			if (reconciled === null) {
+				// A stale replica answered. Keep the view, and keep polling: the
+				// next answer may be current.
+				if (stillInFlight && !live) rearmJoinedRun(conversationData.id)
+				return true
+			}
 			if (reconciled !== viewMessages) {
 				mapMessages(() => reconciled)
 				viewMessages = reconciled

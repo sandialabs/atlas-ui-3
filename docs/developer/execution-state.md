@@ -24,8 +24,12 @@ That view is one JSON document per conversation:
 
 `GET /api/conversations/{id}` attaches the document as `execution` and merges
 invocation rows into `messages`. The merge is idempotent: a row that already
-carries `invocation_id` is updated in place, and a legacy row with only
-`tool_call_id` is reused once.
+carries `invocation_id` is updated in place, and an open legacy row with only
+`tool_call_id` is reused once. A settled history row keeps its status, result,
+and arguments, because history is the full copy and the projection may lag
+it. A finished run merges nothing, so rows a rewind or edit removed do not
+come back. Canvas calls are not projected: they render in the canvas panel
+and never become a transcript row.
 
 ## Where it lives
 
@@ -38,7 +42,9 @@ tool rows still flush into chat history when the step finishes.
 | memory session repository | Process-local store. Single-instance mode only, the same boundary sessions already have. |
 
 A Redis write uses WATCH/MULTI/EXEC on the revision key so two replicas
-applying events do not lose an update. Approval outcomes are a separate key;
+applying events do not lose an update. Inside one replica, writes are
+serialized per conversation, not store-wide. The memory store sweeps expired
+documents and caps how many it keeps. Approval outcomes are a separate key;
 the first write wins, and a later response returns that outcome.
 
 `RunRegistry` and `ToolApprovalManager` stay the in-process wait and cancel
@@ -55,14 +61,24 @@ replay the card.
 An approval response is idempotent. The first one is accepted. A duplicate
 returns `tool_approval_settled` and does not resume the run. A bare
 `tool_call_id` resolves only when exactly one pending request has it, because
-providers reuse `call_0` across steps and runs.
+providers reuse `call_0` across steps and runs. Only the caller's own requests
+count toward that match, so another user's pending `call_0` neither blocks it
+nor gets settled by it. A response that names an `invocation_id` resolves that
+exact invocation and never falls back to its `tool_call_id`. A shared outcome
+is written only for a pending request the caller owns, under that request's
+own invocation id.
+
+Stop closes every open row, including `sleeping` and `in_progress` ones. The
+`tool_interrupted` notice carries the invocation identity and is written into
+the document, so the live row, a reload, and a joined tab all show it stopped.
 
 `atlas_sleep` is `activity=sleeping` and a tool row with status `sleeping`.
 Earlier tool rows stay visible. It is not an approval and it is not
 "Agent thinking...".
 
 When the run completes, fails, or is cancelled, that status is written into
-the same document and the pending set is cleared. A later tool frame for
+the same document, the pending set is cleared, and any invocation still open
+is marked `interrupted`. A later tool frame for
 that run does not bring it back. A run list keeps a local terminal status
 when the shared document has not caught up, and it does not add a finished
 projection as a new active run.

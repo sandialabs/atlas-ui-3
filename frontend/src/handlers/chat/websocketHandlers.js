@@ -20,6 +20,13 @@ function sameApproval(row, data) {
   return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
 }
 
+const SETTLED_APPROVAL_STATUS = new Set(['approved', 'rejected', 'expired'])
+
+function settledApprovalStatus(data) {
+  if (SETTLED_APPROVAL_STATUS.has(data.status)) return data.status
+  return data.approved ? 'approved' : 'rejected'
+}
+
 function sameToolStart(row, data) {
   if (!row || row.type !== 'tool_call') return false
   if (data.invocation_id && row.invocation_id) return row.invocation_id === data.invocation_id
@@ -891,9 +898,10 @@ export function createWebSocketHandler(deps) {
         case 'tool_approval_settled':
           // The request was already answered, on this tab or another. Mark the
           // card and leave the turn running.
+          // An expired approval says so; it is not a rejection by the user.
           mapMessages(prev => prev.map(msg => sameApproval(msg, data) ? {
             ...msg,
-            status: data.approved ? 'approved' : 'rejected',
+            status: settledApprovalStatus(data),
             already_resolved: true,
           } : msg))
           break

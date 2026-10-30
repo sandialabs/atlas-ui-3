@@ -18,7 +18,9 @@ from atlas.hooks import HookEvent, get_hook_manager
 from atlas.modules.llm.tool_call_guard import repair_structural_json
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
+    CANVAS_TOOL_NAME,
     LEGACY_SERVER_NAMES,
+    normalize_tool_name,
 )
 from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
 from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
@@ -476,13 +478,17 @@ async def execute_single_tool(
             identity = execution_identity(
                 session_context, tool_call.id, tool_call.function.name,
             )
-            update_callback = observe_tool_callback(update_callback, identity)
-            await publish_execution_event({
-                **identity,
-                "type": "invocation",
-                "status": "calling",
-                "arguments": display_args,
-            })
+            # Canvas renders into the canvas panel and is never flushed to
+            # history as a tool row. Projecting it would leave a phantom
+            # "Tool call: canvas" row on reload and in joined tabs.
+            if normalize_tool_name(tool_call.function.name) != CANVAS_TOOL_NAME:
+                update_callback = observe_tool_callback(update_callback, identity)
+                await publish_execution_event({
+                    **identity,
+                    "type": "invocation",
+                    "status": "calling",
+                    "arguments": display_args,
+                })
 
             # --- Hook system (GH #713) -----------------------------------------
             # PermissionRequest fires at the approval gate: a hook may
@@ -667,14 +673,14 @@ async def execute_single_tool(
                     # Drop this request only. A bare tool_call_id cleanup would
                     # also drop the other pending call_0 when this one was the
                     # second-to-last match.
+                    owner = session_context.get("user_email", "")
                     storage_key = getattr(request, "storage_key", None)
                     if storage_key:
-                        approval_manager.cleanup_request(storage_key)
+                        approval_manager.cleanup_request(storage_key, user_email=owner)
                     elif tool_call.id:
-                        approval_manager.cleanup_request(tool_call.id)
-                    invocation = identity.get("invocation_id")
-                    if invocation and invocation != storage_key:
-                        approval_manager.cleanup_request(invocation)
+                        approval_manager.cleanup_request(tool_call.id, user_email=owner)
+                    # No second cleanup by invocation id: when the storage key
+                    # differs, that invocation key belongs to another request.
 
                 if expired or response is None:
                     await _emit_approval_settlement(

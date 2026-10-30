@@ -206,13 +206,9 @@ class ToolApprovalManager:
                 return False
             return self._public(remembered)
 
-        matches = [
-            request for request in self._pending_requests.values()
-            if request.tool_call_id == tool_call_id
-            and (
-                not run_id or not request.run_id or request.run_id == run_id
-            )
-        ]
+        # Count only the caller's requests. Another user's pending call_0 must
+        # not make this user's bare id ambiguous.
+        matches = self._bare_matches(tool_call_id, run_id, user_email)
         if len(matches) > 1:
             return False
         if len(matches) == 1:
@@ -222,6 +218,7 @@ class ToolApprovalManager:
             record for record in self._resolved.values()
             if record.get("tool_call_id") == tool_call_id
             and (not run_id or not record.get("run_id") or record.get("run_id") == run_id)
+            and self._visible_to(record.get("user_email"), user_email)
         ]
         if len(remembered_matches) != 1:
             # Inline CR/LF strip: CodeQL treats that as a log-injection
@@ -336,43 +333,73 @@ class ToolApprovalManager:
     def _resolution_key(request: ToolApprovalRequest) -> str:
         return request.invocation_id or request.storage_key or request.tool_call_id
 
+    @staticmethod
+    def _visible_to(owner: Optional[str], user_email: Optional[str]) -> bool:
+        """Whether a request or record belongs to the caller.
+
+        A legacy request with no owner stays visible to everyone, the same
+        backward-compatible rule ``_owned`` applies.
+        """
+        if not owner:
+            return True
+        return normalize_user_email(owner) == normalize_user_email(user_email or "")
+
+    def _bare_matches(
+        self,
+        tool_call_id: Optional[str],
+        run_id: Optional[str],
+        user_email: Optional[str],
+    ) -> list:
+        if not tool_call_id:
+            return []
+        return [
+            request for request in self._pending_requests.values()
+            if request.tool_call_id == tool_call_id
+            and (not run_id or not request.run_id or request.run_id == run_id)
+            and (user_email is None or self._visible_to(request.user_email, user_email))
+        ]
+
     def find_open_request(
         self,
         tool_call_id: Optional[str],
         invocation_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        user_email: Optional[str] = None,
     ) -> Optional[ToolApprovalRequest]:
-        """The still-registered request a response addressed, if there is one."""
-        if invocation_id and invocation_id in self._pending_requests:
-            return self._pending_requests[invocation_id]
-        if not tool_call_id:
-            return None
-        matches = [
-            request for request in self._pending_requests.values()
-            if request.tool_call_id == tool_call_id
-            and (not run_id or not request.run_id or request.run_id == run_id)
-        ]
+        """The still-registered request a response addressed, if there is one.
+
+        An ``invocation_id`` resolves only that exact invocation. Falling back
+        to its ``tool_call_id`` would let a re-sent step-0 ``call_0`` response
+        settle the step-1 ``call_0`` request with the old decision.
+        """
+        if invocation_id:
+            return self._pending_requests.get(invocation_id)
+        matches = self._bare_matches(tool_call_id, run_id, user_email)
         if len(matches) == 1:
             return matches[0]
         return None
 
-    def cleanup_request(self, tool_call_id: str):
+    def cleanup_request(self, tool_call_id: str, user_email: Optional[str] = None):
         """Remove a completed approval request.
 
         ``tool_call_id`` may be the provider id or the invocation id. An
         invocation-keyed request is still found by its provider id, which is
-        what the executor's cleanup has always passed.
+        what the executor's cleanup has always passed. When ``user_email`` is
+        given, only requests that user owns are removed.
         """
-        if tool_call_id in self._pending_requests:
-            del self._pending_requests[tool_call_id]
-            logger.debug("Cleaned up approval request: %s", tool_call_id)
+        direct = self._pending_requests.get(tool_call_id)
+        if direct is not None:
+            if user_email is None or self._visible_to(direct.user_email, user_email):
+                del self._pending_requests[tool_call_id]
+                logger.debug("Cleaned up approval request: %s", tool_call_id)
             return
         # A bare provider id is only safe when one request has it. Two runs
         # can both be waiting on call_0; deleting every match would settle
         # the one this cleanup does not own.
         drop = [
             key for key, request in self._pending_requests.items()
-            if request.tool_call_id == tool_call_id or request.invocation_id == tool_call_id
+            if (request.tool_call_id == tool_call_id or request.invocation_id == tool_call_id)
+            and (user_email is None or self._visible_to(request.user_email, user_email))
         ]
         if len(drop) != 1:
             return

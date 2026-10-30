@@ -8,6 +8,11 @@
 
 const SLEEP_TOOLS = new Set(['atlas_sleep', 'atlas_agent_sleep'])
 const TERMINAL_TOOL_STATUS = new Set(['completed', 'failed', 'interrupted', 'expired', 'rejected'])
+const TERMINAL_RUN_STATUS = new Set(['completed', 'failed', 'cancelled'])
+
+export function isTerminalRun(execution) {
+  return !!execution && TERMINAL_RUN_STATUS.has(execution.status)
+}
 
 export function liveInvocationCount(messages, runId) {
   return (messages || []).filter(message => (
@@ -120,7 +125,11 @@ export function reconcileExecution(messages, execution, previousRevision) {
   const runChanged = previous.runId && execution.run_id && previous.runId !== execution.run_id
   if (!runChanged && !snapshotSupersedes(execution.revision, previous.revision)) return null
 
-  const invocations = Array.isArray(execution.invocations) ? execution.invocations : []
+  // A finished run's rows are already in the stored transcript, with full
+  // results. Its projection only shortens them, so it adds and patches nothing.
+  const invocations = !isTerminalRun(execution) && Array.isArray(execution.invocations)
+    ? execution.invocations
+    : []
   const pending = Array.isArray(execution.pending_requests) ? execution.pending_requests : []
   const pendingKeys = new Set(pending.map(requestIdentity).filter(Boolean))
   const source = Array.isArray(messages) ? messages : []
@@ -146,6 +155,9 @@ export function reconcileExecution(messages, execution, previousRevision) {
       appended.push(row)
       return
     }
+    // A row that already settled keeps what it has. The projection can lag
+    // the live frame, and its result is a shortened copy.
+    if (TERMINAL_TOOL_STATUS.has(source[index].status)) return
     if (rowChanged(source[index], row)) patches.set(index, row)
   })
 

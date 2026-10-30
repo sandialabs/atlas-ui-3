@@ -49,10 +49,18 @@ def _unknown(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _outcome(data: Dict[str, Any], request=None, user_email: Optional[str] = None) -> Dict[str, Any]:
+    # The matched request's identity wins over the response's. The outcome
+    # key is built from it, so a response can only record an outcome for the
+    # request it actually resolved.
     approved = bool(data.get("approved"))
-    invocation_id = data.get("invocation_id") or getattr(request, "invocation_id", None)
-    run_id = data.get("run_id") or getattr(request, "run_id", None)
-    tool_call_id = data.get("tool_call_id") or getattr(request, "tool_call_id", None)
+    if request is not None:
+        invocation_id = getattr(request, "invocation_id", None)
+        run_id = getattr(request, "run_id", None) or data.get("run_id")
+        tool_call_id = getattr(request, "tool_call_id", None) or data.get("tool_call_id")
+    else:
+        invocation_id = data.get("invocation_id")
+        run_id = data.get("run_id")
+        tool_call_id = data.get("tool_call_id")
     owner = user_email or getattr(request, "user_email", None) or ""
     return {
         "approved": approved,
@@ -137,7 +145,7 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
     tool_call_id = data.get("tool_call_id")
     invocation_id = data.get("invocation_id")
     run_id = data.get("run_id")
-    request = manager.find_open_request(tool_call_id, invocation_id, run_id)
+    request = manager.find_open_request(tool_call_id, invocation_id, run_id, user_email)
     if request is not None:
         # A user who does not own the local request must not fall through to
         # the projection scan and write the shared outcome.
@@ -194,7 +202,7 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
         run_id=run_id,
     )
     if result is True:
-        found = manager.find_open_request(tool_call_id, invocation_id, run_id)
+        found = manager.find_open_request(tool_call_id, invocation_id, run_id, user_email)
         outcome = _outcome(data, found, user_email)
         key = approval_storage_key(
             outcome.get("invocation_id"), outcome.get("tool_call_id"), user_email,
@@ -212,15 +220,24 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
     matches = await _pending_matches(user_email, data)
     if len(matches) != 1:
         return "unknown", _unknown(data)
+    # The only pending request this caller owns that the response names. Its
+    # own invocation id is the outcome key; without one there is nothing the
+    # executor replica could observe, so the response settled nothing.
     request = matches[0]
+    if not request.get("invocation_id"):
+        return "unknown", _unknown(data)
     outcome = _outcome(data, user_email=user_email)
     for field in ("invocation_id", "run_id", "tool_call_id"):
-        if not outcome.get(field) and request.get(field):
+        if request.get(field):
             outcome[field] = request[field]
     storage = approval_storage_key(
         outcome.get("invocation_id"), outcome.get("tool_call_id"), user_email,
     )
+    if not storage:
+        return "unknown", _unknown(data)
     stored = await _put(storage, outcome)
-    if stored and stored.get("already_resolved"):
+    if stored is None:
+        return "unknown", _unknown(data)
+    if stored.get("already_resolved"):
         return "duplicate", _frame(stored, data)
     return "accepted", None

@@ -385,8 +385,10 @@ async def test_untracked_call_ids_do_not_share_a_future():
     second = manager.create_approval_request("call_0", "a", {"n": 2}, user_email="other@example.com")
     assert first is not second
     assert first.future is not second.future
-    assert manager.handle_approval_response("call_0", True, user_email=EMAIL) is False
-    first.set_response(True, {"n": 1})
+    # Each owner's bare call_0 resolves only that owner's request. Another
+    # user's pending call_0 neither blocks it nor gets settled by it.
+    assert manager.handle_approval_response("call_0", True, user_email=EMAIL) is True
+    assert first.future.done() is True
     assert second.future.done() is False
 
 
@@ -497,3 +499,177 @@ async def test_elicitation_timeout_emits_a_settle_frame(monkeypatch):
     assert settled[0]["elicitation_id"]
     assert settled[0]["tool_call_id"] == "call_0"
     assert get_execution_store() is not None
+
+
+@pytest.mark.asyncio
+async def test_resent_step_zero_response_does_not_settle_step_one(store):
+    # Providers reuse call_0 across steps. A late or re-sent response for the
+    # step-0 invocation must not fall back to the step-1 call_0 by its bare id.
+    from atlas.application.chat.approval_manager import get_approval_manager
+    manager = get_approval_manager()
+    step0 = invocation_id(RUN, 0, "call_0")
+    step1 = invocation_id(RUN, 1, "call_0")
+    first = manager.create_approval_request(
+        "call_0", TOOL, {"value": "a"}, user_email=EMAIL, invocation_id=step0, run_id=RUN,
+    )
+    response0 = {
+        "tool_call_id": "call_0", "invocation_id": step0, "run_id": RUN,
+        "approved": True, "arguments": {"value": "a"},
+    }
+    kind, _frame = await decide_tool_approval(response0, EMAIL)
+    assert kind == "accepted"
+    assert first.future.done()
+    manager.cleanup_request(first.storage_key)
+    second = manager.create_approval_request(
+        "call_0", TOOL, {"value": "b"}, user_email=EMAIL, invocation_id=step1, run_id=RUN,
+    )
+    try:
+        kind, frame = await decide_tool_approval(response0, EMAIL)
+        assert kind == "duplicate"
+        assert frame["invocation_id"] == step0
+        assert second.future.done() is False
+        assert await store.read_resolution(approval_storage_key(step1, "call_0", EMAIL)) is None
+    finally:
+        manager.cleanup_request(second.storage_key)
+
+
+@pytest.mark.asyncio
+async def test_fabricated_invocation_id_writes_no_outcome(store):
+    # A response naming an invocation that is not pending must not record an
+    # outcome under that id, even when its bare tool_call_id matches a real
+    # request. Otherwise it could pre-seed a future invocation's approval.
+    from atlas.application.chat.approval_manager import get_approval_manager
+    manager = get_approval_manager()
+    real = invocation_id(RUN, 0, "call_7")
+    forged = invocation_id(RUN, 5, "call_7")
+    request = manager.create_approval_request(
+        "call_7", TOOL, {"value": "a"}, user_email=EMAIL, invocation_id=real, run_id=RUN,
+    )
+    try:
+        kind, frame = await decide_tool_approval({
+            "tool_call_id": "call_7", "invocation_id": forged, "run_id": RUN, "approved": True,
+        }, EMAIL)
+        assert kind == "unknown"
+        assert frame["error_type"] == "unknown_tool_approval"
+        assert request.future.done() is False
+        assert await store.read_resolution(approval_storage_key(forged, "call_7", EMAIL)) is None
+        assert await store.read_resolution(approval_storage_key(real, "call_7", EMAIL)) is None
+    finally:
+        manager.cleanup_request(request.storage_key)
+
+
+@pytest.mark.asyncio
+async def test_projection_match_without_invocation_writes_nothing(store):
+    # The replica scan only records an outcome the executor can observe: an
+    # owned pending projection request that has an invocation id.
+    await store.apply_event({
+        "type": "tool_approval_request", "run_id": RUN, "conversation_id": CONV,
+        "user_email": EMAIL, "tool_call_id": "call_9", "tool_name": TOOL, "arguments": {},
+    })
+    kind, frame = await decide_tool_approval({
+        "tool_call_id": "call_9", "conversation_id": CONV, "approved": True,
+    }, EMAIL)
+    assert kind == "unknown"
+    assert frame["error_type"] == "unknown_tool_approval"
+
+
+@pytest.mark.asyncio
+async def test_two_users_bare_call_zero_each_resolve_their_own(store):
+    from atlas.application.chat.approval_manager import get_approval_manager
+    manager = get_approval_manager()
+    mine = manager.create_approval_request("call_0", TOOL, {"value": "a"}, user_email=EMAIL)
+    theirs = manager.create_approval_request("call_0", TOOL, {"value": "b"}, user_email="other@example.com")
+    try:
+        assert manager.find_open_request("call_0", user_email=EMAIL) is mine
+        assert manager.find_open_request("call_0", user_email="other@example.com") is theirs
+        kind, _ = await decide_tool_approval({"tool_call_id": "call_0", "approved": True}, EMAIL)
+        assert kind == "accepted"
+        assert mine.future.done() and theirs.future.done() is False
+        assert mine.future.result()["arguments"] == {"value": "a"}
+        kind, _ = await decide_tool_approval(
+            {"tool_call_id": "call_0", "approved": False}, "other@example.com",
+        )
+        assert kind == "accepted"
+        assert theirs.future.result()["approved"] is False
+    finally:
+        manager.cleanup_request(mine.storage_key)
+        manager.cleanup_request(theirs.storage_key)
+
+
+@pytest.mark.asyncio
+async def test_bare_cleanup_only_removes_the_callers_request():
+    manager = ToolApprovalManager()
+    mine = manager.create_approval_request("call_0", TOOL, {}, user_email=EMAIL)
+    theirs = manager.create_approval_request("call_0", TOOL, {}, user_email="other@example.com")
+    manager.cleanup_request("call_0", user_email=EMAIL)
+    pending = manager.get_pending_requests()
+    assert mine.storage_key not in pending
+    assert theirs.storage_key in pending
+    # A direct key owned by another user is not removed either.
+    manager.cleanup_request(theirs.storage_key, user_email=EMAIL)
+    assert theirs.storage_key in manager.get_pending_requests()
+
+
+@pytest.mark.asyncio
+async def test_canvas_calls_are_not_projected(store, monkeypatch):
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.requires_approval",
+        lambda tool_name, cm: (False, True, False),
+    )
+    frames = []
+
+    async def update_callback(message):
+        frames.append(message)
+
+    set_current_run(RUN, CONV)
+    call = SimpleNamespace(
+        id="call_canvas",
+        function=SimpleNamespace(name="atlas_canvas", arguments='{"content": "x"}'),
+    )
+    await execute_single_tool(
+        call,
+        {"user_email": EMAIL, "conversation_id": CONV, "session_id": "s1", "agent_step": 0, "run_id": RUN},
+        _FakeToolManager(),
+        update_callback=update_callback,
+        config_manager=_config(),
+    )
+    assert await store.get(CONV, EMAIL) is None
+    assert all("invocation_id" not in frame for frame in frames)
+
+
+@pytest.mark.asyncio
+async def test_stop_closes_sleeping_and_running_rows_by_invocation(store):
+    # A Stop closes every open row, sleeping and in-progress ones included. The
+    # notice names the invocation, so the client closes that row and not an
+    # earlier step's call_0, and the projection stops spinning it on reload.
+    from atlas.application.chat.utilities.tool_history import ToolCallRecorder
+    from atlas.domain.messages.models import ConversationHistory
+
+    set_current_run(RUN, CONV)
+    sent = []
+
+    async def inner(payload):
+        sent.append(payload)
+
+    recorder = ToolCallRecorder(inner, user_email=EMAIL)
+    sleeping = invocation_id(RUN, 1, "call_0")
+    running = invocation_id(RUN, 1, "call_1")
+    for call_id, name, inv in (("call_0", "atlas_sleep", sleeping), ("call_1", TOOL, running)):
+        frame = {
+            "type": "tool_start", "tool_call_id": call_id, "tool_name": name,
+            "run_id": RUN, "conversation_id": CONV, "step": 1, "invocation_id": inv,
+            "arguments": {},
+        }
+        await store.apply_event({**frame, "user_email": EMAIL})
+        await recorder(frame)
+
+    history = ConversationHistory()
+    await recorder.unwind(history)
+
+    statuses = {m.metadata["invocation_id"]: m.metadata["status"] for m in history.messages}
+    assert statuses == {sleeping: "interrupted", running: "interrupted"}
+    notices = [p for p in sent if p.get("type") == "tool_interrupted"]
+    assert {n["invocation_id"] for n in notices} == {sleeping, running}
+    assert all(n["run_id"] == RUN and n["step"] == 1 for n in notices)
+    rows = public_projection(await store.get(CONV, EMAIL))["invocations"]
+    assert {row["invocation_id"]: row["status"] for row in rows} == statuses

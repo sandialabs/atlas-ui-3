@@ -24,6 +24,7 @@ error.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -56,6 +57,11 @@ _OPENING_EVENTS = frozenset({
     "elicitation_request",
 })
 _RESOLUTION_CAP = 200
+# Memory store bounds. Expired documents are swept every _SWEEP_EVERY writes,
+# and the oldest are evicted past _DOC_CAP, so a long-lived single instance
+# does not keep every conversation it ever ran.
+_DOC_CAP = 1000
+_SWEEP_EVERY = 64
 _SETTLED_EVENTS = frozenset(
     {"tool_complete", "tool_error", "tool_interrupted", "tool_result", "auth_required"}
 )
@@ -298,6 +304,12 @@ def _apply_run_status(doc: dict, event: dict) -> bool:
     doc["activity"] = status
     doc["waiting_on"] = None
     doc["pending_requests"] = {}
+    # A run that ended cannot still be running a tool. Close any row that never
+    # reported, so a client reconciling this snapshot stops spinning it.
+    for entry in doc.get("invocations", {}).values():
+        if entry.get("status") not in _TERMINAL_INVOCATION:
+            entry["status"] = "interrupted"
+            entry["success"] = False
     if event.get("error"):
         doc["error"] = _elide(event.get("error"))
     doc["updated_at"] = time.time()
@@ -377,6 +389,30 @@ def _message_from_invocation(invocation: dict) -> dict:
     }
 
 
+def _merge_row_metadata(stored: dict, projected: dict) -> dict:
+    """Fold a projection row onto a stored history row without losing data.
+
+    History is the durable copy. A terminal stored row keeps its status,
+    result and arguments: the projection may lag it, and its values are
+    shortened. A non-terminal stored row takes the projection's status, and
+    its result only when the projection has one.
+    """
+    meta = dict(stored)
+    for key in ("invocation_id", "run_id", "step", "tool_call_id", "tool_name"):
+        if meta.get(key) in (None, "") and projected.get(key) not in (None, ""):
+            meta[key] = projected[key]
+    meta["message_type"] = "tool_call"
+    if meta.get("status") in _TERMINAL_INVOCATION:
+        return meta
+    if projected.get("status"):
+        meta["status"] = projected["status"]
+    if projected.get("result") is not None and meta.get("result") is None:
+        meta["result"] = projected["result"]
+    if not meta.get("arguments") and projected.get("arguments"):
+        meta["arguments"] = projected["arguments"]
+    return meta
+
+
 def merge_execution_into_messages(messages: Optional[list], projection: dict) -> list:
     """Upsert projection rows into a conversation message list.
 
@@ -384,8 +420,13 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
     A legacy row with only ``tool_call_id`` is reused once. Anything still
     unmatched is appended, which is how a mid-step fetch shows tools the
     history has not flushed yet.
+
+    A finished run contributes nothing. Its rows are in history, and merging a
+    finished projection back would resurrect rows a rewind or edit removed.
     """
     merged = [dict(message) for message in (messages or [])]
+    if projection.get("status") in _TERMINAL_RUN:
+        return merged
     by_invocation = {}
     by_legacy = {}
     for index, message in enumerate(merged):
@@ -396,7 +437,9 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
         tool_call_id = meta.get("tool_call_id") or message.get("tool_call_id")
         if inv:
             by_invocation[inv] = index
-        elif tool_call_id:
+        elif tool_call_id and meta.get("status") not in _TERMINAL_INVOCATION:
+            # A finished legacy row is an earlier turn's call_0, not this
+            # run's. Only an open row can be the one this run is filling in.
             by_legacy.setdefault(tool_call_id, index)
     for invocation in projection.get("invocations") or []:
         inv_id = invocation.get("invocation_id")
@@ -410,9 +453,9 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
             if inv_id:
                 by_invocation[inv_id] = len(merged) - 1
             continue
-        meta = dict(merged[index].get("metadata") or {})
-        meta.update(row["metadata"])
-        merged[index]["metadata"] = meta
+        merged[index]["metadata"] = _merge_row_metadata(
+            merged[index].get("metadata") or {}, row["metadata"],
+        )
         merged[index]["message_type"] = "tool_call"
         if inv_id:
             by_invocation[inv_id] = index
@@ -495,6 +538,7 @@ class MemoryExecutionStore(ExecutionStore):
         self._docs: Dict[tuple, dict] = {}
         self._by_user: Dict[str, set] = {}
         self._resolutions: Dict[str, dict] = {}
+        self._writes = 0
 
     async def apply_event(self, event: dict) -> Optional[dict]:
         prepared = _prepare(event)
@@ -511,7 +555,25 @@ class MemoryExecutionStore(ExecutionStore):
             doc["revision"] = int(doc.get("revision") or 0) + 1
             self._docs[key] = doc
             self._by_user.setdefault(user_email, set()).add(conversation_id)
+            self._writes += 1
+            if self._writes % _SWEEP_EVERY == 0 or len(self._docs) > _DOC_CAP:
+                self._sweep(keep=key)
             return public_projection(doc)
+
+    def _sweep(self, keep: Optional[tuple] = None) -> None:
+        """Drop expired documents, then the oldest past the cap."""
+        for email, conversation_id in list(self._docs):
+            self._drop_expired(email, conversation_id)
+        overflow = len(self._docs) - _DOC_CAP
+        if overflow <= 0:
+            return
+        oldest = sorted(
+            (key for key in self._docs if key != keep),
+            key=lambda key: self._docs[key].get("updated_at") or 0,
+        )
+        for email, conversation_id in oldest[:overflow]:
+            self._docs.pop((email, conversation_id), None)
+            self._by_user.get(email, set()).discard(conversation_id)
 
     async def get(self, conversation_id: str, user_email: str) -> Optional[dict]:
         email = normalize_user_email(user_email)
@@ -543,7 +605,11 @@ class MemoryExecutionStore(ExecutionStore):
         if time.time() - updated <= PROJECTION_TTL_SECONDS:
             return
         self._docs.pop(key, None)
-        self._by_user.get(user_email, set()).discard(conversation_id)
+        members = self._by_user.get(user_email)
+        if members is not None:
+            members.discard(conversation_id)
+            if not members:
+                self._by_user.pop(user_email, None)
 
     def _visible_resolution(self, record: Optional[dict]) -> Optional[dict]:
         if not record:
@@ -584,7 +650,25 @@ class RedisExecutionStore(ExecutionStore):
 
     def __init__(self, redis_manager):
         self._redis = redis_manager
-        self._lock = asyncio.Lock()
+        # One lock per conversation document, held only while a write is in
+        # flight. WATCH is the cross-replica guard; the lock keeps this
+        # replica's parallel tool frames from retrying against each other
+        # without queueing every conversation behind one Redis round trip.
+        self._locks: Dict[str, list] = {}
+
+    @contextlib.asynccontextmanager
+    async def _doc_lock(self, doc_key: str):
+        slot = self._locks.get(doc_key)
+        if slot is None:
+            slot = self._locks[doc_key] = [asyncio.Lock(), 0]
+        slot[1] += 1
+        try:
+            async with slot[0]:
+                yield
+        finally:
+            slot[1] -= 1
+            if slot[1] == 0 and self._locks.get(doc_key) is slot:
+                del self._locks[doc_key]
 
     def _client(self):
         return self._redis.client
@@ -610,7 +694,7 @@ class RedisExecutionStore(ExecutionStore):
         rev_key = self._rev_key(user_email, conversation_id)
         user_key = self._user_key(user_email)
         client = self._client()
-        async with self._lock:
+        async with self._doc_lock(doc_key):
             for _attempt in range(8):
                 current = _text(await client.get(rev_key)) or "0"
                 raw = await client.get(doc_key)
