@@ -562,6 +562,8 @@ class RunRegistry:
                 return
             self.set_status(run_id, RunStatus.WAITING_FOR_INPUT, waiting_on=event_type)
             self.set_pending_request(run_id, frame)
+        elif event_type == "tool_start":
+            self._drop_started_approval(run_id, frame)
         elif event_type in TOOL_SETTLED_EVENTS:
             record = self.get(run_id)
             if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
@@ -601,6 +603,38 @@ class RunRegistry:
             and request.get("elicitation_id") == frame.get("elicitation_id")
             for request in pending_requests
         )
+
+    def _drop_started_approval(self, run_id: str, frame: Dict[str, Any]) -> None:
+        """A tool that starts was approved, on this replica or another.
+
+        An answer recorded through the shared store (issue #1122) never goes
+        through ``answer_pending_request`` here, so the start frame is what
+        clears the card. Only approval requests match: an elicitation is
+        raised after its tool has started.
+        """
+        record = self.get(run_id)
+        if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
+            return
+        invocation = frame.get("invocation_id")
+        tool_call_id = frame.get("tool_call_id")
+        if not invocation and not tool_call_id:
+            return
+
+        def _started(request: Dict[str, Any]) -> bool:
+            if request.get("type") != "tool_approval_request":
+                return False
+            if invocation and request.get("invocation_id"):
+                return request["invocation_id"] == invocation
+            return bool(tool_call_id) and request.get("tool_call_id") == tool_call_id
+
+        remaining = [request for request in record.pending_requests if not _started(request)]
+        if len(remaining) == len(record.pending_requests):
+            return
+        record.pending_requests = remaining
+        if not remaining:
+            self.set_status(run_id, RunStatus.RUNNING)
+        else:
+            self._notify(record)
 
     def set_pending_request(self, run_id: str, frame: Optional[Dict[str, Any]]) -> None:
         """Remember a request the run is blocked on, for later replay."""

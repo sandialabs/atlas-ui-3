@@ -268,6 +268,26 @@ def _drop_settled(doc: dict, event: dict) -> None:
         del doc["pending_requests"][key]
 
 
+def _drop_answered_approval(doc: dict, event: dict) -> None:
+    """A tool that starts was approved, wherever the answer landed.
+
+    Without this the card stays pending until the tool finishes, so a reload
+    or a second tab shows Approve/Reject for a tool that is already running.
+    Only approval cards are dropped: an elicitation is raised after the tool
+    has started and is still outstanding.
+    """
+    inv = event.get("invocation_id")
+    if not inv:
+        return
+    drop = [
+        key for key, request in doc["pending_requests"].items()
+        if request.get("type") == "tool_approval_request"
+        and (request.get("invocation_id") == inv or key == inv)
+    ]
+    for key in drop:
+        del doc["pending_requests"][key]
+
+
 def _refresh_activity(doc: dict) -> None:
     pending = doc["pending_requests"]
     if pending:
@@ -347,6 +367,8 @@ def apply_event_to_document(doc: dict, event: dict) -> bool:
         doc["pending_requests"][_request_key(event)] = _public_event(event)
     elif event.get("type") in _SETTLED_EVENTS:
         _drop_settled(doc, event)
+    elif event.get("type") == "tool_start":
+        _drop_answered_approval(doc, event)
     doc["updated_at"] = time.time()
     _refresh_activity(doc)
     return True
@@ -475,6 +497,16 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
             continue
         existing = merged.get(conversation_id)
         projection_status = projection.get("status")
+        # A projection of an earlier run says nothing about the run this
+        # replica is executing now. Turn 1's finished document must not mark
+        # turn 2 completed before turn 2 writes its first frame.
+        if (
+            existing is not None
+            and existing.get("run_id")
+            and projection.get("run_id")
+            and existing["run_id"] != projection["run_id"]
+        ):
+            continue
         # A finished projection is not a new active run. Keeping it for the
         # document TTL would leave "Needs approval" on a run that already ended.
         if existing is None:

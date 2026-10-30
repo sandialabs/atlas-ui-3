@@ -434,3 +434,64 @@ async def test_redis_locks_are_per_conversation_and_released():
     assert len(public_projection(await store.get("conv-0", EMAIL))["invocations"]) == 5
     assert len(public_projection(await store.get("conv-1", EMAIL))["invocations"]) == 5
     assert store._locks == {}
+
+
+def test_tool_start_drops_the_answered_approval_card():
+    # The approval may have landed on another replica. The tool starting is
+    # what proves it was approved, so the card must not come back on reload.
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_approval_request", arguments={"q": "x"}))
+    apply_event_to_document(doc, _event(1, type="tool_approval_request", arguments={"q": "y"}))
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    projection = public_projection(doc)
+    assert [r["tool_call_id"] for r in projection["pending_requests"]] == ["call_1"]
+    assert projection["activity"] == "waiting_for_approval"
+    apply_event_to_document(doc, _event(1, type="tool_start"))
+    projection = public_projection(doc)
+    assert projection["pending_requests"] == []
+    assert projection["activity"] == "executing"
+    assert projection["status"] == "running"
+
+
+def test_tool_start_keeps_an_elicitation_card():
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e1"))
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    assert len(public_projection(doc)["pending_requests"]) == 1
+
+
+def test_an_earlier_runs_projection_does_not_overlay_the_current_run():
+    local = [{"run_id": "run-2", "conversation_id": CONV, "status": "running", "activity": "executing"}]
+    shared = [{
+        "run_id": "run-1", "conversation_id": CONV, "status": "completed",
+        "activity": "completed", "revision": 7, "waiting_on": None,
+    }]
+    merged = merge_run_snapshots(local, shared)
+    assert merged == local
+
+
+def test_registry_clears_an_approval_when_its_tool_starts():
+    registry = RunRegistry()
+    record = registry.start(conversation_id=CONV, user_email=EMAIL)
+    registry.set_status(record.run_id, RunStatus.RUNNING)
+    for index in range(2):
+        registry.note_event(record.run_id, {
+            "type": "tool_approval_request", "tool_call_id": f"call_{index}",
+            "invocation_id": invocation_id(record.run_id, 0, f"call_{index}"),
+        })
+    assert registry.get(record.run_id).status == RunStatus.WAITING_FOR_INPUT
+    registry.note_event(record.run_id, {
+        "type": "tool_start", "tool_call_id": "call_0",
+        "invocation_id": invocation_id(record.run_id, 0, "call_0"),
+    })
+    current = registry.get(record.run_id)
+    assert current.status == RunStatus.WAITING_FOR_INPUT
+    assert [r["tool_call_id"] for r in current.pending_requests] == ["call_1"]
+    registry.note_event(record.run_id, {
+        "type": "tool_start", "tool_call_id": "call_1",
+        "invocation_id": invocation_id(record.run_id, 0, "call_1"),
+    })
+    current = registry.get(record.run_id)
+    assert current.status == RunStatus.RUNNING
+    assert current.pending_requests == []

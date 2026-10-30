@@ -72,6 +72,11 @@ Stop closes every open row, including `sleeping` and `in_progress` ones. The
 `tool_interrupted` notice carries the invocation identity and is written into
 the document, so the live row, a reload, and a joined tab all show it stopped.
 
+A `tool_start` for an invocation drops that invocation's approval card, in
+the projection and in the executor's run registry. The answer may have landed
+on another replica, and the tool starting is what proves it was approved, so
+a reload while the tool runs does not offer Approve/Reject again.
+
 `atlas_sleep` is `activity=sleeping` and a tool row with status `sleeping`.
 Earlier tool rows stay visible. It is not an approval and it is not
 "Agent thinking...".
@@ -80,7 +85,8 @@ When the run completes, fails, or is cancelled, that status is written into
 the same document, the pending set is cleared, and any invocation still open
 is marked `interrupted`. A later tool frame for
 that run does not bring it back. A run list keeps a local terminal status
-when the shared document has not caught up, and it does not add a finished
+when the shared document has not caught up, ignores a document from a
+different run than the one this replica is executing, and it does not add a finished
 projection as a new active run.
 
 Pending approval `arguments` are stored in full. Approving the card sends
