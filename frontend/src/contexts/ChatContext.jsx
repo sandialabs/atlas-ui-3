@@ -21,7 +21,7 @@ import { useContextCompaction } from '../hooks/chat/useContextCompaction'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
-import { reconcileExecution } from '../utils/executionState'
+import { liveInvocationCount, reconcileExecution } from '../utils/executionState'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
@@ -1641,7 +1641,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			const sameRun = !previous.run_id || !execution.run_id || previous.run_id === execution.run_id
 			if (sameRun && execution.revision < previous.revision) return false
 		}
-		const liveInvocations = latestMessagesRef.current.filter(m => m.type === 'tool_call' && m.invocation_id).length
+		const liveInvocations = liveInvocationCount(latestMessagesRef.current, execution?.run_id)
 		const storedInvocations = Array.isArray(execution?.invocations) ? execution.invocations.length : 0
 		if (execution && liveInvocations > storedInvocations) return false
 		if (isRunActive(runsByConversationRef.current[id])) return true

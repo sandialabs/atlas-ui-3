@@ -9,6 +9,15 @@
 const SLEEP_TOOLS = new Set(['atlas_sleep', 'atlas_agent_sleep'])
 const TERMINAL_TOOL_STATUS = new Set(['completed', 'failed', 'interrupted', 'expired', 'rejected'])
 
+export function liveInvocationCount(messages, runId) {
+  return (messages || []).filter(message => (
+    message
+    && message.type === 'tool_call'
+    && message.invocation_id
+    && (!runId || message.run_id === runId)
+  )).length
+}
+
 export function isSleepTool(name) {
   return SLEEP_TOOLS.has(name)
 }

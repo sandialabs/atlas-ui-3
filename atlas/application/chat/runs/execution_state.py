@@ -45,6 +45,17 @@ _TERMINAL_INVOCATION = frozenset(
 _TERMINAL_RUN = frozenset({"completed", "failed", "cancelled"})
 _SLEEP_TOOLS = frozenset({"atlas_sleep", "atlas_agent_sleep"})
 _INPUT_EVENTS = frozenset({"tool_approval_request", "elicitation_request"})
+# A different run_id may replace the document only when the event opens work.
+# A late terminal or settlement frame from the previous run must not erase the
+# run that has already started.
+_OPENING_EVENTS = frozenset({
+    "invocation",
+    "tool_start",
+    "tool_progress",
+    "tool_approval_request",
+    "elicitation_request",
+})
+_RESOLUTION_CAP = 200
 _SETTLED_EVENTS = frozenset(
     {"tool_complete", "tool_error", "tool_interrupted", "tool_result", "auth_required"}
 )
@@ -59,11 +70,25 @@ def invocation_id(run_id: str, step: int, tool_call_id: str) -> str:
     return f"{run_id}:{int(step)}:{tool_call_id}"
 
 
-def approval_storage_key(invocation_id_value: Optional[str], tool_call_id: Optional[str]) -> str:
-    """Key for a shared approval outcome. Prefers the invocation identity."""
-    if invocation_id_value:
-        return invocation_id_value
-    return f"tool:{tool_call_id or ''}"
+def approval_storage_key(
+    invocation_id_value: Optional[str],
+    _tool_call_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+) -> Optional[str]:
+    """Shared outcome key, or None when the call must stay process-local.
+
+    Provider ids such as ``call_0`` are reused across turns and users. A
+    shared key without an invocation id would let one approval, edit, or
+    timeout satisfy a later call. The key is also scoped to the authenticated
+    owner. The tool-call id is accepted so existing callers keep their
+    argument order, and it is not part of the key.
+    """
+    if not invocation_id_value:
+        return None
+    email = normalize_user_email(user_email)
+    if not email:
+        return None
+    return f"{email}:{invocation_id_value}"
 
 
 def execution_identity(session_context: Optional[dict], tool_call_id: str, tool_name: Optional[str] = None) -> dict:
@@ -279,16 +304,29 @@ def _apply_run_status(doc: dict, event: dict) -> bool:
     return True
 
 
-def apply_event_to_document(doc: dict, event: dict) -> None:
-    """Fold one tool, approval, or terminal frame into ``doc``. Does not bump the revision."""
-    if event.get("run_id") and doc.get("run_id") and event["run_id"] != doc["run_id"]:
-        fresh = _blank(str(event["run_id"]), doc["conversation_id"], doc["user_email"])
+def apply_event_to_document(doc: dict, event: dict) -> bool:
+    """Fold one frame into ``doc``. Returns False when a stale run was ignored.
+
+    Does not bump the revision. A closing frame whose ``run_id`` is not the
+    document's current run is left untouched.
+    """
+    event_run = event.get("run_id")
+    current_run = doc.get("run_id")
+    if event_run and current_run and event_run != current_run:
+        # Once a run has been replaced, its later frames stay dropped. A
+        # delayed tool_start from that run must not become the current one
+        # again. A closing frame never opens a run.
+        closed = doc.get("closed_runs") or []
+        if event_run in closed or event.get("type") not in _OPENING_EVENTS:
+            return False
+        fresh = _blank(str(event_run), doc["conversation_id"], doc["user_email"])
+        fresh["closed_runs"] = (list(closed) + [current_run])[-50:]
         doc.clear()
         doc.update(fresh)
     if _apply_run_status(doc, event):
-        return
+        return True
     if doc.get("status") in _TERMINAL_RUN:
-        return
+        return False
     status = _status_for(event)
     if status or event.get("invocation_id"):
         _touch_invocation(doc, event, status)
@@ -299,6 +337,7 @@ def apply_event_to_document(doc: dict, event: dict) -> None:
         _drop_settled(doc, event)
     doc["updated_at"] = time.time()
     _refresh_activity(doc)
+    return True
 
 
 def public_projection(doc: dict) -> dict:
@@ -464,12 +503,11 @@ class MemoryExecutionStore(ExecutionStore):
         conversation_id, run_id, user_email = prepared
         async with self._lock:
             key = (user_email, conversation_id)
-            doc = self._docs.get(key)
-            if doc is None or (doc.get("run_id") and doc["run_id"] != run_id):
-                doc = _blank(run_id, conversation_id, user_email)
-            else:
-                doc = copy.deepcopy(doc)
-            apply_event_to_document(doc, event)
+            self._drop_expired(user_email, conversation_id)
+            stored = self._docs.get(key)
+            doc = _blank(run_id, conversation_id, user_email) if stored is None else copy.deepcopy(stored)
+            if not apply_event_to_document(doc, event):
+                return public_projection(stored) if stored is not None else None
             doc["revision"] = int(doc.get("revision") or 0) + 1
             self._docs[key] = doc
             self._by_user.setdefault(user_email, set()).add(conversation_id)
@@ -480,6 +518,7 @@ class MemoryExecutionStore(ExecutionStore):
         if not conversation_id or not email:
             return None
         async with self._lock:
+            self._drop_expired(email, str(conversation_id))
             doc = self._docs.get((email, str(conversation_id)))
             return copy.deepcopy(doc) if doc else None
 
@@ -487,21 +526,57 @@ class MemoryExecutionStore(ExecutionStore):
         email = normalize_user_email(user_email)
         async with self._lock:
             ids = list(self._by_user.get(email, ()))
-            return [public_projection(self._docs[(email, cid)]) for cid in ids if (email, cid) in self._docs]
+            projections = []
+            for conversation_id in ids:
+                self._drop_expired(email, conversation_id)
+                doc = self._docs.get((email, conversation_id))
+                if doc is not None:
+                    projections.append(public_projection(doc))
+            return projections
+
+    def _drop_expired(self, user_email: str, conversation_id: str) -> None:
+        key = (user_email, conversation_id)
+        doc = self._docs.get(key)
+        if doc is None:
+            return
+        updated = doc.get("updated_at") or 0
+        if time.time() - updated <= PROJECTION_TTL_SECONDS:
+            return
+        self._docs.pop(key, None)
+        self._by_user.get(user_email, set()).discard(conversation_id)
+
+    def _visible_resolution(self, record: Optional[dict]) -> Optional[dict]:
+        if not record:
+            return None
+        stored_at = record.get("_stored_at") or 0
+        if stored_at and time.time() - stored_at > PROJECTION_TTL_SECONDS:
+            return None
+        return {key: value for key, value in record.items() if key != "_stored_at"}
 
     async def read_resolution(self, request_key: str) -> Optional[dict]:
+        if not request_key:
+            return None
         async with self._lock:
             found = self._resolutions.get(request_key)
-            return dict(found) if found else None
+            visible = self._visible_resolution(found)
+            if found is not None and visible is None:
+                self._resolutions.pop(request_key, None)
+            return visible
 
     async def put_resolution(self, request_key: str, outcome: dict) -> dict:
+        if not request_key:
+            stored = {k: v for k, v in outcome.items() if k != "already_resolved"}
+            return {**stored, "already_resolved": False}
         async with self._lock:
-            existing = self._resolutions.get(request_key)
+            existing = self._visible_resolution(self._resolutions.get(request_key))
             if existing is not None:
                 return {**existing, "already_resolved": True}
-            stored = {k: v for k, v in outcome.items() if k != "already_resolved"}
+            stored = {k: v for k, v in outcome.items() if k not in ("already_resolved", "_stored_at")}
+            stored["_stored_at"] = time.time()
             self._resolutions[request_key] = stored
-            return {**stored, "already_resolved": False}
+            while len(self._resolutions) > _RESOLUTION_CAP:
+                self._resolutions.pop(next(iter(self._resolutions)))
+            return {**self._visible_resolution(stored), "already_resolved": False}
 
 
 class RedisExecutionStore(ExecutionStore):
@@ -543,9 +618,8 @@ class RedisExecutionStore(ExecutionStore):
                     doc = json.loads(_text(raw))
                 else:
                     doc = _blank(run_id, conversation_id, user_email)
-                if doc.get("run_id") and doc["run_id"] != run_id:
-                    doc = _blank(run_id, conversation_id, user_email)
-                apply_event_to_document(doc, event)
+                if not apply_event_to_document(doc, event):
+                    return public_projection(doc) if raw else None
                 next_rev = str(int(current) + 1)
                 doc["revision"] = int(next_rev)
                 payload = json.dumps(doc, default=str)
@@ -610,12 +684,17 @@ class RedisExecutionStore(ExecutionStore):
         return projections
 
     async def read_resolution(self, request_key: str) -> Optional[dict]:
+        if not request_key:
+            return None
         raw = await self._client().get(self._resolution_key(request_key))
         if not raw:
             return None
         return json.loads(_text(raw))
 
     async def put_resolution(self, request_key: str, outcome: dict) -> dict:
+        if not request_key:
+            stored = {k: v for k, v in outcome.items() if k != "already_resolved"}
+            return {**stored, "already_resolved": False}
         key = self._resolution_key(request_key)
         client = self._client()
         stored = {k: v for k, v in outcome.items() if k != "already_resolved"}
@@ -716,13 +795,18 @@ async def wait_for_shared_approval(request, timeout: Optional[float], request_ke
 
 async def _poll_resolution(request_key: str, timeout: Optional[float]) -> dict:
     deadline = None if timeout is None or timeout <= 0 else time.monotonic() + timeout
+    delay = 0.2
     while True:
         found = await get_execution_store().read_resolution(request_key)
         if found:
             return found
         if deadline is not None and time.monotonic() >= deadline:
             raise asyncio.TimeoutError
-        await asyncio.sleep(0.2)
+        # A finite wait stays responsive. An indefinite approval (timeout 0)
+        # backs off so one parked call does not poll at 5 Hz for its whole life.
+        await asyncio.sleep(delay)
+        if deadline is None:
+            delay = min(delay * 1.5, 2.0)
 
 
 def observe_tool_callback(inner, identity: dict):

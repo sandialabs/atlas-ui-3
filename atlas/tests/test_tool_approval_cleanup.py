@@ -22,6 +22,13 @@ TOOL_NAME = "approval_gated_tool"
 TOOL_CALL_ID = "call_leak_1"
 
 
+def _has_pending(manager, tool_call_id):
+    return any(
+        request.tool_call_id == tool_call_id
+        for request in manager.get_pending_requests().values()
+    )
+
+
 class _FakeToolManager:
     """Minimal tool manager: the gate is reached before execution matters."""
 
@@ -103,14 +110,14 @@ async def test_cancelling_the_approval_wait_cleans_up_the_request(
 
     await asyncio.wait_for(requested.wait(), timeout=5)
     # The gate is open and waiting: the request is registered.
-    assert TOOL_CALL_ID in approval_manager.get_pending_requests()
+    assert _has_pending(approval_manager, TOOL_CALL_ID)
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
     # The regression: this used to still hold the request (and its arguments).
-    assert TOOL_CALL_ID not in approval_manager.get_pending_requests()
+    assert not _has_pending(approval_manager, TOOL_CALL_ID)
 
 
 @pytest.mark.asyncio
@@ -141,4 +148,4 @@ async def test_a_raising_update_callback_cleans_up_the_request(
     )
 
     assert result.success is False
-    assert TOOL_CALL_ID not in approval_manager.get_pending_requests()
+    assert not _has_pending(approval_manager, TOOL_CALL_ID)

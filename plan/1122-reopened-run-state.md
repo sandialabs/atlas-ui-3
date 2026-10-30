@@ -131,3 +131,16 @@ Follow-up verification, same worktree, `atlas.__file__` still this tree:
 A browser pass was still not run.
 
 The next `ci-test` run failed `parallel-conversation-runs.test.js`: a visible `tool_start` is now applied with `mapMessages`, and that test still expected `addMessage`. The assertion follows the reducer. A background `tool_start` still must not call `mapMessages`.
+
+Review on `c13ea029` required the approval store to stop using a global `tool:<tool_call_id>` key. Shared outcomes now require an invocation id and the owner's email. Untracked `call_0` requests get distinct local futures, and each remembered outcome is stored under that unique key. A closing frame never opens a different run. Once a run has been replaced, its later frames, including a delayed `tool_start`, are ignored. Reconnect counts invocation rows for the snapshot's run only. The in-memory store drops projections and approval outcomes older than the projection TTL and caps remembered outcomes. An indefinite approval wait backs off its poll; a finite wait stays at 0.2s so a short timeout still wins.
+
+Verification after that review, same worktree, `atlas.__file__` this tree:
+
+- `ruff check` on the touched modules: all checks passed.
+- `pytest` `test_execution_state.py` `test_reopened_run_approval.py` `test_approval_manager.py` `test_tool_approval_cleanup.py`: 58 passed.
+- `bash test/pr-validation/test_pr1122_reopened_run_state.sh`: Passed 2, Failed 0. The scenario checks passed, then pytest reported 58 passed.
+- Vitest: `execution-state.test.js` 9, `tool-approval-websocket.test.js` 15, `parallel-conversation-runs.test.js` 12, `websocketHandlers.test.js` 24. All passed.
+- `npx eslint` on `ChatContext.jsx`, `executionState.js`, and `execution-state.test.js`: clean.
+- `bash scripts/check-docs.sh`: OK (123 markdown files, 19 indexes).
+
+A browser pass of a live sleep or approval turn was still not run.

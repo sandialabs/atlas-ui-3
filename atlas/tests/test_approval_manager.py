@@ -7,6 +7,23 @@ import pytest
 from atlas.application.chat.approval_manager import ToolApprovalManager, ToolApprovalRequest, get_approval_manager
 
 
+def _has_pending(manager, tool_call_id):
+    """Untracked requests are keyed internally, not by the provider id."""
+    return any(
+        request.tool_call_id == tool_call_id
+        for request in manager.get_pending_requests().values()
+    )
+
+
+def _pending_for(manager, tool_call_id):
+    matches = [
+        request for request in manager.get_pending_requests().values()
+        if request.tool_call_id == tool_call_id
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
 class TestToolApprovalRequest:
     """Test ToolApprovalRequest class."""
 
@@ -93,7 +110,7 @@ class TestToolApprovalManager:
 
         assert request.tool_call_id == "test_123"
         assert request.user_email == "alice@example.com"
-        assert "test_123" in manager.get_pending_requests()
+        assert _has_pending(manager, "test_123")
 
     @pytest.mark.asyncio
     async def test_handle_approval_response(self):
@@ -116,7 +133,7 @@ class TestToolApprovalManager:
 
         assert result is True
         # Request should still be in pending (cleaned up manually later)
-        assert "test_123" in manager.get_pending_requests()
+        assert _has_pending(manager, "test_123")
 
     def test_handle_unknown_request(self):
         """Test handling response for unknown request."""
@@ -139,11 +156,11 @@ class TestToolApprovalManager:
             arguments={"arg1": "value1"}
         )
 
-        assert "test_123" in manager.get_pending_requests()
+        assert _has_pending(manager, "test_123")
 
         manager.cleanup_request("test_123")
 
-        assert "test_123" not in manager.get_pending_requests()
+        assert not _has_pending(manager, "test_123")
 
     def test_get_approval_manager_singleton(self):
         """Test that get_approval_manager returns a singleton."""
@@ -187,7 +204,7 @@ class TestToolApprovalManager:
 
         # Cleanup
         manager.cleanup_request("test_123")
-        assert "test_123" not in manager.get_pending_requests()
+        assert not _has_pending(manager, "test_123")
 
     @pytest.mark.asyncio
     async def test_multiple_concurrent_approvals(self):
@@ -341,7 +358,7 @@ class TestToolApprovalManager:
         # Should not raise an error
         manager.cleanup_request("nonexistent_id")
 
-        assert "nonexistent_id" not in manager.get_pending_requests()
+        assert not _has_pending(manager, "nonexistent_id")
 
     def test_multiple_managers_vs_singleton(self):
         """Test that direct instantiation creates different instances but singleton returns same."""
@@ -435,7 +452,7 @@ class TestToolApprovalManager:
         await task1
 
         assert response1["approved"] is True
-        assert "seq_1" not in manager.get_pending_requests()
+        assert not _has_pending(manager, "seq_1")
 
         # Second approval after first is complete
         request2 = manager.create_approval_request(
@@ -455,7 +472,7 @@ class TestToolApprovalManager:
         await task2
 
         assert response2["approved"] is True
-        assert "seq_2" not in manager.get_pending_requests()
+        assert not _has_pending(manager, "seq_2")
 
 
 class TestCrossUserApprovalPrevention:
@@ -480,7 +497,7 @@ class TestCrossUserApprovalPrevention:
 
         assert result is False
         # Request must still be pending (not resolved by the wrong user)
-        request = manager.get_pending_requests()["call_alice"]
+        request = _pending_for(manager, "call_alice")
         assert not request.future.done()
 
     @pytest.mark.asyncio
@@ -521,7 +538,7 @@ class TestCrossUserApprovalPrevention:
         )
 
         assert result is False
-        request = manager.get_pending_requests()["call_alice"]
+        request = _pending_for(manager, "call_alice")
         assert not request.future.done()
 
     @pytest.mark.asyncio
@@ -543,7 +560,7 @@ class TestCrossUserApprovalPrevention:
         )
 
         assert result is False
-        request = manager.get_pending_requests()["call_alice"]
+        request = _pending_for(manager, "call_alice")
         assert not request.future.done()
 
     @pytest.mark.asyncio
@@ -594,7 +611,7 @@ class TestCrossUserApprovalPrevention:
 
         assert result is False
         # Request must still be pending (not resolved by an empty user identity)
-        request = manager.get_pending_requests()["call_alice"]
+        request = _pending_for(manager, "call_alice")
         assert not request.future.done()
 
     @pytest.mark.asyncio

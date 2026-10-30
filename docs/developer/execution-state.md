@@ -71,6 +71,13 @@ Pending approval `arguments` are stored in full. Approving the card sends
 those arguments. Other fields in the document are shortened so a fetch stays
 bounded.
 
+A shared approval outcome exists only for a call that has an invocation id,
+and the key includes the authenticated owner. A turn with no run does not
+write `tool:call_0` into the store, so one user's approval or timeout cannot
+answer a later call. A closing frame never opens a different run. Once a run
+has been replaced, its later frames, including a delayed `tool_start`, are
+ignored.
+
 ## Client
 
 The joined-view poll and a saved-conversation load reconcile `execution` into

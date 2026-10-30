@@ -9,6 +9,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Union
+from uuid import uuid4
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
@@ -59,6 +60,7 @@ class ToolApprovalRequest:
         self.user_email = user_email
         self.invocation_id = invocation_id
         self.run_id = run_id
+        self.storage_key: Optional[str] = None
         self.future: asyncio.Future = asyncio.Future()
 
     async def wait_for_response(self, timeout: Optional[float] = 300.0) -> Dict[str, Any]:
@@ -140,10 +142,23 @@ class ToolApprovalManager:
             tool_call_id, tool_name, arguments, allow_edit,
             user_email=user_email, invocation_id=invocation_id, run_id=run_id,
         )
-        key = invocation_id or tool_call_id
-        existing = self._pending_requests.get(key)
+        # Reuse only the same invocation, owner, and tool. An untracked call
+        # has no invocation id; keying it by tool_call_id would make two
+        # call_0 requests share one future, including across users.
+        key = invocation_id or None
+        existing = self._pending_requests.get(key) if key else None
         if existing is not None and not existing.future.done():
-            return existing
+            same_owner = (
+                not existing.user_email
+                or not user_email
+                or normalize_user_email(existing.user_email) == normalize_user_email(user_email)
+            )
+            if same_owner and existing.tool_name == tool_name:
+                return existing
+            key = None
+        if not key:
+            key = f"local:{uuid4()}"
+        request.storage_key = key
         self._pending_requests[key] = request
         logger.info(
             "Created approval request for tool %s (call_id: %s)",
@@ -233,7 +248,7 @@ class ToolApprovalManager:
         if not self._owned(request.user_email, user_email, request.tool_call_id):
             return False
         if request.future.done():
-            key = request.invocation_id or request.tool_call_id
+            key = self._resolution_key(request)
             remembered = self._resolved.get(key)
             if remembered is not None:
                 return self._public(remembered)
@@ -249,7 +264,9 @@ class ToolApprovalManager:
             "user_email": request.user_email,
             "status": "approved" if approved else "rejected",
         }
-        key = request.invocation_id or request.tool_call_id
+        # Untracked calls share provider ids. Remember each one under its
+        # unique storage key so a later call_0 does not inherit this outcome.
+        key = self._resolution_key(request)
         self._resolved[key] = record
         self._resolved.move_to_end(key)
         while len(self._resolved) > _RESOLVED_LIMIT:
@@ -314,6 +331,10 @@ class ToolApprovalManager:
             )
             return False
         return True
+
+    @staticmethod
+    def _resolution_key(request: ToolApprovalRequest) -> str:
+        return request.invocation_id or request.storage_key or request.tool_call_id
 
     def find_open_request(
         self,

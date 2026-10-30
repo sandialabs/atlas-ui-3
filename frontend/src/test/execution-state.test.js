@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { reconcileExecution, sameInvocation, toolStatusFromEvent } from '../utils/executionState'
+import { liveInvocationCount, reconcileExecution, sameInvocation, toolStatusFromEvent } from '../utils/executionState'
 
 function invocation(id, overrides = {}) {
   return {
@@ -121,6 +121,17 @@ describe('invocation identity helpers', () => {
     expect(sameInvocation(legacy, { tool_call_id: 'call_0' })).toBe(true)
     expect(sameInvocation(exact, { invocation_id: 'run-1:1:call_0', tool_call_id: 'call_0' })).toBe(false)
     expect(sameInvocation(legacy, { invocation_id: 'run-1:0:call_0', tool_call_id: 'call_0' })).toBe(true)
+  })
+
+  it('counts live rows for the snapshot run only', () => {
+    const messages = [
+      { type: 'tool_call', invocation_id: 'run-1:0:call_0', run_id: 'run-1' },
+      { type: 'tool_call', invocation_id: 'run-1:0:call_1', run_id: 'run-1' },
+      { type: 'tool_call', invocation_id: 'run-2:0:call_0', run_id: 'run-2' },
+      { type: 'tool_approval_request', invocation_id: 'run-2:0:call_1', run_id: 'run-2' },
+    ]
+    expect(liveInvocationCount(messages, 'run-2')).toBe(1)
+    expect(liveInvocationCount(messages, 'run-1')).toBe(2)
   })
 
   it('keeps expired and rejected as their own statuses', () => {

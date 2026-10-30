@@ -48,11 +48,12 @@ def _unknown(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _outcome(data: Dict[str, Any], request=None) -> Dict[str, Any]:
+def _outcome(data: Dict[str, Any], request=None, user_email: Optional[str] = None) -> Dict[str, Any]:
     approved = bool(data.get("approved"))
     invocation_id = data.get("invocation_id") or getattr(request, "invocation_id", None)
     run_id = data.get("run_id") or getattr(request, "run_id", None)
     tool_call_id = data.get("tool_call_id") or getattr(request, "tool_call_id", None)
+    owner = user_email or getattr(request, "user_email", None) or ""
     return {
         "approved": approved,
         "arguments": data.get("arguments"),
@@ -60,11 +61,14 @@ def _outcome(data: Dict[str, Any], request=None) -> Dict[str, Any]:
         "tool_call_id": tool_call_id,
         "invocation_id": invocation_id,
         "run_id": run_id,
+        "user_email": normalize_user_email(owner),
         "status": "approved" if approved else "rejected",
     }
 
 
-async def _put(key: str, outcome: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def _put(key: Optional[str], outcome: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not key:
+        return None
     try:
         return await get_execution_store().put_resolution(key, outcome)
     except Exception:
@@ -72,7 +76,9 @@ async def _put(key: str, outcome: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def _read(key: str) -> Optional[Dict[str, Any]]:
+async def _read(key: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not key:
+        return None
     try:
         return await get_execution_store().read_resolution(key)
     except Exception:
@@ -141,8 +147,10 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
             # The shared outcome is claimed before the local future. A rejection
             # that already won on another replica is what this future resolves
             # to, including when this response said approved.
-            outcome = _outcome(data, request)
-            key = approval_storage_key(outcome.get("invocation_id"), outcome.get("tool_call_id"))
+            outcome = _outcome(data, request, user_email)
+            key = approval_storage_key(
+                outcome.get("invocation_id"), outcome.get("tool_call_id"), user_email,
+            )
             stored = await _put(key, outcome)
             if stored and stored.get("already_resolved"):
                 request.set_response(
@@ -187,27 +195,31 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
     )
     if result is True:
         found = manager.find_open_request(tool_call_id, invocation_id, run_id)
-        outcome = _outcome(data, found)
-        key = approval_storage_key(outcome.get("invocation_id"), outcome.get("tool_call_id"))
+        outcome = _outcome(data, found, user_email)
+        key = approval_storage_key(
+            outcome.get("invocation_id"), outcome.get("tool_call_id"), user_email,
+        )
         await _put(key, outcome)
         return "accepted", None
     if isinstance(result, dict) and result.get("already_resolved"):
         return "duplicate", _frame(result, data)
 
-    key = approval_storage_key(invocation_id, tool_call_id)
+    key = approval_storage_key(invocation_id, tool_call_id, user_email)
     existing = await _read(key)
-    if existing:
+    if existing and _owns(existing.get("user_email"), user_email):
         return "duplicate", _frame(existing, data)
 
     matches = await _pending_matches(user_email, data)
     if len(matches) != 1:
         return "unknown", _unknown(data)
     request = matches[0]
-    outcome = _outcome(data)
+    outcome = _outcome(data, user_email=user_email)
     for field in ("invocation_id", "run_id", "tool_call_id"):
         if not outcome.get(field) and request.get(field):
             outcome[field] = request[field]
-    storage = approval_storage_key(outcome.get("invocation_id"), outcome.get("tool_call_id"))
+    storage = approval_storage_key(
+        outcome.get("invocation_id"), outcome.get("tool_call_id"), user_email,
+    )
     stored = await _put(storage, outcome)
     if stored and stored.get("already_resolved"):
         return "duplicate", _frame(stored, data)

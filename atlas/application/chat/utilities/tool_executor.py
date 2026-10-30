@@ -339,8 +339,13 @@ async def _claim_approval_timeout(identity: Dict[str, Any], tool_call_id: str) -
         "tool_call_id": tool_call_id,
         "invocation_id": identity.get("invocation_id"),
         "run_id": identity.get("run_id"),
+        "user_email": identity.get("user_email") or "",
     }
-    key = approval_storage_key(identity.get("invocation_id"), tool_call_id)
+    key = approval_storage_key(
+        identity.get("invocation_id"), tool_call_id, identity.get("user_email"),
+    )
+    if not key:
+        return {**outcome, "already_resolved": False}
     try:
         return await get_execution_store().put_resolution(key, outcome)
     except Exception:
@@ -636,7 +641,11 @@ async def execute_single_tool(
                         response = await wait_for_shared_approval(
                             request,
                             resolve_approval_timeout(),
-                            approval_storage_key(identity.get("invocation_id"), tool_call.id),
+                            approval_storage_key(
+                                identity.get("invocation_id"),
+                                tool_call.id,
+                                session_context.get("user_email"),
+                            ),
                         )
                     except asyncio.TimeoutError:
                         # Only the wait can mean this: the send failing with
@@ -655,9 +664,17 @@ async def execute_single_tool(
                         else:
                             expired = True
                 finally:
-                    approval_manager.cleanup_request(tool_call.id)
-                    if identity.get("invocation_id"):
-                        approval_manager.cleanup_request(identity["invocation_id"])
+                    # Drop this request only. A bare tool_call_id cleanup would
+                    # also drop the other pending call_0 when this one was the
+                    # second-to-last match.
+                    storage_key = getattr(request, "storage_key", None)
+                    if storage_key:
+                        approval_manager.cleanup_request(storage_key)
+                    elif tool_call.id:
+                        approval_manager.cleanup_request(tool_call.id)
+                    invocation = identity.get("invocation_id")
+                    if invocation and invocation != storage_key:
+                        approval_manager.cleanup_request(invocation)
 
                 if expired or response is None:
                     await _emit_approval_settlement(

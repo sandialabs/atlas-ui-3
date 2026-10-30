@@ -10,6 +10,7 @@ from atlas.application.chat.approval_resolution import decide_tool_approval
 from atlas.application.chat.runs.context import clear_current_run, set_current_run
 from atlas.application.chat.runs.execution_state import (
     MemoryExecutionStore,
+    approval_storage_key,
     get_execution_store,
     invocation_id,
     public_projection,
@@ -173,13 +174,17 @@ async def test_timeout_uses_an_approval_that_won_the_race(store, approval_gate):
     async def update_callback(message):
         frames.append(message)
         if message.get("type") == "tool_approval_request":
-            await store.put_resolution(message["invocation_id"], {
-                "approved": True,
-                "arguments": {"value": "x"},
-                "status": "approved",
-                "invocation_id": message["invocation_id"],
-                "tool_call_id": message["tool_call_id"],
-            })
+            await store.put_resolution(
+                approval_storage_key(message["invocation_id"], message["tool_call_id"], EMAIL),
+                {
+                    "approved": True,
+                    "arguments": {"value": "x"},
+                    "status": "approved",
+                    "invocation_id": message["invocation_id"],
+                    "tool_call_id": message["tool_call_id"],
+                    "user_email": EMAIL,
+                },
+            )
 
     set_current_run(RUN, CONV)
     result = await execute_single_tool(
@@ -297,7 +302,7 @@ async def test_shared_rejection_wins_over_a_later_local_approval(store):
         "call_race", TOOL, {"value": "original"}, user_email=EMAIL,
         invocation_id=invocation, run_id=RUN,
     )
-    await store.put_resolution(invocation, {
+    await store.put_resolution(approval_storage_key(invocation, "call_race", EMAIL), {
         "approved": False,
         "arguments": {"value": "original"},
         "reason": "nope",
@@ -305,6 +310,7 @@ async def test_shared_rejection_wins_over_a_later_local_approval(store):
         "invocation_id": invocation,
         "tool_call_id": "call_race",
         "run_id": RUN,
+        "user_email": EMAIL,
     })
     kind, frame = await decide_tool_approval({
         "tool_call_id": "call_race",
@@ -344,7 +350,7 @@ async def test_decide_on_a_replica_without_the_future_writes_the_outcome(store):
     }
     kind, frame = await decide_tool_approval(data, EMAIL)
     assert kind == "accepted" and frame is None
-    stored = await store.read_resolution(invocation)
+    stored = await store.read_resolution(approval_storage_key(invocation, "call_9", EMAIL))
     assert stored["approved"] is False
     kind, frame = await decide_tool_approval(data, EMAIL)
     assert kind == "duplicate"
@@ -368,6 +374,95 @@ async def test_decide_ambiguous_bare_id_is_unknown(store):
         {"tool_call_id": "call_0", "conversation_id": CONV, "approved": True},
         EMAIL,
     )
+    assert kind == "unknown"
+    assert frame["error_type"] == "unknown_tool_approval"
+
+
+@pytest.mark.asyncio
+async def test_untracked_call_ids_do_not_share_a_future():
+    manager = ToolApprovalManager()
+    first = manager.create_approval_request("call_0", "a", {"n": 1}, user_email=EMAIL)
+    second = manager.create_approval_request("call_0", "a", {"n": 2}, user_email="other@example.com")
+    assert first is not second
+    assert first.future is not second.future
+    assert manager.handle_approval_response("call_0", True, user_email=EMAIL) is False
+    first.set_response(True, {"n": 1})
+    assert second.future.done() is False
+
+
+@pytest.mark.asyncio
+async def test_untracked_timeout_does_not_satisfy_the_next_call(store, monkeypatch):
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.requires_approval",
+        lambda tool_name, cm: (True, False, False),
+    )
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.resolve_approval_timeout",
+        lambda: 0.05,
+    )
+    clear_current_run()
+    timed_out = await execute_single_tool(
+        _call("call_0"),
+        {"user_email": EMAIL, "conversation_id": CONV, "session_id": "s1"},
+        _FakeToolManager(),
+        config_manager=_config(),
+    )
+    assert timed_out.success is False
+    assert "timed out" in timed_out.content
+
+    async def approve(message):
+        if message.get("type") == "tool_approval_request":
+            from atlas.application.chat.approval_manager import get_approval_manager
+            get_approval_manager().handle_approval_response(
+                message["tool_call_id"], True, user_email="other@example.com",
+            )
+
+    fresh = await execute_single_tool(
+        _call("call_0"),
+        {"user_email": "other@example.com", "conversation_id": CONV, "session_id": "s2"},
+        _FakeToolManager(),
+        update_callback=approve,
+        config_manager=_config(),
+    )
+    assert fresh.success is True
+    assert fresh.content == "ran"
+
+
+@pytest.mark.asyncio
+async def test_other_user_cannot_take_a_stored_approval(store):
+    from atlas.application.chat.approval_manager import get_approval_manager
+    manager = get_approval_manager()
+    invocation = invocation_id(RUN, 0, "call_owned")
+    manager.cleanup_request(invocation)
+    manager.create_approval_request(
+        "call_owned", TOOL, {"value": "secret"}, user_email=EMAIL,
+        invocation_id=invocation, run_id=RUN,
+    )
+    kind, frame = await decide_tool_approval({
+        "tool_call_id": "call_owned",
+        "invocation_id": invocation,
+        "run_id": RUN,
+        "approved": True,
+        "arguments": {"value": "stolen"},
+    }, "other@example.com")
+    assert kind == "unknown"
+    assert frame["error_type"] == "unknown_tool_approval"
+    pending = manager.find_open_request("call_owned", invocation, RUN)
+    assert pending is not None and pending.future.done() is False
+    manager.cleanup_request(invocation)
+    await store.put_resolution(approval_storage_key(invocation, "call_owned", EMAIL), {
+        "approved": True,
+        "user_email": EMAIL,
+        "invocation_id": invocation,
+        "tool_call_id": "call_owned",
+        "status": "approved",
+    })
+    kind, frame = await decide_tool_approval({
+        "tool_call_id": "call_owned",
+        "invocation_id": invocation,
+        "run_id": RUN,
+        "approved": False,
+    }, "other@example.com")
     assert kind == "unknown"
     assert frame["error_type"] == "unknown_tool_approval"
 

@@ -282,6 +282,39 @@ async def test_set_status_publishes_a_terminal_projection():
     assert projection["pending_requests"] == []
 
 
+@pytest.mark.asyncio
+async def test_late_terminal_event_does_not_replace_the_newer_run():
+    store = MemoryExecutionStore()
+    await store.apply_event(_event(0, type="tool_start", run_id="run-2", invocation_id=invocation_id("run-2", 0, "call_0")))
+    await store.apply_event({
+        "type": "run_status",
+        "status": "completed",
+        "run_id": "run-1",
+        "conversation_id": CONV,
+        "user_email": EMAIL,
+    })
+    projection = public_projection(await store.get(CONV, EMAIL))
+    assert projection["run_id"] == "run-2"
+    assert projection["status"] == "running"
+    assert projection["invocations"][0]["invocation_id"] == invocation_id("run-2", 0, "call_0")
+
+
+@pytest.mark.asyncio
+async def test_late_opening_event_does_not_revive_a_replaced_run():
+    store = MemoryExecutionStore()
+    await store.apply_event(_event(0, type="tool_start", run_id="run-1"))
+    await store.apply_event(_event(
+        0, type="tool_start", run_id="run-2",
+        invocation_id=invocation_id("run-2", 0, "call_0"),
+    ))
+    await store.apply_event(_event(0, type="tool_progress", run_id="run-1"))
+    projection = public_projection(await store.get(CONV, EMAIL))
+    assert projection["run_id"] == "run-2"
+    assert [item["invocation_id"] for item in projection["invocations"]] == [
+        invocation_id("run-2", 0, "call_0"),
+    ]
+
+
 def test_merge_run_snapshots_surfaces_a_detached_run():
     local = [{"run_id": "run-1", "conversation_id": CONV, "status": "running"}]
     shared = [{
