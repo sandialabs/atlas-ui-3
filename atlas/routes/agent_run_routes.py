@@ -186,7 +186,13 @@ class RunHandle(BaseModel):
     run_id: str
     conversation_id: str
     user: str
-    status: str
+    status: str = Field(
+        ...,
+        description=(
+            "The run's status (see RunStatusModel), or 'expired' on an idempotent "
+            "replay whose run is no longer tracked."
+        ),
+    )
     status_url: str
     workspace: Optional[str] = None
     model: Optional[str] = None

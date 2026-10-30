@@ -448,13 +448,15 @@ class ChatService:
         selected_data_sources: Optional[List[str]],
         compliance_level: Any,
         user_email: Optional[str],
-    ) -> None:
-        """The classification gates ``handle_chat_message`` opens with, alone.
+    ) -> Optional[str]:
+        """The classification gates every turn opens with.
 
-        For callers that admit a run before its turn starts -- the agent-runs
-        REST API (#1105) -- so a level the deployment does not define, or a
+        ``handle_chat_message`` runs them first; callers that admit a run
+        before its turn starts -- the agent-runs REST API (#1105) -- call them
+        directly, so a level the deployment does not define, or a
         model/tool/source not approved for it, is refused at admission rather
-        than discovered when the turn fails. Raises ``ValidationError``.
+        than discovered when the turn fails. Returns the active classification
+        level; raises ``ValidationError``.
         """
         self._enforce_required_compliance_level(compliance_level)
         active = self._resolve_active_classification(compliance_level)
@@ -464,6 +466,7 @@ class ChatService:
         await self._enforce_corpus_classifications(
             active, user_email, selected_data_sources
         )
+        return active
 
     async def _enforce_corpus_classifications(
         self,
@@ -581,15 +584,12 @@ class ChatService:
 
         # Checked before the session is touched, so a refused turn leaves no
         # trace (no conversation rebinding or history hydration).
-        self._enforce_required_compliance_level(kwargs.get("compliance_level"))
-        active_classification = self._resolve_active_classification(
-            kwargs.get("compliance_level")
-        )
-        self._enforce_data_classifications(
-            active_classification, model, selected_tools, selected_data_sources
-        )
-        await self._enforce_corpus_classifications(
-            active_classification, user_email, selected_data_sources
+        active_classification = await self.check_turn_admission(
+            model=model,
+            selected_tools=selected_tools,
+            selected_data_sources=selected_data_sources,
+            compliance_level=kwargs.get("compliance_level"),
+            user_email=user_email,
         )
 
         # Get or create session

@@ -107,7 +107,7 @@ Refusals are JSON `{"detail": {"code": "...", "message": "..."}}`:
 
 | HTTP | `code` | Meaning |
 |---|---|---|
-| 400 | `invalid_request` | Missing or oversized field (requests failing schema validation get FastAPI's standard 422) |
+| 400 | `invalid_request` | Missing or oversized field |
 | 401 | `unauthorized` | Missing or wrong bearer key |
 | 403 | `user_not_allowed` | The target user is outside the email domain whitelist |
 | 404 | `not_found` | The API is disabled |
@@ -121,6 +121,11 @@ Refusals are JSON `{"detail": {"code": "...", "message": "..."}}`:
 | 422 | `model_not_available` / `no_authorized_tools` / `classification_refused` | The user may not use the model, has no usable tools in the workspace, or the classification does not allow a component |
 | 429 | `concurrency_limit` | The user is at `MAX_CONCURRENT_RUNS_PER_USER` |
 | 503 | `not_configured` / `persistence_unavailable` / `unavailable` | Key missing or weak, chat history unavailable, workspaces or a dependency unavailable |
+
+A body that fails schema validation (a wrong type, a missing `message`, a body that is not JSON) is answered
+before any of the above with FastAPI's standard `422`, whose `detail` is a **list** of
+`{"loc", "msg", "type"}` objects rather than a `{code, message}` object. Clients should branch on
+the type of `detail`.
 
 ## Approvals
 
@@ -143,7 +148,9 @@ A repeat with the same key and the same body, for the same user, returns the ori
 with HTTP 200 and `idempotent_replay: true` rather than launching again; the same key with a
 different body is a 409. Two simultaneous requests with one key launch once. A request that was
 refused does not consume its key. Keys are remembered for 24 hours, in the memory of the replica
-that accepted them.
+that accepted them. A replay of a follow-up still works after the run it addressed has been
+cleaned up. When the replayed run itself is no longer tracked, the handle's `status` is
+`expired` (a value only replays carry); its conversation is still in the user's history.
 
 ## Limits, replicas and restarts
 
