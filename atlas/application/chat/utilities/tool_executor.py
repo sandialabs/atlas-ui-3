@@ -87,8 +87,29 @@ async def execute_multiple_tools(
 
     logger.info("Executing %d tool calls in parallel", len(tool_calls))
 
+    # A malformed step can repeat a tool_call_id. The calls would share one
+    # invocation identity, so one approval (and its arguments) would answer
+    # both, and the provider cannot take two results for one id anyway. The
+    # first call runs; a repeat is refused without running (issue #1122).
+    seen_ids = set()
+    duplicate = []
+    for tool_call in tool_calls:
+        call_id = getattr(tool_call, "id", None)
+        duplicate.append(bool(call_id) and call_id in seen_ids)
+        if call_id:
+            seen_ids.add(call_id)
+
+    async def _refuse(tool_call) -> ToolResult:
+        logger.warning("Refusing a repeated tool_call_id in one step")
+        return ToolResult(
+            tool_call_id=tool_call.id,
+            content="Tool call not executed: its tool_call_id repeats an earlier call in this step.",
+            success=False,
+            error="duplicate_tool_call_id",
+        )
+
     coros = [
-        execute_single_tool(
+        _refuse(tool_call) if is_duplicate else execute_single_tool(
             tool_call=tool_call,
             session_context=session_context,
             tool_manager=tool_manager,
@@ -96,7 +117,7 @@ async def execute_multiple_tools(
             config_manager=config_manager,
             skip_approval=skip_approval,
         )
-        for tool_call in tool_calls
+        for tool_call, is_duplicate in zip(tool_calls, duplicate)
     ]
     results = await asyncio.gather(*coros, return_exceptions=True)
 

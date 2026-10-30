@@ -490,5 +490,23 @@ describe('Tool Approval WebSocket Tests', () => {
       expect(messages[1].status).toBe('completed')
       expect(messages[1].result).toBe('turn 2')
     })
+
+    it('settles and drops only the most recent bare call_0 card', () => {
+      const earlier = { type: 'tool_approval_request', tool_call_id: 'call_0', tool_name: 'search', status: 'approved' }
+      let messages = [earlier, { type: 'tool_approval_request', tool_call_id: 'call_0', tool_name: 'search', status: 'pending' }]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      handler = createWebSocketHandler(deps)
+      handler({ type: 'tool_approval_settled', tool_call_id: 'call_0', approved: false, status: 'expired', already_resolved: true })
+      expect(messages[0]).toBe(earlier)
+      expect(messages[1].status).toBe('expired')
+
+      messages = [earlier, { type: 'tool_approval_request', tool_call_id: 'call_0', tool_name: 'search', status: 'pending' }]
+      handler({ type: 'error', error_type: 'unknown_tool_approval', message: 'No matching pending tool approval', tool_call_id: 'call_0' })
+      expect(messages[0]).toBe(earlier)
+      expect(messages.filter(m => m.type === 'tool_approval_request')).toHaveLength(1)
+      expect(messages[1].content).toMatch(/no longer active/)
+    })
   })
 })

@@ -233,6 +233,10 @@ async def delete_conversation(
         return {"error": _chat_history_error()}
 
     deleted = repo.delete_conversation(conversation_id, current_user)
+    if deleted:
+        from atlas.application.chat.runs.execution_state import forget_conversations
+
+        await forget_conversations(current_user, [conversation_id])
     return {"deleted": deleted}
 
 
@@ -247,6 +251,11 @@ async def delete_multiple_conversations(
         return {"error": _chat_history_error()}
 
     count = repo.delete_conversations(body.ids, current_user)
+    from atlas.application.chat.runs.execution_state import forget_conversations
+
+    # Only the caller's projections are touched, so naming an id the caller
+    # does not own deletes nothing of anyone else's.
+    await forget_conversations(current_user, list(body.ids))
     return {"deleted_count": count}
 
 
@@ -260,6 +269,9 @@ async def delete_all_conversations(
         return {"error": _chat_history_error()}
 
     count = repo.delete_all_conversations(current_user)
+    from atlas.application.chat.runs.execution_state import forget_conversations
+
+    await forget_conversations(current_user)
     return {"deleted_count": count}
 
 

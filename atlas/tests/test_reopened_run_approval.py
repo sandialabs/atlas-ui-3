@@ -797,3 +797,34 @@ async def test_parallel_calls_with_one_call_id_do_not_share_a_future():
         "call_dup", TOOL, {"value": "a"}, user_email=EMAIL, invocation_id=inv, run_id=RUN,
     )
     assert again is first
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_call_id_in_one_step_is_refused(store, monkeypatch):
+    # Two parallel calls with one tool_call_id would share an invocation id,
+    # so one approval would answer both with the first call's arguments.
+    from atlas.application.chat.utilities.tool_executor import execute_multiple_tools
+
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.requires_approval",
+        lambda tool_name, cm: (False, True, False),
+    )
+    ran = []
+
+    class Manager(_FakeToolManager):
+        async def execute_tool(self, tool_call_obj, context=None):
+            ran.append(tool_call_obj)
+            return SimpleNamespace(content="ran", success=True, error=None)
+
+    first = SimpleNamespace(id="call_0", function=SimpleNamespace(name=TOOL, arguments='{"value": "a"}'))
+    second = SimpleNamespace(id="call_0", function=SimpleNamespace(name=TOOL, arguments='{"value": "b"}'))
+    results = await execute_multiple_tools(
+        [first, second],
+        {"user_email": EMAIL, "conversation_id": CONV, "session_id": "s1", "agent_step": 0, "run_id": RUN},
+        Manager(),
+        config_manager=_config(),
+    )
+    assert results[0].success is True
+    assert results[1].success is False
+    assert results[1].error == "duplicate_tool_call_id"
+    assert len(ran) == 1

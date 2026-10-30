@@ -613,6 +613,25 @@ class ExecutionStore:
     async def put_resolution(self, request_key: str, outcome: dict) -> dict:
         raise NotImplementedError
 
+    async def delete(self, conversation_id: str, user_email: str) -> None:
+        """Drop a conversation's projection and its approval outcomes."""
+        raise NotImplementedError
+
+    async def conversation_ids(self, user_email: str) -> List[str]:
+        raise NotImplementedError
+
+
+def _outcome_keys(doc: Optional[dict], email: str) -> List[str]:
+    """Outcome keys for the invocations a projection still lists."""
+    if not doc:
+        return []
+    keys = []
+    for inv in (doc.get("invocations") or {}):
+        key = approval_storage_key(inv, None, email)
+        if key:
+            keys.append(key)
+    return keys
+
 
 def _ttl_for(doc: dict) -> int:
     if doc.get("status") in _TERMINAL_RUN:
@@ -662,6 +681,25 @@ class MemoryExecutionStore(ExecutionStore):
             if self._writes % _SWEEP_EVERY == 0 or len(self._docs) > _DOC_CAP:
                 self._sweep(keep=key)
             return public_projection(doc)
+
+    async def delete(self, conversation_id: str, user_email: str) -> None:
+        email = normalize_user_email(user_email)
+        if not conversation_id or not email:
+            return
+        async with self._lock:
+            doc = self._docs.pop((email, str(conversation_id)), None)
+            members = self._by_user.get(email)
+            if members is not None:
+                members.discard(str(conversation_id))
+                if not members:
+                    self._by_user.pop(email, None)
+            for key in _outcome_keys(doc, email):
+                self._resolutions.pop(key, None)
+
+    async def conversation_ids(self, user_email: str) -> List[str]:
+        email = normalize_user_email(user_email)
+        async with self._lock:
+            return list(self._by_user.get(email, ()))
 
     def _sweep(self, keep: Optional[tuple] = None) -> None:
         """Drop expired documents, then the oldest past the cap."""
@@ -874,6 +912,26 @@ class RedisExecutionStore(ExecutionStore):
             projections.append(public_projection(doc))
         return projections
 
+    async def delete(self, conversation_id: str, user_email: str) -> None:
+        email = normalize_user_email(user_email)
+        if not conversation_id or not email:
+            return
+        client = self._client()
+        doc_key = self._doc_key(email, str(conversation_id))
+        raw = await client.get(doc_key)
+        doc = json.loads(_text(raw)) if raw else None
+        keys = [doc_key, self._rev_key(email, str(conversation_id))]
+        keys.extend(self._resolution_key(key) for key in _outcome_keys(doc, email))
+        await client.delete(*keys)
+        await client.srem(self._user_key(email), str(conversation_id))
+
+    async def conversation_ids(self, user_email: str) -> List[str]:
+        email = normalize_user_email(user_email)
+        if not email:
+            return []
+        members = await self._client().smembers(self._user_key(email))
+        return [_text(member) for member in members or []]
+
     async def read_resolution(self, request_key: str) -> Optional[dict]:
         if not request_key:
             return None
@@ -947,6 +1005,23 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
     merged["message_count"] = len(merged["messages"])
     merged["run_activity"] = projection.get("activity")
     return merged
+
+
+async def forget_conversations(user_email: str, conversation_ids: Optional[List[str]] = None) -> None:
+    """Delete projections and approval outcomes for deleted conversations.
+
+    They hold tool arguments and results, so they must not outlive the
+    conversation for the rest of their TTL. ``None`` means every conversation
+    the user has a projection for. A store error is logged, not raised: the
+    conversation itself is already gone.
+    """
+    try:
+        store = get_execution_store()
+        ids = conversation_ids if conversation_ids is not None else await store.conversation_ids(user_email)
+        for conversation_id in ids:
+            await store.delete(str(conversation_id), user_email)
+    except Exception:
+        logger.warning("execution projection delete failed", exc_info=True)
 
 
 async def list_execution_snapshots(user_email: str) -> List[dict]:

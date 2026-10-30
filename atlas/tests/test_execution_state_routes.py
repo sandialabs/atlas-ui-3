@@ -121,3 +121,15 @@ def test_other_user_gets_neither_the_conversation_nor_the_projection(client, sto
     resp = _get(client, "intruder@test.com")
     assert resp.status_code == 404
     assert "secret" not in resp.text
+
+
+def test_deleting_the_conversation_removes_its_projection_and_outcomes(client, store, owner):
+    from atlas.application.chat.runs.execution_state import approval_storage_key
+
+    _apply(store, owner, "call_0", "tool_approval_request", arguments={"secret": "x"})
+    key = approval_storage_key(invocation_id(RUN, 0, "call_0"), "call_0", owner)
+    asyncio.run(store.put_resolution(key, {"approved": True, "user_email": owner}))
+    resp = client.delete(f"/api/conversations/{CONV}", headers={"X-User-Email": owner})
+    assert resp.json()["deleted"] is True
+    assert asyncio.run(store.get(CONV, owner)) is None
+    assert asyncio.run(store.read_resolution(key)) is None

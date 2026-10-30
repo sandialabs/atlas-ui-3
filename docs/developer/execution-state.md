@@ -102,6 +102,11 @@ non-terminal status over the document's (an approval resumes the local run
 before the document sees `tool_start`), and it does not add a finished
 projection as a new active run.
 
+Deleting a conversation (one, several, or all) also deletes its projection
+and the approval outcomes it lists, since both hold tool arguments and
+results. A step that repeats a `tool_call_id` runs the first call and refuses
+the repeat: the two would share one invocation identity and one approval.
+
 Pending approval `arguments` are stored in full. Approving the card sends
 those arguments. Other fields in the document are shortened so a fetch stays
 bounded.

@@ -21,6 +21,23 @@ function sameApproval(row, data) {
   return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
 }
 
+// The card a settle or unknown frame addresses. An identified frame matches
+// its one card. A bare call_0 (untracked turns) matches only the most recent
+// card with that id, preferring one still pending: earlier call_0 cards are
+// earlier requests and keep their own outcome.
+function addressedApprovalIndex(list, data) {
+  if (data.invocation_id || data.elicitation_id) {
+    return list.findIndex(msg => sameApproval(msg, data))
+  }
+  let fallback = -1
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (!sameApproval(list[i], data)) continue
+    if (list[i].status === 'pending') return i
+    if (fallback === -1) fallback = i
+  }
+  return fallback
+}
+
 const SETTLED_APPROVAL_STATUS = new Set(['approved', 'rejected', 'expired'])
 
 function settledApprovalStatus(data) {
@@ -827,16 +844,19 @@ export function createWebSocketHandler(deps) {
           if (data.error_type === 'unknown_tool_approval' || data.error_type === 'unknown_elicitation') {
             mapMessages(prev => {
               const list = Array.isArray(prev) ? prev : []
-              const kept = list.filter(msg => {
+              const target = data.error_type === 'unknown_tool_approval'
+                ? addressedApprovalIndex(list, data)
+                : -1
+              const kept = list.filter((msg, i) => {
                 if (data.error_type === 'unknown_elicitation') {
                   return !(msg.elicitation_id && msg.elicitation_id === data.elicitation_id)
                 }
-                return !sameApproval(msg, data)
+                return i !== target
               })
               // A card that silently vanishes after Approve reads as success.
               // Say what happened in its place.
-              if (data.error_type === 'unknown_tool_approval' && kept.length !== list.length) {
-                const card = list.find(msg => sameApproval(msg, data))
+              if (data.error_type === 'unknown_tool_approval' && target !== -1) {
+                const card = list[target]
                 kept.push({
                   role: 'system',
                   content: `Approval for ${card?.tool_name || 'this tool'} is no longer active. The tool did not run from this answer.`,
@@ -949,11 +969,16 @@ export function createWebSocketHandler(deps) {
           // The request was already answered, on this tab or another. Mark the
           // card and leave the turn running.
           // An expired approval says so; it is not a rejection by the user.
-          mapMessages(prev => prev.map(msg => sameApproval(msg, data) ? {
-            ...msg,
-            status: settledApprovalStatus(data),
-            already_resolved: true,
-          } : msg))
+          mapMessages(prev => {
+            const list = Array.isArray(prev) ? prev : []
+            const target = addressedApprovalIndex(list, data)
+            if (target === -1) return list
+            return list.map((msg, i) => (i === target ? {
+              ...msg,
+              status: settledApprovalStatus(data),
+              already_resolved: true,
+            } : msg))
+          })
           break
         case 'elicitation_request':
           // Handle elicitation request - set pending elicitation state

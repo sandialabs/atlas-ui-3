@@ -615,3 +615,24 @@ async def test_registry_start_publishes_and_retains_the_write():
     assert projection["run_id"] == record.run_id
     assert projection["pending_requests"] == []
     assert not registry_module._PROJECTION_TASKS
+
+
+@pytest.mark.asyncio
+async def test_store_delete_drops_the_document_and_its_outcomes():
+    from atlas.application.chat.runs.execution_state import approval_storage_key, forget_conversations
+
+    for store in (MemoryExecutionStore(), _redis_store(fakeredis.FakeServer())):
+        set_execution_store(store)
+        await store.apply_event(_event(0, type="tool_approval_request", arguments={"q": "x"}))
+        await store.apply_event(_event(0, conversation_id="conv-keep"))
+        key = approval_storage_key(invocation_id("run-1", 0, "call_0"), "call_0", EMAIL)
+        await store.put_resolution(key, {"approved": True, "user_email": EMAIL})
+        await forget_conversations(OTHER, [CONV])
+        assert await store.get(CONV, EMAIL) is not None
+        await forget_conversations(EMAIL, [CONV])
+        assert await store.get(CONV, EMAIL) is None
+        assert await store.read_resolution(key) is None
+        assert await store.get("conv-keep", EMAIL) is not None
+        await forget_conversations(EMAIL)
+        assert await store.get("conv-keep", EMAIL) is None
+        assert await store.list_for_user(EMAIL) == []
