@@ -161,3 +161,11 @@ Verified for that comparison, worktree, `atlas.__file__` this tree:
 
 - `ruff check` on `tool_executor.py` and `test_reopened_run_approval.py`: all checks passed.
 - `pytest` `test_an_unchanged_number_is_not_an_edit` and `test_a_repeated_call_id_in_one_step_is_refused`: 2 passed.
+
+A browser pass then showed no busy indicator on a reopened conversation whose first turn had finished and whose second turn was still running. `list_runs` had keyed runs by conversation, so the finished turn replaced the running one. The list now keeps every local run and matches a projection by `run_id`. The client already shows the newest run for a conversation.
+
+Verified for that list, worktree, `atlas.__file__` this tree:
+
+- `ruff check` on `execution_state.py` and `test_execution_state.py`: all checks passed.
+- `pytest` `test_execution_state.py` and `test_execution_state_routes.py`: 47 passed.
+- `bash scripts/check-docs.sh` is the next check, run with this note.

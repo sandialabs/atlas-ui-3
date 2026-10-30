@@ -95,9 +95,10 @@ It is not "Agent thinking...".
 When the run completes, fails, or is cancelled, that status is written into
 the same document, the pending set is cleared, and any invocation still open
 is marked `interrupted`. A later tool frame for
-that run does not bring it back. A run list keeps a local terminal status
-when the shared document has not caught up, ignores a document from a
-different run than the one this replica is executing, keeps its own
+that run does not bring it back. A run list keeps every local run, including a finished turn beside the
+running turn of the same conversation, and matches a shared document by
+`run_id`. It keeps a local terminal status
+when the shared document has not caught up, keeps its own
 non-terminal status over the document's (an approval resumes the local run
 before the document sees `tool_start`), and it does not add a finished
 projection as a new active run.
